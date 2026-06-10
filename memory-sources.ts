@@ -32,11 +32,13 @@ export async function spawnPostgresSource(roomDir, args, prompt) {
     stdin: String(prompt || ""),
     timeoutMs: MEMORY_POSTGRES_TIMEOUT_MS,
   });
+
   if (outcome.timedOut) return { ok: false, error: "postgres source timed out" };
   if (outcome.spawnError) return { ok: false, error: outcome.spawnError };
   if (outcome.code !== 0) {
     return { ok: false, error: outcome.stderr.trim() || `postgres source exited ${outcome.code}` };
   }
+
   try {
     return { ok: true, data: JSON.parse(outcome.stdout), stderr: outcome.stderr.trim() };
   } catch (err) {
@@ -53,6 +55,7 @@ function runMemoryPostgresLexical(roomDir, roomName, prompt) {
   if (resolvedRoom === "kodo" || resolvedRoom === "kintsu") {
     args.push("--room", resolvedRoom);
   }
+
   return spawnPostgresSource(roomDir, args, prompt);
 }
 
@@ -70,6 +73,7 @@ function runMemoryPostgresSemantic(roomDir, roomName, prompt, scopeFiles) {
   if (Array.isArray(scopeFiles) && scopeFiles.length) {
     args.push("--scope-files", scopeFiles.join(","));
   }
+
   return spawnPostgresSource(roomDir, args, prompt);
 }
 
@@ -86,6 +90,7 @@ function runMemoryPostgresDate(roomDir, roomName, prompt) {
   if (resolvedRoom === "kodo" || resolvedRoom === "kintsu") {
     args.push("--room", resolvedRoom);
   }
+
   return spawnPostgresSource(roomDir, args, prompt);
 }
 
@@ -108,6 +113,7 @@ function runMemoryPostgresContent(roomDir, roomName, prompt, scopeFiles) {
   if (Array.isArray(scopeFiles) && scopeFiles.length) {
     args.push("--scope-files", scopeFiles.join(","));
   }
+
   return spawnPostgresSource(roomDir, args, prompt);
 }
 
@@ -120,10 +126,12 @@ async function loadMemoryImportantIndex(roomDir) {
 
 function prefixHouseMemoryIndex(index) {
   if (!index || typeof index !== "object") return null;
+
   const files = {};
   for (const [filePath, meta] of Object.entries(index.files || {})) {
     files[`${HOUSE_MEMORY_DIRNAME}/${filePath}`] = meta;
   }
+
   const threads = {};
   for (const [threadKey, entries] of Object.entries(index.threads || {})) {
     threads[`house / ${threadKey}`] = (Array.isArray(entries) ? entries : []).map((entry) => ({
@@ -132,6 +140,7 @@ function prefixHouseMemoryIndex(index) {
       context: `Shared house memory. ${entry?.context || ""}`.trim(),
     }));
   }
+
   return { files, threads };
 }
 
@@ -151,6 +160,7 @@ function mergeMemoryIndexes(...indexes) {
       ];
     }
   }
+
   return merged;
 }
 
@@ -164,6 +174,7 @@ async function loadHouseMemoryIndex(roomDir) {
 async function loadMemoryIndexFromJson(roomDir) {
   const roomIndex = await readJson(path.join(roomDir, MEMORY_INDEX_FILENAME), null);
   if (!roomIndex) return null;
+
   return mergeMemoryIndexes(roomIndex, await loadHouseMemoryIndex(roomDir));
 }
 
@@ -180,6 +191,7 @@ export async function loadMemoryLexicalSources(roomDir, roomName, prompt) {
       fallbackReason: null,
     };
   }
+
   return {
     index: await loadMemoryIndexFromJson(roomDir),
     importantIndex: await loadMemoryImportantIndex(roomDir),
@@ -203,6 +215,7 @@ export async function loadMemorySemanticSource(roomDir, roomName, prompt, scopeF
       semanticStderr: "",
     };
   }
+
   const fromPostgres = await runMemoryPostgresSemantic(roomDir, roomName, prompt, scopeFiles);
   if (fromPostgres.ok && Array.isArray(fromPostgres.data?.semanticChunks)) {
     const chunks = fromPostgres.data.semanticChunks;
@@ -212,6 +225,7 @@ export async function loadMemorySemanticSource(roomDir, roomName, prompt, scopeF
       semanticStderr: fromPostgres.stderr || "",
     };
   }
+
   return {
     semanticChunks: [],
     semanticSource: "unavailable",
@@ -233,6 +247,7 @@ export async function loadMemoryDateSource(roomDir, roomName, prompt) {
       dateStderr: "",
     };
   }
+
   // Cheap pre-flight: if no YYYY-MM-DD token in the prompt, skip the spawn.
   // The python side regex is authoritative; this mirror just saves the
   // wsl.exe roundtrip when the user prompt has no date at all.
@@ -244,6 +259,7 @@ export async function loadMemoryDateSource(roomDir, roomName, prompt) {
       dateStderr: "",
     };
   }
+
   const fromPostgres = await runMemoryPostgresDate(roomDir, roomName, prompt);
   if (fromPostgres.ok && Array.isArray(fromPostgres.data?.dateMatches)) {
     const matches = fromPostgres.data.dateMatches;
@@ -257,6 +273,7 @@ export async function loadMemoryDateSource(roomDir, roomName, prompt) {
       dateStderr: fromPostgres.stderr || "",
     };
   }
+
   return {
     dateMatches: [],
     queryDates: [],
@@ -277,6 +294,7 @@ export async function loadMemoryContentSource(roomDir, roomName, prompt) {
       contentStderr: "",
     };
   }
+
   // No scopeFiles passed — content runs global.
   const fromPostgres = await runMemoryPostgresContent(roomDir, roomName, prompt, null);
   if (fromPostgres.ok && Array.isArray(fromPostgres.data?.contentChunks)) {
@@ -287,6 +305,7 @@ export async function loadMemoryContentSource(roomDir, roomName, prompt) {
       contentStderr: fromPostgres.stderr || "",
     };
   }
+
   return {
     contentChunks: [],
     contentSource: "unavailable",

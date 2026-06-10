@@ -30,12 +30,14 @@ def read_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     if not path.exists():
         return out
+
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
         out[key.strip()] = value.strip()
+
     return out
 
 
@@ -43,9 +45,11 @@ def substrate_env(room_dir: Path) -> dict[str, str]:
     shared_root = room_dir.parent
     env_path = shared_root / "kodo" / "substrate" / ".env"
     values = read_env_file(env_path)
+
     for key in ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE"):
         if os.environ.get(key):
             values[key] = os.environ[key]
+
     return values
 
 
@@ -78,6 +82,7 @@ def fetch_lessons(conn, shape: str, scopes: list[str]) -> list[dict]:
                 "negation_of": row["negation_of"],
                 "tags": list(row["tags"] or []),
             })
+
         return rows
 
 
@@ -92,6 +97,7 @@ def main() -> int:
     try:
         room_dir = Path(args.room_dir).resolve()
         env = substrate_env(room_dir)
+
         scopes = ["shared"]
         if args.room.lower() in ("kodo", "kintsu"):
             scopes.append(args.room.lower())
@@ -108,10 +114,12 @@ def main() -> int:
             lessons = fetch_lessons(conn, args.shape, scopes)
         finally:
             conn.close()
+
         print(json.dumps({"lessons": lessons}, ensure_ascii=False))
     except Exception as e:
         # Fail open — empty result, exit 0, hook stays soft.
         print(json.dumps({"lessons": [], "error": str(e)}))
+
     return 0
 
 

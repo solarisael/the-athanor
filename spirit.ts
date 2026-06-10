@@ -45,8 +45,10 @@ export function normalizeAgentName(value) {
 export async function normalizeSpirit(value) {
   const requested = String(value || "").trim();
   if (!requested) return null;
+
   const exact = SUPPORTED_SPIRITS.find((mode) => mode === requested);
   if (exact) return exact;
+
   const target = normalizeForMatch(requested);
   return SUPPORTED_SPIRITS.find((mode) => normalizeForMatch(mode) === target) || null;
 }
@@ -56,12 +58,14 @@ export async function normalizeSpirit(value) {
 function findRoomAncestor(startDir) {
   let current = path.resolve(String(startDir || ""));
   if (!current) return null;
+
   for (let i = 0; i < 12; i += 1) {
     if (normalizeRoomName(path.basename(current))) return current;
     const parent = path.dirname(current);
     if (parent === current) return null;
     current = parent;
   }
+
   return null;
 }
 
@@ -77,10 +81,13 @@ function findRoomAncestor(startDir) {
 export function resolveEffectiveRoomDir(roomDir) {
   const base = path.resolve(String(roomDir || process.cwd()));
   if (normalizeRoomName(path.basename(base))) return base;
+
   const cwdRoomDir = findRoomAncestor(process.cwd());
   if (cwdRoomDir) return cwdRoomDir;
+
   const baseRoomDir = findRoomAncestor(base);
   if (baseRoomDir) return baseRoomDir;
+
   return base;
 }
 
@@ -109,12 +116,14 @@ export async function loadSpiritContract(mode, spiritDir = SPIRIT_DIR) {
     const info = await stat(filePath);
     const cached = spiritCache.get(filePath);
     if (cached && cached.mtimeMs === info.mtimeMs) return cached.value;
+
     const markdown = await readOptionalText(filePath);
     const value = {
       mode: resolvedMode,
       markdown: markdown || `# ${resolvedMode}\n`,
       warning: markdown ? null : `Spirit file missing or empty for ${resolvedMode}.`,
     };
+
     spiritCache.set(filePath, { mtimeMs: info.mtimeMs, value });
     return value;
   } catch {
@@ -148,6 +157,7 @@ export async function writeActiveSpiritFiles({
     await writeFile(SPIRIT_CONTRACT_OUTPUT, spiritOutput, "utf8");
     const localSpiritPath = path.join(effectiveRoomDir, "active_spirit.md");
     await writeFile(localSpiritPath, spiritOutput, "utf8").catch(() => {});
+
     return { wrote: true, headerSpirit, warning: spirit.warning };
   }
 
@@ -159,5 +169,6 @@ export async function writeActiveSpiritFiles({
     `${new Date().toISOString()} skipped: roomDir=${roomDir} effective=${effectiveRoomDir}\n`,
     "utf8",
   ).catch(() => {});
+
   return { wrote: false, headerSpirit, warning: spirit.warning };
 }

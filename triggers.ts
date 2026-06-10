@@ -45,6 +45,7 @@ export async function injectKeywordTriggers(output) {
       fired.push({ keyword, directive });
     }
   }
+
   if (!fired.length) return;
 
   const sessionID = message.info?.sessionID || message.parts?.[0]?.sessionID || null;
@@ -86,8 +87,10 @@ export async function runCodingLessonsByShape(roomDir, roomName, shape) {
     cwd: roomDir,
     timeoutMs: CODING_LESSONS_TIMEOUT_MS,
   });
+
   if (outcome.timedOut) return { ok: false, lessons: [], error: "coding-lessons timed out" };
   if (outcome.spawnError) return { ok: false, lessons: [], error: outcome.spawnError };
+
   try {
     const parsed = JSON.parse(outcome.stdout || "{}");
     return {
@@ -106,6 +109,7 @@ export async function runCodingLessonsByShape(roomDir, roomName, shape) {
 // prepend to any shell command on PowerShell or bash.
 export function formatProcessLessonsBanner(lessons, matchedTriggerName) {
   if (!Array.isArray(lessons) || lessons.length === 0) return "";
+
   const negatedIds = new Set(
     lessons.filter((l) => l.negation_of != null).map((l) => l.negation_of),
   );
@@ -122,7 +126,9 @@ export function formatProcessLessonsBanner(lessons, matchedTriggerName) {
     }
     rendered.push(`  ${String(l.id).padStart(3)} ✓ ${l.title}`);
   }
+
   if (rendered.length === 0) return "";
+
   const lines = [
     `── Solarisael House: process-shape lessons matched on '${matchedTriggerName}' ──`,
     ...rendered,

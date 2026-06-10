@@ -15,6 +15,7 @@ export function windowsPathToWsl(value) {
   const source = String(value || "").replace(/\\/g, "/");
   const match = /^([A-Za-z]):\/(.*)$/.exec(source);
   if (!match) return source;
+
   return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
 }
 
@@ -33,6 +34,7 @@ export function runWsl({ argv, cwd, stdin = null, timeoutMs }) {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
+
     let stdout = "";
     let stderr = "";
     let settled = false;

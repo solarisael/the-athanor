@@ -31,6 +31,7 @@ function extractMemoryConcepts(threadKey) {
       concepts.add(token);
     }
   }
+
   return concepts;
 }
 
@@ -39,6 +40,7 @@ function countTokenOverlap(left, right) {
   for (const token of left) {
     if (right.has(token)) count += 1;
   }
+
   return count;
 }
 
@@ -58,12 +60,14 @@ function collectMemoryEntryTokens(entries, filesMap) {
       }
     }
   }
+
   return { contextTokens, fileTokens };
 }
 
 function scoreMemoryThread(promptTokens, threadKey, entries, filesMap) {
   const concepts = extractMemoryConcepts(threadKey);
   const { contextTokens, fileTokens } = collectMemoryEntryTokens(entries, filesMap);
+
   return (
     countTokenOverlap(concepts, promptTokens) * MEMORY_CONCEPT_WEIGHT
     + countTokenOverlap(contextTokens, promptTokens) * MEMORY_CONTEXT_WEIGHT
@@ -77,6 +81,7 @@ function sessionRepeatCountForThread(state, threadKey, entries = []) {
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (entry?.file) counts.push(hits[`file:${entry.file}`] || 0);
   }
+
   return Math.max(0, ...counts.map((value) => Number(value) || 0));
 }
 
@@ -104,6 +109,7 @@ export function buildCanonicalFileSet(importantIndex) {
       if (fileRef?.file) files.add(fileRef.file);
     }
   }
+
   return files;
 }
 
@@ -115,16 +121,19 @@ function resolveLastTouchedAtMs(filePath, loadedEntry) {
     const parsed = Date.parse(loadedEntry.last_touched_at);
     if (!Number.isNaN(parsed)) return parsed;
   }
+
   const match = String(filePath || "").match(DATE_IN_FILENAME_RE);
   if (match) {
     const parsed = Date.parse(match[1]);
     if (!Number.isNaN(parsed)) return parsed;
   }
+
   return null;
 }
 
 function computeThreadRecencyPenalty(entries, state, canonicalFiles) {
   if (!Array.isArray(entries) || !entries.length) return 1.0;
+
   const loaded = state?.loaded || {};
   let freshestMs = 0;
   for (const entry of entries) {
@@ -136,7 +145,9 @@ function computeThreadRecencyPenalty(entries, state, canonicalFiles) {
     if (touchedMs === null) continue;
     if (touchedMs > freshestMs) freshestMs = touchedMs;
   }
+
   if (freshestMs === 0) return 1.0; // no anchor — give benefit of the doubt
+
   const ageDays = (Date.now() - freshestMs) / MS_PER_DAY;
   if (ageDays <= 0) return 1.0;
   return Math.exp(-Math.LN2 * ageDays / MEMORY_RECENCY_HALF_LIFE_DAYS);
@@ -146,6 +157,7 @@ export function rankMemoryThreads(promptTokens, index, state = {}, canonicalFile
   const ranked = [];
   const threads = index?.threads || {};
   const filesMap = index?.files || {};
+
   for (const [threadKey, entries] of Object.entries(threads)) {
     const rawScore = scoreMemoryThread(promptTokens, threadKey, entries, filesMap);
     const sessionRepeatCount = sessionRepeatCountForThread(state, threadKey, entries);
@@ -158,6 +170,7 @@ export function rankMemoryThreads(promptTokens, index, state = {}, canonicalFile
       });
     }
   }
+
   ranked.sort((a, b) => b.score - a.score);
   return ranked;
 }
@@ -165,6 +178,7 @@ export function rankMemoryThreads(promptTokens, index, state = {}, canonicalFile
 // Re-score a prior turn's prefetch queue against this turn's prompt.
 export function restoreMemoryPrefetchMatches(prefetch, promptTokens, index, state, canonicalFiles) {
   if (!promptTokens?.size) return [];
+
   return (Array.isArray(prefetch) ? prefetch : [])
     .map((item) => {
       const threadKey = item?.thread_key || "prefetch";
@@ -187,6 +201,7 @@ export function restoreMemoryPrefetchMatches(prefetch, promptTokens, index, stat
 export function matchMemoryTerm(promptLower, term) {
   const target = String(term || "").trim().toLowerCase();
   if (!target) return false;
+
   return new RegExp(`\\b${escapeRegExp(target)}\\b`, "i").test(promptLower);
 }
 
@@ -194,6 +209,7 @@ export function matchMemoryImportantTerms(prompt, importantIndex) {
   const promptLower = String(prompt || "").toLowerCase();
   const matches = [];
   const seen = new Set();
+
   for (const [termKey, entry] of Object.entries(importantIndex || {})) {
     if (seen.has(termKey)) continue;
     const terms = [termKey, ...(Array.isArray(entry?.aliases) ? entry.aliases : [])];
@@ -203,6 +219,7 @@ export function matchMemoryImportantTerms(prompt, importantIndex) {
     }
     if (matches.length >= MEMORY_MAX_IMPORTANT_MATCHES) break;
   }
+
   return matches;
 }
 
@@ -214,6 +231,7 @@ export function boostMemoryPromptTokens(promptTokens, importantMatches) {
       boosted.add(token);
     }
   }
+
   return boosted;
 }
 
@@ -250,6 +268,7 @@ export function collectCanonAssertions(importantIndex, syncMatches, alreadyMatch
     if (!entryFiles.some((file) => activeFiles.has(file))) continue;
     assertions.push({ termKey, entry });
   }
+
   return assertions;
 }
 
@@ -279,6 +298,7 @@ export function collectCanonByMatchedFiles(importantIndex, matchedSourcePaths, a
       matched.add(p.slice(HOUSE_MEMORY_DIRNAME.length + 1));
     }
   }
+
   if (!matched.size) return [];
 
   const out = [];
@@ -291,6 +311,7 @@ export function collectCanonByMatchedFiles(importantIndex, matchedSourcePaths, a
     if (!entryFiles.some((file) => matched.has(file))) continue;
     out.push({ termKey, entry, via: "pointer-file" });
   }
+
   return out;
 }
 
@@ -319,13 +340,16 @@ export function annotateMemoryExcerptsWithCanonRefs(
     || !surfacedCanonTermKeys?.size
     || !importantIndex
   ) return;
+
   for (const excerpt of finalExcerpts) {
     const body = String(excerpt?.text || "").toLowerCase();
     if (!body) continue;
+
     const source = String(excerpt?.source || "");
     const selfTermKey = source.startsWith("important_index:")
       ? source.slice("important_index:".length)
       : null;
+
     const refs = new Set();
     for (const termKey of surfacedCanonTermKeys) {
       if (termKey === selfTermKey) continue;
@@ -336,6 +360,7 @@ export function annotateMemoryExcerptsWithCanonRefs(
         refs.add(termKey);
       }
     }
+
     if (refs.size) {
       excerpt.canon_refs = Array.from(refs);
     }

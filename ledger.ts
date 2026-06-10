@@ -55,6 +55,7 @@ function clipLedgerLine(text, max = 220) {
 function summarizeLedgerEntries(entries, limit = 12) {
   const tail = entries.slice(-limit);
   if (!tail.length) return ["- No entries captured."];
+
   return tail.map((entry) => {
     const stamp = String(entry.timestamp || "").slice(11, 16) || "??:??";
     const role = entry.role === "assistant" ? "A" : entry.role === "user" ? "U" : "?";
@@ -65,8 +66,10 @@ function summarizeLedgerEntries(entries, limit = 12) {
 async function refreshSpiritWindow(spirit, date = new Date()) {
   const ledgerPath = ledgerPathForSpirit(spirit, date);
   const entries = await readJsonl(ledgerPath);
+
   const target = windowPathForSpirit(spirit, date);
   await mkdir(path.dirname(target), { recursive: true });
+
   const dateStamp = localDateStamp(date);
   const lines = [
     `# ${spirit} Window ${dateStamp}`,
@@ -79,15 +82,18 @@ async function refreshSpiritWindow(spirit, date = new Date()) {
     ...summarizeLedgerEntries(entries, 12),
     "",
   ];
+
   await writeFile(target, lines.join("\n"), "utf8");
 }
 
 async function appendConversationLedger(entry) {
   const text = String(entry?.text || "").trim();
   if (!text) return;
+
   const spirit = String(entry?.spirit || DEFAULT_SPIRIT).trim() || DEFAULT_SPIRIT;
   const target = ledgerPathForSpirit(spirit);
   await mkdir(path.dirname(target), { recursive: true });
+
   await appendFile(
     target,
     `${JSON.stringify({
@@ -112,11 +118,13 @@ async function resolveLiveContextTargets(roomDir = process.cwd()) {
   const roomName = path.basename(effectiveRoomDir);
   const normalized = roomName.toLowerCase();
   if (normalized !== "kodo" && normalized !== "kintsu") return null;
+
   try {
     await stat(path.join(effectiveSharedRoot, "shared_current_state.md"));
   } catch {
     return null;
   }
+
   return {
     roomName,
     markdownPath: path.join(effectiveRoomDir, LIVE_CONTEXT_FILENAME),
@@ -146,8 +154,10 @@ function formatRecentTurnMarkdown(turn) {
 // active Babel tag set — narrow and stable.
 function looksLikeLiveContextProgressTurn(role, text) {
   if (role !== "assistant") return false;
+
   const source = String(text || "").trim();
   if (!source) return true;
+
   return (
     /^\[(?:ORCHESTRA|FAE|IO|INSTRUMENT|STATE|DRIFT|CORRECTION)\]/i.test(source) ||
     /^## \[(?:ORCHESTRA|FAE|IO|INSTRUMENT|STATE|DRIFT|CORRECTION)\]/i.test(source) ||
@@ -163,6 +173,7 @@ function formatLiveContextMarkdown(state) {
   const renderedTurns = turns.length
     ? turns.map((turn) => formatRecentTurnMarkdown(turn))
     : ["- No turns captured yet."];
+
   return [
     "# Current Session Context",
     "",
@@ -194,6 +205,7 @@ function formatLiveContextMarkdown(state) {
 async function refreshLiveRoomContext(entry, paths = {}) {
   const targets = await resolveLiveContextTargets(paths.roomDir);
   if (!targets) return;
+
   const nextTurn = {
     timestamp: new Date().toISOString(),
     role: entry?.role || "unknown",
@@ -201,6 +213,7 @@ async function refreshLiveRoomContext(entry, paths = {}) {
   };
   if (!nextTurn.text) return;
   if (looksLikeLiveContextProgressTurn(nextTurn.role, nextTurn.text)) return;
+
   const existing = await readJson(targets.jsonPath, null);
   const base =
     existing && existing.sessionID === (entry?.sessionID || null)
@@ -213,6 +226,7 @@ async function refreshLiveRoomContext(entry, paths = {}) {
           latestUser: "",
           latestAssistant: "",
         };
+
   const recentTurns = [
     ...(Array.isArray(base.recentTurns) ? base.recentTurns : []),
     nextTurn,
@@ -230,6 +244,7 @@ async function refreshLiveRoomContext(entry, paths = {}) {
     latestUser: entry?.role === "user" ? nextTurn.text : base.latestUser || "",
     latestAssistant: entry?.role === "assistant" ? nextTurn.text : base.latestAssistant || "",
   };
+
   await writeJson(targets.jsonPath, next);
   await writeFile(targets.markdownPath, formatLiveContextMarkdown(next), "utf8");
 }
@@ -247,6 +262,7 @@ export async function logUserTurn(
 ) {
   const text = String(userText || "").trim();
   if (!text) return;
+
   const entry = {
     sessionID, messageID,
     role: "user",
@@ -255,6 +271,7 @@ export async function logUserTurn(
     agentName: agentName || DEFAULT_AGENT_NAME,
     text,
   };
+
   await appendConversationLedger(entry);
   await refreshLiveRoomContext(entry, paths);
 }
@@ -266,6 +283,7 @@ export async function logAssistantTurn(
 ) {
   const text = String(assistantText || "").trim();
   if (!text) return;
+
   const resolvedSpirit = spirit || DEFAULT_SPIRIT;
   const entry = {
     sessionID, messageID,
@@ -275,6 +293,7 @@ export async function logAssistantTurn(
     agentName: agentName || DEFAULT_AGENT_NAME,
     text,
   };
+
   await appendConversationLedger(entry);
   await refreshSpiritWindow(resolvedSpirit);
   await refreshLiveRoomContext(entry, paths);

@@ -37,6 +37,7 @@ async function loadGlobalState() {
 export async function loadState(sessionID) {
   const globalState = await loadGlobalState();
   if (!sessionID) return globalState;
+
   const sessionState = await readJson(sessionStatePath(sessionID), null);
   return { ...globalState, ...(sessionState || {}) };
 }
@@ -58,6 +59,7 @@ export async function saveState(sessionID, partial) {
   if (sessionID) {
     await writeJson(sessionStatePath(sessionID), next);
   }
+
   return next;
 }
 
@@ -129,6 +131,7 @@ function stripControlDirectivesFromHistory(text) {
 
 export function patchDirectiveHistory(messages) {
   if (!Array.isArray(messages)) return messages;
+
   for (const message of messages) {
     if (message?.role && message.role !== "user") continue;
     if (typeof message?.content === "string") {
@@ -149,6 +152,7 @@ export function patchDirectiveHistory(messages) {
       }
     }
   }
+
   return messages;
 }
 
@@ -156,6 +160,7 @@ function appendBeforeReminderClose(text, addition) {
   if (!text.includes("</system-reminder>")) {
     return `${text}\n\n${addition}`;
   }
+
   return text.replace("</system-reminder>", `${addition}\n</system-reminder>`);
 }
 
@@ -175,6 +180,7 @@ const SYNTHETIC_REMINDER_PHRASES = [
 function patchSyntheticReminderText(text) {
   const source = String(text || "");
   if (!source) return source;
+
   const normalized = normalizeForMatch(source);
   const isSyntheticConstraint = SYNTHETIC_REMINDER_PHRASES.some(
     (phrase) => normalized.includes(normalizeForMatch(phrase)),
@@ -182,11 +188,13 @@ function patchSyntheticReminderText(text) {
   if (isSyntheticConstraint && !source.includes("## Identity And Mode Preservation")) {
     return appendBeforeReminderClose(source, `\n${MODE_PRESERVATION_BLOCK}\n`);
   }
+
   return source;
 }
 
 export function patchSyntheticReminders(messages) {
   if (!Array.isArray(messages)) return messages;
+
   for (const message of messages) {
     if (!Array.isArray(message?.parts)) continue;
     for (const part of message.parts) {
@@ -195,5 +203,6 @@ export function patchSyntheticReminders(messages) {
       part.text = patchSyntheticReminderText(part.text);
     }
   }
+
   return messages;
 }

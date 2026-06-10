@@ -84,5 +84,6 @@ export function latestUserMessage(messages) {
   for (let index = list.length - 1; index >= 0; index -= 1) {
     if (list[index]?.info?.role === "user") return list[index];
   }
+
   return null;
 }

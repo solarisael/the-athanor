@@ -56,6 +56,7 @@ DEFAULT_EMBED_MODEL = os.environ.get(
 )
 DEFAULT_SEMANTIC_TOP_K = 5
 DEFAULT_SEMANTIC_MIN_SIM = 0.40
+
 # Content search (pg_trgm GIN on memory_chunks.body, added 2026-05-19 zeal pass).
 # Complements semantic by catching proper-noun / exact-string matches that
 # cosine cosine-distance misses — e.g. "Beel" in a session-notes file whose
@@ -63,11 +64,13 @@ DEFAULT_SEMANTIC_MIN_SIM = 0.40
 # the chunk where Beel actually appears.
 DEFAULT_CONTENT_TOP_K = 5
 DEFAULT_CONTENT_MIN_SIM = 0.30  # word_similarity threshold; 0.30 = "noticeable substring"
+
 # Date retrieval (added 2026-05-23 — date-aware retrieval fix). Cap returned
 # memories to avoid swamping context; date hits are direct user-targeted
 # lookups so they should be small and high-signal, not a corpus dump.
 DEFAULT_DATE_TOP_K = 6
 DEFAULT_DATE_BODY_EXCERPT_CHARS = 800
+
 EMBED_TIMEOUT_SECS = 5.0
 
 # Date extraction regex — matches any YYYY-MM-DD substring. Used by the
@@ -106,7 +109,9 @@ def filter_content_query(query: str) -> str:
     """
     if not query:
         return ""
+
     tokens = [t for t in query.lower().split() if t and t not in _CONTENT_STOPWORDS]
+
     # Reconstruct as a single space-separated string for word_similarity.
     # Preserve the order of meaningful words (matters for word_similarity's
     # continuous-extent matching in body).
@@ -117,12 +122,14 @@ def read_env_file(path: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     if not path.exists():
         return out
+
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
         out[key.strip()] = value.strip()
+
     return out
 
 
@@ -133,9 +140,11 @@ def substrate_env(room_dir: Path) -> dict[str, str]:
     shared_root = room_dir.parent
     env_path = shared_root / "house" / "substrate" / ".env"
     values = read_env_file(env_path)
+
     for key in ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE"):
         if os.environ.get(key):
             values[key] = os.environ[key]
+
     return values
 
 
@@ -200,6 +209,7 @@ def load_index(conn, rooms=("kintsu", "house")) -> dict:
                 "lines": lines or [0, 0],
                 "context": context,
             })
+
         return {"files": files, "threads": threads}
 
 
@@ -224,6 +234,7 @@ def load_important_index(conn, room="kintsu") -> dict:
                 "search_boost": row["search_boost"] or "",
                 "weighty": bool(row["weighty"]),
             }
+
         return entries
 
 
@@ -244,6 +255,7 @@ def embed_query(prompt: str, url: str, model: str) -> list[float] | None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+
     try:
         with urllib.request.urlopen(req, timeout=EMBED_TIMEOUT_SECS) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
@@ -253,12 +265,14 @@ def embed_query(prompt: str, url: str, model: str) -> list[float] | None:
                 vec = embeddings[0]
                 if isinstance(vec, list) and vec:
                     return [float(x) for x in vec]
+
             # OpenAI-compat fallback (LMStudio etc).
             data = payload.get("data") or []
             if data:
                 vec = data[0].get("embedding")
                 if isinstance(vec, list) and vec:
                     return [float(x) for x in vec]
+
             return None
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, OSError):
         return None
@@ -330,6 +344,7 @@ def load_semantic_chunks(
             sim = float(row["sim"]) if row["sim"] is not None else 0.0
             if sim < min_sim:
                 continue
+
             # Match house-prefix convention used by load_index for cross-room rendering.
             source_path = (
                 f"house/{row['source_path']}" if row["room"] == "house" else row["source_path"]
@@ -344,6 +359,7 @@ def load_semantic_chunks(
                 "char_end": int(row["char_end"]) if row["char_end"] is not None else 0,
                 "sim": round(sim, 4),
             })
+
         return out
 
 
@@ -399,6 +415,7 @@ def load_content_chunks(
     query_words = [w for w in filtered_query.split() if w]
     if not query_words:
         return []
+
     word_patterns = [f"%{w}%" for w in query_words]
 
     normalized_scope: list[str] | None = None
@@ -468,6 +485,7 @@ def load_content_chunks(
                 "char_end": int(row["char_end"]) if row["char_end"] is not None else 0,
                 "ws": round(ws, 4),
             })
+
         return out
 
 
@@ -488,11 +506,13 @@ def extract_query_dates(query: str) -> list:
     out: set = set()
     if not query:
         return []
+
     for m in _DATE_TOKEN_RE.finditer(query):
         try:
             out.add(date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
         except ValueError:
             continue
+
     return sorted(out)
 
 
@@ -521,6 +541,7 @@ def load_date_matches(
     """
     if not query_dates:
         return []
+
     sql = """
         SELECT m.id, m.room, m.source_path, m.title, m.type,
                m.date, m.dates, m.threads,
@@ -555,6 +576,7 @@ def load_date_matches(
                 "body_excerpt": row["body_excerpt"] or "",
                 "body_full_chars": int(row["body_full_chars"] or 0),
             })
+
         return out
 
 
@@ -562,6 +584,7 @@ def read_prompt_from_stdin() -> str:
     """Read the user prompt off stdin. Empty string means no semantic search."""
     if sys.stdin.isatty():
         return ""
+
     try:
         return sys.stdin.read().strip()
     except Exception:
@@ -651,6 +674,7 @@ def main() -> int:
             f"(default {DEFAULT_DATE_BODY_EXCERPT_CHARS})."
         ),
     )
+
     args = parser.parse_args()
 
     room_dir = Path(args.room_dir).resolve()
@@ -711,6 +735,7 @@ def main() -> int:
                     ensure_ollama_up()
                 except Exception as err:
                     print(f"semantic: ollama auto-wake skipped: {err}", file=sys.stderr)
+
                 vec = embed_query(prompt, args.embed_url, args.embed_model)
                 if vec is None:
                     print(
@@ -729,6 +754,7 @@ def main() -> int:
                         )
                     except Exception as err:
                         print(f"semantic: query failed: {err}", file=sys.stderr)
+
             payload["semanticChunks"] = chunks
 
         # Content pass (added 2026-05-19, pg_trgm GIN on memory_chunks.body).
@@ -749,6 +775,7 @@ def main() -> int:
                     )
                 except Exception as err:
                     print(f"content: query failed: {err}", file=sys.stderr)
+
             payload["contentChunks"] = content_chunks
 
         # Date pass (added 2026-05-23 — date-aware retrieval fix). Extracts
@@ -771,10 +798,12 @@ def main() -> int:
                     )
                 except Exception as err:
                     print(f"date: query failed: {err}", file=sys.stderr)
+
             payload["dateMatches"] = date_matches
             payload["queryDates"] = [d.isoformat() for d in query_dates]
     finally:
         conn.close()
+
     print(json.dumps(payload, ensure_ascii=False))
     return 0
 

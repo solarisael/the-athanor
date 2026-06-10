@@ -134,8 +134,10 @@ export async function SolarisaelHousePlugin(pluginInput) {
       // never blocks. Fails open on any error.
       try {
         if (input?.tool !== "bash") return;
+
         const cmd = String(output?.args?.command || "");
         if (!cmd.trim()) return;
+
         // Skip if the command is already an echo-only banner we prepended
         // on a previous turn (avoid recursion).
         if (/^echo '── Solarisael House:/i.test(cmd.trim())) return;
@@ -231,10 +233,12 @@ export async function SolarisaelHousePlugin(pluginInput) {
           }
 
           const lines: string[] = [`## Recall: "${result.query}"`, ``];
+
           const semCount = result.semanticChunks?.length || 0;
           const conCount = result.contentChunks?.length || 0;
           const canonCount = result.canonMatches?.length || 0;
           const dateCount = result.dateMatches?.length || 0;
+
           const summaryParts = [];
           if (dateCount) {
             summaryParts.push(`${dateCount} date match(es) for ${result.queryDates.join(", ")}`);

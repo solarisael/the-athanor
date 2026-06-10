@@ -99,9 +99,12 @@ export function coerceRoomSpirit(effectiveRoomDir) {
 // On missing file: returns the requested mode label with a minimal
 // placeholder body and a warning. Previously this catch substituted
 // DEFAULT_SPIRIT's identity silently — fixed 2026-05-12.
-export async function loadSpiritContract(mode) {
+//
+// spiritDir is injectable so the missing-file fallback contract stays
+// regression-testable without touching the real spirits directory.
+export async function loadSpiritContract(mode, spiritDir = SPIRIT_DIR) {
   const resolvedMode = (await normalizeSpirit(mode)) || DEFAULT_SPIRIT;
-  const filePath = path.join(SPIRIT_DIR, `${resolvedMode}.md`);
+  const filePath = path.join(spiritDir, `${resolvedMode}.md`);
   try {
     const info = await stat(filePath);
     const cached = spiritCache.get(filePath);

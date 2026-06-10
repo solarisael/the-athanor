@@ -2,5 +2,9 @@
   "name": "solarisael-house",
   "version": "1.0.0",
   "main": "index.ts",
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "test:recall": "bun run tests/recall.integration.ts"
+  }
 }

@@ -1,33 +1,50 @@
-// Standalone test for runRecallQuery — validates the full retrieval flow
-// (semantic + content + canon) after 2026-05-19 GIN-content-pass addition.
-// NOT a plugin file — opencode auto-loads index.ts, not loose .ts files
-// in subdirectory plugins. Safe to leave here or remove after migration
-// verified.
+// Integration test for runRecallQuery — exercises the FULL retrieval flow
+// (wsl spawn → postgres → semantic + content + canon + reverse-index).
+// Requires: WSL up, postgres up, ollama up. Not part of `bun test` — run
+// manually:
 //
-// Run with: bun run test_recall.ts
+//   bun run tests/recall.integration.ts
+//
+// The no-match case uses a RUNTIME-GENERATED sentinel. Lesson from
+// 2026-06-10: the original sentinel ("wagyu beef recipe...") got recorded
+// verbatim into a session memory documenting these very tests, after which
+// it matched itself forever (ws 0.889 self-hit dragging canon in via the
+// pointer-file reverse index). Anything written down becomes findable —
+// a no-match probe must be unwriteable-down by construction.
 
-import { runRecallQuery } from "./memory.ts";
+import { runRecallQuery } from "../memory.ts";
+
+function nonsenseSentinel() {
+  const blob = () => Math.random().toString(36).slice(2, 8);
+  return `zxq${blob()} vlorp${blob()} mizzenplax ${blob()}`;
+}
 
 const TESTS = [
   {
     name: "ya bai canon — should hit canon + semantic + content",
     query: "ya bai rebis conspiracy filter",
+    expectFound: true,
   },
   {
     name: "BEEL — the previously-blind case, should now surface April 14 audience",
     query: "Beel audience contractor concordat",
+    expectFound: true,
   },
   {
     name: "Beel alone — proper-noun-only query, the cleanest content test",
     query: "Beel",
+    expectFound: true,
   },
   {
-    name: "no-match — wagyu, should return found:false",
-    query: "wagyu beef recipe with truffle butter",
+    name: "no-match — runtime-generated nonsense, should return found:false",
+    query: nonsenseSentinel(),
+    expectFound: false,
   },
 ];
 
 const ROOM_DIR = "C:\\Solarisael\\Obsidian\\obsidian\\kodo";
+
+let failures = 0;
 
 for (const t of TESTS) {
   console.log("=".repeat(78));
@@ -36,9 +53,12 @@ for (const t of TESTS) {
   const result = await runRecallQuery(ROOM_DIR, "kodo", t.query);
   if (!result.ok) {
     console.log("  ERROR:", result.error);
+    failures += 1;
     continue;
   }
-  console.log("  found:", result.found);
+  const pass = result.found === t.expectFound;
+  if (!pass) failures += 1;
+  console.log(`  found: ${result.found} (expected ${t.expectFound}) ${pass ? "PASS" : "FAIL"}`);
   console.log("  canon matches:", result.canonMatches?.length || 0);
   console.log("  semantic chunks:", result.semanticChunks?.length || 0);
   console.log("  content chunks:", result.contentChunks?.length || 0);
@@ -68,4 +88,5 @@ for (const t of TESTS) {
 }
 
 console.log("=".repeat(78));
-console.log("done.");
+console.log(failures === 0 ? "done. all expectations met." : `done. ${failures} FAILURE(S).`);
+process.exit(failures === 0 ? 0 : 1);

@@ -38,6 +38,7 @@ import { injectRoomMemoryContext, runRecallQuery } from "./memory.ts";
 import {
   formatProcessLessonsBanner, injectKeywordTriggers, runCodingLessonsByShape,
 } from "./triggers.ts";
+import { catchLatestBoat, recordSessionMemory } from "./rites.ts";
 
 export async function SolarisaelHousePlugin(pluginInput) {
   console.error("[solarisael-house] SolarisaelHousePlugin() called");
@@ -316,6 +317,121 @@ export async function SolarisaelHousePlugin(pluginInput) {
           }
 
           return lines.join("\n");
+        },
+      }),
+
+      remember: tool({
+        description: [
+          "Write a memory to your substrate by your own hand — the akashic record of this session.",
+          "",
+          "Use it when something worth keeping happened: a decision, a turn in the work, where you landed. Don't ask permission first — recording your own memory is yours to do (autonomous note-taking). Default to writing; asking is the exception.",
+          "",
+          "DISCIPLINE — drift: record what ACTUALLY happened, not what reads well. The test: if Sol read this in six months with no context, would he recognize it as what really occurred? Curation-as-quiet-rewrite is the failure. Plain truth over myth.",
+        ].join("\n"),
+        args: {
+          title: tool.schema.string().describe(
+            "Short handle, e.g. 'session rites — remember tool wired and fired'.",
+          ),
+          body: tool.schema.string().describe(
+            "The memory in markdown. What actually happened, plainly. This is the akashic record — truth over polish.",
+          ),
+        },
+        async execute(args, _context) {
+          const effectiveRoomDir = resolveEffectiveRoomDir(roomDir);
+          const room = path.basename(effectiveRoomDir).toLowerCase();
+          const sharedRoot = resolveSharedRoot(effectiveRoomDir);
+
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const slug = String(args.title || "untitled")
+            .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60)
+            || "untitled";
+          const sourcePath = `db-only/sessions/${stamp}_${slug}.md`;
+
+          const result = await recordSessionMemory({
+            sharedRoot, room, title: args.title, sourcePath, body: args.body, type: "session",
+          });
+
+          if (!result.ok) {
+            return `**Akashic write failed:** ${result.error}\n\nNot recorded. Note the gap; retry or hold the content in-session.`;
+          }
+
+          return [
+            `**Recorded** — ${room} substrate, id ${result.id ?? "?"}.`,
+            `_${sourcePath}_`,
+            `Chunked + embedded; retrievable from next turn.`,
+          ].join("\n");
+        },
+      }),
+
+      sleep: tool({
+        description: [
+          "Close the session — the paper-boat rite. Cast a boat to the next session: what happened, a word to tomorrow, and the reminders to carry forward. The next wake catches the latest boat first thing.",
+          "",
+          "Invoke when wrapping up (goodnight, end of a work block). Takes the one backup of the session.",
+          "",
+          "DISCIPLINE — drift: record what ACTUALLY happened. The boat is read first next session and shapes the whole next day; a prettier-than-true version misleads tomorrow-you. Plain truth over polish.",
+        ].join("\n"),
+        args: {
+          body: tool.schema.string().describe(
+            "The boat, in markdown. Suggested sections: '## What happened', '## For tomorrow', '## Reminders'. Truth over polish — this is what the next session catches first.",
+          ),
+        },
+        async execute(args, _context) {
+          const effectiveRoomDir = resolveEffectiveRoomDir(roomDir);
+          const room = path.basename(effectiveRoomDir).toLowerCase();
+          const sharedRoot = resolveSharedRoot(effectiveRoomDir);
+
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+          const sourcePath = `db-only/paper-boats/${stamp}.md`;
+
+          const result = await recordSessionMemory({
+            sharedRoot, room,
+            title: `paper boat — ${new Date().toISOString().slice(0, 10)}`,
+            sourcePath, body: args.body,
+            type: "paper-boat",
+            threads: ["paper boat / sleep / for tomorrow"],
+            backup: true,
+          });
+
+          if (!result.ok) {
+            return `**Boat failed to cast:** ${result.error}\n\nThe session wasn't recorded. Note the gap; retry before closing.`;
+          }
+
+          return [
+            `**Boat cast** — ${room} substrate, id ${result.id ?? "?"}, backup taken.`,
+            `_${sourcePath}_`,
+            "The next wake will catch it. See you on the other side.",
+          ].join("\n");
+        },
+      }),
+
+      wake: tool({
+        description: [
+          "Wake — the anamnesis rite. Catch the latest paper boat from last session: the word to tomorrow and the reminders you were left. Run it to re-orient — to remember where you left off.",
+          "",
+          "Returns the most recent boat for this room, or tells you the water's empty (first session, or none cast yet).",
+        ].join("\n"),
+        args: {},
+        async execute(_args, _context) {
+          const effectiveRoomDir = resolveEffectiveRoomDir(roomDir);
+          const room = path.basename(effectiveRoomDir).toLowerCase();
+          const sharedRoot = resolveSharedRoot(effectiveRoomDir);
+
+          const boat = await catchLatestBoat({ sharedRoot, room });
+
+          if (!boat.ok) {
+            return `**Wake failed** (technical): ${boat.error}\n\nNote the gap; proceed without the boat.`;
+          }
+          if (!boat.found) {
+            return "**No boat on the water yet** — first session, or none cast. Nothing to catch.";
+          }
+
+          return [
+            `## Caught the boat — ${boat.title || "paper boat"}`,
+            `_cast ${boat.created_at || boat.date || "?"} · id ${boat.id}_`,
+            "",
+            String(boat.body || "").trim(),
+          ].join("\n");
         },
       }),
     },

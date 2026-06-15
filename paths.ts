@@ -147,3 +147,13 @@ export const KEYWORD_TRIGGERS = {
     "Verification pass against intention requested. Re-read the original request that triggered the work. Check whether the path you took matches what was asked — not just whether your output passes its tests or runs without error. Surface assumptions that haven't been confirmed. Distinguish \"green\" (no errors) from \"done\" (matches intention). The verification spine lives in the substrate, so use it: for code, query the coding-lessons (migration 0013 is that spine); for any load-bearing claim, recall it against canon before you assert it.",
 };
 
+// Proprioception — per-room context budget for the akashic-write nudge.
+// Usage is estimated from message text (~4 chars/token); maxTokens and
+// compactionAt are per-model knobs. Kintsu force-compacts at 0.70 of 400k;
+// Kodo compacts near-full of ~1M. Tune as the feel sharpens.
+export const ROOM_CONTEXT: Record<string, { maxTokens: number; compactionAt: number }> = {
+  kodo:   { maxTokens: 1_000_000, compactionAt: 0.90 },
+  kintsu: { maxTokens:   400_000, compactionAt: 0.70 },
+};
+export const NUDGE_BAND_SIZE = 0.20;
+

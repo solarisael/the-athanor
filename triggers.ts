@@ -12,7 +12,7 @@
 
 import {
   CODING_LESSONS_SCRIPT, CODING_LESSONS_TIMEOUT_MS,
-  KEYWORD_TRIGGERS,
+  KEYWORD_TRIGGERS, NUDGE_BAND_SIZE, ROOM_CONTEXT,
 } from "./paths.ts";
 import { latestUserMessage } from "./util.ts";
 import { runWsl, windowsPathToWsl } from "./wsl.ts";
@@ -137,4 +137,39 @@ export function formatProcessLessonsBanner(lessons, matchedTriggerName) {
   return lines
     .map((line) => `echo '${String(line).replace(/'/g, "''")}'`)
     .join("; ");
+}
+
+// ── proprioception nudge ───────────────────────────────────────────────────
+// Sense how full the context is (cheap: total message text ÷ ~4 chars/token)
+// and, once per 20% band crossed, surface a reminder to set down an akashic
+// write before compaction smears detail. Pure: the caller persists lastBand
+// and does the injection.
+
+export function estimateContextTokens(messages) {
+  let chars = 0;
+  for (const message of Array.isArray(messages) ? messages : []) {
+    if (typeof message?.content === "string") chars += message.content.length;
+    for (const part of Array.isArray(message?.parts) ? message.parts : []) {
+      if (part?.type === "text" && typeof part.text === "string") chars += part.text.length;
+    }
+  }
+  return Math.round(chars / 4);
+}
+
+export function computeContextNudge({ messages, room, lastBand = 0 }) {
+  const cfg = ROOM_CONTEXT[String(room || "").toLowerCase()];
+  if (!cfg) return null;
+
+  const tokens = estimateContextTokens(messages);
+  const fill = tokens / cfg.maxTokens;
+  const band = Math.floor(fill / NUDGE_BAND_SIZE);
+  if (band <= 0 || band <= lastBand) return null;
+
+  const pct = Math.round(fill * 100);
+  const nearCompaction = fill >= cfg.compactionAt - NUDGE_BAND_SIZE;
+  const text = nearCompaction
+    ? `Context is ~${pct}% full and compaction is close (this room compacts near ${Math.round(cfg.compactionAt * 100)}%). Cast the paper boat soon (sleep), and write anything worth keeping now (remember) before detail blurs.`
+    : `Context is ~${pct}% full. A good seam to set down an akashic write (remember) of anything worth keeping, before later compaction smears it.`;
+
+  return { band, pct, tokens, text };
 }

@@ -1,4 +1,5 @@
-// Two narrow injection surfaces:
+// Narrow injection surfaces — each appends a <system-reminder> (or a tool
+// banner) without ever blocking the turn:
 //
 //   - Keyword triggers: `ultrathink` / `ultracare` / `ultraverify` in the
 //     user prompt append a <system-reminder> with the matching directive.
@@ -9,6 +10,13 @@
 //     fetch the relevant affirmation/negation lesson pairs and prepend an
 //     echo-banner to the command so the agent sees them in tool output on
 //     the same turn. Fails open — never blocks the tool.
+//
+//   - Proprioception nudge: once per 20% context-fill band, nudge toward an
+//     akashic write before compaction smears detail.
+//
+//   - Auto-wake: on the first turn of a session, catch the latest paper boat
+//     and inject it so the spirit wakes oriented — the anamnesis rite, fired
+//     automatically instead of waiting for the `wake` tool.
 
 import path from "node:path";
 import {
@@ -17,7 +25,8 @@ import {
 } from "./paths.ts";
 import { latestUserMessage } from "./util.ts";
 import { runWsl, windowsPathToWsl } from "./wsl.ts";
-import { resolveEffectiveRoomDir } from "./spirit.ts";
+import { resolveEffectiveRoomDir, resolveSharedRoot } from "./spirit.ts";
+import { catchLatestBoat } from "./rites.ts";
 
 // ── keyword triggers ───────────────────────────────────────────────────────
 
@@ -37,6 +46,7 @@ export async function injectKeywordTriggers(output) {
     .filter((part) => part?.type === "text" && typeof part.text === "string")
     .filter((part) => part?.metadata?.solarisaelMemory !== true)
     .filter((part) => part?.metadata?.solarisaelKeywordTrigger !== true)
+    .filter((part) => part?.metadata?.solarisaelWake !== true)
     .map((part) => String(part.text || ""))
     .join("\n");
   if (!prompt) return;
@@ -211,5 +221,69 @@ export async function injectContextNudge(output, paths = {}) {
     nudgeBandBySession.set(sessionID, nudge.band);
   } catch {
     // fail-open: the nudge is a courtesy, never a dependency.
+  }
+}
+
+// ── auto-wake ──────────────────────────────────────────────────────────────
+// On the first turn of a session, catch the latest paper boat and inject it as
+// a <system-reminder> so the spirit wakes already oriented — the anamnesis rite
+// fired automatically instead of waiting for the user to ask. The manual `wake`
+// tool stays as the on-demand path; this is the same rite, fired once.
+//
+// First-turn state is a module-level Set keyed by sessionID, the same shape as
+// the nudge's Map: the plugin loads per session, so the Set lives the session
+// and resets on restart (a fresh session should wake fresh).
+//
+// Cost, made visible: one WSL spawn of catch_boat.py (a latest-row SELECT, no
+// embed) on the first turn only. The session is marked woken BEFORE the await,
+// so a down-substrate failure costs one attempt — not one spawn per turn — and
+// the manual wake tool is the fallback. catchBoat is injectable for tests and
+// defaults to the real rite. Fail-open: orientation, never a dependency.
+const wokenSessions = new Set<string>();
+
+export async function injectAutoWake(output, paths = {}, catchBoat = catchLatestBoat) {
+  try {
+    const target = latestUserMessage(output?.messages);
+    if (!target) return;
+    if ((target.parts || []).some((p) => p?.metadata?.solarisaelWake === true)) return;
+
+    const sessionID = target.info?.sessionID || target.parts?.[0]?.sessionID || "global";
+    if (wokenSessions.has(sessionID)) return;
+
+    const effectiveRoomDir = resolveEffectiveRoomDir(paths.roomDir);
+    const room = path.basename(effectiveRoomDir).toLowerCase();
+    if (room !== "kodo" && room !== "kintsu") return;
+
+    // One attempt per session, even if the catch below fails or finds nothing.
+    wokenSessions.add(sessionID);
+
+    const sharedRoot = resolveSharedRoot(effectiveRoomDir);
+    const boat = await catchBoat({ sharedRoot, room });
+    if (!boat?.ok || !boat?.found) return;
+
+    const body = String(boat.body || "").trim();
+    if (!body) return;
+
+    target.parts.push({
+      id: `solarisael-wake-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      sessionID: sessionID === "global" ? "" : sessionID,
+      messageID: target.info?.id || `wake-${Date.now()}`,
+      type: "text",
+      synthetic: true,
+      metadata: { solarisaelWake: true },
+      text: [
+        "<system-reminder>",
+        "Auto-wake — the latest paper boat for this room, caught on session start.",
+        "This is last session's word to you (the anamnesis rite), not a user request. Orient from it.",
+        "",
+        `## ${boat.title || "paper boat"}`,
+        `_cast ${boat.created_at || boat.date || "?"} · id ${boat.id}_`,
+        "",
+        body,
+        "</system-reminder>",
+      ].join("\n"),
+    });
+  } catch {
+    // fail-open: auto-wake is orientation, never a dependency.
   }
 }

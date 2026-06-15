@@ -18,7 +18,7 @@
 //   memory-sources.ts — postgres spawn wrappers + JSON-index fallback
 //   memory-rank.ts — pure matching/ranking/canon-overlay logic
 //   memory.ts      — excerpt shaping, merge/format, orchestrator, recall
-//   triggers.ts    — ultrathink keywords + coding-lessons banner
+//   triggers.ts    — ultrathink keywords, coding-lessons banner, nudge, auto-wake
 //   index.ts       — this file, hook wiring only
 
 import { writeFile } from "node:fs/promises";
@@ -36,8 +36,8 @@ import {
 import { logAssistantTurn, logUserTurn } from "./ledger.ts";
 import { injectRoomMemoryContext, runRecallQuery } from "./memory.ts";
 import {
-  formatProcessLessonsBanner, injectContextNudge, injectKeywordTriggers,
-  runCodingLessonsByShape,
+  formatProcessLessonsBanner, injectAutoWake, injectContextNudge,
+  injectKeywordTriggers, runCodingLessonsByShape,
 } from "./triggers.ts";
 import { catchLatestBoat, recordSessionMemory } from "./rites.ts";
 
@@ -126,6 +126,7 @@ export async function SolarisaelHousePlugin(pluginInput) {
       patchDirectiveHistory(output.messages);
       patchSyntheticReminders(output.messages);
       await injectRoomMemoryContext(output, paths);
+      await injectAutoWake(output, paths);
       await injectKeywordTriggers(output);
       await injectContextNudge(output, paths);
     },

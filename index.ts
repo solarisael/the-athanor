@@ -36,7 +36,8 @@ import {
 import { logAssistantTurn, logUserTurn } from "./ledger.ts";
 import { injectRoomMemoryContext, runRecallQuery } from "./memory.ts";
 import {
-  formatProcessLessonsBanner, injectKeywordTriggers, runCodingLessonsByShape,
+  formatProcessLessonsBanner, injectContextNudge, injectKeywordTriggers,
+  runCodingLessonsByShape,
 } from "./triggers.ts";
 import { catchLatestBoat, recordSessionMemory } from "./rites.ts";
 
@@ -126,6 +127,7 @@ export async function SolarisaelHousePlugin(pluginInput) {
       patchSyntheticReminders(output.messages);
       await injectRoomMemoryContext(output, paths);
       await injectKeywordTriggers(output);
+      await injectContextNudge(output, paths);
     },
 
     "tool.execute.before": async (input, output) => {

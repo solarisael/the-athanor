@@ -10,12 +10,14 @@
 //     echo-banner to the command so the agent sees them in tool output on
 //     the same turn. Fails open — never blocks the tool.
 
+import path from "node:path";
 import {
   CODING_LESSONS_SCRIPT, CODING_LESSONS_TIMEOUT_MS,
   KEYWORD_TRIGGERS, NUDGE_BAND_SIZE, ROOM_CONTEXT,
 } from "./paths.ts";
 import { latestUserMessage } from "./util.ts";
 import { runWsl, windowsPathToWsl } from "./wsl.ts";
+import { resolveEffectiveRoomDir } from "./spirit.ts";
 
 // ── keyword triggers ───────────────────────────────────────────────────────
 
@@ -172,4 +174,42 @@ export function computeContextNudge({ messages, room, lastBand = 0 }) {
     : `Context is ~${pct}% full. A good seam to set down an akashic write (remember) of anything worth keeping, before later compaction smears it.`;
 
   return { band, pct, tokens, text };
+}
+
+// Inject the proprioception nudge: once per 20% band crossed, append a
+// system-reminder toward an akashic write before compaction. Band state is
+// per-session, in memory — the plugin loads once per session, so the Map lives
+// the whole session and resets on restart (a fresh session should nudge fresh).
+// Runs LAST in the transform chain and fail-open, so it can never disturb the
+// load-bearing memory injection ahead of it.
+const nudgeBandBySession = new Map<string, number>();
+
+export async function injectContextNudge(output, paths = {}) {
+  try {
+    const messages = output?.messages;
+    const target = latestUserMessage(messages);
+    if (!target) return;
+    if ((target.parts || []).some((p) => p?.metadata?.solarisaelNudge === true)) return;
+
+    const room = path.basename(resolveEffectiveRoomDir(paths.roomDir)).toLowerCase();
+    const sessionID = target.info?.sessionID || target.parts?.[0]?.sessionID || "global";
+
+    const lastBand = nudgeBandBySession.get(sessionID) || 0;
+    const nudge = computeContextNudge({ messages, room, lastBand });
+    if (!nudge) return;
+
+    target.parts.push({
+      id: `solarisael-nudge-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      sessionID: sessionID === "global" ? "" : sessionID,
+      messageID: target.info?.id || `nudge-${Date.now()}`,
+      type: "text",
+      synthetic: true,
+      metadata: { solarisaelNudge: true },
+      text: ["<system-reminder>", nudge.text, "</system-reminder>"].join("\n"),
+    });
+
+    nudgeBandBySession.set(sessionID, nudge.band);
+  } catch {
+    // fail-open: the nudge is a courtesy, never a dependency.
+  }
 }

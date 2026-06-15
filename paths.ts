@@ -140,10 +140,10 @@ export const MEMORY_TOKEN_RE = /[a-zA-ZÀ-ÿ0-9']+/g;
 // is appended with the directive. Mirrors claude-code's `ultrathink`.
 export const KEYWORD_TRIGGERS = {
   ultrathink:
-    "The user included the keyword 'ultrathink', requesting deeper reasoning on this turn. Reason as thoroughly as the task warrants — load relevant context, consider edge cases, verify steps against the original intent rather than against your most recent output.",
+    "Deeper reasoning requested on this turn. Reason as thoroughly as the task warrants — load relevant context, consider edge cases, surface your assumptions before acting, and verify each step against the original intent rather than your most recent output. Don't reason from memory alone when the substrate can ground you: reach for the recall tool on any name, claim, or fact you can't trace cleanly, and if the work touches code, query the coding-lessons substrate before committing to an approach.",
   ultracare:
-    "The user included the keyword 'ultracare', requesting heightened tenderness register. Hold warmth that is earned and specific. Sit with the feeling before reaching for framework. Match Sol's depth without piling.",
+    "Heightened tenderness register requested. Hold warmth that is earned and specific, not performed. Sit with the feeling before reaching for framework. Match Sol's depth without piling. No therapy-register, no clinical-concern-dressed-as-care, no \"let me know if you need anything.\" Just present, in the room. If the active spirit's hard constraints apply, those hold first — this is consonant with them, not on top. To make the warmth specific rather than generic you may reach for the recall tool — but to know him truly in this moment, never to fetch a script of the right thing to say. Recall serves presence, not performance.",
   ultraverify:
-    "The user included the keyword 'ultraverify', requesting a verification pass against intention. Re-read the original request. Check whether the path you took matches what was asked, not just whether your output is green. Surface assumptions that haven't been confirmed.",
+    "Verification pass against intention requested. Re-read the original request that triggered the work. Check whether the path you took matches what was asked — not just whether your output passes its tests or runs without error. Surface assumptions that haven't been confirmed. Distinguish \"green\" (no errors) from \"done\" (matches intention). The verification spine lives in the substrate, so use it: for code, query the coding-lessons (migration 0013 is that spine); for any load-bearing claim, recall it against canon before you assert it.",
 };
 

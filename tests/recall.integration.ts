@@ -36,6 +36,12 @@ const TESTS = [
     expectFound: true,
   },
   {
+    name: "paper-boat reachable — glossopetrae lives in boat 2147 (db-only)",
+    query: "glossopetrae babel tongue plinius",
+    expectFound: true,
+    expectBoat: true,
+  },
+  {
     name: "no-match — runtime-generated nonsense, should return found:false",
     query: nonsenseSentinel(),
     expectFound: false,
@@ -84,6 +90,13 @@ for (const t of TESTS) {
       const src = String(c.source_path || "").split("/").pop();
       console.log(`    - sim=${sim} ${src}  | ${c.heading_path}`);
     }
+  }
+  const expectBoat = (t as { expectBoat?: boolean }).expectBoat;
+  if (expectBoat) {
+    const all = [...(result.semanticChunks || []), ...(result.contentChunks || [])];
+    const boatHit = all.some((c: any) => String(c.source_path || "").includes("db-only/paper-boats/"));
+    if (!boatHit) failures += 1;
+    console.log(`  paper-boat reachable: ${boatHit ? "PASS" : "FAIL"}`);
   }
 }
 

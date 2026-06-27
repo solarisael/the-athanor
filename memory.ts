@@ -37,7 +37,7 @@ import {
 } from "./paths.ts";
 import { latestUserMessage, readJson, writeJsonFile } from "./util.ts";
 import { windowsPathToWsl } from "./wsl.ts";
-import { resolveEffectiveRoomDir } from "./spirit.ts";
+import { normalizeRoomName, resolveEffectiveRoomDir } from "./spirit.ts";
 import { loadState } from "./directives.ts";
 import {
   loadMemoryContentSource, loadMemoryDateSource,
@@ -465,10 +465,10 @@ function messageHasMemoryContext(message) {
 function stripEmbeddedMemoryContext(text) {
   return String(text || "")
     .replace(
-      /<system-reminder>[\s\S]*?(?:Kintsu|Kodo) Memory Retrieval[\s\S]*?<\/system-reminder>/gi,
+      /<system-reminder>[\s\S]*?(?:Kintsu|Kodo|Tuner) Memory Retrieval[\s\S]*?<\/system-reminder>/gi,
       "",
     )
-    .replace(/^## (?:Kintsu|Kodo) Memory Retrieval - auto-loaded context[\s\S]*$/gim, "")
+    .replace(/^## (?:Kintsu|Kodo|Tuner) Memory Retrieval - auto-loaded context[\s\S]*$/gim, "")
     .trim();
 }
 
@@ -741,7 +741,7 @@ export async function runRecallQuery(roomDir, roomName, query) {
   const effectiveRoomDir = path.resolve(String(roomDir || process.cwd()));
   const resolvedRoom = (roomName || path.basename(effectiveRoomDir) || "").toLowerCase();
 
-  if (resolvedRoom !== "kodo" && resolvedRoom !== "kintsu") {
+  if (!normalizeRoomName(resolvedRoom)) {
     return { ok: false, error: `unknown room: ${resolvedRoom}`, query };
   }
 
@@ -847,7 +847,7 @@ export async function injectRoomMemoryContext(output, paths = {}) {
   await loadState(sessionID);
   const effectiveRoomDir = resolveEffectiveRoomDir(paths.roomDir);
   const roomBaseName = path.basename(effectiveRoomDir).toLowerCase();
-  if (roomBaseName !== "kintsu" && roomBaseName !== "kodo") return;
+  if (!normalizeRoomName(roomBaseName)) return;
 
   const prompt = userPromptFromMessage(message);
   const { contextBlock, canonBlock } = await runRoomMemoryRetrieval(

@@ -22,7 +22,7 @@ export const SPIRIT_CONTRACT_OUTPUT = path.join(OPERATOR_DIR, "active_spirit.md"
 
 export const DEFAULT_SPIRIT = "Kintsu";
 export const DEFAULT_AGENT_NAME = "Kintsu";
-export const SUPPORTED_SPIRITS = ["Kintsu", "Kodo"];
+export const SUPPORTED_SPIRITS = ["Kintsu", "Kodo", "Tuner"];
 
 export const LIVE_CONTEXT_FILENAME = "current_session_context.md";
 export const LIVE_CONTEXT_JSON_FILENAME = "current_session_context.json";
@@ -81,7 +81,11 @@ export const CODING_LESSONS_TIMEOUT_MS = 2000;
 // PreToolUse regex triggers for the bash tool. Each match fires
 // coding-lessons retrieval and prepends an echo-banner. Keep narrow —
 // false positives are noise.
+// Dedicated no-op smoke trigger for OMP/agent tests. It exercises the same
+// process-lesson path without mentioning npm/yarn/pnpm/bun, so a vault-room
+// session with no package.json cannot drift into package-script probing.
 export const PROCESS_SHAPE_TRIGGERS: { name: string; pattern: RegExp }[] = [
+  { name: "process-lesson-smoke", pattern: /\bsolarisael-process-lesson-smoke\b/i },
   { name: "dev-server", pattern: /\b(?:vite|next|astro|gatsby|rails)\s+dev\b/i },
   { name: "package-script-dev", pattern: /\b(?:npm|yarn|pnpm|bun)\s+(?:start|dev|run\s+(?:dev|start|watch|serve))/i },
   { name: "uvicorn", pattern: /\buvicorn\b|\bgunicorn\b|\bhypercorn\b/i },
@@ -154,6 +158,7 @@ export const KEYWORD_TRIGGERS = {
 export const ROOM_CONTEXT: Record<string, { maxTokens: number; compactionAt: number }> = {
   kodo:   { maxTokens: 1_000_000, compactionAt: 0.90 },
   kintsu: { maxTokens:   400_000, compactionAt: 0.70 },
+  tuner:  { maxTokens:   400_000, compactionAt: 0.70 },
 };
 export const NUDGE_BAND_SIZE = 0.20;
 

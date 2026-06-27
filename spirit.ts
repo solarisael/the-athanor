@@ -30,7 +30,7 @@ export function resolveSharedRoot(roomDir) {
 
 export function normalizeRoomName(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  return normalized === "kodo" || normalized === "kintsu" ? normalized : null;
+  return SUPPORTED_SPIRITS.some((s) => s.toLowerCase() === normalized) ? normalized : null;
 }
 
 function normalizeSupportedSpirit(value) {
@@ -96,9 +96,7 @@ export function resolveEffectiveRoomDir(roomDir) {
 // back to state-resolved spirit and refuse to write the global file).
 export function coerceRoomSpirit(effectiveRoomDir) {
   const baseName = path.basename(effectiveRoomDir).toLowerCase();
-  if (baseName === "kodo") return "Kodo";
-  if (baseName === "kintsu") return "Kintsu";
-  return null;
+  return SUPPORTED_SPIRITS.find((s) => s.toLowerCase() === baseName) || null;
 }
 
 // Load the spirit contract markdown for a given mode. mtime-cached.

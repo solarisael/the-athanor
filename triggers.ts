@@ -25,7 +25,7 @@ import {
 } from "./paths.ts";
 import { latestUserMessage } from "./util.ts";
 import { runWsl, windowsPathToWsl } from "./wsl.ts";
-import { resolveEffectiveRoomDir, resolveSharedRoot } from "./spirit.ts";
+import { normalizeRoomName, resolveEffectiveRoomDir, resolveSharedRoot } from "./spirit.ts";
 import { catchLatestBoat } from "./rites.ts";
 
 // ── keyword triggers ───────────────────────────────────────────────────────
@@ -252,7 +252,7 @@ export async function injectAutoWake(output, paths = {}, catchBoat = catchLatest
 
     const effectiveRoomDir = resolveEffectiveRoomDir(paths.roomDir);
     const room = path.basename(effectiveRoomDir).toLowerCase();
-    if (room !== "kodo" && room !== "kintsu") return;
+    if (!normalizeRoomName(room)) return;
 
     // One attempt per session, even if the catch below fails or finds nothing.
     wokenSessions.add(sessionID);

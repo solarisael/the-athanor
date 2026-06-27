@@ -73,6 +73,17 @@ DEFAULT_DATE_BODY_EXCERPT_CHARS = 800
 
 EMBED_TIMEOUT_SECS = 5.0
 
+# Per-turn retrieval visibility (2026-06-22). db-only memories — auto-recorded
+# sessions and paper-boats the OhMyPi session/sleep tools write straight to the
+# DB, never to a curated memory/*.md path — are normally excluded from injection
+# so the auto-session firehose can't swamp context. Paper-boats are the lone
+# exception: one deliberate, high-signal handoff per session that MUST stay
+# retrievable (a GLOSSOPETRAE thread lived only in boat 2147 and was invisible
+# to every pass). One policy, applied at every pass; assumes table alias `m`.
+RETRIEVAL_VISIBILITY_SQL = (
+    "(m.source_path NOT LIKE 'db-only/%%' OR m.type = 'paper-boat')"
+)
+
 # Date extraction regex — matches any YYYY-MM-DD substring. Used by the
 # date pass to pull date tokens out of the user's prompt (or recall query).
 # Conservative validation happens in extract_query_dates: we drop tokens
@@ -162,11 +173,11 @@ def connect(env: dict[str, str]):
 def load_index(conn, rooms=("kintsu", "house")) -> dict:
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
-            """
-            SELECT room, source_path, date, type, meta->>'one_line' AS one_line
-            FROM memories
-            WHERE room = ANY(%s)
-              AND source_path NOT LIKE 'db-only/%%'
+            f"""
+            SELECT m.room, m.source_path, m.date, m.type, m.meta->>'one_line' AS one_line
+            FROM memories m
+            WHERE m.room = ANY(%s)
+              AND {RETRIEVAL_VISIBILITY_SQL}
             """,
             (list(rooms),),
         )
@@ -180,13 +191,13 @@ def load_index(conn, rooms=("kintsu", "house")) -> dict:
             }
 
         cur.execute(
-            """
+            f"""
             SELECT m.room, mt.thread_key, m.source_path AS file,
                    mt.lines_start, mt.lines_end, mt.context
             FROM memory_threads mt
             JOIN memories m ON m.id = mt.memory_id
             WHERE m.room = ANY(%s)
-              AND m.source_path NOT LIKE 'db-only/%%'
+              AND {RETRIEVAL_VISIBILITY_SQL}
             ORDER BY mt.thread_key
             """,
             (list(rooms),),
@@ -318,7 +329,7 @@ def load_semantic_chunks(
         filters.append("m.source_path = ANY(%s)")
         params.append(normalized_scope)
     else:
-        filters.append("m.source_path NOT LIKE 'db-only/%%'")
+        filters.append(RETRIEVAL_VISIBILITY_SQL)
     params.extend([vec_str, top_k])
     where = " AND ".join(filters)
 
@@ -447,7 +458,7 @@ def load_content_chunks(
         filters.append("m.source_path = ANY(%s)")
         params.append(normalized_scope)
     else:
-        filters.append("m.source_path NOT LIKE 'db-only/%%'")
+        filters.append(RETRIEVAL_VISIBILITY_SQL)
 
     params.append(top_k)
     where = " AND ".join(filters)
@@ -542,14 +553,14 @@ def load_date_matches(
     if not query_dates:
         return []
 
-    sql = """
+    sql = f"""
         SELECT m.id, m.room, m.source_path, m.title, m.type,
                m.date, m.dates, m.threads,
                LEFT(m.body, %s) AS body_excerpt,
                OCTET_LENGTH(m.body) AS body_full_chars
         FROM memories m
         WHERE m.room = ANY(%s)
-          AND m.source_path NOT LIKE 'db-only/%%'
+          AND {RETRIEVAL_VISIBILITY_SQL}
           AND (m.dates && %s::date[] OR m.date = ANY(%s::date[]))
         ORDER BY m.date DESC NULLS LAST, m.id DESC
         LIMIT %s
@@ -682,7 +693,7 @@ def main() -> int:
     # 2026-05-04 bug where opencode-Kodo's session loaded Kintsu memory because
     # load_index/load_important_index defaulted to "kintsu" regardless of cwd.
     room_name = (args.room or room_dir.name or "kodo").lower()
-    if room_name not in ("kodo", "kintsu"):
+    if room_name not in ("kodo", "kintsu", "tuner"):
         room_name = "kodo"  # safe fallback; both rooms have substrate rows
 
     prompt = read_prompt_from_stdin()

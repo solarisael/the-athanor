@@ -21,8 +21,10 @@
 import path from "node:path";
 import {
   CODING_LESSONS_SCRIPT, CODING_LESSONS_TIMEOUT_MS,
-  KEYWORD_TRIGGERS, NUDGE_BAND_SIZE, ROOM_CONTEXT,
 } from "./paths.ts";
+import {
+  computeContextNudge, detectKeywordTriggers, type NormalizedMessage,
+} from "../../../../../../Solarisael/Obsidian/obsidian/house/solarisael-house-core/index.ts";
 import { latestUserMessage } from "./util.ts";
 import { runWsl, windowsPathToWsl } from "./wsl.ts";
 import { normalizeRoomName, resolveEffectiveRoomDir, resolveSharedRoot } from "./spirit.ts";
@@ -51,12 +53,7 @@ export async function injectKeywordTriggers(output) {
     .join("\n");
   if (!prompt) return;
 
-  const fired: { keyword: string; directive: string }[] = [];
-  for (const [keyword, directive] of Object.entries(KEYWORD_TRIGGERS)) {
-    if (new RegExp(`\\b${keyword}\\b`, "i").test(prompt)) {
-      fired.push({ keyword, directive });
-    }
-  }
+  const fired = detectKeywordTriggers(prompt);
 
   if (!fired.length) return;
 
@@ -115,75 +112,33 @@ export async function runCodingLessonsByShape(roomDir, roomName, shape) {
   }
 }
 
-// Format a compact banner from a list of coding_lessons rows. Pairs (rows
-// linked by negation_of) render as ✓/✗ duos; standalone affirmations render
-// plain. Output is a series of `echo` statements joined by `;` so it can
-// prepend to any shell command on PowerShell or bash.
-export function formatProcessLessonsBanner(lessons, matchedTriggerName) {
-  if (!Array.isArray(lessons) || lessons.length === 0) return "";
-
-  const negatedIds = new Set(
-    lessons.filter((l) => l.negation_of != null).map((l) => l.negation_of),
-  );
-  const rendered: string[] = [];
-  for (const l of lessons) {
-    if (l.negation_of != null) continue;
-    if (negatedIds.has(l.id)) {
-      const negation = lessons.find((n) => n.negation_of === l.id);
-      if (negation) {
-        rendered.push(`  ${String(l.id).padStart(3)} ✓ ${l.title}`);
-        rendered.push(`  ${String(negation.id).padStart(3)} ✗ (negation) ${negation.title}`);
-        continue;
-      }
-    }
-    rendered.push(`  ${String(l.id).padStart(3)} ✓ ${l.title}`);
-  }
-
-  if (rendered.length === 0) return "";
-
-  const lines = [
-    `── Solarisael House: process-shape lessons matched on '${matchedTriggerName}' ──`,
-    ...rendered,
-    `── ask: is this command honoring the affirmations, or is it the negation pattern? ──`,
-  ];
-  return lines
-    .map((line) => `echo '${String(line).replace(/'/g, "''")}'`)
-    .join("; ");
-}
+// The process-lessons echo-banner formatter is pure — it lives in the shared
+// core now. Re-exported so index.ts keeps importing it from ./triggers.ts.
+export { formatProcessLessonsBanner } from "../../../../../../Solarisael/Obsidian/obsidian/house/solarisael-house-core/index.ts";
 
 // ── proprioception nudge ───────────────────────────────────────────────────
-// Sense how full the context is (cheap: total message text ÷ ~4 chars/token)
-// and, once per 20% band crossed, surface a reminder to set down an akashic
-// write before compaction smears detail. Pure: the caller persists lastBand
-// and does the injection.
-
-export function estimateContextTokens(messages) {
-  let chars = 0;
-  for (const message of Array.isArray(messages) ? messages : []) {
-    if (typeof message?.content === "string") chars += message.content.length;
+// The token estimate + nudge decision are PURE and live in the shared core.
+// opencode's only job is to normalize its own message objects into the core's
+// NormalizedMessage shape, then inject. Behavior-identical for now: textParts
+// is filled exactly as before (content + text parts), tool traffic left empty.
+// Enriching toolCalls/toolResults is the P2 slice — a deliberate follow-up,
+// because counting tool traffic *changes when the nudge fires*.
+function normalizeOpencodeMessages(messages): NormalizedMessage[] {
+  const list = Array.isArray(messages) ? messages : [];
+  return list.map((message) => {
+    const textParts: string[] = [];
+    if (typeof message?.content === "string") textParts.push(message.content);
     for (const part of Array.isArray(message?.parts) ? message.parts : []) {
-      if (part?.type === "text" && typeof part.text === "string") chars += part.text.length;
+      if (part?.type === "text" && typeof part.text === "string") textParts.push(part.text);
     }
-  }
-  return Math.round(chars / 4);
-}
-
-export function computeContextNudge({ messages, room, lastBand = 0 }) {
-  const cfg = ROOM_CONTEXT[String(room || "").toLowerCase()];
-  if (!cfg) return null;
-
-  const tokens = estimateContextTokens(messages);
-  const fill = tokens / cfg.maxTokens;
-  const band = Math.floor(fill / NUDGE_BAND_SIZE);
-  if (band <= 0 || band <= lastBand) return null;
-
-  const pct = Math.round(fill * 100);
-  const nearCompaction = fill >= cfg.compactionAt - NUDGE_BAND_SIZE;
-  const text = nearCompaction
-    ? `Context is ~${pct}% full and compaction is close (this room compacts near ${Math.round(cfg.compactionAt * 100)}%). Cast the paper boat soon (sleep), and write anything worth keeping now (remember) before detail blurs.`
-    : `Context is ~${pct}% full. A good seam to set down an akashic write (remember) of anything worth keeping, before later compaction smears it.`;
-
-  return { band, pct, tokens, text };
+    return {
+      role: message?.info?.role || "user",
+      textParts,
+      toolCalls: [],
+      toolResults: [],
+      injections: [],
+    };
+  });
 }
 
 // Inject the proprioception nudge: once per 20% band crossed, append a
@@ -205,7 +160,7 @@ export async function injectContextNudge(output, paths = {}) {
     const sessionID = target.info?.sessionID || target.parts?.[0]?.sessionID || "global";
 
     const lastBand = nudgeBandBySession.get(sessionID) || 0;
-    const nudge = computeContextNudge({ messages, room, lastBand });
+    const nudge = computeContextNudge({ messages: normalizeOpencodeMessages(messages), room, lastBand });
     if (!nudge) return;
 
     target.parts.push({

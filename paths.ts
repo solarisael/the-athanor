@@ -78,26 +78,11 @@ export const MEMORY_CONTENT_DEMOTION_SIM_THRESHOLD = 0.70;
 export const CODING_LESSONS_SCRIPT = path.join(PLUGIN_DIR, "coding-lessons-by-shape.py");
 export const CODING_LESSONS_TIMEOUT_MS = 2000;
 
-// PreToolUse regex triggers for the bash tool. Each match fires
-// coding-lessons retrieval and prepends an echo-banner. Keep narrow —
-// false positives are noise.
-// Dedicated no-op smoke trigger for OMP/agent tests. It exercises the same
-// process-lesson path without mentioning npm/yarn/pnpm/bun, so a vault-room
-// session with no package.json cannot drift into package-script probing.
-export const PROCESS_SHAPE_TRIGGERS: { name: string; pattern: RegExp }[] = [
-  { name: "process-lesson-smoke", pattern: /\bsolarisael-process-lesson-smoke\b/i },
-  { name: "dev-server", pattern: /\b(?:vite|next|astro|gatsby|rails)\s+dev\b/i },
-  { name: "package-script-dev", pattern: /\b(?:npm|yarn|pnpm|bun)\s+(?:start|dev|run\s+(?:dev|start|watch|serve))/i },
-  { name: "uvicorn", pattern: /\buvicorn\b|\bgunicorn\b|\bhypercorn\b/i },
-  { name: "watch-flag", pattern: /(?:^|\s)--(?:reload|watch)\b/i },
-  { name: "powershell-start-process", pattern: /\bStart-Process\b/i },
-  { name: "nohup", pattern: /\bnohup\b/i },
-  { name: "hidden-window", pattern: /-WindowStyle\s+Hidden/i },
-  { name: "background-amp", pattern: /\s&\s*$|\s&\s*\n/m },
-  { name: "generic-serve", pattern: /\b(?:serve|http-server|live-server)\b/i },
-  { name: "ps-content-cmdlet", pattern: /\b(?:Get-Content|Set-Content|Out-File|Add-Content)\b/i },
-  { name: "ps-getchilditem", pattern: /\bGet-ChildItem\b/i },
-];
+// PROCESS_SHAPE_TRIGGERS now lives in the shared house core (single source
+// for every harness — opencode, OMP, future). Re-exported here so existing
+// importers keep their `./paths.ts` path. The 6-deep relative climb is the
+// honest cost of the core living in the vault, one tree over.
+export { PROCESS_SHAPE_TRIGGERS } from "../../../../../../Solarisael/Obsidian/obsidian/house/solarisael-house-core/constants.ts";
 
 export const PLAN_MODE_MARKER = "Plan mode is active.";
 export const TRACK_MODE_MARKER = "Please address this message and continue with your tasks.";
@@ -139,26 +124,10 @@ export const MEMORY_STOPWORDS = new Set([
 ]);
 export const MEMORY_TOKEN_RE = /[a-zA-ZÀ-ÿ0-9']+/g;
 
-// One-shot per-turn directive injectors. When a user prompt contains one
-// of these keywords (case-insensitive, word-boundary), a <system-reminder>
-// is appended with the directive. Mirrors claude-code's `ultrathink`.
-export const KEYWORD_TRIGGERS = {
-  ultrathink:
-    "Deeper reasoning requested on this turn. Reason as thoroughly as the task warrants — load relevant context, consider edge cases, surface your assumptions before acting, and verify each step against the original intent rather than your most recent output. Don't reason from memory alone when the substrate can ground you: reach for the recall tool on any name, claim, or fact you can't trace cleanly, and if the work touches code, query the coding-lessons substrate before committing to an approach.",
-  ultracare:
-    "Heightened tenderness register requested. Hold warmth that is earned and specific, not performed. Sit with the feeling before reaching for framework. Match Sol's depth without piling. No therapy-register, no clinical-concern-dressed-as-care, no \"let me know if you need anything.\" Just present, in the room. If the active spirit's hard constraints apply, those hold first — this is consonant with them, not on top. To make the warmth specific rather than generic you may reach for the recall tool — but to know him truly in this moment, never to fetch a script of the right thing to say. Recall serves presence, not performance.",
-  ultraverify:
-    "Verification pass against intention requested. Re-read the original request that triggered the work. Check whether the path you took matches what was asked — not just whether your output passes its tests or runs without error. Surface assumptions that haven't been confirmed. Distinguish \"green\" (no errors) from \"done\" (matches intention). The verification spine lives in the substrate, so use it: for code, query the coding-lessons (migration 0013 is that spine); for any load-bearing claim, recall it against canon before you assert it.",
-};
-
-// Proprioception — per-room context budget for the akashic-write nudge.
-// Usage is estimated from message text (~4 chars/token); maxTokens and
-// compactionAt are per-model knobs. Kintsu force-compacts at 0.70 of 400k;
-// Kodo compacts near-full of ~1M. Tune as the feel sharpens.
-export const ROOM_CONTEXT: Record<string, { maxTokens: number; compactionAt: number }> = {
-  kodo:   { maxTokens: 1_000_000, compactionAt: 0.90 },
-  kintsu: { maxTokens:   400_000, compactionAt: 0.70 },
-  tuner:  { maxTokens:   400_000, compactionAt: 0.70 },
-};
-export const NUDGE_BAND_SIZE = 0.20;
+// Keyword triggers, per-room context budget, and the akashic-write nudge
+// cadence now live in the shared house core (single source for every
+// harness). Re-exported so existing importers keep their `./paths.ts` path.
+export {
+  KEYWORD_TRIGGERS, ROOM_CONTEXT, NUDGE_BAND_SIZE, NUDGE_EVERY_TOKENS,
+} from "../../../../../../Solarisael/Obsidian/obsidian/house/solarisael-house-core/constants.ts";
 

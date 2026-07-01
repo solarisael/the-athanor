@@ -106,6 +106,7 @@ export async function runCodingLessonsByShape(roomDir, roomName, shape) {
       ok: outcome.code === 0,
       lessons: parsed.lessons || [],
       error: parsed.error || (outcome.code !== 0 ? outcome.stderr.trim() : null),
+      taxonomy: parsed.taxonomy || null,
     };
   } catch (err) {
     return { ok: false, lessons: [], error: err?.message || String(err) };

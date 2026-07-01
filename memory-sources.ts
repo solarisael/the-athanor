@@ -186,6 +186,7 @@ export async function loadMemoryLexicalSources(roomDir, roomName, prompt) {
     return {
       index: fromPostgres.data.index,
       importantIndex: fromPostgres.data.importantIndex || {},
+      taxonomy: fromPostgres.data.taxonomy || null,
       indexSource: "postgres",
       importantSource: "postgres",
       fallbackReason: null,
@@ -195,6 +196,7 @@ export async function loadMemoryLexicalSources(roomDir, roomName, prompt) {
   return {
     index: await loadMemoryIndexFromJson(roomDir),
     importantIndex: await loadMemoryImportantIndex(roomDir),
+    taxonomy: null,
     indexSource: "json",
     importantSource: "json",
     fallbackReason: fromPostgres.error || "postgres source unavailable",

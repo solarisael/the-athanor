@@ -91,6 +91,30 @@ def fetch_lessons(conn, shape: str, scopes: list[str]) -> list[dict]:
 
         return rows
 
+def fetch_taxonomy(conn, scopes: list[str]) -> dict:
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(
+            """
+            SELECT shape,
+                   COUNT(*) AS count,
+                   COUNT(*) FILTER (WHERE always_on) AS always_on_count
+            FROM coding_lessons
+            WHERE scope = ANY(%s)
+            GROUP BY shape
+            ORDER BY count DESC, shape
+            """,
+            (scopes,),
+        )
+        shapes = [
+            {
+                "shape": row["shape"] or "unknown",
+                "count": int(row["count"]),
+                "always_on_count": int(row["always_on_count"] or 0),
+            }
+            for row in cur.fetchall()
+        ]
+        return {"scopes": scopes, "shapes": shapes}
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -118,10 +142,11 @@ def main() -> int:
         )
         try:
             lessons = fetch_lessons(conn, args.shape, scopes)
+            taxonomy = fetch_taxonomy(conn, scopes)
         finally:
             conn.close()
 
-        print(json.dumps({"lessons": lessons}, ensure_ascii=False))
+        print(json.dumps({"lessons": lessons, "taxonomy": taxonomy}, ensure_ascii=False))
     except Exception as e:
         # Fail open — empty result, exit 0, hook stays soft.
         print(json.dumps({"lessons": [], "error": str(e)}))

@@ -10,6 +10,8 @@ Output JSON contains a subset of the following keys depending on --mode:
                    present when --mode is 'full' or 'lexical'
   - importantIndex (named entity shape from `named_entities`)
                    present when --mode is 'full' or 'lexical'
+  - taxonomy       (cheap corpus menu: memory types, threads, entities)
+                   present when --mode is 'full' or 'taxonomy'
   - semanticChunks (top-K halfvec nearest-neighbors from `memory_chunks`,
                     optionally narrowed to --scope-files; only populated when
                     stdin contains a prompt and embedding endpoint is reachable;
@@ -17,10 +19,12 @@ Output JSON contains a subset of the following keys depending on --mode:
                    present when --mode is 'full' or 'semantic'
 
 Modes (audit ticket #1, tiered retrieval):
-  - full     (default): all three keys, original single-call behavior
+  - full     (default): lexical + taxonomy + semantic/content/date, original
+              single-call behavior plus the cheap menu.
   - lexical: index + importantIndex only, no embed call. Pass 1 of tiered flow.
+  - taxonomy: corpus menu only, no embed call.
   - semantic: semanticChunks only, requires --scope-files for narrowing.
-             Pass 2 of tiered flow, called after plugin ranks Pass 1 threads.
+              Pass 2 of tiered flow, called after plugin ranks Pass 1 threads.
 """
 from __future__ import annotations
 
@@ -247,6 +251,69 @@ def load_important_index(conn, room="kintsu") -> dict:
             }
 
         return entries
+
+def load_taxonomy(conn, rooms=("kintsu", "house"), room="kintsu", limit=16) -> dict:
+    """Return a small self-describing menu of what retrieval can target.
+
+    Cheap SQL only: no embeddings, no body excerpts. This is for alignment and
+    recall targeting, not context injection.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(
+            """
+            SELECT room, COALESCE(type, '') AS type, COUNT(*) AS count
+            FROM memories
+            WHERE room = ANY(%s)
+              AND (source_path NOT LIKE 'db-only/%%' OR type = 'paper-boat')
+            GROUP BY room, COALESCE(type, '')
+            ORDER BY count DESC, room, type
+            """,
+            (list(rooms),),
+        )
+        memory_types = [
+            {"room": row["room"], "type": row["type"] or "unknown", "count": int(row["count"])}
+            for row in cur.fetchall()
+        ]
+
+        cur.execute(
+            """
+            SELECT mt.thread_key, COUNT(*) AS count
+            FROM memory_threads mt
+            JOIN memories m ON m.id = mt.memory_id
+            WHERE m.room = ANY(%s)
+              AND (m.source_path NOT LIKE 'db-only/%%' OR m.type = 'paper-boat')
+            GROUP BY mt.thread_key
+            ORDER BY count DESC, mt.thread_key
+            LIMIT %s
+            """,
+            (list(rooms), limit),
+        )
+        thread_keys = [
+            {"thread_key": row["thread_key"], "count": int(row["count"])}
+            for row in cur.fetchall()
+        ]
+
+        cur.execute(
+            """
+            SELECT name, kind, weighty
+            FROM named_entities
+            WHERE room = %s
+            ORDER BY weighty DESC, name
+            LIMIT %s
+            """,
+            (room, limit),
+        )
+        named_entities = [
+            {"name": row["name"], "kind": row["kind"], "weighty": bool(row["weighty"])}
+            for row in cur.fetchall()
+        ]
+
+        return {
+            "rooms": list(rooms),
+            "memoryTypes": memory_types,
+            "threadKeys": thread_keys,
+            "namedEntities": named_entities,
+        }
 
 
 def embed_query(prompt: str, url: str, model: str) -> list[float] | None:
@@ -636,12 +703,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=("full", "lexical", "semantic", "content", "date"),
+        choices=("full", "lexical", "semantic", "content", "date", "taxonomy"),
         default="full",
         help=(
             "Retrieval mode (audit ticket #1 + 2026-05-19 GIN pass + 2026-05-23 date pass). "
-            "'full': lexical + important + global semantic + content + date (single-call, all passes). "
+            "'full': lexical + important + taxonomy + global semantic + content + date. "
             "'lexical': index + importantIndex only, no embed call, no content. "
+            "'taxonomy': cheap corpus menu only, no embed call. "
             "'semantic': embed prompt + narrowed semantic against --scope-files. "
             "'content': pg_trgm word_similarity on memory_chunks.body, no embed call. "
             "'date': YYYY-MM-DD-token lookup against memories.dates GIN. No embed. "
@@ -712,6 +780,9 @@ def main() -> int:
         if args.mode in ("full", "lexical"):
             payload["index"] = load_index(conn, rooms=(room_name, "house"))
             payload["importantIndex"] = load_important_index(conn, room=room_name)
+
+        if args.mode in ("full", "taxonomy"):
+            payload["taxonomy"] = load_taxonomy(conn, rooms=(room_name, "house"), room=room_name)
 
         # Semantic pass (Pass 2 of tiered retrieval). Embeds prompt + queries
         # memory_chunks for top-K cosine neighbors, optionally narrowed to

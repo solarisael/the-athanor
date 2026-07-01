@@ -803,6 +803,9 @@ export async function runRecallQuery(roomDir, roomName, query) {
   const queryDates = Array.isArray(result.data?.queryDates)
     ? result.data.queryDates
     : [];
+  const taxonomy = result.data?.taxonomy && typeof result.data.taxonomy === "object"
+    ? result.data.taxonomy
+    : null;
 
   // Reverse-index canon (2026-06-05): surface any canon entry whose pointer
   // files include a source_path that recall actually pulled — even when the
@@ -829,6 +832,7 @@ export async function runRecallQuery(roomDir, roomName, query) {
     contentChunks,
     dateMatches,
     queryDates,
+    taxonomy,
     found: canonMatches.length > 0 || semanticChunks.length > 0
       || contentChunks.length > 0 || dateMatches.length > 0,
   };

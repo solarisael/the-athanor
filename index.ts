@@ -201,9 +201,9 @@ export async function SolarisaelHousePlugin(pluginInput) {
           "- the user mentions a name/concept you can't trace cleanly",
           "- you catch yourself about to extrapolate from adjacent matches",
           "",
-          "Returns structured retrieval (canon entries + semantic chunks with sim scores + source paths) OR an explicit 'no canonical match' message.",
+          "Returns structured retrieval (canon entries + semantic/content chunks + source paths) plus a compact taxonomy map for better follow-up queries.",
           "",
-          "DISCIPLINE — load-bearing: if recall returns no canonical match, you MUST say 'i don't have this' or equivalent. Do NOT invent from adjacent matches. The tool is the agency to look; the rule is look-or-admit, never extrapolate.",
+          "DISCIPLINE — load-bearing: if recall returns no canonical match, you MUST say 'i don't have this' or equivalent. Use the taxonomy map to aim the next lookup; do NOT invent from adjacent matches. The tool is the agency to look; the rule is look-or-admit, never extrapolate.",
         ].join("\n"),
         args: {
           query: tool.schema.string().describe(
@@ -252,6 +252,25 @@ export async function SolarisaelHousePlugin(pluginInput) {
           summaryParts.push(`${canonCount} canon entr${canonCount === 1 ? "y" : "ies"}`);
           lines.push(`**Found:** ${summaryParts.join(", ")}`);
           lines.push(``);
+          const taxonomy = result.taxonomy && typeof result.taxonomy === "object" ? result.taxonomy : null;
+          if (taxonomy) {
+            const memoryTypes = Array.isArray(taxonomy.memoryTypes) ? taxonomy.memoryTypes.slice(0, 8) : [];
+            const namedEntities = Array.isArray(taxonomy.namedEntities) ? taxonomy.namedEntities.slice(0, 8) : [];
+            const threadKeys = Array.isArray(taxonomy.threadKeys) ? taxonomy.threadKeys.slice(0, 8) : [];
+            if (memoryTypes.length || namedEntities.length || threadKeys.length) {
+              lines.push(`### Taxonomy map`);
+              if (memoryTypes.length) {
+                lines.push(`- memory types: ${memoryTypes.map((t) => `${t.room}/${t.type} (${t.count})`).join(", ")}`);
+              }
+              if (namedEntities.length) {
+                lines.push(`- named entities: ${namedEntities.map((e) => `${e.name}${e.kind ? `:${e.kind}` : ""}`).join(", ")}`);
+              }
+              if (threadKeys.length) {
+                lines.push(`- thread keys: ${threadKeys.map((t) => `${t.thread_key} (${t.count})`).join(", ")}`);
+              }
+              lines.push(``);
+            }
+          }
 
           if (dateCount) {
             lines.push(`### Date matches (memories.dates GIN — authoritative direct lookup)`);

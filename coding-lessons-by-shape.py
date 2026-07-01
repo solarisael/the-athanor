@@ -43,8 +43,14 @@ def read_env_file(path: Path) -> dict[str, str]:
 
 def substrate_env(room_dir: Path) -> dict[str, str]:
     shared_root = room_dir.parent
-    env_path = shared_root / "kodo" / "substrate" / ".env"
-    values = read_env_file(env_path)
+    values: dict[str, str] = {}
+    for env_path in (
+        shared_root / "house" / "substrate" / ".env",
+        shared_root / "kodo" / "substrate" / ".env",
+    ):
+        values = read_env_file(env_path)
+        if values:
+            break
 
     for key in ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE"):
         if os.environ.get(key):

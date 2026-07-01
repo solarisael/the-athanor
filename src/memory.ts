@@ -47,8 +47,8 @@ import {
 import {
   annotateMemoryExcerptsWithCanonRefs, boostMemoryPromptTokens,
   buildCanonicalFileSet, collectCanonAssertions, collectCanonByMatchedFiles,
-  matchMemoryImportantTerms, rankMemoryThreads, restoreMemoryPrefetchMatches,
-  tokenizeMemory,
+  fuseRetrievalCandidates, matchMemoryImportantTerms, rankMemoryThreads,
+  restoreMemoryPrefetchMatches, tokenizeMemory,
 } from "./memory-rank.ts";
 
 // ── debug / error logging ──────────────────────────────────────────────────
@@ -789,6 +789,12 @@ export async function runRecallQuery(roomDir, roomName, query) {
   const contentChunks = Array.isArray(result.data?.contentChunks)
     ? result.data.contentChunks
     : [];
+  const searchTerms = Array.isArray(result.data?.searchTerms)
+    ? result.data.searchTerms
+    : [];
+  const searchCandidates = Array.isArray(result.data?.searchCandidates)
+    ? result.data.searchCandidates
+    : [];
 
   // Date matches (added 2026-05-23 — date-aware retrieval fix). When the
   // recall query contains a YYYY-MM-DD token, the postgres `--mode full`
@@ -807,6 +813,13 @@ export async function runRecallQuery(roomDir, roomName, query) {
     ? result.data.taxonomy
     : null;
 
+  const retrievalCandidates = fuseRetrievalCandidates({
+    searchCandidates,
+    semanticChunks,
+    contentChunks,
+    dateMatches,
+  }, { query, searchTerms, maxResults: 12 });
+
   // Reverse-index canon (2026-06-05): surface any canon entry whose pointer
   // files include a source_path that recall actually pulled — even when the
   // query never named the entity. This is the fix for "0 canon entries" on a
@@ -815,9 +828,11 @@ export async function runRecallQuery(roomDir, roomName, query) {
   // are excluded from the reverse pass so nothing double-counts.
   const nameMatchedTermKeys = new Set(nameCanonMatches.map((m) => m.termKey));
   const matchedSourcePaths = [
-    ...semanticChunks.map((c) => c?.source_path),
-    ...contentChunks.map((c) => c?.source_path),
-    ...dateMatches.map((d) => d?.source_path),
+    ...retrievalCandidates.map((candidate) => candidate?.source_path),
+    ...semanticChunks.map((chunk) => chunk?.source_path),
+    ...contentChunks.map((chunk) => chunk?.source_path),
+    ...dateMatches.map((match) => match?.source_path),
+    ...searchCandidates.map((candidate) => candidate?.source_path),
   ].filter(Boolean);
   const fileCanonMatches = collectCanonByMatchedFiles(
     importantIndex, matchedSourcePaths, nameMatchedTermKeys,
@@ -833,7 +848,11 @@ export async function runRecallQuery(roomDir, roomName, query) {
     dateMatches,
     queryDates,
     taxonomy,
-    found: canonMatches.length > 0 || semanticChunks.length > 0
+    searchTerms,
+    searchCandidates,
+    retrievalCandidates,
+    found: canonMatches.length > 0 || retrievalCandidates.length > 0
+      || searchCandidates.length > 0 || semanticChunks.length > 0
       || contentChunks.length > 0 || dateMatches.length > 0,
   };
 }

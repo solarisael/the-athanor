@@ -13,8 +13,8 @@ import {
   matchMemoryTerm,
   rankMemoryThreads,
   tokenizeMemory,
-} from "../memory-rank.ts";
-import { MEMORY_MAX_IMPORTANT_MATCHES } from "../paths.ts";
+} from "../src/memory-rank.ts";
+import { MEMORY_MAX_IMPORTANT_MATCHES } from "../src/paths.ts";
 
 describe("tokenizeMemory", () => {
   test("drops stopwords including the house registers (uwu/owo/godling)", () => {

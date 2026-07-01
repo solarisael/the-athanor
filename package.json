@@ -1,8 +1,8 @@
 {
   "name": "solarisael-house",
-  "version": "1.0.0",
-  "main": "index.ts",
+  "version": "0.1.0",
   "type": "module",
+  "main": "index.ts",
   "scripts": {
     "test": "bun test",
     "test:recall": "bun run tests/recall.integration.ts"

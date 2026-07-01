@@ -2,7 +2,7 @@
 // should be safe inside room/vault directories that intentionally have no package.json.
 
 import { describe, expect, test } from "bun:test";
-import { PROCESS_SHAPE_TRIGGERS } from "../paths.ts";
+import { PROCESS_SHAPE_TRIGGERS } from "../src/paths.ts";
 
 describe("PROCESS_SHAPE_TRIGGERS", () => {
   test("provides a package-free smoke trigger", () => {

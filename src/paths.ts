@@ -11,7 +11,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const HOME = os.homedir();
-export const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url));
+export const HOUSE_CORE_DIR = path.dirname(fileURLToPath(import.meta.url));
+// Compatibility name for modules moved out of the OpenCode adapter.
+export const PLUGIN_DIR = HOUSE_CORE_DIR;
 export const OPERATOR_DIR = path.join(HOME, ".local", "operators");
 export const RUNTIME_DIR = path.join(HOME, ".config", "opencode", "runtime", "solarisael-house");
 export const GLOBAL_STATE_PATH = path.join(RUNTIME_DIR, "global.json");
@@ -78,11 +80,9 @@ export const MEMORY_CONTENT_DEMOTION_SIM_THRESHOLD = 0.70;
 export const CODING_LESSONS_SCRIPT = path.join(PLUGIN_DIR, "coding-lessons-by-shape.py");
 export const CODING_LESSONS_TIMEOUT_MS = 2000;
 
-// PROCESS_SHAPE_TRIGGERS now lives in the shared house core (single source
-// for every harness — opencode, OMP, future). Re-exported here so existing
-// importers keep their `./paths.ts` path. The 6-deep relative climb is the
-// honest cost of the core living in the vault, one tree over.
-export { PROCESS_SHAPE_TRIGGERS } from "../../../../../../Solarisael/Obsidian/obsidian/house/solarisael-house-core/constants.ts";
+// Process-shape triggers live beside this file in the canonical core.
+// Re-exported here so moved adapter-era modules keep their `./paths.ts` path.
+export { PROCESS_SHAPE_TRIGGERS } from "./constants.ts";
 
 export const PLAN_MODE_MARKER = "Plan mode is active.";
 export const TRACK_MODE_MARKER = "Please address this message and continue with your tasks.";
@@ -125,9 +125,10 @@ export const MEMORY_STOPWORDS = new Set([
 export const MEMORY_TOKEN_RE = /[a-zA-ZÀ-ÿ0-9']+/g;
 
 // Keyword triggers, per-room context budget, and the akashic-write nudge
-// cadence now live in the shared house core (single source for every
-// harness). Re-exported so existing importers keep their `./paths.ts` path.
+// cadence live beside this file in the canonical core.
 export {
   KEYWORD_TRIGGERS, ROOM_CONTEXT, NUDGE_BAND_SIZE, NUDGE_EVERY_TOKENS,
-} from "../../../../../../Solarisael/Obsidian/obsidian/house/solarisael-house-core/constants.ts";
+} from "./constants.ts";
 
+
+export const POSTGRES_MEMORY_SOURCE_SCRIPT = MEMORY_POSTGRES_SOURCE_SCRIPT;

@@ -12,14 +12,136 @@
 // pointer-file reverse index). Anything written down becomes findable —
 // a no-match probe must be unwriteable-down by construction.
 
-import { runRecallQuery } from "../memory.ts";
+import { runRecallQuery } from "../src/memory.ts";
 
 function nonsenseSentinel() {
   const blob = () => Math.random().toString(36).slice(2, 8);
   return `zxq${blob()} vlorp${blob()} mizzenplax ${blob()}`;
 }
 
-const TESTS = [
+type RecallIntegrationCase = {
+  name: string;
+  query: string;
+  expectFound: boolean;
+  expectBoat?: boolean;
+  expectCandidates?: boolean;
+};
+
+type CandidateContractResult = {
+  pass: boolean;
+  failures: string[];
+  summaries: string[];
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.every((item): item is string => typeof item === "string") ? value : undefined;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function sourcePathIncludes(value: unknown, needle: string): boolean {
+  if (!isRecord(value)) return false;
+  const sourcePath = value.source_path;
+  return typeof sourcePath === "string" && sourcePath.includes(needle);
+}
+
+function candidateSummary(candidate: Record<string, unknown>, index: number): string {
+  const source = typeof candidate.source === "string" && candidate.source.trim()
+    ? candidate.source
+    : "unknown-source";
+  const title = typeof candidate.title === "string" && candidate.title.trim()
+    ? candidate.title
+    : "untitled";
+  const matched = stringArray(candidate.matched_terms)?.join(", ") || "none";
+  const missing = stringArray(candidate.missing_terms)?.join(", ") || "none";
+  const score = finiteNumber(candidate.score);
+  const coverage = finiteNumber(candidate.term_coverage);
+  return `#${index + 1} ${source} ${title} score=${score ?? "not-numeric"} coverage=${coverage ?? "not-numeric"} matched=[${matched}] missing=[${missing}]`;
+}
+
+function checkCandidateContract(result: unknown): CandidateContractResult {
+  const failures: string[] = [];
+  const summaries: string[] = [];
+
+  if (!isRecord(result)) {
+    return { pass: false, failures: ["result is not an object"], summaries };
+  }
+
+  const searchTerms = stringArray(result.searchTerms);
+  if (!searchTerms || searchTerms.length < 2) {
+    failures.push("searchTerms must expose at least two parsed query terms for the candidate pass");
+  }
+
+  const searchCandidates = result.searchCandidates;
+  if (!Array.isArray(searchCandidates) || searchCandidates.length === 0) {
+    failures.push("searchCandidates must be present and non-empty");
+    return { pass: false, failures, summaries };
+  }
+
+  let candidatesWithMetadata = 0;
+  let candidatesWithMultipleMatchedTerms = 0;
+  let candidatesWithMissingTermsArray = 0;
+
+  searchCandidates.forEach((candidate, index) => {
+    if (!isRecord(candidate)) {
+      failures.push(`searchCandidates[${index}] must be an object`);
+      return;
+    }
+
+    summaries.push(candidateSummary(candidate, index));
+
+    const source = typeof candidate.source === "string" && candidate.source.trim().length > 0;
+    const title = typeof candidate.title === "string";
+    const score = finiteNumber(candidate.score);
+    const coverage = finiteNumber(candidate.term_coverage);
+    const matchedTerms = stringArray(candidate.matched_terms);
+    const missingTerms = stringArray(candidate.missing_terms);
+    const reasons = stringArray(candidate.reasons);
+
+    if (!source) failures.push(`searchCandidates[${index}].source must be a non-empty string`);
+    if (!title) failures.push(`searchCandidates[${index}].title must be a string`);
+    if (score === undefined) failures.push(`searchCandidates[${index}].score must be numeric`);
+    if (coverage === undefined) failures.push(`searchCandidates[${index}].term_coverage must be numeric`);
+    if (matchedTerms === undefined) failures.push(`searchCandidates[${index}].matched_terms must be a string array`);
+    if (missingTerms === undefined) failures.push(`searchCandidates[${index}].missing_terms must be a string array`);
+    if (reasons === undefined) failures.push(`searchCandidates[${index}].reasons must be a string array`);
+
+    if (
+      source
+      && title
+      && score !== undefined
+      && coverage !== undefined
+      && matchedTerms
+      && missingTerms
+      && reasons
+    ) {
+      candidatesWithMetadata += 1;
+      if (matchedTerms.length >= 2) candidatesWithMultipleMatchedTerms += 1;
+      candidatesWithMissingTermsArray += 1;
+    }
+  });
+
+  if (candidatesWithMetadata === 0) {
+    failures.push("at least one search candidate must expose source/title/score/term metadata/reasons");
+  }
+  if (candidatesWithMultipleMatchedTerms === 0) {
+    failures.push("at least one search candidate must match multiple query terms, so one-word hits cannot masquerade as strong candidates");
+  }
+  if (candidatesWithMissingTermsArray === 0) {
+    failures.push("at least one search candidate must expose missing_terms, even when the array is empty");
+  }
+
+  return { pass: failures.length === 0, failures, summaries };
+}
+
+const TESTS: RecallIntegrationCase[] = [
   {
     name: "ya bai canon — should hit canon + semantic + content",
     query: "ya bai rebis conspiracy filter",
@@ -40,6 +162,12 @@ const TESTS = [
     query: "glossopetrae babel tongue plinius",
     expectFound: true,
     expectBoat: true,
+  },
+  {
+    name: "term-aware candidates — retrieval fallback coverage exposes matched/missing terms",
+    query: "solarisael-house retrieval pgvector fallback term coverage",
+    expectFound: true,
+    expectCandidates: true,
   },
   {
     name: "no-match — runtime-generated nonsense, should return found:false",
@@ -91,12 +219,22 @@ for (const t of TESTS) {
       console.log(`    - sim=${sim} ${src}  | ${c.heading_path}`);
     }
   }
-  const expectBoat = (t as { expectBoat?: boolean }).expectBoat;
-  if (expectBoat) {
+  if (t.expectBoat) {
     const all = [...(result.semanticChunks || []), ...(result.contentChunks || [])];
-    const boatHit = all.some((c: any) => String(c.source_path || "").includes("db-only/paper-boats/"));
+    const boatHit = all.some((c) => sourcePathIncludes(c, "db-only/paper-boats/"));
     if (!boatHit) failures += 1;
     console.log(`  paper-boat reachable: ${boatHit ? "PASS" : "FAIL"}`);
+  }
+  if (t.expectCandidates) {
+    const candidateContract = checkCandidateContract(result);
+    if (!candidateContract.pass) failures += 1;
+    console.log(`  candidate contract: ${candidateContract.pass ? "PASS" : "FAIL"}`);
+    for (const summary of candidateContract.summaries.slice(0, 4)) {
+      console.log(`    - ${summary}`);
+    }
+    for (const failure of candidateContract.failures) {
+      console.log(`    ! ${failure}`);
+    }
   }
 }
 

@@ -235,6 +235,10 @@ export function boostMemoryPromptTokens(promptTokens, importantMatches) {
   return boosted;
 }
 
+
+// Candidate fusion is its own pure seam; keep lexical/canon ranking readable here.
+export { fuseRetrievalCandidates } from "./retrieval-candidates.ts";
+
 // ── canon-assertion overlay (audit ticket #5) ──────────────────────────────
 // importantIndex entries whose pointer_files reference any file in an active
 // (top-N sync) thread match get pulled in as load-bearing CONSTRAINTS —

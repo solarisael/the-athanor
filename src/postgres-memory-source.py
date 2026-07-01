@@ -12,12 +12,17 @@ Output JSON contains a subset of the following keys depending on --mode:
                    present when --mode is 'full' or 'lexical'
   - taxonomy       (cheap corpus menu: memory types, threads, entities)
                    present when --mode is 'full' or 'taxonomy'
+  - searchTerms    (meaningful query terms used by the term-aware search pass)
+                   present when --mode is 'full' or 'candidates'
+  - searchCandidates
+                   (normalized term-aware candidates from entities, threads,
+                    memories, and lesson rails; no embedding call required)
+                   present when --mode is 'full' or 'candidates'
   - semanticChunks (top-K halfvec nearest-neighbors from `memory_chunks`,
                     optionally narrowed to --scope-files; only populated when
                     stdin contains a prompt and embedding endpoint is reachable;
                     empty list on any failure — fail-open)
                    present when --mode is 'full' or 'semantic'
-
 Modes (audit ticket #1, tiered retrieval):
   - full     (default): lexical + taxonomy + semantic/content/date, original
               single-call behavior plus the cheap menu.
@@ -75,6 +80,13 @@ DEFAULT_CONTENT_MIN_SIM = 0.30  # word_similarity threshold; 0.30 = "noticeable 
 DEFAULT_DATE_TOP_K = 6
 DEFAULT_DATE_BODY_EXCERPT_CHARS = 800
 
+# Term-aware candidate search (2026-07-01 retrieval roadmap). This is the
+# publishable/lightweight lane: every meaningful query term should contribute
+# to rank without requiring pgvector or an awake embedding model.
+DEFAULT_CANDIDATE_TOP_K = 12
+DEFAULT_CANDIDATE_EXCERPT_CHARS = 700
+DEFAULT_CANDIDATE_MAX_TERMS = 10
+
 EMBED_TIMEOUT_SECS = 5.0
 
 # Per-turn retrieval visibility (2026-06-22). db-only memories — auto-recorded
@@ -94,6 +106,12 @@ RETRIEVAL_VISIBILITY_SQL = (
 # that don't parse as real dates (e.g. 2026-13-45).
 _DATE_TOKEN_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
+# Term extraction for the candidate lane. Keep technical tokens such as
+# pgvector, bm25, path-ish values, snake_case, and hyphenated names intact,
+# then also add split pieces so `solarisael-house` can match `solarisael`
+# and `house` fields independently.
+_SEARCH_TERM_RE = re.compile(r"[a-z0-9][a-z0-9_:+#./-]*", re.IGNORECASE)
+
 # Stopwords stripped from content queries before word_similarity. Reason:
 # pg_trgm.word_similarity finds the BEST-matching substring in body, so
 # "with" appearing in body matches the query word "with" at ws=1.0 — false
@@ -107,6 +125,47 @@ _CONTENT_STOPWORDS = frozenset({
     "there", "these", "they", "this", "to", "too", "very", "was", "were",
     "what", "when", "where", "which", "who", "why", "will", "with", "would",
     "you", "your", "about", "into", "onto", "over", "would", "my", "me",
+})
+
+_CANDIDATE_STOPWORDS = _CONTENT_STOPWORDS | frozenset({
+    "alright",
+    "also",
+    "basically",
+    "could",
+    "enabled",
+    "even",
+    "good",
+    "guess",
+    "into",
+    "just",
+    "kinda",
+    "like",
+    "looksie",
+    "maybe",
+    "much",
+    "need",
+    "our",
+    "pretty",
+    "probably",
+    "really",
+    "sample",
+    "see",
+    "seems",
+    "should",
+    "size",
+    "stuff",
+    "thing",
+    "things",
+    "think",
+    "tool",
+    "try",
+    "use",
+    "wanna",
+    "want",
+    "well",
+    "without",
+    "working",
+    "would",
 })
 
 
@@ -131,6 +190,384 @@ def filter_content_query(query: str) -> str:
     # Preserve the order of meaningful words (matters for word_similarity's
     # continuous-extent matching in body).
     return " ".join(tokens).strip()
+
+
+def extract_search_terms(query: str, max_terms: int = DEFAULT_CANDIDATE_MAX_TERMS) -> list[str]:
+    """Return ordered meaningful terms for lightweight candidate search.
+
+    This is deliberately not an NLP layer. It is the plain-line search spine:
+    keep exact technical tokens, split compound tokens into usable pieces, drop
+    true stopwords, dedupe in query order, and cap the list so each source query
+    stays cheap.
+    """
+    if not query:
+        return []
+
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def add(term: str) -> None:
+        cleaned = term.strip("._:/-+").lower()
+        if len(cleaned) <= 1 or cleaned in _CANDIDATE_STOPWORDS or cleaned in seen:
+            return
+        seen.add(cleaned)
+        terms.append(cleaned)
+
+    for match in _SEARCH_TERM_RE.finditer(query):
+        token = match.group(0)
+        add(token)
+        for part in re.split(r"[-_./:+#]+", token):
+            add(part)
+        if len(terms) >= max_terms:
+            break
+
+    return terms[:max_terms]
+
+
+def _candidate_pointer_path(pointer) -> str:
+    if not pointer:
+        return ""
+    if isinstance(pointer, dict):
+        return str(pointer.get("file") or pointer.get("source_path") or "")
+    return str(pointer)
+
+
+def _candidate_source_path(room: str, source_path) -> str:
+    normalized = _candidate_pointer_path(source_path)
+    if not normalized:
+        return ""
+    return f"house/{normalized}" if room == "house" else normalized
+
+
+def _matched_candidate_terms(terms: list[str], *parts: object) -> list[str]:
+    haystack = " ".join(str(part or "").lower() for part in parts)
+    return [term for term in terms if term in haystack]
+
+
+def _candidate_score(
+    *,
+    source: str,
+    coverage: float,
+    raw_rank: float = 0.0,
+    title_hit: bool = False,
+    path_hit: bool = False,
+) -> float:
+    # Source priors are intentionally small; term coverage is the main signal.
+    source_prior = {
+        "entity": 2.4,
+        "coding_lesson": 2.0,
+        "project_lesson": 2.0,
+        "thread": 1.7,
+        "memory": 1.2,
+    }.get(source, 1.0)
+    return round(
+        source_prior
+        + (coverage * 4.0)
+        + (float(raw_rank or 0.0) * 2.0)
+        + (1.0 if title_hit else 0.0)
+        + (0.5 if path_hit else 0.0),
+        4,
+    )
+
+
+def _candidate(
+    *,
+    source: str,
+    source_table: str,
+    source_id,
+    room: str | None,
+    title: str,
+    excerpt: str,
+    terms: list[str],
+    source_path: str = "",
+    heading_path: str = "",
+    raw_rank: float = 0.0,
+    title_hit: bool = False,
+    path_hit: bool = False,
+    extra_haystack: str = "",
+    reasons: list[str] | None = None,
+    kind: str = "",
+    weighty: bool = False,
+) -> dict | None:
+    matched_terms = _matched_candidate_terms(
+        terms, title, excerpt, source_path, heading_path, extra_haystack,
+    )
+    if not matched_terms and raw_rank <= 0:
+        return None
+
+    coverage = (len(matched_terms) / len(terms)) if terms else 0.0
+    missing_terms = [term for term in terms if term not in matched_terms]
+    return {
+        "id": f"{source_table}:{source_id}",
+        "source": source,
+        "source_table": source_table,
+        "source_id": source_id,
+        "room": room or "",
+        "title": title or "",
+        "source_path": source_path or "",
+        "heading_path": heading_path or "",
+        "excerpt": excerpt or "",
+        "raw_rank": round(float(raw_rank or 0.0), 4),
+        "score": _candidate_score(
+            source=source,
+            coverage=coverage,
+            raw_rank=raw_rank,
+            title_hit=title_hit,
+            path_hit=path_hit,
+        ),
+        "term_coverage": round(coverage, 4),
+        "matched_terms": matched_terms,
+        "missing_terms": missing_terms,
+        "reasons": list(reasons or []),
+        "kind": kind or "",
+        "weighty": bool(weighty),
+    }
+
+
+def load_search_candidates(
+    conn,
+    rooms: tuple,
+    query: str,
+    top_k: int,
+    excerpt_chars: int = DEFAULT_CANDIDATE_EXCERPT_CHARS,
+) -> tuple[list[str], list[dict]]:
+    """Return normalized lightweight retrieval candidates.
+
+    This is the no-embedding search pass. It uses existing Postgres indexes
+    where available (`tsvector`, pg_trgm-backed ILIKE/similarity surfaces) and
+    then computes term coverage in Python so a result matching five query terms
+    outranks a result matching one loose term.
+    """
+    terms = extract_search_terms(query)
+    if not terms:
+        return [], []
+
+    text_query = " ".join(terms)
+    term_patterns = [f"%{term}%" for term in terms]
+    room_list = list(rooms)
+    candidates: list[dict] = []
+
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(
+            """
+            WITH q AS (SELECT websearch_to_tsquery('english', %s) AS query)
+            SELECT ne.id, ne.room, ne.name, ne.kind, ne.summary, ne.aliases,
+                   ne.pointer_files, ne.weighty,
+                   ts_rank_cd(ne.summary_tsv, q.query, 32) AS raw_rank,
+                   ne.name ILIKE ANY(%s::text[]) AS title_hit
+            FROM named_entities ne, q
+            WHERE ne.room = ANY(%s)
+              AND (
+                ne.summary_tsv @@ q.query
+                OR ne.name ILIKE ANY(%s::text[])
+                OR ne.summary ILIKE ANY(%s::text[])
+                OR EXISTS (
+                  SELECT 1 FROM unnest(ne.aliases) AS alias_value
+                  WHERE alias_value ILIKE ANY(%s::text[])
+                )
+              )
+            LIMIT %s
+            """,
+            (text_query, term_patterns, room_list, term_patterns, term_patterns, term_patterns, top_k),
+        )
+        for row in cur.fetchall():
+            aliases = " ".join(row["aliases"] or [])
+            source_path = _candidate_source_path(
+                row["room"], (row["pointer_files"] or [""])[0],
+            )
+            item = _candidate(
+                source="entity",
+                source_table="named_entities",
+                source_id=int(row["id"]),
+                room=row["room"],
+                title=row["name"] or "",
+                excerpt=row["summary"] or "",
+                terms=terms,
+                source_path=source_path,
+                raw_rank=float(row["raw_rank"] or 0.0),
+                title_hit=bool(row["title_hit"]),
+                extra_haystack=f"{row['kind'] or ''} {aliases}",
+                kind=row["kind"] or "",
+                weighty=bool(row["weighty"]),
+                reasons=["named entity", "alias/summary/title search"],
+            )
+            if item:
+                candidates.append(item)
+
+        cur.execute(
+            f"""
+            SELECT mt.id, m.room, mt.thread_key, mt.context,
+                   m.source_path, m.type,
+                   GREATEST(
+                     similarity(mt.thread_key, %s),
+                     similarity(COALESCE(mt.context, ''), %s)
+                   ) AS raw_rank,
+                   mt.thread_key ILIKE ANY(%s::text[]) AS title_hit,
+                   m.source_path ILIKE ANY(%s::text[]) AS path_hit
+            FROM memory_threads mt
+            JOIN memories m ON m.id = mt.memory_id
+            WHERE m.room = ANY(%s)
+              AND {RETRIEVAL_VISIBILITY_SQL}
+              AND (
+                mt.thread_key ILIKE ANY(%s::text[])
+                OR mt.context ILIKE ANY(%s::text[])
+                OR m.source_path ILIKE ANY(%s::text[])
+              )
+            LIMIT %s
+            """,
+            (
+                text_query, text_query, term_patterns, term_patterns, room_list,
+                term_patterns, term_patterns, term_patterns, top_k,
+            ),
+        )
+        for row in cur.fetchall():
+            item = _candidate(
+                source="thread",
+                source_table="memory_threads",
+                source_id=int(row["id"]),
+                room=row["room"],
+                title=row["thread_key"] or "",
+                excerpt=row["context"] or "",
+                terms=terms,
+                source_path=_candidate_source_path(row["room"], row["source_path"]),
+                raw_rank=float(row["raw_rank"] or 0.0),
+                title_hit=bool(row["title_hit"]),
+                path_hit=bool(row["path_hit"]),
+                extra_haystack=row["type"] or "",
+                reasons=["memory thread", "thread/context/path search"],
+            )
+            if item:
+                candidates.append(item)
+
+        cur.execute(
+            f"""
+            WITH q AS (SELECT websearch_to_tsquery('english', %s) AS query)
+            SELECT m.id, m.room, m.title, m.source_path, m.type,
+                   LEFT(m.body, %s) AS excerpt,
+                   ts_rank_cd(m.body_tsv, q.query, 32) AS raw_rank,
+                   m.title ILIKE ANY(%s::text[]) AS title_hit,
+                   m.source_path ILIKE ANY(%s::text[]) AS path_hit,
+                   array_to_string(m.threads, ' ') AS thread_text
+            FROM memories m, q
+            WHERE m.room = ANY(%s)
+              AND {RETRIEVAL_VISIBILITY_SQL}
+              AND (
+                m.body_tsv @@ q.query
+                OR m.title ILIKE ANY(%s::text[])
+                OR m.source_path ILIKE ANY(%s::text[])
+                OR EXISTS (
+                  SELECT 1 FROM unnest(m.threads) AS thread_value
+                  WHERE thread_value ILIKE ANY(%s::text[])
+                )
+              )
+            ORDER BY raw_rank DESC, m.date DESC NULLS LAST, m.id DESC
+            LIMIT %s
+            """,
+            (
+                text_query, excerpt_chars, term_patterns, term_patterns, room_list,
+                term_patterns, term_patterns, term_patterns, top_k,
+            ),
+        )
+        for row in cur.fetchall():
+            item = _candidate(
+                source="memory",
+                source_table="memories",
+                source_id=int(row["id"]),
+                room=row["room"],
+                title=row["title"] or row["source_path"] or "",
+                excerpt=row["excerpt"] or "",
+                terms=terms,
+                source_path=_candidate_source_path(row["room"], row["source_path"]),
+                raw_rank=float(row["raw_rank"] or 0.0),
+                title_hit=bool(row["title_hit"]),
+                path_hit=bool(row["path_hit"]),
+                extra_haystack=f"{row['type'] or ''} {row['thread_text'] or ''}",
+                reasons=["memory full-text", "title/path/thread/body search"],
+            )
+            if item:
+                candidates.append(item)
+
+        cur.execute(
+            """
+            WITH q AS (SELECT websearch_to_tsquery('english', %s) AS query)
+            SELECT id, scope, project, title, lesson, shape, tags,
+                   ts_rank_cd(lesson_tsv, q.query, 32) AS raw_rank,
+                   title ILIKE ANY(%s::text[]) AS title_hit
+            FROM coding_lessons, q
+            WHERE lesson_tsv @@ q.query
+               OR title ILIKE ANY(%s::text[])
+               OR shape ILIKE ANY(%s::text[])
+               OR project ILIKE ANY(%s::text[])
+               OR scope ILIKE ANY(%s::text[])
+            ORDER BY raw_rank DESC, updated_at DESC, id DESC
+            LIMIT %s
+            """,
+            (
+                text_query, term_patterns, term_patterns, term_patterns,
+                term_patterns, term_patterns, top_k,
+            ),
+        )
+        for row in cur.fetchall():
+            item = _candidate(
+                source="coding_lesson",
+                source_table="coding_lessons",
+                source_id=int(row["id"]),
+                room="",
+                title=row["title"] or "",
+                excerpt=row["lesson"] or "",
+                terms=terms,
+                raw_rank=float(row["raw_rank"] or 0.0),
+                title_hit=bool(row["title_hit"]),
+                extra_haystack=(
+                    f"{row['scope'] or ''} {row['project'] or ''} "
+                    f"{row['shape'] or ''} {' '.join(row['tags'] or [])}"
+                ),
+                reasons=["coding lesson", "lesson/title/shape/tag search"],
+            )
+            if item:
+                candidates.append(item)
+
+        cur.execute(
+            """
+            WITH q AS (SELECT websearch_to_tsquery('english', %s) AS query)
+            SELECT id, project, title, lesson, tags,
+                   ts_rank_cd(lesson_tsv, q.query, 32) AS raw_rank,
+                   title ILIKE ANY(%s::text[]) AS title_hit
+            FROM project_lessons, q
+            WHERE lesson_tsv @@ q.query
+               OR title ILIKE ANY(%s::text[])
+               OR project ILIKE ANY(%s::text[])
+            ORDER BY raw_rank DESC, updated_at DESC, id DESC
+            LIMIT %s
+            """,
+            (text_query, term_patterns, term_patterns, term_patterns, top_k),
+        )
+        for row in cur.fetchall():
+            item = _candidate(
+                source="project_lesson",
+                source_table="project_lessons",
+                source_id=int(row["id"]),
+                room="",
+                title=row["title"] or "",
+                excerpt=row["lesson"] or "",
+                terms=terms,
+                raw_rank=float(row["raw_rank"] or 0.0),
+                title_hit=bool(row["title_hit"]),
+                extra_haystack=f"{row['project'] or ''} {' '.join(row['tags'] or [])}",
+                reasons=["project lesson", "lesson/title/project search"],
+            )
+            if item:
+                candidates.append(item)
+
+    candidates.sort(
+        key=lambda item: (
+            item.get("score", 0),
+            item.get("term_coverage", 0),
+            item.get("raw_rank", 0),
+        ),
+        reverse=True,
+    )
+    return terms, candidates[:top_k]
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -703,13 +1140,14 @@ def main() -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=("full", "lexical", "semantic", "content", "date", "taxonomy"),
+        choices=("full", "lexical", "semantic", "content", "date", "taxonomy", "candidates"),
         default="full",
         help=(
             "Retrieval mode (audit ticket #1 + 2026-05-19 GIN pass + 2026-05-23 date pass). "
-            "'full': lexical + important + taxonomy + global semantic + content + date. "
+            "'full': lexical + important + taxonomy + candidates + global semantic + content + date. "
             "'lexical': index + importantIndex only, no embed call, no content. "
             "'taxonomy': cheap corpus menu only, no embed call. "
+            "'candidates': term-aware indexed search over entities/threads/memories/lessons, no embed call. "
             "'semantic': embed prompt + narrowed semantic against --scope-files. "
             "'content': pg_trgm word_similarity on memory_chunks.body, no embed call. "
             "'date': YYYY-MM-DD-token lookup against memories.dates GIN. No embed. "
@@ -753,6 +1191,21 @@ def main() -> int:
             f"(default {DEFAULT_DATE_BODY_EXCERPT_CHARS})."
         ),
     )
+    parser.add_argument(
+        "--candidate-top-k",
+        type=int,
+        default=DEFAULT_CANDIDATE_TOP_K,
+        help=f"Max term-aware candidates returned by candidate pass (default {DEFAULT_CANDIDATE_TOP_K}).",
+    )
+    parser.add_argument(
+        "--candidate-excerpt-chars",
+        type=int,
+        default=DEFAULT_CANDIDATE_EXCERPT_CHARS,
+        help=(
+            f"Truncate candidate memory excerpts to this many chars "
+            f"(default {DEFAULT_CANDIDATE_EXCERPT_CHARS})."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -783,6 +1236,28 @@ def main() -> int:
 
         if args.mode in ("full", "taxonomy"):
             payload["taxonomy"] = load_taxonomy(conn, rooms=(room_name, "house"), room=room_name)
+
+        # Term-aware candidate pass (2026-07-01 retrieval roadmap). This is
+        # the lightweight publishable search lane: no embedding call, every
+        # meaningful query term contributes to score, and each candidate reports
+        # matched/missing terms plus reasons. Recall uses this to diagnose why a
+        # result surfaced instead of trusting semantic/content matches alone.
+        if args.mode in ("full", "candidates"):
+            search_terms: list[str] = []
+            search_candidates: list[dict] = []
+            if prompt:
+                try:
+                    search_terms, search_candidates = load_search_candidates(
+                        conn,
+                        rooms=(room_name, "house"),
+                        query=prompt,
+                        top_k=args.candidate_top_k,
+                        excerpt_chars=args.candidate_excerpt_chars,
+                    )
+                except Exception as err:
+                    print(f"candidates: query failed: {err}", file=sys.stderr)
+            payload["searchTerms"] = search_terms
+            payload["searchCandidates"] = search_candidates
 
         # Semantic pass (Pass 2 of tiered retrieval). Embeds prompt + queries
         # memory_chunks for top-K cosine neighbors, optionally narrowed to

@@ -2,7 +2,7 @@
 // lane names map to real OMP agents, and invalid packets stop at receipt shaping.
 
 import { describe, expect, test } from "bun:test";
-import { buildDispatchReceipt, getWorkerLane, listWorkerLanes } from "../src/routing.ts";
+import { buildDispatchReceipt, getWorkerLane, listWorkerLanes, resolveDispatchModel } from "../src/routing.ts";
 
 describe("listWorkerLanes", () => {
   test("exposes worker lanes without advisor or main channels", () => {
@@ -34,6 +34,15 @@ describe("worker lane mappings", () => {
       ompAgent: "task",
     });
   });
+
+  test("resolves lane model roles to OMP spawn aliases unless explicitly overridden", () => {
+    const scout = getWorkerLane("smol-scout");
+    const tester = getWorkerLane("tester");
+
+    expect(scout && resolveDispatchModel(scout)).toBe("smol");
+    expect(tester && resolveDispatchModel(tester)).toBe("default");
+    expect(tester && resolveDispatchModel(tester, "provider/custom-model")).toBe("provider/custom-model");
+  });
 });
 
 describe("buildDispatchReceipt", () => {
@@ -48,6 +57,7 @@ describe("buildDispatchReceipt", () => {
       status: "rejected",
       lane: null,
       requestedModelRole: null,
+      model: null,
       ompAgent: null,
       taskPacket: null,
     });
@@ -110,11 +120,40 @@ describe("buildDispatchReceipt", () => {
       dispatcher: { executed: false },
     });
     expect(receipt.taskPacket?.agent).toBe("sonic");
+    expect(receipt.model).toBe("smol");
+    expect(receipt.taskPacket?.model).toBe("smol");
+    expect(receipt.dispatcher.reason).toContain("eval agent() helper");
+    expect(receipt.dispatcher.reason).toContain("model");
+    expect(receipt.dispatcher.reason).toContain("plain task tool ignores model");
     expect(receipt.taskPacket?.tasks).toHaveLength(1);
 
     const assignment = receipt.taskPacket?.tasks[0].assignment || "";
     expect(assignment).toContain("## Target");
     expect(assignment).toContain("## Change");
     expect(assignment).toContain("## Acceptance");
+  });
+
+  test("passes explicit model overrides through to the task packet and warns about the role replacement", () => {
+    const receipt = buildDispatchReceipt({
+      lane: "tester",
+      task: "Exercise the observable behavior.",
+      acceptance: ["The behavior fails if the wrong model is packaged."],
+      context: [{ mode: "retrieve-only", source: "tests/example.test.ts" }],
+      model: "provider/custom-model",
+    });
+
+    expect(receipt).toMatchObject({
+      ok: true,
+      status: "ready",
+      lane: "tester",
+      requestedModelRole: "pi/default",
+      model: "provider/custom-model",
+      ompAgent: "task",
+    });
+    expect(receipt.taskPacket?.model).toBe("provider/custom-model");
+    expect(receipt.warnings).toContain(
+      "Model override 'provider/custom-model' replaces lane role 'pi/default' for this dispatch.",
+    );
+    expect(receipt.warnings.some((warning) => warning.includes("eval agent() helper"))).toBe(true);
   });
 });

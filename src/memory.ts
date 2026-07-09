@@ -39,10 +39,11 @@ import { latestUserMessage, readJson, writeJsonFile } from "./util.ts";
 import { windowsPathToWsl } from "./wsl.ts";
 import { normalizeRoomName, resolveEffectiveRoomDir } from "./spirit.ts";
 import { loadState } from "./directives.ts";
+import { classifyRetrievalQuery } from "./query-routing.ts";
 import {
   loadMemoryContentSource, loadMemoryDateSource,
   loadMemoryLexicalSources, loadMemorySemanticSource,
-  spawnPostgresSource,
+  preferJsonMemorySource, spawnPostgresSource,
 } from "./memory-sources.ts";
 import {
   annotateMemoryExcerptsWithCanonRefs, boostMemoryPromptTokens,
@@ -519,6 +520,7 @@ async function runRoomMemoryRetrieval(roomName, roomDir, prompt, sessionID = nul
     state.current_turn = (Number(state.current_turn) || 0) + 1;
     const currentTurn = state.current_turn;
     const priorPrefetch = await readJson(prefetchPath, []);
+    const queryRoute = classifyRetrievalQuery(prompt);
 
     const importantMatches = matchMemoryImportantTerms(prompt, importantIndex);
     const importantExcerpts = await collectMemoryImportantExcerpts(effectiveRoomDir, importantMatches);
@@ -554,24 +556,21 @@ async function runRoomMemoryRetrieval(roomName, roomDir, prompt, sessionID = nul
           .filter(Boolean),
       ),
     ));
-    const { semanticChunks, semanticSource, semanticStderr } =
-      await loadMemorySemanticSource(effectiveRoomDir, targetRoom, prompt, activeFiles);
-
-    // Content pass (added 2026-05-19 zeal pass) runs GLOBAL in parallel with
-    // semantic. The whole reason this exists is to catch chunks the
-    // lexical-thread-ranking missed (off-axis files with isolated proper-noun
-    // mentions). Cheap due to the pg_trgm GIN on memory_chunks.body.
-    const { contentChunks, contentSource, contentStderr } =
-      await loadMemoryContentSource(effectiveRoomDir, targetRoom, prompt);
-
-    // Date pass (added 2026-05-23 — date-aware retrieval fix). Extracts
-    // YYYY-MM-DD tokens from prompt and queries memories.dates GIN. Direct
-    // authoritative match: when the user names a date, this returns the
-    // memories tagged with it (handles cross-midnight stitched files like
-    // 2026-05-21_22_* that were invisible to the prior 3-pass pipeline).
-    // Skipped entirely when prompt has no date token — no spawn overhead.
-    const { dateMatches, queryDates, dateSource, dateStderr } =
-      await loadMemoryDateSource(effectiveRoomDir, targetRoom, prompt);
+    const skipSemanticForRoute = { semanticChunks: [], semanticSource: "skip-query-route", semanticStderr: "" };
+    const skipContentForRoute = { contentChunks: [], contentSource: "skip-query-route", contentStderr: "" };
+    const [
+      { semanticChunks, semanticSource, semanticStderr },
+      { contentChunks, contentSource, contentStderr },
+      { dateMatches, queryDates, dateSource, dateStderr },
+    ] = await Promise.all([
+      queryRoute.lanes.semantic
+        ? loadMemorySemanticSource(effectiveRoomDir, targetRoom, prompt, activeFiles)
+        : Promise.resolve(skipSemanticForRoute),
+      queryRoute.lanes.content
+        ? loadMemoryContentSource(effectiveRoomDir, targetRoom, prompt)
+        : Promise.resolve(skipContentForRoute),
+      loadMemoryDateSource(effectiveRoomDir, targetRoom, prompt),
+    ]);
 
     const pinnedExcerpts = await collectMemoryPinnedExcerpts(effectiveRoomDir, state, index);
     const rawSyncExcerpts = await collectMemorySyncExcerpts(effectiveRoomDir, syncMatches);
@@ -737,6 +736,15 @@ async function runRoomMemoryRetrieval(roomName, roomDir, prompt, sessionID = nul
 //   - higher top-K (8 vs 5) — the dragon is willing to read more chunks
 //     when explicitly looking
 
+export function recallRouteSkipArgs(queryRoute) {
+  const lanes = queryRoute?.lanes || {};
+  const args = [];
+  if (!lanes.semantic) args.push("--skip-semantic");
+  if (!lanes.content) args.push("--skip-content");
+  if (!lanes.date) args.push("--skip-date");
+  return args;
+}
+
 export async function runRecallQuery(roomDir, roomName, query) {
   const effectiveRoomDir = path.resolve(String(roomDir || process.cwd()));
   const resolvedRoom = (roomName || path.basename(effectiveRoomDir) || "").toLowerCase();
@@ -747,6 +755,97 @@ export async function runRecallQuery(roomDir, roomName, query) {
 
   if (!query || !String(query).trim()) {
     return { ok: false, error: "empty query", query };
+  }
+
+  // memory://<room>/<id-or-source-path> — deliberate house-wide handle
+  // (2026-07-09 decency architecture: ambient search stays room-scoped so
+  // each room keeps its personality; explicit handles cross rooms on
+  // purpose, provenance stamped by the fetch payload).
+  const handleMatch = /^\s*memory:\/\/([a-z0-9_.-]+)\/(.+?)\s*$/i.exec(String(query));
+  if (handleMatch) {
+    const claimedRoom = handleMatch[1].toLowerCase();
+    const rest = handleMatch[2].trim();
+    const fetchArgs = [
+      "--room-dir", windowsPathToWsl(effectiveRoomDir),
+      "--mode", "fetch",
+      "--room", claimedRoom,
+    ];
+    if (/^\d+$/.test(rest)) fetchArgs.push("--memory-id", rest);
+    else fetchArgs.push("--memory-path", rest);
+    const fetched = await spawnPostgresSource(effectiveRoomDir, fetchArgs, "");
+    if (!fetched.ok) {
+      return { ok: false, error: fetched.error, query };
+    }
+    const memoryHandle = fetched.data?.memoryHandle || { found: false, memory: null, warnings: [] };
+    return { ok: true, query, memoryHandle, found: Boolean(memoryHandle.found) };
+  }
+  const queryRoute = classifyRetrievalQuery(query);
+
+  if (preferJsonMemorySource()) {
+    const {
+      index,
+      importantIndex = {},
+      taxonomy = null,
+    } = await loadMemoryLexicalSources(effectiveRoomDir, resolvedRoom, query);
+    const safeIndex = index || { files: {}, threads: {} };
+    const nameCanonMatches = matchMemoryImportantTerms(query, importantIndex);
+    const promptTokens = boostMemoryPromptTokens(tokenizeMemory(query), nameCanonMatches);
+    const canonicalFiles = buildCanonicalFileSet(importantIndex);
+    const ranked = rankMemoryThreads(promptTokens, safeIndex, {}, canonicalFiles).slice(0, 8);
+    const searchTerms = Array.from(tokenizeMemory(query)).slice(0, 16);
+    const searchCandidates = ranked.flatMap((match, rank) => {
+      const entries = Array.isArray(match?.entries) ? match.entries : [];
+      const usableEntries = entries.filter((entry) => entry?.file);
+      const candidateEntries = usableEntries.length ? usableEntries : [{}];
+      return candidateEntries.map((entry, entryIndex) => {
+        const sourcePath = entry.file || "";
+        const fileMeta = sourcePath ? safeIndex.files?.[sourcePath] || {} : {};
+        const title = fileMeta.one_line || match?.threadKey || sourcePath || `json memory ${rank + 1}`;
+        return {
+          id: `json-thread:${match?.threadKey || rank + 1}:${entryIndex + 1}`,
+          source: "memory",
+          source_table: "memory_threads",
+          source_id: match?.threadKey || "",
+          room: resolvedRoom,
+          title,
+          source_path: sourcePath,
+          heading_path: match?.threadKey || "",
+          excerpt: [fileMeta.one_line, entry.context, match?.threadKey ? `thread: ${match.threadKey}` : ""].filter(Boolean).join("\n"),
+          score: match?.score,
+          matched_terms: [],
+          reasons: ["json fallback thread rank"],
+        };
+      });
+    });
+    const retrievalCandidates = fuseRetrievalCandidates({
+      searchCandidates,
+    }, { query, searchTerms, intent: queryRoute.intent === "technical_project" ? "technical_memory" : "general", maxResults: 12 });
+    const nameMatchedTermKeys = new Set(nameCanonMatches.map((m) => m.termKey));
+    const matchedSourcePaths = [
+      ...ranked.flatMap((match) => (Array.isArray(match?.entries) ? match.entries : []).map((entry) => entry?.file)),
+      ...retrievalCandidates.map((candidate) => candidate?.source_path),
+      ...searchCandidates.map((candidate) => candidate?.source_path),
+    ].filter(Boolean);
+    const fileCanonMatches = collectCanonByMatchedFiles(
+      importantIndex, matchedSourcePaths, nameMatchedTermKeys,
+    );
+    const canonMatches = [...nameCanonMatches, ...fileCanonMatches];
+
+    return {
+      ok: true,
+      query,
+      queryRoute,
+      canonMatches,
+      semanticChunks: [],
+      contentChunks: [],
+      dateMatches: [],
+      queryDates: [],
+      taxonomy,
+      searchTerms,
+      searchCandidates,
+      retrievalCandidates,
+      found: canonMatches.length > 0 || retrievalCandidates.length > 0 || searchCandidates.length > 0,
+    };
   }
 
   // Mode 'full' runs lexical + semantic + content in one postgres call. The
@@ -772,6 +871,7 @@ export async function runRecallQuery(roomDir, roomName, query) {
     "--content-top-k", "8",
     "--content-min-sim", String(MEMORY_CONTENT_MIN_SIM),
   ];
+  args.push(...recallRouteSkipArgs(queryRoute));
   const result = await spawnPostgresSource(effectiveRoomDir, args, query);
   if (!result.ok) {
     return { ok: false, error: result.error, query };
@@ -812,13 +912,19 @@ export async function runRecallQuery(roomDir, roomName, query) {
   const taxonomy = result.data?.taxonomy && typeof result.data.taxonomy === "object"
     ? result.data.taxonomy
     : null;
+  const clusterStaleness = result.data?.clusterStaleness && typeof result.data.clusterStaleness === "object"
+    ? result.data.clusterStaleness
+    : null;
+  const clusterResonance = result.data?.clusterResonance && typeof result.data.clusterResonance === "object"
+    ? result.data.clusterResonance
+    : null;
 
   const retrievalCandidates = fuseRetrievalCandidates({
     searchCandidates,
     semanticChunks,
     contentChunks,
     dateMatches,
-  }, { query, searchTerms, maxResults: 12 });
+  }, { query, searchTerms, intent: queryRoute.intent === "technical_project" ? "technical_memory" : "general", maxResults: 12 });
 
   // Reverse-index canon (2026-06-05): surface any canon entry whose pointer
   // files include a source_path that recall actually pulled — even when the
@@ -842,12 +948,15 @@ export async function runRecallQuery(roomDir, roomName, query) {
   return {
     ok: true,
     query,
+    queryRoute,
     canonMatches,
     semanticChunks,
     contentChunks,
     dateMatches,
     queryDates,
     taxonomy,
+    clusterStaleness,
+    clusterResonance,
     searchTerms,
     searchCandidates,
     retrievalCandidates,

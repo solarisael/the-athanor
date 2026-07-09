@@ -178,9 +178,26 @@ async function loadMemoryIndexFromJson(roomDir) {
   return mergeMemoryIndexes(roomIndex, await loadHouseMemoryIndex(roomDir));
 }
 
+export function preferJsonMemorySource() {
+  const value = String(process.env.SOLARISAEL_MEMORY_SOURCE || "").toLowerCase();
+  return value === "json" || value === "1" || value === "true"
+    || process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES === "1";
+}
+
 // ── load-source wrappers (postgres first, fallback second) ─────────────────
 
 export async function loadMemoryLexicalSources(roomDir, roomName, prompt) {
+  if (preferJsonMemorySource()) {
+    return {
+      index: await loadMemoryIndexFromJson(roomDir),
+      importantIndex: await loadMemoryImportantIndex(roomDir),
+      taxonomy: null,
+      indexSource: "json",
+      importantSource: "json",
+      fallbackReason: "forced json memory source",
+    };
+  }
+
   const fromPostgres = await runMemoryPostgresLexical(roomDir, roomName, prompt);
   if (fromPostgres.ok && fromPostgres.data?.index) {
     return {
@@ -218,6 +235,14 @@ export async function loadMemorySemanticSource(roomDir, roomName, prompt, scopeF
     };
   }
 
+  if (preferJsonMemorySource()) {
+    return {
+      semanticChunks: [],
+      semanticSource: "skip-forced-json",
+      semanticStderr: "",
+    };
+  }
+
   const fromPostgres = await runMemoryPostgresSemantic(roomDir, roomName, prompt, scopeFiles);
   if (fromPostgres.ok && Array.isArray(fromPostgres.data?.semanticChunks)) {
     const chunks = fromPostgres.data.semanticChunks;
@@ -246,6 +271,15 @@ export async function loadMemoryDateSource(roomDir, roomName, prompt) {
       dateMatches: [],
       queryDates: [],
       dateSource: "skip-no-prompt",
+      dateStderr: "",
+    };
+  }
+
+  if (preferJsonMemorySource()) {
+    return {
+      dateMatches: [],
+      queryDates: [],
+      dateSource: "skip-forced-json",
       dateStderr: "",
     };
   }
@@ -293,6 +327,14 @@ export async function loadMemoryContentSource(roomDir, roomName, prompt) {
     return {
       contentChunks: [],
       contentSource: "skip-no-prompt",
+      contentStderr: "",
+    };
+  }
+
+  if (preferJsonMemorySource()) {
+    return {
+      contentChunks: [],
+      contentSource: "skip-forced-json",
       contentStderr: "",
     };
   }

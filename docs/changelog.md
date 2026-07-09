@@ -2,6 +2,121 @@
 
 Most recent changes first.
 
+## 2026-07-09
+
+### Memory-write store routing (roadmap near-term item 1)
+
+The `remember` tool now routes by `kind` (`memory` default, `coding-lesson`,
+`project-lesson`, `writing-lesson`, `audio-lesson`) through a store registry
+(`kind -> { script, required, argMap, whenToUse }`) in the OMP adapter
+(`stores.ts` + `writeLessonStore` in `substrate.ts`). Unknown-for-kind fields
+and missing required fields refuse loudly, naming the accepted set.
+`record_cabinet_entry.py` deliberately excluded (subcommand-shaped).
+
+### Lesson scripts accept stdin bodies
+
+`record_coding_lesson.py`, `record_project_lesson.py`, `record_writing_lesson.py`,
+and `record_audio_lesson.py` gained `--lesson-stdin` (exactly-one validation with
+`--lesson`), mirroring `record_memory.py --body-stdin`, so multiline lesson text
+crosses the WSL boundary safely.
+
+### Verification
+
+Registry contract exercised via Bun import (happy path, unknown-field refusal,
+missing-required refusal, empty-value elision). End-to-end routed write through
+`wsl.exe` -> `--lesson-stdin` -> postgres with a hostile multiline body
+(quotes, `$`, backslash, blank lines): round-trip byte-perfect; sentinel row
+deleted after verification. `memory_clusters` audited for roadmap item 2:
+stale one-pass build from 2026-05-07 on the 8b space; rebuild required.
+
+### Cluster rebuild on the live embedding space
+
+Migration 0022 repointed `memory_clusters`/`memory_cluster_members` FKs from
+`memory_chunks_8b` to live `memory_chunks` and cleared the 2026-05-07 fossil.
+Migration 0023 added a stored `centroid halfvec(2560)`. New
+`house/substrate/rebuild_clusters.py`: spherical k-means over retrieval-visible
+chunks (visibility policy mirrored from retrieval), silhouette-swept k,
+derived labels, `accepted=false` preserved for human review, `--check`
+staleness JSON. Built: k=40 over 2,909 chunks.
+
+### Cluster staleness gauge + resonance readout
+
+`postgres-memory-source.py` full mode emits `clusterStaleness` (build age vs
+chunks embedded since) and `clusterResonance` (cosine activation profile over
+stored centroids + dormant-hot chunk pointers, riding the semantic pass
+embedding, fail-open). Core `runRecallQuery` passes both through; the OMP
+recall compactor surfaces a drift nudge (fires at >=15% unseen or never-built,
+silent when fresh) and the resonance block with an explicit
+telemetry-not-model-internal-state note. Verified on a live prompt.
+
+### Per-dispatch model choice in house routing
+
+`DispatchRequest` gained optional `model`; receipts and task packets now carry
+a resolved spawn model (explicit override wins, else lane role maps via
+`OMP_MODEL_ALIASES`: pi/smol -> smol, pi/default -> default, pi/slow -> slow).
+The v0 "metadata only" shrug-warning is replaced by an actionable one: model
+selection is enforced by spawning via the eval `agent()` helper with the
+packet's model; the plain `task` tool ignores it. `house_dispatch` tool schema
+gained the optional `model` param. Routing tests: 7/7 pass.
+
+### Walkable concept graph v1 (roadmap item 3)
+
+`export_graph.py` renders the latent graph (named_entities pointer_files +
+memory_clusters districts + derived entity co-pointer edges) to
+`exports/graph.json`; `exports/graph.html` is a self-contained canvas viewer
+with semantic-zoom LOD, built by a delegated designer agent and independently
+verified in a live browser (417 nodes, both LOD bands, search/tooltip/panel,
+only ./graph.json fetched, console clean). Viewer port convention: 8400.
+
+### Cross-room memory handles (decency architecture)
+
+`memory://<room>/<id-or-source-path>` now resolves house-wide: `--mode fetch`
+in `postgres-memory-source.py` (pk or newest-by-path SELECT, provenance
+stamped, wrong-room claims warned, db-only visibility bypassed — a handle is
+a deliberate citation), detected in core `runRecallQuery` before routing,
+body clipped at 6KB in the OMP recall compactor. Sol's ruling: ambient
+search stays room-scoped (rooms keep personalities); explicit handles cross
+rooms on purpose — a knock, not a key. Requested by Kintsu after failing to
+fetch kodo memory #2388 cross-room. Verified: id + path + cross-room-from-
+kintsu + miss + wrong-room-warning, CLI and Bun-through-core.
+
+## 2026-07-04
+
+### Hardened OMP recall context
+
+OMP recall compaction now surfaces fused `retrievalCandidates` as the primary context shape, suppresses raw semantic/content chunks when fused candidates exist, and filters reverse-canon matches unless the term is directly named or tied to a surfaced candidate path.
+
+### Added focused OMP adapter tests
+
+Added Bun coverage for:
+
+- adapter label and lifecycle hook registration
+- Solarisael OMP tool surface and schemas
+- recall compactor fused-candidate behavior and canon filtering
+
+### Added core + OMP runtime smoke coverage
+
+Added deterministic core tests for JSON-only memory source behavior, pre-turn injection, forced-JSON recall, and query-route skip labels.
+
+Added OMP runtime smoke tests that execute the context hook, safe local/core-backed tools, model-default paths, and `remember`/`sleep`/`wake` through temp `SOLARISAEL_SUBSTRATE` fake scripts instead of the real substrate.
+
+### Added first query-routing slice
+
+Added pure core query routing for raw code/path token extraction, original-case entity hints, casual/date/technical intent classification, source-lane decisions, and OMP auto-recall gating. Core recall now passes lane skip flags to the Postgres helper, and the helper can skip semantic/content/date branches while preserving full-mode payload keys as empty arrays.
+
+### Deferred v1 package metadata
+
+Core, OpenCode adapter, and OMP adapter package versions remain `0.1.0`. The premature `1.0.0` marker was reverted until broader runtime verification proves the v1 contract.
+
+### Verification
+
+```text
+C:/Projects/solarisael-house          bun test -> 46 pass, 0 fail
+C:/Projects/solarisael-house          bun run tests/recall.integration.ts -> all expectations met
+C:/Projects/solarisael-house          python py_compile helpers -> passed
+C:/Projects/solarisael-house-omp      bun test -> 12 pass, 0 fail
+```
+
 ## 2026-07-01
 
 ### Added unified recall candidate fusion

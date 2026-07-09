@@ -1,6 +1,6 @@
 # Solarisael House Progress
 
-_Last updated: 2026-07-01_
+_Last updated: 2026-07-09 (remember store routing built; memory_clusters audited)_
 
 ## Current shape
 
@@ -71,21 +71,46 @@ Implemented:
 - Recall output section for term-aware candidates.
 - Candidate and fused source paths participate in reverse-index canon matching.
 
-Not yet implemented:
+Implemented after restart/reload testing:
 
-- Query routing/classification.
-- Richer query parsing beyond the current meaningful-term extraction.
-- `retrieval_documents` / `search_documents` SQL layer.
+- No-embedding candidate term extraction now drops weak conversational glue (`wanna`, `see`, `use`, `without`, `our`, `tool`, `size`, etc.) while preserving technical/search terms.
+- Named-entity candidates now carry `kind` and `weighty` into the fused ranking layer.
+- Fused ranking now treats `weighty` as conditional promotion, not an absolute throne: exact matches promote, technical/meta/project weighty can promote for technical retrieval queries, and personal/autobiographical weighty is demoted for technical retrieval queries unless explicitly named.
+- Focused no-embedding regressions cover filler filtering, technical evidence ranking, and conditional weighty behavior.
+- OMP recall context now prefers `retrievalCandidates` from the shared fused candidate contract.
+- OMP recall compaction suppresses raw semantic/content chunk arrays when fused candidates exist, reducing noisy context injection while preserving fallback behavior.
+- OMP reverse-canon compaction now keeps canon matches only when the query directly names the term/alias or the canon file touches a surfaced candidate path.
+- OMP adapter tests now cover adapter label/hooks, tool registration/schema surface, and recall compactor behavior.
+- Core, OpenCode adapter, and OMP adapter package metadata remain `0.1.0`; `1.0.0` is deferred until broader runtime verification proves the v1 contract.
+- Core now has a pure `query-routing.ts` leaf for query parsing/classification, including raw code/path tokens, original-case entity hints, casual/date/technical intent, and lane decisions.
+- Core memory injection gates semantic/content source loading through query routing and keeps date lookup on its existing no-date preflight.
+- Core recall honors JSON-only source mode for deterministic tests and passes query-route skip flags to the Postgres helper so full-mode recall can omit semantic/content/date branches without extra WSL spawns.
+- The Postgres helper now accepts `--skip-semantic`, `--skip-content`, and `--skip-date` flags that keep full-mode payload keys as empty arrays when skipped.
+- OMP auto recall is gated by shared query routing, so low-information casual prompts skip automatic recall while manual recall remains available.
+- OMP tests now execute context hooks and representative tool bodies, including room state, routing mode, lane status/dispatch, model defaults, and `remember`/`sleep`/`wake` through temp `SOLARISAEL_SUBSTRATE` scripts.
+
+Not yet implemented / not yet v1-proof:
+
+- Live OMP process reload smoke proving the running extension picks up the synced runtime files and `hygiene.ts` load path.
+- Real substrate write/read proof against the production substrate scripts. Current `remember`/`sleep`/`wake` coverage uses isolated temp fake scripts via `SOLARISAEL_SUBSTRATE`.
+- Deeper query-routing tuning against live conversation behavior; the first source-selection slice is covered, but the full acceptance matrix is not complete.
 - Embedding queue/status/reindex lifecycle.
 - Optional ParadeDB/BM25/external search adapter.
-- Full acceptance test matrix for memory search behavior.
 
-## Latest verification
+Run on 2026-07-04:
+
+```text
+C:/Projects/solarisael-house          bun test -> 46 pass, 0 fail
+C:/Projects/solarisael-house          bun run tests/recall.integration.ts -> all expectations met
+C:/Projects/solarisael-house          python py_compile helpers -> passed
+C:/Projects/solarisael-house-omp      bun test -> 12 pass, 0 fail
+```
 
 Run on 2026-07-01:
 
 ```text
-C:/Projects/solarisael-house       bun test                         -> 23 pass, 0 fail
+C:/Projects/solarisael-house       bun test tests/retrieval-candidates.test.ts -> 7 pass, 0 fail
+C:/Projects/solarisael-house       bun test                         -> 26 pass, 0 fail
 C:/Projects/solarisael-house       bun run tests/recall.integration.ts -> all expectations met
 C:/Projects/solarisael-house       python py_compile helpers          -> passed
 C:/Projects/solarisael-house-opencode bun test                       -> 31 pass, 0 fail
@@ -99,6 +124,6 @@ Adapter smokes:
 
 ## Current open seam
 
-The next memory implementation slice should be query parsing/routing, not a new database layer.
+Next proof should be a live OMP reload/runtime smoke: confirm the active OMP process loads the synced adapter files, confirm `hygiene.ts` is part of the loaded extension set, and then run a production-substrate `remember`/`sleep`/`wake` proof when Sol explicitly wants a real write.
 
-Reason: the unified candidate contract now exists, so retrieval has one shared ranking/explanation surface. The next maintainer should make source selection cheaper and sharper before adding more storage machinery.
+After that, keep tuning query routing against the acceptance matrix and real conversation behavior before any `1.0.0` marker.

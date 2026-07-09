@@ -1,4 +1,5 @@
 import { MEMORY_STOPWORDS, MEMORY_TOKEN_RE } from "./paths.ts";
+import { classifyRetrievalQuery } from "./query-routing.ts";
 
 // Pure retrieval-candidate contract. This module owns the cross-lane ranking
 // seam so `memory-rank.ts` can stay focused on lexical/canon ranking.
@@ -69,32 +70,6 @@ const CANDIDATE_QUERY_STOPWORDS = new Set([
   "would",
 ]);
 
-const TECHNICAL_MEMORY_TERMS = new Set([
-  "adapter",
-  "bm25",
-  "candidate",
-  "candidates",
-  "content",
-  "debug",
-  "embedding",
-  "embeddings",
-  "fusion",
-  "index",
-  "lexical",
-  "memory",
-  "parsing",
-  "pgvector",
-  "postgres",
-  "query",
-  "rank",
-  "ranking",
-  "recall",
-  "retrieval",
-  "routing",
-  "semantic",
-  "term",
-  "terms",
-]);
 
 const PERSONAL_CANON_KINDS = new Set(["memory", "person"]);
 const TECHNICAL_CANON_KINDS = new Set(["meta", "project"]);
@@ -143,14 +118,9 @@ function cleanTerm(value) {
   return term;
 }
 
-function classifyQueryIntent(terms, query) {
-  const haystack = `${terms.join(" ")} ${text(query).toLowerCase()}`;
-  const technicalHits = terms.filter((term) => TECHNICAL_MEMORY_TERMS.has(term)).length;
-  if (technicalHits >= 2 || /\b(candidate|retrieval|recall|embedding|semantic|pgvector|postgres|query)\b/.test(haystack)) {
-    return "technical_memory";
-  }
-
-  return "general";
+function classifyQueryIntent(_terms, query) {
+  const route = classifyRetrievalQuery(query);
+  return route.intent === "technical_project" ? "technical_memory" : "general";
 }
 
 function termsFrom(query, explicitTerms, laneArrays) {

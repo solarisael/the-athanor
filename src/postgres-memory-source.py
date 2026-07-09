@@ -689,6 +689,170 @@ def load_important_index(conn, room="kintsu") -> dict:
 
         return entries
 
+def load_cluster_staleness(conn) -> dict:
+    """Cluster-map drift gauge (2026-07-09 roadmap: memory as navigable space).
+
+    Compares the memory_clusters build time against retrieval-visible chunks
+    embedded since. Consumers nudge a rebuild (house/substrate/
+    rebuild_clusters.py) when fraction_unseen grows. Telemetry, not liturgy:
+    the nudge fires on measured drift, never on a timer.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT max(created_at), count(*) FROM memory_clusters")
+        built_at, clusters = cur.fetchone()
+        cur.execute(
+            f"""
+            SELECT count(*) FROM memory_chunks c
+            JOIN memories m ON m.id = c.memory_id
+            WHERE c.body_embedding IS NOT NULL AND {RETRIEVAL_VISIBILITY_SQL}
+            """
+        )
+        chunks_total = cur.fetchone()[0]
+        chunks_since = chunks_total
+        if built_at is not None:
+            cur.execute(
+                f"""
+                SELECT count(*) FROM memory_chunks c
+                JOIN memories m ON m.id = c.memory_id
+                WHERE c.body_embedding IS NOT NULL AND {RETRIEVAL_VISIBILITY_SQL}
+                  AND c.embedded_at > %s
+                """,
+                (built_at,),
+            )
+            chunks_since = cur.fetchone()[0]
+    return {
+        "built_at": built_at.isoformat() if built_at else None,
+        "clusters": clusters,
+        "chunks_total": chunks_total,
+        "chunks_since_build": chunks_since,
+        "fraction_unseen": round((chunks_since / chunks_total) if chunks_total else 0.0, 4),
+    }
+
+
+def fetch_memory(conn, memory_id=None, source_path=None, claimed_room=None) -> dict:
+    """Deliberate handle resolution: memory://<room>/<id-or-source-path>.
+
+    2026-07-09 decency architecture (Sol's ruling): ambient search stays
+    room-scoped so each room keeps its personality; explicit handles cross
+    rooms on purpose — a knock, not a key. Provenance is stamped so the
+    caller always knows whose memory it holds. Bypasses the db-only
+    visibility filter: following a receipt is deliberate, like a citation.
+    """
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        if memory_id is not None:
+            cur.execute(
+                """
+                SELECT id, room, type, date, title, source_path, body, created_at
+                FROM memories WHERE id = %s
+                """,
+                (memory_id,),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, room, type, date, title, source_path, body, created_at
+                FROM memories WHERE source_path = %s
+                ORDER BY id DESC LIMIT 1
+                """,
+                (source_path,),
+            )
+        row = cur.fetchone()
+        if row is None:
+            return {"found": False, "memory": None, "warnings": []}
+        cur.execute(
+            "SELECT thread_key FROM memory_threads WHERE memory_id = %s ORDER BY thread_key",
+            (row["id"],),
+        )
+        threads = [r["thread_key"] for r in cur.fetchall()]
+    warnings = []
+    if claimed_room and row["room"] != claimed_room:
+        warnings.append(
+            f"handle claimed room '{claimed_room}' but memory {row['id']} lives in '{row['room']}'"
+        )
+    return {
+        "found": True,
+        "warnings": warnings,
+        "memory": {
+            "id": row["id"],
+            "room": row["room"],
+            "type": row["type"],
+            "date": row["date"].isoformat() if row["date"] else None,
+            "title": row["title"],
+            "source_path": row["source_path"],
+            "threads": threads,
+            "body": row["body"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        },
+    }
+
+
+def load_cluster_resonance(conn, query_vec, top_clusters=8, hot_per_cluster=2, exclude_paths=None):
+    """Cluster-activation profile over the memory space (2026-07-09 roadmap).
+
+    Cosine activation of the prompt embedding against stored cluster
+    centroids (migration 0023), plus the nearest member chunks per top
+    cluster that the semantic pass did NOT already surface — the "dormant
+    hot" regions the reply is near but not using.
+
+    Telemetry, not testimony: this reports what the memory space finds near
+    the conversation — never model-internal state (unavailable on API models).
+    """
+    literal = "[" + ",".join(f"{x:.6f}" for x in query_vec) + "]"
+    exclude = {p for p in (exclude_paths or set()) if p}
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(
+            """
+            SELECT id, label, member_count,
+                   1 - (centroid <=> %s::halfvec) AS activation
+            FROM memory_clusters
+            WHERE centroid IS NOT NULL
+            ORDER BY activation DESC
+            """,
+            (literal,),
+        )
+        rows = cur.fetchall()
+        profile = [
+            {
+                "cluster_id": r["id"],
+                "label": r["label"],
+                "member_count": r["member_count"],
+                "activation": round(float(r["activation"]), 4),
+            }
+            for r in rows[:top_clusters]
+        ]
+        hot = []
+        for entry in profile[:3]:
+            cur.execute(
+                f"""
+                SELECT m.source_path, c.heading_path,
+                       1 - (c.body_embedding <=> %s::halfvec) AS sim
+                FROM memory_cluster_members mm
+                JOIN memory_chunks c ON c.id = mm.chunk_id
+                JOIN memories m ON m.id = c.memory_id
+                WHERE mm.cluster_id = %s AND {RETRIEVAL_VISIBILITY_SQL}
+                ORDER BY sim DESC
+                LIMIT %s
+                """,
+                (literal, entry["cluster_id"], hot_per_cluster + 4),
+            )
+            picked = []
+            for r in cur.fetchall():
+                if r["source_path"] in exclude:
+                    continue
+                picked.append(
+                    {
+                        "source_path": r["source_path"],
+                        "heading_path": r["heading_path"],
+                        "sim": round(float(r["sim"]), 4),
+                    }
+                )
+                if len(picked) >= hot_per_cluster:
+                    break
+            if picked:
+                hot.append({"cluster_id": entry["cluster_id"], "label": entry["label"], "chunks": picked})
+    return {"profile": profile, "hot": hot}
+
+
 def load_taxonomy(conn, rooms=("kintsu", "house"), room="kintsu", limit=16) -> dict:
     """Return a small self-describing menu of what retrieval can target.
 
@@ -1140,7 +1304,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=("full", "lexical", "semantic", "content", "date", "taxonomy", "candidates"),
+        choices=("full", "lexical", "semantic", "content", "date", "taxonomy", "candidates", "fetch"),
         default="full",
         help=(
             "Retrieval mode (audit ticket #1 + 2026-05-19 GIN pass + 2026-05-23 date pass). "
@@ -1154,6 +1318,32 @@ def main() -> int:
             "Plugin's tiered flow: lexical first → rank threads → semantic scoped + "
             "content global + date global → merge."
         ),
+    )
+    parser.add_argument(
+        "--memory-id",
+        type=int,
+        default=None,
+        help="fetch mode: resolve a memory by primary key (house-wide, deliberate handle).",
+    )
+    parser.add_argument(
+        "--memory-path",
+        default=None,
+        help="fetch mode: resolve the newest memory with this source_path.",
+    )
+    parser.add_argument(
+        "--skip-semantic",
+        action="store_true",
+        help="In full mode, skip the semantic branch before any embedding/Ollama wake.",
+    )
+    parser.add_argument(
+        "--skip-content",
+        action="store_true",
+        help="In full mode, skip the content/trigram branch.",
+    )
+    parser.add_argument(
+        "--skip-date",
+        action="store_true",
+        help="In full mode, skip the date lookup branch.",
     )
     parser.add_argument(
         "--scope-files",
@@ -1227,6 +1417,25 @@ def main() -> int:
     try:
         payload: dict = {}
 
+        # Deliberate handle fetch (memory://<room>/<id-or-path>). House-wide
+        # by design — see fetch_memory docstring; short-circuits every
+        # search pass and returns immediately.
+        if args.mode == "fetch":
+            if args.memory_id is None and not args.memory_path:
+                payload["memoryHandle"] = {
+                    "found": False, "memory": None,
+                    "warnings": ["fetch mode requires --memory-id or --memory-path"],
+                }
+            else:
+                payload["memoryHandle"] = fetch_memory(
+                    conn,
+                    memory_id=args.memory_id,
+                    source_path=args.memory_path,
+                    claimed_room=(args.room or "").strip().lower() or None,
+                )
+            print(json.dumps(payload, ensure_ascii=False, default=str))
+            return 0
+
         # Lexical pass (Pass 1 of tiered retrieval). Loads the full thread
         # index + named-entity index for plugin-side ranking. mode=semantic
         # skips these to avoid wasted work in the two-stage flow.
@@ -1236,6 +1445,7 @@ def main() -> int:
 
         if args.mode in ("full", "taxonomy"):
             payload["taxonomy"] = load_taxonomy(conn, rooms=(room_name, "house"), room=room_name)
+            payload["clusterStaleness"] = load_cluster_staleness(conn)
 
         # Term-aware candidate pass (2026-07-01 retrieval roadmap). This is
         # the lightweight publishable search lane: no embedding call, every
@@ -1259,12 +1469,20 @@ def main() -> int:
             payload["searchTerms"] = search_terms
             payload["searchCandidates"] = search_candidates
 
+        if args.mode in ("full", "semantic"):
+            payload["semanticChunks"] = []
+        if args.mode in ("full", "content"):
+            payload["contentChunks"] = []
+        if args.mode in ("full", "date"):
+            payload["dateMatches"] = []
+            payload["queryDates"] = []
+
         # Semantic pass (Pass 2 of tiered retrieval). Embeds prompt + queries
         # memory_chunks for top-K cosine neighbors, optionally narrowed to
         # active-thread files via --scope-files. mode=lexical skips this
         # entirely (no embed call, no postgres query). Fail-open: any
         # failure produces an empty semanticChunks list and a stderr line.
-        if args.mode in ("full", "semantic"):
+        if args.mode in ("full", "semantic") and not args.skip_semantic:
             chunks: list[dict] = []
             if prompt:
                 # Auto-wake Ollama before embedding, same contract the WRITERS
@@ -1312,13 +1530,25 @@ def main() -> int:
                     except Exception as err:
                         print(f"semantic: query failed: {err}", file=sys.stderr)
 
+                    # Resonance readout (2026-07-09): rides the same prompt
+                    # embedding; one pgvector query against 40 centroids.
+                    # Fail-open like every pass in this file.
+                    try:
+                        payload["clusterResonance"] = load_cluster_resonance(
+                            conn,
+                            query_vec=vec,
+                            exclude_paths={c.get("source_path") for c in chunks},
+                        )
+                    except Exception as err:
+                        print(f"resonance: query failed: {err}", file=sys.stderr)
+
             payload["semanticChunks"] = chunks
 
         # Content pass (added 2026-05-19, pg_trgm GIN on memory_chunks.body).
         # No embed call, no scope-narrowing by default — catches proper-noun /
         # exact-string matches the semantic cosine misses. Cheap due to the
         # trigram index. mode=lexical skips this; mode=content runs ONLY this.
-        if args.mode in ("full", "content"):
+        if args.mode in ("full", "content") and not args.skip_content:
             content_chunks: list[dict] = []
             if prompt:
                 try:
@@ -1341,7 +1571,7 @@ def main() -> int:
         # threshold. Hits when the user/dragon literally names a date.
         # mode=date runs ONLY this; mode=full includes it; lexical/semantic/
         # content skip it.
-        if args.mode in ("full", "date"):
+        if args.mode in ("full", "date") and not args.skip_date:
             date_matches: list[dict] = []
             query_dates = extract_query_dates(prompt)
             if query_dates:

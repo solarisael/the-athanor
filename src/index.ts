@@ -15,6 +15,32 @@ export {
 } from "./triggers-core.ts";
 
 export {
+  classifyRetrievalQuery,
+  parseRetrievalQuery,
+  shouldAutoRecall,
+} from "./query-routing.ts";
+
+export {
+  ADVISOR_REVIEW_CHANNEL,
+  CONTEXT_MODES,
+  RISK_LEVELS,
+  WORKER_LANES,
+  buildDispatchReceipt,
+  getWorkerLane,
+  listWorkerLanes,
+} from "./routing.ts";
+
+export type {
+  ContextHint,
+  ContextMode,
+  DispatchReceipt,
+  DispatchRequest,
+  RiskLevel,
+  WorkerLane,
+  WorkerLaneName,
+} from "./routing.ts";
+
+export {
   CODING_LESSONS_SCRIPT,
   MEMORY_POSTGRES_SOURCE_SCRIPT,
   POSTGRES_MEMORY_SOURCE_SCRIPT,

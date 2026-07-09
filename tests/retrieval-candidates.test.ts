@@ -408,4 +408,47 @@ describe("fuseRetrievalCandidates", () => {
     expect(incompatibleWeighty.matched_terms).toEqual(["retrieval", "routing"]);
     expect(incompatibleWeighty.missing_terms).toEqual(["candidate", "fusion", "query"]);
   });
+
+  test("date lookup scoring does not apply technical-memory demotion to personal canon", () => {
+    const query = "what happened on 2026-07-04";
+
+    const candidates = fuseRetrievalCandidates({
+      searchCandidates: [
+        searchCandidate({
+          id: "entity:date-personal-neutral",
+          source: "entity",
+          kind: "memory",
+          weighty: false,
+          source_path: "entities/date-personal-neutral.md",
+          title: "2026 07 04 memory",
+          heading_path: "## Date memory",
+          excerpt: "2026 07 04 memory",
+          score: 0.1,
+          matched_terms: [],
+          missing_terms: [],
+          reasons: ["date lookup personal neutral"],
+        }),
+        searchCandidate({
+          id: "entity:date-personal-weighty",
+          source: "entity",
+          kind: "memory",
+          weighty: true,
+          source_path: "entities/date-personal-weighty.md",
+          title: "2026 07 04 memory",
+          heading_path: "## Date memory",
+          excerpt: "2026 07 04 memory",
+          score: 0.1,
+          matched_terms: [],
+          missing_terms: [],
+          reasons: ["date lookup personal weighty"],
+        }),
+      ],
+    }, { query, maxResults: 2 });
+
+    const neutral = candidateByPath(candidates, "entities/date-personal-neutral.md");
+    const weighty = candidateByPath(candidates, "entities/date-personal-weighty.md");
+
+    expect(weighty.score).toBeGreaterThan(neutral.score);
+    expect(weighty.matched_terms).toEqual(["2026", "07", "04"]);
+  });
 });

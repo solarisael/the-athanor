@@ -1,6 +1,10 @@
 {
   "name": "solarisael-house",
   "version": "0.1.0",
+  "description": "A persistent room, identity, continuity, and memory system for AI companions and collaborators.",
+  "author": "Sol",
+  "license": "Apache-2.0",
+  "repository": "github:solarisael/solarisael-house",
   "type": "module",
   "main": "index.ts",
   "scripts": {

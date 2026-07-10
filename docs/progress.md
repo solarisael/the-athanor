@@ -1,6 +1,6 @@
 # Solarisael House Progress
 
-_Last updated: 2026-07-09 (remember store routing built; memory_clusters audited)_
+_Last updated: 2026-07-09 (public Sol README, Apache attribution, and AI-guided OMP onboarding verified)_
 
 ## Current shape
 
@@ -14,7 +14,7 @@ C:/Projects/solarisael-house-opencode  # OpenCode adapter
 C:/Projects/solarisael-house-omp       # OMP adapter
 ```
 
-Both adapters import core through absolute file URLs or absolute Windows paths rooted at `C:/Projects/solarisael-house`.
+The OpenCode adapter still imports core through the local absolute project path. The OMP adapter now resolves the canonical core from its sibling `solarisael-house` folder by default, with `SOLARISAEL_HOUSE_CORE` and `SOLARISAEL_VAULT_ROOT` overrides for portable installations.
 
 ## Core currently owns
 
@@ -56,6 +56,14 @@ C:/Projects/solarisael-house-omp/index.ts
 C:/Projects/solarisael-house-omp/hygiene.ts
 ```
 
+Portable OMP test distribution:
+
+```text
+C:/Projects/solarisael-house-omp/dist/solarisael-house-portable.zip
+```
+
+The archive keeps core and OMP adapter as siblings and ships a public `README.md` in Sol's voice, the exact AI-facing `INSTALL.md`, an identity-writing guide, Apache-2.0 `LICENSE`/`NOTICE` attribution, a developed private-data-free example spirit, an optional appearance template, and a deterministic verifier. Marker-backed rooms may use any filesystem-safe room key with a separate free-form true name and operator; legacy Kintsu/Kodo rooms remain valid. The bundle never modifies OMP configuration automatically and omits credentials, private rooms, memory exports, and substrate data. Optional memory/substrate features retain their external WSL/Python/PostgreSQL prerequisites and fail open when absent.
+
 ## Memory/retrieval status
 
 Implemented:
@@ -96,6 +104,19 @@ Not yet implemented / not yet v1-proof:
 - Deeper query-routing tuning against live conversation behavior; the first source-selection slice is covered, but the full acceptance matrix is not complete.
 - Embedding queue/status/reindex lifecycle.
 - Optional ParadeDB/BM25/external search adapter.
+
+Run on 2026-07-09 (AI-guided onboarding slice):
+
+```text
+C:/Projects/solarisael-house-omp
+bun test tests/adapter-registration.test.ts tests/runtime-smoke.test.ts tests/portable-bundle.test.ts
+-> 21 pass, 0 fail, 114 expectations
+
+bun run build:portable
+-> dist/solarisael-house-portable.zip
+-> 58 archive entries; 12 required publication paths present
+-> extracted-bundle verify-install.ts: ok=true, all 19 checks passed
+```
 
 Run on 2026-07-04:
 

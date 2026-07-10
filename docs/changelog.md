@@ -4,6 +4,61 @@ Most recent changes first.
 
 ## 2026-07-09
 
+### AI-guided installation and first-room onboarding
+
+The portable OMP bundle now treats the AI as the installation and onboarding
+guide rather than shipping a traditional installer. The canonical core now has
+a public `README.md` written in Sol's voice for people who say good morning,
+thank you, and love you to their AI. Exact environment, dependency, additive
+OMP configuration, room creation, first-session, restart-continuity, optional
+substrate-memory, removal, and receipt contracts moved to `INSTALL.md`.
+`IDENTITY_GUIDE.md` explains true name versus room key, identity prose, hard
+constraints, drift repair, examples, continuity placement, and optional
+appearance without encouraging copies of Kintsu or Kodo.
+
+Both core and OMP repositories now declare Apache-2.0 and carry a `NOTICE`
+requiring applicable attribution to the original project and design by Sol.
+Package metadata names Sol as author. The portable archive carries the public
+docs and attribution files at its root and inside both runtime trees.
+
+The private-data-free `starter-room/example` contains Mica, a deliberately
+fictional developed identity, `.solarisael-room.json`, `AGENTS.md`,
+`room_summary.md`, and an optional appearance template. The portable builder
+ships those files plus `verify-install.ts`, which validates the sibling runtime
+trees, marker/header/context contracts, and exact OMP extension paths before a
+fresh-session `room_state` proof.
+
+OMP room resolution now accepts marker- or `active_spirit.md`-backed arbitrary
+room folders. The folder basename remains the stable room key; marker
+`trueName` and `operator` supply free-form display identities. Generic
+`set_room_state` updates preserve the authored spirit body, while legacy
+Kintsu/Kodo folders retain their behavior.
+
+Focused verification: 21 tests passed with 114 expectations across adapter
+registration, runtime smoke, portable archive, and verifier success/failure
+contracts. The rebuilt archive also passed an extracted-bundle verifier run
+with all 19 checks green; 12 required publication/attribution paths were
+confirmed among 58 archive entries. SHA-256:
+`a1c081b3d451b84266ef7ccb4ce05ecb821cf232a5ea09215293ce1dc328960d`.
+
+### Portable OMP test bundle
+
+The OMP adapter no longer depends on `C:/Projects/solarisael-house` or
+`C:/Solarisael/Obsidian/obsidian` at runtime. It resolves the canonical core
+from a sibling `solarisael-house` folder by default, accepts
+`SOLARISAEL_HOUSE_CORE` and `SOLARISAEL_VAULT_ROOT` overrides, and keeps the
+hygiene extension on the same portable vault-root contract.
+
+`bun run build:portable` now produces
+`dist/solarisael-house-portable.zip`: core + OMP adapter sibling folders,
+private-data-free starter room, and manual `SETUP.txt`. The bundle deliberately
+does not edit OMP configuration or include credentials, private rooms, memory
+exports, or substrate data.
+
+Focused portability/runtime verification: 11 tests passed with 80 expectations.
+Archive inspection confirmed both runtime trees, starter room, and setup guide;
+SHA-256 `009d8fb38b093bb56a8bc0398910be92e2095896a7b4e60bb20f78206f81344b`.
+
 ### Memory-write store routing (roadmap near-term item 1)
 
 The `remember` tool now routes by `kind` (`memory` default, `coding-lesson`,

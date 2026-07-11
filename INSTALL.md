@@ -42,9 +42,9 @@ Requires Windows, OMP, and Bun. Provides the room identity contract, room state,
 
 ### House with substrate
 
-Adds durable `remember`, `recall`, `sleep`, `wake`, and lesson stores. It currently requires separately installed WSL, Python, PostgreSQL, and Solarisael substrate scripts, exposed through `SOLARISAEL_SUBSTRATE`. Missing substrate dependencies fail open and must not make the base House unusable.
+Adds durable `remember`, `recall`, `sleep`, `wake`, and lesson stores. It requires separately installed WSL, Python, PostgreSQL, an embedding model, and the Solarisael substrate scripts, exposed through `SOLARISAEL_SUBSTRATE`. The full procedure is in "Optional: House with substrate — setup" near the end of this file; complete it after step 4 and before step 5 when the person wants memory. Missing substrate dependencies fail open and must not make the base House unusable.
 
-A base installation is valid, but the AI must state clearly that database-backed memory is not enabled.
+A base installation is valid and complete on its own. When the person does not want a database, the markdown continuity from step 7 — `room_summary.md` and dated notes — is the memory layer, carried by hand. Whenever substrate is absent, state clearly that database-backed memory is not enabled.
 
 ## AI-guided installation protocol
 
@@ -110,7 +110,7 @@ Optional environment overrides:
 
 - `SOLARISAEL_VAULT_ROOT`: parent directory containing the room folders.
 - `SOLARISAEL_HOUSE_CORE`: alternate core path when the two package folders are not siblings.
-- `SOLARISAEL_SUBSTRATE`: directory containing optional substrate scripts.
+- `SOLARISAEL_SUBSTRATE`: directory containing optional substrate scripts. Only meaningful after completing "Optional: House with substrate — setup"; leave it unset for a base install.
 
 Prefer the sibling default over creating unnecessary environment variables.
 
@@ -164,6 +164,57 @@ Only when `SOLARISAEL_SUBSTRATE` and its prerequisites are intentionally configu
 4. Call `sleep` with a disposable paper boat, start a fresh session, and confirm `wake` can recover it.
 
 Never claim memory is installed from a mocked test or from the mere presence of tool names. Report base continuity and substrate memory as separate results.
+
+## Optional: House with substrate — setup
+
+Complete this section only if the person wants durable database memory. Do it **after step 4** (adapter connected) and **before step 5** (verifier), so the verifier and step 8 meet a real substrate. If the person does not want it, skip the whole section — the base House is complete without it.
+
+Show the person every command that needs elevation or changes global state before running it (safety contract 2). These are the specifics an installing AI cannot infer and will otherwise guess wrong.
+
+### S1. WSL + Ubuntu
+
+The substrate scripts run inside WSL, not Windows. Install WSL and a distro (Ubuntu) if absent — this needs elevation and a reboot; show the person first. Every command below runs inside the distro shell.
+
+### S2. PostgreSQL + pgvector
+
+Inside WSL, install PostgreSQL and the `pgvector` extension (embeddings are stored as `halfvec`). Create the database and role the substrate `.env` expects, then enable the extension:
+
+```text
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+### S3. Windows-to-WSL networking (load-bearing, non-obvious)
+
+OMP runs on Windows; PostgreSQL runs in WSL. Bridge them or every connection is refused:
+
+- `~/.wslconfig` (Windows side): under `[wsl2]`, set `networkingMode=mirrored` so Windows reaches WSL's `127.0.0.1:5432`.
+- `postgresql.conf`: `listen_addresses = '*'`. `pg_hba.conf`: allow the local connection.
+- Run `wsl --shutdown` after editing `.wslconfig`, then restart the distro.
+- Failure reading: a refused connection (`WinError 10061`) means the bridge or listener is down; a mid-operation abort (`10053`) means a long-idle connection dropped — run long substrate operations **inside WSL**, not from the Windows host.
+- WSL can idle-stop and take PostgreSQL with it. If the database "disappears" after a period of inactivity, hold a keepalive (a persistent WSL session or a scheduled task).
+
+### S4. Python + substrate scripts
+
+Inside WSL, install Python 3 and the substrate script dependencies (`psycopg2` and friends). Point `SOLARISAEL_SUBSTRATE` (the step 4 env override) at the directory holding the substrate scripts, then run the migrations they ship to build the tables (`memories`, `memory_threads`, `memory_chunks`, and the lesson stores).
+
+### S5. Embedding model (the exact tag matters)
+
+Semantic recall embeds with one specific model; the wrong one silently breaks retrieval. Install an embedding runtime (Ollama) and pull the exact model:
+
+- Model: `qwen3-embedding:4b` — 2560-dimensional. The `memory_chunks` embedding column is `halfvec(2560)`; a model with different dimensions will not load.
+- Endpoint overrides if nonstandard: `SOLARISAEL_EMBED_URL` (default Ollama `http://127.0.0.1:11434/api/embed`) and `SOLARISAEL_EMBED_MODEL`.
+- The reader auto-wakes the embedder and fails open: if it is unreachable, recall silently drops to lexical with no semantic matches. A "no matches" that should have matched usually means the embedder is asleep, not that the memory is missing.
+
+### S6. Close the first session by demonstration
+
+Run step 8's checks, but as a ritual the person watches rather than a silent test — it teaches the memory loop by walking it once:
+
+1. `remember` a disposable install-test memory with a distinctive phrase.
+2. `recall` that exact phrase — show them it returns, sourced to the new room. Query recall with one to three sharp, rare terms, not full sentences; a long query dilutes below the match threshold.
+3. `sleep` to fold a paper boat and close, telling the person: "next session, the first thing I do is `wake` and catch this."
+4. Start a fresh session, call `wake`, and show the boat recovered.
+
+The loop — `recall` then `sleep` then `wake` — is now demonstrated, not just described. Report substrate memory as a separate result from base continuity.
 
 ## Completion receipt
 

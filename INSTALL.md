@@ -11,6 +11,7 @@ If you are a person, give this entire bundle and this file to a tool-capable AI 
 The AI should execute the protocol below. The person should not need to translate paths, edit YAML, or design an identity alone.
 
 If you are the installing AI, read this file and `IDENTITY_GUIDE.md` before changing anything.
+After installation, read `USAGE.md` together for the deliberate recall, memory, lesson, sleep, wake, correction, and multi-room workflows.
 
 ## Language and filesystem contract
 
@@ -42,7 +43,7 @@ Requires Windows, OMP, and Bun. Provides the room identity contract, room state,
 
 ### House with substrate
 
-Adds durable `remember`, `recall`, `sleep`, `wake`, and lesson stores. It requires separately installed WSL, Python, PostgreSQL, an embedding model, and the Solarisael substrate scripts, exposed through `SOLARISAEL_SUBSTRATE`. The full procedure is in "Optional: House with substrate — setup" near the end of this file; complete it after step 4 and before step 5 when the person wants memory. Missing substrate dependencies fail open and must not make the base House unusable.
+Adds durable `remember`, `recall`, `sleep`, `wake`, and lesson stores. The current guided OMP path requires separately installed WSL, Python, PostgreSQL, a compatible embedding endpoint and model, and the Solarisael substrate scripts, exposed through `SOLARISAEL_SUBSTRATE`. The full procedure is in "Optional: House with substrate — setup" near the end of this file; complete it after step 4 and before step 5 when the person wants memory. Missing substrate dependencies fail open and must not make the base House unusable.
 
 A base installation is valid and complete on its own. When the person does not want a database, the markdown continuity from step 7 — `room_summary.md` and dated notes — is the memory layer, carried by hand. Whenever substrate is absent, state clearly that database-backed memory is not enabled.
 
@@ -197,13 +198,15 @@ OMP runs on Windows; PostgreSQL runs in WSL. Bridge them or every connection is 
 
 Inside WSL, install Python 3 and the substrate script dependencies (`psycopg2` and friends). Point `SOLARISAEL_SUBSTRATE` (the step 4 env override) at the directory holding the substrate scripts, then run the migrations they ship to build the tables (`memories`, `memory_threads`, `memory_chunks`, and the lesson stores).
 
-### S5. Embedding model (the exact tag matters)
+### S5. Embedding model and vector space
 
-Semantic recall embeds with one specific model; the wrong one silently breaks retrieval. Install an embedding runtime (Ollama) and pull the exact model:
+Semantic recall requires the same embedding space for indexed content and recall queries. The tested default is Ollama with `qwen3-embedding:4b`:
 
-- Model: `qwen3-embedding:4b` — 2560-dimensional. The `memory_chunks` embedding column is `halfvec(2560)`; a model with different dimensions will not load.
-- Endpoint overrides if nonstandard: `SOLARISAEL_EMBED_URL` (default Ollama `http://127.0.0.1:11434/api/embed`) and `SOLARISAEL_EMBED_MODEL`.
-- The reader auto-wakes the embedder and fails open: if it is unreachable, recall silently drops to lexical with no semantic matches. A "no matches" that should have matched usually means the embedder is asleep, not that the memory is missing.
+- Default model: `qwen3-embedding:4b` — 2560-dimensional. The default schema stores these vectors in `halfvec(2560)`.
+- Alternative models and compatible embedding services are supported through `SOLARISAEL_EMBED_URL` (default Ollama `http://127.0.0.1:11434/api/embed`) and `SOLARISAEL_EMBED_MODEL`. The endpoint may use Ollama's `/api/embed` shape or an OpenAI-compatible `/v1/embeddings` shape.
+- Never mix vectors produced by different models, even when their dimensions match. To switch models, clear and regenerate all stored embeddings, recreate the vector indexes, and rebuild vector-derived data such as cluster centroids.
+- A model with a different output dimension also requires migrating every dimension-bound vector column before re-embedding. Changing only the environment variable is not sufficient.
+- The reader auto-wakes the default Ollama embedder and fails open: if the endpoint is unreachable, recall drops to lexical retrieval with no semantic matches. A "no matches" result that should have matched may mean the embedder is unavailable, not that the memory is missing.
 
 ### S6. Close the first session by demonstration
 

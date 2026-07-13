@@ -43,48 +43,22 @@ const ROUTING_STOPWORDS = new Set([
   "worth",
 ]);
 
-const CASUAL_CONTACT_TERMS = new Set([
-  "awoo",
-  "cuddle",
-  "dummy",
-  "eep",
-  "hehe",
-  "hello",
-  "hiii",
-  "love",
-  "morning",
-  "scratch",
-  "scratches",
-  "sleep",
-  "slept",
-  "uwu",
-  "wuv",
-]);
-
 const TECHNICAL_PROJECT_TERMS = new Set([
   "adapter",
-  "advisor",
   "api",
-  "bm25",
-  "bun",
+  "architecture",
+  "build",
   "candidate",
   "candidates",
-  "core",
-  "coverage",
+  "database",
   "debug",
   "embedding",
   "embeddings",
   "fallback",
-  "fusion",
-  "hook",
-  "hooks",
-  "hygiene",
   "index",
+  "indexing",
   "integration",
   "json",
-  "memory",
-  "omp",
-  "opencode",
   "package",
   "plugin",
   "postgres",
@@ -93,17 +67,15 @@ const TECHNICAL_PROJECT_TERMS = new Set([
   "retrieval",
   "routing",
   "runtime",
-  "smoke",
+  "schema",
   "source",
-  "substrate",
+  "storage",
   "test",
   "tests",
   "tool",
   "tools",
   "vector",
   "verification",
-  "v1",
-  "wsl",
 ]);
 
 const MEMORY_LOOKUP_TERMS = new Set([
@@ -116,6 +88,11 @@ const MEMORY_LOOKUP_TERMS = new Set([
   "thread",
   "timeline",
 ]);
+
+const EXPLICIT_MEMORY_LOOKUP_RE = /\b(?:what happened|do you remember|remember when|what do you recall|what was remembered|remind me|tell me what we remember)\b/i;
+const PERSONAL_CANON_LOOKUP_RE = /\b(?:what did we intend|what were we planning|what was our plan|what did we decide)\b/i;
+const GENERIC_LOOKUP_RE = /\b(?:find|lookup|look up|search|who|what|which|tell me about)\b/i;
+
 
 const QUERY_DATE_RE = /\b\d{4}-\d{2}-\d{2}\b/g;
 const QUOTED_PHRASE_RE = /"([^"]+)"|'([^']+)'|`([^`]+)`/g;
@@ -223,38 +200,58 @@ export function parseRetrievalQuery(query) {
   };
 }
 
-export function classifyRetrievalQuery(query) {
+export function classifyRetrievalQuery(query, context = {}) {
   const parsed = parseRetrievalQuery(query);
   const termSet = new Set(parsed.terms);
   const source = parsed.query.toLowerCase();
   const technicalHits = parsed.terms.filter((term) => TECHNICAL_PROJECT_TERMS.has(term)).length;
-  const casualHits = parsed.terms.filter((term) => CASUAL_CONTACT_TERMS.has(term)).length;
   const memoryHits = parsed.terms.filter((term) => MEMORY_LOOKUP_TERMS.has(term)).length;
+  const recognizedEntities = uniqueOriginal(
+    Array.isArray(context?.recognizedEntities) ? context.recognizedEntities : [],
+  );
+  const explicitMemoryLookup = memoryHits > 0 && (
+    /\b(?:what|when|where|how|tell|remind)\b/.test(source)
+    || EXPLICIT_MEMORY_LOOKUP_RE.test(source)
+  );
+  const personalCanonLookup = PERSONAL_CANON_LOOKUP_RE.test(source)
+    || /\b(?:what|which)\b.*\b(?:canon|entity|plan|intended|decided)\b/.test(source);
+  const lookupLanguage = GENERIC_LOOKUP_RE.test(source);
+  const entityLookup = recognizedEntities.length >= 2
+    || (recognizedEntities.length === 1 && lookupLanguage);
+  const informationSignals = technicalHits + memoryHits
+    + parsed.dateTokens.length
+    + parsed.quotedPhrases.length
+    + recognizedEntities.length;
+  const lowInformation = parsed.terms.length === 0
+    || (parsed.terms.length <= 3 && informationSignals === 0);
   const reasons = [];
 
   let intent = "general";
   if (parsed.dateTokens.length) {
     intent = "date_lookup";
     reasons.push("date-token");
-  } else if (technicalHits >= 2 || /\b(?:solarisael[- ]house|plugin|omp|opencode|runtime|query routing|retrieval|postgres|pgvector|tests?)\b/.test(source)) {
+  } else if (explicitMemoryLookup || personalCanonLookup) {
+    intent = "memory_lookup";
+    reasons.push(personalCanonLookup ? "personal-canon-lookup-language" : "memory-lookup-language");
+  } else if (entityLookup) {
+    intent = "entity_lookup";
+    reasons.push("recognized-entity-signals");
+  } else if (technicalHits >= 2 || (technicalHits >= 1 && parsed.terms.length >= 3)) {
     intent = "technical_project";
-    reasons.push("technical-project-terms");
-  } else if (memoryHits || /\b(?:what happened|do you remember|remember when|recall)\b/.test(source)) {
+    reasons.push("technical-signal-strength");
+  } else if (memoryHits) {
     intent = "memory_lookup";
     reasons.push("memory-lookup-language");
-  } else if (parsed.terms.length <= 3 && casualHits > 0) {
+  } else if (lowInformation) {
     intent = "casual_contact";
-    reasons.push("casual-contact-low-information");
-  } else if (!parsed.terms.length) {
-    intent = "casual_contact";
-    reasons.push("no-meaningful-terms");
+    reasons.push(parsed.terms.length ? "low-information" : "no-meaningful-terms");
   }
 
   const lanes = {
     lexical: intent !== "casual_contact",
     candidates: intent !== "casual_contact",
-    semantic: intent === "general" || intent === "memory_lookup",
-    content: intent === "technical_project" || intent === "memory_lookup" || intent === "date_lookup" || intent === "general",
+    semantic: intent === "general" || intent === "memory_lookup" || intent === "entity_lookup",
+    content: intent === "technical_project" || intent === "memory_lookup" || intent === "entity_lookup" || intent === "date_lookup" || intent === "general",
     date: parsed.dateTokens.length > 0,
     canon: intent !== "casual_contact" || termSet.has("canon"),
     codingLessons: intent === "technical_project" && (termSet.has("coding") || termSet.has("lessons")),
@@ -264,11 +261,16 @@ export function classifyRetrievalQuery(query) {
   return {
     ...parsed,
     intent,
+    recognizedEntities,
+    entityResolutionSuggested: parsed.entityHints.some((hint) => hint.length >= 2)
+      || GENERIC_LOOKUP_RE.test(source),
+    recallQuery: intent === "entity_lookup" ? recognizedEntities.join(" ") : parsed.query,
     shouldAutoRecall: intent !== "casual_contact",
     lanes,
     reasons,
   };
 }
+
 
 export function shouldAutoRecall(query) {
   return classifyRetrievalQuery(query).shouldAutoRecall;

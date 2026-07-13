@@ -121,7 +121,7 @@ def main() -> int:
     parser.add_argument("--room-dir", required=True)
     parser.add_argument("--shape", required=True)
     parser.add_argument("--room", default="shared",
-                        help="agent room (kodo|kintsu|shared); used to widen scope")
+                        help="room key; widens shared retrieval with that room's scope")
     args = parser.parse_args()
 
     try:
@@ -129,8 +129,9 @@ def main() -> int:
         env = substrate_env(room_dir)
 
         scopes = ["shared"]
-        if args.room.lower() in ("kodo", "kintsu"):
-            scopes.append(args.room.lower())
+        room_scope = args.room.strip().lower()
+        if room_scope and room_scope != "shared":
+            scopes.append(room_scope)
 
         conn = psycopg2.connect(
             host=env.get("PGHOST"),

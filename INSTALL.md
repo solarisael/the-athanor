@@ -39,13 +39,35 @@ Do not copy the example spirit's personality. The example teaches file shape and
 
 ### Base House
 
-Requires Windows, OMP, and Bun. Provides the room identity contract, room state, conversation continuity files, and House tools that do not need the external substrate.
+Requires Windows 10/11, OMP, and Bun. Provides the room identity contract, room state, conversation continuity files, and House tools that do not need the external substrate.
 
 ### House with substrate
 
-Adds durable `remember`, `recall`, `sleep`, `wake`, and lesson stores. The current guided OMP path requires separately installed WSL, Python, PostgreSQL, a compatible embedding endpoint and model, and the Solarisael substrate scripts, exposed through `SOLARISAEL_SUBSTRATE`. The full procedure is in "Optional: House with substrate — setup" near the end of this file; complete it after step 4 and before step 5 when the person wants memory. Missing substrate dependencies fail open and must not make the base House unusable.
+Adds durable `remember`, `recall`, `sleep`, `wake`, and lesson stores. The configuration used by the maintainers runs OMP on Windows and the substrate inside WSL with separately managed Python, PostgreSQL, `pgvector`, an embedding endpoint, schema migrations, and substrate scripts exposed through `SOLARISAEL_SUBSTRATE`.
 
-A base installation is valid and complete on its own. When the person does not want a database, the markdown continuity from step 7 — `room_summary.md` and dated notes — is the memory layer, carried by hand. Whenever substrate is absent, state clearly that database-backed memory is not enabled.
+The portable House bundle does **not** currently contain the complete substrate bootstrap, migrations, Python dependency manifest, or environment template. Configure this mode only when those matching substrate artifacts are already available. Missing substrate dependencies fail open and must not make the Base House unusable.
+
+A Base House installation is valid and complete on its own. When the person does not want a database, the markdown continuity from step 7 — `room_summary.md` and dated notes — is the memory layer, carried by hand. Whenever the substrate is absent, state clearly that database-backed memory is not enabled.
+
+## Tested support and adaptation contract
+
+The guided protocol in this document has been exercised on **Windows 10/11 with Bun and OMP**, using the Base House. That is the currently supported installation path.
+
+Other paths are present at different maturity levels:
+
+- **Windows + OMP + optional WSL substrate:** used by the maintainers, but the public bundle does not yet provide every substrate bootstrap artifact. Do not present it as reproducible from this bundle alone.
+- **Native Linux:** the Base House may be adaptable, but the guided path has not been verified there. The current substrate helper invokes `wsl.exe`, so database-backed tools are not natively Linux-compatible without a code change.
+- **OpenCode:** an adapter exists and has automated tests, but this OMP installation protocol, static verifier, and first-room procedure do not configure or validate OpenCode.
+- **macOS:** untested and unsupported.
+
+An installing AI may adapt paths, configuration syntax, and host-specific commands for an unverified environment, but must preserve these invariants:
+
+1. Inspect the actual host and adapter before editing anything; do not blindly replay Windows commands.
+2. Keep the core and adapter relationship resolvable, preserve existing configuration, and never overwrite an existing room.
+3. Explain commands that require elevation or change global state before running them.
+4. Distinguish **adapted**, **verified**, and **unsupported** behavior. Never convert “the files are present” into a claim that continuity or substrate memory works.
+5. Verify the adapted installation through equivalent observable behavior: adapter loading, `room_state`, a fresh-session continuity recovery, and—only when configured—a real substrate write/read lifecycle.
+6. Record every deviation from this protocol in the installation receipt so a later maintainer can reproduce the environment.
 
 ## AI-guided installation protocol
 
@@ -178,7 +200,7 @@ The substrate scripts run inside WSL, not Windows. Install WSL and a distro (Ubu
 
 ### S2. PostgreSQL + pgvector
 
-Inside WSL, install PostgreSQL and the `pgvector` extension (embeddings are stored as `halfvec`). Create the database and role the substrate `.env` expects, then enable the extension:
+Inside WSL, install PostgreSQL and the `pgvector` extension (embeddings are stored as `halfvec`). Use the database name, role, credentials, and schema required by the separately supplied substrate environment template and migrations. If those artifacts are unavailable, stop: do not guess identifiers or invent a schema. Once connected to the intended database, enable the extension:
 
 ```text
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -196,7 +218,7 @@ OMP runs on Windows; PostgreSQL runs in WSL. Bridge them or every connection is 
 
 ### S4. Python + substrate scripts
 
-Inside WSL, install Python 3 and the substrate script dependencies (`psycopg2` and friends). Point `SOLARISAEL_SUBSTRATE` (the step 4 env override) at the directory holding the substrate scripts, then run the migrations they ship to build the tables (`memories`, `memory_threads`, `memory_chunks`, and the lesson stores).
+The portable House bundle does not supply a Python dependency manifest, substrate environment template, or schema migrations. Obtain a matching substrate distribution before continuing. Inside WSL, install Python 3 and the dependencies declared by that distribution, point `SOLARISAEL_SUBSTRATE` at its script directory, apply its migrations, and verify that it created the expected memory and lesson stores. Do not infer dependencies from import errors or construct tables from the names in this guide.
 
 ### S5. Embedding model and vector space
 

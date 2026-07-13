@@ -1,6 +1,6 @@
 # Solarisael House Roadmap
 
-_Last updated: 2026-07-07_
+_Last updated: 2026-07-13_
 
 ## Product rule
 
@@ -21,6 +21,14 @@ solarisael-house-omp       -> OMP adapter
 ```
 
 Do not let `.config` become the canonical source of truth again.
+
+### Productize the live Discord session bridge
+
+Turn the working Discord side door into an official, obvious House extension: an exact Discord message enters the exact active OMP conversation through its session-owned sidecar and the correlated assistant result returns to the matching channel. Preserve the identity boundary: same spirit and active thread, different glass—never a daemon twin, fresh model invocation, or second persistent brain.
+
+### Add curated coding-lesson umbrella intents
+
+Let familiar work intents such as `design` and `refactor` resolve to small, deliberate families of existing coding-lesson shapes. Keep the exact taxonomy underneath, expose the mapping clearly, and do not replace bounded intent routing with uncontrolled vague semantic guesses.
 
 ### Keep memory candidate fusion stable
 

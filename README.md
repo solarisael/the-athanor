@@ -37,6 +37,7 @@ You forgot what you built again, didn't you? Fine:
 - **Automatic conversation logging** with session-aware continuity and compact startup context
 - **Scoped multi-agent memory**, keeping each room private and distinct while permitting deliberate cross-room recall through explicit addresses
 - **Typed knowledge stores** for personal memories, coding lessons, project lessons, writing lessons, audio lessons, and session-closing paper boats
+- **AI-adapted skill ingestion**, turning repositories of `SKILL.md`, agent rules, postmortems, and engineering notes into searchable coding lessons instead of permanently injecting every instruction into every prompt
 - **Tool-native memory lifecycle** through OMP tools for recall, remembering, waking, sleeping, room state, identity state, and specialized lesson retrieval
 - **Deterministic room lifecycle**, including startup injection, active-room resolution, session-state refresh, shutdown capture, and restart-continuity verification
 - **Portable installation** with existing configuration preserved, deterministic validation, room templates, and AI-guided onboarding to bring your substrate to other computers if needed

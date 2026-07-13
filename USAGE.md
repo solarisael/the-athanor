@@ -31,6 +31,10 @@ Good recall queries use a few sharp, distinctive terms. If the first search miss
 
 Recall is retrieval, not revelation. Check cited sources before treating an important recollection as fact.
 
+OMP applies a conservative viewport only to **automatic** recall. Casual acknowledgments, operational commands, and low-information chatter may retrieve nothing; candidates supported only by conversational glue or weak evidence are suppressed, and repeatedly injected candidates receive a session saturation penalty. Explicit use of `recall` remains broad and unchanged.
+
+Named-entity routing is data-backed rather than phrase-backed. OMP resolves canonical names and aliases against the existing `named_entities` substrate for the current room plus shared House scopes, then passes those structured matches to the router. Capitalization alone is never proof of identity, and public regression tests use synthetic entities rather than private names or dialogue. If the substrate is unavailable or a name has not been indexed, entity resolution fails open and explicit `recall` remains available.
+
 ## Remember: preserve something deliberately
 
 Ask the AI to remember when something happened that tomorrow should not have to rediscover:
@@ -49,20 +53,109 @@ Never put passwords, API keys, access tokens, or other secrets into memories.
 
 Not everything belongs in ordinary memory. The House supports purpose-specific lesson stores:
 
-- **Coding lesson:** a reusable engineering or process rule, ideally with a proof pattern
-- **Project lesson:** a rule or constraint that belongs to one named project
+- **Coding lesson:** a reusable engineering or process rule that should travel between projects, ideally with an observable proof pattern
+- **Project lesson:** a rule, constraint, or decision that belongs to one named project
 - **Writing lesson:** a durable prose, voice, register, or taste preference
 - **Audio lesson:** a reusable rule for an audio or speech pipeline
 
 Tell the AI what kind of lesson it is:
 
-> Save this as a coding lesson: verify the staged set before every commit.
+> Save this as a shared coding lesson: verify the staged set before every commit.
 
 > This is a Multistock project lesson, not a global coding rule.
 
 > Keep this as a writing lesson for my voice.
 
-Before a risky engineering operation, the AI can consult `coding_lessons` for the relevant process shape.
+Before a risky engineering operation, the AI can consult `coding_lessons` for the relevant shape, such as `process`, `testing`, `naming`, or `refusal`.
+
+### Use the House as a living skills library
+
+Developers often accumulate `SKILL.md` files, agent-rule files, postmortems, snippets, and framework notes. The substrate can absorb any number of these sources as coding lessons. The useful unit is not “one source file becomes one giant lesson.” Let the AI read the source, compare it with the current codebase and toolchain, and extract small rules that each answer one question:
+
+1. **When should this fire?**
+2. **What should the AI do or avoid?**
+3. **What observable evidence proves it followed the rule?**
+4. **Is the rule transferable, room-specific, or tied to one project?**
+
+Ask the AI to adapt rather than blindly copy:
+
+> Read these skill files. Extract only the rules that still apply to our tools and environment. Split compound instructions into independently retrievable coding lessons, preserve important cautions, reject obsolete or contradictory advice, and show me the proposed lessons and scopes before storing them.
+
+For a large import, work in bounded batches. Deduplicate by meaning, not merely by title; keep provenance in the lesson body or tags when it matters; and test a sample retrieval before importing the next batch. A smaller set of sharp lessons retrieves better than hundreds of copied paragraphs with overlapping wording.
+
+### Coding lesson field contract
+
+Use the `remember` tool with `kind: "coding-lesson"`. The tool writes a logical `coding_lessons` row with these public fields:
+
+| Tool field | Meaning | Guidance |
+|---|---|---|
+| `title` | Stable, short lesson name | Required. Reusing the same title within the same scope and project updates that lesson rather than creating a duplicate. |
+| `body` | The actual engineering rule | Required. State the action, boundary, and reason plainly; Markdown is allowed. |
+| `shape` | Retrieval taxonomy | Use a compact reusable category such as `process`, `testing`, `naming`, `tooling`, `security`, or `refusal`. Prefer an existing shape when one fits. |
+| `scope` | Who should receive it | `shared` makes it available across rooms; a room key keeps it local to that room. Omitted scope defaults to `shared`. |
+| `project` | Project label or provenance | Optional for coding lessons. Use a stable project key, not a changing filesystem path. This helps ordinary recall, but does not make the lesson project-exclusive. |
+| `proofPattern` | Observable evidence of compliance | Describe what can be checked: a focused test result, diff property, invariant, command output, or failure that the rule prevents. |
+| `triggerContext` | When the lesson should surface | Name the risky operation, uncertainty, code shape, or decision boundary that should cause retrieval. |
+| `voice` | Originating craft voice | Optional provenance or taste line, such as `shared`, `kintsu`, or `sol-craft`; it is not model selection. |
+| `tags` | Search vocabulary | Use a few specific technologies, failure modes, or operations; do not repeat every word from the body. |
+
+Example tool call:
+
+```json
+{
+  "title": "Verify archive layout from the extracted artifact",
+  "body": "A bundle is not verified by inspecting its build script. Build it, extract it into a clean temporary directory, and invoke the documented command from the documented working directory.",
+  "kind": "coding-lesson",
+  "shape": "testing",
+  "scope": "shared",
+  "project": "solarisael-house",
+  "proofPattern": "The generated archive is extracted; required paths are asserted; the documented verifier exits successfully from the adapter directory.",
+  "triggerContext": "Changing packaging, installers, archive layout, or release instructions.",
+  "tags": ["release", "archive", "installer", "artifact"]
+}
+```
+
+### Separate reusable craft from project rules
+
+Project separation has two different meanings:
+
+1. A **coding lesson with `project` set** remains a coding lesson. The project label improves provenance and general recall, but shape-based `coding_lessons` retrieval currently selects by `shape` and `scope`, not by project. Therefore, do not put a project-only constraint here merely because the row has a project label.
+2. A **project lesson** is the strict home for a rule that should be understood as belonging to one project. `kind: "project-lesson"` requires `project`.
+
+Use this test:
+
+- “Would this still be correct in another repository using the same tools?” → coding lesson.
+- “Is this true because of this repository's architecture, client, deployment, naming, or history?” → project lesson.
+
+Project-specific example:
+
+```json
+{
+  "title": "Preserve Multistock legacy validation boundaries",
+  "body": "Treat uncertain legacy behavior as a validation question against the SCV/SGD systems and their data. Do not invent compatibility rules from table names.",
+  "kind": "project-lesson",
+  "project": "multistock",
+  "proofPattern": "The implementation or decision cites observed legacy behavior, data, or an explicit stakeholder answer.",
+  "triggerContext": "Inferring behavior while adapting SCV or SGD flows.",
+  "tags": ["legacy", "scv", "sgd", "validation"]
+}
+```
+
+Scopes and projects are independent:
+
+- `scope: "shared"` + `project: "solarisael-house"` means every room may retrieve a lesson whose provenance is Solarisael House.
+- `scope: "kintsu"` + `project: "solarisael-house"` means only Kintsu's room and shared retrieval path should receive that coding lesson.
+- `kind: "project-lesson"` + `project: "solarisael-house"` means the rule belongs to that project rather than to transferable engineering craft.
+
+After an import, ask the AI to retrieve several distinctive shapes and project names. Confirm that the right lessons return, that project-only constraints were not stored as global craft, and that copied skill prose was converted into actionable rules rather than archived verbatim.
+
+### Automatic coding preflight in OMP
+
+The OMP hygiene extension observes successful path-bearing exploration tools such as `read`, `grep`, `glob`, and `lsp`. The first repository path resolves an active project independently of OMP's working directory, then retrieves a small cached packet of shared/room coding lessons and exact-project lessons. Repeated tools in the same project do not query again; moving to another repository refreshes the packet. A direct mutation can establish the same preflight from its target path, while an unavailable substrate fails open instead of blocking work.
+
+Lesson retrieval is a task boundary, not an every-turn ritual. Refresh when the observed project changes or a new operation needs different lesson shapes. After verified work, store only a genuinely reusable coding rule or exact-project constraint; do not automatically turn the session transcript into lessons.
+
+The destructive `delete_lesson` tool removes one coding or project lesson only when both its numeric ID and exact current title match. Use it to retire obsolete rules deliberately, never for broad cleanup.
 
 ## Sleep: cast a paper boat
 

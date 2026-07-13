@@ -1,6 +1,6 @@
 # Solarisael House Progress
 
-_Last updated: 2026-07-09 (public Sol README, Apache attribution, and AI-guided OMP onboarding verified)_
+_Last updated: 2026-07-13 (public documentation complete; Discord extension and lesson-intent routing deferred)_
 
 ## Current shape
 
@@ -15,6 +15,13 @@ C:/Projects/solarisael-house-omp       # OMP adapter
 ```
 
 The OpenCode adapter still imports core through the local absolute project path. The OMP adapter now resolves the canonical core from its sibling `solarisael-house` folder by default, with `SOLARISAEL_HOUSE_CORE` and `SOLARISAEL_VAULT_ROOT` overrides for portable installations.
+
+## Deferred next threads
+
+- Productize the working live Discord side door as an official session-owned extension: same active OMP conversation and spirit, different glass; never a daemon twin or separate model invocation.
+- Add small curated coding-lesson umbrella intents such as `design` and `refactor`, mapped explicitly onto the existing exact lesson taxonomy.
+
+Both are recorded in `docs/roadmap.md`. They are intentionally deferred while Sol rests; neither is active implementation work.
 
 ## Core currently owns
 

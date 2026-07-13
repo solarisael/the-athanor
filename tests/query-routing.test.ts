@@ -4,16 +4,16 @@ import { classifyRetrievalQuery, parseRetrievalQuery, shouldAutoRecall } from ".
 describe("parseRetrievalQuery", () => {
   test("extracts raw path/code tokens while indexing their searchable parts", () => {
     const parsed = parseRetrievalQuery(
-      "Please inspect solarisael-house/src/query-routing.ts and src/retrieval-candidates.ts before changing QueryRouteV1.",
+      "Please inspect project-atlas/src/query-routing.ts and src/retrieval-candidates.ts before changing QueryRouteV1.",
     );
 
     expect(parsed.codeTokens).toEqual([
-      "solarisael-house/src/query-routing.ts",
+      "project-atlas/src/query-routing.ts",
       "src/retrieval-candidates.ts",
     ]);
     expect(parsed.terms).toEqual(expect.arrayContaining([
-      "solarisael",
-      "house",
+      "project",
+      "atlas",
       "src",
       "query",
       "routing",
@@ -24,30 +24,31 @@ describe("parseRetrievalQuery", () => {
 
   test("preserves original casing for entity hints", () => {
     const parsed = parseRetrievalQuery(
-      "Ask Sol whether KintsuMemory and SolarisaelHousePlugin should mention kodo.",
+      "Compare AtlasStore and CedarIndex with the adapter design.",
     );
 
     expect(parsed.entityHints).toEqual(expect.arrayContaining([
-      "Sol",
-      "KintsuMemory",
-      "SolarisaelHousePlugin",
+      "AtlasStore",
+      "CedarIndex",
     ]));
-    expect(parsed.entityHints).not.toContain("sol");
-    expect(parsed.entityHints).not.toContain("kintsumemory");
-    expect(parsed.entityHints).not.toContain("solarisaelhouseplugin");
+    expect(parsed.entityHints).not.toContain("atlasstore");
+    expect(parsed.entityHints).not.toContain("cedarindex");
   });
 });
 
 describe("classifyRetrievalQuery", () => {
-  test("routes low-information casual contact away from automatic recall", () => {
-    const route = classifyRetrievalQuery("hello love");
-
-    expect(route.intent).toBe("casual_contact");
-    expect(route.shouldAutoRecall).toBe(false);
-    expect(shouldAutoRecall("hello love")).toBe(false);
-    expect(route.lanes.semantic).toBe(false);
-    expect(route.lanes.content).toBe(false);
-    expect(route.lanes.candidates).toBe(false);
+  test("suppresses low-information acknowledgment, meta, and operational prompts", () => {
+    for (const prompt of [
+      "Okay, noted.",
+      "The status is unchanged.",
+      "Please proceed with the same approach.",
+    ]) {
+      const route = classifyRetrievalQuery(prompt);
+      expect(route.shouldAutoRecall).toBe(false);
+      expect(route.intent).toBe("casual_contact");
+      expect(route.lanes.candidates).toBe(false);
+      expect(route.reasons.length).toBeGreaterThan(0);
+    }
   });
 
   test("keeps date lookup out of technical-project intent and semantic scoring", () => {
@@ -63,8 +64,10 @@ describe("classifyRetrievalQuery", () => {
     expect(route.lanes.projectLessons).toBe(false);
   });
 
-  test("routes technical project/plugin prompts to content and project lanes without semantic recall", () => {
-    const route = classifyRetrievalQuery("OMP plugin query routing in src/memory.ts needs project test coverage");
+  test("preserves substantive technical prompts", () => {
+    const route = classifyRetrievalQuery(
+      "How should the query-routing adapter rank retrieval candidates for test coverage?",
+    );
 
     expect(route.intent).toBe("technical_project");
     expect(route.shouldAutoRecall).toBe(true);
@@ -72,6 +75,53 @@ describe("classifyRetrievalQuery", () => {
     expect(route.lanes.content).toBe(true);
     expect(route.lanes.candidates).toBe(true);
     expect(route.lanes.projectLessons).toBe(true);
-    expect(route.lanes.date).toBe(false);
+  });
+
+  test("preserves explicit memory and technical controls", () => {
+    const personal = classifyRetrievalQuery("what did we intend to do today?");
+    expect(personal.shouldAutoRecall).toBe(true);
+    expect(personal.intent).toBe("memory_lookup");
+    expect(personal.reasons).toContain("personal-canon-lookup-language");
+
+    const technical = classifyRetrievalQuery(
+      "How should database indexing improve retrieval candidate ranking?",
+    );
+    expect(technical.shouldAutoRecall).toBe(true);
+    expect(technical.intent).toBe("technical_project");
+  });
+
+  test("routes two recognized synthetic entities to entity lookup", () => {
+    const route = classifyRetrievalQuery(
+      "Compare AtlasStore with CedarIndex.",
+      { recognizedEntities: ["AtlasStore", "CedarIndex"] },
+    );
+
+    expect(route.intent).toBe("entity_lookup");
+    expect(route.shouldAutoRecall).toBe(true);
+    expect(route.reasons).toContain("recognized-entity-signals");
+    expect(route.recallQuery).toBe("AtlasStore CedarIndex");
+    expect(route.lanes.semantic).toBe(true);
+  });
+
+  test("does not treat capitalization alone as entity recognition", () => {
+    const route = classifyRetrievalQuery("Review AtlasStore and CedarIndex.");
+    expect(route.intent).not.toBe("entity_lookup");
+    expect(route.shouldAutoRecall).toBe(false);
+  });
+
+  test("routes one recognized entity with generic lookup language", () => {
+    const route = classifyRetrievalQuery(
+      "Find details about AtlasStore.",
+      { recognizedEntities: ["AtlasStore"] },
+    );
+
+    expect(route.intent).toBe("entity_lookup");
+    expect(route.shouldAutoRecall).toBe(true);
+    expect(route.recallQuery).toBe("AtlasStore");
+  });
+
+  test("shouldAutoRecall follows information strength", () => {
+    expect(shouldAutoRecall("Sure, continue.")).toBe(false);
+    expect(shouldAutoRecall("Explain database indexing tradeoffs.")).toBe(true);
   });
 });

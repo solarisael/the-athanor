@@ -100,6 +100,63 @@ RETRIEVAL_VISIBILITY_SQL = (
     "(m.source_path NOT LIKE 'db-only/%%' OR m.type = 'paper-boat')"
 )
 
+ERASURE_SCORE_DEMOTION = 8.0
+ARCHIVE_SCORE_DEMOTION = 10.0
+
+
+def detect_erasure_columns(conn) -> dict[str, bool]:
+    """Return migration 0024 capabilities without making them boot-critical."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'memories'
+                  AND column_name IN ('superseded_by', 'archived_at')
+                """
+            )
+            found = {row[0] for row in cur.fetchall()}
+    except Exception:
+        conn.rollback()
+        found = set()
+    return {
+        "superseded_by": "superseded_by" in found,
+        "archived_at": "archived_at" in found,
+    }
+
+
+def erasure_select(columns: dict[str, bool], alias: str = "m") -> str:
+    archived = f"{alias}.archived_at" if columns.get("archived_at") else "NULL::timestamptz"
+    if columns.get("superseded_by"):
+        superseded = f"{alias}.superseded_by IS NOT NULL"
+    else:
+        superseded = "FALSE"
+    return f"{archived} AS archived_at, {superseded} AS superseded"
+
+
+def erasure_filter(
+    columns: dict[str, bool],
+    *,
+    alias: str = "m",
+    include_archived: bool = False,
+) -> str:
+    """Build an additive lifecycle filter; absent columns become no-ops."""
+    filters = []
+    if columns.get("archived_at") and not include_archived:
+        filters.append(f"{alias}.archived_at IS NULL")
+    return " AND ".join(filters) or "TRUE"
+
+
+def lifecycle_flags(row) -> tuple[bool, bool, str | None]:
+    archived_at = row.get("archived_at") if hasattr(row, "get") else None
+    archived = archived_at is not None
+    superseded = bool(row.get("superseded")) if hasattr(row, "get") else False
+    return archived, superseded, (
+        archived_at.isoformat() if hasattr(archived_at, "isoformat") else archived_at
+    )
+
 # Date extraction regex — matches any YYYY-MM-DD substring. Used by the
 # date pass to pull date tokens out of the user's prompt (or recall query).
 # Conservative validation happens in extract_query_dates: we drop tokens
@@ -251,6 +308,8 @@ def _candidate_score(
     raw_rank: float = 0.0,
     title_hit: bool = False,
     path_hit: bool = False,
+    archived: bool = False,
+    superseded: bool = False,
 ) -> float:
     # Source priors are intentionally small; term coverage is the main signal.
     source_prior = {
@@ -260,12 +319,17 @@ def _candidate_score(
         "thread": 1.7,
         "memory": 1.2,
     }.get(source, 1.0)
+    lifecycle_penalty = (
+        (ARCHIVE_SCORE_DEMOTION if archived else 0.0)
+        + (ERASURE_SCORE_DEMOTION if superseded else 0.0)
+    )
     return round(
         source_prior
         + (coverage * 4.0)
         + (float(raw_rank or 0.0) * 2.0)
         + (1.0 if title_hit else 0.0)
-        + (0.5 if path_hit else 0.0),
+        + (0.5 if path_hit else 0.0)
+        - lifecycle_penalty,
         4,
     )
 
@@ -288,6 +352,9 @@ def _candidate(
     reasons: list[str] | None = None,
     kind: str = "",
     weighty: bool = False,
+    archived: bool = False,
+    superseded: bool = False,
+    archived_at=None,
 ) -> dict | None:
     matched_terms = _matched_candidate_terms(
         terms, title, excerpt, source_path, heading_path, extra_haystack,
@@ -297,6 +364,11 @@ def _candidate(
 
     coverage = (len(matched_terms) / len(terms)) if terms else 0.0
     missing_terms = [term for term in terms if term not in matched_terms]
+    candidate_reasons = list(reasons or [])
+    if superseded and "superseded" not in candidate_reasons:
+        candidate_reasons.append("superseded")
+    if archived and "archived" not in candidate_reasons:
+        candidate_reasons.append("archived")
     return {
         "id": f"{source_table}:{source_id}",
         "source": source,
@@ -314,13 +386,18 @@ def _candidate(
             raw_rank=raw_rank,
             title_hit=title_hit,
             path_hit=path_hit,
+            archived=archived,
+            superseded=superseded,
         ),
         "term_coverage": round(coverage, 4),
         "matched_terms": matched_terms,
         "missing_terms": missing_terms,
-        "reasons": list(reasons or []),
+        "reasons": candidate_reasons,
         "kind": kind or "",
         "weighty": bool(weighty),
+        "archived": bool(archived),
+        "archived_at": archived_at.isoformat() if hasattr(archived_at, "isoformat") else archived_at,
+        "superseded": bool(superseded),
     }
 
 
@@ -330,6 +407,8 @@ def load_search_candidates(
     query: str,
     top_k: int,
     excerpt_chars: int = DEFAULT_CANDIDATE_EXCERPT_CHARS,
+    erasure_columns: dict[str, bool] | None = None,
+    include_archived: bool = False,
 ) -> tuple[list[str], list[dict]]:
     """Return normalized lightweight retrieval candidates.
 
@@ -346,6 +425,10 @@ def load_search_candidates(
     term_patterns = [f"%{term}%" for term in terms]
     room_list = list(rooms)
     candidates: list[dict] = []
+    erasure_columns = erasure_columns or {}
+    memory_filter = erasure_filter(
+        erasure_columns, include_archived=include_archived,
+    )
 
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
@@ -396,8 +479,9 @@ def load_search_candidates(
 
         cur.execute(
             f"""
-            SELECT mt.id, m.room, mt.thread_key, mt.context,
+            SELECT mt.id, m.id AS memory_id, m.room, mt.thread_key, mt.context,
                    m.source_path, m.type,
+                   {erasure_select(erasure_columns)},
                    GREATEST(
                      similarity(mt.thread_key, %s),
                      similarity(COALESCE(mt.context, ''), %s)
@@ -408,6 +492,7 @@ def load_search_candidates(
             JOIN memories m ON m.id = mt.memory_id
             WHERE m.room = ANY(%s)
               AND {RETRIEVAL_VISIBILITY_SQL}
+              AND {memory_filter}
               AND (
                 mt.thread_key ILIKE ANY(%s::text[])
                 OR mt.context ILIKE ANY(%s::text[])
@@ -421,6 +506,7 @@ def load_search_candidates(
             ),
         )
         for row in cur.fetchall():
+            archived, superseded, archived_at = lifecycle_flags(row)
             item = _candidate(
                 source="thread",
                 source_table="memory_threads",
@@ -435,6 +521,9 @@ def load_search_candidates(
                 path_hit=bool(row["path_hit"]),
                 extra_haystack=row["type"] or "",
                 reasons=["memory thread", "thread/context/path search"],
+                archived=archived,
+                superseded=superseded,
+                archived_at=archived_at,
             )
             if item:
                 candidates.append(item)
@@ -447,10 +536,12 @@ def load_search_candidates(
                    ts_rank_cd(m.body_tsv, q.query, 32) AS raw_rank,
                    m.title ILIKE ANY(%s::text[]) AS title_hit,
                    m.source_path ILIKE ANY(%s::text[]) AS path_hit,
-                   array_to_string(m.threads, ' ') AS thread_text
+                   array_to_string(m.threads, ' ') AS thread_text,
+                   {erasure_select(erasure_columns)}
             FROM memories m, q
             WHERE m.room = ANY(%s)
               AND {RETRIEVAL_VISIBILITY_SQL}
+              AND {memory_filter}
               AND (
                 m.body_tsv @@ q.query
                 OR m.title ILIKE ANY(%s::text[])
@@ -469,6 +560,7 @@ def load_search_candidates(
             ),
         )
         for row in cur.fetchall():
+            archived, superseded, archived_at = lifecycle_flags(row)
             item = _candidate(
                 source="memory",
                 source_table="memories",
@@ -483,6 +575,9 @@ def load_search_candidates(
                 path_hit=bool(row["path_hit"]),
                 extra_haystack=f"{row['type'] or ''} {row['thread_text'] or ''}",
                 reasons=["memory full-text", "title/path/thread/body search"],
+                archived=archived,
+                superseded=superseded,
+                archived_at=archived_at,
             )
             if item:
                 candidates.append(item)
@@ -611,14 +706,26 @@ def connect(env: dict[str, str]):
     )
 
 
-def load_index(conn, rooms=("kintsu", "house")) -> dict:
+def load_index(
+    conn,
+    rooms=("kintsu", "house"),
+    erasure_columns: dict[str, bool] | None = None,
+    include_archived: bool = False,
+) -> dict:
+    erasure_columns = erasure_columns or {}
+    memory_filter = erasure_filter(
+        erasure_columns, include_archived=include_archived,
+    )
+    lifecycle_select = erasure_select(erasure_columns)
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
             f"""
-            SELECT m.room, m.source_path, m.date, m.type, m.meta->>'one_line' AS one_line
+            SELECT m.id AS memory_id, m.room, m.source_path, m.date, m.type,
+                   m.meta->>'one_line' AS one_line, {lifecycle_select}
             FROM memories m
             WHERE m.room = ANY(%s)
               AND {RETRIEVAL_VISIBILITY_SQL}
+              AND {memory_filter}
             """,
             (list(rooms),),
         )
@@ -626,19 +733,24 @@ def load_index(conn, rooms=("kintsu", "house")) -> dict:
         for row in cur.fetchall():
             key = f"house/{row['source_path']}" if row["room"] == "house" else row["source_path"]
             files[key] = {
+                "memory_id": int(row["memory_id"]),
                 "date": row["date"].isoformat() if row["date"] else None,
                 "type": row["type"],
                 "one_line": row["one_line"] or "",
+                "archived": row["archived_at"] is not None,
+                "archived_at": row["archived_at"].isoformat() if row["archived_at"] else None,
+                "superseded": bool(row["superseded"]),
             }
 
         cur.execute(
             f"""
-            SELECT m.room, mt.thread_key, m.source_path AS file,
-                   mt.lines_start, mt.lines_end, mt.context
+            SELECT m.id AS memory_id, m.room, mt.thread_key, m.source_path AS file,
+                   mt.lines_start, mt.lines_end, mt.context, {lifecycle_select}
             FROM memory_threads mt
             JOIN memories m ON m.id = mt.memory_id
             WHERE m.room = ANY(%s)
               AND {RETRIEVAL_VISIBILITY_SQL}
+              AND {memory_filter}
             ORDER BY mt.thread_key
             """,
             (list(rooms),),
@@ -657,9 +769,13 @@ def load_index(conn, rooms=("kintsu", "house")) -> dict:
             if row["lines_start"] is not None:
                 lines = [row["lines_start"], row["lines_end"] or row["lines_start"]]
             threads.setdefault(thread_key, []).append({
+                "memory_id": int(row["memory_id"]),
                 "file": file_path,
                 "lines": lines or [0, 0],
                 "context": context,
+                "archived": row["archived_at"] is not None,
+                "archived_at": row["archived_at"].isoformat() if row["archived_at"] else None,
+                "superseded": bool(row["superseded"]),
             })
 
         return {"files": files, "threads": threads}
@@ -689,14 +805,20 @@ def load_important_index(conn, room="kintsu") -> dict:
 
         return entries
 
-def load_cluster_staleness(conn) -> dict:
+def load_cluster_staleness(
+    conn,
+    erasure_columns: dict[str, bool] | None = None,
+    include_archived: bool = False,
+) -> dict:
     """Cluster-map drift gauge (2026-07-09 roadmap: memory as navigable space).
 
     Compares the memory_clusters build time against retrieval-visible chunks
-    embedded since. Consumers nudge a rebuild (house/substrate/
-    rebuild_clusters.py) when fraction_unseen grows. Telemetry, not liturgy:
-    the nudge fires on measured drift, never on a timer.
+    embedded since. Consumers nudge a rebuild when fraction_unseen grows.
     """
+    erasure_columns = erasure_columns or {}
+    memory_filter = erasure_filter(
+        erasure_columns, include_archived=include_archived,
+    )
     with conn.cursor() as cur:
         cur.execute("SELECT max(created_at), count(*) FROM memory_clusters")
         built_at, clusters = cur.fetchone()
@@ -704,7 +826,9 @@ def load_cluster_staleness(conn) -> dict:
             f"""
             SELECT count(*) FROM memory_chunks c
             JOIN memories m ON m.id = c.memory_id
-            WHERE c.body_embedding IS NOT NULL AND {RETRIEVAL_VISIBILITY_SQL}
+            WHERE c.body_embedding IS NOT NULL
+              AND {RETRIEVAL_VISIBILITY_SQL}
+              AND {memory_filter}
             """
         )
         chunks_total = cur.fetchone()[0]
@@ -714,7 +838,9 @@ def load_cluster_staleness(conn) -> dict:
                 f"""
                 SELECT count(*) FROM memory_chunks c
                 JOIN memories m ON m.id = c.memory_id
-                WHERE c.body_embedding IS NOT NULL AND {RETRIEVAL_VISIBILITY_SQL}
+                WHERE c.body_embedding IS NOT NULL
+                  AND {RETRIEVAL_VISIBILITY_SQL}
+                  AND {memory_filter}
                   AND c.embedded_at > %s
                 """,
                 (built_at,),
@@ -786,7 +912,15 @@ def fetch_memory(conn, memory_id=None, source_path=None, claimed_room=None) -> d
     }
 
 
-def load_cluster_resonance(conn, query_vec, top_clusters=8, hot_per_cluster=2, exclude_paths=None):
+def load_cluster_resonance(
+    conn,
+    query_vec,
+    top_clusters=8,
+    hot_per_cluster=2,
+    exclude_paths=None,
+    erasure_columns: dict[str, bool] | None = None,
+    include_archived: bool = False,
+):
     """Cluster-activation profile over the memory space (2026-07-09 roadmap).
 
     Cosine activation of the prompt embedding against stored cluster
@@ -799,6 +933,10 @@ def load_cluster_resonance(conn, query_vec, top_clusters=8, hot_per_cluster=2, e
     """
     literal = "[" + ",".join(f"{x:.6f}" for x in query_vec) + "]"
     exclude = {p for p in (exclude_paths or set()) if p}
+    erasure_columns = erasure_columns or {}
+    memory_filter = erasure_filter(
+        erasure_columns, include_archived=include_archived,
+    )
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
             """
@@ -829,7 +967,9 @@ def load_cluster_resonance(conn, query_vec, top_clusters=8, hot_per_cluster=2, e
                 FROM memory_cluster_members mm
                 JOIN memory_chunks c ON c.id = mm.chunk_id
                 JOIN memories m ON m.id = c.memory_id
-                WHERE mm.cluster_id = %s AND {RETRIEVAL_VISIBILITY_SQL}
+                WHERE mm.cluster_id = %s
+                  AND {RETRIEVAL_VISIBILITY_SQL}
+                  AND {memory_filter}
                 ORDER BY sim DESC
                 LIMIT %s
                 """,
@@ -853,21 +993,29 @@ def load_cluster_resonance(conn, query_vec, top_clusters=8, hot_per_cluster=2, e
     return {"profile": profile, "hot": hot}
 
 
-def load_taxonomy(conn, rooms=("kintsu", "house"), room="kintsu", limit=16) -> dict:
-    """Return a small self-describing menu of what retrieval can target.
-
-    Cheap SQL only: no embeddings, no body excerpts. This is for alignment and
-    recall targeting, not context injection.
-    """
+def load_taxonomy(
+    conn,
+    rooms=("kintsu", "house"),
+    room="kintsu",
+    limit=16,
+    erasure_columns: dict[str, bool] | None = None,
+    include_archived: bool = False,
+) -> dict:
+    """Return a small self-describing menu of what retrieval can target."""
+    erasure_columns = erasure_columns or {}
+    memory_filter = erasure_filter(
+        erasure_columns, include_archived=include_archived,
+    )
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
-            """
-            SELECT room, COALESCE(type, '') AS type, COUNT(*) AS count
-            FROM memories
-            WHERE room = ANY(%s)
-              AND (source_path NOT LIKE 'db-only/%%' OR type = 'paper-boat')
-            GROUP BY room, COALESCE(type, '')
-            ORDER BY count DESC, room, type
+            f"""
+            SELECT m.room, COALESCE(m.type, '') AS type, COUNT(*) AS count
+            FROM memories m
+            WHERE m.room = ANY(%s)
+              AND (m.source_path NOT LIKE 'db-only/%%' OR m.type = 'paper-boat')
+              AND {memory_filter}
+            GROUP BY m.room, COALESCE(m.type, '')
+            ORDER BY count DESC, m.room, type
             """,
             (list(rooms),),
         )
@@ -877,12 +1025,13 @@ def load_taxonomy(conn, rooms=("kintsu", "house"), room="kintsu", limit=16) -> d
         ]
 
         cur.execute(
-            """
+            f"""
             SELECT mt.thread_key, COUNT(*) AS count
             FROM memory_threads mt
             JOIN memories m ON m.id = mt.memory_id
             WHERE m.room = ANY(%s)
               AND (m.source_path NOT LIKE 'db-only/%%' OR m.type = 'paper-boat')
+              AND {memory_filter}
             GROUP BY mt.thread_key
             ORDER BY count DESC, mt.thread_key
             LIMIT %s
@@ -964,6 +1113,8 @@ def load_semantic_chunks(
     top_k: int,
     min_sim: float,
     scope_files: list[str] | None = None,
+    erasure_columns: dict[str, bool] | None = None,
+    include_archived: bool = False,
 ) -> list[dict]:
     """Return top-K halfvec nearest-neighbors from `memory_chunks` for the rooms.
 
@@ -979,6 +1130,10 @@ def load_semantic_chunks(
     (the original ``mode=full`` behavior — backward compatible).
     """
     vec_str = "[" + ",".join(f"{x:.6f}" for x in query_vec) + "]"
+    erasure_columns = erasure_columns or {}
+    memory_filter = erasure_filter(
+        erasure_columns, include_archived=include_archived,
+    )
 
     # The ``house/`` prefix is a cross-room rendering convention added by
     # load_index; the database column ``m.source_path`` stores bare paths.
@@ -998,17 +1153,20 @@ def load_semantic_chunks(
         params.append(normalized_scope)
     else:
         filters.append(RETRIEVAL_VISIBILITY_SQL)
+    filters.append(memory_filter)
     params.extend([vec_str, top_k])
     where = " AND ".join(filters)
 
     sql = f"""
-        SELECT m.source_path,
+        SELECT m.id AS memory_id,
+               m.source_path,
                m.room,
                mc.chunk_index,
                mc.heading_path,
                mc.body,
                mc.char_start,
                mc.char_end,
+               {erasure_select(erasure_columns)},
                1 - (mc.body_embedding <=> %s::halfvec) AS sim
         FROM memory_chunks mc
         JOIN memories m ON m.id = mc.memory_id
@@ -1024,11 +1182,16 @@ def load_semantic_chunks(
             if sim < min_sim:
                 continue
 
-            # Match house-prefix convention used by load_index for cross-room rendering.
+            archived, superseded, archived_at = lifecycle_flags(row)
+            lifecycle_penalty = (
+                (ARCHIVE_SCORE_DEMOTION if archived else 0.0)
+                + (ERASURE_SCORE_DEMOTION if superseded else 0.0)
+            )
             source_path = (
                 f"house/{row['source_path']}" if row["room"] == "house" else row["source_path"]
             )
             out.append({
+                "memory_id": int(row["memory_id"]),
                 "source_path": source_path,
                 "room": row["room"],
                 "chunk_index": int(row["chunk_index"]) if row["chunk_index"] is not None else 0,
@@ -1037,6 +1200,13 @@ def load_semantic_chunks(
                 "char_start": int(row["char_start"]) if row["char_start"] is not None else 0,
                 "char_end": int(row["char_end"]) if row["char_end"] is not None else 0,
                 "sim": round(sim, 4),
+                "score": round((sim * 6.0) - lifecycle_penalty, 4),
+                "archived": archived,
+                "archived_at": archived_at,
+                "superseded": superseded,
+                "reasons": [flag for flag, active in (
+                    ("archived", archived), ("superseded", superseded),
+                ) if active],
             })
 
         return out
@@ -1049,6 +1219,8 @@ def load_content_chunks(
     top_k: int,
     min_sim: float,
     scope_files: list[str] | None = None,
+    erasure_columns: dict[str, bool] | None = None,
+    include_archived: bool = False,
 ) -> list[dict]:
     """Return top-K chunks where `word_similarity(query, body)` exceeds min_sim.
 
@@ -1071,6 +1243,10 @@ def load_content_chunks(
 
     Fail-open: returns empty list on failure.
     """
+    erasure_columns = erasure_columns or {}
+    memory_filter = erasure_filter(
+        erasure_columns, include_archived=include_archived,
+    )
     if not query or not query.strip():
         return []
 
@@ -1108,13 +1284,6 @@ def load_content_chunks(
     # Use filtered_query for the SQL, not the original.
     query = filtered_query
 
-    # Param order matches positional %s in final SQL, left-to-right:
-    #   1. SELECT word_similarity(%s, mc.body)    ← query (for the SELECT score)
-    #   2. WHERE m.room = ANY(%s)                 ← rooms
-    #   3. WHERE mc.body ILIKE ANY(ARRAY[...])    ← word_patterns
-    #   4. WHERE word_similarity(%s, ...) >= %s   ← query, min_sim
-    #   5. WHERE m.source_path = ANY(%s)          ← normalized_scope (if present)
-    #   6. LIMIT %s                               ← top_k
     filters = [
         "m.room = ANY(%s)",
         "mc.body ILIKE ANY(%s::text[])",
@@ -1127,18 +1296,21 @@ def load_content_chunks(
         params.append(normalized_scope)
     else:
         filters.append(RETRIEVAL_VISIBILITY_SQL)
+    filters.append(memory_filter)
 
     params.append(top_k)
     where = " AND ".join(filters)
 
     sql = f"""
-        SELECT m.source_path,
+        SELECT m.id AS memory_id,
+               m.source_path,
                m.room,
                mc.chunk_index,
                mc.heading_path,
                mc.body,
                mc.char_start,
                mc.char_end,
+               {erasure_select(erasure_columns)},
                word_similarity(%s, mc.body) AS ws
         FROM memory_chunks mc
         JOIN memories m ON m.id = mc.memory_id
@@ -1151,10 +1323,16 @@ def load_content_chunks(
         out: list[dict] = []
         for row in cur.fetchall():
             ws = float(row["ws"]) if row["ws"] is not None else 0.0
+            archived, superseded, archived_at = lifecycle_flags(row)
+            lifecycle_penalty = (
+                (ARCHIVE_SCORE_DEMOTION if archived else 0.0)
+                + (ERASURE_SCORE_DEMOTION if superseded else 0.0)
+            )
             source_path = (
                 f"house/{row['source_path']}" if row["room"] == "house" else row["source_path"]
             )
             out.append({
+                "memory_id": int(row["memory_id"]),
                 "source_path": source_path,
                 "room": row["room"],
                 "chunk_index": int(row["chunk_index"]) if row["chunk_index"] is not None else 0,
@@ -1163,6 +1341,13 @@ def load_content_chunks(
                 "char_start": int(row["char_start"]) if row["char_start"] is not None else 0,
                 "char_end": int(row["char_end"]) if row["char_end"] is not None else 0,
                 "ws": round(ws, 4),
+                "score": round((ws * 6.0) - lifecycle_penalty, 4),
+                "archived": archived,
+                "archived_at": archived_at,
+                "superseded": superseded,
+                "reasons": [flag for flag, active in (
+                    ("archived", archived), ("superseded", superseded),
+                ) if active],
             })
 
         return out
@@ -1201,6 +1386,8 @@ def load_date_matches(
     query_dates: list,
     top_k: int,
     excerpt_chars: int,
+    erasure_columns: dict[str, bool] | None = None,
+    include_archived: bool = False,
 ) -> list[dict]:
     """Return memories whose `dates` array intersects any of the query dates.
 
@@ -1218,6 +1405,10 @@ def load_date_matches(
     high-priority section above other excerpt types because a direct date
     match means the user literally asked for THIS memory.
     """
+    erasure_columns = erasure_columns or {}
+    memory_filter = erasure_filter(
+        erasure_columns, include_archived=include_archived,
+    )
     if not query_dates:
         return []
 
@@ -1225,10 +1416,12 @@ def load_date_matches(
         SELECT m.id, m.room, m.source_path, m.title, m.type,
                m.date, m.dates, m.threads,
                LEFT(m.body, %s) AS body_excerpt,
-               OCTET_LENGTH(m.body) AS body_full_chars
+               OCTET_LENGTH(m.body) AS body_full_chars,
+               {erasure_select(erasure_columns)}
         FROM memories m
         WHERE m.room = ANY(%s)
           AND {RETRIEVAL_VISIBILITY_SQL}
+          AND {memory_filter}
           AND (m.dates && %s::date[] OR m.date = ANY(%s::date[]))
         ORDER BY m.date DESC NULLS LAST, m.id DESC
         LIMIT %s
@@ -1240,6 +1433,11 @@ def load_date_matches(
         )
         out: list[dict] = []
         for row in cur.fetchall():
+            archived, superseded, archived_at = lifecycle_flags(row)
+            lifecycle_penalty = (
+                (ARCHIVE_SCORE_DEMOTION if archived else 0.0)
+                + (ERASURE_SCORE_DEMOTION if superseded else 0.0)
+            )
             source_path = (
                 f"house/{row['source_path']}" if row["room"] == "house" else row["source_path"]
             )
@@ -1254,6 +1452,13 @@ def load_date_matches(
                 "threads": list(row["threads"] or []),
                 "body_excerpt": row["body_excerpt"] or "",
                 "body_full_chars": int(row["body_full_chars"] or 0),
+                "score": round(6.0 - lifecycle_penalty, 4),
+                "archived": archived,
+                "archived_at": archived_at,
+                "superseded": superseded,
+                "reasons": [flag for flag, active in (
+                    ("archived", archived), ("superseded", superseded),
+                ) if active],
             })
 
         return out
@@ -1270,13 +1475,94 @@ def read_prompt_from_stdin() -> str:
         return ""
 
 
+ANAMNESIS_MAX_LIMIT = 50
+ANAMNESIS_DEFAULT_LIMIT = 10
+
+
+def fetch_anamnesis(conn, room_name: str, view: str, query: str, limit: int) -> dict:
+    """Read deterministic Cabinet counsel, scoped to the room and shared house."""
+    warnings: list[str] = []
+    safe_limit = max(1, min(int(limit or ANAMNESIS_DEFAULT_LIMIT), ANAMNESIS_MAX_LIMIT))
+    if view == "consult" and not (query or "").strip():
+        return {"ok": False, "mode": view, "entries": [], "warnings": ["consult requires a non-empty query"]}
+
+    scope = [room_name, "house"]
+    if view == "wake":
+        where = (
+            "a.room = ANY(%s) AND ((a.kind = 'pillar' AND a.activation = 'wake') OR "
+            "(a.kind = 'cycle' AND a.active = TRUE AND a.activation = 'wake'))"
+        )
+        order = "CASE WHEN a.kind = 'pillar' THEN 0 ELSE 1 END, a.updated_at DESC, a.id DESC"
+        params = [scope]
+    else:
+        search_text = query.strip()
+        terms = extract_search_terms(search_text, max_terms=8)
+        patterns = [f"%{term}%" for term in (terms or [search_text.lower()])]
+        where = """a.room = ANY(%s) AND (
+            a.body_tsv @@ websearch_to_tsquery('portuguese', %s)
+            OR a.title ILIKE ANY(%s)
+            OR coalesce(a.shape,'') ILIKE ANY(%s)
+            OR array_to_string(a.tags, ' ') ILIKE ANY(%s)
+            OR array_to_string(a.canon_links, ' ') ILIKE ANY(%s)
+            OR a.ramp ILIKE ANY(%s)
+            OR coalesce(a.counsel,'') ILIKE ANY(%s)
+            OR coalesce(a.peak,'') ILIKE ANY(%s)
+        )"""
+        params = [
+            scope, search_text,
+            patterns, patterns, patterns, patterns, patterns, patterns, patterns,
+        ]
+        order = """CASE WHEN lower(a.title) = lower(%s) THEN 0
+            WHEN a.title ILIKE ANY(%s) THEN 1
+            WHEN coalesce(a.shape,'') ILIKE ANY(%s) THEN 2 ELSE 3 END,
+            ts_rank_cd(a.body_tsv, websearch_to_tsquery('portuguese', %s)) DESC,
+            similarity(a.title, %s) DESC,
+            a.updated_at DESC, a.id DESC"""
+        params.extend([search_text, patterns, patterns, search_text, search_text])
+
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            f"""SELECT a.id, a.room, a.kind, a.fidelity, a.activation, a.active,
+                       a.title, a.shape, a.peak, a.beginning, a.ramp, a.counsel,
+                       a.verify_note, a.source_paths, a.canon_links, a.tags,
+                       a.created_at, a.updated_at
+                FROM anamnesis a WHERE {where}
+                ORDER BY {order} LIMIT %s""",
+            params + [safe_limit],
+        )
+        rows = cur.fetchall()
+        entries = []
+        for row in rows:
+            if view == "wake" and row["kind"] == "cycle" and not (row["verify_note"] or "").strip():
+                warnings.append(f"excluded cycle {row['id']}: blank verify_note")
+                continue
+            cur.execute(
+                """SELECT id, rep_number, occurred_on, how_it_went, portal_pull,
+                          lighter, source_path, created_at
+                   FROM anamnesis_reps WHERE cabinet_id = %s
+                   ORDER BY occurred_on DESC NULLS LAST, rep_number DESC, id DESC
+                   LIMIT 3""",
+                (row["id"],),
+            )
+            reps = list(reversed(cur.fetchall()))
+            entries.append({**dict(row), "reps": reps})
+    return {"ok": True, "mode": view, "entries": entries, "warnings": warnings}
+
+
+def read_anamnesis(conn, room_name: str, view: str, query: str, limit: int) -> dict:
+    try:
+        return fetch_anamnesis(conn, room_name, view, query, limit)
+    except Exception as exc:
+        return {"ok": False, "mode": view, "entries": [], "warnings": [str(exc)]}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--room-dir", required=True)
     parser.add_argument(
         "--room",
         default=None,
-        help="Room name (kodo|kintsu). If omitted, derived from --room-dir basename.",
+        help="Room name (kodo|kintsu|test). If omitted, derived from --room-dir basename.",
     )
     parser.add_argument(
         "--semantic-top-k",
@@ -1304,7 +1590,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=("full", "lexical", "semantic", "content", "date", "taxonomy", "candidates", "fetch"),
+        choices=("full", "lexical", "semantic", "content", "date", "taxonomy", "candidates", "fetch", "anamnesis"),
         default="full",
         help=(
             "Retrieval mode (audit ticket #1 + 2026-05-19 GIN pass + 2026-05-23 date pass). "
@@ -1319,6 +1605,14 @@ def main() -> int:
             "content global + date global → merge."
         ),
     )
+    parser.add_argument(
+        "--include-archived",
+        action="store_true",
+        help="Include archived memories for deliberate history retrieval (default excludes them).",
+    )
+    parser.add_argument("--anamnesis-view", choices=("wake", "consult"), default="wake")
+    parser.add_argument("--anamnesis-query", default="")
+    parser.add_argument("--anamnesis-limit", type=int, default=ANAMNESIS_DEFAULT_LIMIT)
     parser.add_argument(
         "--memory-id",
         type=int,
@@ -1404,7 +1698,7 @@ def main() -> int:
     # 2026-05-04 bug where opencode-Kodo's session loaded Kintsu memory because
     # load_index/load_important_index defaulted to "kintsu" regardless of cwd.
     room_name = (args.room or room_dir.name or "kodo").lower()
-    if room_name not in ("kodo", "kintsu", "tuner"):
+    if room_name not in ("kodo", "kintsu", "tuner", "test"):
         room_name = "kodo"  # safe fallback; both rooms have substrate rows
 
     prompt = read_prompt_from_stdin()
@@ -1414,8 +1708,16 @@ def main() -> int:
 
     env = substrate_env(room_dir)
     conn = connect(env)
+    erasure_columns = detect_erasure_columns(conn)
+    include_archived = bool(args.include_archived)
     try:
         payload: dict = {}
+        if args.mode == "anamnesis":
+            payload = read_anamnesis(
+                conn, room_name, args.anamnesis_view, args.anamnesis_query, args.anamnesis_limit,
+            )
+            print(json.dumps(payload, ensure_ascii=False, default=str))
+            return 0
 
         # Deliberate handle fetch (memory://<room>/<id-or-path>). House-wide
         # by design — see fetch_memory docstring; short-circuits every
@@ -1440,12 +1742,27 @@ def main() -> int:
         # index + named-entity index for plugin-side ranking. mode=semantic
         # skips these to avoid wasted work in the two-stage flow.
         if args.mode in ("full", "lexical"):
-            payload["index"] = load_index(conn, rooms=(room_name, "house"))
+            payload["index"] = load_index(
+                conn,
+                rooms=(room_name, "house"),
+                erasure_columns=erasure_columns,
+                include_archived=include_archived,
+            )
             payload["importantIndex"] = load_important_index(conn, room=room_name)
 
         if args.mode in ("full", "taxonomy"):
-            payload["taxonomy"] = load_taxonomy(conn, rooms=(room_name, "house"), room=room_name)
-            payload["clusterStaleness"] = load_cluster_staleness(conn)
+            payload["taxonomy"] = load_taxonomy(
+                conn,
+                rooms=(room_name, "house"),
+                room=room_name,
+                erasure_columns=erasure_columns,
+                include_archived=include_archived,
+            )
+            payload["clusterStaleness"] = load_cluster_staleness(
+                conn,
+                erasure_columns=erasure_columns,
+                include_archived=include_archived,
+            )
 
         # Term-aware candidate pass (2026-07-01 retrieval roadmap). This is
         # the lightweight publishable search lane: no embedding call, every
@@ -1463,6 +1780,8 @@ def main() -> int:
                         query=prompt,
                         top_k=args.candidate_top_k,
                         excerpt_chars=args.candidate_excerpt_chars,
+                        erasure_columns=erasure_columns,
+                        include_archived=include_archived,
                     )
                 except Exception as err:
                     print(f"candidates: query failed: {err}", file=sys.stderr)
@@ -1526,6 +1845,8 @@ def main() -> int:
                             top_k=args.semantic_top_k,
                             min_sim=args.semantic_min_sim,
                             scope_files=scope_files,
+                            erasure_columns=erasure_columns,
+                            include_archived=include_archived,
                         )
                     except Exception as err:
                         print(f"semantic: query failed: {err}", file=sys.stderr)
@@ -1538,6 +1859,8 @@ def main() -> int:
                             conn,
                             query_vec=vec,
                             exclude_paths={c.get("source_path") for c in chunks},
+                            erasure_columns=erasure_columns,
+                            include_archived=include_archived,
                         )
                     except Exception as err:
                         print(f"resonance: query failed: {err}", file=sys.stderr)
@@ -1559,6 +1882,8 @@ def main() -> int:
                         top_k=args.content_top_k,
                         min_sim=args.content_min_sim,
                         scope_files=scope_files,
+                        erasure_columns=erasure_columns,
+                        include_archived=include_archived,
                     )
                 except Exception as err:
                     print(f"content: query failed: {err}", file=sys.stderr)
@@ -1582,6 +1907,8 @@ def main() -> int:
                         query_dates=query_dates,
                         top_k=args.date_top_k,
                         excerpt_chars=args.date_excerpt_chars,
+                        erasure_columns=erasure_columns,
+                        include_archived=include_archived,
                     )
                 except Exception as err:
                     print(f"date: query failed: {err}", file=sys.stderr)

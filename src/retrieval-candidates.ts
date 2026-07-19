@@ -29,6 +29,11 @@ const FIELD_BOOST = Object.freeze({
   broadMemoryPenalty: 1.4,
 });
 
+const LIFECYCLE_PENALTY = Object.freeze({
+  superseded: 8.0,
+  archived: 10.0,
+});
+
 const CANDIDATE_QUERY_STOPWORDS = new Set([
   "alright",
   "also",
@@ -205,6 +210,9 @@ function laneCandidate(item, lane, rank, terms, options) {
     reasons: [],
     kind: "",
     weighty: false,
+    archived: false,
+    archived_at: null,
+    superseded: false,
   };
 
   if (lane === "search") {
@@ -257,6 +265,12 @@ function laneCandidate(item, lane, rank, terms, options) {
     pushUnique(candidate.reasons, `date match${dates.length ? ` (${dates.join(", ")})` : ""}`);
   }
 
+  const archivedAt = text(item.archived_at);
+  candidate.archived_at = archivedAt || null;
+  candidate.archived = Boolean(item.archived || archivedAt);
+  candidate.superseded = Boolean(item.superseded);
+  if (candidate.superseded) pushUnique(candidate.reasons, "superseded");
+  if (candidate.archived) pushUnique(candidate.reasons, "archived");
   if (!candidate.reasons.length) candidate.reasons = [candidate.source];
 
   const evidence = fieldEvidence(terms, candidate, options.query);
@@ -310,6 +324,8 @@ function scoreCandidate(candidate, evidence, termCoverage, rank, options) {
     broadPenalty = finiteNumber(fieldBoost.broadMemoryPenalty);
   }
 
+  const lifecyclePenalty = (candidate.superseded ? LIFECYCLE_PENALTY.superseded : 0)
+    + (candidate.archived ? LIFECYCLE_PENALTY.archived : 0);
   const intent = options.intent || "general";
   let weightyAdjustment = 0;
   if (candidate.weighty) {
@@ -331,7 +347,8 @@ function scoreCandidate(candidate, evidence, termCoverage, rank, options) {
     + field_score
     + exact_score
     + weightyAdjustment
-    - broadPenalty;
+    - broadPenalty
+    - lifecyclePenalty;
   return {
     score,
     rrf_score: roundScore(rrf_score),
@@ -355,6 +372,9 @@ function mergeCandidateEvidence(existing, incoming) {
   existing.rrf_score = roundScore(existing.rrf_score + incoming.rrf_score);
   existing.source_prior = roundScore(existing.source_prior + incoming.source_prior);
   existing.exact_match = existing.exact_match || incoming.exact_match;
+  existing.archived = existing.archived || incoming.archived;
+  existing.archived_at = existing.archived_at || incoming.archived_at;
+  existing.superseded = existing.superseded || incoming.superseded;
 
   for (const source of incoming.sources) pushUnique(existing.sources, source);
   for (const lane of incoming.lanes) pushUnique(existing.lanes, lane);
@@ -407,6 +427,9 @@ function finalizeCandidate(candidate, terms, options) {
     exact_match: candidate.exact_match,
     kind: candidate.kind,
     weighty: candidate.weighty,
+    archived: Boolean(candidate.archived),
+    archived_at: candidate.archived_at || null,
+    superseded: Boolean(candidate.superseded),
     reasons: strings(candidate.reasons),
   };
 }

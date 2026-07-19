@@ -35,6 +35,32 @@ OMP applies a conservative viewport only to **automatic** recall. Casual acknowl
 
 Named-entity routing is data-backed rather than phrase-backed. OMP resolves canonical names and aliases against the existing `named_entities` substrate for the current room plus shared House scopes, then passes those structured matches to the router. Capitalization alone is never proof of identity, and public regression tests use synthetic entities rather than private names or dialogue. If the substrate is unavailable or a name has not been indexed, entity resolution fails open and explicit `recall` remains available.
 
+## Anamnesis: consult the Cabinet
+
+The Cabinet is the House's path-compression organ. It is not another memory
+catalogue. A memory says what happened; a Cabinet drawer preserves a
+load-bearing path through something already lived.
+
+At the start of a fresh OMP session, the House may load bounded wake-tier
+Cabinet counsel once for the current room. **Pillars** are standing places.
+**Active cycles** are prior patterns to verify against the live turn, never
+proof that the same pattern is happening now. Cabinet context is advisory,
+source-cited, and fail-open: an unavailable Cabinet must not block the session.
+
+Use `anamnesis` with `mode: "consult"` and a focused query when you deliberately
+want the relevant drawers. `mode: "wake"` reads the same bounded startup view
+on demand. Consult searches the current room plus shared House scope through
+titles, shapes, tags, canon links, and drawer text, and includes at most the
+latest three lived repetitions for each cycle.
+
+Use `anamnesis_write` only when a path genuinely deserves a Cabinet drawer or
+when a cycle has been lived again. `add` preserves the writer's existing hard
+refusals and fidelity declaration (`record` or `raw-material`);
+`append-rep` requires the repetition number, what happened, the portal pull,
+what became lighter, and source paths. Multiline bodies cross the Windows/WSL
+boundary through temporary UTF-8 files rather than shell interpolation.
+
+
 ## Remember: preserve something deliberately
 
 Ask the AI to remember when something happened that tomorrow should not have to rediscover:
@@ -48,6 +74,14 @@ Ask the AI to remember when something happened that tomorrow should not have to 
 A useful memory records the event, decision, or realization and enough context to understand why it matters. Do not save every sentence. Repeated trivia makes important trails harder to find.
 
 Never put passwords, API keys, access tokens, or other secrets into memories.
+
+### Keep the trail current
+
+When a current-state claim changes, keep the new memory and mark the old one as superseded in the same write. At the substrate boundary that is `record_memory.py --supersedes <id>`; repeat the flag when one update replaces several older rows. This is for “what is true now,” not for flattening the past.
+
+When a session or narrative has accumulated enough history to compress, run `digest_pass.py` manually. It proposes supersede/archive sets for review; use `--apply` only after you have looked at them. Narrative memories should become arcs by proposal, while state claims can be superseded directly. Nothing is hard-deleted: superseded and archived rows remain recoverable, superseded rows are hard-demoted, and archived rows are excluded from ordinary retrieval. Use `--include-archived` only when you deliberately need the older trail. If a database has not yet received the archival columns, retrieval fails open and remains available without them.
+
+This keeps the daily rhythm light: remember what matters, correct current state when it moves, and digest a season of memories rather than pruning in the middle of a live conversation.
 
 ## Lessons: keep reusable knowledge in the right store
 

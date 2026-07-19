@@ -2,6 +2,64 @@
 
 Most recent changes first.
 
+## 2026-07-18
+
+### Erasure and archival layer
+
+Migration 0024 adds nullable `memories.superseded_by`, `memories.archived_at`,
+and `named_entities.summary_as_of` columns. `record_memory.py --supersedes <id>`
+is repeatable, so a new current-state memory can mark every row it replaces as
+superseded in the same write. Retrieval hard-demotes superseded rows and
+excludes archived rows by default; `--include-archived` opts into the older
+trail. Missing archival columns fail open rather than making retrieval a boot
+requirement.
+
+`digest_pass.py` is a manual digestion pass. It proposes supersede/archive sets
+for review, and `--apply` executes only the sets a human accepts. Nothing is
+hard-deleted: erasure is ranking-death, not row-death. The state-vs-story rule
+is explicit: current-state claims may be superseded, while narrative memories
+are compressed into arcs by proposal rather than silently rewritten.
+
+### Retrieval evaluation harness
+
+The new `evals/` harness carries 45 golden queries mined from the live
+substrate. Run `bun evals/run-evals.ts` to score recall@1, recall@5, recall@10,
+MRR, and per-lane attribution. The 2026-07-18 baseline is recall@1 64.4%,
+recall@5 75.6%, recall@10 80.0%, and MRR 0.699. A post-erasure rerun showed no
+regression (MRR 0.691). If the embed endpoint is down, the harness fails open
+instead of turning unavailable embeddings into a false retrieval failure.
+
+## 2026-07-16
+
+### Anamnesis Cabinet runtime
+
+The previously seeded Anamnesis Cabinet is now connected to the Solarisael
+House runtime. The canonical core exposes `runAnamnesisQuery` with deterministic
+`wake` and `consult` modes scoped to the current room plus shared House scope.
+Wake returns wake pillars and active wake cycles; consult uses Postgres
+full-text, trigram, title, shape, tag, canon-link, and drawer-text evidence.
+Both modes are bounded and attach only the latest three cycle repetitions in
+chronological order.
+
+OMP now injects Cabinet wake counsel once per fresh session under the dedicated
+`solarisael-anamnesis-wake` custom type. It remains separate from paper-boat
+wake, suppresses duplicates, caps automatic context at 8,000 characters, and
+fails open. The injected framing distinguishes pillars from cycles and requires
+loaded cycle claims to be verified against the live turn.
+
+Manual `anamnesis` and approval-gated `anamnesis_write` tools provide explicit
+consultation and dedicated drawer/repetition writes without flattening the
+Cabinet into the generic `remember` registry. The adapter preserves the
+production writer's hard refusals, and all multiline drawer and repetition
+bodies now cross the Windows/WSL boundary through temporary UTF-8 files.
+
+Verification: Python compile checks passed; 53 canonical-core tests and 45 OMP
+adapter tests passed. Live Postgres wake and multi-term consult succeeded.
+Live writer `add` and `append-rep` dry runs accepted the file-backed bodies.
+A fresh-session runtime smoke observed one hidden, bounded Cabinet injection,
+same-session duplicate suppression, and a new wake in a second session.
+
+
 ## 2026-07-09
 
 ### AI-guided installation and first-room onboarding

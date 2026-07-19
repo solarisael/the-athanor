@@ -451,4 +451,44 @@ describe("fuseRetrievalCandidates", () => {
     expect(weighty.score).toBeGreaterThan(neutral.score);
     expect(weighty.matched_terms).toEqual(["2026", "07", "04"]);
   });
+  test("lifecycle flags survive fusion and demote superseded or archived rows", () => {
+    const candidates = fuseRetrievalCandidates({
+      searchCandidates: [
+        searchCandidate({
+          id: "memories:live",
+          source_path: "memory/live-state.md",
+          title: "Plugin retrieval roadmap",
+          score: 4,
+          reasons: ["live memory"],
+        }),
+        searchCandidate({
+          id: "memories:superseded",
+          source_path: "memory/old-state.md",
+          title: "Plugin retrieval roadmap",
+          score: 4,
+          superseded: true,
+          reasons: ["memory full-text"],
+        }),
+        searchCandidate({
+          id: "memories:archived",
+          source_path: "memory/archived-state.md",
+          title: "Plugin retrieval roadmap",
+          score: 4,
+          archived: true,
+          archived_at: "2026-07-18T00:00:00Z",
+          reasons: ["memory full-text"],
+        }),
+      ],
+    }, { query: QUERY, searchTerms: TERMS, maxResults: 3 });
+
+    expect(candidates[0].source_path).toBe("memory/live-state.md");
+    const superseded = candidateByPath(candidates, "memory/old-state.md");
+    const archived = candidateByPath(candidates, "memory/archived-state.md");
+    expect(superseded.superseded).toBe(true);
+    expect(superseded.reasons).toContain("superseded");
+    expect(archived.archived).toBe(true);
+    expect(archived.reasons).toContain("archived");
+    expect(candidates[0].score).toBeGreaterThan(superseded.score);
+    expect(candidates[0].score).toBeGreaterThan(archived.score);
+  });
 });

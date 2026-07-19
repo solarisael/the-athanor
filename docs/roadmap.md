@@ -1,6 +1,6 @@
 # Solarisael House Roadmap
 
-_Last updated: 2026-07-13_
+_Last updated: 2026-07-18_
 
 ## Product rule
 
@@ -44,6 +44,23 @@ Near-term hardening:
 - keep fused candidates covered by pure unit tests
 - use recall integration to prove the legacy arrays and fused contract stay compatible
 - prefer source-selection/query-routing work before adding more storage layers
+
+### Erasure and archival (built 2026-07-18)
+
+Erasure is ranking-death, never a hard delete. State claims follow the
+state-vs-story rule: a newer state claim may supersede an older one; narrative
+and session memories stay recoverable and are proposed for arc compression
+instead of being silently removed.
+
+Migration 0024 adds nullable `memories.superseded_by`, `memories.archived_at`,
+and `named_entities.summary_as_of`. Default retrieval excludes archived rows
+and strongly demotes superseded rows while preserving lifecycle flags and
+reasons. `--include-archived` keeps history reachable deliberately.
+
+`house/substrate/digest_pass.py` is manual and read-only by default. It reports
+stale state-claim pairs and dense same-thread session sediment. A human edits
+explicit `SUPERSEDE old -> new` or `ARCHIVE id` proposal lines, then
+`--apply` performs only those updates. No sleep/wake rite invokes the pass.
 
 ### Strengthen query parsing
 
@@ -208,8 +225,10 @@ tool had only one destination.
 `substrate.ts:writeLessonStore`). The four flat lesson scripts gained
 `--lesson-stdin` (mirrors `record_memory.py --body-stdin`) so lesson bodies
 cross the WSL boundary on stdin, never inline argv. Smoke-tested end to end
-with a hostile multiline body; round-trip byte-perfect. `record_cabinet_entry.py`
-deliberately excluded (subcommand-shaped; needs its own honest design).
+with a hostile multiline body; round-trip byte-perfect. The subcommand-shaped
+`record_cabinet_entry.py` remains outside the flat store registry by design.
+Its dedicated `anamnesis`/`anamnesis_write` runtime surfaces were built on
+2026-07-16, including bounded startup counsel and file-backed multiline writes.
 
 ### Near-term: cluster/vector resonance readout
 

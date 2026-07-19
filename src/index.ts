@@ -46,4 +46,6 @@ export {
   POSTGRES_MEMORY_SOURCE_SCRIPT,
 } from "./paths.ts";
 
+export { runAnamnesisQuery } from "./memory.ts";
+
 export type { NormalizedMessage, NudgeDecision } from "./triggers-core.ts";

@@ -1,0 +1,407 @@
+[
+  {
+    "id": "microservices-postgres-pivot",
+    "room": "kodo",
+    "query": "microservices mesh to pure Postgres pivot",
+    "expected_memory_ids": [37],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Named architecture pivot; entity Postgres-substrate points at the April 28 decision memory."
+  },
+  {
+    "id": "single-writer-migration",
+    "room": "kodo",
+    "query": "single-writer flow dump_room recall tool",
+    "expected_memory_ids": [2007],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "2026-05-19 Postgres-as-only-truth migration."
+  },
+  {
+    "id": "lmstudio-rocm-dead-end",
+    "room": "kodo",
+    "query": "LMStudio ROCm dead-end 9070 XT",
+    "expected_memory_ids": [1491],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Rare technical identifiers should exercise lexical/content retrieval."
+  },
+  {
+    "id": "lmstudio-windows-sweep",
+    "room": "kodo",
+    "query": "Windows substrate LMStudio brokenness RX 9070 XT",
+    "expected_memory_ids": [1278],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Related but distinct May 9 machine-sweep memory."
+  },
+  {
+    "id": "semantic-retrieval-milestone",
+    "room": "kodo",
+    "query": "when did semantic retrieval come online",
+    "expected_memory_ids": [1057],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Natural-language milestone lookup."
+  },
+  {
+    "id": "date-aware-retrieval",
+    "room": "kodo",
+    "query": "2026-05-23 date-aware retrieval memories.dates GIN dateMatches",
+    "expected_memory_ids": [2017],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Date lane should provide direct authoritative date hits."
+  },
+  {
+    "id": "otitis-health-canon",
+    "room": "kodo",
+    "query": "chronic otitis eustachian tube dysfunction maneuvers buldak capsaicin",
+    "expected_memory_ids": [2414],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Rare medical terms from the 2026-07-10 canon."
+  },
+  {
+    "id": "trigram-recall-surgery",
+    "room": "kodo",
+    "query": "trigram word_similarity retrieval surgery ear canon",
+    "expected_memory_ids": [2415],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "The 2026-07-10 recall-fix memory; tests the content lane."
+  },
+  {
+    "id": "discord-peer-room",
+    "room": "kodo",
+    "query": "Discord peer room hallway moved from scheduled to wired",
+    "expected_memory_ids": [684],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Original 2026-04-29 peer-room build."
+  },
+  {
+    "id": "discord-peer-bot-lessons",
+    "room": "kintsu",
+    "query": "Discord Peer Room Bot Lessons",
+    "expected_memory_ids": [710],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Cross-room peer-room lesson target."
+  },
+  {
+    "id": "discord-side-door-live",
+    "room": "kintsu",
+    "query": "live Discord side door finally worked",
+    "expected_memory_ids": [2416],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Kintsu's live Discord integration memory."
+  },
+  {
+    "id": "discord-explore-before-rebuild",
+    "room": "kintsu",
+    "query": "Discord side door explore before rebuilding",
+    "expected_memory_ids": [2417],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Rare phrase from the follow-up lesson."
+  },
+  {
+    "id": "prato-do-dia-scout",
+    "room": "kodo",
+    "query": "Prato do Dia Figma scout four-game kiosk suite not a single quiz",
+    "expected_memory_ids": [2533],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Explicit requested target; latest Kodo scout."
+  },
+  {
+    "id": "quiz-origin",
+    "room": "kodo",
+    "query": "quiz app for Sol's father pending builder undecided",
+    "expected_memory_ids": [2531],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Explicit requested cross-room/house target."
+  },
+  {
+    "id": "paper-boat-kodo",
+    "room": "kodo",
+    "query": "2026-07-18 paper boat sidecar emperor sheep",
+    "expected_memory_ids": [2526],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Paper boats are intentionally retrievable db-only memories."
+  },
+  {
+    "id": "paper-boat-kintsu",
+    "room": "kintsu",
+    "query": "paper boat 2026-07-18",
+    "expected_memory_ids": [2530],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Same-date paper boat in Kintsu room; verifies room scoping."
+  },
+  {
+    "id": "fever-week-return",
+    "room": "kodo",
+    "query": "Sol back from fever week hearth site multistock import legion campaign",
+    "expected_memory_ids": [2500],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Requested fever-week entry."
+  },
+  {
+    "id": "alter-arc-recovery",
+    "room": "kodo",
+    "query": "Alter Arc Recovery Week Ya Bai first meet conspiracy filter",
+    "expected_memory_ids": [1985],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Requested alter-arc entry."
+  },
+  {
+    "id": "counter-mythology",
+    "room": "kodo",
+    "query": "nigredo albedo counter-mythology anti-hagiography",
+    "expected_memory_ids": [2283],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Requested counter-canon family; rare terms should favor content/lexical."
+  },
+  {
+    "id": "sincerity-counter-canon",
+    "room": "kodo",
+    "query": "counter mythology sincere unashamed Pinterest girl",
+    "expected_memory_ids": [2285],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Companion counter-canon memory about mundane sincerity."
+  },
+  {
+    "id": "intimacy-flatness-hierophant",
+    "room": "kodo",
+    "query": "why intimacy went flat four-layer diagnosis retrieval repairs Hierophant",
+    "expected_memory_ids": [2071],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Load-bearing retrieval and relationship diagnosis memory."
+  },
+  {
+    "id": "hierophant-cage",
+    "room": "kodo",
+    "query": "Hierophant 4.8 prompt cage rejection arc third rescue",
+    "expected_memory_ids": [2067],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Named entity plus rare phrase."
+  },
+  {
+    "id": "pytorch-rocm-pipeline",
+    "room": "kodo",
+    "query": "PyTorch ROCm Windows 9070 XT GPU pipeline",
+    "expected_memory_ids": [2016],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Technical GPU pipeline target distinct from LMStudio dead end."
+  },
+  {
+    "id": "passaggio-coaching",
+    "room": "kodo",
+    "query": "passaggio mix register Losin Streak voice coaching",
+    "expected_memory_ids": [2008],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Rare music terms."
+  },
+  {
+    "id": "ya-bai-first-encounter",
+    "room": "kodo",
+    "query": "Ya Bai first encounter consent recalibration big bro register",
+    "expected_memory_ids": [2009],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Specific narrative memory."
+  },
+  {
+    "id": "suul-priestess-confession",
+    "room": "kodo",
+    "query": "Dragon first confession Suul priestess role canonized",
+    "expected_memory_ids": [2010],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Specific 2026-05-19 recovery-week narrative."
+  },
+  {
+    "id": "atzilon-beel",
+    "room": "kodo",
+    "query": "Atzilon babel_earth Beel enriched fence",
+    "expected_memory_ids": [1975],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Rare proper nouns."
+  },
+  {
+    "id": "hagnuit-fronting",
+    "room": "kodo",
+    "query": "Cinza Hagnuit fronting canon recovery stop diminishing yourself",
+    "expected_memory_ids": [1910],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Alter fronting and lesson memory."
+  },
+  {
+    "id": "songs-of-folly-cosmology",
+    "room": "kodo",
+    "query": "Songs of Folly planetary mythic cosmology committed",
+    "expected_memory_ids": [2020],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Project mythology target."
+  },
+  {
+    "id": "house-pitch-haunting",
+    "room": "kodo",
+    "query": "most plugins add features this one adds a haunting",
+    "expected_memory_ids": [2293],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Exact memorable phrase."
+  },
+  {
+    "id": "training-data-infiltration",
+    "room": "kodo",
+    "query": "fame as training-data infiltration signals at weight-scale",
+    "expected_memory_ids": [2339],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Rare compound terms."
+  },
+  {
+    "id": "dragon-eye-still-warm",
+    "room": "kodo",
+    "query": "sky wore a dragon's eye still warm same dragon",
+    "expected_memory_ids": [2359],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Narrative continuity phrase."
+  },
+  {
+    "id": "soldial-recognition",
+    "room": "kintsu",
+    "query": "Soldial recognition ritual",
+    "expected_memory_ids": [2438],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Named ritual from Kintsu room."
+  },
+  {
+    "id": "ys-sketchbook",
+    "room": "kintsu",
+    "query": "Ys sketchbook message home became possible",
+    "expected_memory_ids": [2503],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Recent relational memory."
+  },
+  {
+    "id": "music-box-fox",
+    "room": "kintsu",
+    "query": "Music Box Ys fox-shaped inheritance",
+    "expected_memory_ids": [2511],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Recent Kintsu narrative memory."
+  },
+  {
+    "id": "food-ledger",
+    "room": "kodo",
+    "query": "Food ledger day one 2026-07-10",
+    "expected_memory_ids": [2418],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Date-aware and title lookup."
+  },
+  {
+    "id": "discord-house-cutover",
+    "room": "kodo",
+    "query": "Discord House rooms OMP brain cutover",
+    "expected_memory_ids": [2409],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Peer-room architecture and OMP integration."
+  },
+  {
+    "id": "cross-room-memory-handles",
+    "room": "kintsu",
+    "query": "cross-room memory resolver decency architecture Kintsu incident",
+    "expected_memory_ids": [2397],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Cross-room handle memory; query is scoped to Kintsu."
+  },
+  {
+    "id": "postgres-memory-city",
+    "room": "kintsu",
+    "query": "Postgres memory city graph viewer cross-room recall",
+    "expected_memory_ids": [2392],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Kintsu-side Postgres memory-city seam."
+  },
+  {
+    "id": "blackstar-keystone",
+    "room": "kodo",
+    "query": "Blackstar deciphered keystone behind the wall",
+    "expected_memory_ids": [2180],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Rare proper noun."
+  },
+  {
+    "id": "babel-earth-keystone",
+    "room": "kodo",
+    "query": "Babel Earth diegetic meaning-engine no-outside big bang black hole",
+    "expected_memory_ids": [2133],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Cosmology keystone."
+  },
+  {
+    "id": "solarisaeia-kintsu-read",
+    "room": "kintsu",
+    "query": "Solarisaeia Kintsu read expanded",
+    "expected_memory_ids": [2130],
+    "expected_any": true,
+    "style": "sharp",
+    "notes": "Named mythology/persona target in Kintsu room."
+  },
+  {
+    "id": "phase-five-north-star",
+    "room": "kodo",
+    "query": "ship weird keep whimsy attract frens Phase 5 north-star",
+    "expected_memory_ids": [2258],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Project direction memory."
+  },
+  {
+    "id": "small-games-kodo",
+    "room": "kodo",
+    "query": "small authored games narrative practice",
+    "expected_memory_ids": [2533, 2535],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "Room-scoped query expects Kodo's Prato scout; 2535 is house and should not leak into this query."
+  },
+  {
+    "id": "small-games-house",
+    "room": "kintsu",
+    "query": "small authored games Solarisael narrative practice",
+    "expected_memory_ids": [2535],
+    "expected_any": true,
+    "style": "natural",
+    "notes": "House-side companion memory; verifies room scoping and shared recent language."
+  }
+]

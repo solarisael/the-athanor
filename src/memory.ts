@@ -745,6 +745,43 @@ export function recallRouteSkipArgs(queryRoute) {
   return args;
 }
 
+
+export async function runAnamnesisQuery(roomDir, roomName, options = {}) {
+  const effectiveRoomDir = path.resolve(String(roomDir || process.cwd()));
+  const resolvedRoom = String(roomName || path.basename(effectiveRoomDir) || "").toLowerCase();
+  const requestedMode = options?.mode;
+  const mode = requestedMode === "consult" ? "consult" : requestedMode === "wake" || requestedMode == null ? "wake" : String(requestedMode);
+  if (mode !== "wake" && mode !== "consult") {
+    return { ok: false, mode, entries: [], warnings: [`invalid anamnesis mode: ${mode}`] };
+  }
+  const warnings = [];
+  if (!normalizeRoomName(resolvedRoom)) {
+    return { ok: false, mode, entries: [], warnings: [`unknown room: ${resolvedRoom}`] };
+  }
+  const limitValue = Number(options?.limit);
+  const limit = Number.isFinite(limitValue) ? Math.max(1, Math.min(50, Math.floor(limitValue))) : undefined;
+  const query = typeof options?.query === "string" ? options.query : "";
+  if (mode === "consult" && !query.trim()) {
+    return { ok: false, mode, entries: [], warnings: ["consult requires a non-empty query"] };
+  }
+  const args = [
+    "--room-dir", windowsPathToWsl(effectiveRoomDir),
+    "--room", resolvedRoom,
+    "--mode", "anamnesis",
+    "--anamnesis-view", mode,
+  ];
+  if (mode === "consult") args.push("--anamnesis-query", query);
+  if (limit !== undefined) args.push("--anamnesis-limit", String(limit));
+  const fetched = await spawnPostgresSource(effectiveRoomDir, args, "");
+  if (!fetched.ok) return { ok: false, mode, entries: [], warnings: [fetched.error || "anamnesis source failed"] };
+  const data = fetched.data || {};
+  return {
+    ok: data.ok !== false,
+    mode,
+    entries: Array.isArray(data.entries) ? data.entries : [],
+    warnings: [...warnings, ...(Array.isArray(data.warnings) ? data.warnings : [])],
+  };
+}
 export async function runRecallQuery(roomDir, roomName, query) {
   const effectiveRoomDir = path.resolve(String(roomDir || process.cwd()));
   const resolvedRoom = (roomName || path.basename(effectiveRoomDir) || "").toLowerCase();

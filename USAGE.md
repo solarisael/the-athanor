@@ -123,7 +123,7 @@ Use the `remember` tool with `kind: "coding-lesson"`. The tool writes a logical 
 
 | Tool field | Meaning | Guidance |
 |---|---|---|
-| `title` | Stable, short lesson name | Required. Reusing the same title within the same scope and project updates that lesson rather than creating a duplicate. |
+| `title` | Stable, short lesson name | Required for new lessons. `remember` writes a new row; use guarded `update_lesson` with the row's numeric ID and exact current title to revise an existing lesson without changing its identity. |
 | `body` | The actual engineering rule | Required. State the action, boundary, and reason plainly; Markdown is allowed. |
 | `shape` | Retrieval taxonomy | Use a compact reusable category such as `process`, `testing`, `naming`, `tooling`, `security`, or `refusal`. Prefer an existing shape when one fits. |
 | `scope` | Who should receive it | `shared` makes it available across rooms; a room key keeps it local to that room. Omitted scope defaults to `shared`. |
@@ -189,7 +189,9 @@ The OMP hygiene extension observes successful path-bearing exploration tools suc
 
 Lesson retrieval is a task boundary, not an every-turn ritual. Refresh when the observed project changes or a new operation needs different lesson shapes. After verified work, store only a genuinely reusable coding rule or exact-project constraint; do not automatically turn the session transcript into lessons.
 
-The destructive `delete_lesson` tool removes one coding or project lesson only when both its numeric ID and exact current title match. Use it to retire obsolete rules deliberately, never for broad cleanup.
+The guarded `update_lesson` tool revises one coding or project lesson in place only when both its numeric ID and exact current title match. It requires at least one explicit patch field, preserves every omitted field—including `negation_of`—and never changes the row ID. Use `clearNegationOf` only when deliberately removing a coding lesson's formal negation link.
+
+The destructive `delete_lesson` tool removes one coding or project lesson only when both its numeric ID and exact current title match. Use it to retire obsolete rules deliberately, never for broad cleanup. When consolidating lessons, update the survivor first and verify its stable ID before deleting the redundant row.
 
 ## Sleep: cast a paper boat
 

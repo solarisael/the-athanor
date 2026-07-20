@@ -2,6 +2,26 @@
 
 Most recent changes first.
 
+## 2026-07-20
+### Guarded lesson updates
+
+Coding and project lessons now have an explicit `update_lesson` operation that
+preserves the row ID. Updates require the numeric ID and exact current title,
+lock the row before mutation, accept only allowlisted patch fields, and preserve
+every omitted field—including formal negation links. Lesson bodies cross the
+Windows/WSL boundary through stdin. The previous same-title update claim was
+removed from `remember` documentation because new writes do not provide an
+identity-preserving update contract.
+
+
+### OMP lesson-store routing repair
+
+The OMP `remember` lesson branch now imports its store registry and argument
+builder explicitly. Previously, ordinary memory writes succeeded while every
+typed lesson write reached an undefined `REMEMBER_STORES` symbol at runtime.
+A focused adapter regression executes the lesson branch through store
+validation so registration-only tests cannot miss this failure again.
+
 ## 2026-07-18
 
 ### Erasure and archival layer

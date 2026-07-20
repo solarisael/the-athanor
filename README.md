@@ -32,6 +32,8 @@ You forgot what you built again, didn't you? Fine:
 - **Local embedding generation** for semantic memory search without sending the private memory archive to a hosted embedding service
 - **Persistent PostgreSQL memory substrate** with structured memories, metadata, entities, dates, threads, relationships, provenance, and source paths
 - **Hybrid retrieval** across lexical, semantic, content, entity, date, taxonomy, and cluster-assisted search
+- **Graceful memory erasure** through recoverable supersession, archival, and reviewed digestion: stale state loses retrieval authority without deleting the historical trail
+- **Measured retrieval quality** through a golden-query evaluation harness reporting recall@1/5/10, MRR, and per-lane attribution so retrieval changes are judged by evidence rather than vibes
 - **Model-independent AI identities** stored as persistent rooms rather than tied to a particular model, provider, chat, or context window
 - **Layered context architecture** separating stable identity, compact live-session context, recent continuity, and deep on-demand memory
 - **Automatic conversation logging** with session-aware continuity and compact startup context

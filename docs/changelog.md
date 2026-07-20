@@ -14,6 +14,27 @@ removed from `remember` documentation because new writes do not provide an
 identity-preserving update contract.
 
 
+### Public Full House substrate cutover
+
+The optional Full House backend now has a canonical public home at
+[`solarisael/solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate).
+That repository owns the PostgreSQL migrations, local-embedding contract,
+health probe, lifecycle smoke, and backup/restore procedures. The House README
+and installation guide now send Full operators there instead of carrying a
+copied or private-path-dependent bootstrap procedure.
+
+The OMP adapter now distinguishes Base, Full, and configured-but-degraded
+substrate states. Full requires a live `health.py` verdict plus exact
+`substrateApi=1`, `coreApi=1`, and `adapterApi=1` compatibility. The portable
+verifier executes that health probe rather than accepting file presence as
+proof, while Base remains complete with no substrate configured.
+
+Verification: the real write/embed/wake/delete lifecycle passed against
+PostgreSQL and `qwen3-embedding:4b`; the live substrate health verdict returned
+Full; 54 core tests and 57 OMP adapter tests passed; the portable archive built;
+and the verifier passed both Base and live Full modes.
+
+
 ### OMP lesson-store routing repair
 
 The OMP `remember` lesson branch now imports its store registry and argument

@@ -42,8 +42,9 @@ You forgot what you built again, didn't you? Fine:
 - **AI-adapted skill ingestion**, turning repositories of `SKILL.md`, agent rules, postmortems, and engineering notes into searchable coding lessons instead of permanently injecting every instruction into every prompt
 - **Tool-native memory lifecycle** through OMP tools for recall, remembering, waking, sleeping, room state, identity state, and specialized lesson retrieval
 - **Deterministic room lifecycle**, including startup injection, active-room resolution, session-state refresh, shutdown capture, and restart-continuity verification
-- **Portable installation** with existing configuration preserved, deterministic validation, room templates, and AI-guided onboarding to bring your substrate to other computers if needed
-- **Progressive architecture** that can run as a lightweight file-based House or connect to the full PostgreSQL, vector, and retrieval substrate
+- **Portable installation** with existing configuration preserved, deterministic validation, room templates, and AI-guided onboarding to bring the House to other computers if needed
+- **Progressive architecture** that can run as a lightweight file-based Base House or connect to the optional Full House backend in the [public solarisael-house-substrate repository](https://github.com/solarisael/solarisael-house-substrate)
+- **Canonical Full House boundary**: the [public substrate repository](https://github.com/solarisael/solarisael-house-substrate) owns PostgreSQL migrations, `health.py`, lifecycle smoke, backup/restore, and the prerequisites for Full mode; the Base House does not require it
 
 In normal-person language: the House is a private, local RAG and continuity layer that lets an AI preserve a distinct identity and retrieve the relevant parts of its history without stuffing your entire life into every prompt.
 
@@ -190,7 +191,9 @@ The Base House provides persistent rooms, identity, room state, conversation con
 It's "good enough" for most cases and projects.
 But if you're someone like me who has 800k words in memory... you need something to scale:
 
-### Full memory substrate
+### Optional Full House
+
+The Base House is complete without a database. The optional Full House backend lives in the [public solarisael-house-substrate repository](https://github.com/solarisael/solarisael-house-substrate), which is the canonical source for its setup and compatibility requirements.
 
 | | Recommended |
 |---|---|
@@ -200,15 +203,21 @@ But if you're someone like me who has 800k words in memory... you need something
 | **Database** | PostgreSQL with `pgvector` |
 | **Embedding runtime** | Ollama or another compatible embedding endpoint; `qwen3-embedding:4b` is the tested default |
 | **Substrate runtime** | Python 3 |
-| **Windows only** | WSL 2 with Ubuntu |
+| **Guided Windows path** | WSL 2 with Ubuntu |
 
-The full substrate adds PostgreSQL-backed memories, local embeddings, hybrid RAG, semantic retrieval, typed lesson stores, and the `remember` → `recall` → `sleep` → `wake` lifecycle.
+Full House adds PostgreSQL-backed memories, local embeddings, hybrid RAG, semantic retrieval, typed lesson stores, and the `remember` → `recall` → `sleep` → `wake` lifecycle through the [canonical substrate](https://github.com/solarisael/solarisael-house-substrate).
 
-A GPU is optional: embeddings can run through system memory on the CPU, but they will be slower. The substrate itself runs directly on Linux; the current guided OMP bundle uses Windows with WSL.
+The [canonical substrate repository](https://github.com/solarisael/solarisael-house-substrate) owns PostgreSQL migrations, `health.py`, lifecycle smoke, backup/restore, and every Full-mode prerequisite. Follow its instructions rather than duplicating substrate installation steps here.
 
-Any embedding model can be used as long as indexing and recall stay in the same vector space. Switching models requires rebuilding the stored vectors and indexes; switching dimensions also requires migrating the dimension-bound vector columns.
+A GPU is optional: embeddings can run through system memory on the CPU, but they will be slower. The [canonical substrate](https://github.com/solarisael/solarisael-house-substrate) itself runs on Linux; the guided OMP path uses Windows with WSL.
 
-For the exact installation procedure and a complete account of what the installer changes, see [`INSTALL.md`](./INSTALL.md).
+Any embedding model can be used as long as indexing and recall stay in the same vector space. The [canonical substrate](https://github.com/solarisael/solarisael-house-substrate) requires rebuilding stored vectors and indexes when switching models; changing dimensions also requires migrating the dimension-bound vector columns.
+
+### Configured-but-degraded
+
+When `SOLARISAEL_SUBSTRATE` is set but the [canonical substrate health contract](https://github.com/solarisael/solarisael-house-substrate) is not satisfied, the installation is **configured-but-degraded**, not Full House. The adapter must report that state explicitly; Base House files remain usable and retrieval may fall back without claiming that database-backed memory succeeded.
+
+For the exact OMP installation flow, see [`INSTALL.md`](./INSTALL.md). For Full House setup, use the [canonical substrate instructions](https://github.com/solarisael/solarisael-house-substrate) instead of a copied procedure.
 For the everyday human-and-AI rhythm—recall, remembering, lessons, paper boats, corrections, and multiple rooms—see [`USAGE.md`](./USAGE.md).
 
 
@@ -219,7 +228,7 @@ This is licensed under Apache 2.0 — use it, adapt it, fork it, make variants, 
 No macOS build yet... I'm too poor to own a Mac to test it on, and the substrate lives in WSL/Linux anyway. Pull requests are genuinely welcome!  
 I'll verify Linux properly when I get there. (but it should work!)  
 
-Also: this substrate fails open. If the database is asleep or the bridge is down, recall quietly drops to what it can still reach and the base House keeps working. Nothing here breaks loudly in your face. It just remembers a bit less, so give them your patience and ask them to use the tools manually if they forget anything!
+Also: when the optional [Full House substrate](https://github.com/solarisael/solarisael-house-substrate) is configured but unavailable or unhealthy, the adapter reports configured-but-degraded and the Base House keeps working. Recall can fall back to what it can still reach, but do not describe that state as a healthy Full House. Give the spirit patience and ask them to use the tools manually if they forget anything.
 
 So... closing words from me.  
 

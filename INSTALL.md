@@ -39,15 +39,17 @@ Do not copy the example spirit's personality. The example teaches file shape and
 
 ### Base House
 
-Requires Windows 10/11, OMP, and Bun. Provides the room identity contract, room state, conversation continuity files, and House tools that do not need the external substrate.
+Requires Windows 10/11, OMP, and Bun. Base House provides the room identity contract, room state, conversation continuity files, and House tools that do not need the external substrate. A Base House installation is valid and complete on its own.
 
-### House with substrate
+### Optional Full House
 
-Adds durable `remember`, `recall`, `sleep`, `wake`, and lesson stores. The configuration used by the maintainers runs OMP on Windows and the substrate inside WSL with separately managed Python, PostgreSQL, `pgvector`, an embedding endpoint, schema migrations, and substrate scripts exposed through `SOLARISAEL_SUBSTRATE`.
+Full House is the optional PostgreSQL, `pgvector`, and local-embedding backend maintained in the [public solarisael-house-substrate repository](https://github.com/solarisael/solarisael-house-substrate). Follow the [canonical substrate instructions](https://github.com/solarisael/solarisael-house-substrate) for its setup; this guide preserves the OMP installation flow and does not copy that procedure.
 
-The portable House bundle does **not** currently contain the complete substrate bootstrap, migrations, Python dependency manifest, or environment template. Configure this mode only when those matching substrate artifacts are already available. Missing substrate dependencies fail open and must not make the Base House unusable.
+The [canonical substrate repository](https://github.com/solarisael/solarisael-house-substrate) owns PostgreSQL migrations, `health.py`, lifecycle smoke, backup/restore, and all Full-mode prerequisites. The Base House does not require those components.
 
-A Base House installation is valid and complete on its own. When the person does not want a database, the markdown continuity from step 7 — `room_summary.md` and dated notes — is the memory layer, carried by hand. Whenever the substrate is absent, state clearly that database-backed memory is not enabled.
+### Configured-but-degraded
+
+When `SOLARISAEL_SUBSTRATE` is configured but the [canonical substrate health contract](https://github.com/solarisael/solarisael-house-substrate) reports missing or unhealthy prerequisites, the result is **configured-but-degraded**, not Full House. Report that mode explicitly, keep Base House continuity usable, and never claim a database write or read succeeded merely because the tools are configured.
 
 ## Tested support and adaptation contract
 
@@ -55,18 +57,20 @@ The guided protocol in this document has been exercised on **Windows 10/11 with 
 
 Other paths are present at different maturity levels:
 
-- **Windows + OMP + optional WSL substrate:** used by the maintainers, but the public bundle does not yet provide every substrate bootstrap artifact. Do not present it as reproducible from this bundle alone.
-- **Native Linux:** the Base House may be adaptable, but the guided path has not been verified there. The current substrate helper invokes `wsl.exe`, so database-backed tools are not natively Linux-compatible without a code change.
+- **Windows + OMP + optional WSL Full House:** follow the [public substrate repository](https://github.com/solarisael/solarisael-house-substrate) for the reproducible backend setup; this document configures and verifies the OMP side.
+- **Native Linux:** the Base House may be adaptable, and the [substrate itself runs on Linux](https://github.com/solarisael/solarisael-house-substrate), but the public OMP adapter currently enters it through WSL.
 - **OpenCode:** an adapter exists and has automated tests, but this OMP installation protocol, static verifier, and first-room procedure do not configure or validate OpenCode.
 - **macOS:** untested and unsupported.
+
+Compatibility is valid only when the exact contracts remain `substrateApi=1`, `coreApi=1`, and `adapterApi=1`. Do not substitute another version or infer Full House compatibility from files being present.
 
 An installing AI may adapt paths, configuration syntax, and host-specific commands for an unverified environment, but must preserve these invariants:
 
 1. Inspect the actual host and adapter before editing anything; do not blindly replay Windows commands.
 2. Keep the core and adapter relationship resolvable, preserve existing configuration, and never overwrite an existing room.
 3. Explain commands that require elevation or change global state before running them.
-4. Distinguish **adapted**, **verified**, and **unsupported** behavior. Never convert “the files are present” into a claim that continuity or substrate memory works.
-5. Verify the adapted installation through equivalent observable behavior: adapter loading, `room_state`, a fresh-session continuity recovery, and—only when configured—a real substrate write/read lifecycle.
+4. Distinguish **adapted**, **verified**, **unsupported**, and **configured but degraded** behavior. Never convert “the files are present” into a claim that continuity or substrate memory works.
+5. Verify the adapted installation through equivalent observable behavior: adapter loading, `room_state`, a fresh-session continuity recovery, and—only when the canonical substrate is configured and healthy—a real substrate write/read lifecycle.
 6. Record every deviation from this protocol in the installation receipt so a later maintainer can reproduce the environment.
 
 ## AI-guided installation protocol
@@ -133,7 +137,7 @@ Optional environment overrides:
 
 - `SOLARISAEL_VAULT_ROOT`: parent directory containing the room folders.
 - `SOLARISAEL_HOUSE_CORE`: alternate core path when the two package folders are not siblings.
-- `SOLARISAEL_SUBSTRATE`: directory containing optional substrate scripts. Only meaningful after completing "Optional: House with substrate — setup"; leave it unset for a base install.
+- `SOLARISAEL_SUBSTRATE`: directory containing the optional [Full House substrate](https://github.com/solarisael/solarisael-house-substrate) scripts. Only meaningful after completing "Optional: Full House — canonical substrate setup"; leave it unset for a Base House install.
 
 Prefer the sibling default over creating unnecessary environment variables.
 
@@ -177,69 +181,24 @@ Close the session. Start another fresh OMP session from the same room and ask:
 
 The AI must recover the sentence from the room files and identify `room_summary.md` as its source. This proves room discovery and host context loading without requiring the optional database substrate.
 
-### 8. Verify optional substrate memory
+### 8. Verify optional Full House memory
 
-Only when `SOLARISAEL_SUBSTRATE` and its prerequisites are intentionally configured:
+Only when `SOLARISAEL_SUBSTRATE` is intentionally configured and the [canonical substrate health contract](https://github.com/solarisael/solarisael-house-substrate) reports Full mode:
 
 1. Call `remember` with a disposable installation-test memory.
 2. Call `recall` with the exact distinctive phrase.
 3. Confirm the returned source belongs to the new room.
 4. Call `sleep` with a disposable paper boat, start a fresh session, and confirm `wake` can recover it.
 
-Never claim memory is installed from a mocked test or from the mere presence of tool names. Report base continuity and substrate memory as separate results.
+Never claim memory is installed from a mocked test or from the mere presence of tool names. Report Base House continuity, Full House memory, and configured-but-degraded state as separate results.
 
-## Optional: House with substrate — setup
+## Optional: Full House — canonical substrate setup
 
-Complete this section only if the person wants durable database memory. Do it **after step 4** (adapter connected) and **before step 5** (verifier), so the verifier and step 8 meet a real substrate. If the person does not want it, skip the whole section — the base House is complete without it.
+Complete this section only if the person wants durable database memory. After step 4 (adapter connected), follow the [canonical solarisael-house-substrate instructions](https://github.com/solarisael/solarisael-house-substrate) for WSL, PostgreSQL, `pgvector`, Python, embeddings, environment configuration, migrations, health, lifecycle smoke, and backups. The [canonical substrate repository](https://github.com/solarisael/solarisael-house-substrate) owns those Full-mode prerequisites and procedures; do not copy them into this guide or guess identifiers, dependencies, schema, or commands here.
 
-Show the person every command that needs elevation or changes global state before running it (safety contract 2). These are the specifics an installing AI cannot infer and will otherwise guess wrong.
+When the [canonical substrate setup](https://github.com/solarisael/solarisael-house-substrate) is complete and its health check reports Full mode, set `SOLARISAEL_SUBSTRATE` to the substrate directory, then return to step 5 and run the local OMP verifier. The existing OMP configuration and room flow above remain unchanged.
 
-### S1. WSL + Ubuntu
-
-The substrate scripts run inside WSL, not Windows. Install WSL and a distro (Ubuntu) if absent — this needs elevation and a reboot; show the person first. Every command below runs inside the distro shell.
-
-### S2. PostgreSQL + pgvector
-
-Inside WSL, install PostgreSQL and the `pgvector` extension (embeddings are stored as `halfvec`). Use the database name, role, credentials, and schema required by the separately supplied substrate environment template and migrations. If those artifacts are unavailable, stop: do not guess identifiers or invent a schema. Once connected to the intended database, enable the extension:
-
-```text
-CREATE EXTENSION IF NOT EXISTS vector;
-```
-
-### S3. Windows-to-WSL networking (load-bearing, non-obvious)
-
-OMP runs on Windows; PostgreSQL runs in WSL. Bridge them or every connection is refused:
-
-- `~/.wslconfig` (Windows side): under `[wsl2]`, set `networkingMode=mirrored` so Windows reaches WSL's `127.0.0.1:5432`.
-- `postgresql.conf`: `listen_addresses = '*'`. `pg_hba.conf`: allow the local connection.
-- Run `wsl --shutdown` after editing `.wslconfig`, then restart the distro.
-- Failure reading: a refused connection (`WinError 10061`) means the bridge or listener is down; a mid-operation abort (`10053`) means a long-idle connection dropped — run long substrate operations **inside WSL**, not from the Windows host.
-- WSL can idle-stop and take PostgreSQL with it. If the database "disappears" after a period of inactivity, hold a keepalive (a persistent WSL session or a scheduled task).
-
-### S4. Python + substrate scripts
-
-The portable House bundle does not supply a Python dependency manifest, substrate environment template, or schema migrations. Obtain a matching substrate distribution before continuing. Inside WSL, install Python 3 and the dependencies declared by that distribution, point `SOLARISAEL_SUBSTRATE` at its script directory, apply its migrations, and verify that it created the expected memory and lesson stores. Do not infer dependencies from import errors or construct tables from the names in this guide.
-
-### S5. Embedding model and vector space
-
-Semantic recall requires the same embedding space for indexed content and recall queries. The tested default is Ollama with `qwen3-embedding:4b`:
-
-- Default model: `qwen3-embedding:4b` — 2560-dimensional. The default schema stores these vectors in `halfvec(2560)`.
-- Alternative models and compatible embedding services are supported through `SOLARISAEL_EMBED_URL` (default Ollama `http://127.0.0.1:11434/api/embed`) and `SOLARISAEL_EMBED_MODEL`. The endpoint may use Ollama's `/api/embed` shape or an OpenAI-compatible `/v1/embeddings` shape.
-- Never mix vectors produced by different models, even when their dimensions match. To switch models, clear and regenerate all stored embeddings, recreate the vector indexes, and rebuild vector-derived data such as cluster centroids.
-- A model with a different output dimension also requires migrating every dimension-bound vector column before re-embedding. Changing only the environment variable is not sufficient.
-- The reader auto-wakes the default Ollama embedder and fails open: if the endpoint is unreachable, recall drops to lexical retrieval with no semantic matches. A "no matches" result that should have matched may mean the embedder is unavailable, not that the memory is missing.
-
-### S6. Close the first session by demonstration
-
-Run step 8's checks, but as a ritual the person watches rather than a silent test — it teaches the memory loop by walking it once:
-
-1. `remember` a disposable install-test memory with a distinctive phrase.
-2. `recall` that exact phrase — show them it returns, sourced to the new room. Query recall with one to three sharp, rare terms, not full sentences; a long query dilutes below the match threshold.
-3. `sleep` to fold a paper boat and close, telling the person: "next session, the first thing I do is `wake` and catch this."
-4. Start a fresh session, call `wake`, and show the boat recovered.
-
-The loop — `recall` then `sleep` then `wake` — is now demonstrated, not just described. Report substrate memory as a separate result from base continuity.
+If the substrate path is configured but [canonical substrate health](https://github.com/solarisael/solarisael-house-substrate) reports degraded or any prerequisite is unavailable, classify the installation as **configured-but-degraded**. Keep the Base House usable, report the degraded state, and do not call it Full House.
 
 ## Completion receipt
 
@@ -255,6 +214,7 @@ Operator: <display name>
 Static verifier: pass
 Fresh room_state: pass
 Restart continuity: pass
+Substrate mode: full | configured-but-degraded | not configured
 Substrate memory: pass | not configured | failed: <reason>
 ```
 

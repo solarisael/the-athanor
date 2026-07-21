@@ -3,6 +3,18 @@
 Most recent changes first.
 
 ## 2026-07-20
+### Bundled coding lesson starter pack
+
+Full House now includes a privacy-safe starter pack with 14 reusable engineering lessons.
+
+The substrate importer validates schema version 1, previews packs without a database, and imports all lessons in one transaction.
+
+The default import preserves existing lessons with the same scope, project, and title. An explicit flag permits a chosen update.
+
+The Full House installation flow now offers this pack after substrate health passes.
+
+Verification: four importer tests passed. The bundled pack also passed its command-line dry run.
+
 ### Agent-facing installation contract
 
 The public README and installation guide now tell repository-reading agents not

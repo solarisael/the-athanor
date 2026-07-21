@@ -60,6 +60,10 @@ Full House stores:
 
 Supersession removes stale retrieval authority without deleting the historical record.
 
+Full House includes an optional privacy-safe starter pack with 14 reusable coding lessons.
+
+The installer can preview the pack before import. The default import preserves lessons with the same scope, project, and title.
+
 ### Local semantic search
 
 Full House generates embeddings through a local endpoint. The tested default is `qwen3-embedding:4b` through Ollama.

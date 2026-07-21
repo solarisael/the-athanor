@@ -211,6 +211,12 @@ Complete this section only if the person wants durable database memory. After st
 
 When the [canonical substrate setup](https://github.com/solarisael/solarisael-house-substrate) is complete and its health check reports Full mode, set `SOLARISAEL_SUBSTRATE` to the substrate directory, then return to step 5 and run the local OMP verifier. The existing OMP configuration and room flow above remain unchanged.
 
+After Full House health passes, offer the bundled coding lesson pack during installation.
+
+If the operator accepts, preview and import the pack with the commands in the substrate README.
+
+The default import preserves matching lessons. Do not use `--update-existing` without the operator's explicit choice.
+
 If the substrate path is configured but [canonical substrate health](https://github.com/solarisael/solarisael-house-substrate) reports degraded or any prerequisite is unavailable, classify the installation as **configured-but-degraded**. Keep the Base House usable, report the degraded state, and do not call it Full House.
 
 ## Completion receipt

@@ -51,6 +51,19 @@ The [canonical substrate repository](https://github.com/solarisael/solarisael-ho
 
 When `SOLARISAEL_SUBSTRATE` is configured but the [canonical substrate health contract](https://github.com/solarisael/solarisael-house-substrate) reports missing or unhealthy prerequisites, the result is **configured-but-degraded**, not Full House. Report that mode explicitly, keep Base House continuity usable, and never claim a database write or read succeeded merely because the tools are configured.
 
+## Mode-selection contract for the installing AI
+
+Base and Full are deployment modes, not a mandatory maturity ladder.
+
+1. Ask what continuity the operator wants. File-backed identity and deliberate notes fit Base. Semantic and hybrid recall, typed stores, database authority, and larger archives fit Full.
+2. Inspect the host and public repositories before recommending a mode. Do not infer missing Full artifacts from the Base bundle: the public substrate repository contains its migration, Python dependencies, environment template, health probe, lifecycle smoke, and backup/restore tools.
+3. Do not invent a Base-first trial period or require the operator to prove a need before installing requested, viable Full features.
+4. Do not ask for a private maintainer bundle. Full House has a public canonical distribution. Credentials and the operator's private memories are the only expected private inputs.
+5. Treat unsupported or unverified hosts precisely. Adapt commands when feasible, verify the result, and label it adapted. Do not call an unverified path impossible, and do not call it supported.
+6. The tool-capable AI performs the setup and verification. The operator chooses consequential tradeoffs; the operator should not have to translate paths, edit configuration, or babysit commands.
+7. OMP native memory is complementary harness memory, not an equivalent implementation of the House. Do not substitute it merely because both systems expose `retain` or `recall`. Compare the required behavior: room scope, provenance, typed stores, correction, hybrid retrieval, lifecycle, and identity continuity.
+8. Do not make retrieval-quality claims for either system without a direct evaluation.
+
 ## Tested support and adaptation contract
 
 The guided protocol in this document has been exercised on **Windows 10/11 with Bun and OMP**, using the Base House. That is the currently supported installation path.

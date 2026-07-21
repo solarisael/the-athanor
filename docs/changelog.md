@@ -3,6 +3,64 @@
 Most recent changes first.
 
 ## 2026-07-20
+### Agent-facing installation contract
+
+The public README and installation guide now tell repository-reading agents not
+to default to Base House merely because Full has more prerequisites, invent a
+trial period, ask for a private maintainer bundle, or treat OMP native memory as
+an equivalent replacement from feature-name overlap. The operator chooses the
+desired capability and consequential tradeoffs. The installing AI owns command
+translation, configuration, execution, and verification.
+
+The canonical substrate README now states its public distribution boundary
+explicitly: migrations, Python dependencies, environment template, health
+probe, lifecycle smoke, memory tools, and backup/restore are public.
+
+Two independent agent interpretations of the revised README selected no Base
+default, no private bundle, AI-owned setup, and no native-memory equivalence.
+
+### Daily-use recall measurement
+
+Tuner now opts into room-local recall telemetry. Each real production turn
+records the actual compact recall viewport, route, suppression diagnostics,
+session ID, and a SHA-256 message join key under `.omp/runtime/`. Raw user text
+is not duplicated; the existing OMP session log remains authoritative.
+
+`run-daily-usage.ts` joins those records to real session turns, with a room-local
+prompt-hash fallback for runtimes that omit the session ID. Its replay mode uses
+the saved conversation prefix and captured viewport while disabling tools to
+prevent future filesystem leakage. Reports and sealed mappings remain in the
+private room runtime directory. Sol or an explicitly delegated blinded reviewer
+provides the final judgment.
+
+No daily-use score is reported until post-instrumentation turns exist and Sol
+has judged enough blind pairs.
+
+### Synthetic single-turn memory diagnostic
+
+The new scenario runner exercises production query routing, recall lanes,
+compaction, and automatic viewport filtering. It then uses an isolated answer
+call and a separate rubric-based judge call to attribute missing evidence,
+stale claims, unsupported claims, and selection failures.
+
+This runner is not the primary memory-quality measurement. It does not reproduce
+normal Solarisael use: it omits the real conversation prefix, disables tools,
+forces JSON citations, asks synthetic memory questions, and prevents the model
+from deciding to use explicit recall or other tools. Its results are useful as a
+viewport diagnostic only.
+
+The former exact-memory-ID benchmark is now
+`run-id-ranking-evals.ts` with `legacy-id-ranking-queries.json`. Its recall@k
+and MRR values measure historical-row ranking only. They do not measure memory
+quality. The previously reported 76.9% recall@1 and 94.9% recall@10 values are
+therefore withdrawn as quality claims.
+
+The first synthetic run used six scenarios and 39 answer-plus-judge trials. Its
+6/18 full-recall pass count and 0/18 no-recall count are retained in the report
+for diagnostic audit, but withdrawn as daily-use quality figures. Both answer
+and judge invocations used `openai-codex/gpt-5.6-sol`.
+
+
 ### Guarded lesson updates
 
 Coding and project lessons now have an explicit `update_lesson` operation that
@@ -61,14 +119,14 @@ hard-deleted: erasure is ranking-death, not row-death. The state-vs-story rule
 is explicit: current-state claims may be superseded, while narrative memories
 are compressed into arcs by proposal rather than silently rewritten.
 
-### Retrieval evaluation harness
+### Legacy historical-row ranking harness
 
-The new `evals/` harness carries 45 golden queries mined from the live
-substrate. Run `bun evals/run-evals.ts` to score recall@1, recall@5, recall@10,
-MRR, and per-lane attribution. The 2026-07-18 baseline is recall@1 64.4%,
-recall@5 75.6%, recall@10 80.0%, and MRR 0.699. A post-erasure rerun showed no
-regression (MRR 0.691). If the embed endpoint is down, the harness fails open
-instead of turning unavailable embeddings into a false retrieval failure.
+The original `evals/` harness carries 45 queries pinned to historical database
+row IDs. It is retained as `bun evals/run-id-ranking-evals.ts` for narrow
+ranking diagnostics. The checked-in 2026-07-18 output remains a historical
+artifact, not a memory-quality baseline. Exact-row recall@k and MRR cannot
+account for supersession, evolving authority, automatic multi-lane context, or
+the model's final evidence decision.
 
 ## 2026-07-16
 

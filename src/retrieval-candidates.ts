@@ -381,6 +381,15 @@ function mergeCandidateEvidence(existing, incoming) {
   for (const reason of incoming.reasons) pushUnique(existing.reasons, reason);
   for (const term of incoming.matched_terms) pushUnique(existing.matched_terms, term);
 
+  existing.id ||= incoming.id;
+  existing.source_table ||= incoming.source_table;
+  existing.source_id ||= incoming.source_id;
+  existing.room ||= incoming.room;
+  existing.title ||= incoming.title;
+  existing.heading_path ||= incoming.heading_path;
+  existing.excerpt ||= incoming.excerpt;
+  existing.source_path ||= incoming.source_path;
+
   if (incoming.best_lane_score <= existing.best_lane_score) return;
 
   existing.best_lane_score = incoming.best_lane_score;

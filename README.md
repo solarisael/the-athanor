@@ -2,7 +2,22 @@
 
 A local-first continuity and memory system for AI companions and collaborators.
 
-Solarisael House gives a tool-capable AI a persistent room, stable identity, and searchable history. It retrieves relevant context without placing the complete memory archive in every prompt.
+> [!IMPORTANT]
+> **Give this repository to a tool-capable AI. The AI performs the installation.**
+>
+> Do not judge Solarisael House as a pre-compiled installer. It is an adaptable plugin and configuration framework.
+>
+> The AI inspects the current harness, operating system, paths, runtime, and database support.
+>
+> The AI then adapts the House to that environment, preserves compatible configuration, and verifies the installed behavior.
+
+The operator chooses the desired continuity and accepts consequential tradeoffs. The AI owns command translation, configuration, execution, and verification.
+
+Read [`INSTALL.md`](./INSTALL.md) for the AI-guided installation contract.
+
+Read [`USAGE.md`](./USAGE.md) for practical examples of project work, recall, lessons, and daily operation.
+
+Solarisael House gives an AI a persistent room, stable identity, and searchable history. It retrieves relevant context without loading the complete archive.
 
 The project supports two deployment modes:
 
@@ -60,7 +75,7 @@ Full House stores:
 
 Supersession removes stale retrieval authority without deleting the historical record.
 
-Full House includes an optional privacy-safe starter pack with 14 reusable coding lessons.
+Full House includes an optional privacy-safe library with 117 reusable coding lessons and no project lessons.
 
 The installer can preview the pack before import. The default import preserves lessons with the same scope, project, and title.
 

@@ -142,25 +142,13 @@ describe("fuseRetrievalCandidates", () => {
     }
   });
 
-  function expectComplementaryDuplicateFusion(searchCandidates) {
-    const candidates = fuseRetrievalCandidates({
+  function fuseDuplicatePair(searchCandidates, options = {}) {
+    return fuseRetrievalCandidates({
       searchCandidates,
-    }, { query: QUERY, searchTerms: TERMS });
-
-    expect(candidates.length).toBe(1);
-    const fused = candidates[0];
-    expect(fused.source).toBe("entity");
-    expect(fused.id).toBe("entities:score-owner");
-    expect(fused.excerpt).toBe("Useful retrieval roadmap evidence from the lower-scored duplicate.");
-    expect(fused.sources).toEqual(expect.arrayContaining(["entity", "memory"]));
-    expect(fused.reasons).toEqual(expect.arrayContaining([
-      "higher-scored entity",
-      "lower-scored excerpt",
-    ]));
-    expect(fused.matched_terms).toEqual(expect.arrayContaining(TERMS));
+    }, { query: QUERY, searchTerms: TERMS, ...options });
   }
 
-  test("keeps a lower-scored useful excerpt when the higher-scored empty duplicate arrives first", () => {
+  test("fuses unequal-score duplicates identically in either order and transfers the complete owner", () => {
     const higherScoredEmpty = searchCandidate({
       id: "entities:score-owner",
       source: "entity",
@@ -172,7 +160,9 @@ describe("fuseRetrievalCandidates", () => {
       excerpt: "",
       score: 10,
       matched_terms: ["plugin"],
-      reasons: ["higher-scored entity"],
+      reasons: ["z-owner reason", "higher-scored entity"],
+      kind: "person",
+      weighty: true,
     });
     const lowerScoredUseful = searchCandidate({
       id: "memories:excerpt",
@@ -183,39 +173,76 @@ describe("fuseRetrievalCandidates", () => {
       excerpt: "Useful retrieval roadmap evidence from the lower-scored duplicate.",
       score: 0.1,
       matched_terms: ["roadmap"],
-      reasons: ["lower-scored excerpt"],
+      reasons: ["lower-scored excerpt", "a-supplement reason"],
+      kind: "memory",
+      weighty: false,
     });
 
-    expectComplementaryDuplicateFusion([higherScoredEmpty, lowerScoredUseful]);
+    const forward = fuseDuplicatePair([higherScoredEmpty, lowerScoredUseful]);
+    const reversed = fuseDuplicatePair([lowerScoredUseful, higherScoredEmpty]);
+    expect(forward).toEqual(reversed);
+    expect(forward).toHaveLength(1);
+    expect(forward[0]).toMatchObject({
+      source: "entity",
+      id: "entities:score-owner",
+      kind: "person",
+      weighty: true,
+      excerpt: "Useful retrieval roadmap evidence from the lower-scored duplicate.",
+      sources: ["entity", "memory"],
+      lanes: ["search"],
+      matched_terms: TERMS,
+      reasons: [
+        "a-supplement reason",
+        "higher-scored entity",
+        "lower-scored excerpt",
+        "z-owner reason",
+      ],
+    });
   });
 
-  test("keeps deterministic score ownership when the lower-scored useful duplicate arrives first", () => {
-    const higherScoredEmpty = searchCandidate({
-      id: "entities:score-owner",
+  test("uses the total owner tie-breaker for exact reversed equality when duplicate scores tie", () => {
+    const entity = searchCandidate({
+      id: "entities:equal-owner",
       source: "entity",
       source_table: "entities",
-      source_id: "score-owner",
-      source_path: "memory/shared-duplicate.md",
-      title: "Higher-scored duplicate",
-      heading_path: "",
-      excerpt: "",
-      score: 10,
-      matched_terms: ["plugin"],
-      reasons: ["higher-scored entity"],
+      source_id: "equal-owner",
+      source_path: "memory/equal-duplicate.md",
+      title: "Equal duplicate",
+      score: 4,
+      matched_terms: ["roadmap", "plugin"],
+      reasons: ["entity evidence"],
+      kind: "person",
+      weighty: false,
     });
-    const lowerScoredUseful = searchCandidate({
-      id: "memories:excerpt",
+    const memory = searchCandidate({
+      id: "memories:equal-owner",
       source: "memory",
-      source_path: "memory/shared-duplicate.md",
-      title: "",
-      heading_path: "",
-      excerpt: "Useful retrieval roadmap evidence from the lower-scored duplicate.",
-      score: 0.1,
-      matched_terms: ["roadmap"],
-      reasons: ["lower-scored excerpt"],
+      source_table: "memories",
+      source_id: "equal-owner",
+      source_path: "memory/equal-duplicate.md",
+      title: "Equal duplicate",
+      score: 4,
+      matched_terms: ["plugin", "roadmap"],
+      reasons: ["memory evidence"],
+      kind: "memory",
+      weighty: false,
     });
+    const options = { sourcePriors: { entity: 0, memory: 0 } };
 
-    expectComplementaryDuplicateFusion([lowerScoredUseful, higherScoredEmpty]);
+    const forward = fuseDuplicatePair([entity, memory], options);
+    const reversed = fuseDuplicatePair([memory, entity], options);
+    expect(forward).toEqual(reversed);
+    expect(forward).toHaveLength(1);
+    expect(forward[0]).toMatchObject({
+      source: "entity",
+      id: "entities:equal-owner",
+      source_table: "entities",
+      kind: "person",
+      weighty: false,
+      sources: ["entity", "memory"],
+      matched_terms: TERMS,
+      reasons: ["entity evidence", "memory evidence"],
+    });
   });
 
   test("ranks multi-term exact title and path evidence ahead of a broad one-term content hit", () => {

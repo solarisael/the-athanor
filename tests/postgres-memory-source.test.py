@@ -167,6 +167,51 @@ class AuthorityFilterTests(unittest.TestCase):
             date_where.index("m.dates &&"),
         )
 
+    def test_active_cluster_resonance_rebuilds_centroids_from_authoritative_members(self):
+        profile_row = {
+            "id": 7,
+            "label": "active cluster",
+            "member_count": 2,
+            "activation": 0.75,
+        }
+        active = FakeConnection([profile_row], [])
+        result = MEMORY_SOURCE.load_cluster_resonance(
+            active,
+            query_vec=[0.1, 0.2],
+            top_clusters=1,
+            erasure_columns=COLUMNS,
+        )
+
+        self.assertEqual(result["profile"][0]["cluster_id"], 7)
+        profile_sql = active.executions[0][0]
+        self.assertIn("avg(c.body_embedding) AS centroid", profile_sql)
+        self.assertIn("JOIN memory_cluster_members mm", profile_sql)
+        self.assertIn("JOIN memories m ON m.id = c.memory_id", profile_sql)
+        self.assertIn("m.archived_at IS NULL", profile_sql)
+        self.assertIn("m.superseded_by IS NULL", profile_sql)
+        self.assertLess(
+            profile_sql.index("m.archived_at IS NULL"),
+            profile_sql.index("GROUP BY clusters.id"),
+        )
+        self.assertLess(
+            profile_sql.index("m.superseded_by IS NULL"),
+            profile_sql.index("GROUP BY clusters.id"),
+        )
+
+        historical = FakeConnection([profile_row], [])
+        MEMORY_SOURCE.load_cluster_resonance(
+            historical,
+            query_vec=[0.1, 0.2],
+            top_clusters=1,
+            erasure_columns=COLUMNS,
+            include_historical=True,
+        )
+        historical_sql = historical.executions[0][0]
+        self.assertIn("FROM memory_clusters", historical_sql)
+        self.assertIn("1 - (centroid <=>", historical_sql)
+        self.assertNotIn("JOIN memory_cluster_members", historical_sql)
+
+
 
 class HistoricalOutputTests(unittest.TestCase):
     def assert_historical_contract(self, item, *, scored=False):

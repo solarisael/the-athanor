@@ -109,6 +109,20 @@ function strings(value) {
   return out;
 }
 
+function compareText(left, right) {
+  const a = text(left);
+  const b = text(right);
+  return a < b ? -1 : (a > b ? 1 : 0);
+}
+
+function canonicalStrings(value) {
+  return strings(value).sort(compareText);
+}
+
+function canonicalTextChoice(...values) {
+  return canonicalStrings(values)[0] || "";
+}
+
 function pushUnique(list, value) {
   const normalized = text(value);
   if (normalized && !list.includes(normalized)) list.push(normalized);
@@ -215,6 +229,8 @@ function laneCandidate(item, lane, rank, terms, options) {
     superseded: false,
   };
 
+  candidate.owner_score = 0;
+
   if (lane === "search") {
     candidate.id = text(item.id);
     candidate.source = text(item.source) || "search";
@@ -289,6 +305,7 @@ function laneCandidate(item, lane, rank, terms, options) {
     exact_match: evidence.exact_match,
     score: scoreParts.score,
     best_lane_score: scoreParts.score,
+    owner_score: scoreParts.owner_score,
     raw_score: roundScore(candidate.raw_score),
     rrf_score: scoreParts.rrf_score,
     source_prior: scoreParts.source_prior,
@@ -340,9 +357,8 @@ function scoreCandidate(candidate, evidence, termCoverage, rank, options) {
     }
   }
 
-  const score = prior
+  const owner_score = prior
     + candidate.raw_score
-    + rrf_score
     + (termCoverage * 6)
     + field_score
     + exact_score
@@ -350,7 +366,8 @@ function scoreCandidate(candidate, evidence, termCoverage, rank, options) {
     - broadPenalty
     - lifecyclePenalty;
   return {
-    score,
+    score: owner_score + rrf_score,
+    owner_score,
     rrf_score: roundScore(rrf_score),
     source_prior: roundScore(prior),
   };
@@ -366,14 +383,44 @@ function candidateKey(candidate) {
   return `anon:${candidate.source}:${candidate.title}:${candidate.heading_path}`;
 }
 
+function compareCandidateOwner(left, right) {
+  const scoreOrder = finiteNumber(right.owner_score) - finiteNumber(left.owner_score);
+  if (scoreOrder) return scoreOrder;
+
+  const textFields = [
+    "source",
+    "lane",
+    "id",
+    "source_table",
+    "source_id",
+    "room",
+    "title",
+    "source_path",
+    "heading_path",
+    "excerpt",
+    "kind",
+    "archived_at",
+  ];
+  for (const field of textFields) {
+    const order = compareText(left[field], right[field]);
+    if (order) return order;
+  }
+
+  return Number(right.weighty) - Number(left.weighty);
+}
+
 function mergeCandidateEvidence(existing, incoming) {
+  const existingOwns = compareCandidateOwner(existing, incoming) <= 0;
+  const owner = existingOwns ? existing : incoming;
+  const supplement = existingOwns ? incoming : existing;
+
   existing.score += incoming.score;
   existing.raw_score = roundScore(existing.raw_score + incoming.raw_score);
   existing.rrf_score = roundScore(existing.rrf_score + incoming.rrf_score);
   existing.source_prior = roundScore(existing.source_prior + incoming.source_prior);
   existing.exact_match = existing.exact_match || incoming.exact_match;
   existing.archived = existing.archived || incoming.archived;
-  existing.archived_at = existing.archived_at || incoming.archived_at;
+  existing.archived_at = canonicalTextChoice(existing.archived_at, incoming.archived_at) || null;
   existing.superseded = existing.superseded || incoming.superseded;
 
   for (const source of incoming.sources) pushUnique(existing.sources, source);
@@ -381,27 +428,20 @@ function mergeCandidateEvidence(existing, incoming) {
   for (const reason of incoming.reasons) pushUnique(existing.reasons, reason);
   for (const term of incoming.matched_terms) pushUnique(existing.matched_terms, term);
 
-  existing.id ||= incoming.id;
-  existing.source_table ||= incoming.source_table;
-  existing.source_id ||= incoming.source_id;
-  existing.room ||= incoming.room;
-  existing.title ||= incoming.title;
-  existing.heading_path ||= incoming.heading_path;
-  existing.excerpt ||= incoming.excerpt;
-  existing.source_path ||= incoming.source_path;
-
-  if (incoming.best_lane_score <= existing.best_lane_score) return;
-
-  existing.best_lane_score = incoming.best_lane_score;
-  existing.id = incoming.id || existing.id;
-  existing.source = incoming.source;
-  existing.source_table = incoming.source_table || existing.source_table;
-  existing.source_id = incoming.source_id || existing.source_id;
-  existing.room = incoming.room || existing.room;
-  existing.title = incoming.title || existing.title;
-  existing.heading_path = incoming.heading_path || existing.heading_path;
-  existing.excerpt = incoming.excerpt || existing.excerpt;
-  existing.source_path = incoming.source_path || existing.source_path;
+  existing.best_lane_score = owner.best_lane_score;
+  existing.owner_score = owner.owner_score;
+  existing.id = owner.id || supplement.id;
+  existing.source = owner.source;
+  existing.lane = owner.lane;
+  existing.source_table = owner.source_table || supplement.source_table;
+  existing.source_id = owner.source_id || supplement.source_id;
+  existing.room = owner.room || supplement.room;
+  existing.title = owner.title || supplement.title;
+  existing.heading_path = owner.heading_path || supplement.heading_path;
+  existing.excerpt = owner.excerpt || supplement.excerpt;
+  existing.source_path = owner.source_path || supplement.source_path;
+  existing.kind = owner.kind;
+  existing.weighty = owner.weighty;
 }
 
 function finalizeCandidate(candidate, terms, options) {
@@ -409,7 +449,11 @@ function finalizeCandidate(candidate, terms, options) {
     ...FIELD_BOOST,
     ...(options.fieldBoosts || {}),
   };
-  const matched_terms = strings(candidate.matched_terms);
+  const matchedTermSet = new Set(strings(candidate.matched_terms));
+  const matched_terms = [
+    ...terms.filter((term) => matchedTermSet.has(term)),
+    ...canonicalStrings([...matchedTermSet].filter((term) => !terms.includes(term))),
+  ];
   const term_coverage = terms.length ? matched_terms.length / terms.length : 0;
   const source_count_score = Math.max(0, candidate.sources.length - 1)
     * finiteNumber(fieldBoost.sourceCount);
@@ -417,8 +461,8 @@ function finalizeCandidate(candidate, terms, options) {
   return {
     id: candidate.id,
     source: candidate.source,
-    sources: candidate.sources,
-    lanes: candidate.lanes,
+    sources: canonicalStrings(candidate.sources),
+    lanes: canonicalStrings(candidate.lanes),
     source_table: candidate.source_table,
     source_id: candidate.source_id,
     room: candidate.room,
@@ -432,14 +476,14 @@ function finalizeCandidate(candidate, terms, options) {
     source_prior: roundScore(candidate.source_prior),
     term_coverage: roundScore(term_coverage),
     matched_terms,
-    missing_terms: terms.filter((term) => !matched_terms.includes(term)),
+    missing_terms: terms.filter((term) => !matchedTermSet.has(term)),
     exact_match: candidate.exact_match,
     kind: candidate.kind,
     weighty: candidate.weighty,
     archived: Boolean(candidate.archived),
     archived_at: candidate.archived_at || null,
     superseded: Boolean(candidate.superseded),
-    reasons: strings(candidate.reasons),
+    reasons: canonicalStrings(candidate.reasons),
   };
 }
 

@@ -997,10 +997,12 @@ def load_cluster_resonance(
 ):
     """Cluster-activation profile over the memory space (2026-07-09 roadmap).
 
-    Cosine activation of the prompt embedding against stored cluster
-    centroids (migration 0023), plus the nearest member chunks per top
-    cluster that the semantic pass did NOT already surface — the "dormant
-    hot" regions the reply is near but not using.
+    Active retrieval recomputes each centroid from currently visible members so
+    archived or superseded memories cannot influence activation or ranking.
+    Explicit historical retrieval may use the stored all-history centroids.
+    The nearest member chunks per top cluster that the semantic pass did NOT
+    already surface are the "dormant hot" regions the reply is near but not
+    using.
 
     Telemetry, not testimony: this reports what the memory space finds near
     the conversation — never model-internal state (unavailable on API models).
@@ -1013,17 +1015,36 @@ def load_cluster_resonance(
         include_archived=include_archived,
         include_historical=include_historical,
     )
-    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-        cur.execute(
-            """
+    if include_historical:
+        profile_sql = """
             SELECT id, label, member_count,
                    1 - (centroid <=> %s::halfvec) AS activation
             FROM memory_clusters
             WHERE centroid IS NOT NULL
-            ORDER BY activation DESC
-            """,
-            (literal,),
-        )
+            ORDER BY activation DESC, id ASC
+        """
+    else:
+        profile_sql = f"""
+            SELECT id, label, member_count,
+                   1 - (centroid <=> %s::halfvec) AS activation
+            FROM (
+                SELECT clusters.id, clusters.label,
+                       count(*) AS member_count,
+                       avg(c.body_embedding) AS centroid
+                FROM memory_clusters clusters
+                JOIN memory_cluster_members mm ON mm.cluster_id = clusters.id
+                JOIN memory_chunks c ON c.id = mm.chunk_id
+                JOIN memories m ON m.id = c.memory_id
+                WHERE {memory_filter}
+                  AND {RETRIEVAL_VISIBILITY_SQL}
+                  AND c.body_embedding IS NOT NULL
+                GROUP BY clusters.id, clusters.label
+            ) visible_clusters
+            ORDER BY activation DESC, id ASC
+        """
+
+    with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+        cur.execute(profile_sql, (literal,))
         rows = cur.fetchall()
         profile = [
             {

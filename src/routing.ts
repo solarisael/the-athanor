@@ -67,7 +67,7 @@ export const WORKER_LANES: Record<WorkerLaneName, WorkerLane> = {
   "smol-scout": {
     name: "smol-scout",
     description: "Cheap bounded read-only scout for exact terrain mapping.",
-    ompAgent: "explore",
+    ompAgent: "scout",
     modelRole: "pi/smol",
     tools: ["read", "grep", "glob", "ast_grep"],
     canEdit: false,

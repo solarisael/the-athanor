@@ -40,6 +40,7 @@ describe("worker lane mappings", () => {
     const tester = getWorkerLane("tester");
 
     expect(scout && resolveDispatchModel(scout)).toBe("smol");
+    expect(scout?.ompAgent).toBe("scout");
     expect(tester && resolveDispatchModel(tester)).toBe("default");
     expect(tester && resolveDispatchModel(tester, "provider/custom-model")).toBe("provider/custom-model");
   });

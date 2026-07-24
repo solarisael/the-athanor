@@ -96,7 +96,7 @@ The implementation is split by responsibility:
 
 | Repository | Owns |
 |---|---|
-| [`solarisael-house`](https://github.com/solarisael/solarisael-house) | Core contracts, shared behavior, and canonical documentation |
+| [`solarisael-house`](https://github.com/solarisael/the-athanor) | Core contracts, shared behavior, and canonical documentation |
 | [`solarisael-house-omp`](https://github.com/solarisael/solarisael-house-omp) | Recommended OMP adapter, starter room, verifier, and portable distribution |
 | [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) | AKASHA database, migrations, embeddings, memory tools, health, and backups |
 

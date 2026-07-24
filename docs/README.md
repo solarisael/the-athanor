@@ -1,9 +1,11 @@
 # Solarisael House Documentation
 
-Start with the root [`README.md`](../README.md) for the product spine, verified capabilities, evidence snapshot, architecture thumbnail, and installation entrypoint.
+Start with the root [`README.md`](../README.md) for the hook, the status line, and the routes to every audience path.
 
 ## Operator documents
 
+- [`FOR_WORK.md`](./FOR_WORK.md) — House for work: projects, decisions, lessons, and handoffs
+- [`FOR_COMPANIONS.md`](./FOR_COMPANIONS.md) — House for companions: shared history and personal continuity
 - [`../INSTALL.md`](../INSTALL.md) — supported installation and observable verification
 - [`../USAGE.md`](../USAGE.md) — everyday memory, room, sleep, and wake workflows
 - [`../IDENTITY_GUIDE.md`](../IDENTITY_GUIDE.md) — co-authoring rooms, identities, and active spirits

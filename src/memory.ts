@@ -7,7 +7,7 @@
 //   important  (named_entities matches via regex word-boundary)
 //   sync       (lexical thread ranks, top 3 by score)
 //   deferred   (prior turn's prefetch queue, re-scored against this prompt)
-//   semantic   (qwen3-embedding:4b cosine over memory_chunks, top 5)
+//   semantic   (Nemotron-3-Embed-1B cosine over memory_chunks, top 5)
 //
 // Split 2026-06-10 along the two natural seams:
 //   memory-sources.ts — postgres spawn wrappers + JSON-index fallback

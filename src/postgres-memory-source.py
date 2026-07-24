@@ -84,10 +84,11 @@ def resolve_room_name(room: str | None, room_dir: Path) -> str:
 # is automatic in embed_query.
 DEFAULT_EMBED_URL = os.environ.get(
     "SOLARISAEL_EMBED_URL",
-    os.environ.get("SOLARISAEL_LMSTUDIO_URL", "http://127.0.0.1:11434/api/embed"),
+    os.environ.get("SOLARISAEL_LMSTUDIO_URL", "http://127.0.0.1:11435/api/embed"),
 )
 DEFAULT_EMBED_MODEL = os.environ.get(
-    "SOLARISAEL_EMBED_MODEL", "qwen3-embedding:4b"
+    "SOLARISAEL_EMBED_MODEL",
+    "hf.co/zenmagnets/Nemotron-3-Embed-1B-Q4_K_M-GGUF:latest",
 )
 DEFAULT_SEMANTIC_TOP_K = 5
 DEFAULT_SEMANTIC_MIN_SIM = 0.40
@@ -921,7 +922,7 @@ def load_cluster_resonance(
         cur.execute(
             f"""
             SELECT mc.id, mc.label, COUNT(DISTINCT mm.chunk_id) AS member_count,
-                   1 - (mc.centroid <=> %s::halfvec) AS activation
+                   1 - (mc.centroid <=> %s::vector) AS activation
             FROM memory_clusters mc
             JOIN memory_cluster_members mm ON mm.cluster_id = mc.id
             JOIN memory_chunks c ON c.id = mm.chunk_id
@@ -950,7 +951,7 @@ def load_cluster_resonance(
             cur.execute(
                 f"""
                 SELECT m.source_path, c.heading_path,
-                       1 - (c.body_embedding <=> %s::halfvec) AS sim
+                       1 - (c.body_embedding <=> %s::vector) AS sim
                 FROM memory_cluster_members mm
                 JOIN memory_chunks c ON c.id = mm.chunk_id
                 JOIN memories m ON m.id = c.memory_id
@@ -1064,7 +1065,7 @@ def embed_query(prompt: str, url: str, model: str) -> list[float] | None:
     Fail-open: any exception (timeout, JSON parse, model unavailable) returns
     None. Caller skips semantic retrieval and returns empty list.
     """
-    body = json.dumps({"model": model, "input": prompt}).encode("utf-8")
+    body = json.dumps({"model": model, "input": f"query: {prompt}"}).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=body,
@@ -1104,7 +1105,7 @@ def load_semantic_chunks(
     erasure_columns: dict[str, bool] | None = None,
     include_archived: bool = False,
 ) -> list[dict]:
-    """Return top-K halfvec nearest-neighbors from `memory_chunks` for the rooms.
+    """Return top-K vector nearest-neighbors from `memory_chunks` for the rooms.
 
     Computes ``1 - (body_embedding <=> $vec)`` as cosine similarity. Filters by
     ``min_sim``. Returns a list of dicts ready for the TypeScript caller to
@@ -1155,11 +1156,11 @@ def load_semantic_chunks(
                mc.char_start,
                mc.char_end,
                {erasure_select(erasure_columns)},
-               1 - (mc.body_embedding <=> %s::halfvec) AS sim
+               1 - (mc.body_embedding <=> %s::vector) AS sim
         FROM memory_chunks mc
         JOIN memories m ON m.id = mc.memory_id
         WHERE {where}
-        ORDER BY mc.body_embedding <=> %s::halfvec
+        ORDER BY mc.body_embedding <=> %s::vector
         LIMIT %s
     """
     with conn.cursor(cursor_factory=DICT_CURSOR_FACTORY) as cur:
@@ -1555,7 +1556,7 @@ def main() -> int:
         "--semantic-top-k",
         type=int,
         default=DEFAULT_SEMANTIC_TOP_K,
-        help=f"Max halfvec neighbors to return (default {DEFAULT_SEMANTIC_TOP_K}).",
+        help=f"Max vector neighbors to return (default {DEFAULT_SEMANTIC_TOP_K}).",
     )
     parser.add_argument(
         "--semantic-min-sim",
@@ -1573,7 +1574,7 @@ def main() -> int:
     parser.add_argument(
         "--embed-model",
         default=DEFAULT_EMBED_MODEL,
-        help="Embedding model id (Ollama tag like 'qwen3-embedding:4b' or LMStudio model name).",
+        help="Embedding model id (Ollama tag or OpenAI-compatible model name).",
     )
     parser.add_argument(
         "--substrate-dir",

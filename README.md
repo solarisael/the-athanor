@@ -1,50 +1,72 @@
-# Solarisael House
+# The Athanor - Solarisael's House
 
-Solarisael House is a local-first continuity and memory system for AI agents that need to persist across sessions, models, providers, and harnesses.
+**one install. eats your whole AI stack.**
+The Athanor is an obsessively made and maintained piece of machinery with the purpose to be an omega-giga-universal extension to any AI harness and workspace.
+Obsidian vault mapping to AI waifu grooming to government agency level ontology and surveillance: it serves all purposes from average joes and pretentious san fran residents to weebs to big corpos. **(disclaimer: potential limited by your skill level)**
 
-Sessions end. Models and providers change. Context windows fill. Solarisael House keeps identity, decisions, corrections, important memories, and project history outside any one model session so an agent can return with the evidence needed to continue.
+**Status:** 0.9.x operational late beta. 1.0.0 comes when the GUI is finished. OMEGA mode planned for 1.1.0
 
-**Status: 0.9.x operational late beta.** The verified Rust-first cutover is complete: Rust now owns the shared contracts and authoritative Full House memory process, while the OMP lifecycle adapter remains TypeScript. Supported ordinary-user installation defines 1.0.
+## What The House changes
 
-## What House changes
+> If your application depends on agents repeatedly burning tokens to rediscover the same solution through nondeterministic reasoning, you are being fleeced by the AI companies.
+>
+> Agents should handle uncertainty, exploration, and exceptions. Once a behavior becomes understood and repeatable, capture it in deterministic code, API/CLI, tools, or workflows.
+>
+> The goal is not to eliminate agents. It is to stop paying for the same cognition over and over again.
+>
+> Tokens should fund discovery, not rent-seeking on already-solved problems.
+>
+> — @joezunenet, some random youtube commenter who is also the wisest man one can only find by pure chance.
 
-Without durable continuity, every new session spends context reconstructing the past. Summaries flatten detail, stale statements survive corrections, and important decisions disappear into old transcripts.
+everyone thinks markdown files are a reliable memory system or skills folders are unfallible magicks. 
+meanwhile they spend their tokens rereading it all every single time their ai wakes up and by that point the output has already committed quality suicide as the context passes the 50% limit degradation cap.
 
-House gives the operator a persistent room with separate layers for identity, current state, recent context, and deep memory. It retrieves only the evidence relevant to the current turn, preserves where that evidence came from, and keeps changed truths from competing forever with the record they replaced.
+House retrieves the evidence relevant to the current turn, keeps its source attached, and lets changed truths replace old ones without pretending history never happened. one lonely guy's room becomes a hallway of rooms, then slowly or rapidly grows into institutional memory. 
 
-For work, House carries project decisions, conventions, lessons, corrections, and handoffs across sessions and harnesses.
+For work, The Athanor carries project decisions, conventions, lessons, corrections, and handoffs across sessions and AI systems.
 
-For personal continuity, House keeps important memories and shared history available across restarts, model changes, and provider changes. The room belongs to the operator, not to one model endpoint.
+For personal continuity, The Athanor keeps important memories and shared history available across restarts, model changes, and provider changes. The room belongs to the operator, not to one model endpoint.
+
+And that's just what's running today. In the pipeline:
+
+- **the Curios cabinet** — your AI notices a hunch it can't prove yet and shelves it instead of forgetting it or hallucinating it into fact. months later, new evidence resonates, the curio comes back for review, and your AI gets an actual AHA moment. hunches can't promote themselves to truth — they have to earn it.
+- **Hippocampus** — memories and lessons get noticed while life happens, not when someone remembers to write them down.
+- **the Hallway** — private rooms exchange letters and shared state without merging into one blob-personality. your work spirit and your home spirit can talk without becoming each other.
+- **Vault → AKASHA upgrade** — start with plain readable files, upgrade to full hybrid retrieval later, and your old file memories get the same retrieval citizenship as the new ones. no second-class memory.
+
+full map with honest status labels in [`PLANNED_FEATURES.md`](./docs/PLANNED_FEATURES.md) — Specified means the contract exists, Planned means roadmap, Research means we're not lying to you about it being ready.
 
 ## Capabilities
 
-| Capability | Base | Full |
-|---|:---:|:---:|
-| Persistent rooms and identity contracts | Yes | Yes |
-| Restart continuity and room-local context | Yes | Yes |
-| Multiple isolated rooms | Yes | Yes |
-| Conversation logging and compact handoffs | Yes | Yes |
-| PostgreSQL memory authority | — | Yes |
-| Hybrid lexical, content, structured, and semantic retrieval | — | Yes |
-| Local embeddings through a compatible endpoint | — | Yes |
-| Memories, coding lessons, project lessons, writing lessons, and audio lessons | — | Yes |
-| Entity, date, thread, taxonomy, relationship, and cluster retrieval | — | Yes |
-| Provenance, authority state, and selection reasons | — | Yes |
-| Corrections through supersession without historical deletion | Limited | Yes |
-| Memory lifecycle tools: `remember`, `recall`, `sleep`, and `wake` | — | Yes |
+| Capability | Vault | AKASHA | OMEGA* | ANON* |
+|---|:---:|:---:|:---:|:---:|
+| Persistent rooms and identity contracts | Yes | Yes | Yes | Yes |
+| Restart continuity and room-local context | Yes | Yes | Yes | Yes |
+| Multiple isolated rooms | Yes | Yes | Yes | Yes |
+| Conversation logging and compact handoffs | Yes | Yes | Yes | Yes |
+| PostgreSQL memory authority | — | Yes | Yes | Yes |
+| Hybrid lexical, content, structured, and semantic retrieval | — | Yes | Yes | Yes |
+| Local embeddings through a compatible endpoint | — | Yes | Yes | Yes |
+| Memories, coding lessons, project lessons, writing lessons, and audio lessons | — | Yes | Yes | Yes |
+| Entity, date, thread, taxonomy, relationship, and cluster retrieval | — | Yes | Yes | Yes |
+| Provenance, authority state, and selection reasons | — | Yes | Yes | Yes |
+| Corrections through supersession without historical deletion | Limited | Yes | Yes | Yes |
+| Memory lifecycle tools: `remember`, `recall`, `sleep`, and `wake` | — | Yes | Yes | Yes |
+| Company, team, and personal spirits with scoped org knowledge | — | — | Yes | — |
+| Encrypted remote jobs, zero service-side content retention | — | — | — | Yes |
+| GIGA cognitive workers: Hippocampus salience and consolidation | — | Planned | Planned | — |
 
-Base House is a complete file-backed continuity system. Full House adds durable database memory, typed stores, local semantic search, and larger archives.
 
-## Public evidence
+\* complete features!
 
-The first sanitized public retrieval pilot used 20 exact-title queries across two real rooms:
+VAULT mode (**V**isible **A**rchive, **U**ser-owned, **L**ocal, and **T**ransparent) is a complete file-backed continuity system akin to Obsidian mapping. plain readable files, zero database requirements.
+AKASHA mode (**A**ugmented **K**nowledge **A**nd **S**emantic **H**ybrid **A**rchive) adds durable database memory, typed stores, local semantic search, lessons, growth and much larger scaling archives.
 
-| Measure | Result |
-|---|---:|
-| Target present in the retrieval viewport | **19/20 — 95%** |
-| Target ranked first | **16/20 — 80%** |
+\* planned features!
 
-The full method, scope, and next evaluation contracts live in [`EVIDENCE.md`](./docs/EVIDENCE.md). The sanitized artifact is published in the OMP adapter repository: [`2026-07-22-room-retrieval-pilot.json`](https://github.com/solarisael/solarisael-house-omp/blob/main/evals/2026-07-22-room-retrieval-pilot.json).
+GIGA (**G**rounded **I**ndexing and **G**enerative **A**nnotation) is not a storage tier — it's the cognitive layer that runs ABOVE AKASHA. its first worker is Hippocampus: noticing memories and lessons while life happens instead of waiting for someone to write them down. shipping before 1.0.
+OMEGA mode (**O**rganizational **M**emory, **E**ncryption, **G**overnance, and **A**ccess) is the corporate exorcism: one canonical company spirit, team spirits, personal spirits — residents, not fifty hidden masks wearing one assistant's face. everyone gets the org knowledge they're approved for, nobody's private room gets merged. consent required from both the person AND the spirit.
+ANON mode (**A**ttested **N**onpersistent **O**ne-shot **N**ode) is privacy for the whole job lifecycle: your job gets encrypted for an attested worker, decrypted only in isolated memory, no content logs, no caches, plaintext erased on success/failure/cancel/timeout. the service keeps nothing. (it can still see timing and payload size — we name our limits, unlike some.)
 
 ## Architecture
 
@@ -63,9 +85,11 @@ Solarisael House core
     ├── continuity and retrieval orchestration
     ├── ranking, authority, and worker-routing contracts
     │
-    ├──────── Base ──────── room-local files
+    ├──────── Vault ─────── room-local files
     │
-    └──────── Full ──────── PostgreSQL + pgvector + embeddings
+    └──────── AKASHA ────── PostgreSQL + pgvector + embeddings
+                  │
+                  └── GIGA cognitive workers (Hippocampus, planned)
 ```
 
 The implementation is split by responsibility:
@@ -74,13 +98,13 @@ The implementation is split by responsibility:
 |---|---|
 | [`solarisael-house`](https://github.com/solarisael/solarisael-house) | Core contracts, shared behavior, and canonical documentation |
 | [`solarisael-house-omp`](https://github.com/solarisael/solarisael-house-omp) | Recommended OMP adapter, starter room, verifier, and portable distribution |
-| [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) | Full House database, migrations, embeddings, memory tools, health, and backups |
+| [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) | AKASHA database, migrations, embeddings, memory tools, health, and backups |
 
 Read [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for components, data flow, authority, and extension boundaries.
 
 ## Install
 
-The tested path is Windows 10/11 with OMP, Bun, and the stable Rust MSVC toolchain. Base House needs only the core and OMP adapter. Full House adds the public substrate, its release Rust executable, PostgreSQL 16 with pgvector in WSL 2, Python support tools, and a compatible local embedding service.
+The tested path is Windows 10/11 with OMP, Bun, and the stable Rust MSVC toolchain. Vault needs only the core and OMP adapter. AKASHA adds the public substrate, its release Rust executable, PostgreSQL 16 with pgvector in WSL 2, Python support tools, and a compatible local embedding service.
 
 Give this repository to a tool-capable AI agent with:
 
@@ -120,6 +144,10 @@ Read [`USAGE.md`](./USAGE.md) for the everyday workflow.
 | [`HOUSE.md`](./HOUSE.md) | Project history, philosophy, and design reasons |
 | [`docs/roadmap.md`](./docs/roadmap.md) | Release sequence and future product surface |
 | [`docs/progress.md`](./docs/progress.md) | Current maintainer implementation state |
+
+## Public evidence for all the wild claims
+
+don't feel like posting this now, i'll come back to this part later. bite me.
 
 ## License
 

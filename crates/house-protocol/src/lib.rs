@@ -252,6 +252,11 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for ResponsePayload<T> {
     }
 }
 
+/// A version-1-compatible error body.
+///
+/// `details` intentionally remains raw JSON: old peers may send arbitrary diagnostic
+/// objects, and readers that only understand the legacy error shape must keep working.
+/// New producers should prefer [`DiagnosticDetails`] through [`ProtocolErrorBodyBuilder`].
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolErrorBody {
@@ -260,6 +265,430 @@ pub struct ProtocolErrorBody {
     pub retryable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
+}
+
+/// Stable broad diagnostic category.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticCategory {
+    Input,
+    Transport,
+    Protocol,
+    Configuration,
+    Database,
+    Embedding,
+    Filesystem,
+    Backup,
+    Authorization,
+    Operation,
+    Reconciliation,
+    Internal,
+}
+
+/// The precise stage at which an operation failed.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticStage {
+    Validation,
+    Spawn,
+    Startup,
+    RequestWrite,
+    RequestParse,
+    ConfigurationLoad,
+    DatabaseConnect,
+    DatabaseQuery,
+    EmbeddingRequest,
+    Transaction,
+    Backup,
+    ResponseEncode,
+    Reconciliation,
+    Shutdown,
+}
+
+/// The component and source location that own a failure.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticOwner {
+    pub component: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+}
+
+impl DiagnosticOwner {
+    pub fn new(component: impl Into<String>) -> Self {
+        Self {
+            component: redact_diagnostic_text(component.into()),
+            path: None,
+            symbol: None,
+        }
+    }
+
+    pub fn path(mut self, path: impl Into<String>) -> Self {
+        self.path = Some(redact_diagnostic_text(path.into()));
+        self
+    }
+
+    pub fn symbol(mut self, symbol: impl Into<String>) -> Self {
+        self.symbol = Some(redact_diagnostic_text(symbol.into()));
+        self
+    }
+}
+
+/// A machine-readable record supporting a diagnostic conclusion.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticEvidence {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+}
+
+impl DiagnosticEvidence {
+    pub fn new(kind: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            summary: None,
+            data: None,
+        }
+    }
+
+    pub fn summary(mut self, summary: impl Into<String>) -> Self {
+        self.summary = Some(redact_diagnostic_text(summary.into()));
+        self
+    }
+
+    pub fn data(mut self, data: Value) -> Self {
+        self.data = Some(redact_diagnostic_value(data));
+        self
+    }
+}
+
+/// Kinds of exact targets an AI or operator can inspect.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticTargetKind {
+    File,
+    Symbol,
+    Endpoint,
+    Migration,
+    Table,
+    RequestField,
+    Service,
+}
+
+/// An exact source, schema, request, or service inspection target.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticTarget {
+    pub kind: DiagnosticTargetKind,
+    pub value: String,
+}
+
+impl DiagnosticTarget {
+    pub fn new(kind: DiagnosticTargetKind, value: impl Into<String>) -> Self {
+        Self {
+            kind,
+            value: redact_diagnostic_text(value.into()),
+        }
+    }
+}
+
+/// An ordered, machine-actionable diagnostic follow-up.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticNextCheck {
+    pub action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<DiagnosticTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected: Option<Value>,
+}
+
+impl DiagnosticNextCheck {
+    pub fn new(action: impl Into<String>) -> Self {
+        Self {
+            action: redact_diagnostic_text(action.into()),
+            target: None,
+            expected: None,
+        }
+    }
+
+    pub fn target(mut self, target: DiagnosticTarget) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    pub fn expected(mut self, expected: Value) -> Self {
+        self.expected = Some(redact_diagnostic_value(expected));
+        self
+    }
+}
+
+/// The known write outcome when an operation stops.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticWriteOutcome {
+    NotStarted,
+    RolledBack,
+    Committed,
+    Unknown,
+}
+
+/// The safe retry policy for an operation.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticRetry {
+    SafeNow,
+    AfterChange,
+    ReconcileFirst,
+    Never,
+}
+
+/// Write and retry facts needed to safely handle a failed request.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DiagnosticExecution {
+    pub request_dispatched: bool,
+    pub write_outcome: DiagnosticWriteOutcome,
+    pub retry: DiagnosticRetry,
+}
+
+impl DiagnosticExecution {
+    pub const fn new(
+        request_dispatched: bool,
+        write_outcome: DiagnosticWriteOutcome,
+        retry: DiagnosticRetry,
+    ) -> Self {
+        Self {
+            request_dispatched,
+            write_outcome,
+            retry,
+        }
+    }
+}
+
+/// Typed fields in the extensible version-1 `error.details` object.
+///
+/// Unknown fields are retained in `additional`, allowing old and independently
+/// evolving producers to remain readable. Fact values passed through the builders
+/// are redacted before they reach the wire.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct DiagnosticDetails {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<DiagnosticCategory>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<DiagnosticStage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<DiagnosticOwner>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed: Option<Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub evidence: Vec<DiagnosticEvidence>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub targets: Vec<DiagnosticTarget>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub next_checks: Vec<DiagnosticNextCheck>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution: Option<DiagnosticExecution>,
+    #[serde(flatten)]
+    pub additional: Map<String, Value>,
+}
+
+impl DiagnosticDetails {
+    pub fn new(category: DiagnosticCategory, stage: DiagnosticStage) -> Self {
+        Self {
+            category: Some(category),
+            stage: Some(stage),
+            ..Self::default()
+        }
+    }
+
+    pub fn operation(mut self, operation: impl Into<String>) -> Self {
+        self.operation = Some(redact_diagnostic_text(operation.into()));
+        self
+    }
+
+    pub fn owner(mut self, owner: DiagnosticOwner) -> Self {
+        self.owner = Some(owner);
+        self
+    }
+
+    pub fn expected(mut self, expected: Value) -> Self {
+        self.expected = Some(redact_diagnostic_value(expected));
+        self
+    }
+
+    pub fn observed(mut self, observed: Value) -> Self {
+        self.observed = Some(redact_diagnostic_value(observed));
+        self
+    }
+
+    pub fn evidence(mut self, evidence: DiagnosticEvidence) -> Self {
+        self.evidence.push(evidence);
+        self
+    }
+
+    pub fn target(mut self, target: DiagnosticTarget) -> Self {
+        self.targets.push(target);
+        self
+    }
+
+    pub fn next_check(mut self, next_check: DiagnosticNextCheck) -> Self {
+        self.next_checks.push(next_check);
+        self
+    }
+
+    pub fn execution(mut self, execution: DiagnosticExecution) -> Self {
+        self.execution = Some(execution);
+        self
+    }
+
+    pub fn additional(mut self, key: impl Into<String>, value: Value) -> Self {
+        self.additional
+            .insert(key.into(), redact_diagnostic_value(value));
+        self
+    }
+}
+
+/// Builds a backward-compatible protocol error body without exposing raw diagnostic
+/// facts accidentally.
+#[derive(Clone, Debug)]
+pub struct ProtocolErrorBodyBuilder {
+    body: ProtocolErrorBody,
+}
+
+impl ProtocolErrorBodyBuilder {
+    pub fn retryable(mut self, retryable: bool) -> Self {
+        self.body.retryable = retryable;
+        self
+    }
+
+    pub fn details(mut self, details: Value) -> Self {
+        self.body.details = Some(redact_diagnostic_value(details));
+        self
+    }
+
+    pub fn diagnostics(mut self, diagnostics: DiagnosticDetails) -> Self {
+        self.body.details = Some(redact_diagnostic_value(
+            serde_json::to_value(diagnostics)
+                .expect("serializing diagnostic details containing JSON values cannot fail"),
+        ));
+        self
+    }
+
+    pub fn build(self) -> ProtocolErrorBody {
+        self.body
+    }
+}
+
+impl ProtocolErrorBody {
+    /// Starts an application error. Application code can add typed diagnostics before
+    /// calling [`ProtocolErrorBodyBuilder::build`].
+    pub fn application(
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> ProtocolErrorBodyBuilder {
+        ProtocolErrorBodyBuilder {
+            body: Self {
+                code: code.into(),
+                message: message.into(),
+                retryable: false,
+                details: None,
+            },
+        }
+    }
+
+    /// Starts a builder for a protocol decoding error.
+    pub fn protocol(error: ProtocolError) -> ProtocolErrorBodyBuilder {
+        ProtocolErrorBodyBuilder { body: error.into() }
+    }
+
+    /// Decodes the optional typed diagnostic extension without changing legacy raw
+    /// `details` handling. Unknown detail keys are preserved by `DiagnosticDetails`.
+    pub fn diagnostics(&self) -> Option<Result<DiagnosticDetails, serde_json::Error>> {
+        self.details
+            .as_ref()
+            .map(|details| serde_json::from_value(details.clone()))
+    }
+}
+
+fn redact_diagnostic_text(value: String) -> String {
+    let lowercase = value.to_ascii_lowercase();
+    let has_authenticated_url = lowercase
+        .split_once("://")
+        .is_some_and(|(_, rest)| rest.split('/').next().is_some_and(|authority| authority.contains('@')));
+    if has_authenticated_url
+        || lowercase.starts_with("bearer ")
+        || lowercase.starts_with("basic ")
+        || lowercase.contains("authorization:")
+        || lowercase.contains("token=")
+        || lowercase.contains("password=")
+    {
+        "[redacted]".into()
+    } else {
+        value
+    }
+}
+
+fn redact_diagnostic_value(value: Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(redact_diagnostic_value)
+                .collect(),
+        ),
+        Value::Object(values) => Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| {
+                    if is_sensitive_diagnostic_key(&key) {
+                        (key, Value::String("[redacted]".into()))
+                    } else {
+                        (key, redact_diagnostic_value(value))
+                    }
+                })
+                .collect(),
+        ),
+        Value::String(value) => Value::String(redact_diagnostic_text(value)),
+        value => value,
+    }
+}
+
+fn is_sensitive_diagnostic_key(key: &str) -> bool {
+    let normalized = key
+        .bytes()
+        .filter(u8::is_ascii_alphanumeric)
+        .map(char::from)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "password"
+            | "passwd"
+            | "secret"
+            | "token"
+            | "authorization"
+            | "authorizationheader"
+            | "cookie"
+            | "setcookie"
+            | "apikey"
+            | "privatekey"
+            | "databaseurl"
+            | "headers"
+            | "body"
+    ) || normalized.ends_with("password")
+        || normalized.ends_with("passwd")
+        || normalized.ends_with("secret")
+        || normalized.ends_with("token")
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -866,6 +1295,217 @@ pub fn error<T>(id: impl Into<String>, error: ProtocolError) -> ResponseEnvelope
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostic_details_round_trip_with_machine_actions() {
+        let target = DiagnosticTarget::new(
+            DiagnosticTargetKind::File,
+            "crates/house-substrate/src/lib.rs",
+        );
+        let details = DiagnosticDetails::new(
+            DiagnosticCategory::Database,
+            DiagnosticStage::Transaction,
+        )
+        .operation("remember")
+        .owner(
+            DiagnosticOwner::new("house-substrate")
+                .path("crates/house-substrate/src/lib.rs")
+                .symbol("Store::remember"),
+        )
+        .expected(serde_json::json!({"transaction": "committed"}))
+        .observed(serde_json::json!({
+            "transaction": "unknown",
+            "password": "do-not-leak",
+        }))
+        .evidence(
+            DiagnosticEvidence::new("database_error")
+                .summary("commit result was not returned")
+                .data(serde_json::json!({"sqlstate": "08006"})),
+        )
+        .target(target.clone())
+        .next_check(
+            DiagnosticNextCheck::new("inspect")
+                .target(target)
+                .expected(serde_json::json!({"symbol_exists": true})),
+        )
+        .execution(DiagnosticExecution::new(
+            true,
+            DiagnosticWriteOutcome::Unknown,
+            DiagnosticRetry::ReconcileFirst,
+        ));
+        let error = ProtocolErrorBody::application("database_failure", "write outcome unknown")
+            .retryable(false)
+            .diagnostics(details)
+            .build();
+        let response = ResponseEnvelope::<Value> {
+            protocol: PROTOCOL_VERSION,
+            id: "d1".into(),
+            payload: ResponsePayload::Error { error },
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["protocol"], PROTOCOL_VERSION);
+        assert_eq!(json["error"]["details"]["category"], "database");
+        assert_eq!(json["error"]["details"]["stage"], "transaction");
+        assert_eq!(
+            json["error"]["details"]["execution"]["write_outcome"],
+            "unknown"
+        );
+        assert_eq!(
+            json["error"]["details"]["execution"]["retry"],
+            "reconcile_first"
+        );
+        assert_eq!(
+            json["error"]["details"]["observed"]["password"],
+            "[redacted]"
+        );
+
+        let decoded: ResponseEnvelope<Value> = serde_json::from_value(json).unwrap();
+        let ResponsePayload::Error { error } = decoded.payload else {
+            panic!("expected error response");
+        };
+        let details = error.diagnostics().unwrap().unwrap();
+        assert_eq!(details.category, Some(DiagnosticCategory::Database));
+        assert_eq!(details.stage, Some(DiagnosticStage::Transaction));
+        assert_eq!(details.targets.len(), 1);
+        assert_eq!(details.next_checks.len(), 1);
+        assert_eq!(
+            details.execution,
+            Some(DiagnosticExecution::new(
+                true,
+                DiagnosticWriteOutcome::Unknown,
+                DiagnosticRetry::ReconcileFirst,
+            ))
+        );
+    }
+
+    #[test]
+    fn diagnostic_redaction_preserves_environment_presence_without_secret_values() {
+        let details = DiagnosticDetails::new(
+            DiagnosticCategory::Configuration,
+            DiagnosticStage::ConfigurationLoad,
+        )
+        .observed(serde_json::json!({
+            "environment": {
+                "PGHOST": "present",
+                "PGPASSWORD": "secret-value",
+                "API_TOKEN": "secret-value",
+            },
+            "env": {
+                "DATABASE_URL": "postgres://user:password@localhost/database",
+                "PGDATABASE": "present",
+            },
+        }));
+
+        let observed = details.observed.unwrap();
+        assert_eq!(observed["environment"]["PGHOST"], "present");
+        assert_eq!(observed["environment"]["PGPASSWORD"], "[redacted]");
+        assert_eq!(observed["environment"]["API_TOKEN"], "[redacted]");
+        assert_eq!(observed["env"]["DATABASE_URL"], "[redacted]");
+        assert_eq!(observed["env"]["PGDATABASE"], "present");
+    }
+
+    #[test]
+    fn diagnostic_details_are_optional_and_old_details_remain_compatible() {
+        let omitted = ProtocolErrorBody::application("app_failure", "failed").build();
+        assert!(
+            !serde_json::to_value(&omitted)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("details")
+        );
+        assert!(omitted.diagnostics().is_none());
+        let protocol = ProtocolErrorBody::protocol(ProtocolError::InvalidParams("bad".into()))
+            .build();
+        assert_eq!(protocol.code, "invalid_params");
+        assert_eq!(protocol.message, "invalid parameters: bad");
+        assert!(!protocol.retryable);
+        assert!(protocol.details.is_none());
+
+        let legacy: ResponseEnvelope<Value> = serde_json::from_value(serde_json::json!({
+            "protocol": 1,
+            "id": "legacy",
+            "error": {
+                "code": "legacy_failure",
+                "message": "old producer",
+                "retryable": true,
+                "details": {
+                    "legacy_pointer": "subsystem/old",
+                    "unrecognized_fact": 7
+                }
+            }
+        }))
+        .unwrap();
+        let ResponsePayload::Error { error } = legacy.payload else {
+            panic!("expected error response");
+        };
+        assert_eq!(error.code, "legacy_failure");
+        assert_eq!(error.message, "old producer");
+        assert!(error.retryable);
+        let diagnostics = error.diagnostics().unwrap().unwrap();
+        assert_eq!(
+            diagnostics.additional["legacy_pointer"],
+            serde_json::json!("subsystem/old")
+        );
+        assert_eq!(diagnostics.additional["unrecognized_fact"], 7);
+
+        let arbitrary_details: ResponseEnvelope<Value> = serde_json::from_value(serde_json::json!({
+            "protocol": 1,
+            "id": "older",
+            "error": {
+                "code": "old_failure",
+                "message": "old details can be any JSON",
+                "retryable": false,
+                "details": ["legacy", "array"]
+            }
+        }))
+        .unwrap();
+        let ResponsePayload::Error { error } = arbitrary_details.payload else {
+            panic!("expected error response");
+        };
+        assert_eq!(error.details, Some(serde_json::json!(["legacy", "array"])));
+        assert!(error.diagnostics().unwrap().is_err());
+    }
+
+    #[test]
+    fn diagnostic_execution_enum_wire_values_are_stable() {
+        for (write_outcome, wire) in [
+            (DiagnosticWriteOutcome::NotStarted, "not_started"),
+            (DiagnosticWriteOutcome::RolledBack, "rolled_back"),
+            (DiagnosticWriteOutcome::Committed, "committed"),
+            (DiagnosticWriteOutcome::Unknown, "unknown"),
+        ] {
+            assert_eq!(serde_json::to_value(write_outcome).unwrap(), wire);
+            assert_eq!(
+                serde_json::from_value::<DiagnosticWriteOutcome>(serde_json::json!(wire))
+                    .unwrap(),
+                write_outcome
+            );
+        }
+        for (retry, wire) in [
+            (DiagnosticRetry::SafeNow, "safe_now"),
+            (DiagnosticRetry::AfterChange, "after_change"),
+            (DiagnosticRetry::ReconcileFirst, "reconcile_first"),
+            (DiagnosticRetry::Never, "never"),
+        ] {
+            assert_eq!(serde_json::to_value(retry).unwrap(), wire);
+            assert_eq!(
+                serde_json::from_value::<DiagnosticRetry>(serde_json::json!(wire)).unwrap(),
+                retry
+            );
+        }
+    }
+
+    #[test]
+    fn response_envelope_rejects_mutually_exclusive_payloads() {
+        for payload in [
+            serde_json::json!({"protocol": 1, "id": "both", "result": {}, "error": {}}),
+            serde_json::json!({"protocol": 1, "id": "neither"}),
+        ] {
+            assert!(serde_json::from_value::<ResponseEnvelope<Value>>(payload).is_err());
+        }
+    }
 
     #[test]
     fn exact_v1_request_and_response_shape() {

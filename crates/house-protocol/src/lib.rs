@@ -94,6 +94,8 @@ pub struct RecallParams {
     pub content_top_k: u32,
     #[serde(default = "default_content_min_similarity")]
     pub content_min_similarity: f64,
+    #[serde(default)]
+    pub temporal_decay: bool,
 }
 
 fn deserialize_unit_fraction<'de, D>(deserializer: D) -> Result<f64, D::Error>
@@ -810,6 +812,7 @@ impl TryFrom<RecallParams> for RecallRequest {
             params.content_top_k,
             params.content_min_similarity,
         )
+        .map(|request| request.with_temporal_decay(params.temporal_decay))
         .map_err(|e| ProtocolError::InvalidParams(e.to_string()))
     }
 }
@@ -2700,6 +2703,7 @@ impl TryFrom<GigaReviewParams> for GigaReviewAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use house_core::GigaPromotionKind;
 
     #[test]
     fn diagnostic_details_round_trip_with_machine_actions() {
@@ -3141,12 +3145,21 @@ mod tests {
         assert_eq!(recall.semantic_min_similarity(), 0.50);
         assert_eq!(recall.content_top_k(), 8);
         assert_eq!(recall.content_min_similarity(), 0.30);
+        assert!(!recall.temporal_decay());
+
+        let explicit = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","temporal_decay":true}}"#,
+        )
+        .unwrap()
+        .recall_request()
+        .unwrap();
+        assert!(explicit.temporal_decay());
 
         let params: RecallParams =
             serde_json::from_value(serde_json::json!({"room":"lab","query":"alpha"})).unwrap();
         assert_eq!(
             serde_json::to_string(&params).unwrap(),
-            r#"{"room":"lab","query":"alpha","semantic_top_k":8,"semantic_min_similarity":0.5,"content_top_k":8,"content_min_similarity":0.3}"#
+            r#"{"room":"lab","query":"alpha","semantic_top_k":8,"semantic_min_similarity":0.5,"content_top_k":8,"content_min_similarity":0.3,"temporal_decay":false}"#
         );
     }
 
@@ -3176,9 +3189,15 @@ mod tests {
             semantic_min_similarity: f64::NAN,
             content_top_k: 8,
             content_min_similarity: 0.3,
+            temporal_decay: false,
         };
         assert!(RecallRequest::try_from(params).is_err());
-        let unknown = serde_json::json!({"room":"lab","query":"x","extra":true});
+        let unknown = serde_json::json!({
+            "room":"lab",
+            "query":"x",
+            "temporal_decay":true,
+            "extra":true
+        });
         assert!(base(unknown).recall_request().is_err());
         let wrong = RequestEnvelope {
             protocol: 1,

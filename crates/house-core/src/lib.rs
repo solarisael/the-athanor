@@ -703,6 +703,7 @@ pub struct RecallRequest {
     semantic_min_similarity: f64,
     content_top_k: u32,
     content_min_similarity: f64,
+    temporal_decay: bool,
 }
 
 impl RecallRequest {
@@ -746,7 +747,13 @@ impl RecallRequest {
             semantic_min_similarity,
             content_top_k,
             content_min_similarity,
+            temporal_decay: false,
         })
+    }
+
+    pub fn with_temporal_decay(mut self, temporal_decay: bool) -> Self {
+        self.temporal_decay = temporal_decay;
+        self
     }
 
     pub fn room(&self) -> &RoomKey {
@@ -766,6 +773,9 @@ impl RecallRequest {
     }
     pub const fn content_min_similarity(&self) -> f64 {
         self.content_min_similarity
+    }
+    pub const fn temporal_decay(&self) -> bool {
+        self.temporal_decay
     }
 }
 
@@ -3901,6 +3911,17 @@ mod tests {
         assert!(RoomKey::for_anamnesis("living-room2").is_ok());
         assert!(RoomKey::for_anamnesis("Living").is_err());
         assert!(RoomKey::new("house").is_err());
+    }
+
+    #[test]
+    fn recall_constructor_compatibility_defaults_decay_off_and_builder_opts_in() {
+        let request =
+            RecallRequest::new(RoomKey::new("lab").unwrap(), "alpha".into(), 8, 0.5, 8, 0.3)
+                .unwrap();
+        assert!(!request.temporal_decay());
+
+        let decayed = request.with_temporal_decay(true);
+        assert!(decayed.temporal_decay());
     }
 
     #[test]

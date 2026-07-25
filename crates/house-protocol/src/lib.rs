@@ -4,8 +4,16 @@ use house_core::{
     AnamnesisActivation, AnamnesisAddDetails, AnamnesisAddRequest, AnamnesisAppendReceipt,
     AnamnesisAppendRequest, AnamnesisFidelity, AnamnesisKind, AnamnesisReadMode,
     AnamnesisReadRequest, AnamnesisReceipt, AnamnesisSeedRep, ClusterMaintenanceOperation,
-    ClusterMaintenanceRequest, RecallRequest, RememberKind, RememberLessonDetails,
-    RememberMemoryDetails, RememberReceipt, RememberRequest, RoomKey,
+    ClusterMaintenanceRequest, GigaAuthority, GigaCandidate, GigaCandidateKind,
+    GigaClassifierIdentity, GigaCodingLessonPromotionPayload, GigaEvent, GigaEventClaimReceipt,
+    GigaEventClaimRequest, GigaEventFinishOutcome, GigaEventFinishReceipt, GigaEventFinishRequest,
+    GigaEventReplayReceipt, GigaEventReplayRequest, GigaEventType, GigaLifecycle,
+    GigaMemoryPromotionPayload, GigaProcessRequest, GigaProcessSource,
+    GigaProjectLessonPromotionPayload, GigaPromotionAuthority, GigaPromotionPayload,
+    GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent, GigaQueueState,
+    GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope, GigaScores,
+    GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallRequest, RememberKind,
+    RememberLessonDetails, RememberMemoryDetails, RememberReceipt, RememberRequest, RoomKey,
 };
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -171,6 +179,8 @@ pub struct RecallResult {
     pub cluster_resonance: Option<ClusterResonanceTelemetry>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "memoryHandle")]
     pub memory_handle: Option<Value>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -622,9 +632,11 @@ impl ProtocolErrorBody {
 
 fn redact_diagnostic_text(value: String) -> String {
     let lowercase = value.to_ascii_lowercase();
-    let has_authenticated_url = lowercase
-        .split_once("://")
-        .is_some_and(|(_, rest)| rest.split('/').next().is_some_and(|authority| authority.contains('@')));
+    let has_authenticated_url = lowercase.split_once("://").is_some_and(|(_, rest)| {
+        rest.split('/')
+            .next()
+            .is_some_and(|authority| authority.contains('@'))
+    });
     if has_authenticated_url
         || lowercase.starts_with("bearer ")
         || lowercase.starts_with("basic ")
@@ -640,12 +652,9 @@ fn redact_diagnostic_text(value: String) -> String {
 
 fn redact_diagnostic_value(value: Value) -> Value {
     match value {
-        Value::Array(values) => Value::Array(
-            values
-                .into_iter()
-                .map(redact_diagnostic_value)
-                .collect(),
-        ),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(redact_diagnostic_value).collect())
+        }
         Value::Object(values) => Value::Object(
             values
                 .into_iter()
@@ -1180,6 +1189,105 @@ impl RequestEnvelope {
             .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?
             .append_request()
     }
+    pub fn giga_event_ingest_request(self) -> Result<GigaEvent, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_event_ingest" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaEventParams>(self.params)
+            .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?
+            .try_into()
+    }
+    pub fn giga_process_request(self) -> Result<GigaProcessRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_process" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaProcessParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
+    pub fn giga_event_claim_request(self) -> Result<GigaEventClaimRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_event_claim" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaEventClaimParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
+    pub fn giga_event_finish_request(self) -> Result<GigaEventFinishRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_event_finish" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaEventFinishParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
+    pub fn giga_event_replay_request(self) -> Result<GigaEventReplayRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_event_replay" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaEventReplayParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
+    pub fn giga_promote_request(self) -> Result<GigaPromotionRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_promote" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaPromoteParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
+    pub fn giga_review_request(self) -> Result<GigaReviewAction, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_review" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaReviewParams>(self.params)
+            .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?
+            .try_into()
+    }
+    pub fn giga_candidate_list_request(self) -> Result<GigaCandidateListRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_candidate_list" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaCandidateListParams>(self.params)
+            .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?
+            .try_into()
+    }
+    pub fn giga_health_request(self) -> Result<GigaHealthRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_health" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaHealthParams>(self.params)
+            .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?
+            .try_into()
+    }
     pub fn parse_line(line: &str) -> Result<Self, ProtocolError> {
         serde_json::from_str(line).map_err(|e| ProtocolError::Malformed(e.to_string()))
     }
@@ -1292,6 +1400,1303 @@ pub fn error<T>(id: impl Into<String>, error: ProtocolError) -> ResponseEnvelope
     }
 }
 
+macro_rules! giga_known_string {
+    ($name:ident, $parse:path) => {
+        fn $name<'de, D>(deserializer: D) -> Result<String, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let value = String::deserialize(deserializer)?;
+            $parse(&value).map_err(D::Error::custom)?;
+            Ok(value)
+        }
+    };
+}
+giga_known_string!(deserialize_giga_visibility, GigaVisibility::parse);
+giga_known_string!(deserialize_giga_source_type, GigaSourceType::parse);
+giga_known_string!(deserialize_giga_event_type, GigaEventType::parse);
+giga_known_string!(deserialize_giga_risk, GigaRisk::parse);
+giga_known_string!(deserialize_giga_kind, GigaCandidateKind::parse);
+giga_known_string!(deserialize_giga_authority, GigaAuthority::parse);
+giga_known_string!(deserialize_giga_review_state, GigaReviewState::parse);
+giga_known_string!(
+    deserialize_giga_finish_outcome,
+    GigaEventFinishOutcome::parse
+);
+giga_known_string!(deserialize_giga_queue_state, GigaQueueState::parse);
+giga_known_string!(
+    deserialize_giga_promotion_authority,
+    GigaPromotionAuthority::parse
+);
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(transparent)]
+pub struct RequiredNullable<T>(pub Option<T>);
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaScopeParams {
+    pub room: RequiredNullable<String>,
+    pub project: RequiredNullable<String>,
+    #[serde(deserialize_with = "deserialize_giga_visibility")]
+    pub visibility: String,
+    pub publication_review_required: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaSourceRangeParams {
+    pub start: u64,
+    pub end: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaSourceRefParams {
+    #[serde(deserialize_with = "deserialize_giga_source_type")]
+    pub source_type: String,
+    pub source_id: String,
+    pub role: String,
+    pub timestamp: String,
+    pub content_hash: String,
+    pub scope: GigaScopeParams,
+    pub range: RequiredNullable<GigaSourceRangeParams>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ConversationWindowLifecycle {}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TaskStartedLifecycle {
+    pub task_reference: String,
+    pub worker_id: String,
+    pub worker_role: String,
+    pub phase: String,
+    pub project_key: String,
+    pub task_kind: String,
+    #[serde(deserialize_with = "deserialize_giga_risk")]
+    pub risk: String,
+    pub target: String,
+    pub change: String,
+    pub proof_contract: Vec<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TaskCompletedLifecycle {
+    pub task_reference: String,
+    pub outcome: String,
+    pub verification_result: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SubagentDispatchedLifecycle {
+    pub subagent_reference: String,
+    pub parent_task: String,
+    pub role: String,
+    pub target: String,
+    pub change: String,
+    pub acceptance: Vec<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SubagentCompletedLifecycle {
+    pub subagent_reference: String,
+    pub parent_task: String,
+    pub outcome: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TodoTransitionLifecycle {
+    pub todo_reference: String,
+    pub previous_state: String,
+    pub new_state: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolOutcomeLifecycle {
+    pub tool_name: String,
+    pub status: String,
+    pub sanitized_outcome: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ManualReprocessLifecycle {
+    pub source_range: GigaSourceRangeParams,
+    pub reason: String,
+    pub operator_identity: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum GigaLifecycleParams {
+    TaskStarted(TaskStartedLifecycle),
+    TaskCompleted(TaskCompletedLifecycle),
+    SubagentDispatched(SubagentDispatchedLifecycle),
+    SubagentCompleted(SubagentCompletedLifecycle),
+    TodoTransition(TodoTransitionLifecycle),
+    ToolOutcome(ToolOutcomeLifecycle),
+    ManualReprocess(ManualReprocessLifecycle),
+    ConversationWindow(ConversationWindowLifecycle),
+}
+
+impl GigaLifecycleParams {
+    fn into_core(self) -> Result<GigaLifecycle, ProtocolError> {
+        let result = match self {
+            Self::ConversationWindow(_) => Ok(GigaLifecycle::conversation_window()),
+            Self::TaskStarted(v) => GigaRisk::parse(&v.risk).and_then(|risk| {
+                GigaLifecycle::task_started(
+                    v.task_reference,
+                    v.worker_id,
+                    v.worker_role,
+                    v.phase,
+                    v.project_key,
+                    v.task_kind,
+                    risk,
+                    v.target,
+                    v.change,
+                    v.proof_contract,
+                )
+            }),
+            Self::TaskCompleted(v) => {
+                GigaLifecycle::task_completed(v.task_reference, v.outcome, v.verification_result)
+            }
+            Self::SubagentDispatched(v) => GigaLifecycle::subagent_dispatched(
+                v.subagent_reference,
+                v.parent_task,
+                v.role,
+                v.target,
+                v.change,
+                v.acceptance,
+            ),
+            Self::SubagentCompleted(v) => {
+                GigaLifecycle::subagent_completed(v.subagent_reference, v.parent_task, v.outcome)
+            }
+            Self::TodoTransition(v) => {
+                GigaLifecycle::todo_transition(v.todo_reference, v.previous_state, v.new_state)
+            }
+            Self::ToolOutcome(v) => {
+                GigaLifecycle::tool_outcome(v.tool_name, v.status, v.sanitized_outcome)
+            }
+            Self::ManualReprocess(v) => {
+                GigaSourceRange::new(v.source_range.start, v.source_range.end).and_then(|range| {
+                    GigaLifecycle::manual_reprocess(range, v.reason, v.operator_identity)
+                })
+            }
+        };
+        result.map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaEventParams {
+    pub event_schema_version: u8,
+    pub event_id: String,
+    #[serde(deserialize_with = "deserialize_giga_event_type")]
+    pub event_type: String,
+    pub room: String,
+    pub session_id: String,
+    pub project_keys: Vec<String>,
+    pub source_refs: Vec<GigaSourceRefParams>,
+    pub lifecycle: GigaLifecycleParams,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaProcessSourceParams {
+    pub source_id: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaProcessParams {
+    pub event_id: String,
+    pub sources: Vec<GigaProcessSourceParams>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaEventClaimParams {
+    pub room: String,
+    pub worker_id: String,
+    pub lease_seconds: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaEventFinishParams {
+    pub room: String,
+    pub event_id: String,
+    pub worker_id: String,
+    #[serde(deserialize_with = "deserialize_giga_finish_outcome")]
+    pub outcome: String,
+    pub candidate_count: u32,
+    pub error_class: RequiredNullable<String>,
+    pub retry_after_seconds: RequiredNullable<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaEventReplayParams {
+    pub room: String,
+    pub event_id: String,
+    pub operator_identity: String,
+    pub authorization_basis: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaScoresParams {
+    pub priority: f64,
+    pub novelty: f64,
+    pub durability: f64,
+    pub confidence: f64,
+}
+
+const fn default_giga_list_limit() -> u32 {
+    50
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaCandidateListParams {
+    pub room: String,
+    pub review_state: Option<String>,
+    #[serde(default = "default_giga_list_limit")]
+    pub limit: u32,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaHealthParams {
+    pub room: String,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct GigaHealthRequest {
+    room: RoomKey,
+}
+impl GigaHealthRequest {
+    pub fn room(&self) -> &RoomKey {
+        &self.room
+    }
+}
+impl TryFrom<GigaHealthParams> for GigaHealthRequest {
+    type Error = ProtocolError;
+    fn try_from(value: GigaHealthParams) -> Result<Self, Self::Error> {
+        Ok(Self {
+            room: RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+        })
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct GigaCandidateListRequest {
+    room: RoomKey,
+    review_state: Option<GigaReviewState>,
+    limit: u32,
+}
+impl GigaCandidateListRequest {
+    pub fn room(&self) -> &RoomKey {
+        &self.room
+    }
+    pub const fn review_state(&self) -> Option<GigaReviewState> {
+        self.review_state
+    }
+    pub const fn limit(&self) -> u32 {
+        self.limit
+    }
+}
+impl TryFrom<GigaCandidateListParams> for GigaCandidateListRequest {
+    type Error = ProtocolError;
+    fn try_from(value: GigaCandidateListParams) -> Result<Self, Self::Error> {
+        if value.limit == 0 || value.limit > 200 {
+            return Err(ProtocolError::InvalidParams(
+                "limit must be between 1 and 200".into(),
+            ));
+        }
+        Ok(Self {
+            room: RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            review_state: value
+                .review_state
+                .as_deref()
+                .map(GigaReviewState::parse)
+                .transpose()
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            limit: value.limit,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaClassifierParams {
+    pub model: String,
+    pub provider_type: String,
+    pub model_version: String,
+    pub prompt_version: String,
+    pub configuration_digest: String,
+    pub run_id: String,
+    pub completed_at: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaCandidateParams {
+    pub candidate_schema_version: u8,
+    pub candidate_id: String,
+    pub event_id: String,
+    pub room: String,
+    pub session_id: String,
+    #[serde(deserialize_with = "deserialize_giga_kind")]
+    pub kind: String,
+    pub source_refs: Vec<GigaSourceRefParams>,
+    pub priority: f64,
+    pub novelty: f64,
+    pub durability: f64,
+    pub confidence: f64,
+    pub project_keys: Vec<String>,
+    pub thread_keys: Vec<String>,
+    pub entity_hints: Vec<String>,
+    pub retrieval_terms: Vec<String>,
+    pub proposed_title: String,
+    pub gist: String,
+    pub rationale: String,
+    pub proof_refs: Vec<String>,
+    pub scope: GigaScopeParams,
+    #[serde(deserialize_with = "deserialize_giga_authority")]
+    pub authority: String,
+    #[serde(deserialize_with = "deserialize_giga_review_state")]
+    pub review_state: String,
+    pub classifier: GigaClassifierParams,
+    pub created_at: String,
+    pub expires_at: RequiredNullable<String>,
+    pub promotion_refs: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaResonanceParams {
+    pub event_id: String,
+    pub score: f64,
+    pub classifier: GigaClassifierParams,
+    pub source_refs: Vec<GigaSourceRefParams>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaReviewParams {
+    pub candidate_id: String,
+    pub reviewer_id: String,
+    #[serde(deserialize_with = "deserialize_giga_review_state")]
+    pub previous_state: String,
+    #[serde(deserialize_with = "deserialize_giga_review_state")]
+    pub new_state: String,
+    pub reason: String,
+    pub authorization_basis: String,
+    pub source_refs: Vec<GigaSourceRefParams>,
+    pub promotion_target: RequiredNullable<String>,
+    pub merge_target: RequiredNullable<String>,
+    pub merge_source_candidates: Vec<String>,
+    pub resonance: RequiredNullable<GigaResonanceParams>,
+    pub reviewed_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaMemoryPromotionPayloadParams {
+    pub title: String,
+    pub body: String,
+    pub threads: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaCodingLessonPromotionPayloadParams {
+    pub title: String,
+    pub body: String,
+    pub shape: RequiredNullable<String>,
+    pub proof_pattern: String,
+    pub trigger_context: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaProjectLessonPromotionPayloadParams {
+    pub title: String,
+    pub body: String,
+    pub project: String,
+    pub proof_pattern: String,
+    pub trigger_context: String,
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(
+    tag = "kind",
+    content = "payload",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum GigaPromotionTargetParams {
+    Memory(GigaMemoryPromotionPayloadParams),
+    CodingLesson(GigaCodingLessonPromotionPayloadParams),
+    ProjectLesson(GigaProjectLessonPromotionPayloadParams),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaPublicationConsentParams {
+    pub operator_approved: bool,
+    pub reviewer_approved: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaPromoteParams {
+    pub candidate_id: String,
+    pub room: String,
+    pub reviewer_id: String,
+    pub operator_identity: String,
+    pub authorization_basis: String,
+    pub source_refs: Vec<GigaSourceRefParams>,
+    pub target: GigaPromotionTargetParams,
+    pub publication_consent: RequiredNullable<GigaPublicationConsentParams>,
+    pub reviewed_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaEventIngestResult {
+    pub event_id: String,
+    pub accepted: bool,
+    pub duplicate: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaEventClaimResult {
+    pub room: String,
+    pub worker_id: String,
+    pub claimed_at: String,
+    pub event: RequiredNullable<GigaEventParams>,
+    pub lease_expires_at: RequiredNullable<String>,
+    pub attempt_count: RequiredNullable<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaProcessResult {
+    pub event_id: String,
+    #[serde(deserialize_with = "deserialize_giga_finish_outcome")]
+    pub outcome: String,
+    pub candidate_count: u32,
+    pub attempt_count: u32,
+    pub error_class: RequiredNullable<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaEventFinishResult {
+    pub room: String,
+    pub event_id: String,
+    pub worker_id: String,
+    #[serde(deserialize_with = "deserialize_giga_finish_outcome")]
+    pub outcome: String,
+    #[serde(deserialize_with = "deserialize_giga_queue_state")]
+    pub queue_state: String,
+    pub attempt_count: u32,
+    pub candidate_count: u32,
+    pub available_at: RequiredNullable<String>,
+    pub finished_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaEventReplayResult {
+    pub room: String,
+    pub event_id: String,
+    pub operator_identity: String,
+    #[serde(deserialize_with = "deserialize_giga_queue_state")]
+    pub previous_state: String,
+    #[serde(deserialize_with = "deserialize_giga_queue_state")]
+    pub queue_state: String,
+    pub attempt_count: u32,
+    pub replayed_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum GigaPromoteResult {
+    Memory {
+        candidate_id: String,
+        #[serde(deserialize_with = "deserialize_giga_review_state")]
+        review_state: String,
+        memory_id: u64,
+        room: String,
+        durable: bool,
+        #[serde(deserialize_with = "deserialize_giga_promotion_authority")]
+        authority: String,
+        warnings: Vec<String>,
+        reviewer_id: String,
+        operator_identity: String,
+        reviewed_at: String,
+        committed_at: String,
+    },
+    CodingLesson {
+        candidate_id: String,
+        #[serde(deserialize_with = "deserialize_giga_review_state")]
+        review_state: String,
+        coding_lesson_id: u64,
+        scope: String,
+        durable: bool,
+        #[serde(deserialize_with = "deserialize_giga_promotion_authority")]
+        authority: String,
+        warnings: Vec<String>,
+        reviewer_id: String,
+        operator_identity: String,
+        reviewed_at: String,
+        committed_at: String,
+    },
+    ProjectLesson {
+        candidate_id: String,
+        #[serde(deserialize_with = "deserialize_giga_review_state")]
+        review_state: String,
+        project_lesson_id: u64,
+        project: String,
+        durable: bool,
+        #[serde(deserialize_with = "deserialize_giga_promotion_authority")]
+        authority: String,
+        warnings: Vec<String>,
+        reviewer_id: String,
+        operator_identity: String,
+        reviewed_at: String,
+        committed_at: String,
+    },
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaCandidateStoreResult {
+    pub candidate_id: String,
+    pub stored: bool,
+    pub duplicate: bool,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaCandidateListResult {
+    pub candidates: Vec<GigaCandidateParams>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaReviewResult {
+    pub candidate_id: String,
+    #[serde(deserialize_with = "deserialize_giga_review_state")]
+    pub previous_state: String,
+    #[serde(deserialize_with = "deserialize_giga_review_state")]
+    pub new_state: String,
+    pub reviewed_at: String,
+    pub resonance: RequiredNullable<GigaResonanceParams>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaHealthCount {
+    #[serde(deserialize_with = "deserialize_giga_kind")]
+    pub kind: String,
+    #[serde(deserialize_with = "deserialize_giga_review_state")]
+    pub review_state: String,
+    pub count: u64,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaClassifierHealthResult {
+    pub provider_type: String,
+    pub model: String,
+    pub model_digest: String,
+    pub prompt_version: String,
+    pub endpoint_scope: String,
+    pub last_error_class: RequiredNullable<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaHealthResult {
+    pub enabled: bool,
+    pub store_healthy: bool,
+    pub queue_depth: u64,
+    pub oldest_queue_age_seconds: Option<u64>,
+    pub processed_count: u64,
+    pub failed_count: u64,
+    pub candidates_by_kind_state: Vec<GigaHealthCount>,
+    pub classifier: GigaClassifierHealthResult,
+}
+
+impl TryFrom<GigaProcessParams> for GigaProcessRequest {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaProcessParams) -> Result<Self, Self::Error> {
+        let sources = value
+            .sources
+            .into_iter()
+            .map(|source| GigaProcessSource::new(source.source_id, source.text))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+        GigaProcessRequest::new(value.event_id, sources)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<GigaEventClaimParams> for GigaEventClaimRequest {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaEventClaimParams) -> Result<Self, Self::Error> {
+        GigaEventClaimRequest::new(
+            RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.worker_id,
+            value.lease_seconds,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<GigaEventFinishParams> for GigaEventFinishRequest {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaEventFinishParams) -> Result<Self, Self::Error> {
+        GigaEventFinishRequest::new(
+            RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.event_id,
+            value.worker_id,
+            GigaEventFinishOutcome::parse(&value.outcome)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.candidate_count,
+            value.error_class.0,
+            value.retry_after_seconds.0,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<GigaEventReplayParams> for GigaEventReplayRequest {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaEventReplayParams) -> Result<Self, Self::Error> {
+        GigaEventReplayRequest::new(
+            RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.event_id,
+            value.operator_identity,
+            value.authorization_basis,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl GigaPromotionTargetParams {
+    fn into_core(self) -> Result<GigaPromotionPayload, ProtocolError> {
+        let payload = match self {
+            Self::Memory(payload) => {
+                GigaMemoryPromotionPayload::new(payload.title, payload.body, payload.threads)
+                    .map(GigaPromotionPayload::Memory)
+            }
+            Self::CodingLesson(payload) => GigaCodingLessonPromotionPayload::new(
+                payload.title,
+                payload.body,
+                payload.shape.0,
+                payload.proof_pattern,
+                payload.trigger_context,
+                payload.tags,
+            )
+            .map(GigaPromotionPayload::CodingLesson),
+            Self::ProjectLesson(payload) => GigaProjectLessonPromotionPayload::new(
+                payload.title,
+                payload.body,
+                payload.project,
+                payload.proof_pattern,
+                payload.trigger_context,
+                payload.tags,
+            )
+            .map(GigaPromotionPayload::ProjectLesson),
+        };
+        payload.map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<GigaPromoteParams> for GigaPromotionRequest {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaPromoteParams) -> Result<Self, Self::Error> {
+        let source_refs = value
+            .source_refs
+            .into_iter()
+            .map(giga_source)
+            .collect::<Result<Vec<_>, _>>()?;
+        let publication_consent = value
+            .publication_consent
+            .0
+            .map(|consent| {
+                GigaPublicationConsent::new(consent.operator_approved, consent.reviewer_approved)
+                    .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+            })
+            .transpose()?;
+        GigaPromotionRequest::new(
+            value.candidate_id,
+            RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.reviewer_id,
+            value.operator_identity,
+            value.authorization_basis,
+            source_refs,
+            value.target.into_core()?,
+            publication_consent,
+            value.reviewed_at,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+fn giga_scope_params(value: &GigaScope) -> GigaScopeParams {
+    GigaScopeParams {
+        room: RequiredNullable(value.room().map(ToString::to_string)),
+        project: RequiredNullable(value.project().map(str::to_owned)),
+        visibility: value.visibility().as_str().into(),
+        publication_review_required: value.publication_review_required(),
+    }
+}
+
+fn giga_source_params(value: &GigaSourceRef) -> GigaSourceRefParams {
+    GigaSourceRefParams {
+        source_type: value.source_type().as_str().into(),
+        source_id: value.source_id().into(),
+        role: value.role().into(),
+        timestamp: value.timestamp().into(),
+        content_hash: value.content_hash().into(),
+        scope: giga_scope_params(value.scope()),
+        range: RequiredNullable(value.range().map(|range| GigaSourceRangeParams {
+            start: range.start(),
+            end: range.end(),
+        })),
+    }
+}
+
+fn giga_lifecycle_params(value: &GigaLifecycle) -> GigaLifecycleParams {
+    let field = |name| {
+        value
+            .field(name)
+            .expect("GigaLifecycle constructor guarantees event-specific fields")
+            .to_owned()
+    };
+    match value.event_type() {
+        GigaEventType::ConversationWindow => {
+            GigaLifecycleParams::ConversationWindow(ConversationWindowLifecycle {})
+        }
+        GigaEventType::TaskStarted => GigaLifecycleParams::TaskStarted(TaskStartedLifecycle {
+            task_reference: field("task_reference"),
+            worker_id: field("worker_id"),
+            worker_role: field("worker_role"),
+            phase: field("phase"),
+            project_key: field("project_key"),
+            task_kind: field("task_kind"),
+            risk: value
+                .risk()
+                .expect("task_started lifecycle always has risk")
+                .as_str()
+                .into(),
+            target: field("target"),
+            change: field("change"),
+            proof_contract: value.proof_contract().to_vec(),
+        }),
+        GigaEventType::TaskCompleted => {
+            GigaLifecycleParams::TaskCompleted(TaskCompletedLifecycle {
+                task_reference: field("task_reference"),
+                outcome: field("outcome"),
+                verification_result: field("verification_result"),
+            })
+        }
+        GigaEventType::SubagentDispatched => {
+            GigaLifecycleParams::SubagentDispatched(SubagentDispatchedLifecycle {
+                subagent_reference: field("subagent_reference"),
+                parent_task: field("parent_task"),
+                role: field("role"),
+                target: field("target"),
+                change: field("change"),
+                acceptance: value.proof_contract().to_vec(),
+            })
+        }
+        GigaEventType::SubagentCompleted => {
+            GigaLifecycleParams::SubagentCompleted(SubagentCompletedLifecycle {
+                subagent_reference: field("subagent_reference"),
+                parent_task: field("parent_task"),
+                outcome: field("outcome"),
+            })
+        }
+        GigaEventType::TodoTransition => {
+            GigaLifecycleParams::TodoTransition(TodoTransitionLifecycle {
+                todo_reference: field("todo_reference"),
+                previous_state: field("previous_state"),
+                new_state: field("new_state"),
+            })
+        }
+        GigaEventType::ToolOutcome => GigaLifecycleParams::ToolOutcome(ToolOutcomeLifecycle {
+            tool_name: field("tool_name"),
+            status: field("status"),
+            sanitized_outcome: field("sanitized_outcome"),
+        }),
+        GigaEventType::ManualReprocess => {
+            let range = value
+                .source_range()
+                .expect("manual_reprocess lifecycle always has a source range");
+            GigaLifecycleParams::ManualReprocess(ManualReprocessLifecycle {
+                source_range: GigaSourceRangeParams {
+                    start: range.start(),
+                    end: range.end(),
+                },
+                reason: field("reason"),
+                operator_identity: field("operator_identity"),
+            })
+        }
+    }
+}
+
+impl From<&GigaEvent> for GigaEventParams {
+    fn from(value: &GigaEvent) -> Self {
+        Self {
+            event_schema_version: value.event_schema_version(),
+            event_id: value.event_id().into(),
+            event_type: value.event_type().as_str().into(),
+            room: value.room().to_string(),
+            session_id: value.session_id().into(),
+            project_keys: value.project_keys().to_vec(),
+            source_refs: value.source_refs().iter().map(giga_source_params).collect(),
+            lifecycle: giga_lifecycle_params(value.lifecycle()),
+            created_at: value.created_at().into(),
+        }
+    }
+}
+
+impl From<GigaEventClaimReceipt> for GigaEventClaimResult {
+    fn from(receipt: GigaEventClaimReceipt) -> Self {
+        Self {
+            room: receipt.room().to_string(),
+            worker_id: receipt.worker_id().into(),
+            claimed_at: receipt.claimed_at().into(),
+            event: RequiredNullable(receipt.event().map(GigaEventParams::from)),
+            lease_expires_at: RequiredNullable(receipt.lease_expires_at().map(str::to_owned)),
+            attempt_count: RequiredNullable(receipt.attempt_count()),
+        }
+    }
+}
+
+impl From<GigaEventFinishReceipt> for GigaEventFinishResult {
+    fn from(receipt: GigaEventFinishReceipt) -> Self {
+        Self {
+            room: receipt.room().to_string(),
+            event_id: receipt.event_id().into(),
+            worker_id: receipt.worker_id().into(),
+            outcome: receipt.outcome().as_str().into(),
+            queue_state: receipt.queue_state().as_str().into(),
+            attempt_count: receipt.attempt_count(),
+            candidate_count: receipt.candidate_count(),
+            available_at: RequiredNullable(receipt.available_at().map(str::to_owned)),
+            finished_at: receipt.finished_at().into(),
+        }
+    }
+}
+
+impl From<GigaEventReplayReceipt> for GigaEventReplayResult {
+    fn from(receipt: GigaEventReplayReceipt) -> Self {
+        Self {
+            room: receipt.room().to_string(),
+            event_id: receipt.event_id().into(),
+            operator_identity: receipt.operator_identity().into(),
+            previous_state: receipt.previous_state().as_str().into(),
+            queue_state: receipt.queue_state().as_str().into(),
+            attempt_count: receipt.attempt_count(),
+            replayed_at: receipt.replayed_at().into(),
+        }
+    }
+}
+
+impl From<GigaPromotionReceipt> for GigaPromoteResult {
+    fn from(receipt: GigaPromotionReceipt) -> Self {
+        let review_state = receipt.review_state().as_str().to_owned();
+        let authority = receipt.authority().as_str().to_owned();
+        let candidate_id = receipt.candidate_id().to_owned();
+        let reviewer_id = receipt.reviewer_id().to_owned();
+        let operator_identity = receipt.operator_identity().to_owned();
+        let reviewed_at = receipt.reviewed_at().to_owned();
+        let committed_at = receipt.committed_at().to_owned();
+        match &receipt {
+            GigaPromotionReceipt::Memory(memory) => Self::Memory {
+                candidate_id,
+                review_state,
+                memory_id: memory.memory_id(),
+                room: memory.room().to_string(),
+                durable: true,
+                authority,
+                warnings: Vec::new(),
+                reviewer_id,
+                operator_identity,
+                reviewed_at,
+                committed_at,
+            },
+            GigaPromotionReceipt::CodingLesson(lesson) => Self::CodingLesson {
+                candidate_id,
+                review_state,
+                coding_lesson_id: lesson.coding_lesson_id(),
+                scope: lesson.scope().into(),
+                durable: true,
+                authority,
+                warnings: Vec::new(),
+                reviewer_id,
+                operator_identity,
+                reviewed_at,
+                committed_at,
+            },
+            GigaPromotionReceipt::ProjectLesson(lesson) => Self::ProjectLesson {
+                candidate_id,
+                review_state,
+                project_lesson_id: lesson.project_lesson_id(),
+                project: lesson.project().into(),
+                durable: true,
+                authority,
+                warnings: Vec::new(),
+                reviewer_id,
+                operator_identity,
+                reviewed_at,
+                committed_at,
+            },
+        }
+    }
+}
+
+fn giga_scope(value: GigaScopeParams) -> Result<GigaScope, ProtocolError> {
+    GigaScope::new(
+        value.room.0,
+        value.project.0,
+        GigaVisibility::parse(&value.visibility)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+        value.publication_review_required,
+    )
+    .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+}
+fn giga_source(value: GigaSourceRefParams) -> Result<GigaSourceRef, ProtocolError> {
+    let range = value
+        .range
+        .0
+        .map(|range| GigaSourceRange::new(range.start, range.end))
+        .transpose()
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+    GigaSourceRef::new(
+        GigaSourceType::parse(&value.source_type)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+        value.source_id,
+        value.role,
+        value.timestamp,
+        value.content_hash,
+        giga_scope(value.scope)?,
+        range,
+    )
+    .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+}
+fn giga_classifier(value: GigaClassifierParams) -> Result<GigaClassifierIdentity, ProtocolError> {
+    GigaClassifierIdentity::new(
+        value.model,
+        value.provider_type,
+        value.model_version,
+        value.prompt_version,
+        value.configuration_digest,
+        value.run_id,
+        value.completed_at,
+    )
+    .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+}
+impl TryFrom<GigaEventParams> for GigaEvent {
+    type Error = ProtocolError;
+    fn try_from(value: GigaEventParams) -> Result<Self, Self::Error> {
+        if value.event_schema_version != 1 {
+            return Err(ProtocolError::InvalidParams(
+                "unsupported event_schema_version".into(),
+            ));
+        }
+        let event_type = GigaEventType::parse(&value.event_type)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+        let source_refs = value
+            .source_refs
+            .into_iter()
+            .map(giga_source)
+            .collect::<Result<Vec<_>, _>>()?;
+        GigaEvent::new(
+            value.event_id,
+            event_type,
+            RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.session_id,
+            value.project_keys,
+            source_refs,
+            value.lifecycle.into_core()?,
+            value.created_at,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+impl TryFrom<GigaEventClaimResult> for GigaEventClaimReceipt {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaEventClaimResult) -> Result<Self, Self::Error> {
+        let event = value.event.0.map(GigaEvent::try_from).transpose()?;
+        GigaEventClaimReceipt::new(
+            RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.worker_id,
+            value.claimed_at,
+            event,
+            value.lease_expires_at.0,
+            value.attempt_count.0,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<GigaEventFinishResult> for GigaEventFinishReceipt {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaEventFinishResult) -> Result<Self, Self::Error> {
+        GigaEventFinishReceipt::new(
+            RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.event_id,
+            value.worker_id,
+            GigaEventFinishOutcome::parse(&value.outcome)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            GigaQueueState::parse(&value.queue_state)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.attempt_count,
+            value.candidate_count,
+            value.available_at.0,
+            value.finished_at,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<GigaEventReplayResult> for GigaEventReplayReceipt {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaEventReplayResult) -> Result<Self, Self::Error> {
+        GigaEventReplayReceipt::new(
+            RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.event_id,
+            value.operator_identity,
+            GigaQueueState::parse(&value.previous_state)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            GigaQueueState::parse(&value.queue_state)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.attempt_count,
+            value.replayed_at,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<GigaPromoteResult> for GigaPromotionReceipt {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaPromoteResult) -> Result<Self, Self::Error> {
+        fn validate_common(
+            review_state: &str,
+            durable: bool,
+            authority: &str,
+        ) -> Result<(), ProtocolError> {
+            if !durable
+                || GigaReviewState::parse(review_state)
+                    .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+                    != GigaReviewState::Promoted
+                || GigaPromotionAuthority::parse(authority)
+                    .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+                    != GigaPromotionAuthority::Full
+            {
+                return Err(ProtocolError::InvalidParams(
+                    "promotion result must be durable, promoted, and full-authority".into(),
+                ));
+            }
+            Ok(())
+        }
+
+        let result = match value {
+            GigaPromoteResult::Memory {
+                candidate_id,
+                review_state,
+                memory_id,
+                room,
+                durable,
+                authority,
+                warnings: _,
+                reviewer_id,
+                operator_identity,
+                reviewed_at,
+                committed_at,
+            } => {
+                validate_common(&review_state, durable, &authority)?;
+                GigaPromotionReceipt::memory(
+                    candidate_id,
+                    memory_id,
+                    RoomKey::new(room)
+                        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+                    reviewer_id,
+                    operator_identity,
+                    reviewed_at,
+                    committed_at,
+                )
+            }
+            GigaPromoteResult::CodingLesson {
+                candidate_id,
+                review_state,
+                coding_lesson_id,
+                scope,
+                durable,
+                authority,
+                warnings: _,
+                reviewer_id,
+                operator_identity,
+                reviewed_at,
+                committed_at,
+            } => {
+                validate_common(&review_state, durable, &authority)?;
+                GigaPromotionReceipt::coding_lesson(
+                    candidate_id,
+                    coding_lesson_id,
+                    scope,
+                    reviewer_id,
+                    operator_identity,
+                    reviewed_at,
+                    committed_at,
+                )
+            }
+            GigaPromoteResult::ProjectLesson {
+                candidate_id,
+                review_state,
+                project_lesson_id,
+                project,
+                durable,
+                authority,
+                warnings: _,
+                reviewer_id,
+                operator_identity,
+                reviewed_at,
+                committed_at,
+            } => {
+                validate_common(&review_state, durable, &authority)?;
+                GigaPromotionReceipt::project_lesson(
+                    candidate_id,
+                    project_lesson_id,
+                    project,
+                    reviewer_id,
+                    operator_identity,
+                    reviewed_at,
+                    committed_at,
+                )
+            }
+        };
+        result.map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+impl TryFrom<GigaCandidateParams> for GigaCandidate {
+    type Error = ProtocolError;
+    fn try_from(value: GigaCandidateParams) -> Result<Self, Self::Error> {
+        if value.candidate_schema_version != 1 {
+            return Err(ProtocolError::InvalidParams(
+                "unsupported candidate_schema_version".into(),
+            ));
+        }
+        let source_refs = value
+            .source_refs
+            .into_iter()
+            .map(giga_source)
+            .collect::<Result<Vec<_>, _>>()?;
+        GigaCandidate::new(
+            value.candidate_id,
+            value.event_id,
+            RoomKey::new(value.room)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.session_id,
+            GigaCandidateKind::parse(&value.kind)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            source_refs,
+            value.proof_refs,
+            GigaScores::new(
+                value.priority,
+                value.novelty,
+                value.durability,
+                value.confidence,
+            )
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.project_keys,
+            value.thread_keys,
+            value.entity_hints,
+            value.retrieval_terms,
+            value.proposed_title,
+            value.gist,
+            value.rationale,
+            giga_scope(value.scope)?,
+            GigaAuthority::parse(&value.authority)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            GigaReviewState::parse(&value.review_state)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            giga_classifier(value.classifier)?,
+            value.created_at,
+            value.expires_at.0,
+            value.promotion_refs,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+impl TryFrom<GigaReviewParams> for GigaReviewAction {
+    type Error = ProtocolError;
+    fn try_from(value: GigaReviewParams) -> Result<Self, Self::Error> {
+        let source_refs = value
+            .source_refs
+            .into_iter()
+            .map(giga_source)
+            .collect::<Result<Vec<_>, _>>()?;
+        let resonance = value
+            .resonance
+            .0
+            .map(|resonance| {
+                let refs = resonance
+                    .source_refs
+                    .into_iter()
+                    .map(giga_source)
+                    .collect::<Result<Vec<_>, _>>()?;
+                GigaResonance::new(
+                    resonance.event_id,
+                    resonance.score,
+                    giga_classifier(resonance.classifier)?,
+                    refs,
+                )
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+            })
+            .transpose()?;
+        GigaReviewAction::new(
+            value.candidate_id,
+            value.reviewer_id,
+            GigaReviewState::parse(&value.previous_state)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            GigaReviewState::parse(&value.new_state)
+                .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?,
+            value.reason,
+            value.authorization_basis,
+            source_refs,
+            value.promotion_target.0,
+            value.merge_target.0,
+            value.merge_source_candidates,
+            resonance,
+            value.reviewed_at,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1302,37 +2707,35 @@ mod tests {
             DiagnosticTargetKind::File,
             "crates/house-substrate/src/lib.rs",
         );
-        let details = DiagnosticDetails::new(
-            DiagnosticCategory::Database,
-            DiagnosticStage::Transaction,
-        )
-        .operation("remember")
-        .owner(
-            DiagnosticOwner::new("house-substrate")
-                .path("crates/house-substrate/src/lib.rs")
-                .symbol("Store::remember"),
-        )
-        .expected(serde_json::json!({"transaction": "committed"}))
-        .observed(serde_json::json!({
-            "transaction": "unknown",
-            "password": "do-not-leak",
-        }))
-        .evidence(
-            DiagnosticEvidence::new("database_error")
-                .summary("commit result was not returned")
-                .data(serde_json::json!({"sqlstate": "08006"})),
-        )
-        .target(target.clone())
-        .next_check(
-            DiagnosticNextCheck::new("inspect")
-                .target(target)
-                .expected(serde_json::json!({"symbol_exists": true})),
-        )
-        .execution(DiagnosticExecution::new(
-            true,
-            DiagnosticWriteOutcome::Unknown,
-            DiagnosticRetry::ReconcileFirst,
-        ));
+        let details =
+            DiagnosticDetails::new(DiagnosticCategory::Database, DiagnosticStage::Transaction)
+                .operation("remember")
+                .owner(
+                    DiagnosticOwner::new("house-substrate")
+                        .path("crates/house-substrate/src/lib.rs")
+                        .symbol("Store::remember"),
+                )
+                .expected(serde_json::json!({"transaction": "committed"}))
+                .observed(serde_json::json!({
+                    "transaction": "unknown",
+                    "password": "do-not-leak",
+                }))
+                .evidence(
+                    DiagnosticEvidence::new("database_error")
+                        .summary("commit result was not returned")
+                        .data(serde_json::json!({"sqlstate": "08006"})),
+                )
+                .target(target.clone())
+                .next_check(
+                    DiagnosticNextCheck::new("inspect")
+                        .target(target)
+                        .expected(serde_json::json!({"symbol_exists": true})),
+                )
+                .execution(DiagnosticExecution::new(
+                    true,
+                    DiagnosticWriteOutcome::Unknown,
+                    DiagnosticRetry::ReconcileFirst,
+                ));
         let error = ProtocolErrorBody::application("database_failure", "write outcome unknown")
             .retryable(false)
             .diagnostics(details)
@@ -1416,8 +2819,8 @@ mod tests {
                 .contains_key("details")
         );
         assert!(omitted.diagnostics().is_none());
-        let protocol = ProtocolErrorBody::protocol(ProtocolError::InvalidParams("bad".into()))
-            .build();
+        let protocol =
+            ProtocolErrorBody::protocol(ProtocolError::InvalidParams("bad".into())).build();
         assert_eq!(protocol.code, "invalid_params");
         assert_eq!(protocol.message, "invalid parameters: bad");
         assert!(!protocol.retryable);
@@ -1450,17 +2853,18 @@ mod tests {
         );
         assert_eq!(diagnostics.additional["unrecognized_fact"], 7);
 
-        let arbitrary_details: ResponseEnvelope<Value> = serde_json::from_value(serde_json::json!({
-            "protocol": 1,
-            "id": "older",
-            "error": {
-                "code": "old_failure",
-                "message": "old details can be any JSON",
-                "retryable": false,
-                "details": ["legacy", "array"]
-            }
-        }))
-        .unwrap();
+        let arbitrary_details: ResponseEnvelope<Value> =
+            serde_json::from_value(serde_json::json!({
+                "protocol": 1,
+                "id": "older",
+                "error": {
+                    "code": "old_failure",
+                    "message": "old details can be any JSON",
+                    "retryable": false,
+                    "details": ["legacy", "array"]
+                }
+            }))
+            .unwrap();
         let ResponsePayload::Error { error } = arbitrary_details.payload else {
             panic!("expected error response");
         };
@@ -1478,8 +2882,7 @@ mod tests {
         ] {
             assert_eq!(serde_json::to_value(write_outcome).unwrap(), wire);
             assert_eq!(
-                serde_json::from_value::<DiagnosticWriteOutcome>(serde_json::json!(wire))
-                    .unwrap(),
+                serde_json::from_value::<DiagnosticWriteOutcome>(serde_json::json!(wire)).unwrap(),
                 write_outcome
             );
         }
@@ -1907,5 +3310,805 @@ mod tests {
         let resonance: ClusterResonanceTelemetry = serde_json::from_value(serde_json::json!({"profile":[{"label":"x","activation":0.9,"member_count":2}],"hot":["chunk"]})).unwrap();
         assert_eq!(resonance.profile[0].member_count, 2);
         assert!(serde_json::from_value::<ClusterStalenessTelemetry>(serde_json::json!({"built_at":null,"chunks_since_build":1,"fraction_unseen":0.1,"bad":true})).is_err());
+    }
+
+    #[test]
+    fn recall_result_defaults_warnings_without_weakening_strict_fields() {
+        let result: RecallResult = serde_json::from_value(serde_json::json!({
+            "ok": true,
+            "query": "bounded query",
+            "found": false,
+            "source": "postgres",
+            "retrievalCandidates": [],
+            "canonMatches": [],
+            "semanticChunks": [],
+            "contentChunks": [],
+            "dateMatches": [],
+            "queryDates": [],
+            "taxonomy": {},
+            "cluster": null,
+            "clusters": null,
+            "clusterStaleness": null,
+            "clusterResonance": null,
+            "memoryHandle": null
+        }))
+        .unwrap();
+        assert!(result.warnings.is_empty());
+        let mut with_warning = serde_json::to_value(result).unwrap();
+        assert_eq!(with_warning["warnings"], serde_json::json!([]));
+        with_warning["warnings"] = serde_json::json!(["semantic lane unavailable"]);
+        let decoded: RecallResult = serde_json::from_value(with_warning).unwrap();
+        assert_eq!(decoded.warnings, vec!["semantic lane unavailable"]);
+        let mut unknown = serde_json::to_value(decoded).unwrap();
+        unknown["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<RecallResult>(unknown).is_err());
+    }
+    fn giga_private_source_json() -> Value {
+        serde_json::json!({
+            "source_type": "turn",
+            "source_id": "turn-1",
+            "role": "user",
+            "timestamp": "2026-07-24T12:00:00Z",
+            "content_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "scope": {
+                "room": "lab",
+                "project": null,
+                "visibility": "private",
+                "publication_review_required": false
+            },
+            "range": null
+        })
+    }
+
+    fn giga_project_source_json() -> Value {
+        serde_json::json!({
+            "source_type": "turn",
+            "source_id": "turn-2",
+            "role": "user",
+            "timestamp": "2026-07-24T12:00:00Z",
+            "content_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "scope": {
+                "room": "lab",
+                "project": "athanor",
+                "visibility": "private",
+                "publication_review_required": true
+            },
+            "range": null
+        })
+    }
+
+    #[test]
+    fn giga_curio_review_wire_keeps_new_event_resonance_sources_separate() {
+        let mut new_source = giga_private_source_json();
+        new_source["source_id"] = serde_json::json!("turn-new");
+        new_source["timestamp"] = serde_json::json!("2026-07-24T12:01:00Z");
+        new_source["content_hash"] =
+            serde_json::json!("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+        let action = RequestEnvelope {
+            protocol: 1,
+            id: "review".into(),
+            method: "giga_review".into(),
+            params: serde_json::json!({
+                "candidate_id": "candidate-curio",
+                "reviewer_id": "governing-spirit",
+                "previous_state": "curio",
+                "new_state": "in_review",
+                "reason": "new event resonates with the retained curio",
+                "authorization_basis": "deliberate local review",
+                "source_refs": [giga_private_source_json()],
+                "promotion_target": null,
+                "merge_target": null,
+                "merge_source_candidates": [],
+                "resonance": {
+                    "event_id": "event-new",
+                    "score": 0.9,
+                    "classifier": {
+                        "model": "resonance-model",
+                        "provider_type": "ollama",
+                        "model_version": "manifest",
+                        "prompt_version": "resonance-v1",
+                        "configuration_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                        "run_id": "resonance-run",
+                        "completed_at": "2026-07-24T12:01:01Z"
+                    },
+                    "source_refs": [new_source]
+                },
+                "reviewed_at": "2026-07-24T12:02:00Z"
+            }),
+        }
+        .giga_review_request()
+        .unwrap();
+        assert_eq!(action.source_refs()[0].source_id(), "turn-1");
+        assert_eq!(
+            action.resonance().unwrap().source_refs()[0].source_id(),
+            "turn-new"
+        );
+    }
+
+    fn giga_promote_params_json(kind: &str) -> Value {
+        let (source, payload, publication_consent) = match kind {
+            "memory" => (
+                giga_private_source_json(),
+                serde_json::json!({
+                    "title": "Edited memory",
+                    "body": "Human-reviewed durable body",
+                    "threads": ["consent"]
+                }),
+                Value::Null,
+            ),
+            "coding_lesson" => (
+                giga_private_source_json(),
+                serde_json::json!({
+                    "title": "Sanitize inherited state",
+                    "body": "Clear inherited variables before invoking tools.",
+                    "shape": "process",
+                    "proof_pattern": "failure then passing proof",
+                    "trigger_context": "inherited environment state reaches a child tool process",
+                    "tags": ["environment"]
+                }),
+                Value::Null,
+            ),
+            "project_lesson" => (
+                giga_project_source_json(),
+                serde_json::json!({
+                    "title": "Stable Athanor rule",
+                    "body": "Keep queue mutations transactional.",
+                    "project": "athanor",
+                    "proof_pattern": "rollback observed",
+                    "trigger_context": "queue work crosses a durable transaction boundary",
+                    "tags": ["queue"]
+                }),
+                serde_json::json!({
+                    "operator_approved": true,
+                    "reviewer_approved": true
+                }),
+            ),
+            other => panic!("unsupported test kind: {other}"),
+        };
+        serde_json::json!({
+            "candidate_id": format!("candidate-{kind}"),
+            "room": "lab",
+            "reviewer_id": "kintsu",
+            "operator_identity": "sol",
+            "authorization_basis": "reviewed exact source and edited payload",
+            "source_refs": [source],
+            "target": {
+                "kind": kind,
+                "payload": payload
+            },
+            "publication_consent": publication_consent,
+            "reviewed_at": "2026-07-24T12:04:00Z"
+        })
+    }
+
+    #[test]
+    fn giga_process_wire_is_exact_and_bounds_source_records_by_utf8_bytes() {
+        let valid = RequestEnvelope {
+            protocol: 1,
+            id: "process".into(),
+            method: "giga_process".into(),
+            params: serde_json::json!({
+                "event_id": "event-1",
+                "sources": [
+                    {"source_id":"turn-1","text":"exact user text"},
+                    {"source_id":"turn-2","text":"exact assistant text"}
+                ]
+            }),
+        }
+        .giga_process_request()
+        .unwrap();
+        assert_eq!(valid.event_id(), "event-1");
+        assert_eq!(valid.sources().len(), 2);
+        assert_eq!(valid.sources()[0].text(), "exact user text");
+
+        let rejects = [
+            serde_json::json!({
+                "event_id":"event-1",
+                "sources":[{"source_id":"turn-1","text":"x","extra":true}]
+            }),
+            serde_json::json!({
+                "event_id":"event-1",
+                "sources":[{"source_id":"turn-1","text":"x"}],
+                "extra":true
+            }),
+            serde_json::json!({
+                "event_id":"event-1",
+                "sources":[
+                    {"source_id":"turn-1","text":"x"},
+                    {"source_id":"turn-1","text":"y"}
+                ]
+            }),
+            serde_json::json!({
+                "event_id":"event-1",
+                "sources":[{"source_id":"turn-1","text":"x".repeat(8_001)}]
+            }),
+            serde_json::json!({
+                "event_id":"event-1",
+                "sources":[
+                    {"source_id":"turn-1","text":"x".repeat(8_000)},
+                    {"source_id":"turn-2","text":"x".repeat(8_000)},
+                    {"source_id":"turn-3","text":"x".repeat(8_000)},
+                    {"source_id":"turn-4","text":"x"}
+                ]
+            }),
+            serde_json::json!({
+                "event_id":"event-1",
+                "sources":(0..9).map(|index| serde_json::json!({
+                    "source_id":format!("turn-{index}"),"text":"x"
+                })).collect::<Vec<_>>()
+            }),
+        ];
+        for params in rejects {
+            assert!(
+                RequestEnvelope {
+                    protocol: 1,
+                    id: "process".into(),
+                    method: "giga_process".into(),
+                    params,
+                }
+                .giga_process_request()
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn giga_queue_wire_accepts_valid_claim_finish_and_authorized_replay() {
+        let claim = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"claim","method":"giga_event_claim","params":{"room":"lab","worker_id":"agents-a1","lease_seconds":60}}"#,
+        )
+        .unwrap()
+        .giga_event_claim_request()
+        .unwrap();
+        assert_eq!(claim.room().as_str(), "lab");
+        assert_eq!(claim.worker_id(), "agents-a1");
+        assert_eq!(claim.lease_seconds(), 60);
+
+        let finish = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"finish","method":"giga_event_finish","params":{"room":"lab","event_id":"event-1","worker_id":"agents-a1","outcome":"retry","candidate_count":0,"error_class":"model_timeout","retry_after_seconds":60}}"#,
+        )
+        .unwrap()
+        .giga_event_finish_request()
+        .unwrap();
+        assert_eq!(finish.outcome(), GigaEventFinishOutcome::Retry);
+        assert_eq!(finish.error_class(), Some("model_timeout"));
+        assert_eq!(finish.retry_after_seconds(), Some(60));
+
+        let replay = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"replay","method":"giga_event_replay","params":{"room":"lab","event_id":"event-1","operator_identity":"sol","authorization_basis":"operator requested replay after prompt repair"}}"#,
+        )
+        .unwrap()
+        .giga_event_replay_request()
+        .unwrap();
+        assert_eq!(replay.operator_identity(), "sol");
+        assert_eq!(
+            replay.authorization_basis(),
+            "operator requested replay after prompt repair"
+        );
+    }
+
+    #[test]
+    fn giga_queue_wire_enforces_lease_retry_and_replay_contracts() {
+        let claim = |lease_seconds| RequestEnvelope {
+            protocol: 1,
+            id: "claim".into(),
+            method: "giga_event_claim".into(),
+            params: serde_json::json!({
+                "room": "lab",
+                "worker_id": "agents-a1",
+                "lease_seconds": lease_seconds
+            }),
+        };
+        for lease_seconds in [1, house_core::GIGA_MAX_LEASE_SECONDS] {
+            assert!(claim(lease_seconds).giga_event_claim_request().is_ok());
+        }
+        for lease_seconds in [0, house_core::GIGA_MAX_LEASE_SECONDS + 1] {
+            assert!(matches!(
+                claim(lease_seconds).giga_event_claim_request(),
+                Err(ProtocolError::InvalidParams(message)) if message.contains("lease_seconds")
+            ));
+        }
+
+        for (outcome, retry_after_seconds) in
+            [("retry", serde_json::json!(1)), ("failed", Value::Null)]
+        {
+            let request = RequestEnvelope {
+                protocol: 1,
+                id: "finish".into(),
+                method: "giga_event_finish".into(),
+                params: serde_json::json!({
+                    "room": "lab",
+                    "event_id": "event-1",
+                    "worker_id": "agents-a1",
+                    "outcome": outcome,
+                    "candidate_count": 0,
+                    "error_class": null,
+                    "retry_after_seconds": retry_after_seconds
+                }),
+            };
+            assert!(matches!(
+                request.giga_event_finish_request(),
+                Err(ProtocolError::InvalidParams(message)) if message.contains("error_class")
+            ));
+        }
+
+        let final_retry: GigaEventFinishResult = serde_json::from_value(serde_json::json!({
+            "room": "lab",
+            "event_id": "event-1",
+            "worker_id": "agents-a1",
+            "outcome": "retry",
+            "queue_state": "pending",
+            "attempt_count": house_core::GIGA_MAX_EVENT_ATTEMPTS,
+            "candidate_count": 0,
+            "available_at": "2026-07-24T12:02:00Z",
+            "finished_at": "2026-07-24T12:01:00Z"
+        }))
+        .unwrap();
+        assert!(matches!(
+            GigaEventFinishReceipt::try_from(final_retry),
+            Err(ProtocolError::InvalidParams(message)) if message.contains("final bounded attempt")
+        ));
+
+        for (operator_identity, authorization_basis) in
+            [("", "operator requested replay"), ("sol", " ")]
+        {
+            let request = RequestEnvelope {
+                protocol: 1,
+                id: "replay".into(),
+                method: "giga_event_replay".into(),
+                params: serde_json::json!({
+                    "room": "lab",
+                    "event_id": "event-1",
+                    "operator_identity": operator_identity,
+                    "authorization_basis": authorization_basis
+                }),
+            };
+            assert!(request.giga_event_replay_request().is_err());
+        }
+    }
+
+    #[test]
+    fn giga_queue_wire_rejects_client_arbitration_timestamps() {
+        assert!(
+            RequestEnvelope {
+                protocol: 1,
+                id: "claim".into(),
+                method: "giga_event_claim".into(),
+                params: serde_json::json!({
+                    "room":"lab",
+                    "worker_id":"agents-a1",
+                    "lease_seconds":60,
+                    "claimed_at":"2099-01-01T00:00:00Z"
+                }),
+            }
+            .giga_event_claim_request()
+            .is_err()
+        );
+        assert!(
+            RequestEnvelope {
+                protocol: 1,
+                id: "finish".into(),
+                method: "giga_event_finish".into(),
+                params: serde_json::json!({
+                    "room":"lab",
+                    "event_id":"event-1",
+                    "worker_id":"agents-a1",
+                    "outcome":"succeeded",
+                    "candidate_count":0,
+                    "error_class":null,
+                    "retry_after_seconds":null,
+                    "finished_at":"2099-01-01T00:00:00Z"
+                }),
+            }
+            .giga_event_finish_request()
+            .is_err()
+        );
+        assert!(
+            RequestEnvelope {
+                protocol: 1,
+                id: "replay".into(),
+                method: "giga_event_replay".into(),
+                params: serde_json::json!({
+                    "room":"lab",
+                    "event_id":"event-1",
+                    "operator_identity":"operator",
+                    "authorization_basis":"deliberate replay",
+                    "replayed_at":"2099-01-01T00:00:00Z"
+                }),
+            }
+            .giga_event_replay_request()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn giga_health_wire_requires_an_explicit_room_scope() {
+        let request = RequestEnvelope {
+            protocol: 1,
+            id: "health".into(),
+            method: "giga_health".into(),
+            params: serde_json::json!({"room":"lab"}),
+        }
+        .giga_health_request()
+        .unwrap();
+        assert_eq!(request.room().as_str(), "lab");
+        assert!(
+            RequestEnvelope {
+                protocol: 1,
+                id: "health".into(),
+                method: "giga_health".into(),
+                params: serde_json::json!({}),
+            }
+            .giga_health_request()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn giga_memory_coding_and_project_promotion_wire_preserves_edited_targets() {
+        for (kind, expected_kind) in [
+            ("memory", GigaPromotionKind::Memory),
+            ("coding_lesson", GigaPromotionKind::CodingLesson),
+            ("project_lesson", GigaPromotionKind::ProjectLesson),
+        ] {
+            let request = RequestEnvelope {
+                protocol: 1,
+                id: format!("promote-{kind}"),
+                method: "giga_promote".into(),
+                params: giga_promote_params_json(kind),
+            }
+            .giga_promote_request()
+            .unwrap();
+            assert_eq!(request.payload().kind(), expected_kind);
+            assert_eq!(request.source_refs().len(), 1);
+            assert_eq!(
+                request.source_refs()[0].source_id(),
+                if kind == "project_lesson" {
+                    "turn-2"
+                } else {
+                    "turn-1"
+                }
+            );
+            assert_eq!(
+                request.publication_consent().is_some(),
+                kind == "project_lesson"
+            );
+        }
+    }
+
+    #[test]
+    fn giga_lesson_promotion_wire_requires_proof_and_trigger_fields() {
+        for kind in ["coding_lesson", "project_lesson"] {
+            for field in ["proof_pattern", "trigger_context"] {
+                let mut params = giga_promote_params_json(kind);
+                params["target"]["payload"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                assert!(
+                    RequestEnvelope {
+                        protocol: 1,
+                        id: "promotion".into(),
+                        method: "giga_promote".into(),
+                        params,
+                    }
+                    .giga_promote_request()
+                    .is_err()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn giga_promotion_wire_rejects_kind_mismatch_unsupported_kinds_and_unedited_payloads() {
+        let mut mismatch = giga_promote_params_json("memory");
+        mismatch["target"]["kind"] = serde_json::json!("coding_lesson");
+        assert!(
+            RequestEnvelope {
+                protocol: 1,
+                id: "mismatch".into(),
+                method: "giga_promote".into(),
+                params: mismatch,
+            }
+            .giga_promote_request()
+            .is_err()
+        );
+
+        for kind in [
+            "correction",
+            "supersession",
+            "entity_update",
+            "thread_update",
+            "unknown",
+        ] {
+            let mut params = giga_promote_params_json("memory");
+            params["target"]["kind"] = serde_json::json!(kind);
+            assert!(
+                RequestEnvelope {
+                    protocol: 1,
+                    id: format!("unsupported-{kind}"),
+                    method: "giga_promote".into(),
+                    params,
+                }
+                .giga_promote_request()
+                .is_err()
+            );
+        }
+
+        for (kind, field) in [
+            ("memory", "title"),
+            ("memory", "body"),
+            ("coding_lesson", "title"),
+            ("coding_lesson", "body"),
+            ("project_lesson", "title"),
+            ("project_lesson", "body"),
+            ("project_lesson", "project"),
+        ] {
+            let mut params = giga_promote_params_json(kind);
+            params["target"]["payload"][field] = serde_json::json!(" ");
+            assert!(
+                RequestEnvelope {
+                    protocol: 1,
+                    id: format!("blank-{kind}-{field}"),
+                    method: "giga_promote".into(),
+                    params,
+                }
+                .giga_promote_request()
+                .is_err()
+            );
+        }
+        let mut missing_payload = giga_promote_params_json("memory");
+        missing_payload["target"]
+            .as_object_mut()
+            .unwrap()
+            .remove("payload");
+        assert!(
+            RequestEnvelope {
+                protocol: 1,
+                id: "missing-payload".into(),
+                method: "giga_promote".into(),
+                params: missing_payload,
+            }
+            .giga_promote_request()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn giga_project_promotion_wire_requires_both_publication_approvals() {
+        for consent in [
+            Value::Null,
+            serde_json::json!({"operator_approved": false, "reviewer_approved": true}),
+            serde_json::json!({"operator_approved": true, "reviewer_approved": false}),
+            serde_json::json!({"operator_approved": false, "reviewer_approved": false}),
+        ] {
+            let mut params = giga_promote_params_json("project_lesson");
+            params["publication_consent"] = consent;
+            assert!(
+                RequestEnvelope {
+                    protocol: 1,
+                    id: "project-consent".into(),
+                    method: "giga_promote".into(),
+                    params,
+                }
+                .giga_promote_request()
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn giga_promotion_wire_rejects_unknown_fields_at_every_nested_authority_boundary() {
+        let mut cases = Vec::new();
+
+        let mut scope = giga_promote_params_json("project_lesson");
+        scope["source_refs"][0]["scope"]["unexpected"] = serde_json::json!(true);
+        cases.push(scope);
+
+        let mut range = giga_promote_params_json("project_lesson");
+        range["source_refs"][0]["range"] =
+            serde_json::json!({"start": 0, "end": 5, "unexpected": true});
+        cases.push(range);
+
+        let mut source = giga_promote_params_json("project_lesson");
+        source["source_refs"][0]["unexpected"] = serde_json::json!(true);
+        cases.push(source);
+
+        let mut target = giga_promote_params_json("project_lesson");
+        target["target"]["unexpected"] = serde_json::json!(true);
+        cases.push(target);
+
+        let mut payload = giga_promote_params_json("project_lesson");
+        payload["target"]["payload"]["unexpected"] = serde_json::json!(true);
+        cases.push(payload);
+
+        let mut consent = giga_promote_params_json("project_lesson");
+        consent["publication_consent"]["unexpected"] = serde_json::json!(true);
+        cases.push(consent);
+
+        for params in cases {
+            assert!(matches!(
+                RequestEnvelope {
+                    protocol: 1,
+                    id: "nested-unknown".into(),
+                    method: "giga_promote".into(),
+                    params,
+                }
+                .giga_promote_request(),
+                Err(ProtocolError::InvalidParams(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn giga_queue_receipts_have_exact_wire_shapes_and_reject_invalid_states() {
+        let room = RoomKey::new("lab").unwrap();
+        let claim = GigaEventClaimReceipt::new(
+            room.clone(),
+            "agents-a1".into(),
+            "2026-07-24T12:00:00Z".into(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_string(&success("claim", GigaEventClaimResult::from(claim))).unwrap(),
+            r#"{"protocol":1,"id":"claim","result":{"room":"lab","worker_id":"agents-a1","claimed_at":"2026-07-24T12:00:00Z","event":null,"lease_expires_at":null,"attempt_count":null}}"#
+        );
+
+        let finish = GigaEventFinishReceipt::new(
+            room.clone(),
+            "event-1".into(),
+            "agents-a1".into(),
+            GigaEventFinishOutcome::Succeeded,
+            GigaQueueState::Succeeded,
+            1,
+            1,
+            None,
+            "2026-07-24T12:01:00Z".into(),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_string(&success("finish", GigaEventFinishResult::from(finish))).unwrap(),
+            r#"{"protocol":1,"id":"finish","result":{"room":"lab","event_id":"event-1","worker_id":"agents-a1","outcome":"succeeded","queue_state":"succeeded","attempt_count":1,"candidate_count":1,"available_at":null,"finished_at":"2026-07-24T12:01:00Z"}}"#
+        );
+
+        let replay = GigaEventReplayReceipt::new(
+            room,
+            "event-1".into(),
+            "sol".into(),
+            GigaQueueState::Failed,
+            GigaQueueState::Pending,
+            0,
+            "2026-07-24T12:03:00Z".into(),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_string(&success("replay", GigaEventReplayResult::from(replay))).unwrap(),
+            r#"{"protocol":1,"id":"replay","result":{"room":"lab","event_id":"event-1","operator_identity":"sol","previous_state":"failed","queue_state":"pending","attempt_count":0,"replayed_at":"2026-07-24T12:03:00Z"}}"#
+        );
+
+        let invalid_replay: GigaEventReplayResult = serde_json::from_value(serde_json::json!({
+            "room": "lab",
+            "event_id": "event-1",
+            "operator_identity": "sol",
+            "previous_state": "failed",
+            "queue_state": "pending",
+            "attempt_count": 1,
+            "replayed_at": "2026-07-24T12:03:00Z"
+        }))
+        .unwrap();
+        assert!(GigaEventReplayReceipt::try_from(invalid_replay).is_err());
+    }
+
+    #[test]
+    fn giga_promotion_receipts_are_exact_tagged_records_for_every_supported_kind() {
+        let receipts = [
+            GigaPromotionReceipt::memory(
+                "candidate-memory".into(),
+                11,
+                RoomKey::new("lab").unwrap(),
+                "kintsu".into(),
+                "sol".into(),
+                "2026-07-24T12:04:00Z".into(),
+                "2026-07-24T12:05:00Z".into(),
+            )
+            .unwrap(),
+            GigaPromotionReceipt::coding_lesson(
+                "candidate-coding_lesson".into(),
+                12,
+                "lab".into(),
+                "kintsu".into(),
+                "sol".into(),
+                "2026-07-24T12:04:00Z".into(),
+                "2026-07-24T12:05:00Z".into(),
+            )
+            .unwrap(),
+            GigaPromotionReceipt::project_lesson(
+                "candidate-project_lesson".into(),
+                13,
+                "kintsu".into(),
+                "kintsu".into(),
+                "sol".into(),
+                "2026-07-24T12:04:00Z".into(),
+                "2026-07-24T12:05:00Z".into(),
+            )
+            .unwrap(),
+        ];
+        let expected = [
+            serde_json::json!({
+                "kind":"memory","candidate_id":"candidate-memory","review_state":"promoted",
+                "memory_id":11,"room":"lab","durable":true,"authority":"full","warnings":[],
+                "reviewer_id":"kintsu","operator_identity":"sol",
+                "reviewed_at":"2026-07-24T12:04:00Z","committed_at":"2026-07-24T12:05:00Z"
+            }),
+            serde_json::json!({
+                "kind":"coding_lesson","candidate_id":"candidate-coding_lesson",
+                "review_state":"promoted","coding_lesson_id":12,"scope":"lab","durable":true,
+                "authority":"full","warnings":[],"reviewer_id":"kintsu","operator_identity":"sol",
+                "reviewed_at":"2026-07-24T12:04:00Z","committed_at":"2026-07-24T12:05:00Z"
+            }),
+            serde_json::json!({
+                "kind":"project_lesson","candidate_id":"candidate-project_lesson",
+                "review_state":"promoted","project_lesson_id":13,"project":"kintsu","durable":true,
+                "authority":"full","warnings":[],"reviewer_id":"kintsu","operator_identity":"sol",
+                "reviewed_at":"2026-07-24T12:04:00Z","committed_at":"2026-07-24T12:05:00Z"
+            }),
+        ];
+        for (receipt, expected) in receipts.into_iter().zip(expected) {
+            let kind = receipt.durable_kind();
+            let durable_id = receipt.durable_id();
+            let result = GigaPromoteResult::from(receipt);
+            assert_eq!(serde_json::to_value(&result).unwrap(), expected);
+            let round_trip = GigaPromotionReceipt::try_from(result).unwrap();
+            assert_eq!(round_trip.durable_kind(), kind);
+            assert_eq!(round_trip.durable_id(), durable_id);
+        }
+    }
+
+    #[test]
+    fn giga_promotion_receipt_wire_rejects_false_durability_state_id_and_authority() {
+        let base = serde_json::json!({
+            "kind": "memory",
+            "candidate_id": "candidate-memory",
+            "review_state": "promoted",
+            "memory_id": 11,
+            "room": "lab",
+            "durable": true,
+            "authority": "full",
+            "warnings": [],
+            "reviewer_id": "kintsu",
+            "operator_identity": "sol",
+            "reviewed_at": "2026-07-24T12:04:00Z",
+            "committed_at": "2026-07-24T12:05:00Z"
+        });
+
+        let mut not_durable = base.clone();
+        not_durable["durable"] = serde_json::json!(false);
+        let result: GigaPromoteResult = serde_json::from_value(not_durable).unwrap();
+        assert!(GigaPromotionReceipt::try_from(result).is_err());
+
+        let mut wrong_state = base.clone();
+        wrong_state["review_state"] = serde_json::json!("in_review");
+        let result: GigaPromoteResult = serde_json::from_value(wrong_state).unwrap();
+        assert!(GigaPromotionReceipt::try_from(result).is_err());
+
+        let mut zero_id = base.clone();
+        zero_id["memory_id"] = serde_json::json!(0);
+        let result: GigaPromoteResult = serde_json::from_value(zero_id).unwrap();
+        assert!(GigaPromotionReceipt::try_from(result).is_err());
+
+        let mut unknown_authority = base.clone();
+        unknown_authority["authority"] = serde_json::json!("pointer-only");
+        assert!(serde_json::from_value::<GigaPromoteResult>(unknown_authority).is_err());
+
+        let mut wrong_variant_field = base.clone();
+        wrong_variant_field["project"] = serde_json::json!("kintsu");
+        assert!(serde_json::from_value::<GigaPromoteResult>(wrong_variant_field).is_err());
+
+        let mut unknown_receipt_field = base;
+        unknown_receipt_field["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<GigaPromoteResult>(unknown_receipt_field).is_err());
     }
 }

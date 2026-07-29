@@ -10,11 +10,12 @@ use house_core::{
     GigaEventReplayReceipt, GigaEventReplayRequest, GigaEventType, GigaLifecycle,
     GigaMemoryPromotionPayload, GigaProcessRequest, GigaProcessSource,
     GigaProjectLessonPromotionPayload, GigaPromotionAuthority, GigaPromotionPayload,
-    GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent, GigaQueueState,
-    GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope, GigaScores,
-    GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallRequest, RememberKind,
-    RememberLessonDetails, RememberMemoryDetails, RememberReceipt, RememberRequest, RoomKey,
-    ThreadContinuation,
+    GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
+    GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
+    GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
+    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallRequest,
+    RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberReceipt, RememberRequest,
+    RoomKey, ThreadContinuation,
 };
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -937,15 +938,15 @@ impl TryFrom<RememberParams> for RememberRequest {
                     "previousMemoryId must be a positive PostgreSQL BIGINT decimal: {raw}"
                 )));
             }
-            let previous_memory_id = raw
-                .parse::<i64>()
-                .ok()
-                .filter(|&id| id > 0)
-                .ok_or_else(|| {
-                    ProtocolError::InvalidParams(format!(
-                        "previousMemoryId must be a positive PostgreSQL BIGINT decimal: {raw}"
-                    ))
-                })? as u64;
+            let previous_memory_id =
+                raw.parse::<i64>()
+                    .ok()
+                    .filter(|&id| id > 0)
+                    .ok_or_else(|| {
+                        ProtocolError::InvalidParams(format!(
+                            "previousMemoryId must be a positive PostgreSQL BIGINT decimal: {raw}"
+                        ))
+                    })? as u64;
             continues.push(ThreadContinuation {
                 thread: continuation.thread,
                 previous_memory_id,
@@ -1283,6 +1284,19 @@ impl RequestEnvelope {
             return Err(ProtocolError::UnknownMethod(self.method));
         }
         serde_json::from_value::<GigaEventReplayParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
+    pub fn giga_queue_maintenance_request(
+        self,
+    ) -> Result<GigaQueueMaintenanceRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_queue_maintenance" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<GigaQueueMaintenanceParams>(self.params)
             .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
             .try_into()
     }
@@ -1688,6 +1702,14 @@ pub struct GigaEventReplayParams {
     pub operator_identity: String,
     pub authorization_basis: String,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaQueueMaintenanceParams {
+    pub room: String,
+    pub operation: String,
+    pub scope: String,
+}
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GigaScoresParams {
@@ -1968,6 +1990,30 @@ pub struct GigaEventReplayResult {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaQueueStateCount {
+    #[serde(deserialize_with = "deserialize_giga_queue_state")]
+    pub queue_state: String,
+    pub count: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaQueueMaintenanceResult {
+    pub ok: bool,
+    pub operation: String,
+    pub scope: String,
+    pub room: String,
+    pub eligible_events: u64,
+    pub blocked_events: u64,
+    pub deleted_events: u64,
+    pub deleted_attempts: u64,
+    pub preserved_candidates: u64,
+    pub before: Vec<GigaQueueStateCount>,
+    pub after: Vec<GigaQueueStateCount>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GigaPromoteResult {
     Memory {
@@ -2133,6 +2179,21 @@ impl TryFrom<GigaEventReplayParams> for GigaEventReplayRequest {
             value.authorization_basis,
         )
         .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<GigaQueueMaintenanceParams> for GigaQueueMaintenanceRequest {
+    type Error = ProtocolError;
+
+    fn try_from(value: GigaQueueMaintenanceParams) -> Result<Self, Self::Error> {
+        let room = RoomKey::new(value.room)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+        let operation = GigaQueueMaintenanceOperation::parse(&value.operation)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+        let scope = GigaQueueMaintenanceScope::parse(&value.scope)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+
+        Ok(GigaQueueMaintenanceRequest::new(room, operation, scope))
     }
 }
 
@@ -3853,6 +3914,56 @@ mod tests {
             .giga_health_request()
             .is_err()
         );
+    }
+
+    #[test]
+    fn giga_queue_maintenance_wire_is_exact_and_rejects_unknown_operations() {
+        let check = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"check","method":"giga_queue_maintenance","params":{"room":"lab","operation":"check","scope":"room"}}"#,
+        )
+        .unwrap()
+        .giga_queue_maintenance_request()
+        .unwrap();
+        assert_eq!(check.operation(), GigaQueueMaintenanceOperation::Check);
+        assert_eq!(check.scope(), GigaQueueMaintenanceScope::Room);
+
+        let purge = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"purge","method":"giga_queue_maintenance","params":{"room":"lab","operation":"purge_stuck","scope":"all"}}"#,
+        )
+        .unwrap()
+        .giga_queue_maintenance_request()
+        .unwrap();
+        assert_eq!(purge.operation(), GigaQueueMaintenanceOperation::PurgeStuck);
+
+        for params in [
+            serde_json::json!({
+                "room": "lab",
+                "operation": "purge_everything",
+                "scope": "room"
+            }),
+            serde_json::json!({
+                "room": "lab",
+                "operation": "purge_stuck",
+                "scope": "discardable_stage1"
+            }),
+            serde_json::json!({
+                "room": "lab",
+                "operation": "check",
+                "scope": "room",
+                "operator_identity": "sol"
+            }),
+        ] {
+            assert!(
+                RequestEnvelope {
+                    protocol: 1,
+                    id: "maintenance".into(),
+                    method: "giga_queue_maintenance".into(),
+                    params,
+                }
+                .giga_queue_maintenance_request()
+                .is_err()
+            );
+        }
     }
 
     #[test]

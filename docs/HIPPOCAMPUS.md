@@ -699,6 +699,7 @@ The behavior must satisfy these rules:
 8. Pause without data loss.
 9. Stop cleanly during upgrade or shutdown.
 10. Never delay room startup because a backlog exists.
+11. Expose room-scoped maintenance that checks before it purges. Purge only pending, failed, or lease-expired running events with no attached candidate or review resonance. Preserve succeeded events, candidate/review provenance, memories, and lessons.
 
 The scheduler can batch adjacent turns. It must keep stable source references after batching.
 

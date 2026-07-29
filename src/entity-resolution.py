@@ -113,7 +113,7 @@ def fetch_matches(query: str, room: str, room_dir: str | Path, limit: int = DEFA
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute(
                 "SELECT name, kind, aliases FROM named_entities WHERE room = ANY(%s) ORDER BY name",
-                ([room, "house", "shared"],),
+                ([room, "house"],),
             )
             return resolve_matches(query, [dict(row) for row in cur.fetchall()], limit)
     except Exception:

@@ -14,6 +14,13 @@ from substrate_config import (
 
 class SubstrateConfigTests(unittest.TestCase):
     def setUp(self):
+        # SOLARISAEL_SUBSTRATE is set on any machine with a live House, and
+        # resolve_substrate_dir honours it over the sibling default. Without
+        # this the default-path test passes or fails by ambient environment.
+        environment = patch.dict(os.environ, {}, clear=False)
+        environment.start()
+        os.environ.pop("SOLARISAEL_SUBSTRATE", None)
+        self.addCleanup(environment.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.room_dir = self.root / "room"

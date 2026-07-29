@@ -119,14 +119,14 @@ class PostgresMemorySourceIsolationTests(unittest.TestCase):
         _, candidates = source.load_search_candidates(
             conn,
             rooms=("active-room", "house"),
-            lesson_scopes=("shared", "active-room"),
+            lesson_scopes=("house", "active-room"),
             query="deploy",
             top_k=12,
         )
         self.assertEqual([candidate["source_id"] for candidate in candidates], [1])
         coding_sql, coding_args = conn.cursor_obj.calls[3]
         self.assertIn("scope = ANY(%s)", coding_sql)
-        self.assertEqual(coding_args[2], ["active-room", "shared"])
+        self.assertEqual(coding_args[2], ["active-room", "house"])
         self.assertFalse(any("project_lessons" in sql for sql, _ in conn.cursor_obj.calls))
 
     def test_cluster_resonance_scopes_profile_and_hot_chunks_to_active_and_shared_rooms(self):

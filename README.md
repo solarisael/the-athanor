@@ -59,6 +59,7 @@ full map with honest status labels in [`PLANNED_FEATURES.md`](./docs/PLANNED_FEA
 | Local embeddings through a compatible endpoint | — | Yes | Yes | Yes |
 | Memories, coding lessons, project lessons, writing lessons, and audio lessons | — | Yes | Yes | Yes |
 | Entity, date, thread, taxonomy, relationship, and cluster retrieval | — | Yes | Yes | Yes |
+| Explicit per-thread memory continuity with bounded neighbor recall | Limited | Yes | Yes | Yes |
 | Provenance, authority state, and selection reasons | — | Yes | Yes | Yes |
 | Corrections through supersession without historical deletion | Limited | Yes | Yes | Yes |
 | Memory lifecycle tools: `remember`, `recall`, `sleep`, and `wake` | — | Yes | Yes | Yes |

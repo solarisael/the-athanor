@@ -70,6 +70,27 @@ Full House uses PostgreSQL source lanes for:
 
 The core can fall back to room and shared JSON indexes for lighter retrieval. Source failures are logged and do not block the conversation.
 
+## Ordered continuity
+
+Thread labels answer which history a memory belongs to. Continuation links answer what happened next inside that history. They are separate from timestamps and from authority replacement.
+
+When one memory explicitly continues another, `remember` accepts both the thread membership and its predecessor:
+
+```json
+{
+  "threads": ["Solarisael website / Work page"],
+  "continues": [{
+    "thread": "Solarisael website / Work page",
+    "previousMemoryId": "2935"
+  }]
+}
+```
+
+A memory may continue a different predecessor in each of its threads. Each event has at most one predecessor per thread. Branching is valid; a memory can converge histories only by carrying one predecessor in each distinct thread. House never infers these links from creation order, import order, matching labels, or supersession.
+
+After ranking, `recall` expands only the bounded final candidates with their directly linked `previous` and `next` memories. Historical neighbors can remain visible as labeled history. Supersession still decides current authority; continuation only records chronology.
+
+
 ## Authority
 
 House keeps candidate relevance separate from authority.

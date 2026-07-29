@@ -19,7 +19,7 @@ class Conn:
     def cursor(self, **_): return self.cursor_obj
 
 
-def row(i, scope="shared", project="", shape="process", tags=None, trigger=""):
+def row(i, scope="house", project="", shape="process", tags=None, trigger=""):
     return {"id": i, "title": f"lesson {i}", "lesson": "text", "proof_pattern": "proof",
             "trigger_context": trigger, "scope": scope, "project": project, "voice": "generic",
             "shape": shape, "tags": tags or []}
@@ -30,12 +30,12 @@ class LessonContextTests(unittest.TestCase):
         conn = Conn([row(9, scope="other-room"), row(2, trigger="deploy"), row(1, tags=["deploy"]), row(3, shape="deploy")], [])
         result = lesson_context.retrieve_lesson_context(conn, "sample-room", shapes=["deploy"], terms=["deploy"], limit=3)
         self.assertEqual([x["id"] for x in result["codingLessons"]], [2, 1, 3])
-        self.assertEqual(result["match"]["scopes"], ["shared", "sample-room"])
-        self.assertEqual(conn.cursor_obj.calls[0][1], (["shared", "sample-room"],))
+        self.assertEqual(result["match"]["scopes"], ["house", "sample-room"])
+        self.assertEqual(conn.cursor_obj.calls[0][1], (["house", "sample-room"],))
 
     def test_exact_projects_and_bounded_deterministic_order(self):
         conn = Conn([row(9, project="other"), row(2, project="app"), row(1, project="app")], [row(4, project="app"), row(3, project="app2")])
-        result = lesson_context.retrieve_lesson_context(conn, "shared", projects=["app"], limit=1)
+        result = lesson_context.retrieve_lesson_context(conn, "house", projects=["app"], limit=1)
         self.assertEqual([x["id"] for x in result["projectLessons"]], [4])
         self.assertEqual([x["id"] for x in result["codingLessons"]], [1])
         self.assertEqual(conn.cursor_obj.calls[1][1], (["app"],))
@@ -55,6 +55,11 @@ class LessonContextTests(unittest.TestCase):
             output = io.StringIO()
             with redirect_stdout(output):
                 self.assertEqual(lesson_context.main(), 0)
-        self.assertEqual(lesson_context.json.loads(output.getvalue())["codingLessons"], [])
+        payload = lesson_context.json.loads(output.getvalue())
+        self.assertEqual(payload["codingLessons"], [])
+        # Fail-open must stay loud. A silent empty context is how a broken
+        # SELECT stayed invisible for weeks: every turn injected zero lessons
+        # and exited 0. The exit code stays 0; the reason has to come with it.
+        self.assertIn("psycopg2 unavailable", payload["error"])
 
 if __name__ == "__main__": unittest.main()

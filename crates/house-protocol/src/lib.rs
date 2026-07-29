@@ -14,6 +14,7 @@ use house_core::{
     GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope, GigaScores,
     GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallRequest, RememberKind,
     RememberLessonDetails, RememberMemoryDetails, RememberReceipt, RememberRequest, RoomKey,
+    ThreadContinuation,
 };
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -35,6 +36,14 @@ pub struct RequestEnvelope {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct ThreadContinuationParams {
+    pub thread: String,
+    #[serde(rename = "previousMemoryId")]
+    pub previous_memory_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct RememberParams {
     pub room: String,
     pub kind: String,
@@ -44,6 +53,8 @@ pub struct RememberParams {
     pub source_path: Option<String>,
     #[serde(default)]
     pub threads: Vec<String>,
+    #[serde(default)]
+    pub continues: Vec<ThreadContinuationParams>,
     #[serde(default)]
     pub supersedes: Vec<String>,
     #[serde(default)]
@@ -72,7 +83,11 @@ fn default_semantic_top_k() -> u32 {
     8
 }
 fn default_semantic_min_similarity() -> f64 {
-    0.50
+    // Calibrated 2026-07-25 against Nemotron-3-Embed-1B-Q4: true positives
+    // measure 0.42-0.56, noise ceilings 0.24. Must stay equal to the substrate
+    // constant in recall.rs — when these diverged, the omitted-field path
+    // silently reimposed 0.50 and dropped the whole true-positive band.
+    0.40
 }
 fn default_content_top_k() -> u32 {
     8
@@ -874,6 +889,7 @@ impl TryFrom<RememberParams> for RememberRequest {
         if kind.is_lesson()
             && (params.source_path.is_some()
                 || !params.threads.is_empty()
+                || !params.continues.is_empty()
                 || !params.supersedes.is_empty())
         {
             return Err(ProtocolError::InvalidParams(
@@ -895,7 +911,7 @@ impl TryFrom<RememberParams> for RememberRequest {
         }
         let mut supersedes = Vec::with_capacity(params.supersedes.len());
         for raw in params.supersedes {
-            if raw.is_empty() || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+            if raw.starts_with('0') || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
                 return Err(ProtocolError::InvalidParams(format!(
                     "supersedes ID must be a positive PostgreSQL BIGINT decimal: {raw}"
                 )));
@@ -912,6 +928,28 @@ impl TryFrom<RememberParams> for RememberRequest {
             if !supersedes.contains(&id) {
                 supersedes.push(id);
             }
+        }
+        let mut continues = Vec::with_capacity(params.continues.len());
+        for continuation in params.continues {
+            let raw = continuation.previous_memory_id;
+            if raw.starts_with('0') || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(ProtocolError::InvalidParams(format!(
+                    "previousMemoryId must be a positive PostgreSQL BIGINT decimal: {raw}"
+                )));
+            }
+            let previous_memory_id = raw
+                .parse::<i64>()
+                .ok()
+                .filter(|&id| id > 0)
+                .ok_or_else(|| {
+                    ProtocolError::InvalidParams(format!(
+                        "previousMemoryId must be a positive PostgreSQL BIGINT decimal: {raw}"
+                    ))
+                })? as u64;
+            continues.push(ThreadContinuation {
+                thread: continuation.thread,
+                previous_memory_id,
+            });
         }
         let result = if kind.is_lesson() {
             RememberRequest::new_lesson(
@@ -938,6 +976,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                 RememberMemoryDetails {
                     source_path: params.source_path,
                     threads: params.threads,
+                    continues,
                     supersedes,
                     backup: params.backup,
                 },
@@ -2018,6 +2057,8 @@ pub struct GigaClassifierHealthResult {
     pub prompt_version: String,
     pub endpoint_scope: String,
     pub last_error_class: RequiredNullable<String>,
+    pub last_error_at: RequiredNullable<String>,
+    pub consecutive_failures: u64,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -3066,6 +3107,7 @@ mod tests {
             body: "B".into(),
             source_path: None,
             threads: vec![],
+            continues: vec![],
             supersedes: vec!["41".into(), "42".into(), "41".into()],
             shape: None,
             voice: None,
@@ -3089,6 +3131,7 @@ mod tests {
             body: "B".into(),
             source_path: None,
             threads: vec![],
+            continues: vec![],
             shape: None,
             voice: None,
             scope: None,
@@ -3111,6 +3154,7 @@ mod tests {
                 body: "B".into(),
                 source_path: None,
                 threads: vec![],
+                continues: vec![],
                 shape: None,
                 voice: None,
                 scope: None,
@@ -3122,6 +3166,54 @@ mod tests {
             };
             assert!(matches!(
                 RememberRequest::try_from(params),
+                Err(ProtocolError::InvalidParams(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn continuation_ids_round_trip_separately_from_supersession() {
+        let request = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"lab","kind":"memory","title":"T","body":"B","threads":["work / page"],"continues":[{"thread":"work / page","previousMemoryId":"41"}],"supersedes":["7"]}}"#,
+        )
+        .unwrap()
+        .remember_request()
+        .unwrap();
+        assert_eq!(
+            request.continues(),
+            &[ThreadContinuation {
+                thread: "work / page".into(),
+                previous_memory_id: 41,
+            }]
+        );
+        assert_eq!(request.supersedes(), &[7]);
+
+        for params in [
+            serde_json::json!({
+                "room":"lab",
+                "kind":"memory",
+                "title":"T",
+                "body":"B",
+                "threads":["work / page"],
+                "continues":[{"thread":"work / page","previousMemoryId":"0"}]
+            }),
+            serde_json::json!({
+                "room":"lab",
+                "kind":"memory",
+                "title":"T",
+                "body":"B",
+                "threads":["other"],
+                "continues":[{"thread":"work / page","previousMemoryId":"41"}]
+            }),
+        ] {
+            let envelope = RequestEnvelope {
+                protocol: 1,
+                id: "x".into(),
+                method: "remember".into(),
+                params,
+            };
+            assert!(matches!(
+                envelope.remember_request(),
                 Err(ProtocolError::InvalidParams(_))
             ));
         }
@@ -3142,7 +3234,7 @@ mod tests {
         .unwrap();
         let recall = request.recall_request().unwrap();
         assert_eq!(recall.semantic_top_k(), 8);
-        assert_eq!(recall.semantic_min_similarity(), 0.50);
+        assert_eq!(recall.semantic_min_similarity(), 0.40);
         assert_eq!(recall.content_top_k(), 8);
         assert_eq!(recall.content_min_similarity(), 0.30);
         assert!(!recall.temporal_decay());
@@ -3159,7 +3251,7 @@ mod tests {
             serde_json::from_value(serde_json::json!({"room":"lab","query":"alpha"})).unwrap();
         assert_eq!(
             serde_json::to_string(&params).unwrap(),
-            r#"{"room":"lab","query":"alpha","semantic_top_k":8,"semantic_min_similarity":0.5,"content_top_k":8,"content_min_similarity":0.3,"temporal_decay":false}"#
+            r#"{"room":"lab","query":"alpha","semantic_top_k":8,"semantic_min_similarity":0.4,"content_top_k":8,"content_min_similarity":0.3,"temporal_decay":false}"#
         );
     }
 

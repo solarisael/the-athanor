@@ -88,16 +88,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--room-dir", required=True)
     parser.add_argument("--shape", required=True)
-    parser.add_argument("--room", default="shared",
-                        help="room key; widens shared retrieval with that room's scope")
+    parser.add_argument("--room", default="house",
+                        help="room key; widens House-wide retrieval with that room's scope")
     args = parser.parse_args()
 
     try:
         env = substrate_env(args.room_dir)
 
-        scopes = ["shared"]
+        scopes = ["house"]
         room_scope = args.room.strip().lower()
-        if room_scope and room_scope != "shared":
+        if room_scope and room_scope != "house":
             scopes.append(room_scope)
 
         if psycopg2 is None:

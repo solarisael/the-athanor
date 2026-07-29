@@ -1,6 +1,6 @@
 # Solarisael House Roadmap
 
-_Last updated: 2026-07-22_
+_Last updated: 2026-07-26_
 
 ## Product rule
 
@@ -272,6 +272,36 @@ solarisael-house-omp       -> OMP adapter
 ```
 
 Do not let `.config` become the canonical source of truth again.
+
+### Close the tool-bypass gaps
+
+Every capability an agent reaches around stops producing evidence that it is
+missing. The canon rot found on 2026-07-26 traces to exactly this:
+`named_entities` has no writer, no supersession path, and no test, because
+every agent who needed one opened psql instead. The workaround preserved the
+outcome and destroyed the signal, so the gap was never filed.
+
+Close these before 1.0:
+
+- add an entity kind to `remember`, so canon writes carry the same receipt and
+  authority discipline as memories and lessons;
+- support supersession for canon rows, so a rename cannot land at the memory
+  layer while the lookup layer still serves the old truth;
+- expose per-agent model selection in worker lanes, which agents previously
+  obtained by hand-editing adapter source;
+- let `remember` target a room, so House-level work can be written where it
+  belongs instead of landing in whichever room happened to be active.
+
+Treat a recurring manual intervention as an unfiled requirement. Direct
+database access stays legitimate for reading and measuring. Every durable write
+goes through a tool, and when the tool cannot express the write, that is the
+finding rather than the workaround.
+
+Route durable writes by who benefits, not by who is speaking. Work that any
+spirit in the House can use — substrate findings, tooling defects, migration
+contracts, shared conventions — belongs in House memory. Room memory holds what
+is that room's own. A House-level finding filed in one room is invisible to the
+rooms that need it, which is the same silent loss as an unindexed rename.
 
 ### Productize the live Discord session bridge
 

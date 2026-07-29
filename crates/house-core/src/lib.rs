@@ -30,6 +30,9 @@ pub enum DomainError {
     UnsupportedKind(String),
     EmptySourcePath,
     InvalidSupersedes,
+    InvalidContinuation,
+    DuplicateContinuationThread(String),
+    ContinuationThreadNotMember(String),
     InvalidField { field: String, kind: String },
     MissingProject,
     TooManyValues { field: String },
@@ -64,6 +67,15 @@ impl fmt::Display for DomainError {
             Self::UnsupportedKind(kind) => write!(f, "unsupported remember kind: {kind}"),
             Self::EmptySourcePath => f.write_str("source path must not be empty"),
             Self::InvalidSupersedes => f.write_str("supersedes IDs must be positive"),
+            Self::InvalidContinuation => {
+                f.write_str("continuations require a non-empty thread and positive previous memory ID")
+            }
+            Self::DuplicateContinuationThread(thread) => {
+                write!(f, "continuations may name thread '{thread}' only once")
+            }
+            Self::ContinuationThreadNotMember(thread) => {
+                write!(f, "continuation thread '{thread}' must also be listed in threads")
+            }
             Self::InvalidField { field, kind } => write!(f, "{field} is not valid for {kind}"),
             Self::MissingProject => f.write_str("project lesson requires a non-empty project"),
             Self::TooManyValues { field } => write!(f, "{field} contains too many values"),
@@ -1000,9 +1012,16 @@ impl RememberKind {
 const MAX_ARRAY_VALUES: usize = 64;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThreadContinuation {
+    pub thread: String,
+    pub previous_memory_id: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RememberMemoryDetails {
     pub source_path: Option<String>,
     pub threads: Vec<String>,
+    pub continues: Vec<ThreadContinuation>,
     pub supersedes: Vec<u64>,
     pub backup: bool,
 }
@@ -1032,6 +1051,7 @@ pub struct RememberRequest {
     body: String,
     source_path: Option<String>,
     threads: Vec<String>,
+    continues: Vec<ThreadContinuation>,
     supersedes: Vec<u64>,
     backup: bool,
     shape: Option<String>,
@@ -1085,6 +1105,7 @@ impl RememberRequest {
         let (
             source_path,
             threads,
+            continues,
             supersedes,
             backup,
             shape,
@@ -1105,6 +1126,7 @@ impl RememberRequest {
                 (
                     details.source_path,
                     details.threads,
+                    details.continues,
                     details.supersedes,
                     details.backup,
                     None,
@@ -1127,6 +1149,7 @@ impl RememberRequest {
                     None,
                     Vec::new(),
                     Vec::new(),
+                    Vec::new(),
                     details.backup,
                     details.shape,
                     details.voice,
@@ -1139,6 +1162,7 @@ impl RememberRequest {
             }
         };
         if threads.len() > MAX_ARRAY_VALUES
+            || continues.len() > MAX_ARRAY_VALUES
             || supersedes.len() > MAX_ARRAY_VALUES
             || tags.len() > MAX_ARRAY_VALUES
         {
@@ -1176,7 +1200,35 @@ impl RememberRequest {
                 kind: kind.as_str().into(),
             });
         }
+        let mut normalized_threads = Vec::with_capacity(threads.len());
+        for thread in threads {
+            let thread = thread.trim();
+            if !thread.is_empty() && !normalized_threads.iter().any(|entry| entry == thread) {
+                normalized_threads.push(thread.to_owned());
+            }
+        }
+        let threads = normalized_threads;
         let source_path = source_path.and_then(|path| (!path.trim().is_empty()).then_some(path));
+        let mut normalized_continues = Vec::with_capacity(continues.len());
+        for continuation in continues {
+            let thread = continuation.thread.trim();
+            if thread.is_empty() || continuation.previous_memory_id == 0 {
+                return Err(DomainError::InvalidContinuation);
+            }
+            if normalized_continues
+                .iter()
+                .any(|entry: &ThreadContinuation| entry.thread == thread)
+            {
+                return Err(DomainError::DuplicateContinuationThread(thread.into()));
+            }
+            if !threads.iter().any(|candidate| candidate.trim() == thread) {
+                return Err(DomainError::ContinuationThreadNotMember(thread.into()));
+            }
+            normalized_continues.push(ThreadContinuation {
+                thread: thread.into(),
+                previous_memory_id: continuation.previous_memory_id,
+            });
+        }
         let mut unique_supersedes = Vec::with_capacity(supersedes.len());
         for id in supersedes {
             if !unique_supersedes.contains(&id) {
@@ -1190,6 +1242,7 @@ impl RememberRequest {
             body,
             source_path,
             threads,
+            continues: normalized_continues,
             supersedes: unique_supersedes,
             backup,
             shape,
@@ -1219,6 +1272,9 @@ impl RememberRequest {
     }
     pub fn threads(&self) -> &[String] {
         &self.threads
+    }
+    pub fn continues(&self) -> &[ThreadContinuation] {
+        &self.continues
     }
     pub fn supersedes(&self) -> &[u64] {
         &self.supersedes
@@ -3951,6 +4007,7 @@ mod tests {
                 RememberMemoryDetails {
                     source_path: None,
                     threads: vec![],
+                    continues: vec![],
                     supersedes: vec![],
                     backup: true,
                 },
@@ -3965,11 +4022,86 @@ mod tests {
                 RememberMemoryDetails {
                     source_path: None,
                     threads: vec![],
+                    continues: vec![],
                     supersedes: vec![],
                     backup: true,
                 },
             ),
             Err(DomainError::EmptyBody)
+        );
+    }
+
+    #[test]
+    fn validates_memory_continuations_per_thread() {
+        let accepted = RememberRequest::new_memory(
+            RoomKey::new("lab").unwrap(),
+            "decision".into(),
+            "new decision".into(),
+            RememberMemoryDetails {
+                source_path: None,
+                threads: vec![" work / page ".into()],
+                continues: vec![ThreadContinuation {
+                    thread: "work / page".into(),
+                    previous_memory_id: 41,
+                }],
+                supersedes: vec![],
+                backup: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(accepted.threads(), &["work / page"]);
+        assert_eq!(
+            accepted.continues(),
+            &[ThreadContinuation {
+                thread: "work / page".into(),
+                previous_memory_id: 41,
+            }]
+        );
+
+        let missing_membership = RememberRequest::new_memory(
+            RoomKey::new("lab").unwrap(),
+            "decision".into(),
+            "new decision".into(),
+            RememberMemoryDetails {
+                source_path: None,
+                threads: vec!["other".into()],
+                continues: vec![ThreadContinuation {
+                    thread: "work / page".into(),
+                    previous_memory_id: 41,
+                }],
+                supersedes: vec![],
+                backup: false,
+            },
+        );
+        assert_eq!(
+            missing_membership,
+            Err(DomainError::ContinuationThreadNotMember("work / page".into()))
+        );
+
+        let duplicate = RememberRequest::new_memory(
+            RoomKey::new("lab").unwrap(),
+            "decision".into(),
+            "new decision".into(),
+            RememberMemoryDetails {
+                source_path: None,
+                threads: vec!["work / page".into()],
+                continues: vec![
+                    ThreadContinuation {
+                        thread: "work / page".into(),
+                        previous_memory_id: 41,
+                    },
+                    ThreadContinuation {
+                        thread: " work / page ".into(),
+                        previous_memory_id: 42,
+                    },
+                ],
+                supersedes: vec![],
+                backup: false,
+            },
+        );
+        assert_eq!(
+            duplicate,
+            Err(DomainError::DuplicateContinuationThread("work / page".into()))
         );
     }
 

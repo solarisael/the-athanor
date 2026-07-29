@@ -928,16 +928,16 @@ export async function runRecallQuery(roomDir, roomName, query) {
   // script embeds the prompt when stdin has content; we pipe `query` there.
   // Returns {index, importantIndex, semanticChunks, contentChunks}.
   //
-  // Recall-specific min-sim is tighter than pre-turn (0.50 vs 0.40). The
-  // caller framed this query specifically and is going to *act* on what
-  // comes back; weak matches should read as "not found" so the look-or-admit
-  // discipline fires. Pre-turn casts a wider net because it's auto-firing
-  // on the user's prompt and the model is the filter.
+  // Recall's semantic floor matches pre-turn at 0.40. It sat at 0.50 deliberately,
+  // so weak matches would read as "not found" and look-or-admit would fire. That
+  // intent survives; the number stopped implementing it. On Nemotron-3-Embed-1B/Q4
+  // a 0.50 floor cut correct rank-1 hits and returned a confident empty answer —
+  // a false "i don't have this", worse than a weak match because it is invisible.
+  // Calibration, not taste: re-measure on any model change — coding lesson 222.
   //
-  // Content threshold stays at 0.30 (the default) — word_similarity 0.30 is
-  // already "noticeable substring," tightening further would miss proper-
-  // noun queries like "Beel" where the caller explicitly wants the hit.
-  const RECALL_SEMANTIC_MIN_SIM = 0.50;
+  // Content stays at 0.30: word_similarity 0.30 is already "noticeable substring",
+  // and tightening would miss short proper-noun queries the caller asked for.
+  const RECALL_SEMANTIC_MIN_SIM = 0.40;
   const args = [
     "--room-dir", windowsPathToWsl(effectiveRoomDir),
     "--mode", "full",

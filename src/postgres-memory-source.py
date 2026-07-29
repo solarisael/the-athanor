@@ -458,7 +458,7 @@ def load_search_candidates(
         erasure_columns, include_archived=include_archived,
     )
     lesson_scope_list = sorted({
-        str(scope).strip() for scope in (lesson_scopes or ("shared",)) if str(scope).strip()
+        str(scope).strip() for scope in (lesson_scopes or ("house",)) if str(scope).strip()
     })
 
     with conn.cursor(cursor_factory=DICT_CURSOR_FACTORY) as cur:
@@ -637,7 +637,7 @@ def load_search_candidates(
             ),
         )
         for row in cur.fetchall():
-            lesson_scope = str(row["scope"] or "shared").strip()
+            lesson_scope = str(row["scope"] or "house").strip()
             if lesson_scope not in lesson_scope_list:
                 continue
             item = _candidate(
@@ -760,16 +760,20 @@ def load_index(
         return {"files": files, "threads": threads}
 
 
-def load_important_index(conn, room) -> dict:
+def load_important_index(conn, rooms) -> dict:
+    # Takes `rooms`, not `room`, to match load_index and load_taxonomy above —
+    # this loader was the only one of the three that never learned about the
+    # shared room, so every house-scope entity was invisible to the automatic
+    # lexical lane. "The Athanor" is a house row, and weighty, and was dark.
     with conn.cursor(cursor_factory=DICT_CURSOR_FACTORY) as cur:
         cur.execute(
             """
             SELECT name, kind, summary, aliases, search_boost, weighty, pointer_files
             FROM named_entities
-            WHERE room = %s
-            ORDER BY weighty DESC, name
+            WHERE room = ANY(%s)
+            ORDER BY (room = 'house') DESC, weighty DESC, name
             """,
-            (room,),
+            (list(rooms),),
         )
         entries: dict = {}
         for row in cur.fetchall():
@@ -1740,7 +1744,9 @@ def main() -> int:
                 erasure_columns=erasure_columns,
                 include_archived=include_archived,
             )
-            payload["importantIndex"] = load_important_index(conn, room=room_name)
+            # House rows are loaded first and a same-named room row overwrites
+            # them, so a room's own canon always outranks the shared entry.
+            payload["importantIndex"] = load_important_index(conn, rooms=(room_name, "house"))
 
         if args.mode in ("full", "taxonomy"):
             payload["taxonomy"] = load_taxonomy(
@@ -1774,7 +1780,7 @@ def main() -> int:
                         excerpt_chars=args.candidate_excerpt_chars,
                         erasure_columns=erasure_columns,
                         include_archived=include_archived,
-                        lesson_scopes=("shared", room_name),
+                        lesson_scopes=("house", room_name),
                     )
                 except Exception as err:
                     print(f"candidates: query failed: {err}", file=sys.stderr)

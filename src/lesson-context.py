@@ -68,8 +68,8 @@ def _compact(row: dict, score: int, matched: list[str]) -> dict:
 
 
 def retrieve_lesson_context(conn, room: str, projects=(), shapes=(), terms=(), limit: int = 8) -> dict:
-    room = _norm(room) or "shared"
-    scopes = ["shared"] if room == "shared" else ["shared", room]
+    room = _norm(room) or "house"
+    scopes = ["house"] if room == "house" else ["house", room]
     project_keys = set(_terms(projects)); shape_keys = set(_terms(shapes)); query_terms = _terms(terms)
     limit = max(0, min(int(limit or 0), 50))
     if not limit:
@@ -82,7 +82,12 @@ def retrieve_lesson_context(conn, room: str, projects=(), shapes=(), terms=(), l
         coding = [row for row in coding if _norm(row.get("scope")) in scopes]
         project = []
         if project_keys:
-            cur.execute("""SELECT id,title,lesson,proof_pattern,trigger_context,scope,project,voice,shape,tags
+            # Deliberately narrower than the coding_lessons list above:
+            # project_lessons has no scope, voice, or shape column. Selecting
+            # them raised "column scope does not exist", and the exception took
+            # BOTH lists down with it — every turn injected zero lessons while
+            # reporting nothing. _row() defaults the missing keys to "".
+            cur.execute("""SELECT id,title,lesson,proof_pattern,trigger_context,project,tags
                            FROM project_lessons WHERE project = ANY(%s)""", (sorted(project_keys),))
             project = [_row(r) for r in cur.fetchall()]
             project = [row for row in project if _norm(row.get("project")) in project_keys]
@@ -108,7 +113,7 @@ def main() -> int:
     parser.add_argument("--shape", action="append", default=[]); parser.add_argument("--term", action="append", default=[])
     parser.add_argument("--limit", type=int, default=8); parser.add_argument("--room-dir", required=True)
     args = parser.parse_args()
-    empty = {"codingLessons": [], "projectLessons": [], "match": {"scopes": ["shared"] if _norm(args.room) == "shared" else ["shared", _norm(args.room)], "projects": [], "limit": 0}}
+    empty = {"codingLessons": [], "projectLessons": [], "match": {"scopes": ["house"] if _norm(args.room) == "house" else ["house", _norm(args.room)], "projects": [], "limit": 0}}
 
     try:
         if psycopg2 is None: raise RuntimeError("psycopg2 unavailable")
@@ -117,7 +122,12 @@ def main() -> int:
         try: result = retrieve_lesson_context(conn, args.room, args.project, args.shape, args.term, args.limit)
         finally: conn.close()
         print(json.dumps(result, ensure_ascii=False))
-    except Exception:
+    except Exception as error:
+        # Fail-open by contract: lessons must never block a turn. But failing
+        # open SILENTLY is what kept this dark — a SELECT naming columns that
+        # project_lessons does not have threw on every single call, printed an
+        # empty context, and exited 0. Keep the fail-open. Carry the reason.
+        empty["error"] = f"{type(error).__name__}: {error}"[:300]
         print(json.dumps(empty, ensure_ascii=False))
     return 0
 

@@ -2728,94 +2728,23 @@ pub const GIGA_MAX_PROCESS_SOURCE_BYTES: usize = 8_000;
 pub const GIGA_MAX_PROCESS_WINDOW_BYTES: usize = 24_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GigaProcessSource {
-    source_id: String,
-    text: String,
-}
-
-impl GigaProcessSource {
-    pub fn new(source_id: String, text: String) -> Result<Self, DomainError> {
-        if source_id.is_empty() || source_id.len() > 512 || source_id.trim() != source_id {
-            return Err(DomainError::InvalidGiga {
-                field: "sources.source_id".into(),
-                message: "must be a trimmed identifier of at most 512 bytes".into(),
-            });
-        }
-        if text.is_empty() || text.len() > GIGA_MAX_PROCESS_SOURCE_BYTES {
-            return Err(DomainError::InvalidGiga {
-                field: "sources.text".into(),
-                message: format!(
-                    "must contain between 1 and {GIGA_MAX_PROCESS_SOURCE_BYTES} UTF-8 bytes"
-                ),
-            });
-        }
-        Ok(Self { source_id, text })
-    }
-
-    pub fn source_id(&self) -> &str {
-        &self.source_id
-    }
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GigaProcessRequest {
     event_id: String,
-    sources: Vec<GigaProcessSource>,
 }
 
 impl GigaProcessRequest {
-    pub fn new(event_id: String, sources: Vec<GigaProcessSource>) -> Result<Self, DomainError> {
+    pub fn new(event_id: String) -> Result<Self, DomainError> {
         if event_id.is_empty() || event_id.len() > 512 || event_id.trim() != event_id {
             return Err(DomainError::InvalidGiga {
                 field: "event_id".into(),
                 message: "must be a trimmed identifier of at most 512 bytes".into(),
             });
         }
-        if sources.is_empty() || sources.len() > GIGA_MAX_PROCESS_SOURCES {
-            return Err(DomainError::InvalidGiga {
-                field: "sources".into(),
-                message: format!(
-                    "must contain between 1 and {GIGA_MAX_PROCESS_SOURCES} exact source records"
-                ),
-            });
-        }
-        let mut total_bytes = 0usize;
-        for (index, source) in sources.iter().enumerate() {
-            if sources[..index]
-                .iter()
-                .any(|known| known.source_id() == source.source_id())
-            {
-                return Err(DomainError::InvalidGiga {
-                    field: "sources.source_id".into(),
-                    message: "must be unique within the request".into(),
-                });
-            }
-            total_bytes = total_bytes
-                .checked_add(source.text().len())
-                .ok_or_else(|| DomainError::InvalidGiga {
-                    field: "sources.text".into(),
-                    message: "aggregate UTF-8 byte count overflowed".into(),
-                })?;
-        }
-        if total_bytes > GIGA_MAX_PROCESS_WINDOW_BYTES {
-            return Err(DomainError::InvalidGiga {
-                field: "sources.text".into(),
-                message: format!(
-                    "aggregate text must not exceed {GIGA_MAX_PROCESS_WINDOW_BYTES} UTF-8 bytes"
-                ),
-            });
-        }
-        Ok(Self { event_id, sources })
+        Ok(Self { event_id })
     }
 
     pub fn event_id(&self) -> &str {
         &self.event_id
-    }
-    pub fn sources(&self) -> &[GigaProcessSource] {
-        &self.sources
     }
 }
 

@@ -703,6 +703,8 @@ The behavior must satisfy these rules:
 
 The scheduler can batch adjacent turns. It must keep stable source references after batching.
 
+`giga_process` dispatch carries only `event_id`. The Rust worker reloads the ordered source references from PostgreSQL and the exact turn bodies from the trusted room ledger, then verifies room, session, role, hash, count, and byte bounds before classification. Callers must not duplicate source text in the process request.
+
 ## 20. Configuration contract
 
 The canonical configuration should expose these logical settings:

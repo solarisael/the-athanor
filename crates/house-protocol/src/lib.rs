@@ -8,14 +8,13 @@ use house_core::{
     GigaClassifierIdentity, GigaCodingLessonPromotionPayload, GigaEvent, GigaEventClaimReceipt,
     GigaEventClaimRequest, GigaEventFinishOutcome, GigaEventFinishReceipt, GigaEventFinishRequest,
     GigaEventReplayReceipt, GigaEventReplayRequest, GigaEventType, GigaLifecycle,
-    GigaMemoryPromotionPayload, GigaProcessRequest, GigaProcessSource,
-    GigaProjectLessonPromotionPayload, GigaPromotionAuthority, GigaPromotionPayload,
-    GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
-    GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
-    GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
-    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallRequest,
-    RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberReceipt, RememberRequest,
-    RoomKey, ThreadContinuation,
+    GigaMemoryPromotionPayload, GigaProcessRequest, GigaProjectLessonPromotionPayload,
+    GigaPromotionAuthority, GigaPromotionPayload, GigaPromotionReceipt, GigaPromotionRequest,
+    GigaPublicationConsent, GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest,
+    GigaQueueMaintenanceScope, GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState,
+    GigaRisk, GigaScope, GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType,
+    GigaVisibility, RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails,
+    RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
 };
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -1661,16 +1660,8 @@ pub struct GigaEventParams {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct GigaProcessSourceParams {
-    pub source_id: String,
-    pub text: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
 pub struct GigaProcessParams {
     pub event_id: String,
-    pub sources: Vec<GigaProcessSourceParams>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -2123,13 +2114,7 @@ impl TryFrom<GigaProcessParams> for GigaProcessRequest {
     type Error = ProtocolError;
 
     fn try_from(value: GigaProcessParams) -> Result<Self, Self::Error> {
-        let sources = value
-            .sources
-            .into_iter()
-            .map(|source| GigaProcessSource::new(source.source_id, source.text))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
-        GigaProcessRequest::new(value.event_id, sources)
+        GigaProcessRequest::new(value.event_id)
             .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
     }
 }
@@ -3654,63 +3639,24 @@ mod tests {
     }
 
     #[test]
-    fn giga_process_wire_is_exact_and_bounds_source_records_by_utf8_bytes() {
+    fn giga_process_wire_accepts_only_an_event_id() {
         let valid = RequestEnvelope {
             protocol: 1,
             id: "process".into(),
             method: "giga_process".into(),
-            params: serde_json::json!({
-                "event_id": "event-1",
-                "sources": [
-                    {"source_id":"turn-1","text":"exact user text"},
-                    {"source_id":"turn-2","text":"exact assistant text"}
-                ]
-            }),
+            params: serde_json::json!({"event_id": "event-1"}),
         }
         .giga_process_request()
         .unwrap();
         assert_eq!(valid.event_id(), "event-1");
-        assert_eq!(valid.sources().len(), 2);
-        assert_eq!(valid.sources()[0].text(), "exact user text");
 
-        let rejects = [
-            serde_json::json!({
-                "event_id":"event-1",
-                "sources":[{"source_id":"turn-1","text":"x","extra":true}]
-            }),
-            serde_json::json!({
-                "event_id":"event-1",
-                "sources":[{"source_id":"turn-1","text":"x"}],
-                "extra":true
-            }),
-            serde_json::json!({
-                "event_id":"event-1",
-                "sources":[
-                    {"source_id":"turn-1","text":"x"},
-                    {"source_id":"turn-1","text":"y"}
-                ]
-            }),
-            serde_json::json!({
-                "event_id":"event-1",
-                "sources":[{"source_id":"turn-1","text":"x".repeat(8_001)}]
-            }),
-            serde_json::json!({
-                "event_id":"event-1",
-                "sources":[
-                    {"source_id":"turn-1","text":"x".repeat(8_000)},
-                    {"source_id":"turn-2","text":"x".repeat(8_000)},
-                    {"source_id":"turn-3","text":"x".repeat(8_000)},
-                    {"source_id":"turn-4","text":"x"}
-                ]
-            }),
-            serde_json::json!({
-                "event_id":"event-1",
-                "sources":(0..9).map(|index| serde_json::json!({
-                    "source_id":format!("turn-{index}"),"text":"x"
-                })).collect::<Vec<_>>()
-            }),
-        ];
-        for params in rejects {
+        for params in [
+            serde_json::json!({}),
+            serde_json::json!({"event_id": ""}),
+            serde_json::json!({"event_id": " event-1"}),
+            serde_json::json!({"event_id": "event-1", "sources": []}),
+            serde_json::json!({"event_id": "event-1", "extra": true}),
+        ] {
             assert!(
                 RequestEnvelope {
                     protocol: 1,

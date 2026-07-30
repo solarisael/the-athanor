@@ -882,10 +882,14 @@ impl From<ProtocolError> for ProtocolErrorBody {
 impl TryFrom<RememberParams> for RememberRequest {
     type Error = ProtocolError;
     fn try_from(params: RememberParams) -> Result<Self, Self::Error> {
-        let room =
-            RoomKey::new(params.room).map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
         let kind = RememberKind::parse(&params.kind)
             .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
+        let room = if kind.is_lesson() {
+            RoomKey::new(params.room)
+        } else {
+            RoomKey::for_memory_write(params.room)
+        }
+        .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
         if kind.is_lesson()
             && (params.source_path.is_some()
                 || !params.threads.is_empty()
@@ -3051,13 +3055,23 @@ mod tests {
             json,
             r#"{"protocol":1,"id":"a","result":{"ok":true,"mode":"consult","room":"house","query":"needle","found":true,"entries":[{"title":"T"}],"warnings":[]}}"#
         );
-        let remember = RequestEnvelope {
+        let house_memory = RequestEnvelope {
             protocol: 1,
             id: "r".into(),
             method: "remember".into(),
             params: serde_json::json!({"room":"house","kind":"memory","title":"T","body":"B"}),
         };
-        assert!(remember.remember_request().is_err());
+        assert_eq!(
+            house_memory.remember_request().unwrap().room().as_str(),
+            "house"
+        );
+        let house_lesson = RequestEnvelope {
+            protocol: 1,
+            id: "r2".into(),
+            method: "remember".into(),
+            params: serde_json::json!({"room":"house","kind":"coding-lesson","title":"T","body":"B"}),
+        };
+        assert!(house_lesson.remember_request().is_err());
     }
 
     #[test]

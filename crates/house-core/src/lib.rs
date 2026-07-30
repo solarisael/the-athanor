@@ -685,6 +685,10 @@ impl RoomKey {
     pub fn for_anamnesis(value: impl Into<String>) -> Result<Self, DomainError> {
         Self::build(value.into(), true)
     }
+    /// Memory writes may target the shared house commons; lesson writes may not.
+    pub fn for_memory_write(value: impl Into<String>) -> Result<Self, DomainError> {
+        Self::build(value.into(), true)
+    }
 
     fn build(value: String, allow_house: bool) -> Result<Self, DomainError> {
         if value == "house" && !allow_house {
@@ -3979,10 +3983,12 @@ mod tests {
     }
 
     #[test]
-    fn anamnesis_room_keys_allow_shared_house_but_remember_keys_do_not() {
+    fn shared_house_doors_stay_purpose_scoped() {
         assert!(RoomKey::for_anamnesis("house").is_ok());
-        assert!(RoomKey::for_anamnesis("living-room2").is_ok());
+        assert!(RoomKey::for_memory_write("house").is_ok());
+        assert!(RoomKey::for_memory_write("living-room2").is_ok());
         assert!(RoomKey::for_anamnesis("Living").is_err());
+        assert!(RoomKey::for_memory_write("Living").is_err());
         assert!(RoomKey::new("house").is_err());
     }
 

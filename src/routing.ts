@@ -38,15 +38,13 @@ export type DispatchRequest = {
   context?: ContextHint[];
   acceptance?: string[];
   risk?: RiskLevel;
-  model?: string;
 };
 
 export type DispatchReceipt = {
   ok: boolean;
   status: "ready" | "rejected";
   lane: WorkerLaneName | null;
-  requestedModelRole: string | null;
-  model: string | null;
+  modelRole: string | null;
   ompAgent: string | null;
   errors: string[];
   warnings: string[];
@@ -54,12 +52,16 @@ export type DispatchReceipt = {
     executed: false;
     reason: string;
   };
-  taskPacket: null | {
-    agent: string;
-    model: string;
-    role: string;
-    context: string;
-    tasks: [{ id: string; description: string; role: string; assignment: string }];
+  spawnPacket: null | {
+    tool: "task";
+    args: {
+      context: string;
+      tasks: [{
+        name: string;
+        agent?: string;
+        task: string;
+      }];
+    };
   };
 };
 
@@ -67,7 +69,7 @@ export const WORKER_LANES: Record<WorkerLaneName, WorkerLane> = {
   "smol-scout": {
     name: "smol-scout",
     description: "Cheap bounded read-only scout for exact terrain mapping.",
-    ompAgent: "explore",
+    ompAgent: "scout",
     modelRole: "pi/smol",
     tools: ["read", "grep", "glob", "ast_grep"],
     canEdit: false,
@@ -120,20 +122,6 @@ export function listWorkerLanes(): WorkerLane[] {
   return Object.values(WORKER_LANES).map((lane) => ({ ...lane, tools: [...lane.tools], allowedContextModes: [...lane.allowedContextModes] }));
 }
 
-// Lane model-role -> OMP spawn alias. These are the model aliases the OMP
-// eval helpers (agent()/completion()) resolve against harness config; core
-// stays pure — string shaping only, no provider resolution here.
-export const OMP_MODEL_ALIASES: Record<string, string> = {
-  "pi/smol": "smol",
-  "pi/default": "default",
-  "pi/slow": "slow",
-};
-
-export function resolveDispatchModel(lane: WorkerLane, override?: string): string {
-  const explicit = String(override || "").trim();
-  if (explicit) return explicit;
-  return OMP_MODEL_ALIASES[lane.modelRole] || "default";
-}
 
 export function getWorkerLane(name: string): WorkerLane | null {
   const key = String(name || "").trim() as WorkerLaneName;
@@ -182,20 +170,10 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
   const target = String(request?.target || "").trim();
   const acceptance = cleanLines(request?.acceptance);
   const context = normalizeContext(request?.context);
-  const model = lane ? resolveDispatchModel(lane, request?.model) : null;
 
   if (!lane) errors.push(`Unknown worker lane: ${String(request?.lane || "") || "<empty>"}`);
   if (!task) errors.push("Dispatch task is required.");
   if (lane?.requiresAcceptance && acceptance.length === 0) errors.push(`${lane.name} requires at least one acceptance item.`);
-  if (lane) {
-    if (String(request?.model || "").trim()) {
-      warnings.push(`Model override '${String(request?.model).trim()}' replaces lane role '${lane.modelRole}' for this dispatch.`);
-    }
-    warnings.push(
-      `Model '${model}' is enforced only when spawned via the eval agent() helper — agent(assignment, { agent, model }); the plain task tool ignores model and uses the harness default.`,
-    );
-  }
-
 
   if (lane) {
     for (const item of context) {
@@ -212,25 +190,24 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
       ok: false,
       status: "rejected",
       lane: lane?.name || null,
-      requestedModelRole: lane?.modelRole || null,
-      model,
+      modelRole: lane?.modelRole || null,
       ompAgent: lane?.ompAgent || null,
       errors,
       warnings,
       dispatcher: {
         executed: false,
-        reason: "Solarisael-house v0 validates and packages dispatches; it does not spawn OMP subagents itself.",
+        reason: "The Athanor validates and packages dispatches; the main model explicitly spawns accepted packets.",
       },
-      taskPacket: null,
+      spawnPacket: null,
     };
   }
 
   const role = `${lane.name}: ${lane.description}`;
   const assignment = [
-    "## Target",
+    "# Target",
     target || task,
     "",
-    "## Change",
+    "# Change",
     [
       `Execute this ${lane.name} work packet exactly as assigned.`,
       "Do not infer the operator's broader intent beyond the packet.",
@@ -240,10 +217,7 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
       task,
     ].join("\n"),
     "",
-    "## Context",
-    formatContext(context),
-    "",
-    "## Acceptance",
+    "# Acceptance",
     formatAcceptance(acceptance),
   ].join("\n");
 
@@ -251,36 +225,40 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
     ok: true,
     status: "ready",
     lane: lane.name,
-    requestedModelRole: lane.modelRole,
-    model,
+    modelRole: lane.modelRole,
     ompAgent: lane.ompAgent,
     errors,
     warnings,
     dispatcher: {
       executed: false,
-      reason: "Solarisael-house returns a validated OMP task packet; spawn via the eval agent() helper with the packet's model to enforce selection (the plain task tool ignores model).",
+      reason: "Pass spawnPacket.args directly to the OMP task tool. Spawning remains an explicit main-model action.",
     },
-    taskPacket: {
-      agent: lane.ompAgent,
-      model,
-      role,
-      context: [
-        "## Goal",
-        "Execute the Solarisael-house worker packet from the main model.",
-        "## Constraints",
-        `Lane: ${lane.name}`,
-        `Requested model role: ${lane.modelRole} (spawn model: ${model})`,
-        `Risk: ${request?.risk || "low"}`,
-        "Do not infer user intent beyond the packet.",
-        "## Contract",
-        "Return evidence, uncertainties, and exact changed/checked artifacts.",
-      ].join("\n"),
-      tasks: [{
-        id: stableTaskId(lane.name),
-        description: lane.description,
-        role,
-        assignment,
-      }],
+    spawnPacket: {
+      tool: "task",
+      args: {
+        context: [
+          "# Goal",
+          "Execute the validated Athanor worker packet from the main model.",
+          "# Constraints",
+          `Lane: ${lane.name}`,
+          `Configured agent: ${lane.ompAgent}`,
+          `Model role: ${lane.modelRole}; the agent definition selects the runtime model.`,
+          `Risk: ${request?.risk || "low"}`,
+          "Do not infer user intent beyond the packet.",
+          "# Contract",
+          role,
+          "",
+          "Context fragments:",
+          formatContext(context),
+          "",
+          "Return evidence, uncertainties, and exact changed/checked artifacts.",
+        ].join("\n"),
+        tasks: [{
+          name: stableTaskId(lane.name),
+          ...(lane.ompAgent === "task" ? {} : { agent: lane.ompAgent }),
+          task: assignment,
+        }],
+      },
     },
   };
 }

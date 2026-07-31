@@ -1,8 +1,8 @@
-// Guards the v0 worker-routing seam: only dispatchable lanes are exposed,
-// lane names map to real OMP agents, and invalid packets stop at receipt shaping.
+// Guards the worker-routing seam: only dispatchable lanes are exposed, lane
+// names map to real OMP agents, and accepted receipts fit the task tool exactly.
 
 import { describe, expect, test } from "bun:test";
-import { buildDispatchReceipt, getWorkerLane, listWorkerLanes, resolveDispatchModel } from "../src/routing.ts";
+import { buildDispatchReceipt, getWorkerLane, listWorkerLanes } from "../src/routing.ts";
 
 describe("listWorkerLanes", () => {
   test("exposes worker lanes without advisor or main channels", () => {
@@ -14,6 +14,15 @@ describe("listWorkerLanes", () => {
     expect(laneNames).toContain("verifier");
     expect(laneNames).not.toContain("advisor");
     expect(laneNames).not.toContain("main");
+  });
+
+  test("routes the scout lane to the current OMP scout agent", () => {
+    expect(getWorkerLane("smol-scout")).toMatchObject({
+      name: "smol-scout",
+      ompAgent: "scout",
+      modelRole: "pi/smol",
+      canEdit: false,
+    });
   });
 });
 
@@ -35,18 +44,10 @@ describe("worker lane mappings", () => {
     });
   });
 
-  test("resolves lane model roles to OMP spawn aliases unless explicitly overridden", () => {
-    const scout = getWorkerLane("smol-scout");
-    const tester = getWorkerLane("tester");
-
-    expect(scout && resolveDispatchModel(scout)).toBe("smol");
-    expect(tester && resolveDispatchModel(tester)).toBe("default");
-    expect(tester && resolveDispatchModel(tester, "provider/custom-model")).toBe("provider/custom-model");
-  });
 });
 
 describe("buildDispatchReceipt", () => {
-  test("rejects invalid lanes before creating a task packet", () => {
+  test("rejects invalid lanes before creating a spawn packet", () => {
     const receipt = buildDispatchReceipt({
       lane: "advisor",
       task: "Review this implementation.",
@@ -56,10 +57,9 @@ describe("buildDispatchReceipt", () => {
       ok: false,
       status: "rejected",
       lane: null,
-      requestedModelRole: null,
-      model: null,
+      modelRole: null,
       ompAgent: null,
-      taskPacket: null,
+      spawnPacket: null,
     });
     expect(receipt.errors).toEqual(["Unknown worker lane: advisor"]);
   });
@@ -75,9 +75,9 @@ describe("buildDispatchReceipt", () => {
       ok: false,
       status: "rejected",
       lane: "smol-executor",
-      requestedModelRole: "pi/smol",
+      modelRole: "pi/smol",
       ompAgent: "sonic",
-      taskPacket: null,
+      spawnPacket: null,
     });
     expect(receipt.errors).toEqual(["smol-executor requires at least one acceptance item."]);
   });
@@ -94,14 +94,14 @@ describe("buildDispatchReceipt", () => {
       ok: false,
       status: "rejected",
       lane: "smol-executor",
-      requestedModelRole: "pi/smol",
+      modelRole: "pi/smol",
       ompAgent: "sonic",
-      taskPacket: null,
+      spawnPacket: null,
     });
     expect(receipt.errors).toEqual(["smol-executor does not allow context mode 'image-ok'."]);
   });
 
-  test("packages a valid smol-executor dispatch without executing it", () => {
+  test("packages valid dispatches as direct task-tool arguments", () => {
     const receipt = buildDispatchReceipt({
       lane: "smol-executor",
       target: "src/routing.ts",
@@ -115,45 +115,28 @@ describe("buildDispatchReceipt", () => {
       ok: true,
       status: "ready",
       lane: "smol-executor",
-      requestedModelRole: "pi/smol",
+      modelRole: "pi/smol",
       ompAgent: "sonic",
       dispatcher: { executed: false },
+      spawnPacket: {
+        tool: "task",
+        args: {
+          tasks: [{
+            name: "SmolExecutor",
+            agent: "sonic",
+          }],
+        },
+      },
     });
-    expect(receipt.taskPacket?.agent).toBe("sonic");
-    expect(receipt.model).toBe("smol");
-    expect(receipt.taskPacket?.model).toBe("smol");
-    expect(receipt.dispatcher.reason).toContain("eval agent() helper");
-    expect(receipt.dispatcher.reason).toContain("model");
-    expect(receipt.dispatcher.reason).toContain("plain task tool ignores model");
-    expect(receipt.taskPacket?.tasks).toHaveLength(1);
+    expect(receipt.warnings).toEqual([]);
+    expect(receipt.dispatcher.reason).toContain("spawnPacket.args");
+    expect(receipt.spawnPacket?.args.tasks).toHaveLength(1);
 
-    const assignment = receipt.taskPacket?.tasks[0].assignment || "";
-    expect(assignment).toContain("## Target");
-    expect(assignment).toContain("## Change");
-    expect(assignment).toContain("## Acceptance");
-  });
-
-  test("passes explicit model overrides through to the task packet and warns about the role replacement", () => {
-    const receipt = buildDispatchReceipt({
-      lane: "tester",
-      task: "Exercise the observable behavior.",
-      acceptance: ["The behavior fails if the wrong model is packaged."],
-      context: [{ mode: "retrieve-only", source: "tests/example.test.ts" }],
-      model: "provider/custom-model",
-    });
-
-    expect(receipt).toMatchObject({
-      ok: true,
-      status: "ready",
-      lane: "tester",
-      requestedModelRole: "pi/default",
-      model: "provider/custom-model",
-      ompAgent: "task",
-    });
-    expect(receipt.taskPacket?.model).toBe("provider/custom-model");
-    expect(receipt.warnings).toContain(
-      "Model override 'provider/custom-model' replaces lane role 'pi/default' for this dispatch.",
-    );
-    expect(receipt.warnings.some((warning) => warning.includes("eval agent() helper"))).toBe(true);
+    const assignment = receipt.spawnPacket?.args.tasks[0].task || "";
+    expect(assignment).toContain("# Target");
+    expect(assignment).toContain("# Change");
+    expect(assignment).toContain("# Acceptance");
+    expect(receipt.spawnPacket?.args.context).toContain("Model role: pi/smol");
+    expect(receipt.spawnPacket?.args.context).toContain("mode=exact");
   });
 });

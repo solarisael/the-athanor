@@ -169,7 +169,13 @@ Current lanes are:
 - `tester` for explicit behavioral contracts;
 - `verifier` for independent checks.
 
-Harness adapters execute the returned packet with the selected agent and model role. This keeps routing policy testable and the core independent from one harness runtime.
+Dispatch takes exactly one selector — a lane or a familiar — through one unified contract; the familiar-only entry point is an alias over the same path. Accepted receipts expose `spawnPacket.args` shaped directly for the harness task call, and harness adapters spawn explicitly with that packet. Runtime models come from the agent definitions themselves; per-dispatch model override is unsupported. This keeps routing policy testable and the core independent from one harness runtime.
+
+### Familiar spellbooks
+
+Familiars are room-owned identities bound to existing worker lanes; they do not add a second routing system. A room stores the canonical registry at `familiars/spellbook.json`. Adapters also accept `familiars/litters.json` as a filename alias.
+
+The spellbook keeps generic code vocabulary (`collective: "familiars"`) while exposing room language through `collectiveAliases`, such as `kittens`. Each familiar has a stable id, display name, aliases, description, and one lane. The core resolves that identity and delegates packet shaping to the same unified dispatch contract. Harness adapters still spawn explicitly.
 
 ## Extension direction
 

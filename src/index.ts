@@ -43,6 +43,22 @@ export type {
 } from "./routing.ts";
 
 export {
+  FAMILIAR_SPELLBOOK_FILENAMES,
+  buildFamiliarDispatchReceipt,
+  getFamiliar,
+  listFamiliars,
+  parseFamiliarSpellbook,
+} from "./familiars.ts";
+
+export type {
+  FamiliarDefinition,
+  FamiliarDispatchReceipt,
+  FamiliarDispatchRequest,
+  FamiliarSpellbook,
+  FamiliarSpellbookResult,
+} from "./familiars.ts";
+
+export {
   CODING_LESSONS_SCRIPT,
   MEMORY_POSTGRES_SOURCE_SCRIPT,
   POSTGRES_MEMORY_SOURCE_SCRIPT,

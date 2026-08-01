@@ -1010,21 +1010,21 @@ GIGA can ship before 1.0 when all these statements are true:
 16. Room-local review requires the authenticated governing spirit or a scoped principal.
 17. Curios remain pointer-only and cannot promote themselves through resonance.
 
-## 28. Open decisions
+## 28. Stage 1 decisions
 
-Implementation must resolve these questions before Stage 1 closes:
+These questions were open at draft time. Stage 1 implementation resolved them as follows.
 
-- Which existing turn identifier becomes the canonical source ID?
-- Does the candidate store use one table or a normalized event and candidate pair?
-- How long do dismissed and expired candidates remain available?
-- Which retention and resonance budget applies to reviewed Curios?
-- Which local model meets the first quality and latency baseline?
-- Which review surface ships first?
-- How does the OMP adapter expose task and subagent events?
-- Which candidate fields join the existing retrieval fusion contract?
-- How does backup and restore include queue and candidate state?
-- Which configuration surface controls local resource limits?
-- Which public API version changes are required?
+1. **Canonical source ID.** The OMP-derived stable turn ID `omp-derived:<role>:<index>:<sha256[0..32]>`, produced by the adapter conversation log and dual-verified: the adapter checks stability, uniqueness, and session consistency; the Rust worker re-verifies `source_id`, role, and content hash against the trusted room ledger before classification.
+2. **Candidate store shape.** A normalized event and candidate pair: `giga_events` (queue columns inline), `giga_event_sources`, `giga_candidates`, `giga_candidate_sources`, and `giga_reviews`, plus `giga_event_attempts` and `giga_review_resonances`, with `ON DELETE CASCADE`.
+3. **Dismissed and expired retention.** Retained indefinitely. `expires_at` exists in the schema but nothing sets it; expiry is a manual review transition, not a timer. A TTL sweep is deferred past Stage 1.
+4. **Curio retention and resonance budget.** Curios are retained indefinitely, remain pointer-only, and are invisible to retrieval fusion. Review resonance records provenance only and is review-state-agnostic. A substrate-aware resonance budget for curios is explicitly deferred to the future resonance pass.
+5. **Local model baseline.** Agents-A1-4B (Q4_K_M GGUF) on local Ollama, pinned by manifest digest and verified against `/api/tags` before every run, prompt version `agents-a1-two-pass-v2`. Latency and memory are measured (~41 MB KV per 1k tokens; `num_ctx` 32768 ≈ 4.4 GB). The sanitized quality baseline required by acceptance item 11 is still outstanding.
+6. **First review surface.** The OMP tool-organ set: `giga_candidate_list`, `giga_review` (safe non-authority transitions), `giga_promote_memory`, `giga_promote_coding_lesson`, `giga_promote_project_lesson`, `giga_health`, and `giga_queue_maintenance`. No graphical surface ships in Stage 1.
+7. **Adapter task and subagent events.** Stage 1 ingests only the main session. Subagent turns are excluded at the adapter ingestion gate (detected by the child-transcript layout, `<parentStem>/<agentId>.jsonl`); a subagent's durable output re-enters the ledger through the main agent's consuming turn. Typed `task_started` / `subagent_*` events are deferred past Stage 1; the schema's typed event columns stay unused until then.
+8. **Candidate fields in retrieval fusion.** Only promoted candidates enter fusion, via promotion metadata (`origin = giga-promotion`, durability, `candidate_created_at` decay anchor) carried on the resulting memory. Unpromoted candidates are invisible to recall by design: a candidate is a proposal, never memory.
+9. **Backup and restore.** Whole-database `pg_dump -Fc --no-owner --no-acl` with no table filters; all GIGA tables are included in every dump and restored wholesale. No GIGA-specific handling is needed.
+10. **Configuration surface.** Enablement and endpoints are environment variables (`SOLARISAEL_GIGA_ENABLED`, `SOLARISAEL_HIPPOCAMPUS_ENABLED`, `SOLARISAEL_REPLAY_MODE`, `SOLARISAEL_HIPPOCAMPUS_OLLAMA_ENDPOINT`, adapter-side `SOLARISAEL_GIGA_PROJECT_KEY`). Resource limits are compiled constants (`num_ctx`, keep-alive, timeouts, lease seconds, byte and source caps). Concurrency is implicitly one worker via the `FOR UPDATE SKIP LOCKED` lease protocol; no dedicated knob.
+11. **Public API version.** No version bump: protocol version stays 1 and the core API version stays 1. GIGA methods are additive under protocol v1, with independent `event_schema_version = 1` and `candidate_schema_version = 1` payload versions.
 
 ## 29. Related documents
 

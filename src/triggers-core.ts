@@ -96,8 +96,8 @@ export function matchProcessShape(command: string): string | null {
   return null;
 }
 
-// Render a compact echo-banner from coding_lessons rows. Pairs (linked by
-// negation_of) render as ✓/✗ duos; standalone affirmations render plain.
+// Render a compact echo-banner from typed lessons rows. Pairs (linked by
+// negationOf) render as ✓/✗ duos; standalone affirmations render plain.
 // Output is `echo` statements joined by `;` so it prepends to any command on
 // PowerShell or bash. Pure string work.
 export function formatProcessLessonsBanner(
@@ -107,20 +107,20 @@ export function formatProcessLessonsBanner(
   if (!Array.isArray(lessons) || lessons.length === 0) return "";
 
   const negatedIds = new Set(
-    lessons.filter((l) => l.negation_of != null).map((l) => l.negation_of),
+    lessons.filter((lesson) => lesson.negationOf != null).map((lesson) => lesson.negationOf),
   );
   const rendered: string[] = [];
-  for (const l of lessons) {
-    if (l.negation_of != null) continue;
-    if (negatedIds.has(l.id)) {
-      const negation = lessons.find((n) => n.negation_of === l.id);
+  for (const lesson of lessons) {
+    if (lesson.negationOf != null) continue;
+    if (negatedIds.has(lesson.id)) {
+      const negation = lessons.find((candidate) => candidate.negationOf === lesson.id);
       if (negation) {
-        rendered.push(`  ${String(l.id).padStart(3)} ✓ ${l.title}`);
+        rendered.push(`  ${String(lesson.id).padStart(3)} ✓ ${lesson.title}`);
         rendered.push(`  ${String(negation.id).padStart(3)} ✗ (negation) ${negation.title}`);
         continue;
       }
     }
-    rendered.push(`  ${String(l.id).padStart(3)} ✓ ${l.title}`);
+    rendered.push(`  ${String(lesson.id).padStart(3)} ✓ ${lesson.title}`);
   }
   if (rendered.length === 0) return "";
 

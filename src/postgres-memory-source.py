@@ -619,8 +619,9 @@ def load_search_candidates(
             SELECT id, scope, project, title, lesson, shape, tags,
                    ts_rank_cd(lesson_tsv, q.query, 32) AS raw_rank,
                    title ILIKE ANY(%s::text[]) AS title_hit
-            FROM coding_lessons, q
-            WHERE scope = ANY(%s)
+            FROM lessons, q
+            WHERE lesson_key = 'coding'
+              AND scope = ANY(%s)
               AND (
                 lesson_tsv @@ q.query
                 OR title ILIKE ANY(%s::text[])
@@ -642,7 +643,7 @@ def load_search_candidates(
                 continue
             item = _candidate(
                 source="coding_lesson",
-                source_table="coding_lessons",
+                source_table="lessons",
                 source_id=int(row["id"]),
                 room="",
                 title=row["title"] or "",

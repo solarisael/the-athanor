@@ -1,9 +1,9 @@
 // The single seam for everything that crosses the Windows→WSL door:
 // path translation + child-process spawn with timeout.
 //
-// Extracted 2026-06-10. spawnPostgresSource (memory.ts) and
-// runCodingLessonsByShape (triggers.ts) had grown the same spawn machinery
-// independently — settle-once latch, kill-timer, buffer accumulation.
+// Extracted 2026-06-10 after memory and lesson retrieval had independently
+// grown the same spawn machinery: settle-once latch, kill timer, and buffer
+// accumulation.
 // Single-source seam: the machinery lives here once; callers map the raw
 // outcome onto their own result contracts.
 

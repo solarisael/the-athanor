@@ -92,8 +92,8 @@ export const MEMORY_CONTENT_TOP_K = 5;
 export const MEMORY_CONTENT_MIN_SIM = 0.30;
 export const MEMORY_CONTENT_DEMOTION_SIM_THRESHOLD = 0.70;
 
-export const CODING_LESSONS_SCRIPT = path.join(PLUGIN_DIR, "coding-lessons-by-shape.py");
-export const CODING_LESSONS_TIMEOUT_MS = 2000;
+export const LESSONS_SCRIPT = path.join(PLUGIN_DIR, "lessons.py");
+export const LESSONS_TIMEOUT_MS = 2000;
 
 // Process-shape triggers live beside this file in the canonical core.
 // Re-exported here so moved adapter-era modules keep their `./paths.ts` path.

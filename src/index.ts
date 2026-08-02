@@ -59,7 +59,7 @@ export type {
 } from "./familiars.ts";
 
 export {
-  CODING_LESSONS_SCRIPT,
+  LESSONS_SCRIPT,
   MEMORY_POSTGRES_SOURCE_SCRIPT,
   POSTGRES_MEMORY_SOURCE_SCRIPT,
 } from "./paths.ts";

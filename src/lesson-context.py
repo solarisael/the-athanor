@@ -77,18 +77,15 @@ def retrieve_lesson_context(conn, room: str, projects=(), shapes=(), terms=(), l
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor if psycopg2 else None)
     try:
         cur.execute("""SELECT id,title,lesson,proof_pattern,trigger_context,scope,project,voice,shape,tags
-                       FROM coding_lessons WHERE scope = ANY(%s)""", (scopes,))
+                       FROM lessons WHERE lesson_key = 'coding' AND scope = ANY(%s)""", (scopes,))
         coding = [_row(r) for r in cur.fetchall()]
         coding = [row for row in coding if _norm(row.get("scope")) in scopes]
         project = []
         if project_keys:
-            # Deliberately narrower than the coding_lessons list above:
-            # project_lessons has no scope, voice, or shape column. Selecting
-            # them raised "column scope does not exist", and the exception took
-            # BOTH lists down with it — every turn injected zero lessons while
-            # reporting nothing. _row() defaults the missing keys to "".
+            # Keep the project lesson payload deliberately narrower than the
+            # coding payload. _row() defaults the omitted keys to "".
             cur.execute("""SELECT id,title,lesson,proof_pattern,trigger_context,project,tags
-                           FROM project_lessons WHERE project = ANY(%s)""", (sorted(project_keys),))
+                           FROM lessons WHERE lesson_key = 'project' AND project = ANY(%s)""", (sorted(project_keys),))
             project = [_row(r) for r in cur.fetchall()]
             project = [row for row in project if _norm(row.get("project")) in project_keys]
     finally:
@@ -123,10 +120,8 @@ def main() -> int:
         finally: conn.close()
         print(json.dumps(result, ensure_ascii=False))
     except Exception as error:
-        # Fail-open by contract: lessons must never block a turn. But failing
-        # open SILENTLY is what kept this dark — a SELECT naming columns that
-        # project_lessons does not have threw on every single call, printed an
-        # empty context, and exited 0. Keep the fail-open. Carry the reason.
+        # Fail-open by contract: lessons must never block a turn. Keep the
+        # database failure visible without changing the successful exit.
         empty["error"] = f"{type(error).__name__}: {error}"[:300]
         print(json.dumps(empty, ensure_ascii=False))
     return 0

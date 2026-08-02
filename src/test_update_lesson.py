@@ -64,15 +64,15 @@ class UpdateLessonTests(unittest.TestCase):
             "updated": True,
         })
         self.assertEqual(conn.cursor_obj.calls[0], (
-            "SELECT title FROM coding_lessons WHERE id = %s FOR UPDATE",
-            (137,),
+            "SELECT title FROM lessons WHERE lesson_key = %s AND id = %s FOR UPDATE",
+            ("coding", 137),
         ))
         update_sql, update_args = conn.cursor_obj.calls[1]
         self.assertEqual(
             update_sql,
-            "UPDATE coding_lessons SET lesson = %s, tags = %s, negation_of = %s WHERE id = %s",
+            "UPDATE lessons SET lesson = %s, tags = %s, negation_of = %s WHERE lesson_key = %s AND id = %s",
         )
-        self.assertEqual(update_args, ["Revised lesson", ["tooling"], None, 137])
+        self.assertEqual(update_args, ["Revised lesson", ["tooling"], None, "coding", 137])
 
     def test_omitted_negation_link_is_preserved(self):
         conn = Connection()
@@ -86,7 +86,7 @@ class UpdateLessonTests(unittest.TestCase):
 
         update_sql, update_args = conn.cursor_obj.calls[1]
         self.assertNotIn("negation_of", update_sql)
-        self.assertEqual(update_args, ["Revised lesson", 137])
+        self.assertEqual(update_args, ["Revised lesson", "coding", 137])
 
     def test_title_mismatch_refuses_before_update(self):
         conn = Connection(row=("Different title",))
@@ -132,7 +132,7 @@ class UpdateLessonTests(unittest.TestCase):
                 self.assertFalse(result["ok"])
                 self.assertEqual(conn.cursor_obj.calls, [])
 
-    def test_project_update_uses_project_table(self):
+    def test_project_update_uses_typed_unified_row(self):
         conn = Connection()
         result = update_lesson.update_lesson(
             conn,
@@ -143,7 +143,8 @@ class UpdateLessonTests(unittest.TestCase):
         )
 
         self.assertTrue(result["ok"])
-        self.assertIn("UPDATE project_lessons", conn.cursor_obj.calls[1][0])
+        self.assertIn("UPDATE lessons", conn.cursor_obj.calls[1][0])
+        self.assertEqual(conn.cursor_obj.calls[1][1][-2:], ["project", 7])
 
     def test_unexpected_rowcount_refuses(self):
         conn = Connection(update_rowcount=0)

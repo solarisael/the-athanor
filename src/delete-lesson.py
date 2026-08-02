@@ -2,8 +2,8 @@
 """Delete exactly one coding or project lesson after title confirmation.
 
 The operation is deliberately narrow: kind selects one of two allowlisted
-lesson tables, the numeric id identifies one row, and expected-title must
-match the row currently in the database before deletion.  Errors are emitted
+lesson types in the unified table, the numeric id identifies one typed row,
+and expected-title must match that row before deletion. Errors are emitted
 as structured JSON and the CLI stays fail-open for OMP callers.
 """
 from __future__ import annotations
@@ -21,15 +21,15 @@ except ImportError:
     psycopg2 = None
 
 
-TABLES = {"coding-lesson": "coding_lessons", "project-lesson": "project_lessons"}
+LESSON_KEYS = {"coding-lesson": "coding", "project-lesson": "project"}
 
 
 
 
 def delete_lesson(conn, kind: str, lesson_id: int, expected_title: str) -> dict:
     """Delete one exact row, or return a refusal without changing the DB."""
-    table = TABLES.get(kind)
-    if table is None:
+    lesson_key = LESSON_KEYS.get(kind)
+    if lesson_key is None:
         return {"ok": False, "kind": kind, "id": lesson_id, "deleted": False, "error": "kind must be coding-lesson or project-lesson"}
     if isinstance(lesson_id, bool) or not isinstance(lesson_id, int) or lesson_id <= 0:
         return {"ok": False, "kind": kind, "id": lesson_id, "deleted": False, "error": "id must be a positive integer"}
@@ -39,14 +39,20 @@ def delete_lesson(conn, kind: str, lesson_id: int, expected_title: str) -> dict:
     # The connection context commits on normal exit and rolls back on errors.
     with conn:
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-            cur.execute(f"SELECT title FROM {table} WHERE id = %s FOR UPDATE", (lesson_id,))
+            cur.execute(
+                "SELECT title FROM lessons WHERE lesson_key = %s AND id = %s FOR UPDATE",
+                (lesson_key, lesson_id),
+            )
             row = cur.fetchone()
             if row is None:
                 return {"ok": False, "kind": kind, "id": lesson_id, "deleted": False, "error": "lesson not found"}
             actual_title = str(row["title"] if isinstance(row, dict) else row[0])
             if actual_title != expected_title:
                 return {"ok": False, "kind": kind, "id": lesson_id, "deleted": False, "error": "title mismatch", "actual_title": actual_title}
-            cur.execute(f"DELETE FROM {table} WHERE id = %s AND title = %s", (lesson_id, expected_title))
+            cur.execute(
+                "DELETE FROM lessons WHERE lesson_key = %s AND id = %s AND title = %s",
+                (lesson_key, lesson_id, expected_title),
+            )
             if cur.rowcount != 1:
                 return {"ok": False, "kind": kind, "id": lesson_id, "deleted": False, "error": "delete affected an unexpected number of rows"}
     return {"ok": True, "kind": kind, "id": lesson_id, "title": expected_title, "deleted": True}

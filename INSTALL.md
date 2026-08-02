@@ -31,6 +31,44 @@ A completed Full installation additionally has:
 - a paper boat recovered after a fresh session;
 - substrate backup and recovery configured through its canonical repository.
 
+## Release installation and updates
+
+The portable release contains the core, OMP adapter, compiled installer and updater, starter room, platform Rust executable, and an embedded manifest of every shipped artifact. Download the ZIP for the host platform from the adapter's GitHub release, keep the original ZIP, and extract a temporary copy so the installer executable can run:
+
+```powershell
+Expand-Archive .\solarisael-house-<VERSION>-windows-x64.zip .\solarisael-house-setup
+.\solarisael-house-setup\solarisael-house-omp\install.exe --list-harnesses
+```
+
+The current public catalog exposes `omp`. Install Base House with:
+
+```powershell
+.\solarisael-house-setup\solarisael-house-omp\install.exe `
+  --bundle .\solarisael-house-<VERSION>-windows-x64.zip `
+  --target C:\Solarisael `
+  --room my-room `
+  --mode base `
+  --harness omp
+```
+
+For Full House, add `--mode full --substrate <ABSOLUTE_SUBSTRATE_PATH>`. Use `--config <ABSOLUTE_OMP_CONFIG>` when OMP does not use its default configuration path.
+
+The installer rejects unsafe archive entries, verifies the embedded artifact manifest and platform Rust binary, stages the complete installation, preserves existing rooms and unrelated configuration, runs the canonical verifier, and only then activates the staged tree. Replacing an existing target requires `--force`; release updates use the narrower internal `--update` path.
+
+The installed updater resolves the selected GitHub release channel, validates the release manifest, SHA-256, byte size, internal package version, required substrate schema, and installer result. Check without changing files:
+
+```powershell
+C:\Solarisael\solarisael-house-omp\update.exe `
+  --target C:\Solarisael `
+  --room my-room `
+  --mode base `
+  --harness omp `
+  --channel stable `
+  --check
+```
+
+Remove `--check` to apply an available update. The updater copies itself outside the live installation before replacement on Windows, then hands the release to the same staged installer. Channels are `stable`, `beta`, and `experimental`; the updater never treats an arbitrary mutable `latest` file as a trusted release.
+
 ## Deployment modes
 
 ### Base House

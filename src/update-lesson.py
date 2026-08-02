@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Update exactly one coding or project lesson after title confirmation.
 
-The operation is deliberately narrow: kind selects an allowlisted table and
-columns, the numeric id identifies one row, and expected-title must match the
-row currently in the database before an update is attempted. Errors are JSON
+The operation is deliberately narrow: kind selects one of two allowlisted
+lesson types in the unified table, the numeric id identifies one typed row,
+and expected-title must match that row before an update is attempted. Errors are JSON
 and the CLI remains fail-open for OMP callers.
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ except ImportError:
     psycopg2 = None
 
 
-TABLES = {"coding-lesson": "coding_lessons", "project-lesson": "project_lessons"}
+LESSON_KEYS = {"coding-lesson": "coding", "project-lesson": "project"}
 COMMON_FIELDS = ("title", "lesson", "shape", "trigger_context", "tags")
 CODING_FIELDS = COMMON_FIELDS + ("voice", "scope", "project", "proof_pattern", "negation_of")
 PROJECT_FIELDS = COMMON_FIELDS + ("project", "proof_pattern")
@@ -42,8 +42,8 @@ def _allowed_fields(kind: str):
 
 def update_lesson(conn, kind: str, lesson_id: int, expected_title: str, patch: dict) -> dict:
     """Update one exact row, preserving all fields omitted from *patch*."""
-    table = TABLES.get(kind)
-    if table is None:
+    lesson_key = LESSON_KEYS.get(kind)
+    if lesson_key is None:
         return _refusal(kind, lesson_id, "kind must be coding-lesson or project-lesson")
     if isinstance(lesson_id, bool) or not isinstance(lesson_id, int) or lesson_id <= 0:
         return _refusal(kind, lesson_id, "id must be a positive integer")
@@ -66,7 +66,10 @@ def update_lesson(conn, kind: str, lesson_id: int, expected_title: str, patch: d
     with conn:
         cursor_factory = psycopg2.extras.DictCursor if psycopg2 is not None else None
         with conn.cursor(cursor_factory=cursor_factory) as cur:
-            cur.execute(f"SELECT title FROM {table} WHERE id = %s FOR UPDATE", (lesson_id,))
+            cur.execute(
+                "SELECT title FROM lessons WHERE lesson_key = %s AND id = %s FOR UPDATE",
+                (lesson_key, lesson_id),
+            )
             row = cur.fetchone()
             if row is None:
                 return _refusal(kind, lesson_id, "lesson not found")
@@ -75,8 +78,11 @@ def update_lesson(conn, kind: str, lesson_id: int, expected_title: str, patch: d
                 return _refusal(kind, lesson_id, "title mismatch", actual_title=actual_title)
             columns = list(patch)
             assignments = ", ".join(f"{column} = %s" for column in columns)
-            values = [patch[column] for column in columns] + [lesson_id]
-            cur.execute(f"UPDATE {table} SET {assignments} WHERE id = %s", values)
+            values = [patch[column] for column in columns] + [lesson_key, lesson_id]
+            cur.execute(
+                f"UPDATE lessons SET {assignments} WHERE lesson_key = %s AND id = %s",
+                values,
+            )
             if cur.rowcount != 1:
                 return _refusal(kind, lesson_id, "update affected an unexpected number of rows")
     return {"ok": True, "kind": kind, "id": lesson_id, "title": patch.get("title", expected_title), "updated": True}

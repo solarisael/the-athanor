@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Bounded canonical retrieval across every typed lesson row."""
+from __future__ import annotations
+
+import argparse
+import json
+
+from substrate_config import substrate_env
+
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    psycopg2 = None
+
+
+LESSON_TYPES = ("coding", "project", "writing", "audio")
+
+
+def _row(value) -> dict:
+    return {
+        "id": int(value["id"]),
+        "type": value["lesson_key"],
+        "kindPath": value["kind_path"],
+        "scope": value["scope"],
+        "project": value["project"],
+        "voice": value["voice"],
+        "register": list(value["register"] or []),
+        "shape": value["shape"],
+        "stage": list(value["stage"] or []),
+        "title": value["title"],
+        "lesson": value["lesson"],
+        "triggerContext": value["trigger_context"],
+        "proofPattern": value["proof_pattern"],
+        "exampleText": value["example_text"],
+        "exampleCommand": value["example_cmd"],
+        "writers": list(value["writers"] or []),
+        "tools": list(value["tools"] or []),
+        "negationOf": value["negation_of"],
+        "tags": list(value["tags"] or []),
+        "alwaysOn": bool(value["always_on"]),
+    }
+
+
+def fetch_lessons(conn, *, lesson_type: str, room: str, shape: str | None,
+                  project: str | None, register: str | None, stage: str | None,
+                  query: str | None, limit: int) -> dict:
+    if lesson_type not in LESSON_TYPES:
+        raise ValueError(f"type must be one of: {', '.join(LESSON_TYPES)}")
+    if lesson_type == "project" and not project:
+        raise ValueError("project lessons require --project")
+    scopes = ["house"] if room == "house" else ["house", room]
+    clauses = ["lesson_key = %s"]
+    values: list[object] = [lesson_type]
+    if lesson_type == "coding":
+        clauses.append("scope = ANY(%s)")
+        values.append(scopes)
+    if project:
+        clauses.append("project = %s")
+        values.append(project)
+    if shape:
+        clauses.append("shape = %s")
+        values.append(shape)
+    if register:
+        clauses.append("%s = ANY(register)")
+        values.append(register)
+    if stage:
+        clauses.append("%s = ANY(stage)")
+        values.append(stage)
+    if query:
+        clauses.append(
+            "lesson_tsv @@ plainto_tsquery("
+            "CASE WHEN lesson_key = 'audio' THEN 'english'::regconfig "
+            "ELSE 'portuguese'::regconfig END, %s)"
+        )
+        values.append(query)
+    where = " AND ".join(clauses)
+    rank_query = query or ""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            f"""
+            SELECT id,lesson_key,kind_path,scope,project,voice,register,shape,stage,
+                   title,lesson,trigger_context,proof_pattern,example_text,example_cmd,
+                   writers,tools,negation_of,tags,always_on
+            FROM lessons
+            WHERE {where}
+            ORDER BY
+              always_on DESC,
+              CASE WHEN %s <> '' THEN
+                ts_rank(
+                  lesson_tsv,
+                  plainto_tsquery(
+                    CASE WHEN lesson_key = 'audio' THEN 'english'::regconfig
+                         ELSE 'portuguese'::regconfig END,
+                    %s
+                  )
+                )
+              ELSE 0 END DESC,
+              updated_at DESC,
+              id
+            LIMIT %s
+            """,
+            (*values, rank_query, rank_query, limit),
+        )
+        rows = [_row(row) for row in cur.fetchall()]
+
+        taxonomy_clauses = ["lesson_key = %s"]
+        taxonomy_values: list[object] = [lesson_type]
+        if lesson_type == "coding":
+            taxonomy_clauses.append("scope = ANY(%s)")
+            taxonomy_values.append(scopes)
+        if project:
+            taxonomy_clauses.append("project = %s")
+            taxonomy_values.append(project)
+        cur.execute(
+            f"""
+            SELECT kind_path,shape,COUNT(*) AS count,
+                   COUNT(*) FILTER (WHERE always_on) AS always_on_count
+            FROM lessons
+            WHERE {' AND '.join(taxonomy_clauses)}
+            GROUP BY kind_path,shape
+            ORDER BY count DESC,kind_path
+            """,
+            taxonomy_values,
+        )
+        taxonomy = [{
+            "kindPath": row["kind_path"],
+            "shape": row["shape"],
+            "count": int(row["count"]),
+            "alwaysOnCount": int(row["always_on_count"]),
+        } for row in cur.fetchall()]
+    return {
+        "ok": True,
+        "type": lesson_type,
+        "filters": {
+            "room": room,
+            "scopes": scopes if lesson_type == "coding" else [],
+            "shape": shape,
+            "project": project,
+            "register": register,
+            "stage": stage,
+            "query": query,
+            "limit": limit,
+        },
+        "lessons": rows,
+        "taxonomy": taxonomy,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--room-dir", required=True)
+    parser.add_argument("--room", default="house")
+    parser.add_argument("--type", required=True, choices=LESSON_TYPES)
+    parser.add_argument("--shape")
+    parser.add_argument("--project")
+    parser.add_argument("--register")
+    parser.add_argument("--stage")
+    parser.add_argument("--query")
+    parser.add_argument("--limit", type=int, default=12)
+    args = parser.parse_args()
+    try:
+        if psycopg2 is None:
+            raise RuntimeError("psycopg2 is required for lesson retrieval")
+        if not 1 <= args.limit <= 50:
+            raise ValueError("--limit must be between 1 and 50")
+        env = substrate_env(args.room_dir)
+        conn = psycopg2.connect(
+            host=env.get("PGHOST"),
+            port=env.get("PGPORT"),
+            user=env.get("PGUSER"),
+            password=env.get("PGPASSWORD"),
+            dbname=env.get("PGDATABASE"),
+            connect_timeout=2,
+        )
+        try:
+            result = fetch_lessons(
+                conn,
+                lesson_type=args.type,
+                room=args.room.strip().lower() or "house",
+                shape=args.shape,
+                project=args.project,
+                register=args.register,
+                stage=args.stage,
+                query=args.query,
+                limit=args.limit,
+            )
+        finally:
+            conn.close()
+        print(json.dumps(result, ensure_ascii=False))
+    except Exception as error:
+        print(json.dumps({
+            "ok": False,
+            "type": args.type,
+            "lessons": [],
+            "taxonomy": [],
+            "error": f"{type(error).__name__}: {error}"[:500],
+        }, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

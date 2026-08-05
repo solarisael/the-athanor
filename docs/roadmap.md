@@ -1,10 +1,10 @@
-# Solarisael House Roadmap
+# The Athanor Roadmap
 
-_Last updated: 2026-07-26_
+_Last updated: 2026-08-05_
 
 ## Product rule
 
-Solarisael House should work light, get sharper with Postgres, get semantic with pgvector, and optionally grow into BM25 or external search.
+The Athanor should work light, get sharper with PostgreSQL, get semantic with pgvector, and optionally grow into BM25 or external search.
 
 Magic is allowed. Magic is not a boot requirement.
 
@@ -125,56 +125,68 @@ other AI projects. The definite article is deliberate: distinction comes from
 specificity, depth, and execution inside a recognizable form. Complete legal,
 domain, package, and namespace review before the public cutover.
 
-#### Ship GIGA before 1.0
+#### Complete GIGA before 1.0
 
 GIGA means **Grounded Indexing and Generative Annotation**. It is an optional
-cognitive capability above AKASHA, and Hippocampus is its first worker.
+cognitive capability above AKASHA.
 
-The detailed contract lives in [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md).
+Hippocampus Stage 1 is operational in the reference House. Exact events are
+logged before asynchronous classification; workers receive event IDs rather
+than copied source text; generated candidates remain non-authoritative pointers
+to exact evidence. The live lifecycle includes review, dismissal, Curios,
+promotion into memory or typed lessons, and safe queue maintenance. Failure or
+disablement remains fail-open for the active conversation.
 
-After an exact turn is durably logged, Hippocampus asynchronously examines a
-small conversational window plus relevant harness lifecycle metadata. A local
-small model emits structured, non-authoritative pointers for possible:
+The detailed contract and remaining acceptance work live in
+[`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md).
 
-- memories;
-- coding lessons;
-- project lessons;
-- corrections or supersessions;
-- entity and thread updates.
+Finish Hippocampus evaluation before calling the capability complete:
 
-Each candidate carries exact turn references, kind, priority, novelty,
-durability, project/thread keys, retrieval terms, rationale, classifier model
-and prompt version, and review state. Classification is local by default,
-batched or queued off the conversation hot path, fail-open, reprocessable, and
-never allowed to block the active turn.
+- measure candidate precision, missed durable events, false-positive burden,
+  consolidation latency, and local compute cost;
+- prove that later `remember`, `sleep`, and review recover more durable events
+  from a blinded human-labeled session set;
+- keep every public fixture sterile and every result tied to its method,
+  hardware, date, limitations, and sanitized artifact;
+- complete the remaining Stage 1 policy decision and reproducible public
+  demonstration.
 
-Hippocampus does not write durable truth. `recall`, task completion, and
-`sleep` use its pointers to fetch exact source spans. The room's governing
-spirit can authorize room-local changes. The operator controls room bindings
-and shared House policy.
+Then add two procedural workers:
 
-This closes the loop from experience to consolidation without turning every
-turn into permanent sediment. It should also consume OMP todo/task/subagent
-boundaries so lesson candidates inherit the real work contract rather than
-guessing from isolated prose.
+**Striatum — state-conditioned lesson activation.** Maintain a small,
+inspectable working-state vector for the active project, work kind, task shape,
+and phase. On every turn while that state persists, select a bounded set of
+reviewed project, coding, writing, audio, or other typed lessons and inject them
+as a compact pressure packet. Preserve the active set with decay and hysteresis
+instead of rerunning an unstable search from zero. Re-rank when the work state
+materially changes. Every activation names the lesson, match reason, scope, and
+strength; candidates can propose activation anatomy but cannot install hidden
+behavior.
 
-Measure candidate precision, missed durable events, false-positive burden,
-consolidation latency, local compute cost, and whether boats and later recall
-recover more of a blinded human-labeled session set. Capture the paired
-House-on/House-off benchmark before GIGA where practical, then repeat it with
-Hippocampus enabled to measure the additional effect.
+**Cingulate — regression and conflict detection.** Compare the current workflow
+against active lesson invariants and proof patterns. Raise explicit friction
+when the work attempts to finish without required evidence or diverges from an
+accepted procedure. Cingulate reports a conflict; it does not invent authority.
+Preferences remain nudges, known regression risks become warnings, and only
+authoritative invariants may become hard gates.
 
-Add a reviewed `curio` state. Curios remain pointer-only and can return to
-review when a later resonance pass finds new supporting context.
+The first Striatum slice should be boring and deterministic: derive state from
+trusted harness lifecycle metadata plus explicit project scope, query the typed
+lesson registry, keep three to six pressures warm across turns, inject them
+before inference, and log activation/outcome telemetry. A generative GIGA pass
+may later propose better triggers from repeated corrections, but the live path
+must stay fast, bounded, attributable, and reproducible.
 
-Every public result names its method, fixture or corpus, hardware, date,
-limitations, and sanitized artifact. Public demonstrations use a sterile
-synthetic House; private room, relationship, family, and company continuity
-never becomes demo material.
+Together these workers close three different loops:
 
-Ship a short presentation, a reproducible live demonstration, and public posts
-from the same evidence package. GUI, avatars, marketplace work, organizational
-imports, and perfect installers do not block this phase.
+```text
+Hippocampus -> what experience may deserve consolidation?
+Striatum    -> which learned practices should remain warm right now?
+Cingulate   -> where is current work diverging from those practices?
+```
+
+This is the reliability path from remembered work to repeatable work:
+regressions become observable instead of being silently normalized.
 
 #### Productize the accepted continuity features
 
@@ -315,23 +327,27 @@ spirit and thread. It must not create a daemon twin or second persistent brain.
 Later, support a group-owned room spirit. Authorized members can query the
 room's shared memory through Discord or direct chat.
 
-### Add curated coding-lesson umbrella intents
+### Activate typed lessons from persistent work state
 
-Let familiar work intents such as `design` and `refactor` resolve to small, deliberate families of existing coding-lesson shapes. Keep the exact taxonomy underneath, expose the mapping clearly, and do not replace bounded intent routing with uncontrolled vague semantic guesses.
+Adapters should derive an initial Striatum state from structured lifecycle
+signals such as an OMP todo starting, a task or subagent dispatch, its role and
+`Target`/`Change`/`Acceptance` contract, and the transition into verification.
+Conversation and tool evidence may refine the state, but must not silently
+override explicit project or task scope.
 
-### Trigger lessons from harness work boundaries
+The House selects one bounded packet across every applicable lesson family:
+project lessons for the active project, coding lessons for implementation,
+writing lessons for prose work, audio lessons for their pipeline stage, and
+future typed stores through the same registry contract. Refresh the packet on
+every turn so its influence does not decay during a long workflow, while
+caching candidates and preserving the active set until the work shape
+materially changes. Do not query on every tool call and do not dump the lesson
+registry into context.
 
-Work with the host harness instead of inferring every task from conversational
-prose. Adapters should use structured lifecycle signals such as an OMP todo
-starting, a task or subagent dispatch, its role and
-`Target`/`Change`/`Acceptance` contract, and the transition into verification
-to derive a compact retrieval intent.
-
-House then selects a small, relevant coding/project-lesson packet for the exact
-worker and phase. Retrieve at meaningful task boundaries, cache within a task,
-and re-query only when the work shape materially changes; never spray lessons
-on every tool call. The harness owns when work begins and how it is structured.
-House owns which accumulated experience applies.
+Record enough telemetry to answer: which lessons fired, why they matched,
+whether the agent followed or dismissed them, whether their proof appeared,
+and whether the result still regressed. Use those outcomes to refine reviewed
+lesson triggers, not to grant candidates authority.
 
 ### Keep memory candidate fusion stable
 
@@ -470,24 +486,51 @@ disabled
 
 Retrieval must remain useful when embeddings are absent.
 
-### Optional advanced search adapters
+### Sparse retrieval spine: BM25F live, learned sparse open
 
-Optional only, never default boot requirements:
+**BM25F memory retrieval shipped on 2026-08-05.** AKASHA now has a native
+field-aware lexical lane without adding another database extension or service.
+Migration 9 adds indexed `simple`-configuration search vectors and generated
+field-length metadata. The Rust scorer computes corpus document frequency,
+Robertson-style inverse document frequency, term-frequency saturation, and
+per-field length normalization over title, heading, source path, threads, body,
+and memory type.
 
-```text
-ParadeDB / BM25
-external search service
-future local JS index for non-Postgres installs
-```
+The first pass uses explicit weights (`title=4.0`, `heading=2.5`,
+`source_path=2.0`, `threads=2.0`, `body=1.0`, `type=0.5`) and `k1=1.2`.
+PostgreSQL FTS provides an indexed, bounded prefilter; BM25F performs the final
+lexical ordering, keeps the best-scoring chunk per memory, and exposes the raw
+score plus matched fields in fused candidate attribution. Exact identifiers,
+canon, lifecycle authority, trigram content recovery, threads, and dense
+semantic retrieval remain separate signals.
 
-Adapter rule:
+The deployment proof applied schema version 9, passed 19 core tests, 35 protocol
+tests, 35 substrate library tests, 6 substrate binary tests, and 5 diagnostic
+tests, then returned a healthy Full-mode result. Live recall returned BM25F
+attribution on representative architecture, workflow, migration, embedding, and
+session-bridge queries; every BM25F reason appeared once after memory-level
+deduplication.
 
-```text
-if advanced backend is installed:
-  use it as an extra candidate source
-else:
-  use native Postgres FTS + pg_trgm + structured rails
-```
+The learned-sparse slot remains research, but SPLADE itself is not an adoption
+target. The available SPLADE line is already aging, and the first concrete model
+examined, `naver/splade-v3`, is gated and licensed CC-BY-NC-SA-4.0. A newer
+deployable optimizer—potentially a Kimi-derived design—should be evaluated when
+one is available instead of canonizing a model family by inertia. The later
+prototype must record:
+
+- relevance against the same labeled memory-query corpus as BM25F and the
+  current hybrid baseline;
+- query latency and indexing throughput on the reference workstation;
+- model download, license, and resident-memory cost;
+- pruned sparse-index size and PostgreSQL or sidecar storage shape;
+- tokenizer, model, pruning, and index versions required for reproducibility;
+- fail-open behavior when the model or learned-sparse index is unavailable.
+
+The learned-sparse successor is never a Vault requirement. It becomes an
+ordinary AKASHA capability only if measured quality justifies its additional
+lifecycle. Candidate fusion must preserve lane-local scores and explanations
+rather than pretending BM25F, future learned-sparse scores, trigram similarity,
+and cosine similarity share one scale.
 
 ## Memory as navigable space (2026-07-07 design session)
 

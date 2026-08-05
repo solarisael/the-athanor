@@ -1,6 +1,6 @@
-# Solarisael House Architecture
+# The Athanor Architecture
 
-Solarisael House separates durable continuity from the model session that consumes it. Models and harnesses remain replaceable; rooms, identity, memory, and authority remain under the operator's control.
+The Athanor separates durable continuity from the model session that consumes it. Models and harnesses remain replaceable; rooms, identity, memory, and authority remain under the operator's control.
 
 ## System boundaries
 
@@ -33,9 +33,9 @@ House core
    ├── memory context shaping
    └── worker-routing contracts
    │
-   ├──────── Base House ───── room-local files
+   ├──────── Vault ───────── room-local files
    │
-   └──────── Full House ───── PostgreSQL + pgvector + embeddings
+   └──────── AKASHA ──────── PostgreSQL + pgvector + embeddings
 ```
 
 ## Repository ownership
@@ -44,7 +44,7 @@ House uses separate repositories so the core does not depend on one harness or o
 
 | Repository | Responsibility |
 |---|---|
-| [`solarisael-house`](https://github.com/solarisael/solarisael-house) | Provider-neutral core contracts, retrieval orchestration, ranking, room identity logic, deterministic worker routing, and canonical documentation |
+| [`the-athanor`](https://github.com/solarisael/the-athanor) | Provider-neutral core contracts, retrieval orchestration, ranking, room identity logic, deterministic worker routing, Rust protocol/core crates, and canonical documentation |
 | [`solarisael-house-omp`](https://github.com/solarisael/solarisael-house-omp) | OMP extension entrypoint, lifecycle hooks, room integration, tool schemas, static verifier, starter room, portable bundle, and adapter tests |
 | [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) | PostgreSQL schema and migrations, pgvector, embeddings, memory and lesson writes, retrieval sources, health, lifecycle smoke, and backup/restore |
 | `solarisael-house-opencode` | OpenCode adapter for the same core contracts |
@@ -78,9 +78,9 @@ House keeps four concerns separate:
 
 This separation lets a new session load a small identity and continuity surface while retrieving deeper evidence only when the current turn needs it.
 
-## Base House
+## Vault
 
-Base House uses room-local files and the harness adapter. It provides:
+Vault uses room-local files and the harness adapter. It provides:
 
 - stable room discovery;
 - identity loading;
@@ -90,11 +90,11 @@ Base House uses room-local files and the harness adapter. It provides:
 - restart recovery through the room context;
 - multiple isolated rooms.
 
-Base House requires no database, vector index, or GPU.
+Vault requires no database, vector index, or GPU.
 
-## Full House
+## AKASHA
 
-Full House adds the substrate as the durable memory authority. PostgreSQL stores memories, entities, threads, chunks, clusters, and typed lesson stores. PostgreSQL full-text search, `pg_trgm`, direct content search, structured rails, and pgvector semantic search contribute retrieval candidates.
+AKASHA adds the substrate as the durable memory authority. PostgreSQL stores memories, entities, threads, chunks, clusters, GIGA candidates, and typed lesson stores. Native BM25F scores memory title, heading, source path, threads, body, and type with corpus IDF, term-frequency saturation, and per-field length normalization. PostgreSQL full-text search, `pg_trgm`, direct content search, structured rails, BM25F, and pgvector semantic search contribute retrieval candidates.
 
 The tested local embedding path uses Nemotron-3-Embed-1B with 2,048-dimensional vectors through a compatible local endpoint. The substrate can use another compatible Ollama or OpenAI-style embedding endpoint when indexing and recall share the same vector space.
 
@@ -109,6 +109,14 @@ Full House adds:
 - archival without silent historical deletion;
 - vector rebuilds and substrate health checks.
 
+AKASHA also supports optional GIGA cognitive workers. Hippocampus Stage 1 logs
+exact events before asynchronous local classification and stores generated
+candidates as non-authoritative pointers to source evidence. Review, Curios,
+promotion, health, and safe queue maintenance are explicit operations.
+Striatum and Cingulate are planned procedural workers: the former keeps relevant
+reviewed lessons active during a working state; the latter detects divergence
+from lesson invariants and proof contracts.
+
 ## Retrieval flow
 
 Automatic per-turn retrieval merges bounded candidate streams:
@@ -118,6 +126,7 @@ latest user turn
       │
       ├── pinned room context
       ├── important named entities
+      ├── BM25F field-aware lexical candidates
       ├── lexical thread matches
       ├── deferred prior-turn candidates
       └── semantic memory chunks

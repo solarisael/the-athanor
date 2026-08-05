@@ -1,6 +1,6 @@
 {
   "name": "solarisael-house",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "A persistent room, identity, continuity, and memory system for AI agents and collaborators.",
   "author": "Sol",
   "license": "Apache-2.0",

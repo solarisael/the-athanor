@@ -11,7 +11,7 @@ A House can contain several private rooms and several distinct spirits. Each spi
 
 > **Many rooms. One hallway. Shared memory without merged selves.**
 
-Solarisael House is the working reference House. The Athanor is the planned public platform that creates and runs Houses.
+Solarisael House is the working reference House. The Athanor is the public platform that creates and runs Houses.
 
 ## Why this can become a product
 
@@ -38,15 +38,17 @@ Solarisael House is an operational late beta. It runs daily and has external ins
 
 Current capabilities include:
 
-- persistent identity and room contracts;
-- separate private rooms;
-- compact handoffs across restarts;
-- PostgreSQL memory and typed lessons;
-- lexical, structured, and semantic retrieval;
+- persistent identity contracts and separate private rooms;
+- compact handoffs and automatic bounded recall across restarts;
+- PostgreSQL memory authority and typed memory, lesson, and counsel stores;
+- lexical, structured, semantic, date, thread, taxonomy, relationship, and
+  cluster retrieval;
 - local embeddings through a compatible endpoint;
-- exact source provenance and authority labels;
-- correction through supersession;
-- tools for recall, memory, sleep, and wake;
+- exact source provenance, authority labels, supersession, and archival;
+- room-local memory plus a House commons for shared work;
+- deterministic worker lanes and room-owned familiar spellbooks;
+- GIGA Hippocampus Stage 1: event-ID processing, non-authoritative candidates,
+  review, Curios, promotion, health, and safe queue maintenance;
 - adapters for more than one AI harness.
 
 The public evidence document separates measured results from planned claims.
@@ -55,8 +57,12 @@ The public evidence document separates measured results from planned claims.
 
 | Feature | Plain-language promise | Status |
 |---|---|---|
-| GIGA and Hippocampus | Notice possible memories and lessons while life happens | Specified |
-| Curios | Keep selected hunches until later context makes them meaningful | Specified |
+| GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current |
+| Curios | Keep selected hunches until later context makes them meaningful | Current |
+| GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Planned |
+| GIGA Cingulate | Detect workflow divergence and missing proof before a regression is accepted | Planned |
+| BM25F lexical retrieval | Rank structured memory fields with a principled field-aware sparse baseline | Current |
+| Learned-sparse retrieval successor | Add local learned lexical expansion when a newer deployable optimizer proves its quality and cost | Research — model open |
 | Vault upgrade | Move file memories into semantic search without making them second class | Specified |
 | Hallway | Let private rooms share messages and state without merging identities | Specified |
 | OMEGA | Give organizations shared knowledge with separate company, team, and personal spirits | Specified |
@@ -161,10 +167,15 @@ Relay or ANON can provide remote compute. Durable continuity can remain under op
 
 ## The path to 1.0
 
-The 0.9.x phase proves value and implements GIGA. It also gathers public evidence with sanitized fixtures.
+The 0.9.x phase finishes Hippocampus evaluation, adds public evidence with
+sanitized fixtures, and begins the procedural reliability path through
+Striatum's state-conditioned lesson activation. Cingulate follows with explicit
+regression and proof-conflict detection.
 
-The 1.0 release adds supported ordinary-user installation. It must preserve existing Houses during upgrades.
+The 1.0 release adds supported ordinary-user installation. It must preserve
+existing Houses during upgrades.
 
-Later releases can add OMEGA, ANON, group rooms, embodied rooms, and a trusted marketplace.
+Later releases can add OMEGA, ANON, group rooms, embodied rooms, and a trusted
+marketplace.
 
 See [`roadmap.md`](./roadmap.md) for sequence. See [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) for the accepted technical contracts.

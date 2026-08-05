@@ -232,7 +232,7 @@ The first stable product contract includes:
 The bootstrapper owns deterministic machine changes. The AI owns the flexible
 parts of onboarding. Ordinary users should not need to manually create the
 starting folder, install a terminal, assemble WSL dependencies, or understand
-the substrate before House can help them.
+the substrate before The Athanor can help them.
 
 ### After 1.0 — broader product surface
 

@@ -1,16 +1,16 @@
-# House for work
+# The Athanor for work
 
 You should not have to re-explain yourself every morning before useful work can begin. Without durable continuity, every new session spends context reconstructing the past.
 
-Summaries flatten detail, stale statements survive corrections, and important decisions disappear into old transcripts. House gives you a persistent room with separate layers for identity, current state, recent context, and deep memory. It retrieves only the evidence relevant to the current turn, preserves where that evidence came from, and keeps changed truths from competing forever with the record they replaced.
+Summaries flatten detail, stale statements survive corrections, and important decisions disappear into old transcripts. The Athanor gives you a persistent House with separate layers for identity, current state, recent context, and deep memory. It retrieves only the evidence relevant to the current turn, preserves the evidence source, and keeps changed truths from competing forever with the record they replaced.
 
-For work, House carries project decisions, conventions, lessons, corrections, and handoffs across sessions and harnesses.
+For work, a House carries project decisions, conventions, lessons, corrections, and handoffs across sessions and harnesses.
 
 ## Capabilities
 
-Base keeps continuity in files; Full adds database-backed memory and search.
+Vault keeps continuity in files. AKASHA adds database-backed memory and search.
 
-| Capability | Base | Full |
+| Capability | Vault | AKASHA |
 |---|:---:|:---:|
 | Persistent rooms and identity contracts | Yes | Yes |
 | Restart continuity and room-local context | Yes | Yes |
@@ -25,11 +25,11 @@ Base keeps continuity in files; Full adds database-backed memory and search.
 | Corrections through supersession without historical deletion | Limited | Yes |
 | Memory lifecycle tools: `remember`, `recall`, `sleep`, and `wake` | — | Yes |
 
-Base House is a complete file-backed continuity system. Full House adds durable database memory, typed stores, local semantic search, and larger archives.
+Vault is a complete file-backed continuity system. AKASHA adds durable database memory, typed stores, local semantic search, and larger archives.
 
 ## Public evidence
 
-Memory claims are cheap, so House publishes its numbers.
+Memory claims are cheap, so The Athanor publishes its numbers.
 
 The first sanitized public retrieval pilot used 20 exact-title queries across two real rooms:
 

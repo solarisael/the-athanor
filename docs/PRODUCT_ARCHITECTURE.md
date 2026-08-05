@@ -6,7 +6,7 @@ Decision date: 2026-07-23
 
 ## 1. Purpose
 
-This document defines the future public vocabulary for the current Solarisael House project.
+This document defines the public product vocabulary for The Athanor.
 
 The accepted platform name is **The Athanor**. A user-owned continuity domain remains a **House**.
 

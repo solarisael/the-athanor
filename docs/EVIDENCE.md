@@ -1,6 +1,6 @@
-# Solarisael House Evidence
+# The Athanor Evidence
 
-House states implemented behavior directly and measures the contracts whose quality depends on scale, ranking, latency, or environment.
+The Athanor states implemented behavior directly and measures contracts whose quality depends on scale, ranking, latency, or environment.
 
 This document is the canonical public evidence index. It separates product behavior, measured results, evaluation scope, and future proof work without interrupting the product README with methodology.
 
@@ -12,7 +12,7 @@ Every published evaluation names:
 - the fixture or corpus;
 - how queries were constructed;
 - sample size;
-- House mode and relevant configuration;
+- storage profile and relevant configuration;
 - hardware when performance is measured;
 - the scoring rule;
 - the result;
@@ -76,7 +76,7 @@ These tests establish implementation contracts. They are not substitutes for pub
 
 ## Next public evidence
 
-The 0.9.x proof phase expands the evidence surface in this order.
+The 0.10.x proof phase expands the evidence surface in this order.
 
 ### Restart continuity
 
@@ -123,7 +123,7 @@ Publish p50 and p95 latency with:
 
 ### Clean-machine installation
 
-**Contract:** A tool-capable agent can install the supported topology on a clean Windows machine, create the first room, connect OMP, pass the static verifier, recover continuity after restart, and—when selected—complete the Full House lifecycle.
+**Contract:** A tool-capable agent can install the supported topology on a clean Windows machine, create the first room, connect OMP, pass the static verifier, recover continuity after restart, and—when selected—complete the AKASHA lifecycle.
 
 Installation evidence reports user intervention, elevation, restarts, elapsed time, and every failed prerequisite.
 
@@ -161,4 +161,4 @@ A useful external evaluation should provide:
 5. raw machine-readable results without private content;
 6. a short interpretation that stays within the measured scope.
 
-Open evidence issues against the repository that owns the failing contract: core behavior in `solarisael-house`, OMP runtime behavior in `solarisael-house-omp`, and database or embedding behavior in `solarisael-house-substrate`.
+Open evidence issues against the repository that owns the failing contract: core behavior in `the-athanor`, OMP runtime behavior in `solarisael-house-omp`, and database or embedding behavior in `solarisael-house-substrate`.

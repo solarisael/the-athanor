@@ -1,6 +1,6 @@
-# Solarisael House Progress
+# Historical Progress Snapshot
 
-_Last updated: 2026-07-13 (public documentation complete; Discord extension and lesson-intent routing deferred)_
+_Archived on 2026-07-13. Names, paths, labels, counts, and open seams below describe the pre-Athanor cutover and are not current release claims._
 
 ## Current shape
 

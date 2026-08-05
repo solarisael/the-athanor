@@ -1,6 +1,6 @@
-# Solarisael House Boundaries
+# The Athanor Boundaries
 
-This document records current support boundaries and non-goals. The product README states what House does; this document tells operators where adaptation or additional engineering is still required.
+This document records current support boundaries and non-goals. The product README states what The Athanor does. This document tells operators where adaptation or additional engineering is still required.
 
 ## Supported installation path
 
@@ -10,9 +10,9 @@ The guided public installation currently supports:
 - OMP;
 - Bun;
 - the stable Rust MSVC toolchain;
-- Base House room files and the TypeScript OMP lifecycle adapter over Rust core contracts.
+- Vault room files and the TypeScript OMP lifecycle adapter over Rust core contracts.
 
-Full House on the guided Windows path additionally uses:
+AKASHA on the guided Windows path additionally uses:
 
 - the release-built Windows `solarisael-house-substrate.exe`;
 - WSL 2 with Ubuntu;
@@ -27,18 +27,18 @@ The tested embedding default is Nemotron-3-Embed-1B through WSL ROCm Ollama on c
 
 | Host | Current state |
 |---|---|
-| Windows + OMP + Base | Supported guided path |
-| Windows + OMP + WSL Full House | Supported guided Rust-first path split between the core, OMP, and substrate repositories |
+| Windows + OMP + Vault | Supported guided path |
+| Windows + OMP + WSL AKASHA | Supported guided Rust-first path split between the core, OMP, and substrate repositories |
 | Native Linux | Database and support tools are adaptable; the current Windows executable and OMP integration require host-specific engineering and verification |
 | OpenCode | Adapter work predates the Rust cutover; it is not covered by the current guided installer |
 | macOS | Unsupported by the guided installation |
 | Other harnesses | Require an adapter over the core contracts |
 
-An adapted path becomes trustworthy when it proves the same observable contracts: adapter loading, room discovery, `room_state`, fresh-session continuity, and—when Full House is selected—a real substrate write/read lifecycle.
+An adapted path becomes trustworthy when it proves the same observable contracts: adapter loading, room discovery, `room_state`, fresh-session continuity, and—when AKASHA is selected—a real substrate write/read lifecycle.
 
 ## Installation boundary
 
-Version 0.9 uses an AI-guided developer-shaped setup with a verified Rust-first runtime. The operator still needs a working harness and its authentication before the AI can take over. The 1.0 milestone adds a trusted native bootstrapper, ordinary-user onboarding, upgrades, uninstall behavior, backup, and recovery.
+Version 0.10 uses an AI-guided developer-shaped setup with a verified Rust-first runtime. The operator still needs a working harness and its authentication before the AI can take over. The 1.0 milestone adds a trusted native bootstrapper, ordinary-user onboarding, upgrades, uninstall behavior, backup, and recovery.
 
 The current installer does not promise one-click setup on an otherwise empty machine.
 
@@ -54,7 +54,7 @@ Retrieval is fail-open for conversation continuity. If PostgreSQL or embeddings 
 
 ## Memory boundary
 
-House is not indiscriminate transcript storage. Durable memory remains deliberate by default.
+The Athanor is not indiscriminate transcript storage. Durable memory remains deliberate by default.
 
 - Events and realizations belong in memories.
 - Transferable engineering rules belong in coding lessons.
@@ -63,7 +63,7 @@ House is not indiscriminate transcript storage. Durable memory remains deliberat
 - Narrative history remains recoverable.
 - Secrets belong in a secret manager, never memory.
 
-House can preserve a wrong interpretation if an operator or agent deliberately records it. Correction and supersession make the trail repairable; they do not eliminate the need for judgment.
+The Athanor can preserve a wrong interpretation if an operator or agent deliberately records it. Correction and supersession make the trail repairable; they do not eliminate the need for judgment.
 
 ## Identity boundary
 
@@ -79,7 +79,7 @@ A local House does not make the model provider local. Any context sent to a host
 
 Local embeddings keep archive vectorization off a hosted embedding service. They do not prevent selected memory context from reaching the active model provider.
 
-House keeps continuity provider-portable, but it cannot remove provider-side rate limits, model policies, outages, or capability differences.
+The Athanor keeps continuity provider-portable, but it cannot remove provider-side rate limits, model policies, outages, or capability differences.
 
 ## Organizational boundary
 
@@ -99,7 +99,7 @@ Do not place an entire company's private corpus behind shared retrieval until th
 
 ## Non-goals
 
-House does not replace:
+The Athanor does not replace:
 
 - Git for source-code history, branches, review, and merges;
 - a secret manager for credentials;

@@ -1,10 +1,10 @@
 {
-  "name": "solarisael-house",
-  "version": "0.9.0",
-  "description": "A persistent room, identity, continuity, and memory system for AI agents and collaborators.",
+  "name": "the-athanor",
+  "version": "0.10.1",
+  "description": "A persistent identity, continuity, and memory platform for AI agents and collaborators.",
   "author": "Sol",
   "license": "Apache-2.0",
-  "repository": "github:solarisael/solarisael-house",
+  "repository": "github:solarisael/the-athanor",
   "type": "module",
   "main": "index.ts",
   "scripts": {

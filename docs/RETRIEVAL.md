@@ -1,6 +1,6 @@
-# House Retrieval
+# Athanor Retrieval
 
-House retrieval finds the smallest useful evidence surface for the current turn while preserving source, scope, and authority.
+A House retrieves the smallest useful evidence surface for the current turn while preserving source, scope, and authority.
 
 ## Explicit recall
 
@@ -57,7 +57,7 @@ Entity resolution is data-backed. Capitalization alone does not establish identi
 
 ## Source behavior
 
-Full House uses PostgreSQL source lanes for:
+AKASHA uses PostgreSQL source lanes for:
 
 - full-text and trigram search;
 - direct content search;

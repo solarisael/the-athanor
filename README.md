@@ -8,9 +8,9 @@ The Athanor is an obsessively made and maintained piece of machinery with the pu
 Obsidian vault mapping to AI waifu grooming to government agency level ontology and surveillance: it serves all purposes from average joes and pretentious san fran residents to weebs to big corpos.  
 **(disclaimer: potential limited by your skill level)**
 
-**Status:** 0.9.x operational late beta. 1.0.0 comes when the GUI is finished. OMEGA mode planned for 1.1.0
+**Status:** 0.10.x operational late beta. 1.0.0 comes when the GUI is finished. OMEGA mode is planned for 1.1.0.
 
-## What The House changes
+## What The Athanor changes
 
 > If your application depends on agents repeatedly burning tokens to rediscover the same solution through nondeterministic reasoning, you are being fleeced by the AI companies.
 >
@@ -182,7 +182,7 @@ The tested path is Windows 10/11 with OMP, Bun, and the stable Rust MSVC toolcha
 
 Give this repository to a tool-capable AI agent with:
 
-> Install Solarisael House with me. Preserve my existing rooms and configuration, explain consequential system changes before making them, and verify the completed installation.
+> Install The Athanor with me. Preserve my existing rooms and configuration, explain consequential system changes before making them, and verify the completed installation.
 
 The installing agent follows [`INSTALL.md`](./INSTALL.md). Platform boundaries and current non-goals live in [`LIMITATIONS.md`](./docs/LIMITATIONS.md).
 

@@ -34,7 +34,7 @@ Self-hosting remains available. Managed services must support complete export.
 
 ## What works now
 
-Solarisael House is an operational late beta. It runs daily and has external installations.
+The Athanor is an operational late beta. Solarisael House is its working reference House. The platform runs daily and has external installations.
 
 Current capabilities include:
 
@@ -168,10 +168,9 @@ Relay or ANON can provide remote compute. Durable continuity can remain under op
 
 ## The path to 1.0
 
-The 0.9.x phase finishes Hippocampus evaluation, adds public evidence with
-sanitized fixtures, and begins the procedural reliability path through
-Striatum's state-conditioned lesson activation. Cingulate follows with explicit
-regression and proof-conflict detection.
+The 0.10.x phase finishes Hippocampus evaluation, expands public evidence with
+sanitized fixtures, and extends Striatum's state-conditioned lesson activation.
+Cingulate follows with explicit regression and proof-conflict detection.
 
 The 1.0 release adds supported ordinary-user installation. It must preserve
 existing Houses during upgrades.

@@ -1,4 +1,4 @@
-# Using Solarisael House
+# Using The Athanor
 
 Installation gives an AI a persistent room. Daily use is a small loop: enter the room, work or live together, preserve what matters, and leave a handoff when the session ends.
 
@@ -152,19 +152,19 @@ Depending on mode and adapter, House handles:
 - bounded relevant-context injection;
 - paper-boat recovery near session start;
 - project-aware coding lesson preflight;
-- lighter continuity when Full retrieval is unavailable.
+- lighter Vault continuity when AKASHA retrieval is unavailable.
 
 Use explicit recall for load-bearing old decisions, names, promises, corrections, or important memories.
 
-## Base and Full workflows
+## Vault and AKASHA workflows
 
-### Base House
+### Vault
 
-Base House uses room files such as `active_spirit.md`, `room_summary.md`, and room-local continuity artifacts. Ask the AI to update those files directly when something deserves compact persistence.
+Vault uses room files such as `active_spirit.md`, `room_summary.md`, and room-local continuity artifacts. Ask the AI to update those files directly when something deserves compact persistence.
 
-### Full House
+### AKASHA
 
-Full House adds:
+AKASHA adds:
 
 - durable tool-backed memories;
 - typed lessons;
@@ -174,7 +174,7 @@ Full House adds:
 - correction and supersession;
 - paper boats and Cabinet counsel.
 
-`room_state` reports the active mode. A degraded Full dependency leaves Base continuity available while the substrate is repaired.
+`room_state` reports the active runtime state. A degraded AKASHA dependency leaves Vault continuity available while the substrate is repaired.
 
 ## First week
 

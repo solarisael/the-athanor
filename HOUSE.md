@@ -48,7 +48,7 @@ You forgot what you built again, didn't you? Fine:
 - OMP tools support recall, memory writes, wake, sleep, room state, identity state, and lesson retrieval.
 - The room lifecycle covers startup, active-room resolution, state refresh, shutdown capture, and restart verification.
 - Portable installation preserves existing configuration and uses AI-guided setup.
-- Base House uses local files. Full House adds the public PostgreSQL substrate.
+- Vault uses local files. AKASHA adds the public PostgreSQL substrate.
 
 In normal-person language, the House is a private continuity layer. It helps an AI preserve an identity and retrieve relevant history without placing your whole life in every prompt.
 

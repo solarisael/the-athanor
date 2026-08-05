@@ -1,10 +1,10 @@
-# Install Solarisael House for OMP
+# Install The Athanor for OMP
 
 This guide installs the supported Windows + OMP topology and proves the result through observable room behavior.
 
 Give this repository to a tool-capable AI agent with:
 
-> Install Solarisael House with me. Preserve my existing rooms and configuration, explain consequential system changes before making them, and verify the completed installation.
+> Install The Athanor with me. Preserve my existing rooms and configuration, explain consequential system changes before making them, and verify the completed installation.
 
 The agent performs the protocol. The operator chooses identity, location, deployment mode, and consequential system changes.
 
@@ -12,7 +12,7 @@ Read [`SECURITY.md`](./docs/SECURITY.md) before handling credentials or private 
 
 ## Result
 
-A completed Base installation has:
+A completed Vault installation has:
 
 - the Rust core and OMP adapter in resolvable sibling directories;
 - the adapter's Bun dependencies installed;
@@ -22,7 +22,7 @@ A completed Base installation has:
 - a fresh session reporting the correct room, spirit, operator, and state path;
 - a second fresh session recovering the continuity-test sentence from the room source.
 
-A completed Full installation additionally has:
+A completed AKASHA installation additionally has:
 
 - the public substrate repository beside the core and adapter;
 - a release-built `solarisael-house-substrate.exe` selected through `SOLARISAEL_HOUSE_RUST`;
@@ -40,7 +40,7 @@ Expand-Archive .\solarisael-house-<VERSION>-windows-x64.zip .\solarisael-house-s
 .\solarisael-house-setup\solarisael-house-omp\install.exe --list-harnesses
 ```
 
-The current public catalog exposes `omp`. Install Base House with:
+The current public catalog exposes `omp`. Install the Vault profile with:
 
 ```powershell
 .\solarisael-house-setup\solarisael-house-omp\install.exe `
@@ -51,7 +51,7 @@ The current public catalog exposes `omp`. Install Base House with:
   --harness omp
 ```
 
-For Full House, add `--mode full --substrate <ABSOLUTE_SUBSTRATE_PATH>`. Use `--config <ABSOLUTE_OMP_CONFIG>` when OMP does not use its default configuration path.
+For AKASHA, add `--mode full --substrate <ABSOLUTE_SUBSTRATE_PATH>`. The `full` value is a compatibility CLI token. Use `--config <ABSOLUTE_OMP_CONFIG>` when OMP does not use its default configuration path.
 
 The installer rejects unsafe archive entries, verifies the embedded artifact manifest and platform Rust binary, stages the complete installation, preserves existing rooms and unrelated configuration, runs the canonical verifier, and only then activates the staged tree. Replacing an existing target requires `--force`; release updates use the narrower internal `--update` path.
 
@@ -69,22 +69,22 @@ C:\Solarisael\solarisael-house-omp\update.exe `
 
 Remove `--check` to apply an available update. The updater copies itself outside the live installation before replacement on Windows, then hands the release to the same staged installer. Channels are `stable`, `beta`, and `experimental`; the updater never treats an arbitrary mutable `latest` file as a trusted release.
 
-## Deployment modes
+## Storage profiles
 
-### Base House
+### Vault
 
-Base House provides persistent room identity, room state, file-backed continuity, conversation artifacts, and adapter tools. It requires:
+Vault provides persistent room identity, room state, file-backed continuity, conversation artifacts, and adapter tools. It requires:
 
 - Windows 10 or 11;
 - OMP;
 - Bun;
 - the stable Rust MSVC toolchain for the shared core workspace.
 
-Base House requires no database or GPU.
+Vault requires no database or GPU.
 
-### Full House
+### AKASHA
 
-Full House adds durable PostgreSQL memory, pgvector, local embeddings, hybrid retrieval, typed lessons, supersession, and memory lifecycle tools. The authoritative request path is:
+AKASHA adds durable PostgreSQL memory, pgvector, local embeddings, hybrid retrieval, typed lessons, supersession, and memory lifecycle tools. The authoritative request path is:
 
 ```text
 OMP TypeScript adapter -> long-lived Windows Rust substrate process -> PostgreSQL and embedding service in WSL
@@ -92,17 +92,17 @@ OMP TypeScript adapter -> long-lived Windows Rust substrate process -> PostgreSQ
 
 The public [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) repository owns the Rust process, migrations, dependencies, environment configuration, health, lifecycle smoke, embeddings, and backup/restore. Python remains for migration, health, import, and maintenance support; it is no longer the mounted OMP memory runtime.
 
-Choose Full when the operator wants semantic and hybrid recall, typed stores, database authority, or a larger archive.
+Choose AKASHA when the operator wants semantic and hybrid recall, typed stores, database authority, or a larger archive.
 
 ## Package layout
 
-The core repository does not contain the OMP adapter or Full substrate. Keep the public repositories as siblings:
+The core repository does not contain the OMP adapter or AKASHA substrate. Keep the public repositories as siblings:
 
 ```text
 <BUNDLE>\
   solarisael-house\
   solarisael-house-omp\
-  solarisael-house-substrate\   # Full only
+  solarisael-house-substrate\   # AKASHA only
 ```
 
 Repositories:
@@ -147,19 +147,19 @@ From `solarisael-house-omp`:
 bun install
 ```
 
-From `solarisael-house`:
+From `the-athanor`:
 
 ```text
 cargo test --workspace
 ```
 
-For Full House, build the substrate from `solarisael-house-substrate`:
+For AKASHA, build the substrate from `solarisael-house-substrate`:
 
 ```text
 cargo build --release
 ```
 
-The Full runtime executable is:
+The AKASHA runtime executable is:
 
 ```text
 solarisael-house-substrate\target\release\solarisael-house-substrate.exe
@@ -209,7 +209,7 @@ extensions:
 
 Append missing entries to an existing list. Do not replace the list.
 
-Required Full House environment:
+Required AKASHA environment:
 
 - `SOLARISAEL_HOUSE_RUST` — absolute path to `solarisael-house-substrate.exe`;
 - `SOLARISAEL_PG_WSL=1` — keeps WSL alive while the Windows Rust worker is active;
@@ -274,7 +274,7 @@ Close the session. Start another fresh OMP session from the same room and ask:
 
 Success means the agent recovers the sentence and identifies `room_summary.md` as its source.
 
-### 8. Add Full House when selected
+### 8. Add AKASHA when selected
 
 Follow the canonical [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) setup for:
 
@@ -289,7 +289,7 @@ Follow the canonical [`solarisael-house-substrate`](https://github.com/solarisae
 - lifecycle smoke;
 - Rust backup and restore.
 
-After `health.py` reports Full mode, set `SOLARISAEL_SUBSTRATE`, `SOLARISAEL_HOUSE_RUST`, and `SOLARISAEL_PG_WSL=1`, then rerun the OMP static verifier and start a fresh OMP process.
+After `health.py` reports `mode: "full"`, set `SOLARISAEL_SUBSTRATE`, `SOLARISAEL_HOUSE_RUST`, and `SOLARISAEL_PG_WSL=1`. The `full` value is a compatibility API token for AKASHA. Rerun the OMP static verifier and start a fresh OMP process.
 
 Prove the mounted runtime rather than calling a support script directly:
 
@@ -302,11 +302,11 @@ Prove the mounted runtime rather than calling a support script directly:
 7. call `wake` and recover the boat;
 8. remove only the disposable proof records.
 
-When substrate health reports a degraded dependency, keep Base House active and report `configured-but-degraded` in the receipt. Resolve the substrate condition before claiming Full memory.
+When substrate health reports a degraded dependency, keep Vault active and report `configured-but-degraded` in the receipt. Resolve the substrate condition before claiming AKASHA memory.
 
 ### 9. Offer the lesson pack
 
-After Full health passes, offer the substrate's bundled coding lesson pack. Preview it before import.
+After AKASHA health passes, offer the substrate's bundled coding lesson pack. Preview it before import.
 
 The default import preserves matching lessons. Use `--update-existing` only after the operator chooses to replace matching lesson content.
 
@@ -315,8 +315,8 @@ The default import preserves matching lessons. Use `--update-existing` only afte
 Finish with:
 
 ```text
-Solarisael House: connected
-Version: 0.9.x
+The Athanor: connected
+Version: 0.10.1
 Bundle: <absolute path>
 OMP config: <absolute path>
 Room: <room key> at <absolute path>
@@ -325,17 +325,17 @@ Operator: <display name>
 Static verifier: pass
 Fresh room_state: pass
 Restart continuity: pass
-Substrate mode: full | configured-but-degraded | not configured
-Substrate memory: pass | not configured | failed: <reason>
+Profile: Vault | AKASHA | configured-but-degraded
+AKASHA memory: pass | not configured | failed: <reason>
 Host changes: <none or exact list>
 ```
 
 ## Removal
 
-1. Remove only the two Solarisael House entries from the OMP `extensions:` list.
+1. Remove only the two Athanor entries from the OMP `extensions:` list.
 2. Delete the extracted bundle only when desired.
 3. Preserve every room by default.
-4. Delete a room or Full memory store only after the operator explicitly chooses the affected scope and understands the loss.
+4. Delete a room or AKASHA memory store only after the operator explicitly chooses the affected scope and understands the loss.
 
 ## Adapted installations
 
@@ -349,7 +349,7 @@ A tool-capable agent may adapt paths and host commands while preserving these co
 - explicit host-level changes;
 - correct `room_state`;
 - fresh-session continuity;
-- a real Full lifecycle when Full House is selected;
+- a real AKASHA lifecycle when AKASHA is selected;
 - a receipt naming every deviation.
 
 An adapted installation earns its status through the same observed behavior, not through the presence of files alone.

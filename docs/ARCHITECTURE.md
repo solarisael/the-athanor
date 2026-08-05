@@ -40,7 +40,7 @@ House core
 
 ## Repository ownership
 
-House uses separate repositories so the core does not depend on one harness or one database deployment.
+The Athanor uses separate repositories so the core does not depend on one harness or one database deployment.
 
 | Repository | Responsibility |
 |---|---|
@@ -55,7 +55,7 @@ The public API boundaries are `coreApi=1`, `adapterApi=1`, and `substrateApi=1`.
 
 A room is a writable directory with one stable lowercase key. Display names may change without changing the room key.
 
-The Base room contract includes:
+The Vault room contract includes:
 
 - `.solarisael-room.json` for machine-readable room identity;
 - `AGENTS.md` as the host context entrypoint;
@@ -98,7 +98,7 @@ AKASHA adds the substrate as the durable memory authority. PostgreSQL stores mem
 
 The tested local embedding path uses Nemotron-3-Embed-1B with 2,048-dimensional vectors through a compatible local endpoint. Recall reuses its query vector to select at most three sufficiently similar, room-scoped concepts derived only from authoritative named entities, active threads, and lesson metadata. Their normalized terms enter a separate capped BM25F lane with concept, similarity, source-kind, and field attribution. Missing or stale vocabulary fails open without weakening exact BM25F. The substrate can use another compatible Ollama or OpenAI-style embedding endpoint when indexing and recall share the same vector space.
 
-Full House adds:
+The AKASHA profile adds:
 
 - `remember`, `recall`, `sleep`, and `wake`;
 - memories and paper boats scoped to rooms;
@@ -159,7 +159,7 @@ Corporate or project source authority remains a separate domain. An imported sou
 
 ## Typed knowledge
 
-House uses separate stores because different knowledge requires different retrieval and authority rules:
+The Athanor uses separate stores because different knowledge requires different retrieval and authority rules:
 
 - memories record things that happened;
 - coding lessons record transferable engineering rules;

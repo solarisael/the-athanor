@@ -1,6 +1,6 @@
-# Solarisael House Security and Privacy
+# The Athanor Security and Privacy
 
-Solarisael House keeps continuity under the operator's control. That requires explicit boundaries around credentials, room data, model providers, retrieval scope, publication, and destructive operations.
+The Athanor keeps continuity under the operator's control. That requires explicit boundaries around credentials, room data, model providers, retrieval scope, publication, and destructive operations.
 
 ## Trust model
 
@@ -99,7 +99,7 @@ Destructive lesson deletion requires the exact numeric ID and current title. Bro
 
 Room and memory deletion require explicit operator intent and a clear statement of the affected scope. Preserve the room by default when removing an adapter or bundle.
 
-Back up Full House before migrations, bulk imports, retention changes, or destructive maintenance. The substrate repository owns canonical backup and restore procedures.
+Back up AKASHA before migrations, bulk imports, retention changes, or destructive maintenance. The substrate repository owns canonical backup and restore procedures.
 
 ## Public evidence and demonstrations
 

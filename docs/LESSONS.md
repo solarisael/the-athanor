@@ -43,7 +43,7 @@ Example:
   "kind": "coding-lesson",
   "shape": "testing",
   "scope": "shared",
-  "project": "solarisael-house",
+  "project": "the-athanor",
   "proofPattern": "The generated archive is extracted; required paths are asserted; the documented verifier exits successfully from the adapter directory.",
   "triggerContext": "Changing packaging, installers, archive layout, or release instructions.",
   "tags": ["release", "archive", "installer", "artifact"]
@@ -78,7 +78,7 @@ Audio lessons preserve reusable pipeline behavior such as model choice, preproce
 
 ## Importing skills and workspaces
 
-House can absorb `SKILL.md` files, agent rules, postmortems, snippets, governance, and framework notes. Import the semantics, not the file count.
+The Athanor can absorb `SKILL.md` files, agent rules, postmortems, snippets, governance, and framework notes. Import the semantics, not the file count.
 
 For each source rule, determine:
 

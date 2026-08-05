@@ -1,7 +1,7 @@
 # GIGA and Hippocampus Specification
 
 Status: Stage 1 operational in the reference House; evaluation and remaining policy work continue
-Target: The Athanor 0.9.x, before 1.0  
+Target: The Athanor 0.10.x, before 1.0
 Contract version: 0.1
 
 ## 1. Purpose

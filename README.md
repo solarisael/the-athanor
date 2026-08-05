@@ -53,6 +53,13 @@ runs:
 - **BM25F memory retrieval** — field-aware lexical scoring with corpus IDF,
   term-frequency saturation, per-field length normalization, and explicit
   title, heading, source-path, thread, body, and memory-type attribution;
+- **controlled semantic lexical expansion** — the resident Nemotron query vector
+  selects at most three room-scoped concepts from authoritative entity, active
+  thread, and lesson metadata; their terms feed a separately attributed,
+  lower-priority BM25F lane;
+- **GIGA Striatum's first operational slice** — exact room, project, lesson type,
+  stage, and register rails precede Nemotron ranking; three to six coding or
+  project lessons remain warm with hysteresis while observed work state persists;
 - **House commons without room collapse** — durable work can belong to the
   House while private continuity remains room-owned;
 - **deterministic worker routing and familiar spellbooks** — bounded lanes,
@@ -65,11 +72,10 @@ runs:
   safe queue maintenance. the classifier can fail without blocking the active
   conversation.
 
-the next reliability step is not “more memory.” it is making repeated work stop
-quietly regressing:
-
-- **GIGA Striatum** will keep the right reviewed lessons warm on every turn while
-  a project/work state persists;
+the next reliability work is no longer “more memory.” Striatum's first
+coding/project slice now keeps relevant reviewed lessons warm across observed
+project work. the remaining path is broader lifecycle coverage and regression
+detection:
 - **GIGA Cingulate** will notice when current work diverges from those lessons
   or tries to finish without their required proof;
 - **the Hallway** will let private rooms exchange letters and approved shared
@@ -103,7 +109,7 @@ roadmap. “Research” means we are not lying to you about it being ready.
 | Anamnesis reviewed counsel | — | Yes | Yes | — |
 | Deterministic worker lanes and room-owned familiar spellbooks | Yes | Yes | Yes | — |
 | GIGA Hippocampus Stage 1 candidates and review | — | Yes | Yes | — |
-| GIGA Striatum lesson pressure | — | Planned | Planned | — |
+| GIGA Striatum lesson pressure | — | Current (coding/project slice) | Current (coding/project slice) | — |
 | GIGA Cingulate regression detection | — | Planned | Planned | — |
 | Company, team, and personal spirits with scoped org knowledge | — | — | Planned | — |
 | Encrypted remote jobs with zero service-side content retention | — | — | — | Planned |
@@ -117,7 +123,8 @@ search, and the substrate required by GIGA.
 GIGA (**G**rounded **I**ndexing and **G**enerative **A**nnotation) is not a
 storage tier. it is the cognitive layer above AKASHA. Hippocampus Stage 1 is
 operational in the reference House and remains deliberately non-authoritative.
-Striatum and Cingulate are planned next; see the
+Striatum's first coding/project activation slice is operational; broader typed
+lifecycle coverage and Cingulate remain planned. see the
 [`roadmap`](./docs/roadmap.md) for their contracts.
 
 \* OMEGA and ANON are planned profiles, not current release claims. OMEGA
@@ -152,7 +159,7 @@ The Athanor core
                   │
                   └── GIGA cognitive workers
                       ├── Hippocampus (Stage 1 operational)
-                      ├── Striatum (planned)
+                      ├── Striatum (coding/project slice operational)
                       └── Cingulate (planned)
 ```
 

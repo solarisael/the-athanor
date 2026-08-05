@@ -94,9 +94,9 @@ Vault requires no database, vector index, or GPU.
 
 ## AKASHA
 
-AKASHA adds the substrate as the durable memory authority. PostgreSQL stores memories, entities, threads, chunks, clusters, GIGA candidates, and typed lesson stores. Native BM25F scores memory title, heading, source path, threads, body, and type with corpus IDF, term-frequency saturation, and per-field length normalization. PostgreSQL full-text search, `pg_trgm`, direct content search, structured rails, BM25F, and pgvector semantic search contribute retrieval candidates.
+AKASHA adds the substrate as the durable memory authority. PostgreSQL stores memories, entities, threads, chunks, clusters, GIGA candidates, typed lesson stores, and the controlled semantic vocabulary. Native BM25F scores memory title, heading, source path, threads, body, and type with corpus IDF, term-frequency saturation, and per-field length normalization. PostgreSQL full-text search, `pg_trgm`, direct content search, structured rails, BM25F, and pgvector semantic search contribute retrieval candidates.
 
-The tested local embedding path uses Nemotron-3-Embed-1B with 2,048-dimensional vectors through a compatible local endpoint. The substrate can use another compatible Ollama or OpenAI-style embedding endpoint when indexing and recall share the same vector space.
+The tested local embedding path uses Nemotron-3-Embed-1B with 2,048-dimensional vectors through a compatible local endpoint. Recall reuses its query vector to select at most three sufficiently similar, room-scoped concepts derived only from authoritative named entities, active threads, and lesson metadata. Their normalized terms enter a separate capped BM25F lane with concept, similarity, source-kind, and field attribution. Missing or stale vocabulary fails open without weakening exact BM25F. The substrate can use another compatible Ollama or OpenAI-style embedding endpoint when indexing and recall share the same vector space.
 
 Full House adds:
 
@@ -113,9 +113,11 @@ AKASHA also supports optional GIGA cognitive workers. Hippocampus Stage 1 logs
 exact events before asynchronous local classification and stores generated
 candidates as non-authoritative pointers to source evidence. Review, Curios,
 promotion, health, and safe queue maintenance are explicit operations.
-Striatum and Cingulate are planned procedural workers: the former keeps relevant
-reviewed lessons active during a working state; the latter detects divergence
-from lesson invariants and proof contracts.
+Striatum's first operational slice keeps three to six coding or exact-project
+lessons active across an observed project work state. Scope, project, type,
+declared stage, and register eligibility precede Nemotron similarity; hysteresis
+prevents small prose changes from churning the set, while phase and abrupt topic
+changes refresh it. Cingulate remains planned for divergence detection.
 
 ## Retrieval flow
 
@@ -127,6 +129,7 @@ latest user turn
       ├── pinned room context
       ├── important named entities
       ├── BM25F field-aware lexical candidates
+      ├── controlled semantic-vocabulary BM25F candidates
       ├── lexical thread matches
       ├── deferred prior-turn candidates
       └── semantic memory chunks

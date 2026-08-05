@@ -59,10 +59,11 @@ The public evidence document separates measured results from planned claims.
 |---|---|---|
 | GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current |
 | Curios | Keep selected hunches until later context makes them meaningful | Current |
-| GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Planned |
+| GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Current — coding/project slice |
 | GIGA Cingulate | Detect workflow divergence and missing proof before a regression is accepted | Planned |
 | BM25F lexical retrieval | Rank structured memory fields with a principled field-aware sparse baseline | Current |
-| Learned-sparse retrieval successor | Add local learned lexical expansion when a newer deployable optimizer proves its quality and cost | Research — model open |
+| Nemotron-controlled lexical bridge | Expand through at most three authoritative stored concepts into a lower-priority attributed BM25F lane | Current |
+| Learned-sparse retrieval successor | Add a separate local learned lexical model only if measured misses justify its cost | Research — model open |
 | Vault upgrade | Move file memories into semantic search without making them second class | Specified |
 | Hallway | Let private rooms share messages and state without merging identities | Specified |
 | OMEGA | Give organizations shared knowledge with separate company, team, and personal spirits | Specified |

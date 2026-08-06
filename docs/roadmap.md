@@ -78,24 +78,6 @@ Expand public evidence beyond the favorable exact-title pilot:
 - migration, backup, and recovery
 - final-answer grounding against retrieved evidence
 
-#### Benchmark House against no House
-
-Run a paired public agent benchmark with the model, harness, task corpus, tools,
-budgets, and execution settings held constant:
-
-- control: House and its retrieval unavailable;
-- treatment: ordinary House recall and lessons enabled, with no
-  benchmark-specific memories or lesson implants;
-- report the final benchmark score and delta first, then cost, latency, and
-  method so the result stays legible;
-- begin with a recognized tool-using or coding-agent benchmark, and include
-  lower-cost models where externalized experience may have the largest effect.
-
-This measures whether using House normally changes completed-task results. It
-does not require a causal account before publishing the observed comparison;
-later ablations may separate ordinary memory, coding lessons, project lessons,
-and harness-triggered retrieval if the result warrants them.
-
 #### Maintain The Athanor product architecture before 1.0
 
 The public platform is **The Athanor**. **House** names one operator-owned
@@ -524,6 +506,34 @@ the substrate before The Athanor can help them.
 
 ### After 1.0 — broader product surface
 
+#### Benchmark House against no House
+
+Benchmarks are announcement evidence. They land in the repository together
+with the public 1.0 announcement, once the product exists to point at and the
+measured pipeline is the shipping pipeline rather than a stand-in extractor.
+
+Run a paired public agent benchmark with the model, harness, task corpus, tools,
+budgets, and execution settings held constant:
+
+- control: House and its retrieval unavailable;
+- treatment: ordinary House recall and lessons enabled, with no
+  benchmark-specific memories or lesson implants;
+- report the final benchmark score and delta first, then cost, latency, and
+  method so the result stays legible;
+- begin with a recognized tool-using or coding-agent benchmark, and include
+  lower-cost models where externalized experience may have the largest effect.
+
+Complement the paired benchmark with the established memory benchmarks:
+reproduce mem0's open evaluation harness OSS-vs-OSS on LoCoMo and LongMemEval,
+where knowledge-update questions exercise supersession directly, and publish
+tokens-to-correct-answer against corpus size, including the crossover point
+below which plain markdown wins.
+
+This measures whether using House normally changes completed-task results. It
+does not require a causal account before publishing the observed comparison;
+later ablations may separate ordinary memory, coding lessons, project lessons,
+and harness-triggered retrieval if the result warrants them.
+
 #### In-world Godot client
 
 Build one functional 2D `Control` tree first, then present that same tree through
@@ -773,6 +783,50 @@ what/when/remember shape -> prioritize memories + dates + threads
 broad conceptual query   -> allow semantic/vector lane
 ```
 
+### Design-system document index (accepted 2026-08-06)
+
+Lessons hold taste; they cannot hold reference values without drifting. The
+House also needs to catalogue design systems themselves — tokens, component
+contracts, layout grammars, accessibility floors — efficiently and
+regression-resistantly, for any design system a room works on, not for one
+website's build toolchain.
+
+The accepted contract:
+
+- The catalogue is House-native. `design_documents` rows are identified by
+  (system, doc_type, name): system names the design system (solarisael,
+  multistock, a future client); doc_type is token | component | contract |
+  guideline; values are structured JSONB — PostgreSQL's own binary
+  representation, so no file courier exists at all; body carries the contract
+  prose; provenance records whatever evidence exists (repository path and
+  ref, an external extraction, a session memory).
+- Writes go through a dedicated organ, sibling of `remember`, so every entry
+  carries a receipt and the tool-bypass rule holds. Rooms author entries from
+  design sessions as decisions land. There is no hand-edit path around the
+  organ.
+- Regression resistance is supersession, not mutation: a redesign supersedes
+  its row, current state is one query, and history stays recoverable under
+  the erasure and archival discipline. Identity makes a component or token
+  one addressable thing across its whole life instead of a claim scattered
+  through session memories.
+- Indexed rows join lexical and semantic retrieval, so design lessons (taste)
+  and design documents (current values) surface together for UI work.
+- A source-repository sync may later exist as one optional feeder for one
+  system, carrying source hashes and staleness reporting. It is an ingestion
+  path, never the catalogue's authority model.
+
+Later phases empower the catalogue without changing its shape: refinement
+transactions give design changes expected and observed outcomes with proof
+receipts; Hippocampus may propose catalogue entries from session evidence as
+ordinary reviewed candidates; Striatum keeps the active system's documents
+warm during UI work; Cingulate can raise explicit friction when a change
+contradicts a catalogued contract. The catalogue is a natural early tenant of
+the retrieval-documents layer below and the eventual seed of the Godot token
+manifest.
+
+The 2026-08-06 Claude Design extraction (`Athanor.zip`) was the inspiration
+for the entry shapes and remains evidence rather than canon.
+
 ## Future goals
 
 ### Normalized retrieval document layer
@@ -796,10 +850,8 @@ memories
 memory_threads
 memory_chunks
 named_entities
-coding_lessons
-project_lessons
-writing_lessons
-audio_lessons
+lessons (every typed family: coding, project, writing, design, audio)
+design_documents (the design-system document index above)
 ```
 
 Expected fields:

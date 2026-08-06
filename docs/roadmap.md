@@ -448,6 +448,18 @@ input/output checker, or verified extraction.
 The first candidate is Striatum stage replacement: a non-empty declared stage
 replaces the prior stage set; an empty declaration retains it.
 
+The second candidate family is design lessons over the design-system document
+index: the catalogue's tokens, component contracts, and hierarchy form the
+formal model, and structural design laws — token-set membership, contrast
+floors, hierarchy acyclicity, and container laws such as authority-separation —
+become theorems over a typed component tree. The evidence adapter then checks
+real GUI artifacts against the proven contract on every mutation, so a
+violating change fails the build. Formal coverage is structural only:
+perceptual regressions remain boundary work — screenshots, the running client,
+operator eyes. A checker that has never rejected anything proves nothing: the
+acceptance rite for each new obligation is one deliberate violation seen red,
+reverted, and seen green.
+
 Run Lean through a dedicated unprivileged wrapper with an allowlisted checker
 digest, read-only inputs, isolated temporary output, no network or inherited
 credentials, and numeric limits for wall time, CPU time, memory, processes,
@@ -528,6 +540,12 @@ reproduce mem0's open evaluation harness OSS-vs-OSS on LoCoMo and LongMemEval,
 where knowledge-update questions exercise supersession directly, and publish
 tokens-to-correct-answer against corpus size, including the crossover point
 below which plain markdown wins.
+
+Add the substrate-aging comparison: the same repository and model measured on
+feature-add success as the codebase ages, House-gated against ungated, using
+the slop-resistance baselines captured under Current goals. If the gated
+substrate holds the curve flat where the raw store bends down, that difference
+is the product's clearest external claim.
 
 This measures whether using House normally changes completed-task results. It
 does not require a causal account before publishing the observed comparison;
@@ -827,7 +845,67 @@ manifest.
 The 2026-08-06 Claude Design extraction (`Athanor.zip`) was the inspiration
 for the entry shapes and remains evidence rather than canon.
 
+### Slop resistance is a pre-registered target (directive 2026-08-06)
+
+Perceived agent performance is model intelligence multiplied by substrate
+quality, and every ungated write degrades the substrate: entropy enters the
+context window and conditions worse output until progress stalls. Operator
+review cannot set the decay rate — no operator can read every line at machine
+throughput — so the discipline lives in the harness and the substrate or it
+does not exist. The House's own history is the controlled experiment: gated
+memory writes (single-writer, review, supersession, refusal) produced a rising
+quality curve while advisory-only coding discipline produced the ordinary
+decay curve, under the same operator and models.
+
+The obligation: capture baselines BEFORE gate-shaped features land, because a
+before-arm cannot be retro-fitted. Instruments, mostly already defined by
+existing lessons:
+
+- corrective passes per file per session (the recompression rate);
+- regression re-discovery rate: defects re-committed that the substrate
+  already recorded — each one a retrieval or bindingness failure;
+- orphan density after ports;
+- feature-add success rate on the same aging repository and model, month 1
+  versus month N (the stall-equilibrium claim, made falsifiable);
+- memory-quality and code-quality curves, instrumented rather than
+  retrospective.
+
+Publication belongs to the after-1.0 benchmark section; baseline capture is
+current work.
+
 ## Future goals
+
+### Contract-bounded fabrication: proofs replace context (design 2026-08-06)
+
+Builder agents need surrounding code in the window only because wiring rules
+are implicit — and the window is the contamination vector: accumulated
+codebase entropy enters generation as context. A proven contract is the
+maximally compressed, zero-slop representation of everything outside the
+task. Fabrication flow once the design-system index and lesson obligations
+exist:
+
+```text
+design_doc query -> contract -> familiar spawn packet
+  (clean context: contract + tokens + task)
+  -> build -> proof gate -> accept or refuse
+```
+
+Consequences:
+
+- a clean-context worker cannot inherit repository slop, so each build is a
+  fresh encode from source truth rather than a recompression;
+- mechanical acceptance buys intelligence down: cheap lanes fabricate, the
+  expensive body judges;
+- rerolling against a proof gate is legitimate filtered search, because
+  acceptance is sound;
+- composition, flow, and gestalt remain judgment work over the composed
+  result — reading the whole, never building inside it;
+- contract drift becomes the primary risk: a proof is the strongest green
+  output and still not intention. Catalogue supersession and operator
+  blessing keep contracts current; intention never leaves the operator;
+- alignment amortizes: contract-to-implementation is a theorem, and the
+  remaining bet — does the contract say what the operator means — is one
+  small artifact, audited once, superseded when intent changes.
 
 ### Normalized retrieval document layer
 

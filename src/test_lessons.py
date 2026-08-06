@@ -123,5 +123,42 @@ class CanonicalLessonsTests(unittest.TestCase):
         self.assertEqual(args[0:3], ("audio", "mix", "headroom"))
 
 
+    def test_design_query_is_typed_uses_register_and_portuguese_fts(self):
+        design = {
+            **LESSON,
+            "lesson_key": "design",
+            "kind_path": "design/component-contract",
+            "voice": "solarisael",
+            "register": ["general"],
+            "shape": "component-contract",
+        }
+        taxonomy = {
+            "kind_path": "design/component-contract",
+            "shape": "component-contract",
+            "count": 1,
+            "always_on_count": 0,
+        }
+        conn = Connection([[design], [taxonomy]])
+        result = lessons.fetch_lessons(
+            conn,
+            lesson_type="design",
+            room="kintsu",
+            shape="component-contract",
+            project=None,
+            register="general",
+            stage=None,
+            query="navegação",
+            limit=5,
+        )
+
+        self.assertEqual(result["type"], "design")
+        self.assertEqual(result["lessons"][0]["kindPath"], "design/component-contract")
+        query, args = conn.cursor_obj.calls[0]
+        self.assertIn("lesson_key = %s", query)
+        self.assertIn("%s = ANY(register)", query)
+        self.assertIn("ELSE 'portuguese'::regconfig", query)
+        self.assertNotIn("scope = ANY(%s)", query)
+        self.assertEqual(args[:4], ("design", "component-contract", "general", "navegação"))
+
 if __name__ == "__main__":
     unittest.main()

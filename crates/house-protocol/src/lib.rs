@@ -71,6 +71,8 @@ pub struct RememberParams {
     pub proof_pattern: Option<String>,
     #[serde(default, rename = "triggerContext")]
     pub trigger_context: Option<String>,
+    #[serde(default, rename = "exampleText")]
+    pub example_text: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default = "default_backup")]
@@ -910,6 +912,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                 || params.project.is_some()
                 || params.proof_pattern.is_some()
                 || params.trigger_context.is_some()
+                || params.example_text.is_some()
                 || !params.tags.is_empty())
         {
             return Err(ProtocolError::InvalidParams(
@@ -973,6 +976,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                     project: params.project,
                     proof_pattern: params.proof_pattern,
                     trigger_context: params.trigger_context,
+                    example_text: params.example_text,
                     tags: params.tags,
                 },
             )
@@ -3163,7 +3167,7 @@ mod tests {
     }
 
     #[test]
-    fn writing_register_round_trips_and_memory_refuses_it() {
+    fn writing_and_design_registers_round_trip_and_memory_refuses_them() {
         let writing = RequestEnvelope::parse_line(
             r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"kintsu","kind":"writing-lesson","title":"T","body":"B","register":[" fiction ","product-work","fiction"]}}"#,
         )
@@ -3171,6 +3175,16 @@ mod tests {
         .remember_request()
         .unwrap();
         assert_eq!(writing.register(), &["fiction", "product-work"]);
+
+        let design = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"kintsu","kind":"design-lesson","title":"T","body":"B","voice":"solarisael","register":[" general ","general"],"shape":"component-contract","proofPattern":"Verify keyboard navigation.","triggerContext":"Before introducing a component.","exampleText":"Use the token, not a one-off value.","tags":["accessibility"]}}"#,
+        )
+        .unwrap()
+        .remember_request()
+        .unwrap();
+        assert_eq!(design.kind(), RememberKind::DesignLesson);
+        assert_eq!(design.register(), &["general"]);
+        assert_eq!(design.example_text(), Some("Use the token, not a one-off value."));
 
         let memory = RequestEnvelope::parse_line(
             r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"kintsu","kind":"memory","title":"T","body":"B","register":["fiction"]}}"#,
@@ -3198,8 +3212,9 @@ mod tests {
             scope: None,
             project: None,
             proof_pattern: None,
-            register: vec![],
             trigger_context: None,
+            example_text: None,
+            register: vec![],
             tags: vec![],
             backup: true,
         };
@@ -3224,6 +3239,7 @@ mod tests {
             register: vec![],
             proof_pattern: None,
             trigger_context: None,
+            example_text: None,
             tags: vec![],
             backup: true,
         };
@@ -3248,6 +3264,7 @@ mod tests {
                 register: vec![],
                 proof_pattern: None,
                 trigger_context: None,
+                example_text: None,
                 tags: vec![],
                 backup: true,
             };
@@ -3390,11 +3407,12 @@ mod tests {
         ));
     }
     #[test]
-    fn all_lesson_kinds_validate_defaults_and_receipt_shape() {
+    fn all_lesson_kinds_validate_defaults_and_receipts() {
         for kind in [
             "coding-lesson",
             "project-lesson",
             "writing-lesson",
+            "design-lesson",
             "audio-lesson",
         ] {
             let mut params = serde_json::json!({"room":"lab","kind":kind,"title":"T","body":"B"});
@@ -3441,8 +3459,8 @@ mod tests {
         );
         assert!(base(serde_json::json!({"room":"lab","kind":"coding-lesson","title":"T","body":"B","threads":["x"]})).remember_request().is_err());
         assert!(base(serde_json::json!({"room":"lab","kind":"writing-lesson","title":"T","body":"B","project":"x"})).remember_request().is_err());
+        assert!(base(serde_json::json!({"room":"lab","kind":"design-lesson","title":"T","body":"B","scope":"house"})).remember_request().is_err());
         assert!(base(serde_json::json!({"room":"lab","kind":"project-lesson","title":"T","body":"B","project":"x","shape":"process"})).remember_request().is_ok());
-        assert!(base(serde_json::json!({"room":"lab","kind":"audio-lesson","title":"T","body":"B","voice":"narrator"})).remember_request().is_err());
         assert!(
             base(
                 serde_json::json!({"room":"lab","kind":"memory","title":"T","body":"B","shape":"x"})

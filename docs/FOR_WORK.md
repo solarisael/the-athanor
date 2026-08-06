@@ -19,7 +19,7 @@ Vault keeps continuity in files. AKASHA adds database-backed memory and search.
 | PostgreSQL memory authority | — | Yes |
 | Hybrid lexical, content, structured, and semantic retrieval | — | Yes |
 | Local embeddings through a compatible endpoint | — | Yes |
-| Memories, coding lessons, project lessons, writing lessons, and audio lessons | — | Yes |
+| Memories, coding lessons, project lessons, writing lessons, design lessons, and audio lessons | — | Yes |
 | Entity, date, thread, taxonomy, relationship, and cluster retrieval | — | Yes |
 | Provenance, authority state, and selection reasons | — | Yes |
 | Corrections through supersession without historical deletion | Limited | Yes |

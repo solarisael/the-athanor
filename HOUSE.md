@@ -43,7 +43,7 @@ You forgot what you built again, didn't you? Fine:
 - Layered context separates stable identity, current context, recent continuity, and deep memory.
 - Session-aware logs support compact startup context and restart recovery.
 - Room boundaries keep each identity private while explicit addresses permit deliberate cross-room recall.
-- Typed stores hold personal memories, coding lessons, project lessons, writing lessons, audio lessons, and paper boats.
+- Typed stores hold personal memories, coding lessons, project lessons, writing lessons, design lessons, audio lessons, and paper boats.
 - Skill ingestion converts repository guidance into searchable lessons instead of injecting every rule into every prompt.
 - OMP tools support recall, memory writes, wake, sleep, room state, identity state, and lesson retrieval.
 - The room lifecycle covers startup, active-room resolution, state refresh, shutdown capture, and restart verification.

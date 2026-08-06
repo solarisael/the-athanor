@@ -130,7 +130,7 @@ The AKASHA profile adds:
 
 - `remember`, `recall`, `sleep`, and `wake`;
 - memories and paper boats scoped to rooms;
-- coding, project, writing, and audio lesson stores;
+- coding, project, writing, design, and audio lesson stores;
 - entity, date, thread, taxonomy, relationship, and cluster retrieval;
 - provenance and authority state;
 - correction through supersession;

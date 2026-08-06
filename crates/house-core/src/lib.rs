@@ -988,6 +988,7 @@ pub enum RememberKind {
     CodingLesson,
     ProjectLesson,
     WritingLesson,
+    DesignLesson,
     AudioLesson,
 }
 
@@ -998,6 +999,7 @@ impl RememberKind {
             "coding-lesson" => Ok(Self::CodingLesson),
             "project-lesson" => Ok(Self::ProjectLesson),
             "writing-lesson" => Ok(Self::WritingLesson),
+            "design-lesson" => Ok(Self::DesignLesson),
             "audio-lesson" => Ok(Self::AudioLesson),
             other => Err(DomainError::UnsupportedKind(other.to_owned())),
         }
@@ -1008,6 +1010,7 @@ impl RememberKind {
             Self::CodingLesson => "coding-lesson",
             Self::ProjectLesson => "project-lesson",
             Self::WritingLesson => "writing-lesson",
+            Self::DesignLesson => "design-lesson",
             Self::AudioLesson => "audio-lesson",
         }
     }
@@ -1043,6 +1046,7 @@ pub struct RememberLessonDetails {
     pub project: Option<String>,
     pub proof_pattern: Option<String>,
     pub trigger_context: Option<String>,
+    pub example_text: Option<String>,
     pub tags: Vec<String>,
 }
 
@@ -1069,6 +1073,7 @@ pub struct RememberRequest {
     project: Option<String>,
     proof_pattern: Option<String>,
     trigger_context: Option<String>,
+    example_text: Option<String>,
     tags: Vec<String>,
 }
 
@@ -1124,6 +1129,7 @@ impl RememberRequest {
             project,
             proof_pattern,
             trigger_context,
+            example_text,
             tags,
         ) = match details {
             RememberDetails::Memory(details) => {
@@ -1142,6 +1148,7 @@ impl RememberRequest {
                     None,
                     None,
                     Vec::new(),
+                    None,
                     None,
                     None,
                     None,
@@ -1169,6 +1176,7 @@ impl RememberRequest {
                     details.project,
                     details.proof_pattern,
                     details.trigger_context,
+                    details.example_text,
                     details.tags,
                 )
             }
@@ -1196,6 +1204,12 @@ impl RememberRequest {
         {
             return Err(DomainError::InvalidField {
                 field: "scope/project/proof_pattern".into(),
+                kind: kind.as_str().into(),
+            });
+        }
+        if matches!(kind, RememberKind::DesignLesson) && (scope.is_some() || project.is_some()) {
+            return Err(DomainError::InvalidField {
+                field: "scope/project".into(),
                 kind: kind.as_str().into(),
             });
         }
@@ -1285,6 +1299,7 @@ impl RememberRequest {
             project,
             proof_pattern,
             trigger_context,
+            example_text,
             tags,
         })
     }
@@ -1336,6 +1351,9 @@ impl RememberRequest {
     }
     pub fn trigger_context(&self) -> Option<&str> {
         self.trigger_context.as_deref()
+    }
+    pub fn example_text(&self) -> Option<&str> {
+        self.example_text.as_deref()
     }
     pub fn tags(&self) -> &[String] {
         &self.tags
@@ -4081,6 +4099,52 @@ mod tests {
                 },
             ),
             Err(DomainError::EmptyBody)
+        );
+    }
+
+    #[test]
+    fn design_lessons_round_trip_and_reject_cross_family_fields() {
+        let kind = RememberKind::parse("design-lesson").unwrap();
+        assert_eq!(kind, RememberKind::DesignLesson);
+        assert_eq!(kind.as_str(), "design-lesson");
+        assert!(kind.is_lesson());
+
+        let details = || RememberLessonDetails {
+            backup: true,
+            shape: Some("component-contract".into()),
+            voice: Some("solarisael".into()),
+            register: vec!["general".into()],
+            scope: None,
+            project: None,
+            proof_pattern: Some("Verify keyboard navigation.".into()),
+            trigger_context: Some("Before introducing a component.".into()),
+            example_text: Some("Use the token, not a one-off value.".into()),
+            tags: vec!["accessibility".into()],
+        };
+        let request = RememberRequest::new_lesson(
+            RoomKey::new("lab").unwrap(),
+            kind,
+            "Accessibility floor".into(),
+            "Components retain their keyboard contract.".into(),
+            details(),
+        )
+        .unwrap();
+        assert_eq!(request.example_text(), Some("Use the token, not a one-off value."));
+
+        let mut invalid = details();
+        invalid.scope = Some("house".into());
+        assert_eq!(
+            RememberRequest::new_lesson(
+                RoomKey::new("lab").unwrap(),
+                kind,
+                "Accessibility floor".into(),
+                "Components retain their keyboard contract.".into(),
+                invalid,
+            ),
+            Err(DomainError::InvalidField {
+                field: "scope/project".into(),
+                kind: "design-lesson".into(),
+            })
         );
     }
 

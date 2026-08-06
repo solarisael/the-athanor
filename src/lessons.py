@@ -14,7 +14,7 @@ except ImportError:
     psycopg2 = None
 
 
-LESSON_TYPES = ("coding", "project", "writing", "audio")
+LESSON_TYPES = ("coding", "project", "writing", "design", "audio")
 
 
 def _row(value) -> dict:

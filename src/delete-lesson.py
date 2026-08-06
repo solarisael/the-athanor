@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Delete exactly one coding, project, or writing lesson after title confirmation.
+"""Delete exactly one coding, project, writing, or design lesson after title confirmation.
 
-The operation is deliberately narrow: kind selects one of three allowlisted
+The operation is deliberately narrow: kind selects one of four allowlisted
 lesson types in the unified table, the numeric id identifies one typed row,
 and expected-title must match that row before deletion. Errors are emitted
 as structured JSON and the CLI stays fail-open for OMP callers.
@@ -25,6 +25,7 @@ LESSON_KEYS = {
     "coding-lesson": "coding",
     "project-lesson": "project",
     "writing-lesson": "writing",
+    "design-lesson": "design",
 }
 
 
@@ -34,7 +35,7 @@ def delete_lesson(conn, kind: str, lesson_id: int, expected_title: str) -> dict:
     """Delete one exact row, or return a refusal without changing the DB."""
     lesson_key = LESSON_KEYS.get(kind)
     if lesson_key is None:
-        return {"ok": False, "kind": kind, "id": lesson_id, "deleted": False, "error": "kind must be coding-lesson, project-lesson, or writing-lesson"}
+        return {"ok": False, "kind": kind, "id": lesson_id, "deleted": False, "error": "kind must be coding-lesson, project-lesson, writing-lesson, or design-lesson"}
     if isinstance(lesson_id, bool) or not isinstance(lesson_id, int) or lesson_id <= 0:
         return {"ok": False, "kind": kind, "id": lesson_id, "deleted": False, "error": "id must be a positive integer"}
     if not isinstance(expected_title, str) or not expected_title:
@@ -65,7 +66,7 @@ def delete_lesson(conn, kind: str, lesson_id: int, expected_title: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--room-dir", required=True)
-    parser.add_argument("--kind", required=True, help="coding-lesson, project-lesson, or writing-lesson")
+    parser.add_argument("--kind", required=True, help="coding-lesson, project-lesson, writing-lesson, or design-lesson")
     parser.add_argument("--id", required=True, type=int)
     parser.add_argument("--expected-title", required=True)
     args = parser.parse_args()

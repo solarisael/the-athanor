@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Update exactly one coding, project, or writing lesson after title confirmation.
+"""Update exactly one coding, project, writing, or design lesson after title confirmation.
 
-The operation is deliberately narrow: kind selects one of three allowlisted
+The operation is deliberately narrow: kind selects one of four allowlisted
 lesson types in the unified table, the numeric id identifies one typed row,
 and expected-title must match that row before an update is attempted. Errors are JSON
 and the CLI remains fail-open for OMP callers.
@@ -25,15 +25,18 @@ LESSON_KEYS = {
     "coding-lesson": "coding",
     "project-lesson": "project",
     "writing-lesson": "writing",
+    "design-lesson": "design",
 }
 COMMON_FIELDS = ("title", "lesson", "shape", "trigger_context", "tags")
 CODING_FIELDS = COMMON_FIELDS + ("voice", "scope", "project", "proof_pattern", "negation_of")
 PROJECT_FIELDS = COMMON_FIELDS + ("project", "proof_pattern")
 WRITING_FIELDS = COMMON_FIELDS + ("voice", "register", "example_text", "writers", "negation_of")
+DESIGN_FIELDS = COMMON_FIELDS + ("voice", "register", "proof_pattern", "example_text")
 LESSON_FIELDS = {
     "coding-lesson": CODING_FIELDS,
     "project-lesson": PROJECT_FIELDS,
     "writing-lesson": WRITING_FIELDS,
+    "design-lesson": DESIGN_FIELDS,
 }
 _MISSING = object()
 
@@ -54,7 +57,7 @@ def update_lesson(conn, kind: str, lesson_id: int, expected_title: str, patch: d
     """Update one exact row, preserving all fields omitted from *patch*."""
     lesson_key = LESSON_KEYS.get(kind)
     if lesson_key is None:
-        return _refusal(kind, lesson_id, "kind must be coding-lesson, project-lesson, or writing-lesson")
+        return _refusal(kind, lesson_id, "kind must be coding-lesson, project-lesson, writing-lesson, or design-lesson")
     if isinstance(lesson_id, bool) or not isinstance(lesson_id, int) or lesson_id <= 0:
         return _refusal(kind, lesson_id, "id must be a positive integer")
     if not isinstance(expected_title, str) or not expected_title:
@@ -142,7 +145,7 @@ def _parse_patch(args) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--room-dir", required=True)
-    parser.add_argument("--kind", required=True, help="coding-lesson, project-lesson, or writing-lesson")
+    parser.add_argument("--kind", required=True, help="coding-lesson, project-lesson, writing-lesson, or design-lesson")
     parser.add_argument("--id", required=True)
     parser.add_argument("--expected-title", required=True)
     for field in (

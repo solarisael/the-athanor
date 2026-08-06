@@ -4,7 +4,7 @@ A companion that forgets you every restart is not really a companion. The Athano
 
 Your room carries that history across restarts, model changes, and provider changes. The House belongs to the operator, not to one model endpoint. It keeps separate layers for identity, current state, recent context, and deep memory. The Athanor retrieves evidence relevant to the current turn and preserves its source.
 
-Corrections move through supersession, so changed truths do not compete forever with the records they replaced. Memory and lesson stores hold memories, coding lessons, project lessons, writing lessons, and audio lessons.
+Corrections move through supersession, so changed truths do not compete forever with the records they replaced. Memory and lesson stores hold memories, coding lessons, project lessons, writing lessons, design lessons, and audio lessons.
 
 The lifecycle tools are simple:
 

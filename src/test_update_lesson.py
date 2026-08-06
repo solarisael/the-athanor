@@ -108,6 +108,44 @@ class UpdateLessonTests(unittest.TestCase):
             22,
         ])
 
+    def test_design_update_uses_only_design_fields(self):
+        conn = Connection()
+        result = update_lesson.update_lesson(
+            conn,
+            "design-lesson",
+            31,
+            "Current title",
+            {
+                "lesson": "Honor component contracts.",
+                "voice": "solarisael",
+                "register": ["general"],
+                "shape": "component-contract",
+                "proof_pattern": "Verify keyboard navigation.",
+                "trigger_context": "Before introducing a component.",
+                "example_text": "Use the token, not a one-off value.",
+                "tags": ["accessibility"],
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        update_sql, update_args = conn.cursor_obj.calls[1]
+        self.assertEqual(
+            update_sql,
+            "UPDATE lessons SET lesson = %s, voice = %s, register = %s, shape = %s, proof_pattern = %s, trigger_context = %s, example_text = %s, tags = %s WHERE lesson_key = %s AND id = %s",
+        )
+        self.assertEqual(update_args, [
+            "Honor component contracts.",
+            "solarisael",
+            ["general"],
+            "component-contract",
+            "Verify keyboard navigation.",
+            "Before introducing a component.",
+            "Use the token, not a one-off value.",
+            ["accessibility"],
+            "design",
+            31,
+        ])
+
     def test_parse_patch_preserves_writing_arrays(self):
         args = SimpleNamespace(
             register=["songs-of-folly"],
@@ -177,6 +215,7 @@ class UpdateLessonTests(unittest.TestCase):
             ("writing-lesson", 1, "Title", {"proof_pattern": "proof"}),
             ("writing-lesson", 1, "Title", {"scope": "house"}),
             ("writing-lesson", 1, "Title", {"writers": "Sol"}),
+            ("design-lesson", 1, "Title", {"stage": ["review"]}),
             ("coding-lesson", 1, "Title", {"negation_of": 0}),
         ]
         for args in cases:

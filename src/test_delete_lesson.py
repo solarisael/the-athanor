@@ -71,6 +71,24 @@ class DeleteLessonTests(unittest.TestCase):
             ),
         ])
 
+    def test_design_delete_remains_guarded_by_title(self):
+        conn = Connection(row=("Different title",))
+        result = delete_lesson.delete_lesson(
+            conn,
+            "design-lesson",
+            31,
+            "Current title",
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "title mismatch")
+        self.assertEqual(conn.cursor_obj.calls, [
+            (
+                "SELECT title FROM lessons WHERE lesson_key = %s AND id = %s FOR UPDATE",
+                ("design", 31),
+            ),
+        ])
+
     def test_title_mismatch_refuses_before_delete(self):
         conn = Connection(row=("Different title",))
         result = delete_lesson.delete_lesson(

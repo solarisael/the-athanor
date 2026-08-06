@@ -48,7 +48,7 @@ runs:
 - **automatic per-turn recall** — canon, lexical/content/semantic candidates,
   dates, threads, taxonomy, relationships, and cluster resonance arrive with
   their sources and selection reasons instead of becoming unsourced prompt soup;
-- **typed experience** — memories plus coding, project, writing, and audio
+- **typed experience** — memories plus coding, project, writing, design, and audio
   lessons, each with its own retrieval and authority contract;
 - **BM25F memory retrieval** — field-aware lexical scoring with corpus IDF,
   term-frequency saturation, per-field length normalization, and explicit
@@ -115,7 +115,7 @@ roadmap. “Research” means we are not lying to you about it being ready.
 | Hybrid lexical, content, structured, and semantic retrieval | — | Yes | Yes | Yes |
 | BM25F field-aware memory retrieval | — | Yes | Yes | Yes |
 | Local embeddings through a compatible endpoint | — | Yes | Yes | Yes |
-| Memories plus coding, project, writing, and audio lessons | — | Yes | Yes | Yes |
+| Memories plus coding, project, writing, design, and audio lessons | — | Yes | Yes | Yes |
 | Entity, date, thread, taxonomy, relationship, and cluster retrieval | — | Yes | Yes | Yes |
 | Explicit per-thread continuity with bounded neighbor recall | Limited | Yes | Yes | Yes |
 | Provenance, authority state, and selection reasons | — | Yes | Yes | Yes |

@@ -58,8 +58,8 @@ runs:
   thread, and lesson metadata; their terms feed a separately attributed,
   lower-priority BM25F lane;
 - **GIGA Striatum's first operational slice** — exact room, project, lesson type,
-  stage, and register rails precede Nemotron ranking; three to six coding or
-  project lessons remain warm with hysteresis while observed work state persists;
+  stage, and register rails precede Nemotron ranking; up to six coding or project
+  lessons remain warm with hysteresis while observed work state persists;
 - **House commons without room collapse** — durable work can belong to the
   House while private continuity remains room-owned;
 - **deterministic worker routing and familiar spellbooks** — bounded lanes,

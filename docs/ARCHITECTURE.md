@@ -113,11 +113,12 @@ AKASHA also supports optional GIGA cognitive workers. Hippocampus Stage 1 logs
 exact events before asynchronous local classification and stores generated
 candidates as non-authoritative pointers to source evidence. Review, Curios,
 promotion, health, and safe queue maintenance are explicit operations.
-Striatum's first operational slice keeps three to six coding or exact-project
+Striatum's first operational slice keeps up to six coding or exact-project
 lessons active across an observed project work state. Scope, project, type,
 declared stage, and register eligibility precede Nemotron similarity; hysteresis
-prevents small prose changes from churning the set, while phase and abrupt topic
-changes refresh it. Cingulate remains planned for divergence detection.
+prevents small prose changes from churning the set, while an explicitly declared
+phase replaces prior phases and abrupt topic changes refresh it. Cingulate remains
+planned for divergence detection.
 
 ## Retrieval flow
 

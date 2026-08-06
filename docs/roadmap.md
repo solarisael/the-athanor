@@ -172,21 +172,22 @@ authoritative invariants may become hard gates.
 
 The first Striatum slice should be boring and deterministic: derive state from
 trusted harness lifecycle metadata plus explicit project scope, query the typed
-lesson registry, keep three to six pressures warm across turns, inject them
-before inference, and log activation/outcome telemetry. A generative GIGA pass
-may later propose better triggers from repeated corrections, but the live path
-must stay fast, bounded, attributable, and reproducible.
+lesson registry, keep up to six pressures warm across turns, inject them before
+inference, and log activation/outcome telemetry. A generative GIGA pass may later
+propose better triggers from repeated corrections, but the live path must stay
+fast, bounded, attributable, and reproducible.
 
 **First operational slice shipped on 2026-08-05.** OMP now persists an observed
 room/project work state, prefilters authoritative coding and exact-project
 lessons by scope, type, declared stage, and register, then asks the resident
-Nemotron embedder to rank only that eligible set. Three to six lessons remain
-warm with hysteresis; explicit phase and abrupt topic changes refresh the set,
-while small wording changes do not. Hidden injection carries lesson identity,
-scope, project, similarity, trigger context, and proof pattern. Embedding failure
-falls back to the existing deterministic process trigger. Writing, audio, richer
-lifecycle signals, activation telemetry, and outcome learning remain later
-Striatum work rather than being claimed by this slice.
+Nemotron embedder to rank only that eligible set. Up to six lessons remain warm
+with hysteresis; an explicitly declared phase replaces prior phases, while
+prompts without a phase retain the current one and abrupt topic changes refresh
+the set. Hidden injection carries lesson identity, scope, project, similarity,
+trigger context, and proof pattern. Embedding failure falls back to the existing
+deterministic process trigger. Writing, audio, richer lifecycle signals,
+activation telemetry, and outcome learning remain later Striatum work rather
+than being claimed by this slice.
 
 Together these workers close three different loops:
 

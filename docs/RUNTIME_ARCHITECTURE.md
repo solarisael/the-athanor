@@ -209,6 +209,57 @@ finish: release | keep_warm | pin
 Model residency is not session continuity. Keeping weights loaded can reduce
 latency, but it does not authorize reuse of hidden conversational or KV state.
 
+### 4.5 Versioned delta synchronization
+
+Interactive clients synchronize versioned projections, not whole backend
+objects after every mutation.
+
+The Host sends one initial snapshot when a client subscribes or resynchronizes:
+
+```text
+projection_id
+schema_version
+snapshot_id
+version
+sequence
+state_hash
+state
+```
+
+After that snapshot, the Host sends only typed deltas:
+
+```text
+delta_id
+projection_id
+base_version
+next_version
+sequence
+source_event_ids
+mutations
+coalesce_key
+created_at
+```
+
+Mutation types are domain operations such as field update, item insert, item
+remove, item move, status transition, and bounded list append. Prefer typed
+operations over arbitrary string-path patches so schema validation and
+authorization remain explicit.
+
+The client applies a delta only when `base_version` equals its current
+projection version and the sequence is next. On a gap, duplicate conflict,
+unknown mutation, or hash mismatch, it requests replay from the last
+acknowledged sequence. If the bounded replay window no longer contains that
+sequence, the Host sends a fresh snapshot.
+
+The client acknowledges the applied projection version. The Host may coalesce
+superseded updates to the same field or disposable telemetry, but it cannot
+coalesce away an authoritative status transition, audit event, or user-visible
+intermediate state required by the contract.
+
+Snapshots are recovery and initial-load mechanisms, not the ordinary broadcast
+path. A tiny mutation must not trigger serialization, transmission, parsing,
+scene reconstruction, or redraw of the complete projection.
+
 ## 5. Thin Godot control surface
 
 The first UI slice exists to expose the real system while the runtime evolves.
@@ -239,6 +290,14 @@ The client must never:
 
 The UI should deepen after every backend phase. Finishing an ornamental client
 before the underlying contracts stabilize would freeze the wrong architecture.
+
+The Godot client maps each projection to a bounded view-model or scene subtree.
+Applied deltas emit signals only for affected nodes. Static panels do not poll
+through `_process()`. Custom drawing calls `queue_redraw()` only for the changed
+`CanvasItem`, and compatible mutations may be batched once at the next frame
+boundary. Protocol-level deltas reduce invalidation pressure; the client still
+measures renderer behavior rather than claiming that a delta guarantees zero
+GPU work.
 
 ## 6. GIGA integrity before distribution
 
@@ -414,6 +473,40 @@ The first bus slice is one durable cross-room mailbox. It must prove:
 Do not replace the current GIGA PostgreSQL queue merely to introduce a broker.
 Move a job family only when the pilot proves an actual delivery or wake-up need.
 
+### 7.5 Deduplication windows and the idempotency ledger
+
+JetStream stream configuration must set an explicit duplicate window. The NATS
+default is two minutes; The Athanor must not inherit that default accidentally.
+The configured window must cover the expected relay retry horizon and be
+recorded with the stream policy.
+
+Every publish uses the immutable outbox ID as `Nats-Msg-Id`. This suppresses
+duplicate writes only inside the configured broker window. Correctness outside
+that window comes from the PostgreSQL consumer idempotency ledger.
+
+Keep these identifiers distinct:
+
+```text
+event_id       immutable fact
+operation_id   one intended side effect
+delivery_id    one transport delivery attempt
+```
+
+Each consumer commits a uniqueness record keyed by consumer identity and
+`operation_id` in the same transaction as its result. The row records event,
+handler version, result digest, and completion state. An intentional replay or
+new handler migration creates a new operation linked to the original; it does
+not evade idempotency by changing the delivery ID.
+
+Idempotency records must survive at least the maximum stream retention,
+administrative replay horizon, and disaster-recovery replay horizon. A compacted
+record retains a tombstone key for any non-repeatable side effect.
+
+Durable consumers use explicit acknowledgement, bounded `AckWait`, `MaxDeliver`,
+and `Backoff`. Exhausted delivery becomes a durable dead-letter result. Double
+acknowledgements and publisher deduplication improve delivery guarantees but do
+not replace the database transaction.
+
 ## 8. Dynamic model and living-room embodiment
 
 After the delivery pilot works, invocation routing may choose model bodies and
@@ -500,6 +593,71 @@ resource bound.
 
 Prolog/Datalog answers **what follows from these accepted facts and rules, and
 why**. It does not decide whether the source facts deserve authority.
+
+### 9.1 Incremental code facts and precomputed derivations
+
+Git remains authoritative for code. The Athanor indexes changes as background
+events without placing source code or diffs in NATS payloads.
+
+For a committed change, an adapter records a PostgreSQL `code_change` event
+containing:
+
+```text
+repository_id
+ref and commit_id
+parent_commit_id
+changed paths
+before and after blob hashes
+change kind
+observer version
+```
+
+The same transaction writes an outbox row. NATS delivers only the event ID and
+routing metadata on a subject such as:
+
+```text
+athanor.v1.house.<house>.project.<project>.repo.<repo>.changes
+```
+
+The background indexer reloads the event and exact Git blobs, parses only added,
+removed, renamed, or modified units, and commits source-linked fact additions
+and retractions in PostgreSQL. Each successful batch advances a monotonic
+`fact_epoch` and records the indexed commit.
+
+Uncommitted work can use a separate volatile overlay keyed by repository,
+worktree snapshot hash, and session. The overlay may improve live assistance,
+but it never replaces the committed Git base or survives as code authority.
+
+The rules engine maintains a dependency graph from source facts to derived
+relations. Semi-naive incremental evaluation or equivalent incremental view
+maintenance recomputes only relations touched by the new fact delta. Common
+eligibility, permission, context, and obligation queries read precomputed
+materialized relations instead of rebuilding the whole fact base.
+
+A cache key includes every input that can change the result:
+
+```text
+House and project
+repository and ref
+committed fact_epoch
+worktree overlay epoch, when used
+authorization-scope digest
+ruleset and schema versions
+normalized query parameters
+```
+
+Do not cache failures. Do not confuse a cached `null` result with a cache miss.
+Authorization-shaped results cannot share entries across authorization digests.
+
+Out-of-order commits, missing parents, parser-version changes, ruleset changes,
+or inconsistent fact counts invalidate the affected cache. The indexer replays
+from the last verified epoch or rebuilds the exact repository snapshot. Query
+responses expose `indexed_commit`, `fact_epoch`, and overlay epoch so stale
+precomputation is visible rather than presented as current.
+
+The mailbox remains the first JetStream pilot. Code indexing is the first
+background-event consumer only after that pilot proves the transport contract.
+
 
 ## 10. Cingulate enforcement and outcome closure
 
@@ -592,18 +750,66 @@ The corresponding production transition must execute the same shared cases.
 This prevents a formal proof from blessing a detached model while the live
 Striatum implementation behaves differently.
 
+### 11.3 Resource-bounded proof execution
+
+Lean runs through a dedicated execution wrapper, never as an unrestricted tool
+inside the Host or model process.
+
+Each proof profile declares numeric limits:
+
+```text
+wall_time_ms
+cpu_time_ms
+memory_bytes
+max_processes
+max_threads
+max_open_files
+max_input_bytes
+max_output_bytes
+max_artifact_bytes
+```
+
+The supported release profile chooses aggressive defaults from the smallest
+measured limits that pass the approved proof corpus. A lesson or generated proof
+cannot widen its own limits.
+
+The wrapper uses an unprivileged process, an allowlisted Lean binary and module
+digest, read-only inputs, an isolated temporary output directory, no network,
+and no inherited credentials. Timeout or quota exhaustion kills the complete
+process tree and removes temporary plaintext artifacts.
+
+Results distinguish:
+
+```text
+proved
+proof_failed
+timeout
+cpu_exhausted
+memory_exhausted
+output_exhausted
+checker_error
+```
+
+Only `proved` can satisfy a formal gate. Resource exhaustion is inconclusive,
+not a counterexample and never a pass.
+
+Proof-receipt reuse is allowed only when theorem, module digest, specification,
+implementation binding, evidence inputs, checker version, and resource-profile
+digest all match. The wrapper records wall time, CPU time, peak memory, exit
+status, and bounded output digest for every attempt.
+
 ## 12. Dependency-ordered delivery plan
 
 | Phase | Deliverable | Exit gate |
 |---:|---|---|
-| 0 | Host, invocation, event, outbox, refinement, and proof contracts | Versioned schemas reviewed; current and planned claims separated |
-| 1 | Thin Godot UI | One room can chat, inspect recall/health/review, and trace one command through the Host without backend bypass |
+| 0 | Host, invocation, delta-sync, event, outbox, idempotency, refinement, indexing, and proof-wrapper contracts | Versioned schemas reviewed; current and planned claims separated |
+| 1 | Thin Godot UI | Snapshot, ordered delta, acknowledgement, replay, and resync work; one fine-grained mutation updates only its bounded projection subtree |
 | 2 | GIGA integrity and Cingulate skeleton | Fresh inference proven; deterministic overlapping evidence and separate expected/observed outcomes visible |
-| 3 | PostgreSQL outbox plus one JetStream mailbox | Restart, duplicate, permission, privacy, expiry, dead-letter, wake, and UI trace gates pass |
+| 3 | PostgreSQL outbox plus one JetStream mailbox | Explicit duplicate window, durable idempotency, restart, permission, privacy, expiry, dead-letter, wake, and UI trace gates pass |
 | 4 | Dynamic models and headless embodiment | Local/provider selection and cold/familiar/reflection/dialogue targets remain identity-safe and observable |
-| 5 | Bounded Prolog/Datalog pilot | One real eligibility or context query returns deterministic derivations under explicit bounds |
+| 5 | Incremental Prolog/Datalog pilot | Code-change events update source-linked facts and precomputed relations incrementally; cache isolation, invalidation, lag visibility, derivations, and latency gates pass |
 | 6 | Complete Cingulate enforcement | Nudges, warnings, gates, overrides, proof receipts, and observed outcomes close correctly |
-| 7 | First Lean-backed lesson | One approved formal obligation is bound to production behavior and verified end to end |
+| 7 | First Lean-backed lesson | One production-bound obligation runs inside the quota wrapper and records a valid proof receipt plus timeout and exhaustion failures |
 
 The UI evolves after every phase. Phases 5 through 7 are not automatically 1.0
 prerequisites; release gates depend on supported installation and stable public
@@ -615,12 +821,12 @@ contracts, not on pretending every research layer must ship together.
 |---|---|
 | Logical Host, invocation, event, refinement, and proof contracts | `the-athanor` core and protocol crates |
 | OMP lifecycle, tool, task, and live-session integration | `solarisael-house-omp` |
-| PostgreSQL authority, outbox rows, GIGA jobs, outcomes, proof receipts, and health | `solarisael-house-substrate` |
+| PostgreSQL authority, outbox rows, code-change facts, materialized derivations, GIGA jobs, outcomes, proof receipts, and health | `solarisael-house-substrate` |
 | Godot rendering and interaction | A separate client package over the Host contract; no core authority |
 | NATS deployment and relay | Deployment/runtime integration; behavior remains defined by core contracts |
 | Model-provider implementations | Replaceable adapter/provider modules |
-| Prolog/Datalog rules | Versioned policy package over PostgreSQL fact projections |
-| Lean modules and evidence adapters | Versioned formal package plus production bindings |
+| Prolog/Datalog rules, dependency graph, and incremental fact-cache contract | Versioned policy package over PostgreSQL fact projections |
+| Lean modules, evidence adapters, and quota wrapper | Versioned formal package plus production bindings and sandboxed execution |
 
 A repository move must not move authority. Contracts remain versioned across
 repository boundaries.
@@ -637,6 +843,10 @@ This architecture does not:
 - equate a familiar, worker, room, model, or provider;
 - require distributed infrastructure for a single local room;
 - claim exactly-once delivery without idempotent database transitions;
+- treat a JetStream duplicate window as a substitute for durable idempotency;
+- broadcast complete UI projections for ordinary fine-grained mutations;
+- cache code-derived answers without commit, epoch, ruleset, and authorization identity;
+- run generated Lean input without explicit CPU, memory, output, process, and time bounds;
 - allow generated refinement to self-promote.
 
 ## 15. Related documents

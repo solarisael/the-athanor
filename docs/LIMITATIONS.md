@@ -83,10 +83,12 @@ The Athanor keeps continuity provider-portable, but it cannot remove provider-si
 
 ## Runtime-evolution boundary
 
-Version 0.10.1 does not yet ship the Godot client, Athanor Host WebSocket,
-PostgreSQL-outbox/NATS delivery, invocation-time model routing, headless room
-reflection/dialogue targets, Prolog/Datalog derivation, complete Cingulate
-enforcement, or Lean-backed lesson obligations.
+Version 0.10.1 does not yet ship the Godot client, Athanor Host WebSocket or
+delta synchronization, PostgreSQL-outbox/NATS delivery or idempotency ledger,
+background code-change indexing, incremental Prolog/Datalog facts and
+precomputed relations, invocation-time model routing, headless room
+reflection/dialogue targets, complete Cingulate enforcement, or the
+resource-bounded Lean lesson checker.
 
 These capabilities have an accepted dependency order and technical contract in
 [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md). Documentation labels

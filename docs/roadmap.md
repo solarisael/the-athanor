@@ -252,13 +252,23 @@ Specify and version these surfaces before implementation:
 - refinement transactions with baseline, expected outcome, observed outcome,
   and proof receipt;
 - optional formal-lesson references and production bindings.
+- initial snapshot, typed delta, acknowledgement, replay, and resynchronization
+  contracts for client projections;
+- committed-code and volatile-worktree change events, fact epochs, dependency
+  invalidation, and precomputed-query cache identity;
+- explicit JetStream duplicate-window policy plus a PostgreSQL consumer
+  idempotency ledger;
+- a Lean execution profile with CPU, memory, process, output, artifact, and wall
+  time limits.
 
 The Godot client must talk only to the Host over WebSocket. It must not connect
 directly to PostgreSQL, NATS, Ollama, a hosted provider, or OMP internals.
 
 **Exit gate:** versioned schemas separate current from planned capability,
-identity never derives from a working directory, and one synthetic command can
-be traced from request through a typed result without backend bypass.
+identity never derives from a working directory, one synthetic command can be
+traced through a typed result, one projection can recover from a delta gap, and
+no correctness rule depends only on a broker duplicate window or in-process
+cache.
 
 #### Phase 1 — build the thin Godot UI
 
@@ -273,12 +283,20 @@ Expose the system that already exists:
 - event, correlation, retry, and dead-letter inspection;
 - a terminal escape hatch.
 
+After the initial snapshot, the Host sends only versioned typed mutations for
+the affected projection. The client acknowledges applied versions and requests
+bounded replay or a fresh snapshot after a gap. Godot maps deltas to bounded
+view-models or scene subtrees, emits signals only for affected nodes, and queues
+redraw only where changed instead of rebuilding the complete scene.
+
 Do not build the full avatar, animation, voice, room-package, or marketplace
 surface yet. Evolve the UI after every backend phase instead of freezing the
 wrong runtime underneath a finished shell.
 
 **Exit gate:** one room can chat, inspect recall and review state, observe
-health, and trace one command end to end through the Host.
+health, and trace one command end to end through the Host. A fine-grained
+mutation updates only its projection subtree; duplicate, missing, and
+out-of-order deltas recover without accepting stale state.
 
 #### Phase 2 — strengthen GIGA integrity before distribution
 
@@ -327,12 +345,22 @@ relay publishes an opaque record ID with stable deduplication metadata. The
 consumer reloads and authorizes the PostgreSQL record, commits an idempotent
 result, then acknowledges delivery. Raw private prose does not enter NATS.
 
+Set the JetStream duplicate window explicitly rather than inheriting its default.
+Publish with the immutable outbox ID as `Nats-Msg-Id`, but preserve end-to-end
+correctness in a PostgreSQL idempotency ledger keyed by consumer and operation.
+Keep event, operation, and delivery IDs distinct. Idempotency tombstones survive
+the maximum retention, administrative replay, and disaster-recovery horizons.
+Use explicit acknowledgement with bounded `AckWait`, `MaxDeliver`, and
+`Backoff`.
+
 The first slice is one durable cross-room mailbox, not a rewrite of the working
 GIGA PostgreSQL queue.
 
-**Exit gate:** prove restart survival, duplicate safety, room and subject
+**Exit gate:** prove restart survival, the configured duplicate window,
+duplicate delivery safety both inside and outside that window, room and subject
 permissions, payload privacy, expiry, bounded retries, dead-letter behavior,
-dormant-room wake, PostgreSQL recovery, and UI visibility through acknowledgement.
+dormant-room wake, PostgreSQL recovery, idempotency-ledger retention, and UI
+visibility through acknowledgement.
 
 #### Phase 4 — route dynamic models into explicit execution targets
 
@@ -366,8 +394,29 @@ Start with one real bounded problem: lesson eligibility or context selection.
 Avoid unrestricted recursion, dynamic assertion as authority, cut-dependent
 semantics, and unbounded search.
 
+After the mailbox proves NATS, record committed code changes as PostgreSQL
+events containing repository/ref/commit identity, parent commit, changed paths,
+and before/after blob hashes. Publish only the event ID. A background indexer
+reloads exact Git blobs, applies source-linked fact additions and retractions,
+and advances a monotonic `fact_epoch`. Uncommitted work uses a separate volatile
+overlay keyed by worktree snapshot and session.
+
+Maintain dependencies from source facts to derived relations and use semi-naive
+incremental evaluation or equivalent incremental view maintenance. Precompute
+common eligibility, permission, context, and obligation relations. Cache
+identity includes House, project, repository, ref, fact epoch, optional
+worktree-overlay epoch, authorization digest, ruleset/schema versions, and
+normalized query inputs. Never cache failures.
+
+Responses expose indexed commit and epochs. Missing parents, parser/ruleset
+changes, out-of-order events, or inconsistent fact counts invalidate the
+affected relations and trigger verified replay or exact-snapshot rebuild.
+
 **Exit gate:** the pilot is deterministic, resource-bounded, explainable, and
-matches the existing trusted behavior on a shared case corpus.
+matches the existing trusted behavior on a shared case corpus. Incremental
+results match clean rebuilds, authorization scopes never share cached answers,
+deletions and renames retract stale facts, index lag is visible, and measured
+warm-query latency improves without hiding stale epochs.
 
 #### Phase 6 — complete Cingulate enforcement
 
@@ -398,9 +447,19 @@ input/output checker, or verified extraction.
 The first candidate is Striatum stage replacement: a non-empty declared stage
 replaces the prior stage set; an empty declaration retains it.
 
+Run Lean through a dedicated unprivileged wrapper with an allowlisted checker
+digest, read-only inputs, isolated temporary output, no network or inherited
+credentials, and numeric limits for wall time, CPU time, memory, processes,
+threads, open files, input, output, and artifacts. Kill the full process tree on
+timeout or exhaustion. Resource failure is inconclusive and cannot satisfy a
+gate. Reuse a proof receipt only when proof inputs, implementation binding,
+checker, and resource-profile digests match exactly.
+
 **Exit gate:** one approved lesson obligation is checked against actual
-production behavior end to end, with specification, implementation, checker,
-inputs, and proof artifact recorded.
+production behavior end to end inside the quota wrapper. The receipt records
+specification, implementation, checker, inputs, resource profile, wall/CPU/peak
+memory, and artifact digest; synthetic timeout, memory, CPU, and output
+exhaustion cases terminate safely and never pass.
 
 Phases 5 through 7 are dependency-ordered research and reliability work, not
 automatic 1.0 blockers. The 1.0 gate remains a supported UI, installation,

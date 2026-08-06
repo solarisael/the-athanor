@@ -62,12 +62,12 @@ The public evidence document separates measured results from planned claims.
 | GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current |
 | Curios | Keep selected hunches until later context makes them meaningful | Current |
 | GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Current — coding/project slice |
-| Athanor Host and thin Godot UI | Give people one visible control surface without bypassing the real runtime | Specified |
+| Athanor Host and thin Godot UI | Give people one visible control surface whose initial snapshot becomes fine-grained versioned deltas | Specified |
 | GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Specified |
-| PostgreSQL outbox and NATS delivery | Deliver letters, events, and wake-ups durably without making the broker a second memory store | Specified |
+| PostgreSQL outbox and NATS delivery | Deliver opaque event IDs with explicit deduplication windows and durable database idempotency | Specified |
 | Dynamic model and room execution | Choose local or hosted model bodies independently from cold workers, familiars, reflections, and live room dialogue | Specified |
-| Prolog/Datalog derivations | Explain which lessons, context, permissions, or obligations follow from accepted facts and rules | Planned |
-| Lean-backed lesson obligations | Let selected stable lessons carry machine-checked invariants bound to production behavior | Planned |
+| Incremental Prolog/Datalog derivations | Index code changes in the background, update only affected facts, and answer common queries from precomputed authorized relations | Planned |
+| Lean-backed lesson obligations | Check selected production-bound invariants inside an aggressively resource-limited wrapper | Planned |
 | GIGA Cingulate | Detect workflow divergence and missing proof before a regression is accepted | Planned |
 | BM25F lexical retrieval | Rank structured memory fields with a principled field-aware sparse baseline | Current |
 | Nemotron-controlled lexical bridge | Expand through at most three authoritative stored concepts into a lower-priority attributed BM25F lane | Current |
@@ -92,6 +92,12 @@ providers, or harness internals. It sends canonical commands and renders
 canonical events. The terminal remains available for operations the client does
 not yet understand.
 
+After one initial snapshot, ordinary updates are typed deltas with base and next
+versions. Missing or out-of-order mutations trigger replay or resynchronization.
+Godot updates only the affected view-model or scene subtree and queues redraw
+only where state changed; it does not rebuild the complete renderer-facing
+projection for a tiny mutation.
+
 Later visual work can add avatars, animation, voice, and room packages. Those
 surfaces grow over a proven Host contract instead of freezing an attractive but
 incorrect runtime.
@@ -103,6 +109,11 @@ and outcomes. A transactional outbox can publish opaque record IDs to NATS
 JetStream so rooms and workers receive durable delivery, retries, and wake-up
 signals. Private prose stays in PostgreSQL and consumers acknowledge only after
 committing an idempotent result.
+
+JetStream's duplicate window is configured explicitly. The immutable outbox ID
+deduplicates publication within that window, while a PostgreSQL ledger prevents
+the same consumer operation from being applied again during later replay.
+Broker deduplication is an optimization, not the correctness boundary.
 
 Model body, spirit identity, execution target, and session lifetime remain
 separate. One job may choose an approved local model, hosted provider, or
@@ -124,6 +135,13 @@ can answer questions such as “which lessons apply?” or “which room may rec
 this?” It receives authorized facts from PostgreSQL and returns derivation
 traces. It never becomes a second mutable truth store.
 
+Committed Git changes become PostgreSQL code-change events whose opaque IDs move
+through NATS. A background indexer parses changed blobs, advances a fact epoch,
+and incrementally updates source-linked facts and precomputed relations.
+Uncommitted work uses a separate volatile overlay. Cache identity includes the
+repository/ref, epochs, ruleset, query, and authorization scope so one caller
+cannot receive another caller's answer.
+
 Cingulate consumes those obligations and distinguishes preferences, regression
 warnings, and authoritative hard gates. It records the expected evidence,
 observed action, resolution, and actual outcome.
@@ -133,6 +151,10 @@ evidence adapter. The proof must be bound to actual Rust, TypeScript, SQL, or
 adapter behavior through shared cases or a real input/output checker. An AI
 saying “proved” is not a proof artifact, and human prose or creative taste is
 not forced into theorem form.
+
+Lean runs without network or inherited credentials under hard wall-time, CPU,
+memory, process, thread, file, input, output, and artifact limits. Timeout or
+quota exhaustion is inconclusive and never satisfies a proof gate.
 
 ## Curios: a cabinet for ideas before their season
 

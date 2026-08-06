@@ -74,12 +74,36 @@ from PostgreSQL, commit an idempotent result, and only then acknowledge delivery
 NATS accounts, subjects, and consumer permissions must prevent broad
 cross-House or cross-room subscription. Filtering after receipt is too late.
 
+JetStream duplicate tracking is a bounded performance aid. Streams declare the
+window explicitly, while PostgreSQL keeps consumer-operation idempotency through
+the maximum retention and replay horizon. A replay outside the broker window
+must still be harmless. Event, operation, and delivery identities remain
+distinct.
+
 Dynamic execution binds model selector, execution target, session lifecycle,
 room, spirit, operator, and allowed side effects independently. A model,
 process, working directory, or target label cannot grant room authority.
 Headless room work disables interactive transports and sidecars unless policy
 explicitly enables them. `room_reflection` must not silently consume a live
 dialogue tail; `room_dialogue` must visibly address an intentional live session.
+
+The Host sends Godot versioned typed deltas with bounded mutation counts and
+payload sizes. Clients reject gaps, out-of-order versions, unknown operations,
+and unauthorized projection fields, then request replay or a fresh snapshot.
+Do not expose arbitrary database or object-property paths through a generic
+patch operation.
+
+Code indexing treats Git as authority. NATS receives only a PostgreSQL
+`code_change` ID, never source or diff text. Precomputed facts and cache entries
+remain partitioned by House, project, repository/ref, fact epoch, worktree
+overlay, ruleset/schema, and authorization digest. Authorization filtering
+happens before fact projection and cache lookup.
+
+Lean proof checking runs as an unprivileged, networkless child with allowlisted
+binary/module digests, read-only input, isolated temporary output, no inherited
+credentials, and hard CPU, wall-time, memory, process, thread, file, input,
+output, and artifact limits. Timeout or exhaustion kills the process tree and
+cannot satisfy a proof gate.
 
 Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the full planned
 contract.

@@ -15,6 +15,7 @@ Start with the root [`README.md`](../README.md) for the hook, the status line, a
 ## Technical documents
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — components, contracts, data flow, authority, and repository ownership
+- [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) — accepted Host, Godot UI, GIGA integrity, NATS delivery, dynamic embodiment, derivation, Cingulate, and Lean target
 - [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — The Athanor product, House domain, profiles, capabilities, governance, privacy, and naming cutover
 - [`RETRIEVAL.md`](./RETRIEVAL.md) — recall lanes, automatic retrieval, authority, corrections, and archival
 - [`LESSONS.md`](./LESSONS.md) — typed lesson stores, fields, scopes, imports, updates, and deletion

@@ -429,6 +429,32 @@ Every unpromoted candidate has `authority: pointer-only`.
 
 A candidate cannot override canon, current state, project authority, or exact source documents. Promotion creates a separate durable record with its own authority contract.
 
+### 12.6 Future refinement transaction extension
+
+The Stage 1 candidate schema remains the contract for annotation pointers.
+Later GIGA integrity work may add a separate versioned refinement transaction
+for governed artifacts:
+
+```text
+artifact_kind
+operation: create | update | supersede | retire | rollback
+target_id
+baseline_version
+trigger_refs
+evidence_refs
+expected_outcome
+proof_requirement
+review_state
+observed_outcome
+proof_receipt
+```
+
+This extension does not weaken candidate authority. GIGA proposes the
+transaction; the relevant authority approves the named operation against the
+named baseline; Cingulate records the observed result. `expected_outcome` is a
+prediction made before execution and must never be copied into
+`observed_outcome`.
+
 ## 13. Candidate kinds
 
 ### 13.1 Memory
@@ -683,6 +709,39 @@ On the locked candidate fixture, the profile must reach at least 0.70 precision.
 
 Exact source-span accuracy must reach 0.95. Failed thresholds block the supported GIGA profile.
 
+### 18.1 Inference context and residency
+
+The runtime must keep three concerns separate:
+
+- exact durable evidence selected for the job;
+- tokens belonging to one classifier invocation;
+- model weights retained in memory for latency.
+
+Each cold classifier job starts with fresh inference state and receives only its
+explicit evidence snapshot. A gate and extraction pass may use separate fresh
+requests. Loaded model residency, including provider `keep_alive` behavior,
+must not carry hidden conversational or KV state into the next job.
+
+Future evidence construction should use completed-interaction anchors and
+deterministic bounded overlapping windows from the trusted ledger. Overlap is
+resolved through source IDs and hashes. The worker records the evidence-builder
+version, exact ordered sources, authority filters, reviewed precedents, and
+prompt/model digest for every run.
+
+### 18.2 Dynamic invocation routing
+
+The current supported profile remains local by default. Future invocation-time
+routing may choose `local`, `provider`, or operator-approved `auto` through the
+shared `ModelSelector`.
+
+Model selection remains independent from execution target and identity. A GIGA
+job can run as a cold worker, familiar, room reflection, or intentional room
+dialogue only through the explicit policy for that target. Choosing a model or
+inheriting a room directory cannot grant room authority.
+
+Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the accepted
+routing and headless-room contract.
+
 ## 19. Queue and scheduling contract
 
 The queue implementation remains private to the core and substrate.
@@ -704,6 +763,13 @@ The behavior must satisfy these rules:
 The scheduler can batch adjacent turns. It must keep stable source references after batching.
 
 `giga_process` dispatch carries only `event_id`. The Rust worker reloads the ordered source references from PostgreSQL and the exact turn bodies from the trusted room ledger, then verifies room, session, role, hash, count, and byte bounds before classification. Callers must not duplicate source text in the process request.
+
+The authoritative event, queue state, exact source references, candidate links,
+and processing result remain in PostgreSQL. A future NATS JetStream integration
+may deliver an opaque event ID and wake a worker through a transactional outbox.
+The worker still reloads PostgreSQL before processing and acknowledges delivery
+only after committing an idempotent result. NATS must not carry copied private
+turns or become a second candidate store.
 
 ## 20. Configuration contract
 
@@ -1029,7 +1095,8 @@ These questions were open at draft time. Stage 1 implementation resolved them as
 ## 29. Related documents
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) defines the core and adapter boundary.
+- [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) defines GIGA integrity, dynamic execution, delivery, Cingulate, and formal-proof evolution.
 - [`RETRIEVAL.md`](./RETRIEVAL.md) defines retrieval and authority behavior.
 - [`LESSONS.md`](./LESSONS.md) defines typed lesson contracts.
 - [`SECURITY.md`](./SECURITY.md) defines privacy and destructive-operation rules.
-- [`roadmap.md`](./roadmap.md) schedules GIGA before 1.0.
+- [`roadmap.md`](./roadmap.md) defines the dependency and release sequence.

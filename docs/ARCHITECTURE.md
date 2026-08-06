@@ -38,6 +38,33 @@ House core
    └──────── AKASHA ──────── PostgreSQL + pgvector + embeddings
 ```
 
+### Planned Host and delivery plane
+
+The next runtime slice adds a versioned Athanor Host between interactive clients
+and the current adapters. The thin Godot client will use only Host WebSocket
+commands and events. It will not connect directly to PostgreSQL, NATS, model
+endpoints, or harness internals.
+
+```text
+Godot client ───────┐
+                    ├── Athanor Host ── core contracts ── Vault / AKASHA
+harness adapters ───┘                         │
+                                             ├── invocation router
+                                             └── PostgreSQL outbox
+                                                        │
+                                                        └── NATS delivery
+```
+
+PostgreSQL remains authoritative. The outbox records durable publication intent
+in the same transaction as the domain event. NATS JetStream may deliver opaque
+record IDs and wake consumers, but it never becomes memory, review state, or a
+second conversation ledger.
+
+The complete accepted target, including dynamic model and room execution,
+Prolog/Datalog derivations, Cingulate enforcement, and optional Lean-backed
+lessons, lives in
+[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md).
+
 ## Repository ownership
 
 The Athanor uses separate repositories so the core does not depend on one harness or one database deployment.
@@ -48,6 +75,7 @@ The Athanor uses separate repositories so the core does not depend on one harnes
 | [`solarisael-house-omp`](https://github.com/solarisael/solarisael-house-omp) | OMP extension entrypoint, lifecycle hooks, room integration, tool schemas, static verifier, starter room, portable bundle, and adapter tests |
 | [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) | PostgreSQL schema and migrations, pgvector, embeddings, memory and lesson writes, retrieval sources, health, lifecycle smoke, and backup/restore |
 | `solarisael-house-opencode` | OpenCode adapter for the same core contracts |
+| Future Godot client package | Presentation and interaction over the versioned Host contract; no room, memory, or delivery authority |
 
 The public API boundaries are `coreApi=1`, `adapterApi=1`, and `substrateApi=1`.
 
@@ -120,6 +148,13 @@ prevents small prose changes from churning the set, while an explicitly declared
 phase replaces prior phases and abrupt topic changes refresh it. Cingulate remains
 planned for divergence detection.
 
+The next GIGA integrity pass keeps three contexts distinct: durable evidence,
+one-invocation model tokens, and loaded model residency. Every cold job starts
+with fresh inference state over an explicit source snapshot. Completed
+interaction anchors, deterministic overlapping evidence, reviewed precedents,
+separate expected and observed outcomes, and proof receipts must stabilize
+before GIGA work is distributed across models or rooms.
+
 ## Retrieval flow
 
 Automatic per-turn retrieval merges bounded candidate streams:
@@ -184,6 +219,12 @@ Current lanes are:
 
 Dispatch takes exactly one selector — a lane or a familiar — through one unified contract; the familiar-only entry point is an alias over the same path. Accepted receipts expose `spawnPacket.args` shaped directly for the harness task call, and harness adapters spawn explicitly with that packet. Runtime models come from the agent definitions themselves; per-dispatch model override is unsupported. This keeps routing policy testable and the core independent from one harness runtime.
 
+That paragraph describes the current dispatch contract. The planned invocation
+router adds a separate `ModelSelector`, execution target, and session lifecycle
+above adapter-specific spawning. Model choice will remain independent from
+identity: changing provider or model cannot rename a spirit, grant room
+authority, or silently reuse conversational state.
+
 ### Familiar spellbooks
 
 Familiars are room-owned identities bound to existing worker lanes; they do not add a second routing system. A room stores the canonical registry at `familiars/spellbook.json`. Adapters also accept `familiars/litters.json` as a filename alias.
@@ -192,6 +233,15 @@ The spellbook keeps generic code vocabulary (`collective: "familiars"`) while ex
 
 ## Extension direction
 
-New harnesses implement adapters over the same core contracts. Organizational deployments add access control, source connectors, and import profiles above the substrate. GUIs control harnesses through canonical commands and structured events rather than replacing the runtime.
+New harnesses implement adapters over the same core contracts. Organizational
+deployments add access control, source connectors, and import profiles above the
+substrate.
 
-Release sequencing and future product work live in [`roadmap.md`](./roadmap.md).
+The next extension order is contractual: thin Godot UI over the Host; GIGA
+integrity; PostgreSQL outbox plus one JetStream mailbox; dynamic local/provider
+models and explicit cold/familiar/reflection/dialogue targets; bounded
+Prolog/Datalog derivation; complete Cingulate enforcement; then selected
+Lean-backed lesson obligations.
+
+Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for that target and
+[`roadmap.md`](./roadmap.md) for its release gates.

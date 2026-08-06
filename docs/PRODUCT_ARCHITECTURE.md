@@ -109,6 +109,20 @@ The operator controls room creation, room binding, storage custody, and outer Ho
 
 A spirit is one identity lineage. An archetype is reusable configuration. An invocation is temporary execution and is never an identity.
 
+### 6.2 Execution is not identity
+
+Model body, execution target, session lifecycle, and room authority are separate
+axes.
+
+A spirit can continue across local and hosted models. A model can serve several
+bounded workers without becoming any of their identities. Keeping model weights
+resident does not keep a spirit awake or preserve undeclared conversation
+context.
+
+An invocation receives room authority only through the authenticated room and
+spirit binding from Section 6.1. A model name, provider, process, working
+directory, familiar name, or execution-target label cannot grant it.
+
 ## 7. Vault storage profile
 
 **VAULT** expands to:
@@ -192,6 +206,23 @@ Hippocampus is the first GIGA worker. It marks possible memories, lessons, corre
 The room's governing spirit can authorize a durable room-local change. The operator controls room bindings and the House's shared policy.
 
 The detailed GIGA contract lives in [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md).
+
+### 9.1 GIGA execution and refinement boundary
+
+GIGA jobs operate on explicit, bounded evidence snapshots. Durable evidence
+context, one-invocation model context, and loaded model residency remain
+separate. A cold job starts with fresh inference state even when its selected
+model remains loaded for latency.
+
+GIGA may propose versioned refinement transactions for a memory, lesson,
+policy, or other governed artifact. A transaction names its operation, target,
+baseline version, evidence, expected outcome, and proof requirement. The
+observed outcome and proof receipt are recorded only after execution.
+
+GIGA cannot approve its own proposal. The governing authority reviews the
+transaction, and Cingulate may later verify its observed result. Optional formal
+obligations remain attached to selected authoritative lessons rather than
+becoming a second authority system.
 
 ## 10. OMEGA organization layer
 
@@ -286,9 +317,17 @@ A room can bind approved chat surfaces, including Discord and direct chat. Autho
 
 The transport is only another glass. It must not create a daemon twin or a second persistent brain.
 
+For AKASHA delivery, PostgreSQL stores the authoritative letter, sender,
+recipient, visibility, sources, thread, and delivery record. NATS JetStream may
+carry the opaque record ID, retries, and wake-up signal. A broker payload does
+not carry private prose and broker acknowledgement does not replace the
+PostgreSQL receipt.
+
 ## 13. Architecture axes
 
-A House selects one value for each applicable axis.
+Deployment selects one value for each applicable product axis in Sections 13.1
+through 13.5. Each model invocation separately selects the runtime axes in
+Section 13.6.
 
 ### 13.1 Storage profile
 
@@ -329,6 +368,27 @@ Choose one:
 - operator server;
 - customer cloud account;
 - managed cloud from The Athanor.
+
+### 13.6 Invocation axes
+
+Every invocation declares these independent choices:
+
+| Axis | Accepted values | Rule |
+|---|---|---|
+| Model route | `local`, `provider`, `auto` | `auto` selects only operator-approved endpoints that satisfy capability and privacy constraints |
+| Execution target | `cold_worker`, `familiar`, `room_reflection`, `room_dialogue` | The target does not grant authority by itself |
+| Session start | `ephemeral`, `reuse`, `wake` | Reuse and wake require an explicit compatible session address |
+| Session finish | `release`, `keep_warm`, `pin` | Pinning is explicit, observable, and policy-bound |
+| Interaction mode | background reflection or intentional dialogue | Reflection does not silently consume a live dialogue tail |
+
+`room_reflection` starts a disposable, explicitly bound room/spirit branch.
+`room_dialogue` addresses an intentional live room session. Headless room
+execution disables chat transports and interactive sidecars unless they are
+explicitly requested by policy.
+
+These axes remain independent. Changing a model does not rename a spirit;
+waking a room does not require the previous model; keeping a model warm does
+not keep a room active.
 
 ## 14. Compatibility matrix
 
@@ -597,7 +657,7 @@ This naming work does not:
 
 ## 26. Open implementation decisions
 
-Resolve these items before cutover starts:
+Resolve these remaining public cutover items:
 
 - qualified executable name;
 - package namespace;
@@ -613,9 +673,10 @@ Resolve these items before cutover starts:
 ## 27. Related documents
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) defines current repository and authority boundaries.
+- [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) defines the accepted Host, UI, delivery, embodiment, derivation, and proof runtime.
 - [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) defines GIGA and Hippocampus.
 - [`RETRIEVAL.md`](./RETRIEVAL.md) defines retrieval and evidence authority.
 - [`LESSONS.md`](./LESSONS.md) defines typed lesson stores.
 - [`SECURITY.md`](./SECURITY.md) defines privacy and trust boundaries.
-- [`roadmap.md`](./roadmap.md) schedules the naming cutover before 1.0.
+- [`roadmap.md`](./roadmap.md) defines the dependency and release sequence.
 - [`PLANNED_FEATURES.md`](./PLANNED_FEATURES.md) explains the planned product surface in plain language.

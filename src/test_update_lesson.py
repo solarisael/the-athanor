@@ -1,6 +1,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 spec = importlib.util.spec_from_file_location("update_lesson", Path(__file__).with_name("update-lesson.py"))
@@ -73,6 +74,54 @@ class UpdateLessonTests(unittest.TestCase):
             "UPDATE lessons SET lesson = %s, tags = %s, negation_of = %s WHERE lesson_key = %s AND id = %s",
         )
         self.assertEqual(update_args, ["Revised lesson", ["tooling"], None, "coding", 137])
+    def test_writing_update_uses_only_writing_fields(self):
+        conn = Connection()
+        result = update_lesson.update_lesson(
+            conn,
+            "writing-lesson",
+            22,
+            "Current title",
+            {
+                "lesson": "Revised prose rule",
+                "voice": "sol-craft",
+                "register": ["songs-of-folly", "prose"],
+                "example_text": "The bullet left only red flowers.",
+                "writers": ["Sol"],
+                "negation_of": 6,
+            },
+        )
+
+        self.assertTrue(result["ok"])
+        update_sql, update_args = conn.cursor_obj.calls[1]
+        self.assertEqual(
+            update_sql,
+            "UPDATE lessons SET lesson = %s, voice = %s, register = %s, example_text = %s, writers = %s, negation_of = %s WHERE lesson_key = %s AND id = %s",
+        )
+        self.assertEqual(update_args, [
+            "Revised prose rule",
+            "sol-craft",
+            ["songs-of-folly", "prose"],
+            "The bullet left only red flowers.",
+            ["Sol"],
+            6,
+            "writing",
+            22,
+        ])
+
+    def test_parse_patch_preserves_writing_arrays(self):
+        args = SimpleNamespace(
+            register=["songs-of-folly"],
+            writers=["Sol"],
+            tags=[],
+            clear_negation_of=False,
+            lesson_stdin=False,
+        )
+
+        self.assertEqual(update_lesson._parse_patch(args), {
+            "tags": [],
+            "register": ["songs-of-folly"],
+            "writers": ["Sol"],
+        })
 
     def test_omitted_negation_link_is_preserved(self):
         conn = Connection()
@@ -123,6 +172,11 @@ class UpdateLessonTests(unittest.TestCase):
             ("coding-lesson", 1, "", {"lesson": "x"}),
             ("coding-lesson", 1, "Title", {}),
             ("project-lesson", 1, "Title", {"voice": "shared"}),
+            ("coding-lesson", 1, "Title", {"register": ["fiction"]}),
+            ("writing-lesson", 1, "Title", {"project": "sample"}),
+            ("writing-lesson", 1, "Title", {"proof_pattern": "proof"}),
+            ("writing-lesson", 1, "Title", {"scope": "house"}),
+            ("writing-lesson", 1, "Title", {"writers": "Sol"}),
             ("coding-lesson", 1, "Title", {"negation_of": 0}),
         ]
         for args in cases:

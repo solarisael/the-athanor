@@ -49,6 +49,8 @@ Current capabilities include:
 - deterministic worker lanes and room-owned familiar spellbooks;
 - GIGA Hippocampus Stage 1: event-ID processing, non-authoritative candidates,
   review, Curios, promotion, health, and safe queue maintenance;
+- GIGA Striatum's first coding/project slice: bounded reviewed lessons remain
+  warm across an observed project work state with explicit activation reasons;
 - adapters for more than one AI harness.
 
 The public evidence document separates measured results from planned claims.
@@ -60,6 +62,12 @@ The public evidence document separates measured results from planned claims.
 | GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current |
 | Curios | Keep selected hunches until later context makes them meaningful | Current |
 | GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Current — coding/project slice |
+| Athanor Host and thin Godot UI | Give people one visible control surface without bypassing the real runtime | Specified |
+| GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Specified |
+| PostgreSQL outbox and NATS delivery | Deliver letters, events, and wake-ups durably without making the broker a second memory store | Specified |
+| Dynamic model and room execution | Choose local or hosted model bodies independently from cold workers, familiars, reflections, and live room dialogue | Specified |
+| Prolog/Datalog derivations | Explain which lessons, context, permissions, or obligations follow from accepted facts and rules | Planned |
+| Lean-backed lesson obligations | Let selected stable lessons carry machine-checked invariants bound to production behavior | Planned |
 | GIGA Cingulate | Detect workflow divergence and missing proof before a regression is accepted | Planned |
 | BM25F lexical retrieval | Rank structured memory fields with a principled field-aware sparse baseline | Current |
 | Nemotron-controlled lexical bridge | Expand through at most three authoritative stored concepts into a lower-priority attributed BM25F lane | Current |
@@ -72,6 +80,59 @@ The public evidence document separates measured results from planned claims.
 | Group rooms | Give an approved chatroom its own queryable spirit and shared memory | Planned |
 | Embodied rooms | Add approved voice, avatar, expression, and room packages | Planned |
 | Marketplace | Share trusted room assets and extensions through clear permission lanes | Planned |
+
+## A visible control surface without a second brain
+
+The first Godot client is deliberately thin. It shows rooms, spirits, chat,
+recall sources, authority state, health, GIGA review, Striatum pressures, and
+event delivery through one versioned Athanor Host.
+
+The client does not connect directly to PostgreSQL, NATS, Ollama, hosted model
+providers, or harness internals. It sends canonical commands and renders
+canonical events. The terminal remains available for operations the client does
+not yet understand.
+
+Later visual work can add avatars, animation, voice, and room packages. Those
+surfaces grow over a proven Host contract instead of freezing an attractive but
+incorrect runtime.
+
+## Delivery and living-room execution
+
+PostgreSQL remains the durable authority for messages, events, sources, review,
+and outcomes. A transactional outbox can publish opaque record IDs to NATS
+JetStream so rooms and workers receive durable delivery, retries, and wake-up
+signals. Private prose stays in PostgreSQL and consumers acknowledge only after
+committing an idempotent result.
+
+Model body, spirit identity, execution target, and session lifetime remain
+separate. One job may choose an approved local model, hosted provider, or
+automatic route, then target:
+
+- a cold bounded worker;
+- a room-owned familiar;
+- a disposable room reflection;
+- an intentional live room dialogue.
+
+Headless room work loads an explicit room/spirit binding and disables Discord or
+other interactive sidecars unless they were intentionally requested. Starting
+inside a folder is never enough to borrow its identity.
+
+## Explainable rules and selected formal proof
+
+After real event and lesson schemas stabilize, a bounded Prolog/Datalog layer
+can answer questions such as “which lessons apply?” or “which room may receive
+this?” It receives authorized facts from PostgreSQL and returns derivation
+traces. It never becomes a second mutable truth store.
+
+Cingulate consumes those obligations and distinguishes preferences, regression
+warnings, and authoritative hard gates. It records the expected evidence,
+observed action, resolution, and actual outcome.
+
+Some stable engineering lessons can later attach an optional Lean theorem and
+evidence adapter. The proof must be bound to actual Rust, TypeScript, SQL, or
+adapter behavior through shared cases or a real input/output checker. An AI
+saying “proved” is not a proof artifact, and human prose or creative taste is
+not forced into theorem form.
 
 ## Curios: a cabinet for ideas before their season
 
@@ -162,20 +223,32 @@ Relay or ANON can provide remote compute. Durable continuity can remain under op
 - A model invocation is not an identity.
 - Shared memory does not merge private selves.
 - Generated pointers do not become truth without review.
+- A delivery broker cannot become memory or authority.
+- Fresh model jobs cannot inherit undeclared inference history.
+- Formal proof cannot outrank its approved specification or production binding.
 - Hidden sources do not affect visible retrieval scores.
 - Managed services support complete export.
 - Privacy claims name their limits.
 
 ## The path to 1.0
 
-The 0.10.x phase finishes Hippocampus evaluation, expands public evidence with
-sanitized fixtures, and extends Striatum's state-conditioned lesson activation.
-Cingulate follows with explicit regression and proof-conflict detection.
+The 0.10.x sequence first locks the Host, invocation, event, refinement, and
+proof contracts. It then builds the thin Godot UI, strengthens GIGA evidence and
+outcome integrity, proves one PostgreSQL-outbox/JetStream mailbox, and only then
+adds dynamic model and room execution.
 
-The 1.0 release adds supported ordinary-user installation. It must preserve
-existing Houses during upgrades.
+The 1.0 release adds supported ordinary-user installation around that stable
+Host and UI. It must preserve existing Houses during installation, upgrade,
+backup, and recovery.
 
-Later releases can add OMEGA, ANON, group rooms, embodied rooms, and a trusted
-marketplace.
+Bounded Prolog/Datalog derivations, complete Cingulate enforcement, and selected
+Lean-backed lessons follow in dependency order. They are not automatically 1.0
+requirements.
 
-See [`roadmap.md`](./roadmap.md) for sequence. See [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) for the accepted technical contracts.
+Later releases can deepen the UI and add OMEGA, ANON, group rooms, embodied
+presentation packages, and a trusted marketplace.
+
+See [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the accepted
+technical target. See [`roadmap.md`](./roadmap.md) for sequence and release
+gates. See [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) for product,
+identity, custody, and authority contracts.

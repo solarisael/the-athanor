@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Update exactly one coding or project lesson after title confirmation.
+"""Update exactly one coding, project, or writing lesson after title confirmation.
 
-The operation is deliberately narrow: kind selects one of two allowlisted
+The operation is deliberately narrow: kind selects one of three allowlisted
 lesson types in the unified table, the numeric id identifies one typed row,
 and expected-title must match that row before an update is attempted. Errors are JSON
 and the CLI remains fail-open for OMP callers.
@@ -21,10 +21,20 @@ except ImportError:
     psycopg2 = None
 
 
-LESSON_KEYS = {"coding-lesson": "coding", "project-lesson": "project"}
+LESSON_KEYS = {
+    "coding-lesson": "coding",
+    "project-lesson": "project",
+    "writing-lesson": "writing",
+}
 COMMON_FIELDS = ("title", "lesson", "shape", "trigger_context", "tags")
 CODING_FIELDS = COMMON_FIELDS + ("voice", "scope", "project", "proof_pattern", "negation_of")
 PROJECT_FIELDS = COMMON_FIELDS + ("project", "proof_pattern")
+WRITING_FIELDS = COMMON_FIELDS + ("voice", "register", "example_text", "writers", "negation_of")
+LESSON_FIELDS = {
+    "coding-lesson": CODING_FIELDS,
+    "project-lesson": PROJECT_FIELDS,
+    "writing-lesson": WRITING_FIELDS,
+}
 _MISSING = object()
 
 
@@ -37,14 +47,14 @@ def _refusal(kind, lesson_id, error, **extra) -> dict:
 
 
 def _allowed_fields(kind: str):
-    return CODING_FIELDS if kind == "coding-lesson" else PROJECT_FIELDS
+    return LESSON_FIELDS.get(kind, ())
 
 
 def update_lesson(conn, kind: str, lesson_id: int, expected_title: str, patch: dict) -> dict:
     """Update one exact row, preserving all fields omitted from *patch*."""
     lesson_key = LESSON_KEYS.get(kind)
     if lesson_key is None:
-        return _refusal(kind, lesson_id, "kind must be coding-lesson or project-lesson")
+        return _refusal(kind, lesson_id, "kind must be coding-lesson, project-lesson, or writing-lesson")
     if isinstance(lesson_id, bool) or not isinstance(lesson_id, int) or lesson_id <= 0:
         return _refusal(kind, lesson_id, "id must be a positive integer")
     if not isinstance(expected_title, str) or not expected_title:
@@ -61,6 +71,11 @@ def update_lesson(conn, kind: str, lesson_id: int, expected_title: str, patch: d
         value = patch["negation_of"]
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             return _refusal(kind, lesson_id, "negation_of must be null or a positive integer")
+    for field in ("tags", "register", "writers"):
+        if field in patch:
+            value = patch[field]
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                return _refusal(kind, lesson_id, f"{field} must be an array of strings")
 
     # The connection context commits on normal exit and rolls back on errors.
     with conn:
@@ -90,9 +105,24 @@ def update_lesson(conn, kind: str, lesson_id: int, expected_title: str, patch: d
 
 def _parse_patch(args) -> dict:
     patch = {}
-    for field in COMMON_FIELDS + ("voice", "scope", "project", "proof_pattern", "negation_of"):
+    scalar_fields = (
+        "title",
+        "shape",
+        "trigger_context",
+        "voice",
+        "scope",
+        "project",
+        "proof_pattern",
+        "example_text",
+        "negation_of",
+    )
+    for field in scalar_fields:
         value = getattr(args, field, _MISSING)
-        if value is not _MISSING and not (field == "tags" and value is None):
+        if value is not _MISSING:
+            patch[field] = value
+    for field in ("tags", "register", "writers"):
+        value = getattr(args, field, None)
+        if value is not None:
             patch[field] = value
     if getattr(args, "clear_negation_of", False):
         patch["negation_of"] = None
@@ -106,23 +136,31 @@ def _parse_patch(args) -> dict:
                 patch["negation_of"] = int(patch["negation_of"])
             except ValueError:
                 pass
-    if isinstance(patch.get("tags"), str):
-        patch["tags"] = json.loads(patch["tags"])
     return patch
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--room-dir", required=True)
-    parser.add_argument("--kind", required=True, help="coding-lesson or project-lesson")
+    parser.add_argument("--kind", required=True, help="coding-lesson, project-lesson, or writing-lesson")
     parser.add_argument("--id", required=True)
     parser.add_argument("--expected-title", required=True)
-    for field in COMMON_FIELDS + ("voice", "scope", "project", "proof_pattern", "negation_of"):
-        if field == "tags":
-            continue
+    for field in (
+        "title",
+        "shape",
+        "trigger_context",
+        "voice",
+        "scope",
+        "project",
+        "proof_pattern",
+        "example_text",
+        "negation_of",
+    ):
         option = "--" + field.replace("_", "-")
         parser.add_argument(option, dest=field, default=_MISSING)
     parser.add_argument("--tag", dest="tags", action="append", default=None)
+    parser.add_argument("--register", dest="register", action="append", default=None)
+    parser.add_argument("--writer", dest="writers", action="append", default=None)
     parser.add_argument("--clear-negation-of", dest="clear_negation_of", action="store_true")
     parser.add_argument("--lesson-stdin", action="store_true")
     args = parser.parse_args()

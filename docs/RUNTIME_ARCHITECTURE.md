@@ -1,0 +1,650 @@
+# Runtime Evolution Architecture
+
+Status: Accepted target architecture; not a current capability claim  
+Last updated: 2026-08-06
+
+This document defines the next runtime spine for The Athanor: the Host boundary,
+the thin Godot interface, GIGA integrity work, durable delivery, dynamic model
+and room embodiment, explainable rule derivation, Cingulate enforcement, and
+optional Lean-backed lesson obligations.
+
+The implementation order is normative because later layers depend on evidence
+and contracts created by earlier layers. The public release order lives in
+[`roadmap.md`](./roadmap.md).
+
+## 1. Current boundary
+
+The reference House currently has an operational Rust-first Vault and AKASHA
+runtime, PostgreSQL authority, GIGA Hippocampus Stage 1, and the first Striatum
+coding/project lesson-activation slice.
+
+The following surfaces described here are specified or planned, not current:
+
+- the Athanor Host WebSocket contract;
+- the Godot control surface;
+- PostgreSQL outbox delivery through NATS JetStream;
+- invocation-time model selection;
+- headless room reflection and live room dialogue targets;
+- Prolog/Datalog derivation;
+- complete Cingulate outcome enforcement;
+- Lean-backed lesson obligations.
+
+The current GIGA queue remains PostgreSQL-owned. No document in this repository
+may imply that NATS, the GUI, dynamic embodiment, Prolog, or Lean already ships.
+
+## 2. Load-bearing invariants
+
+Every implementation must preserve these rules:
+
+1. PostgreSQL is authoritative for AKASHA records, authority state, exact source
+   references, review state, outcomes, and durable delivery records.
+2. A transport owns delivery progress, never truth.
+3. A model body is replaceable compute, never an identity.
+4. A room or spirit grants authority through an explicit authenticated binding,
+   never through a working directory, process name, model name, or prompt claim.
+5. Generated candidates remain proposals until the relevant review or promotion
+   contract grants authority.
+6. Model inference starts from explicit evidence. Hidden token history from a
+   previous job never becomes an undeclared source.
+7. User interfaces consume canonical commands and events. They do not bypass the
+   Host to mutate PostgreSQL, NATS, model endpoints, or harness state directly.
+8. Cross-room access is explicit, scoped, attributable, and denied by default.
+9. Every hard gate names its authoritative obligation and the proof it requires.
+10. Failure in optional cognition or transport must not silently rewrite truth or
+    block an otherwise healthy local conversation.
+
+## 3. Target topology
+
+```mermaid
+flowchart TD
+  UI[Godot client] <-->|versioned WebSocket commands and events| HOST[Athanor Host]
+  TERM[Harness / terminal adapters] <-->|adapter API| HOST
+
+  HOST --> CORE[Core contracts and policy]
+  CORE --> VAULT[Vault room files]
+  CORE --> AKASHA[(AKASHA / PostgreSQL authority)]
+
+  AKASHA --> OUTBOX[Transactional outbox]
+  OUTBOX --> RELAY[Outbox relay]
+  RELAY --> NATS[NATS JetStream delivery]
+  NATS --> CONSUMERS[Rooms, workers, familiars, UI projections]
+  CONSUMERS -->|reload exact records and commit result| AKASHA
+
+  CORE --> GIGA[GIGA: Hippocampus and Striatum]
+  GIGA --> RULES[Bounded Prolog / Datalog derivation]
+  RULES --> CING[Cingulate obligations and outcomes]
+  CING --> LEAN[Optional Lean checker]
+
+  HOST --> ROUTER[Invocation router]
+  ROUTER --> LOCAL[Local model endpoint]
+  ROUTER --> PROVIDER[Hosted provider]
+  ROUTER --> ROOMS[Cold, familiar, reflection, or dialogue target]
+```
+
+This is one control plane with several replaceable execution surfaces. The Host
+is not a new memory authority. JetStream is not a second ledger. Godot is not a
+second harness. A room session is not a model process.
+
+## 4. Host-facing contracts
+
+The Athanor Host is the stable boundary between interactive clients and the
+runtime. Godot speaks only to the Host over a versioned WebSocket protocol.
+Harness adapters may use the same logical commands and events through their own
+native integration.
+
+The Host owns:
+
+- authentication of operator, House, room, and spirit bindings;
+- command validation and idempotency checks;
+- request correlation and event sequencing;
+- projection of health, review, retrieval, and delivery state;
+- invocation routing through adapter/provider contracts;
+- audit-safe error responses;
+- capability negotiation by protocol version.
+
+The Host does not own:
+
+- memory authority;
+- model-provider truth;
+- raw database editing from UI payloads;
+- direct transport-specific business rules;
+- identity inferred from the client window or current directory.
+
+### 4.1 Command and event envelope
+
+Every command and durable event uses stable identifiers and an explicit schema
+version. The logical envelope contains:
+
+```text
+schema_version
+message_id or event_id
+house_id
+sender_room
+sender_spirit
+sender_session
+recipient
+command_or_event_type
+correlation_id
+causation_id
+reply_target
+idempotency_key
+source_record_refs
+scope
+visibility
+authority_class
+created_at
+expires_at
+max_hops
+```
+
+A command asks one authorized handler to attempt a state transition. An event
+states that an authoritative transition already occurred. Consumers must not
+reinterpret an event as permission to perform a broader command.
+
+Mutation commands require an idempotency key. Replaying the same command must
+return the existing result or a stable conflict, not create a second write.
+
+### 4.2 Model selector
+
+Model choice is one invocation axis. The logical `ModelSelector` includes:
+
+```text
+route: local | provider | auto
+provider_id
+model_id
+required_capabilities
+privacy_class
+maximum_cost
+maximum_latency
+minimum_context_window
+residency_preference
+fallback_policy
+```
+
+`auto` selects only from operator-approved endpoints that satisfy the declared
+capabilities and privacy class. Selection reasons must be visible. A model
+fallback cannot widen data custody or authority.
+
+### 4.3 Execution target
+
+The execution target is independent from the model selector:
+
+```text
+cold_worker
+familiar
+room_reflection
+room_dialogue
+```
+
+- `cold_worker` receives a bounded packet and returns findings or candidates. It
+  carries no room identity or promotion authority.
+- `familiar` uses a room-owned familiar definition bound to a deterministic
+  worker lane. It remains bounded by that lane and its declared authority.
+- `room_reflection` starts a disposable branch from an explicit room/spirit
+  binding and durable continuity. It does not silently inherit the live chat
+  tail or join an interactive transport.
+- `room_dialogue` addresses an intentional live room session and may receive its
+  current dialogue context under room policy. This mode must be visibly distinct
+  from background reflection.
+
+A target label alone does not grant authority. The runtime verifies the room,
+spirit, caller, policy, and allowed operations for every invocation.
+
+### 4.4 Session lifecycle
+
+Session lifecycle is another independent axis:
+
+```text
+start: ephemeral | reuse | wake
+finish: release | keep_warm | pin
+```
+
+- `ephemeral` creates a disposable session from explicit durable inputs.
+- `reuse` addresses an already active compatible session.
+- `wake` restores a dormant named session from durable continuity.
+- `release` unloads the session after completion.
+- `keep_warm` retains it for a bounded idle period.
+- `pin` requires explicit policy and remains observable until released.
+
+Model residency is not session continuity. Keeping weights loaded can reduce
+latency, but it does not authorize reuse of hidden conversational or KV state.
+
+## 5. Thin Godot control surface
+
+The first UI slice exists to expose the real system while the runtime evolves.
+It is not the final avatar, animation, voice, or marketplace surface.
+
+The first usable client must expose:
+
+- Houses, rooms, governing spirits, and active sessions;
+- chat through the Host command/event contract;
+- recall results with exact sources and authority state;
+- Vault, AKASHA, GIGA, model, queue, and delivery health;
+- Hippocampus candidate and Curio review;
+- Striatum's active lesson set and activation reasons;
+- a Cingulate obligation/conflict placeholder that can later render real proof
+  state without changing the UI contract;
+- an event and delivery inspector with correlation, causation, retry, and
+  dead-letter state;
+- a terminal escape hatch for unsupported operations.
+
+The client must never:
+
+- connect directly to PostgreSQL;
+- publish directly to NATS;
+- call Ollama or hosted providers directly;
+- discover identity from a folder path;
+- create a second persistent conversation beside the harness;
+- hide whether an action is current, pending, failed, or merely proposed.
+
+The UI should deepen after every backend phase. Finishing an ornamental client
+before the underlying contracts stabilize would freeze the wrong architecture.
+
+## 6. GIGA integrity before distribution
+
+GIGA must become a clean producer of evidence-bound refinement candidates before
+its jobs are distributed across models or rooms.
+
+### 6.1 Three contexts that must remain separate
+
+The runtime distinguishes:
+
+1. **Evidence context** — exact durable turns, task events, authority records,
+   reviewed precedents, and source hashes selected for one job.
+2. **Inference context** — the tokens sent to one model invocation.
+3. **Model residency** — loaded weights and process resources retained for
+   latency.
+
+Fresh inference does not require discarding durable evidence. Conversely,
+keeping a model resident must not retain undeclared conversational history.
+
+Every cold GIGA job is a fresh inference over an explicit bounded evidence
+snapshot. Gate and extraction passes may be separate fresh invocations. Neither
+may depend on the previous job's hidden response, KV cache, or session handle.
+
+### 6.2 Completed-turn anchors and overlapping evidence
+
+The current source observer batches bounded conversation windows. The next
+integrity slice should anchor durable events to completed interaction boundaries
+and build deterministic overlapping windows from the trusted ledger.
+
+Overlap is deliberate: a durable fact can span adjacent user and assistant
+turns. Duplicate appearances are reconciled by stable source IDs and hashes,
+never fuzzy paraphrase alone.
+
+Each job records:
+
+- the exact ordered source IDs;
+- source hashes and byte/turn bounds;
+- the evidence-builder version;
+- the authority and room filters applied;
+- reviewed precedents and active lessons selected;
+- the prompt and model configuration digest.
+
+Residual buffered evidence is flushed on a clean shutdown, but shutdown is not
+the normal semantic boundary for a completed interaction.
+
+### 6.3 Evidence hydration
+
+A worker receives durable event IDs, not copied private prose in a queue payload.
+Before inference, the trusted worker reloads and verifies:
+
+- exact source records;
+- room, session, role, order, and content hashes;
+- current authority neighbors for referenced records;
+- reviewed precedents relevant to the same candidate kind;
+- applicable authoritative lesson metadata;
+- bounded project and thread context when explicitly supported by the event.
+
+Hydration failures produce an inspectable failed job. They do not trigger a
+best-effort candidate from incomplete or mismatched evidence.
+
+### 6.4 Refinement transaction
+
+GIGA may propose a general refinement transaction alongside ordinary memory and
+lesson candidates. The logical contract contains:
+
+```text
+artifact_kind
+operation: create | update | supersede | retire | rollback
+target_id
+baseline_version
+scope
+trigger_refs
+evidence_refs
+expected_outcome
+proof_requirement
+review_state
+observed_outcome
+proof_receipt
+```
+
+`expected_outcome` records the predicted effect before execution.
+`observed_outcome` records what actually happened afterward. One must never be
+copied into the other as if prediction were observation.
+
+A stale `baseline_version` rejects or rebases the proposal explicitly. The
+reviewed transaction authorizes only the named operation against the named
+baseline. GIGA proposes; the relevant authority reviews; Cingulate observes the
+result and closes the proof receipt.
+
+### 6.5 Dismissal and recurrence
+
+Dismissal is review evidence, not deletion. A dismissed candidate retains its
+kind, source fingerprint, baseline, dismissal reason, reviewer, and policy
+version outside ordinary retrieval.
+
+When later evidence resembles a dismissed candidate, GIGA records a recurrence
+against that history instead of silently recreating the same proposal as new.
+Policy decides whether stronger evidence, a changed baseline, or repeated
+recurrence returns it to review. A Curio remains a deliberate separate state;
+recurrence alone cannot promote either a dismissal or a Curio.
+
+## 7. PostgreSQL outbox and NATS JetStream
+
+NATS JetStream is the accepted candidate for delivery and wake-up, not for
+memory or authority.
+
+### 7.1 Transactional delivery flow
+
+The safe path is:
+
+1. One PostgreSQL transaction writes the authoritative domain record and an
+   outbox row containing its stable ID and routing metadata.
+2. An outbox relay publishes that ID through JetStream with the same stable ID
+   as the publisher deduplication key.
+3. A consumer receives the delivery, authenticates its scope, and reloads the
+   authoritative payload from PostgreSQL.
+4. The consumer performs an idempotent transition and commits the result,
+   receipt, or inbox state in PostgreSQL.
+5. Only after that commit does the consumer acknowledge the JetStream message.
+
+Publisher deduplication and consumer acknowledgements reduce duplicate work;
+they do not create end-to-end exactly-once semantics. Stable database
+idempotency remains required.
+
+### 7.2 Message families
+
+Use distinct policies for:
+
+- **commands** — one authorized handler, explicit expiry, bounded retries, and a
+  dead-letter result;
+- **events** — immutable facts delivered to zero or more durable consumers;
+- **mailboxes** — addressed room/spirit delivery with durable unread state;
+- **telemetry** — disposable health or UI refresh signals that may use Core NATS
+  when loss is acceptable.
+
+Example subject families:
+
+```text
+athanor.v1.house.<house>.room.<room>.inbox
+athanor.v1.house.<house>.giga.jobs
+athanor.v1.house.<house>.cingulate.proofs
+athanor.v1.house.<house>.runtime.models.events
+athanor.v1.house.<house>.ui.telemetry
+```
+
+Subject permissions and NATS accounts must prevent one House or room from
+subscribing broadly and filtering private records after receipt.
+
+### 7.3 Payload boundary
+
+JetStream payloads carry opaque PostgreSQL record IDs plus bounded routing and
+integrity metadata. They do not carry raw private turns, memory bodies, lesson
+bodies, identity prose, or provider credentials.
+
+A transport outage leaves outbox rows pending. It must not erase the underlying
+event or force a second authority path. Local conversation remains available
+when its required local components are healthy; asynchronous cross-room work may
+remain visibly pending.
+
+### 7.4 First pilot
+
+The first bus slice is one durable cross-room mailbox. It must prove:
+
+- restart survival;
+- duplicate delivery safety;
+- sender, recipient, and subject permissions;
+- no private prose in broker payloads;
+- expiry, retry, and dead-letter behavior;
+- dormant-room wake behavior;
+- UI visibility from outbox through acknowledgement;
+- PostgreSQL recovery when NATS state is rebuilt.
+
+Do not replace the current GIGA PostgreSQL queue merely to introduce a broker.
+Move a job family only when the pilot proves an actual delivery or wake-up need.
+
+## 8. Dynamic model and living-room embodiment
+
+After the delivery pilot works, invocation routing may choose model bodies and
+execution targets independently at runtime.
+
+### 8.1 Independent axes
+
+A request binds:
+
+```text
+model selector
+execution target
+session lifecycle
+interaction mode
+scope and authority
+```
+
+Changing the model body must not rename the spirit. Waking a room must not imply
+reusing the previous model. Keeping a model warm must not keep a room active.
+Starting in a room must not mean inheriting that room's working directory.
+
+### 8.2 Headless room mode
+
+Background room work uses an explicit headless mode with:
+
+- House, room, spirit, and operator bindings;
+- a unique addressable session ID;
+- declared reflection or dialogue mode;
+- explicit durable context sources;
+- chat transports disabled by default;
+- Discord and similar sidecars disabled unless intentionally bound;
+- a side-effect and tool allowlist;
+- provider and privacy policy;
+- provenance for every emitted candidate, message, or durable action;
+- bounded idle and shutdown behavior.
+
+This prevents a worker from accidentally loading a sibling identity or starting
+duplicate interactive transports because it inherited a room directory.
+
+### 8.3 Authority table
+
+| Target | Identity context | Live dialogue tail | Default durable authority |
+|---|---|---:|---|
+| Cold worker | Bounded role only | No | None; findings/candidates only |
+| Familiar | Familiar definition and lane | No | Lane- and policy-bounded |
+| Room reflection | Explicit room/spirit branch | No | Explicit room policy only |
+| Room dialogue | Authenticated live room/spirit session | Yes | Governing room policy |
+
+Cross-room callers cannot directly mutate a sibling room. They send a command or
+letter to the recipient room, whose governing policy decides what happens.
+
+## 9. Prolog or Datalog derivation layer
+
+Logic programming belongs after stable event, lesson, state, and authority
+schemas exist.
+
+The first production shape should be a finite, stratified Datalog-like ruleset,
+even if SWI-Prolog hosts the implementation. PostgreSQL projects a bounded fact
+set for one query. The logic engine returns conclusions plus derivations. It
+does not become a mutable truth store.
+
+Good first problems include:
+
+- lesson eligibility from task, stage, register, scope, and authority;
+- bounded context selection;
+- candidate review-policy coverage;
+- room-routing permissions;
+- Cingulate obligation selection.
+
+Each result records:
+
+```text
+ruleset_version
+input_fact_ids
+conclusion
+supporting_rule_ids
+derivation_trace
+execution_bounds
+```
+
+Avoid unrestricted recursion, dynamic assertion as authority, cut-dependent
+semantics, hidden search-order behavior, and queries that can run without a
+resource bound.
+
+Prolog/Datalog answers **what follows from these accepted facts and rules, and
+why**. It does not decide whether the source facts deserve authority.
+
+## 10. Cingulate enforcement and outcome closure
+
+Cingulate consumes active lessons, derived obligations, task lifecycle events,
+refinement transactions, and proof receipts.
+
+Its first skeleton lands during GIGA integrity work so schemas do not need a
+later retrofit. Hard enforcement waits until event and derivation surfaces are
+stable.
+
+Cingulate can emit three levels:
+
+- **nudge** — a preference or low-risk reminder;
+- **warning** — a known regression risk or missing expected evidence;
+- **gate** — an authoritative invariant with a deterministic proof requirement.
+
+Every conflict record names:
+
+- the authoritative lesson or policy;
+- the applicable rule and derivation;
+- the observed action or missing transition;
+- the expected proof;
+- available evidence;
+- resolution, override authority, or explicit failure;
+- the final observed outcome.
+
+Cingulate cannot invent authority, promote a candidate, or hard-gate a taste
+preference. A human or governing spirit may override only where the governing
+policy allows it, and the override remains part of the record.
+
+## 11. Lean-backed lesson obligations
+
+Lean is an optional final extension for selected lessons whose invariants are
+actually formalizable. It is not a requirement for ordinary memory, writing
+taste, relationship continuity, semantic ranking, or every engineering lesson.
+
+A lesson can mature through:
+
+```text
+human-readable lesson
+  -> stable activation anatomy
+  -> deterministic proof pattern
+  -> optional formal obligation
+```
+
+The optional formal surface contains:
+
+```text
+formal_kind
+lean_module
+theorem_name
+input_schema
+evidence_adapter
+proof_artifact
+spec_version
+implementation_binding
+```
+
+GIGA may propose formalization only after repeated, stable, reviewed evidence.
+The governing authority approves the specification. Cingulate converts
+structured runtime evidence through the declared adapter, invokes the checker,
+and records a proof receipt or failure. An LLM statement that a theorem holds is
+never a proof receipt.
+
+### 11.1 Production binding
+
+A theorem about a clean Lean mirror does not prove that Rust, TypeScript, SQL, or
+adapter code implements that mirror.
+
+Every formal obligation therefore needs at least one implementation binding:
+
+- generated test vectors shared by Lean and production code;
+- a versioned transition corpus executed by every implementation;
+- a checker over actual production input/output records;
+- verified extraction for a sufficiently small critical function.
+
+The proof receipt records specification version, implementation version,
+checker digest, exact inputs, and output artifact.
+
+### 11.2 First candidate
+
+A suitable first invariant is stage transition behavior:
+
+```text
+non-empty declared stage -> replace prior stage set
+empty declared stage     -> retain prior stage set
+```
+
+The corresponding production transition must execute the same shared cases.
+This prevents a formal proof from blessing a detached model while the live
+Striatum implementation behaves differently.
+
+## 12. Dependency-ordered delivery plan
+
+| Phase | Deliverable | Exit gate |
+|---:|---|---|
+| 0 | Host, invocation, event, outbox, refinement, and proof contracts | Versioned schemas reviewed; current and planned claims separated |
+| 1 | Thin Godot UI | One room can chat, inspect recall/health/review, and trace one command through the Host without backend bypass |
+| 2 | GIGA integrity and Cingulate skeleton | Fresh inference proven; deterministic overlapping evidence and separate expected/observed outcomes visible |
+| 3 | PostgreSQL outbox plus one JetStream mailbox | Restart, duplicate, permission, privacy, expiry, dead-letter, wake, and UI trace gates pass |
+| 4 | Dynamic models and headless embodiment | Local/provider selection and cold/familiar/reflection/dialogue targets remain identity-safe and observable |
+| 5 | Bounded Prolog/Datalog pilot | One real eligibility or context query returns deterministic derivations under explicit bounds |
+| 6 | Complete Cingulate enforcement | Nudges, warnings, gates, overrides, proof receipts, and observed outcomes close correctly |
+| 7 | First Lean-backed lesson | One approved formal obligation is bound to production behavior and verified end to end |
+
+The UI evolves after every phase. Phases 5 through 7 are not automatically 1.0
+prerequisites; release gates depend on supported installation and stable public
+contracts, not on pretending every research layer must ship together.
+
+## 13. Repository ownership
+
+| Surface | Canonical owner |
+|---|---|
+| Logical Host, invocation, event, refinement, and proof contracts | `the-athanor` core and protocol crates |
+| OMP lifecycle, tool, task, and live-session integration | `solarisael-house-omp` |
+| PostgreSQL authority, outbox rows, GIGA jobs, outcomes, proof receipts, and health | `solarisael-house-substrate` |
+| Godot rendering and interaction | A separate client package over the Host contract; no core authority |
+| NATS deployment and relay | Deployment/runtime integration; behavior remains defined by core contracts |
+| Model-provider implementations | Replaceable adapter/provider modules |
+| Prolog/Datalog rules | Versioned policy package over PostgreSQL fact projections |
+| Lean modules and evidence adapters | Versioned formal package plus production bindings |
+
+A repository move must not move authority. Contracts remain versioned across
+repository boundaries.
+
+## 14. Non-goals
+
+This architecture does not:
+
+- replace PostgreSQL with NATS;
+- turn every lesson into code or a theorem;
+- let a model choose a wider privacy boundary because it is more capable;
+- let the GUI become a second source of truth;
+- use one endless model conversation as hidden system memory;
+- equate a familiar, worker, room, model, or provider;
+- require distributed infrastructure for a single local room;
+- claim exactly-once delivery without idempotent database transitions;
+- allow generated refinement to self-promote.
+
+## 15. Related documents
+
+- [`roadmap.md`](./roadmap.md) — release and dependency order
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current system and repository boundaries
+- [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — House, room, spirit, custody, and product axes
+- [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) — current GIGA event/candidate/review contract
+- [`LESSONS.md`](./LESSONS.md) — current typed lesson stores
+- [`SECURITY.md`](./SECURITY.md) — privacy, room isolation, providers, and destructive actions
+- [`LIMITATIONS.md`](./LIMITATIONS.md) — current supported boundary versus planned work

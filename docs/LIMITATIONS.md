@@ -81,6 +81,23 @@ Local embeddings keep archive vectorization off a hosted embedding service. They
 
 The Athanor keeps continuity provider-portable, but it cannot remove provider-side rate limits, model policies, outages, or capability differences.
 
+## Runtime-evolution boundary
+
+Version 0.10.1 does not yet ship the Godot client, Athanor Host WebSocket,
+PostgreSQL-outbox/NATS delivery, invocation-time model routing, headless room
+reflection/dialogue targets, Prolog/Datalog derivation, complete Cingulate
+enforcement, or Lean-backed lesson obligations.
+
+These capabilities have an accepted dependency order and technical contract in
+[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md). Documentation labels
+them as specified, planned, or research until observable implementation gates
+pass.
+
+The current worker lanes still obtain their runtime models from harness agent
+definitions; per-dispatch model override remains unsupported. The current GIGA
+queue remains PostgreSQL-owned. A model process kept warm is not a persistent
+room, and no current broker should be treated as memory authority.
+
 ## Organizational boundary
 
 The current room model is not yet a complete enterprise authorization system.

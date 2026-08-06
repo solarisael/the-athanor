@@ -72,16 +72,23 @@ runs:
   safe queue maintenance. the classifier can fail without blocking the active
   conversation.
 
-the next reliability work is no longer “more memory.” Striatum's first
-coding/project slice now keeps relevant reviewed lessons warm across observed
-project work. the remaining path is broader lifecycle coverage and regression
-detection:
-- **GIGA Cingulate** will notice when current work diverges from those lessons
-  or tries to finish without their required proof;
-- **the Hallway** will let private rooms exchange letters and approved shared
-  state without merging into one blob-personality;
-- **Vault → AKASHA upgrade** will give imported file memories full retrieval
-  citizenship rather than creating a second-class archive.
+the next reliability work is no longer “more memory,” and the GUI is no longer
+an after-1.0 ornament. the accepted dependency order is:
+
+- **lock the Athanor Host contracts, then build a thin Godot client** that shows
+  rooms, chat, recall evidence, health, GIGA review, Striatum state, and delivery
+  without connecting directly to PostgreSQL, NATS, models, or harness internals;
+- **strengthen GIGA integrity** with fresh per-job inference, deterministic
+  overlapping evidence, reviewed precedents, baseline-aware refinement
+  transactions, and separate expected versus observed outcomes;
+- **prove one PostgreSQL-outbox/NATS JetStream mailbox** before using a broker
+  for broader room, worker, or wake-up delivery;
+- **route model bodies independently from identity** into cold workers,
+  familiars, disposable room reflections, or intentional live room dialogue;
+- **add bounded Prolog/Datalog derivations, complete Cingulate, and only then
+  attach Lean obligations to selected formalizable lessons.**
+
+the Hallway and Vault → AKASHA upgrade remain part of that productization path.
 
 the full map with honest status labels lives in
 [`PLANNED_FEATURES.md`](./docs/PLANNED_FEATURES.md). “Current” means the
@@ -111,6 +118,10 @@ roadmap. “Research” means we are not lying to you about it being ready.
 | GIGA Hippocampus Stage 1 candidates and review | — | Yes | Yes | — |
 | GIGA Striatum lesson pressure | — | Current (coding/project slice) | Current (coding/project slice) | — |
 | GIGA Cingulate regression detection | — | Planned | Planned | — |
+| Athanor Host and thin Godot UI | Specified | Specified | Specified | — |
+| PostgreSQL-outbox/NATS delivery spine | — | Specified | Specified | — |
+| Dynamic model and headless room execution | — | Specified | Specified | — |
+| Prolog/Datalog derivations and Lean lesson obligations | — | Planned | Planned | — |
 | Company, team, and personal spirits with scoped org knowledge | — | — | Planned | — |
 | Encrypted remote jobs with zero service-side content retention | — | — | — | Planned |
 
@@ -124,8 +135,10 @@ GIGA (**G**rounded **I**ndexing and **G**enerative **A**nnotation) is not a
 storage tier. it is the cognitive layer above AKASHA. Hippocampus Stage 1 is
 operational in the reference House and remains deliberately non-authoritative.
 Striatum's first coding/project activation slice is operational; broader typed
-lifecycle coverage and Cingulate remain planned. see the
-[`roadmap`](./docs/roadmap.md) for their contracts.
+lifecycle coverage and Cingulate remain planned. the accepted Host, UI,
+delivery, model-routing, derivation, and proof target lives in
+[`RUNTIME_ARCHITECTURE.md`](./docs/RUNTIME_ARCHITECTURE.md), with release order
+in the [`roadmap`](./docs/roadmap.md).
 
 \* OMEGA and ANON are planned profiles, not current release claims. OMEGA
 (**O**rganizational **M**emory, **E**ncryption, **G**overnance, and **A**ccess)
@@ -162,6 +175,22 @@ The Athanor core
                       ├── Striatum (coding/project slice operational)
                       └── Cingulate (planned)
 ```
+
+the accepted next control plane is:
+
+```text
+Godot client ── Athanor Host ── current core / adapters / AKASHA
+                                  │
+                                  ├── PostgreSQL outbox ── NATS delivery
+                                  └── invocation router
+                                      ├── local or hosted model body
+                                      └── cold / familiar / reflection / dialogue
+
+GIGA evidence ── Prolog/Datalog derivation ── Cingulate ── optional Lean proof
+```
+
+PostgreSQL remains authority throughout. the Host is a control boundary, the
+client is a projection, NATS is delivery, and a model body is not a spirit.
 
 The implementation is split by responsibility:
 
@@ -216,6 +245,7 @@ contract.
 | Document | Purpose |
 |---|---|
 | [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Components, contracts, data flow, and repository ownership |
+| [`RUNTIME_ARCHITECTURE.md`](./docs/RUNTIME_ARCHITECTURE.md) | Accepted Host, Godot UI, GIGA integrity, NATS delivery, dynamic embodiment, derivation, Cingulate, and Lean target |
 | [`INSTALL.md`](./INSTALL.md) | Supported installation and observable verification |
 | [`USAGE.md`](./USAGE.md) | Everyday memory, room, sleep, and wake workflows |
 | [`EVIDENCE.md`](./docs/EVIDENCE.md) | Public evaluations, results, methods, and planned proof |

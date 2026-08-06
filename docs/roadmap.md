@@ -1,6 +1,6 @@
 # The Athanor Roadmap
 
-_Last updated: 2026-08-05_
+_Last updated: 2026-08-06_
 
 ## Product rule
 
@@ -10,9 +10,10 @@ Magic is allowed. Magic is not a boot requirement.
 
 ## Release path
 
-This order is deliberate. Finish the durable runtime, prove the product, then
-make it easy to enter. Do not let later interface ideas postpone evidence and
-public explanation.
+This order is deliberate. The next interface is a thin instrument over stable
+contracts, not a finished ornamental client and not a reason to postpone
+evidence. GIGA integrity precedes distribution; durable delivery precedes
+multi-room embodiment; formal methods follow stable runtime facts.
 
 ### 0.8.x — operational late beta
 
@@ -95,11 +96,11 @@ does not require a causal account before publishing the observed comparison;
 later ablations may separate ordinary memory, coding lessons, project lessons,
 and harness-triggered retrieval if the result warrants them.
 
-#### Establish The Athanor product architecture before 1.0
+#### Maintain The Athanor product architecture before 1.0
 
-Rename the public platform to **The Athanor**. Keep **House** as one
-operator-owned continuity domain, and keep **Solarisael House** as the original
-reference deployment.
+The public platform is **The Athanor**. **House** names one operator-owned
+continuity domain, and **Solarisael House** remains the original reference
+deployment.
 
 Use these accepted product names:
 
@@ -115,17 +116,17 @@ The detailed naming and cutover contract lives in
 The plain-language product guide lives in
 [`PLANNED_FEATURES.md`](./PLANNED_FEATURES.md).
 
-Perform one planned public cutover. Update repositories, packages,
-configuration, installers, documentation, and release artifacts together.
-Preserve every House, memory, lesson, authority state, candidate, backup, and
-export.
+The canonical repository and package now use The Athanor vocabulary. Remaining
+public domains, release artifacts, installers, and namespaces must cut over
+together. Preserve every House, memory, lesson, authority state, candidate,
+backup, and export.
 
 The operator accepted The Athanor despite active uses of the Athanor root in
 other AI projects. The definite article is deliberate: distinction comes from
 specificity, depth, and execution inside a recognizable form. Complete legal,
 domain, package, and namespace review before the public cutover.
 
-#### Complete GIGA before 1.0
+#### Complete the pre-1.0 GIGA integrity slice
 
 GIGA means **Grounded Indexing and Generative Annotation**. It is an optional
 cognitive capability above AKASHA.
@@ -150,8 +151,8 @@ Finish Hippocampus evaluation before calling the capability complete:
   hardware, date, limitations, and sanitized artifact;
 - complete the remaining Stage 1 policy decision and reproducible public
   demonstration.
-
-Then add two procedural workers:
+GIGA also includes two procedural workers whose delivery spans the dependency
+sequence:
 
 **Striatum — state-conditioned lesson activation.** Maintain a small,
 inspectable working-state vector for the active project, work kind, task shape,
@@ -200,26 +201,218 @@ Cingulate   -> where is current work diverging from those practices?
 This is the reliability path from remembered work to repeatable work:
 regressions become observable instead of being silently normalized.
 
-#### Productize the accepted continuity features
+#### Productize the accepted continuity foundation
 
 Complete these contracts before 1.0:
 
 - add a resumable Vault-to-AKASHA backfill with full retrieval citizenship;
-- store Hallway letters and shared state as typed AKASHA records;
-- define canonical, team, and personal spirits under OMEGA;
-- require consent from both participants for a personal-spirit relationship;
-- implement ANON lifecycle encryption and erasure;
-- support group-room spirits through approved chat transports.
+- store Hallway letters and shared state as typed AKASHA records.
+
+OMEGA organization topology, personal-spirit consent, ANON lifecycle privacy,
+and group-room chat transports remain accepted post-1.0 product work. They must
+not delay the supported personal-House release.
 
 The technical contracts live in
 [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md). The public value lives
 in [`PLANNED_FEATURES.md`](./PLANNED_FEATURES.md).
+
+### 0.10.x — integrated runtime before 1.0
+
+The accepted runtime sequence corrects two tempting mistakes:
+
+- build a thin interface first, not the entire final GUI first;
+- split GIGA into pre-transport integrity work and post-transport embodiment.
+
+The dependency spine is:
+
+```text
+contracts
+  -> thin Godot UI
+  -> GIGA integrity + Cingulate skeleton
+  -> PostgreSQL outbox + NATS mailbox pilot
+  -> dynamic models + headless room embodiment
+  -> bounded Prolog/Datalog derivation
+  -> complete Cingulate enforcement
+  -> selected Lean-backed lesson obligations
+```
+
+The complete logical contracts and acceptance gates live in
+[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md). The phases below remain
+in the roadmap so the dependency order cannot disappear behind a design link.
+
+#### Phase 0 — lock the Host and runtime contracts
+
+Specify and version these surfaces before implementation:
+
+- Athanor Host commands and events;
+- `ModelSelector`, `ExecutionTarget`, and `SessionLifecycle`;
+- `cold_worker`, `familiar`, `room_reflection`, and `room_dialogue`;
+- message, event, correlation, causation, reply, and idempotency identifiers;
+- PostgreSQL outbox records and delivery receipts;
+- refinement transactions with baseline, expected outcome, observed outcome,
+  and proof receipt;
+- optional formal-lesson references and production bindings.
+
+The Godot client must talk only to the Host over WebSocket. It must not connect
+directly to PostgreSQL, NATS, Ollama, a hosted provider, or OMP internals.
+
+**Exit gate:** versioned schemas separate current from planned capability,
+identity never derives from a working directory, and one synthetic command can
+be traced from request through a typed result without backend bypass.
+
+#### Phase 1 — build the thin Godot UI
+
+Expose the system that already exists:
+
+- Houses, rooms, governing spirits, and active sessions;
+- chat through canonical Host commands and events;
+- recall sources and authority state;
+- Vault, AKASHA, GIGA, model, queue, and delivery health;
+- Hippocampus and Curio review;
+- Striatum's active lessons and activation reasons;
+- event, correlation, retry, and dead-letter inspection;
+- a terminal escape hatch.
+
+Do not build the full avatar, animation, voice, room-package, or marketplace
+surface yet. Evolve the UI after every backend phase instead of freezing the
+wrong runtime underneath a finished shell.
+
+**Exit gate:** one room can chat, inspect recall and review state, observe
+health, and trace one command end to end through the Host.
+
+#### Phase 2 — strengthen GIGA integrity before distribution
+
+Separate durable evidence context, one-invocation model context, and model
+residency. Every cold GIGA job starts with fresh inference state over an
+explicit evidence snapshot. A warm model keeps weights, not hidden conversation.
+
+Replace incidental buffer boundaries with completed-interaction anchors and
+deterministic bounded overlapping windows from the trusted ledger. Reconcile
+overlap through stable source IDs and hashes. Hydrate exact sources, authority
+neighbors, reviewed precedents, and applicable lesson metadata before inference.
+
+Preserve dismissed-candidate fingerprints and reasons so recurrence is visible
+instead of recreating the same proposal as apparently new. Stronger evidence,
+a changed baseline, or repeated recurrence may return it to review under
+explicit policy; recurrence cannot self-promote a dismissal or Curio.
+
+Add the refinement-transaction schema:
+
+```text
+artifact kind
+create | update | supersede | retire | rollback
+target and baseline version
+scope, triggers, and evidence
+expected outcome
+proof requirement
+observed outcome
+proof receipt
+review state
+```
+
+GIGA proposes. The relevant authority reviews. Cingulate receives the skeleton
+needed to close observed outcomes later. Prediction must never be stored as if
+it were observation.
+
+**Exit gate:** clean-session tests prove no inference history crosses jobs;
+overlapping evidence is source-stable; stale baselines reject safely; expected
+and observed outcomes remain distinct and visible.
+
+#### Phase 3 — add a PostgreSQL outbox and one NATS JetStream pilot
+
+PostgreSQL remains authority. JetStream owns delivery progress and wake-up only.
+
+The publishing transaction writes the domain event and outbox row together. A
+relay publishes an opaque record ID with stable deduplication metadata. The
+consumer reloads and authorizes the PostgreSQL record, commits an idempotent
+result, then acknowledges delivery. Raw private prose does not enter NATS.
+
+The first slice is one durable cross-room mailbox, not a rewrite of the working
+GIGA PostgreSQL queue.
+
+**Exit gate:** prove restart survival, duplicate safety, room and subject
+permissions, payload privacy, expiry, bounded retries, dead-letter behavior,
+dormant-room wake, PostgreSQL recovery, and UI visibility through acknowledgement.
+
+#### Phase 4 — route dynamic models into explicit execution targets
+
+Choose model body, execution target, and session lifecycle independently:
+
+```text
+local | provider | auto
+cold worker | familiar | room reflection | room dialogue
+ephemeral | reuse | wake
+release | keep warm | pin
+```
+
+Add an explicit headless room mode with House, room, spirit, operator, session,
+provider, privacy, context-source, side-effect, tool, and transport bindings.
+Discord and other interactive sidecars stay disabled unless intentionally
+requested. Inheriting a room directory is never sufficient to load its identity
+or start its transports.
+
+**Exit gate:** local and hosted model routes can execute the same bounded job;
+model changes do not rename spirits; reflection does not consume a live chat
+tail; dialogue addresses a visible live session; cross-room callers cannot
+mutate a sibling room directly.
+
+#### Phase 5 — derive bounded rules with Prolog or Datalog
+
+Project a finite authorized fact set from PostgreSQL into a versioned,
+stratified Datalog-like ruleset. Return conclusions with rule IDs, supporting
+fact IDs, and derivation traces. Do not create a second mutable truth store.
+
+Start with one real bounded problem: lesson eligibility or context selection.
+Avoid unrestricted recursion, dynamic assertion as authority, cut-dependent
+semantics, and unbounded search.
+
+**Exit gate:** the pilot is deterministic, resource-bounded, explainable, and
+matches the existing trusted behavior on a shared case corpus.
+
+#### Phase 6 — complete Cingulate enforcement
+
+Consume authoritative lessons, derived obligations, task events, refinement
+transactions, and proof receipts. Distinguish nudges, regression warnings, and
+hard gates. Only an authoritative invariant with a deterministic proof
+requirement may hard-gate work.
+
+Every conflict names the applicable rule, expected evidence, observed action,
+resolution or authorized override, and final observed outcome.
+
+**Exit gate:** conflicts and overrides are attributable; missing proof cannot be
+silently accepted; preferences never become accidental hard policy; refinement
+transactions close against real observed outcomes.
+
+#### Phase 7 — extend selected lessons with Lean obligations
+
+Formalization is optional and belongs only to stable lessons with expressible
+invariants. Preserve the human lesson, activation anatomy, and proof pattern,
+then attach a versioned Lean module, theorem, input schema, evidence adapter,
+proof artifact, and implementation binding.
+
+An LLM assertion is never a proof receipt. A proof of a detached Lean mirror is
+not proof that Rust, TypeScript, SQL, or an adapter implements it. Bind the
+formal model through shared vectors, a common transition corpus, an actual
+input/output checker, or verified extraction.
+
+The first candidate is Striatum stage replacement: a non-empty declared stage
+replaces the prior stage set; an empty declaration retains it.
+
+**Exit gate:** one approved lesson obligation is checked against actual
+production behavior end to end, with specification, implementation, checker,
+inputs, and proof artifact recorded.
+
+Phases 5 through 7 are dependency-ordered research and reliability work, not
+automatic 1.0 blockers. The 1.0 gate remains a supported UI, installation,
+upgrade, recovery, and stable-contract release.
 
 ### 1.0.0 — supported ordinary-user installation
 
 The first stable product contract includes:
 
 - a small trusted native bootstrapper
+- a thin supported Godot client over the versioned Athanor Host
+- stable command/event, invocation, identity, and delivery contracts
 - AI-guided contextual setup after the bootstrapper establishes a foothold
 - explicit provider authentication
 - Vault or AKASHA selection
@@ -237,12 +430,12 @@ the substrate before The Athanor can help them.
 
 ### After 1.0 — broader product surface
 
-#### Thin GUI
+#### UI deepening
 
-Provide a familiar chat interface that controls a harness through canonical
-commands and structured events. It should expose rooms, active spirits, tools,
-permissions, recall, and health without replacing the harness or scraping ANSI
-terminal output. Keep an explicit terminal escape hatch.
+After the thin supported client proves the Host contract, deepen it with richer
+visualization, accessibility, multi-room operations, and creator surfaces.
+Keep the terminal escape hatch and the rule that clients use canonical commands
+and events rather than scraping ANSI output or bypassing the Host.
 
 #### Embodiment and creator ecosystem
 
@@ -275,6 +468,14 @@ operator may choose House as the coordinating PostgreSQL authority. Git remains
 authoritative for code, and human-readable tools such as Obsidian may remain
 interfaces or synchronized projections.
 
+#### Additional privacy and shared-room profiles
+
+After the personal-House release, implement ANON lifecycle encryption and
+erasure, group-room spirits through approved chat transports, and the
+relationship-consent contract for personal spirits. These use the same Host,
+delivery, identity, and authority boundaries rather than creating parallel
+runtimes.
+
 #### Honest commercial boundary
 
 Self-hosting and the core may remain free while paid offerings provide painless
@@ -290,9 +491,10 @@ provider-portable.
 Core owns behavior. Adapters own runtime glue.
 
 ```text
-solarisael-house           -> canonical core
-solarisael-house-opencode  -> OpenCode adapter
-solarisael-house-omp       -> OMP adapter
+the-athanor                       -> canonical core and protocol contracts
+solarisael-house-opencode         -> OpenCode adapter
+solarisael-house-omp              -> OMP adapter
+solarisael-house-substrate        -> AKASHA runtime and PostgreSQL authority
 ```
 
 Do not let `.config` become the canonical source of truth again.
@@ -765,8 +967,14 @@ docs/progress.md
 docs/history/YYYY-MM-DD.md
 ```
 
-When future goals change, update:
+When future runtime goals or dependencies change, update:
 
 ```text
 docs/roadmap.md
+docs/RUNTIME_ARCHITECTURE.md
+docs/PLANNED_FEATURES.md
+docs/LIMITATIONS.md
 ```
+
+Update the root README only when the compressed public status or next-action
+spine changes.

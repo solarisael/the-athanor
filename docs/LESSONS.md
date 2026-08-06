@@ -117,7 +117,7 @@ Lesson retrieval is a task boundary, not an every-turn ritual. Refresh when the 
 
 ## Updating lessons
 
-`update_lesson` revises one coding or project lesson in place.
+`update_lesson` revises one coding, project, or writing lesson in place.
 
 The guard requires:
 
@@ -125,13 +125,13 @@ The guard requires:
 - the exact current title;
 - at least one explicit replacement field.
 
-Omitted fields remain unchanged, including formal negation links. The row ID remains stable. Use `clearNegationOf` only when deliberately removing a coding lesson's negation relationship.
+Omitted fields remain unchanged, including formal negation links. The row ID remains stable. Use `clearNegationOf` only when deliberately removing a coding or writing lesson's negation relationship.
 
-Update a lesson when its rule remains the same identity but wording, trigger, proof, scope, or project metadata changes.
+Update a lesson when its rule remains the same identity but wording, trigger, or typed metadata changes. Coding lessons accept voice, scope, project, proof pattern, and negation fields; project lessons accept project and proof-pattern fields; writing lessons accept voice, registers, example text, writers, and negation fields. Cross-store fields are refused rather than silently discarded.
 
 ## Deleting lessons
 
-`delete_lesson` permanently deletes exactly one coding or project lesson. It requires the numeric ID and exact current title.
+`delete_lesson` permanently deletes exactly one coding, project, or writing lesson. It requires the numeric ID and exact current title.
 
 Use deletion for an obsolete rule that should no longer remain recoverable in the active lesson store. For consolidation, update and verify the surviving lesson first, then delete the redundant row.
 

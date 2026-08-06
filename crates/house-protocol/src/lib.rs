@@ -62,6 +62,8 @@ pub struct RememberParams {
     #[serde(default)]
     pub voice: Option<String>,
     #[serde(default)]
+    pub register: Vec<String>,
+    #[serde(default)]
     pub scope: Option<String>,
     #[serde(default)]
     pub project: Option<String>,
@@ -903,6 +905,7 @@ impl TryFrom<RememberParams> for RememberRequest {
         if !kind.is_lesson()
             && (params.shape.is_some()
                 || params.voice.is_some()
+                || !params.register.is_empty()
                 || params.scope.is_some()
                 || params.project.is_some()
                 || params.proof_pattern.is_some()
@@ -965,6 +968,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                     backup: params.backup,
                     shape: params.shape,
                     voice: params.voice,
+                    register: params.register,
                     scope: params.scope,
                     project: params.project,
                     proof_pattern: params.proof_pattern,
@@ -3159,6 +3163,26 @@ mod tests {
     }
 
     #[test]
+    fn writing_register_round_trips_and_memory_refuses_it() {
+        let writing = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"kintsu","kind":"writing-lesson","title":"T","body":"B","register":[" fiction ","product-work","fiction"]}}"#,
+        )
+        .unwrap()
+        .remember_request()
+        .unwrap();
+        assert_eq!(writing.register(), &["fiction", "product-work"]);
+
+        let memory = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"kintsu","kind":"memory","title":"T","body":"B","register":["fiction"]}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            memory.remember_request(),
+            Err(ProtocolError::InvalidParams(_))
+        ));
+    }
+
+    #[test]
     fn supersedes_strings_are_positive_postgres_bigints_and_deduplicated() {
         let params = RememberParams {
             room: "lab".into(),
@@ -3174,6 +3198,7 @@ mod tests {
             scope: None,
             project: None,
             proof_pattern: None,
+            register: vec![],
             trigger_context: None,
             tags: vec![],
             backup: true,
@@ -3196,6 +3221,7 @@ mod tests {
             voice: None,
             scope: None,
             project: None,
+            register: vec![],
             proof_pattern: None,
             trigger_context: None,
             tags: vec![],
@@ -3219,6 +3245,7 @@ mod tests {
                 voice: None,
                 scope: None,
                 project: None,
+                register: vec![],
                 proof_pattern: None,
                 trigger_context: None,
                 tags: vec![],

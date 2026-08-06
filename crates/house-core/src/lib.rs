@@ -1038,6 +1038,7 @@ pub struct RememberLessonDetails {
     pub backup: bool,
     pub shape: Option<String>,
     pub voice: Option<String>,
+    pub register: Vec<String>,
     pub scope: Option<String>,
     pub project: Option<String>,
     pub proof_pattern: Option<String>,
@@ -1063,6 +1064,7 @@ pub struct RememberRequest {
     backup: bool,
     shape: Option<String>,
     voice: Option<String>,
+    register: Vec<String>,
     scope: Option<String>,
     project: Option<String>,
     proof_pattern: Option<String>,
@@ -1117,6 +1119,7 @@ impl RememberRequest {
             backup,
             shape,
             voice,
+            register,
             scope,
             project,
             proof_pattern,
@@ -1138,6 +1141,7 @@ impl RememberRequest {
                     details.backup,
                     None,
                     None,
+                    Vec::new(),
                     None,
                     None,
                     None,
@@ -1160,6 +1164,7 @@ impl RememberRequest {
                     details.backup,
                     details.shape,
                     details.voice,
+                    details.register,
                     details.scope,
                     details.project,
                     details.proof_pattern,
@@ -1171,6 +1176,7 @@ impl RememberRequest {
         if threads.len() > MAX_ARRAY_VALUES
             || continues.len() > MAX_ARRAY_VALUES
             || supersedes.len() > MAX_ARRAY_VALUES
+            || register.len() > MAX_ARRAY_VALUES
             || tags.len() > MAX_ARRAY_VALUES
         {
             return Err(DomainError::TooManyValues {
@@ -1194,19 +1200,39 @@ impl RememberRequest {
             });
         }
         if matches!(kind, RememberKind::AudioLesson)
-            && (voice.is_some() || scope.is_some() || project.is_some() || proof_pattern.is_some())
+            && (voice.is_some()
+                || !register.is_empty()
+                || scope.is_some()
+                || project.is_some()
+                || proof_pattern.is_some())
         {
             return Err(DomainError::InvalidField {
-                field: "voice/scope/project/proof_pattern".into(),
+                field: "voice/register/scope/project/proof_pattern".into(),
                 kind: kind.as_str().into(),
             });
         }
-        if matches!(kind, RememberKind::ProjectLesson) && (voice.is_some() || scope.is_some()) {
+        if matches!(kind, RememberKind::ProjectLesson)
+            && (voice.is_some() || !register.is_empty() || scope.is_some())
+        {
             return Err(DomainError::InvalidField {
-                field: "voice/scope".into(),
+                field: "voice/register/scope".into(),
                 kind: kind.as_str().into(),
             });
         }
+        if matches!(kind, RememberKind::CodingLesson) && !register.is_empty() {
+            return Err(DomainError::InvalidField {
+                field: "register".into(),
+                kind: kind.as_str().into(),
+            });
+        }
+        let mut normalized_register = Vec::with_capacity(register.len());
+        for value in register {
+            let value = value.trim();
+            if !value.is_empty() && !normalized_register.iter().any(|entry| entry == value) {
+                normalized_register.push(value.to_owned());
+            }
+        }
+        let register = normalized_register;
         let mut normalized_threads = Vec::with_capacity(threads.len());
         for thread in threads {
             let thread = thread.trim();
@@ -1254,6 +1280,7 @@ impl RememberRequest {
             backup,
             shape,
             voice,
+            register,
             scope,
             project,
             proof_pattern,
@@ -1294,6 +1321,9 @@ impl RememberRequest {
     }
     pub fn voice(&self) -> Option<&str> {
         self.voice.as_deref()
+    }
+    pub fn register(&self) -> &[String] {
+        &self.register
     }
     pub fn scope(&self) -> Option<&str> {
         self.scope.as_deref()

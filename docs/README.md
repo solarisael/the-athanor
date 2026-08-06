@@ -16,6 +16,9 @@ Start with the root [`README.md`](../README.md) for the hook, the status line, a
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — components, contracts, data flow, authority, and repository ownership
 - [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) — accepted Host, Godot UI, GIGA integrity, NATS delivery, dynamic embodiment, derivation, Cingulate, and Lean target
+- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — bounded e-graphs, Z3, SyGuS, Wasmtime, proof feedback, and governed self-improvement
+- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) — visual-token inheritance, in-world Control UI, GPU-particle constellations, companion bodies, and alchemical profiles
+- [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) — companion room sovereignty, companion-authored models, and typed signed marketplace
 - [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — The Athanor product, House domain, profiles, capabilities, governance, privacy, and naming cutover
 - [`RETRIEVAL.md`](./RETRIEVAL.md) — recall lanes, automatic retrieval, authority, corrections, and archival
 - [`LESSONS.md`](./LESSONS.md) — typed lesson stores, fields, scopes, imports, updates, and deletion

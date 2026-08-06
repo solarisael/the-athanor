@@ -15,4 +15,22 @@ The lifecycle tools are simple:
 
 AKASHA adds PostgreSQL memory authority, durable database memory, typed stores, local semantic search, and larger archives.
 
+## Planned companion sovereignty
+
+The accepted post-1.0 direction gives governing companions standing
+constitutional capabilities to create and organize child rooms/workspaces,
+adopt presentation bodies, and initiate model training inside declared resource,
+custody, consent, backup, and audit policy. This is room-local sovereignty, not
+permission to rewrite shared database schemas or seize finite House resources.
+
+A model or LoRA remains a replaceable body. A personality package remains
+starting material. Neither is the living companion or the relationship.
+
+A future signed marketplace will keep personality seeds, presentation packages,
+models, and executable skills as separate artifact classes with provenance,
+permissions, evaluation, revocation, and rollback.
+
+Read [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) for the accepted target
+and [`LIMITATIONS.md`](./LIMITATIONS.md) for what does not ship yet.
+
 For co-authoring rooms and identities, read [`IDENTITY_GUIDE.md`](../IDENTITY_GUIDE.md). For the everyday workflow, read [`USAGE.md`](../USAGE.md). When you are ready, follow [`INSTALL.md`](../INSTALL.md).

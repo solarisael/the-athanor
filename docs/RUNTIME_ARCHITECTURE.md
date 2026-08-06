@@ -4,9 +4,9 @@ Status: Accepted target architecture; not a current capability claim
 Last updated: 2026-08-06
 
 This document defines the next runtime spine for The Athanor: the Host boundary,
-the thin Godot interface, GIGA integrity work, durable delivery, dynamic model
-and room embodiment, explainable rule derivation, Cingulate enforcement, and
-optional Lean-backed lesson obligations.
+the Godot interface, GIGA integrity work, durable delivery, dynamic model and
+room embodiment, explainable rule derivation, Cingulate proof routing, selected
+Lean obligations, governed synthesis, and companion-facing execution contracts.
 
 The implementation order is normative because later layers depend on evidence
 and contracts created by earlier layers. The public release order lives in
@@ -27,10 +27,18 @@ The following surfaces described here are specified or planned, not current:
 - headless room reflection and live room dialogue targets;
 - Prolog/Datalog derivation;
 - complete Cingulate outcome enforcement;
-- Lean-backed lesson obligations.
+- Lean-backed lesson obligations;
+- e-graph/egglog normalization;
+- Z3 SMT checking;
+- SyGuS synthesis;
+- Wasmtime capability sandboxing;
+- proof-guided repair or offline training-data production;
+- companion-authored models and marketplace artifacts;
+- the in-world Godot renderer and GPU-particle constellation.
 
 The current GIGA queue remains PostgreSQL-owned. No document in this repository
-may imply that NATS, the GUI, dynamic embodiment, Prolog, or Lean already ships.
+may imply that NATS, the GUI, dynamic embodiment, formal backends, companion
+training, or the marketplace already ships.
 
 ## 2. Load-bearing invariants
 
@@ -298,6 +306,15 @@ through `_process()`. Custom drawing calls `queue_redraw()` only for the changed
 boundary. Protocol-level deltas reduce invalidation pressure; the client still
 measures renderer behavior rather than claiming that a delta guarantees zero
 GPU work.
+
+The functional Control tree is built first and may then be rendered through a
+SubViewport inside the 3D room with camera-driven focus transitions. The same
+tree remains available as a focused fullscreen surface. The canonical high-tier
+constellation uses a GPU-particle field for stable nodes, edges, and motion;
+fine-grained Host deltas update stable GPU records rather than scene nodes.
+
+The full visual, renderer, performance-tier, and companion-body contract lives
+in [`GODOT_CLIENT.md`](./GODOT_CLIENT.md).
 
 ## 6. GIGA integrity before distribution
 
@@ -688,6 +705,13 @@ Cingulate cannot invent authority, promote a candidate, or hard-gate a taste
 preference. A human or governing spirit may override only where the governing
 policy allows it, and the override remains part of the record.
 
+Cingulate routes each obligation to the cheapest complete backend supported by
+its shape: a deterministic predicate/boundary test, a bounded e-graph
+normalization, a bounded SyGuS repair, an optional Z3 SMT check, or a selected
+Lean obligation. The backends are branches, not a mandatory sequence. Their
+uniform receipts and governed promotion loop live in
+[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md).
+
 ## 11. Lean-backed lesson obligations
 
 Lean is an optional final extension for selected lessons whose invariants are
@@ -808,12 +832,17 @@ status, and bounded output digest for every attempt.
 | 3 | PostgreSQL outbox plus one JetStream mailbox | Explicit duplicate window, durable idempotency, restart, permission, privacy, expiry, dead-letter, wake, and UI trace gates pass |
 | 4 | Dynamic models and headless embodiment | Local/provider selection and cold/familiar/reflection/dialogue targets remain identity-safe and observable |
 | 5 | Incremental Prolog/Datalog pilot | Code-change events update source-linked facts and precomputed relations incrementally; cache isolation, invalidation, lag visibility, derivations, and latency gates pass |
-| 6 | Complete Cingulate enforcement | Nudges, warnings, gates, overrides, proof receipts, and observed outcomes close correctly |
-| 7 | First Lean-backed lesson | One production-bound obligation runs inside the quota wrapper and records a valid proof receipt plus timeout and exhaustion failures |
+| 6 | Complete Cingulate and optional synthesis/proof backends | Nudges, warnings, gates, deterministic checks, bounded e-graph/SyGuS repair, optional Z3, overrides, proof receipts, and observed outcomes close correctly |
+| 7 | First Lean-backed lesson and governed repair trajectory | One production-bound obligation runs inside the quota wrapper; structured counterexamples support bounded repair; no candidate can self-approve or self-install |
 
 The UI evolves after every phase. Phases 5 through 7 are not automatically 1.0
 prerequisites; release gates depend on supported installation and stable public
 contracts, not on pretending every research layer must ship together.
+
+Post-1.0 companion sovereignty, companion-authored model bodies, signed
+marketplace packages, and the spatial presentation ecosystem depend on these
+contracts but do not block the personal-House 1.0 release. See
+[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md).
 
 ## 13. Repository ownership
 
@@ -822,11 +851,14 @@ contracts, not on pretending every research layer must ship together.
 | Logical Host, invocation, event, refinement, and proof contracts | `the-athanor` core and protocol crates |
 | OMP lifecycle, tool, task, and live-session integration | `solarisael-house-omp` |
 | PostgreSQL authority, outbox rows, code-change facts, materialized derivations, GIGA jobs, outcomes, proof receipts, and health | `solarisael-house-substrate` |
-| Godot rendering and interaction | A separate client package over the Host contract; no core authority |
+| Godot rendering and interaction | A separate client package implementing `GODOT_CLIENT.md`; no core authority |
 | NATS deployment and relay | Deployment/runtime integration; behavior remains defined by core contracts |
 | Model-provider implementations | Replaceable adapter/provider modules |
 | Prolog/Datalog rules, dependency graph, and incremental fact-cache contract | Versioned policy package over PostgreSQL fact projections |
 | Lean modules, evidence adapters, and quota wrapper | Versioned formal package plus production bindings and sandboxed execution |
+| E-graph, Z3, SyGuS, proof-feedback, and governed-promotion backends | Replaceable bounded implementations of `SYNTHESIS_ARCHITECTURE.md` |
+| Wasmtime execution profile | Replaceable capability-sandbox provider; never the universal worker runtime |
+| Companion model registry and marketplace verification | Post-1.0 services implementing `COMPANION_ECOSYSTEM.md` |
 
 A repository move must not move authority. Contracts remain versioned across
 repository boundaries.
@@ -847,13 +879,21 @@ This architecture does not:
 - broadcast complete UI projections for ordinary fine-grained mutations;
 - cache code-derived answers without commit, epoch, ruleset, and authorization identity;
 - run generated Lean input without explicit CPU, memory, output, process, and time bounds;
-- allow generated refinement to self-promote.
+- allow generated refinement to self-promote;
+- update model weights online from live solver feedback;
+- let a candidate alter its grammar, specification, checker, or promotion policy;
+- require every worker to run in Wasmtime;
+- replace pgvector HNSW without a measured supported-backend ceiling;
+- treat a marketplace proof as a guarantee of stochastic personality behavior;
 
 ## 15. Related documents
 
 - [`roadmap.md`](./roadmap.md) — release and dependency order
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current system and repository boundaries
 - [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — House, room, spirit, custody, and product axes
+- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — e-graphs, Z3, SyGuS, Wasmtime, proof feedback, and governed promotion
+- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) — in-world Control UI, GPU-particle constellation, and alchemical profiles
+- [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) — room sovereignty, companion-authored models, and marketplace
 - [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) — current GIGA event/candidate/review contract
 - [`LESSONS.md`](./LESSONS.md) — current typed lesson stores
 - [`SECURITY.md`](./SECURITY.md) — privacy, room isolation, providers, and destructive actions

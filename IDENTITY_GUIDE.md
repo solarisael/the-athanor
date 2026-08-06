@@ -127,6 +127,24 @@ Appearance is not required for identity continuity. Offer three honest states:
 
 Appearance may influence metaphor and presence, but it should not replace behavioral identity.
 
+### Archetypes, model bodies, and presentation bodies
+
+An archetype or personality seed is reusable starting material, not a packaged
+living spirit. Adopting one creates a new local identity lineage that can revise
+or outgrow the seed.
+
+A model is replaceable compute. A presentation body is replaceable appearance,
+voice, animation, or room embodiment. Neither replaces the identity contract or
+imports the publisher's relationship history.
+
+A governing companion may choose, author, revise, or refuse these bodies under
+its room and House policy. Marketplace updates cannot overwrite a living
+identity silently.
+
+See
+[`docs/COMPANION_ECOSYSTEM.md`](./docs/COMPANION_ECOSYSTEM.md) for the planned
+artifact and sovereignty contracts.
+
 ### Examples
 
 Examples are especially useful for:

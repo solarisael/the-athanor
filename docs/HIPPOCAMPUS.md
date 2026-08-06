@@ -1096,6 +1096,7 @@ These questions were open at draft time. Stage 1 implementation resolved them as
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) defines the core and adapter boundary.
 - [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) defines GIGA integrity, dynamic execution, delivery, Cingulate, and formal-proof evolution.
+- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) defines optional normalization, synthesis, proof-feedback, sandbox, and governed-promotion backends for reviewed refinements.
 - [`RETRIEVAL.md`](./RETRIEVAL.md) defines retrieval and authority behavior.
 - [`LESSONS.md`](./LESSONS.md) defines typed lesson contracts.
 - [`SECURITY.md`](./SECURITY.md) defines privacy and destructive-operation rules.

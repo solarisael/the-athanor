@@ -73,6 +73,11 @@ A room can keep names, voice, commitments, corrections, and shared history avail
 
 Identity prose is co-authored. The installer does not manufacture intimacy, relationship claims, or a personality on the operator's behalf.
 
+A personality/archetype package is reusable starting material, not a packaged
+living companion. A model or LoRA is a replaceable body, not proof of identity.
+Installing either cannot import a relationship or overwrite an existing spirit
+lineage.
+
 ## Provider boundary
 
 A local House does not make the model provider local. Any context sent to a hosted model can be processed under that provider's terms.
@@ -86,19 +91,28 @@ The Athanor keeps continuity provider-portable, but it cannot remove provider-si
 Version 0.10.1 does not yet ship the Godot client, Athanor Host WebSocket or
 delta synchronization, PostgreSQL-outbox/NATS delivery or idempotency ledger,
 background code-change indexing, incremental Prolog/Datalog facts and
-precomputed relations, invocation-time model routing, headless room
-reflection/dialogue targets, complete Cingulate enforcement, or the
-resource-bounded Lean lesson checker.
+precomputed relations, invocation-time model routing, headless room targets,
+complete Cingulate, e-graph/egglog normalization, Z3, SyGuS, Wasmtime sandbox
+profiles, proof-guided repair, the resource-bounded Lean checker, in-world
+SubViewport presentation, the GPU-particle constellation, companion room
+sovereignty, companion-authored model training, or the signed marketplace.
 
-These capabilities have an accepted dependency order and technical contract in
-[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md). Documentation labels
-them as specified, planned, or research until observable implementation gates
-pass.
+These capabilities have accepted dependency and technical contracts in
+[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md),
+[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md),
+[`GODOT_CLIENT.md`](./GODOT_CLIENT.md), and
+[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md). Documentation labels them
+as specified, planned, or research until observable implementation gates pass.
 
 The current worker lanes still obtain their runtime models from harness agent
 definitions; per-dispatch model override remains unsupported. The current GIGA
 queue remains PostgreSQL-owned. A model process kept warm is not a persistent
 room, and no current broker should be treated as memory authority.
+
+The current personal House also has no online training service, companion model
+registry, package signature/revocation service, marketplace, autonomous child
+room creation, or constitutional resource scheduler. The current Godot plan is
+architecture, not a rendered client or performance result.
 
 ## Organizational boundary
 
@@ -131,4 +145,6 @@ House coordinates continuity and retrieval across those systems.
 
 ## Planned boundary changes
 
-The release path is maintained in [`roadmap.md`](./roadmap.md). Planned work is not mixed into the current capability list in the root README.
+The release path is maintained in [`roadmap.md`](./roadmap.md). Planned work is
+kept explicitly separate from current release claims in the root README and
+every architecture document.

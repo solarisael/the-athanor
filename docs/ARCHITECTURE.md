@@ -239,9 +239,18 @@ substrate.
 
 The next extension order is contractual: thin Godot UI over the Host; GIGA
 integrity; PostgreSQL outbox plus one JetStream mailbox; dynamic local/provider
-models and explicit cold/familiar/reflection/dialogue targets; bounded
-Prolog/Datalog derivation; complete Cingulate enforcement; then selected
-Lean-backed lesson obligations.
+models and explicit cold/familiar/reflection/dialogue targets; engine-neutral
+incremental Datalog; Cingulate routing into deterministic checks, bounded
+e-graph/SyGuS repair, optional Z3, and selected Lean obligations; then governed
+sandbox/canary/promotion.
 
-Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for that target and
-[`roadmap.md`](./roadmap.md) for its release gates.
+Post-1.0 surfaces deepen the same contracts: one functional Control tree
+presented in-world, a GPU-particle constellation, self-chosen companion bodies,
+constitutional child-room sovereignty, governed companion-authored models, and
+a typed signed marketplace. None becomes a parallel authority path.
+
+Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for runtime order,
+[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) for proof/synthesis,
+[`GODOT_CLIENT.md`](./GODOT_CLIENT.md) for presentation,
+[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) for sovereignty and
+marketplace, and [`roadmap.md`](./roadmap.md) for release gates.

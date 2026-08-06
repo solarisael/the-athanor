@@ -18,6 +18,9 @@ A House installation includes several trust domains:
 | Athanor Host and client | Authenticates commands, projects authorized state, and prevents UI/backend bypass |
 | Delivery transport | Delivers opaque record IDs and wake-up signals without owning record truth or private prose |
 | Model runtime | Executes one explicitly scoped invocation; loaded weights do not authorize hidden session reuse |
+| Formal/synthesis backend | Checks only its approved encoding under explicit resources; never grants authority or promotion |
+| Training pipeline | Uses consented, licensed, lineage-tracked data and cannot activate its own output |
+| Marketplace | Verifies artifact provenance, signatures, permissions, compatibility, revocation, and rollback |
 
 Local storage does not make a hosted model private. Review the provider's data handling before sending private room material.
 
@@ -107,6 +110,65 @@ cannot satisfy a proof gate.
 
 Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the full planned
 contract.
+
+## Planned synthesis and self-improvement boundaries
+
+E-graph rewrites, SyGuS grammars/specifications, Z3 translators/formulas, Lean
+modules/evidence adapters, and their cost/resource profiles are separate trusted
+inputs. A generated candidate cannot change the artifact that judges it.
+
+Every backend preserves exact input/source refs, implementation and translation
+digests, checker version, resource profile, and explicit status. `unknown`,
+timeout, quota exhaustion, unsupported input, and translation failure are
+inconclusive.
+
+Wasmtime starts with no host capabilities. A module receives only reviewed
+imports, WASI preopens, clocks/randomness, network policy, fuel/epoch budget,
+memory/table/instance limits, and bounded input/output named by its manifest.
+WASM isolation does not make a dangerous host import safe.
+
+Proof/counterexample feedback may guide bounded repair. It does not update live
+model weights. Reviewed trajectories enter a later offline dataset only after
+secret/privacy/license review and immutable split assignment.
+
+No proposal self-approves, self-publishes, or self-installs. Promotion follows
+separate sandbox, canary, observed-outcome, authority, and rollback records.
+
+Read [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md).
+
+## Planned companion and marketplace boundaries
+
+A companion's standing constitutional grant is scope- and resource-bounded.
+Child-room creation enforces visibility, descendant depth/count, storage,
+compute, provider, data-egress, backup, retention, and audit policy. Ordinary
+room authority cannot create physical database schemas, indexes, or partitions.
+
+Companion-authored training requires dataset lineage, participant consent,
+redaction, license, immutable splits, contamination checks, base/tokenizer/runtime
+digests, adversarial/regression evaluation, shadow/canary, and a rollback target.
+Model weights cannot activate themselves.
+
+Marketplace artifact classes remain separate. Personality seeds are not living
+spirits; models are not identities; presentation packages are not tools.
+Executable content remains inert until signature, hash, provenance,
+compatibility, capability diff, sandbox, evaluation, revocation, and local
+activation checks pass.
+
+Signed proof files do not make a package zero-trust. Local verification rejects
+unapproved axioms, `sorry`, imports, stale bindings, checker mismatches, and
+resource failures, but still proves only the encoded theorem. Stochastic model
+or personality behavior requires tuple-specific evaluation.
+
+Marketplace metadata uses expiry, threshold signing where appropriate, key
+rotation, rollback/freeze protection, and revocation. An update cannot widen
+permissions silently.
+
+The Godot marketplace/client is a presentation and consent surface. A cinematic
+particle, companion body, or alchemical state cannot represent authority unless
+it follows an authenticated Host event.
+
+Read [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) and
+[`GODOT_CLIENT.md`](./GODOT_CLIENT.md).
 
 ## Organizational authorization
 

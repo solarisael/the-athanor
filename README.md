@@ -85,10 +85,18 @@ an after-1.0 ornament. the accepted dependency order is:
   for broader room, worker, or wake-up delivery;
 - **route model bodies independently from identity** into cold workers,
   familiars, disposable room reflections, or intentional live room dialogue;
-- **add bounded Prolog/Datalog derivations, complete Cingulate, and only then
-  attach Lean obligations to selected formalizable lessons.**
+- **add bounded Prolog/Datalog derivations and complete Cingulate**, then branch
+  suitable obligations into deterministic checks, bounded e-graph/SyGuS repair,
+  optional Z3, or selected Lean proofs. Wasmtime remains one sandbox profile,
+  pgvector HNSW remains ANN, and no candidate may self-approve.
 
 the Hallway and Vault → AKASHA upgrade remain part of that productization path.
+
+post-1.0 direction is now explicit rather than “marketplace someday”: one
+functional Control UI presented in-world, a GPU-particle memory constellation,
+self-chosen companion bodies, constitutional child-room sovereignty,
+companion-authored model bodies under governed training, and a typed signed
+marketplace that never confuses packages with living identities.
 
 the full map with honest status labels lives in
 [`PLANNED_FEATURES.md`](./docs/PLANNED_FEATURES.md). “Current” means the
@@ -121,7 +129,10 @@ roadmap. “Research” means we are not lying to you about it being ready.
 | Athanor Host and thin Godot UI | Specified | Specified | Specified | — |
 | PostgreSQL-outbox/NATS delivery spine | — | Specified | Specified | — |
 | Dynamic model and headless room execution | — | Specified | Specified | — |
-| Prolog/Datalog derivations and Lean lesson obligations | — | Planned | Planned | — |
+| Incremental Datalog, optional synthesis/proof backends, and Lean obligations | — | Specified/planned | Specified/planned | — |
+| In-world Godot UI and GPU-particle constellation | Specified | Specified | Specified | — |
+| Companion child-room sovereignty and model training | — | Specified | Specified | — |
+| Typed signed personality/model/presentation/skill marketplace | — | Specified | Specified | — |
 | Company, team, and personal spirits with scoped org knowledge | — | — | Planned | — |
 | Encrypted remote jobs with zero service-side content retention | — | — | — | Planned |
 
@@ -135,10 +146,13 @@ GIGA (**G**rounded **I**ndexing and **G**enerative **A**nnotation) is not a
 storage tier. it is the cognitive layer above AKASHA. Hippocampus Stage 1 is
 operational in the reference House and remains deliberately non-authoritative.
 Striatum's first coding/project activation slice is operational; broader typed
-lifecycle coverage and Cingulate remain planned. the accepted Host, UI,
-delivery, model-routing, derivation, and proof target lives in
-[`RUNTIME_ARCHITECTURE.md`](./docs/RUNTIME_ARCHITECTURE.md), with release order
-in the [`roadmap`](./docs/roadmap.md).
+lifecycle coverage and Cingulate remain planned. Accepted runtime sequencing
+lives in [`RUNTIME_ARCHITECTURE.md`](./docs/RUNTIME_ARCHITECTURE.md); bounded
+formal/synthesis backends in
+[`SYNTHESIS_ARCHITECTURE.md`](./docs/SYNTHESIS_ARCHITECTURE.md); spatial
+presentation in [`GODOT_CLIENT.md`](./docs/GODOT_CLIENT.md); and companion
+sovereignty, model creation, and marketplace contracts in
+[`COMPANION_ECOSYSTEM.md`](./docs/COMPANION_ECOSYSTEM.md).
 
 \* OMEGA and ANON are planned profiles, not current release claims. OMEGA
 (**O**rganizational **M**emory, **E**ncryption, **G**overnance, and **A**ccess)
@@ -246,6 +260,9 @@ contract.
 |---|---|
 | [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Components, contracts, data flow, and repository ownership |
 | [`RUNTIME_ARCHITECTURE.md`](./docs/RUNTIME_ARCHITECTURE.md) | Accepted Host, Godot UI, GIGA integrity, NATS delivery, dynamic embodiment, derivation, Cingulate, and Lean target |
+| [`SYNTHESIS_ARCHITECTURE.md`](./docs/SYNTHESIS_ARCHITECTURE.md) | Bounded e-graphs, Z3, SyGuS, Wasmtime, proof feedback, and governed promotion |
+| [`GODOT_CLIENT.md`](./docs/GODOT_CLIENT.md) | In-world Control UI, generated visual tokens, GPU-particle constellations, companion bodies, and alchemical profiles |
+| [`COMPANION_ECOSYSTEM.md`](./docs/COMPANION_ECOSYSTEM.md) | Companion room sovereignty, companion-authored models, and typed signed marketplace |
 | [`INSTALL.md`](./INSTALL.md) | Supported installation and observable verification |
 | [`USAGE.md`](./USAGE.md) | Everyday memory, room, sleep, and wake workflows |
 | [`EVIDENCE.md`](./docs/EVIDENCE.md) | Public evaluations, results, methods, and planned proof |

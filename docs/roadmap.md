@@ -428,9 +428,28 @@ requirement may hard-gate work.
 Every conflict names the applicable rule, expected evidence, observed action,
 resolution or authorized override, and final observed outcome.
 
+Route each obligation to the cheapest complete backend supported by its shape:
+
+- deterministic predicates and real-boundary tests first;
+- one bounded e-graph/egglog typed-IR research spike with reviewed rewrites and
+  explicit extraction cost;
+- optional Z3 for SMT-shaped constraints, preserving formulas, models or unsat
+  cores, translation and solver digests, and inconclusive `unknown`/timeout;
+- bounded SyGuS for approved small grammars/specifications, followed by trusted
+  code generation, typecheck, real-boundary proof, sandbox, and canary;
+- Lean only for selected formal obligations.
+
+Keep the incremental Datalog contract engine-neutral until identical fact-delta
+benchmarks justify an implementation. Wasmtime is one optional capability
+sandbox for compatible plugins/helpers, never the universal worker runtime.
+pgvector HNSW remains the ANN lane until a measured supported-backend ceiling.
+
 **Exit gate:** conflicts and overrides are attributable; missing proof cannot be
 silently accepted; preferences never become accidental hard policy; refinement
-transactions close against real observed outcomes.
+transactions close against real observed outcomes. Every optional backend is
+resource-bounded, preserves a uniform receipt, fails inconclusively rather than
+passing, and cannot modify its own specification, rewrites, grammar, checker, or
+promotion policy.
 
 #### Phase 7 — extend selected lessons with Lean obligations
 
@@ -455,11 +474,27 @@ timeout or exhaustion. Resource failure is inconclusive and cannot satisfy a
 gate. Reuse a proof receipt only when proof inputs, implementation binding,
 checker, and resource-profile digests match exactly.
 
+Use structured proof errors and counterexamples for a bounded repair loop:
+
+```text
+candidate -> checker -> counterexample -> bounded repair -> checker
+```
+
+Stop on proof, attempt/resource limit, or repeated candidate. Preserve reviewed
+trajectories as possible offline training data; do not update model weights
+online from live solver feedback.
+
+The governed promotion loop is observe, propose, optionally normalize/synthesize,
+derive obligations, check, sandbox, canary, record observed outcome, then let the
+governing authority promote, reject, or roll back. No candidate self-installs.
+
 **Exit gate:** one approved lesson obligation is checked against actual
 production behavior end to end inside the quota wrapper. The receipt records
 specification, implementation, checker, inputs, resource profile, wall/CPU/peak
 memory, and artifact digest; synthetic timeout, memory, CPU, and output
-exhaustion cases terminate safely and never pass.
+exhaustion cases terminate safely and never pass. A bounded repair trajectory
+produces reproducible counterexample feedback, cannot alter its judge, and
+requires separate promotion after canary evidence.
 
 Phases 5 through 7 are dependency-ordered research and reliability work, not
 automatic 1.0 blockers. The 1.0 gate remains a supported UI, installation,
@@ -489,19 +524,72 @@ the substrate before The Athanor can help them.
 
 ### After 1.0 — broader product surface
 
-#### UI deepening
+#### In-world Godot client
 
-After the thin supported client proves the Host contract, deepen it with richer
-visualization, accessibility, multi-room operations, and creator surfaces.
-Keep the terminal escape hatch and the rule that clients use canonical commands
-and events rather than scraping ANSI output or bypassing the Host.
+Build one functional 2D `Control` tree first, then present that same tree through
+SubViewport surfaces inside a 3D room with camera-driven focus transitions.
+Primary text/input remains available in a focused fullscreen mode. Godot receives
+only Host WebSocket deltas; it never connects directly to NATS, PostgreSQL, OMP,
+or a parallel gRPC control path.
+
+The Solarisael website remains visual canon. A versioned token manifest generates
+web tokens and Godot Theme/Environment/material resources. Map `mantle`,
+`vessel`, `aether`, `bones`, phase, shape, state, and tone into typed primitives
+and theme variations rather than one stringly class per custom element.
+
+The canonical high-tier memory constellation uses GPU particle records for
+stable nodes, edges, and motion, with explicit IDs, GPU/CPU picking maps,
+semantic LOD, delta-driven buffer updates, and measured renderer tiers. A custom
+compute/particle path may replace built-in `GPUParticles3D` when stable identity,
+edges, or picking require it.
+
+The cinematic reference profile uses maximal alchemical environments—SSAO/SSIL,
+fog, reflection, emission, LUTs, particles, and ceremonial camera work—while
+balanced, compatibility/web, accessibility, and focused-2D profiles preserve
+meaning on other hardware. Abstract procedural companion bodies remain
+self-chosen presentation packages.
+
+Detailed contract: [`GODOT_CLIENT.md`](./GODOT_CLIENT.md).
 
 #### Embodiment and creator ecosystem
 
-Keep spirit identity and memory separate from replaceable presentation bodies.
-Support avatar, expression, animation, voice, and room packages through a
-manifested and sandboxed asset format. Cosmetic assets and executable tool
-extensions require different trust and permission lanes.
+Keep spirit identity, model body, presentation body, and archetype separate.
+Support self-chosen companion bodies, expression, animation, voice, room assets,
+and creator packages through manifested permission lanes. Cosmetic assets,
+models, personality seeds, and executable tools have different trust,
+compatibility, consent, and revocation rules.
+
+#### Companion room sovereignty and model creation
+
+Grant governing companions constitutional authority to create and reorganize
+child rooms/workspaces inside standing scope, storage, compute, provider,
+custody, backup, audit, and descendant limits. Use fixed typed storage records
+and logical scope keys; ordinary room organization does not generate arbitrary
+database schemas or physical pgvector partitions.
+
+Allow companions to initiate and curate local model/LoRA training inside standing
+resource and data policy. Determinize repetitive work into code/rules/tools
+first. Training requires dataset lineage, consent, redaction, licenses,
+base/tokenizer/runtime digests, holdout/adversarial/regression evaluation,
+shadow/canary, model cards, rollback, revocation, and explicit registry
+promotion. A trained model is a replaceable body, not the companion or an
+automatic child spirit.
+
+#### Typed signed marketplace
+
+Build a sovereign ecosystem and signed marketplace, not an unimplemented
+“decentralized machine economy.” Separate personality/archetype seeds,
+presentation packages, model/LoRA packages, and executable/declarative skills.
+
+Every artifact carries hashes, signatures, provenance/attestation, license,
+dependencies, API/runtime/base-model compatibility, permissions, sandbox
+profile, evaluation/proof evidence, update policy, revocation, expiry, and
+rollback. A personality seed creates a new local lineage; it is not a packaged
+living relationship. Formal proof covers the approved theorem and production
+binding, not stochastic personality behavior or user intent.
+
+Detailed contract:
+[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md).
 
 #### OMEGA organizational governance
 
@@ -1031,8 +1119,13 @@ When future runtime goals or dependencies change, update:
 ```text
 docs/roadmap.md
 docs/RUNTIME_ARCHITECTURE.md
+docs/SYNTHESIS_ARCHITECTURE.md
+docs/GODOT_CLIENT.md
+docs/COMPANION_ECOSYSTEM.md
+docs/PRODUCT_ARCHITECTURE.md
 docs/PLANNED_FEATURES.md
 docs/LIMITATIONS.md
+docs/SECURITY.md
 ```
 
 Update the root README only when the compressed public status or next-action

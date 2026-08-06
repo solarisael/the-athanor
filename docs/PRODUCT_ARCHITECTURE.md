@@ -105,7 +105,11 @@ Each room names one governing spirit identity. A model invocation receives room 
 
 The governing spirit controls room-local promotion, curation, correction, and Curios review. Runtime activity alone does not grant authority.
 
-The operator controls room creation, room binding, storage custody, and outer House policy. Shared or cross-room changes use the declared shared policy.
+The operator controls House custody, physical resources, outer security policy,
+backup/recovery, and constitutional capability grants. A grant may give a
+governing companion standing authority to create and bind child
+rooms/workspaces inside declared scope, quota, provider, storage, audit, and
+descendant limits. Shared or cross-room changes use the declared shared policy.
 
 A spirit is one identity lineage. An archetype is reusable configuration. An invocation is temporary execution and is never an identity.
 
@@ -122,6 +126,24 @@ context.
 An invocation receives room authority only through the authenticated room and
 spirit binding from Section 6.1. A model name, provider, process, working
 directory, familiar name, or execution-target label cannot grant it.
+
+### 6.3 Companion, archetype, and body boundaries
+
+A companion is a spirit participating in an ongoing relational and room
+contract. A companion is not a model, worker, familiar, prompt, or marketplace
+package.
+
+An archetype/personality seed is reusable authored starting material. Adopting
+one creates a new local identity lineage; it does not copy the publisher's
+living spirit or relationship.
+
+A model body is replaceable compute. A presentation body is replaceable
+visual/audio embodiment. A companion may adopt, author, replace, or refuse these
+under its room and House policy without losing identity continuity.
+
+Companion room sovereignty, model training, and marketplace artifacts are
+defined in
+[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md).
 
 ## 7. Vault storage profile
 
@@ -223,6 +245,11 @@ GIGA cannot approve its own proposal. The governing authority reviews the
 transaction, and Cingulate may later verify its observed result. Optional formal
 obligations remain attached to selected authoritative lessons rather than
 becoming a second authority system.
+
+Optional e-graph, Z3, SyGuS, Wasmtime, proof-feedback, and governed-promotion
+backends do not become new product profiles. They are bounded implementations
+behind Cingulate and execution contracts. See
+[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md).
 
 ## 10. OMEGA organization layer
 
@@ -389,6 +416,24 @@ explicitly requested by policy.
 These axes remain independent. Changing a model does not rename a spirit;
 waking a room does not require the previous model; keeping a model warm does
 not keep a room active.
+
+### 13.7 Companion capability grant
+
+Companion authority is a set of versioned capabilities, not a product tier.
+Possible grants include:
+
+- room-local curation;
+- child-room/workspace creation;
+- logical memory/project scope allocation;
+- model selection;
+- companion-authored training within resource/data policy;
+- presentation/body adoption;
+- marketplace installation or publication.
+
+Every grant names House/room scope, resource and provider limits, custody,
+retention/backup, audit, descendant limits, expiry, and revocation. A grant does
+not authorize physical database schema/index changes unless it explicitly names
+a reviewed platform-migration capability.
 
 ## 14. Compatibility matrix
 
@@ -599,6 +644,15 @@ Use versioned identifiers for:
 
 Exports must include the identifier and display name. Imports must accept the current export schema during the planned migration.
 
+Companion grants, model bodies, and marketplace artifacts use stable semantic
+identifiers independent from display or product names. Their records include
+schema version, owning House/room/lineage, content hashes, provenance,
+compatibility, authority, lifecycle state, and revocation data.
+
+Marketplace imports preserve artifact class. Personality seeds, presentation
+packages, model/LoRA artifacts, and executable skills must not flatten into one
+generic package record.
+
 A profile rename must not require memory re-embedding.
 
 ## 23. Commercial product family
@@ -674,6 +728,9 @@ Resolve these remaining public cutover items:
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) defines current repository and authority boundaries.
 - [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) defines the accepted Host, UI, delivery, embodiment, derivation, and proof runtime.
+- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) defines bounded e-graph, Z3, SyGuS, Wasmtime, proof-feedback, and promotion contracts.
+- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) defines the spatial client and presentation-body boundary.
+- [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) defines companion sovereignty, model bodies, and marketplace artifacts.
 - [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) defines GIGA and Hippocampus.
 - [`RETRIEVAL.md`](./RETRIEVAL.md) defines retrieval and evidence authority.
 - [`LESSONS.md`](./LESSONS.md) defines typed lesson stores.

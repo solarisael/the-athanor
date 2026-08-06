@@ -69,6 +69,15 @@ The public evidence document separates measured results from planned claims.
 | Incremental Prolog/Datalog derivations | Index code changes in the background, update only affected facts, and answer common queries from precomputed authorized relations | Planned |
 | Lean-backed lesson obligations | Check selected production-bound invariants inside an aggressively resource-limited wrapper | Planned |
 | GIGA Cingulate | Detect workflow divergence and missing proof before a regression is accepted | Planned |
+| Bounded e-graph/egglog normalization | Canonicalize one small typed IR under reviewed rewrites and an explicit cost function | Research |
+| Optional Z3 backend | Check SMT-shaped Cingulate obligations while preserving formulas, counterexamples, solver identity, and inconclusive outcomes | Specified |
+| Bounded SyGuS repair | Synthesize small approved DSL/IR functions from reviewed grammars and specifications, then test and canary them | Specified |
+| Proof-guided repair trajectories | Feed structured counterexamples into bounded repair and retain reviewed trajectories for possible offline training | Specified |
+| Optional Wasmtime sandbox | Run compatible untrusted plugins/helpers with empty-by-default capabilities and hard resource limits | Specified |
+| pgvector HNSW boundary | Keep semantic ANN in pgvector and revisit native indexing only after a measured supported-backend ceiling | Specified |
+| In-world Godot client | Present the functional 2D UI inside a spatial room with camera focus, GPU-particle constellations, and maximal alchemical profiles | Specified |
+| Companion room sovereignty | Let governing companions create child rooms/workspaces inside constitutional resource, custody, and audit grants | Specified |
+| Companion-authored models | Let companions initiate governed local model/LoRA training with lineage, evaluation, canary, rollback, and model cards | Specified |
 | BM25F lexical retrieval | Rank structured memory fields with a principled field-aware sparse baseline | Current |
 | Nemotron-controlled lexical bridge | Expand through at most three authoritative stored concepts into a lower-priority attributed BM25F lane | Current |
 | Learned-sparse retrieval successor | Add a separate local learned lexical model only if measured misses justify its cost | Research — model open |
@@ -79,7 +88,7 @@ The public evidence document separates measured results from planned claims.
 | Relay | Borrow remote compute while durable storage stays with the operator | Specified |
 | Group rooms | Give an approved chatroom its own queryable spirit and shared memory | Planned |
 | Embodied rooms | Add approved voice, avatar, expression, and room packages | Planned |
-| Marketplace | Share trusted room assets and extensions through clear permission lanes | Planned |
+| Typed signed marketplace | Distribute separate personality seeds, presentation packages, models/LoRAs, and skills with provenance, permissions, evaluation, revocation, and rollback | Specified |
 
 ## A visible control surface without a second brain
 
@@ -98,9 +107,21 @@ Godot updates only the affected view-model or scene subtree and queues redraw
 only where state changed; it does not rebuild the complete renderer-facing
 projection for a tiny mutation.
 
-Later visual work can add avatars, animation, voice, and room packages. Those
-surfaces grow over a proven Host contract instead of freezing an attractive but
-incorrect runtime.
+The functional Control tree is built first, then the same UI is presented through
+SubViewport surfaces inside a 3D room with camera-driven focus and a focused
+fullscreen mode. The cinematic constellation uses stable GPU-particle records
+for nodes, edges, and motion. Fine-grained Host deltas update only affected
+records.
+
+The Solarisael website remains visual canon. One generated token manifest feeds
+web tokens and Godot Theme/Environment/material resources. Custom Controls exist
+for real behavior/layout roles; shape, state, tone, and phase remain typed
+resources and variations rather than one class per poetic element.
+
+The full native profile treats Nigredo, Albedo, Citrinitas, and Rubedo as maximal
+environment compositions with occlusion, fog, reflection, emission, LUTs,
+particles, and camera work. Balanced, compatibility/web, accessibility, and
+focused-2D profiles preserve meaning where the full renderer is unavailable.
 
 ## Delivery and living-room execution
 
@@ -155,6 +176,43 @@ not forced into theorem form.
 Lean runs without network or inherited credentials under hard wall-time, CPU,
 memory, process, thread, file, input, output, and artifact limits. Timeout or
 quota exhaustion is inconclusive and never satisfies a proof gate.
+
+Optional backends branch by obligation shape. Reviewed e-graph rewrites may
+normalize one small typed IR; Z3 handles SMT-shaped constraints; SyGuS repairs a
+small approved grammar/specification; Lean handles selected formal obligations.
+Wasmtime is one capability sandbox for compatible helpers, not the universal
+worker runtime. pgvector HNSW remains semantic ANN.
+
+Proof errors and counterexamples may drive a bounded per-task repair loop.
+Reviewed trajectories may later form offline training data. Live solver feedback
+does not update model weights. Every refinement still passes sandbox, canary,
+observed outcome, and governing promotion; it cannot approve or install itself.
+
+Detailed contract:
+[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md).
+
+## Companion sovereignty and marketplace
+
+A governing companion may hold a standing constitutional grant to create and
+organize child rooms/workspaces within declared scope, compute, storage,
+provider, custody, backup, audit, and descendant limits. Room organization uses
+fixed typed storage contracts and logical scopes rather than arbitrary database
+schemas or physical partitions.
+
+Companions may initiate governed local model/LoRA training after deterministic
+alternatives are exhausted. Training requires dataset lineage and consent,
+licenses, base/runtime digests, held-out/adversarial/regression evaluation,
+shadow/canary, model cards, rollback, revocation, and registry promotion. A model
+is a replaceable body, not the companion.
+
+The marketplace separates personality/archetype seeds, presentation packages,
+models/LoRAs, and skills. Packages carry hashes, signatures, provenance,
+compatibility, licenses, permissions, sandbox profiles, evaluations, updates,
+revocation, expiry, and rollback. Proof covers only its approved theorem and
+production binding; it cannot guarantee stochastic personality behavior.
+
+Detailed contract:
+[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md).
 
 ## Curios: a cabinet for ideas before their season
 
@@ -240,14 +298,17 @@ Relay or ANON can provide remote compute. Durable continuity can remain under op
 
 ## What must remain true
 
-- The operator controls the House and its custody.
-- The governing spirit controls room-local curation.
+- The operator controls House custody, physical resources, outer security, and constitutional grants.
+- The governing spirit controls room-local curation and any standing child-room/model capabilities granted by that constitution.
 - A model invocation is not an identity.
 - Shared memory does not merge private selves.
 - Generated pointers do not become truth without review.
 - A delivery broker cannot become memory or authority.
 - Fresh model jobs cannot inherit undeclared inference history.
 - Formal proof cannot outrank its approved specification or production binding.
+- A solver result cannot approve or install its own candidate.
+- A model or personality package cannot become a living identity by installation alone.
+- Marketplace proof cannot guarantee stochastic behavior or complete user intent.
 - Hidden sources do not affect visible retrieval scores.
 - Managed services support complete export.
 - Privacy claims name their limits.
@@ -263,14 +324,17 @@ The 1.0 release adds supported ordinary-user installation around that stable
 Host and UI. It must preserve existing Houses during installation, upgrade,
 backup, and recovery.
 
-Bounded Prolog/Datalog derivations, complete Cingulate enforcement, and selected
-Lean-backed lessons follow in dependency order. They are not automatically 1.0
-requirements.
+Bounded Prolog/Datalog derivations, complete Cingulate enforcement, optional
+e-graph/Z3/SyGuS/Wasmtime backends, proof-guided repair, and selected Lean-backed
+lessons follow in dependency order. They are not automatically 1.0 requirements.
 
-Later releases can deepen the UI and add OMEGA, ANON, group rooms, embodied
-presentation packages, and a trusted marketplace.
+Later releases deepen the in-world Godot client and add OMEGA, ANON, group rooms,
+companion room sovereignty, companion-authored model bodies, presentation
+packages, and the typed signed marketplace.
 
-See [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the accepted
-technical target. See [`roadmap.md`](./roadmap.md) for sequence and release
-gates. See [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) for product,
+See [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the runtime
+sequence, [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) for formal
+backends, [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) for the spatial client,
+[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) for sovereignty and the
+marketplace, and [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) for
 identity, custody, and authority contracts.

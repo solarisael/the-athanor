@@ -152,6 +152,50 @@ reinterpret an event as permission to perform a broader command.
 Mutation commands require an idempotency key. Replaying the same command must
 return the existing result or a stable conflict, not create a second write.
 
+### 4.1.1 Origami handoff vocabulary
+
+The accepted handoff vocabulary maps directly to versioned contracts:
+
+- **Origami** folds authoritative state into one recipient-specific capsule and
+  unfolds it through deterministic runtime tooling;
+- a **crease pattern** is the versioned schema and reconstruction contract;
+- a **Crane** is an active message or bounded handoff addressed to a current
+  worker, familiar, room, reviewer, or other authorized consumer;
+- a **Paper Boat** is a living continuity message addressed to the same room
+  across sleep;
+- a **Pawprint** is room-scoped provenance and integrity, never memory,
+  authority, identity proof by itself, or a covert model instruction.
+
+Origami extends the command/event envelope with bounded fields such as:
+
+```text
+crease_pattern
+handoff_kind
+payload_ref
+payload_digest
+source_context_digest
+lifecycle_state
+pawprint
+```
+
+Adapters fold and unfold stable contracts, exact source references, budgets,
+authorization, expiry, idempotency, and recipient context mechanically. Models
+receive ordinary legible context and judge only the remaining ambiguity. They do
+not decode hidden instructions or reconstruct contract fields from style.
+
+A Crane lifecycle is explicit and monotonic:
+
+```text
+folded -> outboxed -> in_flight -> landed -> unfolded -> returned
+                                      \-> torn
+```
+
+Redelivery may revisit transport states but cannot apply the represented
+operation twice. A related concurrent set of Cranes may be exposed as a
+**flight** only when it shares one durable parent intent and explicit child
+correlation IDs.
+
+
 ### 4.2 Model selector
 
 Model choice is one invocation axis. The logical `ModelSelector` includes:
@@ -508,10 +552,17 @@ Use distinct policies for:
 - **telemetry** — disposable health or UI refresh signals that may use Core NATS
   when loss is acceptable.
 
+Origami does not replace these transport policies. It names an addressed
+command, event, or mailbox handoff a **Crane** and binds that message to one
+crease pattern and Pawprint. A Paper Boat remains a distinct living payload in
+PostgreSQL; its wake notification is a Crane.
+
+
 Example subject families:
 
 ```text
 athanor.v1.house.<house>.room.<room>.inbox
+athanor.v1.house.<house>.room.<room>.boats.ready
 athanor.v1.house.<house>.giga.jobs
 athanor.v1.house.<house>.cingulate.proofs
 athanor.v1.house.<house>.runtime.models.events
@@ -581,6 +632,50 @@ Durable consumers use explicit acknowledgement, bounded `AckWait`, `MaxDeliver`,
 and `Backoff`. Exhausted delivery becomes a durable dead-letter result. Double
 acknowledgements and publisher deduplication improve delivery guarantees but do
 not replace the database transaction.
+
+### 7.6 Paper Boat wake flow
+
+Paper Boats participate in JetStream delivery without moving their authoritative
+bodies into the broker:
+
+1. `sleep` commits the complete living Boat, room/session provenance, content
+   digest, and outbox row in one PostgreSQL transaction.
+2. The relay publishes a `boat.ready` Crane with the immutable outbox ID as
+   `Nats-Msg-Id`.
+3. The Host or wake consumer verifies the crease pattern, Pawprint, recipient,
+   expiry, and bounded routing fields.
+4. The consumer reloads the Boat by ID from PostgreSQL and verifies its room,
+   digest, authority state, and freshness.
+5. The consumer commits one idempotent inbox/wake transition before
+   acknowledging JetStream.
+6. The next model receives the ordinary standalone letter, not the broker
+   envelope or a hidden instruction stream.
+
+The broker payload is bounded to identifiers and routing/integrity metadata:
+
+```text
+schema_version
+event_id
+boat_id
+recipient_room
+source_session_id
+crease_pattern
+created_at
+expires_at
+correlation_id
+causation_id
+payload_digest
+pawprint
+```
+
+Repeated delivery cannot inject the same Boat twice. A delayed older Crane
+cannot regress a room after a newer Boat was accepted. Wrong-room, missing,
+stale, superseded, malformed, digest-mismatched, or unknown-Pawprint deliveries
+fail closed and remain visible in delivery diagnostics.
+
+The operational rule is: **the Paper Boat remains in the authoritative archive;
+a Crane flies through NATS to say the Boat is waiting.**
+
 
 ## 8. Dynamic model and living-room embodiment
 
@@ -885,18 +980,38 @@ implementation binding, evidence inputs, checker version, and resource-profile
 digest all match. The wrapper records wall time, CPU time, peak memory, exit
 status, and bounded output digest for every attempt.
 
+### 11.4 Origami transition candidates
+
+After the first lesson proof establishes the production-binding method, selected
+Origami transitions are suitable formal candidates:
+
+```text
+published boat.ready -> committed Boat and outbox record exist
+recipient mismatch   -> unfolded is unreachable
+duplicate operation  -> applied at most once
+older accepted Boat  -> cannot replace newer accepted Boat
+payload mutation     -> authoritative body remains unchanged
+invalid schema, digest, Pawprint, or transition -> unfolded is unreachable
+```
+
+The formal model proves only the abstract transition law. PostgreSQL
+constraints, runtime validators, a shared versioned transition corpus,
+red-on-violation tests, and end-to-end receipts bind the law to Rust,
+TypeScript, SQL, NATS policy, and adapter behavior.
+
+
 ## 12. Dependency-ordered delivery plan
 
 | Phase | Deliverable | Exit gate |
 |---:|---|---|
-| 0 | Host, invocation, delta-sync, event, outbox, idempotency, refinement, indexing, and proof-wrapper contracts | Versioned schemas reviewed; current and planned claims separated |
+| 0 | Host, invocation, delta-sync, event, Origami/Crane/Pawprint, Paper Boat wake, outbox, idempotency, refinement, indexing, and proof-wrapper contracts | Versioned schemas reviewed; current and planned claims separated |
 | 1 | Thin Godot UI | Snapshot, ordered delta, acknowledgement, replay, and resync work; one fine-grained mutation updates only its bounded projection subtree |
 | 2 | GIGA integrity and Cingulate skeleton | Fresh inference proven; deterministic overlapping evidence and separate expected/observed outcomes visible |
-| 3 | PostgreSQL outbox plus one JetStream mailbox | Explicit duplicate window, durable idempotency, restart, permission, privacy, expiry, dead-letter, wake, and UI trace gates pass |
+| 3 | PostgreSQL outbox plus one JetStream mailbox and `boat.ready` wake path | Explicit duplicate window, durable idempotency, restart, permission, privacy, expiry, dead-letter, wake, stale-Boat rejection, and UI trace gates pass |
 | 4 | Dynamic models and headless embodiment | Local/provider selection and cold/familiar/reflection/dialogue targets remain identity-safe and observable |
 | 5 | Incremental Prolog/Datalog pilot | Code-change events update source-linked facts and precomputed relations incrementally; cache isolation, invalidation, lag visibility, derivations, and latency gates pass |
 | 6 | Complete Cingulate and optional synthesis/proof backends | Nudges, warnings, gates, deterministic checks, bounded e-graph/SyGuS repair, optional Z3, overrides, proof receipts, and observed outcomes close correctly |
-| 7 | First Lean-backed lesson and governed repair trajectory | One production-bound obligation runs inside the quota wrapper; structured counterexamples support bounded repair; no candidate can self-approve or self-install |
+| 7 | First Lean-backed lesson, then selected Origami transition obligations | One production-bound lesson obligation runs inside the quota wrapper; any Crane/Boat proof uses the same shared transition corpus and implementation binding; no candidate can self-approve or self-install |
 
 The UI evolves after every phase. Phases 5 through 7 are not automatically 1.0
 prerequisites; release gates depend on supported installation and stable public

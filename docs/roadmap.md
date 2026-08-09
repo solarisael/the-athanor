@@ -122,16 +122,20 @@ These threads have accepted contracts but are not all `1.0.0` blockers:
 
 1. strengthen GIGA integrity with fresh per-job inference, deterministic
    overlapping evidence, reviewed precedents, and baseline-aware refinement;
-2. prove one PostgreSQL-outbox/NATS JetStream mailbox before broader durable
-   delivery;
-3. route model bodies independently from identity into cold workers, familiars,
+2. define Origami crease patterns, Cranes, room-scoped Pawprints, and the Paper
+   Boat wake contract over the shared Host command/event envelope;
+3. prove one PostgreSQL-outbox/NATS JetStream mailbox, then the `boat.ready`
+   wake path in which NATS carries a signed pointer and PostgreSQL keeps the
+   complete living Boat;
+4. route model bodies independently from identity into cold workers, familiars,
    reflections, or intentional live dialogue;
-4. add bounded Prolog/Datalog derivation and complete Cingulate;
-5. branch suitable obligations into deterministic checks, bounded synthesis,
-   optional Z3, or selected Lean proofs;
-6. build the Hallway and resumable Vault-to-AKASHA import with full retrieval
+5. add bounded Prolog/Datalog derivation and complete Cingulate;
+6. branch suitable obligations into deterministic checks, bounded synthesis,
+   optional Z3, or selected Lean proofs, including production-bound Origami
+   lifecycle invariants after the first lesson proof;
+7. build the Hallway and resumable Vault-to-AKASHA import with full retrieval
    citizenship;
-7. grow the in-world Control UI, memory constellation, companion ecosystem,
+8. grow the in-world Control UI, memory constellation, companion ecosystem,
    OMEGA governance, and ANON execution from their accepted specifications.
 
 ## Release rule

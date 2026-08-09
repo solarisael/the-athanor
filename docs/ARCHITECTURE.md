@@ -60,6 +60,13 @@ in the same transaction as the domain event. NATS JetStream may deliver opaque
 record IDs and wake consumers, but it never becomes memory, review state, or a
 second conversation ledger.
 
+Origami defines versioned recipient-specific folds over the same Host envelope:
+Cranes carry active handoffs, Paper Boats carry living continuity across sleep,
+and room-scoped Pawprints provide provenance and integrity. NATS carries only
+bounded Crane routing; consumers reload authoritative bodies from PostgreSQL.
+The model receives the unfolded legible context, not a covert instruction
+channel.
+
 The complete accepted target, including dynamic model and room execution,
 Prolog/Datalog derivations, Cingulate enforcement, and optional Lean-backed
 lessons, lives in
@@ -327,10 +334,12 @@ deployments add access control, source connectors, and import profiles above the
 substrate.
 
 The next extension order is contractual: thin Godot UI over the Host; GIGA
-integrity; PostgreSQL outbox plus one JetStream mailbox; dynamic local/provider
-models and explicit cold/familiar/reflection/dialogue targets; engine-neutral
-incremental Datalog; Cingulate routing into deterministic checks, bounded
-e-graph/SyGuS repair, optional Z3, and selected Lean obligations; then governed
+integrity; Origami/Crane/Pawprint and Paper Boat wake contracts; PostgreSQL
+outbox plus one JetStream mailbox and the `boat.ready` wake path; dynamic
+local/provider models and explicit cold/familiar/reflection/dialogue targets;
+engine-neutral incremental Datalog; Cingulate routing into deterministic checks,
+bounded e-graph/SyGuS repair, optional Z3, and selected Lean obligations,
+including production-bound Origami transitions; then governed
 sandbox/canary/promotion.
 
 Post-1.0 surfaces deepen the same contracts: one functional Control tree

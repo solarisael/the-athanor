@@ -65,6 +65,7 @@ The public evidence document separates measured results from planned claims.
 | Athanor Host and thin Godot UI | Give people one visible control surface whose initial snapshot becomes fine-grained versioned deltas | Specified |
 | GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Specified |
 | PostgreSQL outbox and NATS delivery | Deliver opaque event IDs with explicit deduplication windows and durable database idempotency | Specified |
+| Origami, Cranes, Pawprints, and Paper Boat wake delivery | Fold recipient-specific handoffs mechanically, preserve room provenance, and wake from authoritative Boats without placing private bodies in the broker | Specified |
 | Dynamic model and room execution | Choose local or hosted model bodies independently from cold workers, familiars, reflections, and live room dialogue | Specified |
 | Incremental Prolog/Datalog derivations | Index code changes in the background, update only affected facts, and answer common queries from precomputed authorized relations | Planned |
 | Lean-backed lesson obligations | Check selected production-bound invariants inside an aggressively resource-limited wrapper | Planned |
@@ -130,6 +131,18 @@ and outcomes. A transactional outbox can publish opaque record IDs to NATS
 JetStream so rooms and workers receive durable delivery, retries, and wake-up
 signals. Private prose stays in PostgreSQL and consumers acknowledge only after
 committing an idempotent result.
+
+Origami supplies versioned crease patterns for recipient-specific handoffs.
+Active handoffs are Cranes; Paper Boats remain living continuity messages across
+sleep; Pawprints provide room-scoped provenance and integrity without becoming
+memory, authority, or covert model instructions. Folding and unfolding happen in
+deterministic Host/adapter tooling wherever the transformation is known.
+
+When `sleep` commits a Paper Boat, the same PostgreSQL transaction records its
+outbox event. NATS carries a bounded `boat.ready` Crane with IDs, routing and
+integrity metadata, and a Pawprint. The waking consumer verifies it, reloads the
+complete Boat from PostgreSQL, rejects stale or wrong-room delivery, and commits
+one idempotent wake transition before acknowledgement.
 
 JetStream's duplicate window is configured explicitly. The immutable outbox ID
 deduplicates publication within that window, while a PostgreSQL ledger prevents
@@ -315,10 +328,11 @@ Relay or ANON can provide remote compute. Durable continuity can remain under op
 
 ## The path to 1.0
 
-The 0.10.x sequence first locks the Host, invocation, event, refinement, and
-proof contracts. It then builds the thin Godot UI, strengthens GIGA evidence and
-outcome integrity, proves one PostgreSQL-outbox/JetStream mailbox, and only then
-adds dynamic model and room execution.
+The 0.10.x sequence first locks the Host, invocation, event, Origami/Crane/
+Pawprint, Paper Boat wake, refinement, and proof contracts. It then builds the
+thin Godot UI, strengthens GIGA evidence and outcome integrity, proves one
+PostgreSQL-outbox/JetStream mailbox and the `boat.ready` wake path, and only
+then adds dynamic model and room execution.
 
 The 1.0 release adds supported ordinary-user installation around that stable
 Host and UI. It must preserve existing Houses during installation, upgrade,

@@ -22,10 +22,11 @@ class Conn:
 
 
 def row(i, scope="house", project="", shape="process", tags=None, trigger="", lesson_key="coding",
-        stage=None, register=""):
+        stage=None, register="", language_keys=None, technology_keys=None):
     return {"id": i, "lesson_key": lesson_key, "title": f"lesson {i}", "lesson": "text", "proof_pattern": "proof",
             "trigger_context": trigger, "scope": scope, "project": project, "voice": "generic",
-            "register": register, "shape": shape, "stage": stage or [], "tags": tags or []}
+            "register": register, "shape": shape, "stage": stage or [], "tags": tags or [],
+            "language_keys": language_keys or [], "technology_keys": technology_keys or []}
 
 
 class LessonContextTests(unittest.TestCase):
@@ -61,6 +62,21 @@ class LessonContextTests(unittest.TestCase):
         )
         self.assertEqual([item["id"] for item in result["codingLessons"]], [2, 3, 4])
         self.assertEqual([item["id"] for item in result["projectLessons"]], [5])
+    def test_eligibility_keys_are_silent_for_wrong_context(self):
+        conn = Conn([
+            row(1),
+            row(2, language_keys=["rust"]),
+            row(3, language_keys=["python"]),
+            row(4, technology_keys=["postgresql"]),
+            row(5, technology_keys=["godot"]),
+        ], [])
+        result = lesson_context.retrieve_lesson_context(
+            conn, "room", languages=["rust"], technologies=["postgresql"], limit=10,
+        )
+        self.assertEqual([item["id"] for item in result["codingLessons"]], [1, 2, 4])
+        self.assertEqual(result["match"]["languages"], ["rust"])
+        self.assertEqual(result["match"]["technologies"], ["postgresql"])
+
     def test_unavailable_substrate_fails_open(self):
         import io
         from contextlib import redirect_stdout

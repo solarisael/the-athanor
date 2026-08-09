@@ -1021,6 +1021,33 @@ impl RememberKind {
 
 const MAX_ARRAY_VALUES: usize = 64;
 
+fn normalize_eligibility_keys(
+    field: &str,
+    values: Vec<String>,
+) -> Result<Vec<String>, DomainError> {
+    let mut normalized = Vec::with_capacity(values.len());
+    for value in values {
+        let value = value.trim();
+        let valid = !value.is_empty()
+            && !value.starts_with('-')
+            && !value.ends_with('-')
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+            && !value.contains("--");
+        if !valid {
+            return Err(DomainError::InvalidField {
+                field: field.into(),
+                kind: "eligibility-key".into(),
+            });
+        }
+        if !normalized.iter().any(|entry| entry == value) {
+            normalized.push(value.to_owned());
+        }
+    }
+    Ok(normalized)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ThreadContinuation {
     pub thread: String,
@@ -1047,6 +1074,8 @@ pub struct RememberLessonDetails {
     pub proof_pattern: Option<String>,
     pub trigger_context: Option<String>,
     pub example_text: Option<String>,
+    pub language_keys: Vec<String>,
+    pub technology_keys: Vec<String>,
     pub tags: Vec<String>,
 }
 
@@ -1074,6 +1103,8 @@ pub struct RememberRequest {
     proof_pattern: Option<String>,
     trigger_context: Option<String>,
     example_text: Option<String>,
+    language_keys: Vec<String>,
+    technology_keys: Vec<String>,
     tags: Vec<String>,
 }
 
@@ -1130,6 +1161,8 @@ impl RememberRequest {
             proof_pattern,
             trigger_context,
             example_text,
+            language_keys,
+            technology_keys,
             tags,
         ) = match details {
             RememberDetails::Memory(details) => {
@@ -1154,6 +1187,8 @@ impl RememberRequest {
                     None,
                     None,
                     Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
                 )
             }
             RememberDetails::Lesson(details) => {
@@ -1177,6 +1212,8 @@ impl RememberRequest {
                     details.proof_pattern,
                     details.trigger_context,
                     details.example_text,
+                    details.language_keys,
+                    details.technology_keys,
                     details.tags,
                 )
             }
@@ -1185,6 +1222,8 @@ impl RememberRequest {
             || continues.len() > MAX_ARRAY_VALUES
             || supersedes.len() > MAX_ARRAY_VALUES
             || register.len() > MAX_ARRAY_VALUES
+            || language_keys.len() > MAX_ARRAY_VALUES
+            || technology_keys.len() > MAX_ARRAY_VALUES
             || tags.len() > MAX_ARRAY_VALUES
         {
             return Err(DomainError::TooManyValues {
@@ -1239,6 +1278,19 @@ impl RememberRequest {
                 kind: kind.as_str().into(),
             });
         }
+        if !matches!(
+            kind,
+            RememberKind::CodingLesson | RememberKind::ProjectLesson
+        ) && (!language_keys.is_empty() || !technology_keys.is_empty())
+        {
+            return Err(DomainError::InvalidField {
+                field: "language_keys/technology_keys".into(),
+                kind: kind.as_str().into(),
+            });
+        }
+        let language_keys = normalize_eligibility_keys("language_keys", language_keys)?;
+        let technology_keys =
+            normalize_eligibility_keys("technology_keys", technology_keys)?;
         let mut normalized_register = Vec::with_capacity(register.len());
         for value in register {
             let value = value.trim();
@@ -1300,6 +1352,8 @@ impl RememberRequest {
             proof_pattern,
             trigger_context,
             example_text,
+            language_keys,
+            technology_keys,
             tags,
         })
     }
@@ -1354,6 +1408,12 @@ impl RememberRequest {
     }
     pub fn example_text(&self) -> Option<&str> {
         self.example_text.as_deref()
+    }
+    pub fn language_keys(&self) -> &[String] {
+        &self.language_keys
+    }
+    pub fn technology_keys(&self) -> &[String] {
+        &self.technology_keys
     }
     pub fn tags(&self) -> &[String] {
         &self.tags
@@ -3482,6 +3542,8 @@ pub struct GigaCodingLessonPromotionPayload {
     shape: Option<String>,
     proof_pattern: String,
     trigger_context: String,
+    language_keys: Vec<String>,
+    technology_keys: Vec<String>,
     tags: Vec<String>,
 }
 
@@ -3492,6 +3554,8 @@ impl GigaCodingLessonPromotionPayload {
         shape: Option<String>,
         proof_pattern: String,
         trigger_context: String,
+        language_keys: Vec<String>,
+        technology_keys: Vec<String>,
         tags: Vec<String>,
     ) -> Result<Self, DomainError> {
         Ok(Self {
@@ -3500,6 +3564,14 @@ impl GigaCodingLessonPromotionPayload {
             shape: giga_optional_edited_text("target.payload.shape", shape)?,
             proof_pattern: giga_edited_text("target.payload.proof_pattern", proof_pattern)?,
             trigger_context: giga_edited_text("target.payload.trigger_context", trigger_context)?,
+            language_keys: normalize_eligibility_keys(
+                "target.payload.language_keys",
+                language_keys,
+            )?,
+            technology_keys: normalize_eligibility_keys(
+                "target.payload.technology_keys",
+                technology_keys,
+            )?,
             tags: giga_promotion_strings("target.payload.tags", tags)?,
         })
     }
@@ -3519,6 +3591,12 @@ impl GigaCodingLessonPromotionPayload {
     pub fn trigger_context(&self) -> &str {
         &self.trigger_context
     }
+    pub fn language_keys(&self) -> &[String] {
+        &self.language_keys
+    }
+    pub fn technology_keys(&self) -> &[String] {
+        &self.technology_keys
+    }
     pub fn tags(&self) -> &[String] {
         &self.tags
     }
@@ -3531,6 +3609,8 @@ pub struct GigaProjectLessonPromotionPayload {
     project: String,
     proof_pattern: String,
     trigger_context: String,
+    language_keys: Vec<String>,
+    technology_keys: Vec<String>,
     tags: Vec<String>,
 }
 
@@ -3541,6 +3621,8 @@ impl GigaProjectLessonPromotionPayload {
         project: String,
         proof_pattern: String,
         trigger_context: String,
+        language_keys: Vec<String>,
+        technology_keys: Vec<String>,
         tags: Vec<String>,
     ) -> Result<Self, DomainError> {
         Ok(Self {
@@ -3549,6 +3631,14 @@ impl GigaProjectLessonPromotionPayload {
             project: giga_edited_text("target.payload.project", project)?,
             proof_pattern: giga_edited_text("target.payload.proof_pattern", proof_pattern)?,
             trigger_context: giga_edited_text("target.payload.trigger_context", trigger_context)?,
+            language_keys: normalize_eligibility_keys(
+                "target.payload.language_keys",
+                language_keys,
+            )?,
+            technology_keys: normalize_eligibility_keys(
+                "target.payload.technology_keys",
+                technology_keys,
+            )?,
             tags: giga_promotion_strings("target.payload.tags", tags)?,
         })
     }
@@ -3567,6 +3657,12 @@ impl GigaProjectLessonPromotionPayload {
     }
     pub fn trigger_context(&self) -> &str {
         &self.trigger_context
+    }
+    pub fn language_keys(&self) -> &[String] {
+        &self.language_keys
+    }
+    pub fn technology_keys(&self) -> &[String] {
+        &self.technology_keys
     }
     pub fn tags(&self) -> &[String] {
         &self.tags
@@ -4119,6 +4215,8 @@ mod tests {
             proof_pattern: Some("Verify keyboard navigation.".into()),
             trigger_context: Some("Before introducing a component.".into()),
             example_text: Some("Use the token, not a one-off value.".into()),
+            language_keys: vec![],
+            technology_keys: vec![],
             tags: vec!["accessibility".into()],
         };
         let request = RememberRequest::new_lesson(
@@ -4146,6 +4244,64 @@ mod tests {
                 kind: "design-lesson".into(),
             })
         );
+    }
+
+    #[test]
+    fn lesson_eligibility_keys_normalize_and_reject_wrong_families() {
+        let details = RememberLessonDetails {
+            backup: false,
+            shape: Some("process".into()),
+            voice: None,
+            register: vec![],
+            scope: Some("house".into()),
+            project: None,
+            proof_pattern: Some("The exact path passes.".into()),
+            trigger_context: Some("When editing Rust database code.".into()),
+            example_text: None,
+            language_keys: vec![" rust ".into(), "rust".into()],
+            technology_keys: vec!["postgresql".into()],
+            tags: vec![],
+        };
+        let request = RememberRequest::new_lesson(
+            RoomKey::new("lab").unwrap(),
+            RememberKind::CodingLesson,
+            "Keyed database lesson".into(),
+            "Apply only in eligible contexts.".into(),
+            details,
+        )
+        .unwrap();
+        assert_eq!(request.language_keys(), &["rust"]);
+        assert_eq!(request.technology_keys(), &["postgresql"]);
+
+        let mut invalid = RememberLessonDetails {
+            backup: false,
+            shape: None,
+            voice: Some("general".into()),
+            register: vec![],
+            scope: None,
+            project: None,
+            proof_pattern: None,
+            trigger_context: None,
+            example_text: None,
+            language_keys: vec!["rust".into()],
+            technology_keys: vec![],
+            tags: vec![],
+        };
+        assert!(RememberRequest::new_lesson(
+            RoomKey::new("lab").unwrap(),
+            RememberKind::WritingLesson,
+            "Wrong family".into(),
+            "Must refuse keys.".into(),
+            invalid.clone(),
+        ).is_err());
+        invalid.language_keys = vec!["Rust".into()];
+        assert!(RememberRequest::new_lesson(
+            RoomKey::new("lab").unwrap(),
+            RememberKind::CodingLesson,
+            "Bad slug".into(),
+            "Must refuse malformed keys.".into(),
+            invalid,
+        ).is_err());
     }
 
     #[test]
@@ -4643,6 +4799,8 @@ mod tests {
                     Some("process".into()),
                     "failure then passing proof".into(),
                     "inherited environment state reaches a child tool process".into(),
+                    vec!["rust".into()],
+                    vec![],
                     vec!["environment".into()],
                 )
                 .unwrap(),
@@ -4679,6 +4837,8 @@ mod tests {
                     "athanor".into(),
                     "rollback observed".into(),
                     "queue work crosses a durable transaction boundary".into(),
+                    vec![],
+                    vec!["postgresql".into()],
                     vec!["queue".into()],
                 )
                 .unwrap(),
@@ -4834,6 +4994,8 @@ mod tests {
                     "transaction rollback preserves the prior durable state".into(),
                     "a project rule changes coupled database writes".into(),
                     vec![],
+                    vec![],
+                    vec![],
                 )
                 .unwrap(),
             )
@@ -4897,6 +5059,8 @@ mod tests {
                 "proof".into(),
                 "trigger".into(),
                 vec![],
+                vec![],
+                vec![],
             )
             .is_err()
         );
@@ -4907,6 +5071,8 @@ mod tests {
                 Some(" ".into()),
                 "proof".into(),
                 "trigger".into(),
+                vec![],
+                vec![],
                 vec![],
             )
             .is_err()
@@ -4921,6 +5087,8 @@ mod tests {
                     proof_pattern.into(),
                     trigger_context.into(),
                     vec![],
+                    vec![],
+                    vec![],
                 )
                 .is_err()
             );
@@ -4933,6 +5101,8 @@ mod tests {
                 "proof".into(),
                 "trigger".into(),
                 vec![],
+                vec![],
+                vec![],
             )
             .is_err()
         );
@@ -4944,6 +5114,8 @@ mod tests {
                     "project".into(),
                     proof_pattern.into(),
                     trigger_context.into(),
+                    vec![],
+                    vec![],
                     vec![],
                 )
                 .is_err()

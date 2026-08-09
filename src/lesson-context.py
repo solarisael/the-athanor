@@ -40,11 +40,14 @@ def _row(row) -> dict:
         "project": get("project", "") or "", "voice": get("voice", "") or "",
         "register": get("register", "") or "", "shape": get("shape", "") or "",
         "stage": list(get("stage", []) or []), "tags": list(get("tags", []) or []),
+        "language_keys": list(get("language_keys", []) or []),
+        "technology_keys": list(get("technology_keys", []) or []),
     }
 
 
 def _eligible(row: dict, *, lesson_type: str, scopes: set[str], projects: set[str],
-              stages: set[str], registers: set[str]) -> bool:
+              stages: set[str], registers: set[str], languages: set[str],
+              technologies: set[str]) -> bool:
     """Apply authority rails before any lexical or semantic rank is considered."""
     if _norm(row.get("type")) != lesson_type:
         return False
@@ -62,6 +65,12 @@ def _eligible(row: dict, *, lesson_type: str, scopes: set[str], projects: set[st
         return False
     declared_register = _norm(row.get("register"))
     if declared_register and declared_register not in registers:
+        return False
+    declared_languages = set(_terms(row.get("language_keys")))
+    if declared_languages and not declared_languages.intersection(languages):
+        return False
+    declared_technologies = set(_terms(row.get("technology_keys")))
+    if declared_technologies and not declared_technologies.intersection(technologies):
         return False
     return True
 
@@ -91,46 +100,52 @@ def _compact(row: dict, score: int, matched: list[str]) -> dict:
         "proof_pattern": row["proof_pattern"], "trigger_context": row["trigger_context"],
         "scope": row["scope"], "project": row["project"], "register": row["register"],
         "shape": row["shape"], "stage": row["stage"], "tags": row["tags"],
+        "language_keys": row["language_keys"], "technology_keys": row["technology_keys"],
         "match": {"score": score, "matched": matched},
     }
 
 
 def retrieve_lesson_context(conn, room: str, projects=(), shapes=(), terms=(), *,
-                            stages=(), registers=(), limit: int = 8) -> dict:
+                            stages=(), registers=(), languages=(), technologies=(),
+                            limit: int = 8) -> dict:
     room = _norm(room) or "house"
     scopes = ["house"] if room == "house" else ["house", room]
     scope_keys = set(scopes)
     project_keys = set(_terms(projects)); shape_keys = set(_terms(shapes)); query_terms = _terms(terms)
     stage_keys = set(_terms(stages)); register_keys = set(_terms(registers))
+    language_keys = set(_terms(languages)); technology_keys = set(_terms(technologies))
     limit = max(0, min(int(limit or 0), 50))
     match = {
         "scopes": scopes, "projects": sorted(project_keys), "terms": query_terms,
         "shapes": sorted(shape_keys), "stages": sorted(stage_keys),
-        "registers": sorted(register_keys), "limit": limit,
+        "registers": sorted(register_keys), "languages": sorted(language_keys),
+        "technologies": sorted(technology_keys), "limit": limit,
     }
     if not limit:
         return {"codingLessons": [], "projectLessons": [], "match": match}
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor if psycopg2 else None)
     try:
         cur.execute("""SELECT id,lesson_key,title,lesson,proof_pattern,trigger_context,scope,project,
-                              voice,register,shape,stage,tags
+                              voice,register,shape,stage,tags,language_keys,technology_keys
                        FROM lessons
                        WHERE lesson_key = 'coding' AND scope = ANY(%s)""", (scopes,))
         coding = [_row(r) for r in cur.fetchall()]
         coding = [row for row in coding if _eligible(
             row, lesson_type="coding", scopes=scope_keys, projects=project_keys,
-            stages=stage_keys, registers=register_keys,
+            stages=stage_keys, registers=register_keys, languages=language_keys,
+            technologies=technology_keys,
         )]
         project = []
         if project_keys:
             cur.execute("""SELECT id,lesson_key,title,lesson,proof_pattern,trigger_context,scope,project,
-                                  voice,register,shape,stage,tags
+                                  voice,register,shape,stage,tags,language_keys,technology_keys
                            FROM lessons
                            WHERE lesson_key = 'project' AND project = ANY(%s)""", (sorted(project_keys),))
             project = [_row(r) for r in cur.fetchall()]
             project = [row for row in project if _eligible(
                 row, lesson_type="project", scopes=scope_keys, projects=project_keys,
-                stages=stage_keys, registers=register_keys,
+                stages=stage_keys, registers=register_keys, languages=language_keys,
+                technologies=technology_keys,
             )]
     finally:
         cur.close()
@@ -153,6 +168,7 @@ def main() -> int:
     parser.add_argument("--room", required=True); parser.add_argument("--project", action="append", default=[])
     parser.add_argument("--shape", action="append", default=[]); parser.add_argument("--term", action="append", default=[])
     parser.add_argument("--stage", action="append", default=[]); parser.add_argument("--register", action="append", default=[])
+    parser.add_argument("--language", action="append", default=[]); parser.add_argument("--technology", action="append", default=[])
     parser.add_argument("--limit", type=int, default=8); parser.add_argument("--room-dir", required=True)
     args = parser.parse_args()
     empty = {"codingLessons": [], "projectLessons": [], "match": {"scopes": ["house"] if _norm(args.room) == "house" else ["house", _norm(args.room)], "projects": [], "limit": 0}}
@@ -163,7 +179,8 @@ def main() -> int:
         conn = psycopg2.connect(host=env.get("PGHOST"), port=env.get("PGPORT"), user=env.get("PGUSER"), password=env.get("PGPASSWORD"), dbname=env.get("PGDATABASE"), connect_timeout=2)
         try: result = retrieve_lesson_context(
             conn, args.room, args.project, args.shape, args.term,
-            stages=args.stage, registers=args.register, limit=args.limit,
+            stages=args.stage, registers=args.register, languages=args.language,
+            technologies=args.technology, limit=args.limit,
         )
         finally: conn.close()
         print(json.dumps(result, ensure_ascii=False))

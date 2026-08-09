@@ -1,34 +1,64 @@
 # The Athanor Documentation
 
-Start with the root [`README.md`](../README.md) for the hook, the status line, and the routes to every audience path.
+Start with the root [`README.md`](../README.md) for the public current state.
+Everything below has one job; dated snapshots live under `history/` and do not
+compete with current contracts.
 
-## Operator documents
+## Current contracts
 
-- [`FOR_WORK.md`](./FOR_WORK.md) — The Athanor for work: projects, decisions, lessons, and handoffs
-- [`FOR_COMPANIONS.md`](./FOR_COMPANIONS.md) — The Athanor for companions: shared history and personal continuity
-- [`../INSTALL.md`](../INSTALL.md) — supported installation and observable verification
-- [`../USAGE.md`](../USAGE.md) — everyday memory, room, sleep, and wake workflows
-- [`../IDENTITY_GUIDE.md`](../IDENTITY_GUIDE.md) — co-authoring rooms, identities, and active spirits
-- [`SECURITY.md`](./SECURITY.md) — privacy, secrets, permissions, publication, and destructive operations
-- [`LIMITATIONS.md`](./LIMITATIONS.md) — platform boundaries, current constraints, and non-goals
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current components, authority, data
+  flow, repository ownership, and extension boundaries
+- [`RETRIEVAL.md`](./RETRIEVAL.md) — Vault and AKASHA recall behavior,
+  attribution, authority, corrections, and debugging
+- [`LESSONS.md`](./LESSONS.md) — typed lesson stores, scopes, lifecycle, and
+  guarded writes
+- [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) — GIGA event, candidate, review,
+  promotion, and evaluation contracts
+- [`EVIDENCE.md`](./EVIDENCE.md) — measured public claims, methods, fixtures,
+  and missing proof
+- [`SECURITY.md`](./SECURITY.md) — privacy, secrets, permissions, publication,
+  and destructive operations
+- [`LIMITATIONS.md`](./LIMITATIONS.md) — supported platforms, current
+  constraints, and explicit non-goals
 
-## Technical documents
+## Operator path
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — components, contracts, data flow, authority, and repository ownership
-- [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) — accepted Host, Godot UI, GIGA integrity, NATS delivery, dynamic embodiment, derivation, Cingulate, and Lean target
-- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — bounded e-graphs, Z3, SyGuS, Wasmtime, proof feedback, and governed self-improvement
-- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) — visual-token inheritance, in-world Control UI, GPU-particle constellations, companion bodies, and alchemical profiles
-- [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) — companion room sovereignty, companion-authored models, and typed signed marketplace
-- [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — The Athanor product, House domain, profiles, capabilities, governance, privacy, and naming cutover
-- [`RETRIEVAL.md`](./RETRIEVAL.md) — recall lanes, automatic retrieval, authority, corrections, and archival
-- [`LESSONS.md`](./LESSONS.md) — typed lesson stores, fields, scopes, imports, updates, and deletion
-- [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) — GIGA event, candidate, authority, review, integration, and evaluation contracts
-- [`EVIDENCE.md`](./EVIDENCE.md) — public evaluations, methods, results, and planned proof
+- [`../INSTALL.md`](../INSTALL.md) — supported installation, upgrades, and
+  observable verification
+- [`../USAGE.md`](../USAGE.md) — everyday recall, memory, lessons, sleep, wake,
+  rooms, and profiles
+- [`../IDENTITY_GUIDE.md`](../IDENTITY_GUIDE.md) — co-authoring room identity
+  and active spirits
+- [`FOR_WORK.md`](./FOR_WORK.md) — project continuity and work retrieval
+- [`FOR_COMPANIONS.md`](./FOR_COMPANIONS.md) — personal continuity and shared
+  history
 
-## Project documents
+## Accepted target architecture
 
-- [`../HOUSE.md`](../HOUSE.md) — history, philosophy, and design reasons
-- [`PLANNED_FEATURES.md`](./PLANNED_FEATURES.md) — plain-language product direction, market value, and feature status
-- [`roadmap.md`](./roadmap.md) — release sequence and future product surface
-- [`progress.md`](./progress.md) — current maintainer implementation state
-- [`history/`](./history/) — dated development history
+These documents define accepted direction. They do not claim every described
+surface is already shipped.
+
+- [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) — Athanor Host, thin
+  clients, GIGA integrity, durable delivery, invocation, derivation, and proof
+- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) — the native instrument, visual-token
+  inheritance, in-world Control UI, constellations, and bodies
+- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — bounded e-graphs,
+  Z3, SyGuS, Wasmtime, proof feedback, and governed promotion
+- [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) — room sovereignty,
+  companion-authored models, and the typed signed marketplace
+- [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — product domains,
+  profiles, capabilities, governance, privacy, and naming
+- [`PLANNED_FEATURES.md`](./PLANNED_FEATURES.md) — plain-language feature status
+  and product direction
+
+## Release path and history
+
+- [`roadmap.md`](./roadmap.md) — concise current `0.10.x` to `1.0.0` dependency
+  path
+- [`../HOUSE.md`](../HOUSE.md) — project history, philosophy, and design reasons
+- [`history/`](./history/) — dated plans, progress snapshots, and development
+  history that no longer represents current release state
+
+[The 2026-08-06 long-form roadmap](./history/2026-08-06-roadmap-snapshot.md)
+and [the 2026-07-13 progress snapshot](./history/2026-07-13-progress-snapshot.md)
+remain available as provenance.

@@ -73,14 +73,33 @@ Remove `--check` to apply an available update. The updater copies itself outside
 
 ### Vault
 
-Vault provides persistent room identity, room state, file-backed continuity, conversation artifacts, and adapter tools. It requires:
+Vault provides persistent room identity, room state, file-backed continuity,
+conversation artifacts, adapter tools, and attributed local retrieval over
+Markdown, JSON, JSONL, and text. It requires:
 
 - Windows 10 or 11;
 - OMP;
 - Bun;
 - the stable Rust MSVC toolchain for the shared core workspace.
 
-Vault requires no database or GPU.
+Vault requires no database, embedding service, or GPU.
+
+Vault recall searches the room directory by default. To search one or several
+project roots, add optional fields to the room's `.solarisael-room.json`:
+
+```json
+{
+  "vaultRoots": ["../project-a", "../project-b"],
+  "vaultIgnore": ["private/**", "generated/**"],
+  "vaultMaxFileBytes": 524288,
+  "vaultMaxFiles": 5000
+}
+```
+
+Relative roots resolve from the room directory; absolute roots are also
+accepted. The index is derived in memory, cached briefly, and rebuilt from the
+files. Common generated directories, secret-bearing filenames, configured
+ignore patterns, and each root's top-level `.gitignore` are excluded.
 
 ### AKASHA
 

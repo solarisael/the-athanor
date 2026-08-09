@@ -37,6 +37,8 @@ def _row(value) -> dict:
         "writers": list(value["writers"] or []),
         "tools": list(value["tools"] or []),
         "negationOf": value["negation_of"],
+        "languageKeys": list(value.get("language_keys") or []),
+        "technologyKeys": list(value.get("technology_keys") or []),
         "tags": list(value["tags"] or []),
         "alwaysOn": bool(value["always_on"]),
     }
@@ -44,7 +46,8 @@ def _row(value) -> dict:
 
 def fetch_lessons(conn, *, lesson_type: str, room: str, shape: str | None,
                   project: str | None, register: str | None, stage: str | None,
-                  query: str | None, limit: int) -> dict:
+                  query: str | None, limit: int, language_keys: list[str] = [],
+                  technology_keys: list[str] = []) -> dict:
     if lesson_type not in LESSON_TYPES:
         raise ValueError(f"type must be one of: {', '.join(LESSON_TYPES)}")
     if lesson_type == "project" and not project:
@@ -67,6 +70,18 @@ def fetch_lessons(conn, *, lesson_type: str, room: str, shape: str | None,
     if stage:
         clauses.append("%s = ANY(stage)")
         values.append(stage)
+    clauses.append(
+        "(cardinality(language_keys) = 0 OR language_keys && %s)"
+        if language_keys else "cardinality(language_keys) = 0"
+    )
+    if language_keys:
+        values.append(language_keys)
+    clauses.append(
+        "(cardinality(technology_keys) = 0 OR technology_keys && %s)"
+        if technology_keys else "cardinality(technology_keys) = 0"
+    )
+    if technology_keys:
+        values.append(technology_keys)
     if query:
         clauses.append(
             "lesson_tsv @@ plainto_tsquery("
@@ -81,7 +96,7 @@ def fetch_lessons(conn, *, lesson_type: str, room: str, shape: str | None,
             f"""
             SELECT id,lesson_key,kind_path,scope,project,voice,register,shape,stage,
                    title,lesson,trigger_context,proof_pattern,example_text,example_cmd,
-                   writers,tools,negation_of,tags,always_on
+                   writers,tools,negation_of,language_keys,technology_keys,tags,always_on
             FROM lessons
             WHERE {where}
             ORDER BY
@@ -112,6 +127,18 @@ def fetch_lessons(conn, *, lesson_type: str, room: str, shape: str | None,
         if project:
             taxonomy_clauses.append("project = %s")
             taxonomy_values.append(project)
+        taxonomy_clauses.append(
+            "(cardinality(language_keys) = 0 OR language_keys && %s)"
+            if language_keys else "cardinality(language_keys) = 0"
+        )
+        if language_keys:
+            taxonomy_values.append(language_keys)
+        taxonomy_clauses.append(
+            "(cardinality(technology_keys) = 0 OR technology_keys && %s)"
+            if technology_keys else "cardinality(technology_keys) = 0"
+        )
+        if technology_keys:
+            taxonomy_values.append(technology_keys)
         cur.execute(
             f"""
             SELECT kind_path,shape,COUNT(*) AS count,
@@ -139,6 +166,8 @@ def fetch_lessons(conn, *, lesson_type: str, room: str, shape: str | None,
             "project": project,
             "register": register,
             "stage": stage,
+            "languageKeys": language_keys,
+            "technologyKeys": technology_keys,
             "query": query,
             "limit": limit,
         },
@@ -156,6 +185,8 @@ def main() -> int:
     parser.add_argument("--project")
     parser.add_argument("--register")
     parser.add_argument("--stage")
+    parser.add_argument("--language-key", action="append", default=[])
+    parser.add_argument("--technology-key", action="append", default=[])
     parser.add_argument("--query")
     parser.add_argument("--limit", type=int, default=12)
     args = parser.parse_args()
@@ -182,6 +213,8 @@ def main() -> int:
                 project=args.project,
                 register=args.register,
                 stage=args.stage,
+                language_keys=sorted(set(args.language_key)),
+                technology_keys=sorted(set(args.technology_key)),
                 query=args.query,
                 limit=args.limit,
             )

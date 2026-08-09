@@ -14,20 +14,23 @@ Use `recall` when older context matters or either person is uncertain:
 
 Sharp queries work best. Use distinctive terms, dates, entities, project names, or exact phrases. Follow returned taxonomy, threads, and related candidates when the first viewport reveals a nearby trail.
 
-The evidence viewport can include:
+The evidence viewport depends on the active storage profile.
 
-- canon matches;
-- named entities;
-- thread candidates;
-- source paths and headings;
-- semantic memory chunks;
-- direct content matches;
-- date matches;
-- cluster resonance;
-- selection and suppression reasons;
-- authority and lifecycle state.
+Vault can return:
 
-Treat the cited source as evidence. A semantic match is a navigation signal, not factual authority by itself.
+- exact source paths;
+- Markdown headings, JSON pointers, or JSONL line identity;
+- field-aware BM25F score and term coverage;
+- matched and missing query terms;
+- exact-content and matching-field reasons;
+- bounded source excerpts.
+
+AKASHA can additionally return canon, named entities, thread candidates,
+semantic and direct-content memory chunks, dates, taxonomy, cluster resonance,
+authority, lifecycle state, and suppression reasons.
+
+Treat the cited source as evidence. Relevance selects a viewport; it does not
+change the source's authority.
 
 ## Automatic retrieval
 
@@ -57,18 +60,34 @@ Entity resolution is data-backed. Capitalization alone does not establish identi
 
 ## Source behavior
 
-AKASHA uses PostgreSQL source lanes for:
+### Vault
 
-- full-text and trigram search;
-- direct content search;
-- named entities and aliases;
-- dates;
-- threads and taxonomy;
-- typed lessons;
-- semantic pgvector search;
-- cluster resonance.
+Vault searches configured operator-controlled roots directly. It parses
+Markdown into heading-addressed sections, JSON into pointer-addressed records,
+JSONL line by line, and eligible text into bounded chunks.
 
-The core can fall back to room and shared JSON indexes for lighter retrieval. Source failures are logged and do not block the conversation.
+Its native lanes are:
+
+- field-aware BM25F over relative path, title, heading, structured keys, tags,
+  metadata, and body;
+- direct exact-content matching for identifiers, filenames, symbols, UUIDs,
+  quoted strings, and errors.
+
+The scanner applies configured limits and ignore patterns, honors each root's
+top-level `.gitignore`, skips common generated and secret-bearing paths, and
+does not follow symlinks. The in-memory index is derived and briefly cached;
+files remain authoritative. Missing embeddings do not weaken lexical Vault
+retrieval because embeddings are not a Vault requirement.
+
+### AKASHA
+
+AKASHA uses PostgreSQL source lanes for full-text and trigram search, direct
+content, named entities and aliases, dates, threads, taxonomy, typed lessons,
+pgvector semantic search, controlled lexical expansion, and cluster resonance.
+
+AKASHA source failures are explicit diagnostics. An absent substrate selects
+Vault; a configured but unhealthy substrate reports degraded AKASHA rather than
+silently changing authority profiles.
 
 ## Ordered continuity
 
@@ -149,14 +168,20 @@ Cross-room retrieval requires a deliberate room name or exact memory address. A 
 When retrieval misses:
 
 1. use explicit `recall` rather than relying on automatic context;
-2. add distinctive names, dates, phrases, or project terms;
-3. inspect the taxonomy and related candidates;
-4. verify the room and source scope;
-5. check substrate health and source diagnostics;
-6. fetch the exact source when the viewport gives a path;
-7. record an evaluation fixture only after the intended authority is known.
+2. retry with one to three distinctive names, dates, identifiers, or project
+   terms;
+3. inspect matched and missing terms, reasons, source scope, and warnings;
+4. verify the room and active Vault or AKASHA profile;
+5. in Vault, verify `vaultRoots`, ignore rules, file eligibility, and scan
+   limits;
+6. in AKASHA, inspect substrate health, authority suppression, and source-lane
+   diagnostics;
+7. fetch the exact source when the viewport gives a path;
+8. record an evaluation fixture only after the intended authority is known.
 
-A miss can mean query mismatch, indexing lag, scope, authority suppression, source failure, or true absence. Diagnostics distinguish those cases.
+A miss can mean query mismatch, ignored or ineligible files, scan limits,
+indexing lag, scope, authority suppression, source failure, or true absence.
+Diagnostics and attributed results distinguish those cases.
 
 ## Public evaluation
 

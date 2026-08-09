@@ -38,6 +38,7 @@ import { windowsPathToWsl } from "./wsl.ts";
 import { normalizeRoomName, resolveEffectiveRoomDir } from "./spirit.ts";
 import { loadState } from "./directives.ts";
 import { classifyRetrievalQuery } from "./query-routing.ts";
+import { searchVault } from "./vault-search.ts";
 import {
   loadMemoryContentSource, loadMemoryDateSource,
   loadMemoryLexicalSources, loadMemorySemanticSource,
@@ -818,6 +819,13 @@ export async function runAnamnesisQuery(roomDir, roomName, options = {}) {
     entries: Array.isArray(data.entries) ? data.entries : [],
     warnings: [...warnings, ...(Array.isArray(data.warnings) ? data.warnings : [])],
   };
+}
+
+export async function runVaultRecallQuery(roomDir, roomName, query) {
+  const ambient = validateAmbientRoom(roomDir, roomName);
+  if (!ambient.ok) return { ok: false, error: ambient.error, query };
+  if (!query || !String(query).trim()) return { ok: false, error: "empty query", query };
+  return searchVault(ambient.effectiveRoomDir, String(query));
 }
 
 export async function runRecallQuery(roomDir, roomName, query) {

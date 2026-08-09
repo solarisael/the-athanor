@@ -87,6 +87,29 @@ class CanonicalLessonsTests(unittest.TestCase):
         self.assertIn("scope = ANY(%s)", query)
         self.assertEqual(args[:3], ("coding", ["house", "kintsu"], "process"))
 
+    def test_keyed_query_uses_eligibility_overlap_and_unkeyed_fallback(self):
+        keyed = {**LESSON, "language_keys": ["rust"], "technology_keys": ["postgresql"]}
+        conn = Connection([[keyed], [TAXONOMY]])
+        result = lessons.fetch_lessons(
+            conn,
+            lesson_type="coding",
+            room="kintsu",
+            shape=None,
+            project=None,
+            register=None,
+            stage=None,
+            query=None,
+            limit=12,
+            language_keys=["rust"],
+            technology_keys=["postgresql"],
+        )
+        query, args = conn.cursor_obj.calls[0]
+        self.assertIn("(cardinality(language_keys) = 0 OR language_keys && %s)", query)
+        self.assertIn("(cardinality(technology_keys) = 0 OR technology_keys && %s)", query)
+        self.assertEqual(args[:4], ("coding", ["house", "kintsu"], ["rust"], ["postgresql"]))
+        self.assertEqual(result["lessons"][0]["languageKeys"], ["rust"])
+        self.assertEqual(result["lessons"][0]["technologyKeys"], ["postgresql"])
+
     def test_project_type_requires_an_explicit_project(self):
         with self.assertRaisesRegex(ValueError, "require --project"):
             lessons.fetch_lessons(

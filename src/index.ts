@@ -67,7 +67,9 @@ export {
 export {
   runAnamnesisQuery,
   runRecallQuery,
+  runVaultRecallQuery,
 } from "./memory.ts";
+export { clearVaultSearchCache, searchVault } from "./vault-search.ts";
 
 export {
   logAssistantTurn,

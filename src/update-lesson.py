@@ -28,8 +28,8 @@ LESSON_KEYS = {
     "design-lesson": "design",
 }
 COMMON_FIELDS = ("title", "lesson", "shape", "trigger_context", "tags")
-CODING_FIELDS = COMMON_FIELDS + ("voice", "scope", "project", "proof_pattern", "negation_of")
-PROJECT_FIELDS = COMMON_FIELDS + ("project", "proof_pattern")
+CODING_FIELDS = COMMON_FIELDS + ("voice", "scope", "project", "proof_pattern", "language_keys", "technology_keys", "negation_of")
+PROJECT_FIELDS = COMMON_FIELDS + ("project", "proof_pattern", "language_keys", "technology_keys")
 WRITING_FIELDS = COMMON_FIELDS + ("voice", "register", "example_text", "writers", "negation_of")
 DESIGN_FIELDS = COMMON_FIELDS + ("voice", "register", "proof_pattern", "example_text")
 LESSON_FIELDS = {
@@ -74,7 +74,7 @@ def update_lesson(conn, kind: str, lesson_id: int, expected_title: str, patch: d
         value = patch["negation_of"]
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             return _refusal(kind, lesson_id, "negation_of must be null or a positive integer")
-    for field in ("tags", "register", "writers"):
+    for field in ("tags", "register", "writers", "language_keys", "technology_keys"):
         if field in patch:
             value = patch[field]
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
@@ -123,7 +123,7 @@ def _parse_patch(args) -> dict:
         value = getattr(args, field, _MISSING)
         if value is not _MISSING:
             patch[field] = value
-    for field in ("tags", "register", "writers"):
+    for field in ("tags", "register", "writers", "language_keys", "technology_keys"):
         value = getattr(args, field, None)
         if value is not None:
             patch[field] = value
@@ -164,6 +164,8 @@ def main() -> int:
     parser.add_argument("--tag", dest="tags", action="append", default=None)
     parser.add_argument("--register", dest="register", action="append", default=None)
     parser.add_argument("--writer", dest="writers", action="append", default=None)
+    parser.add_argument("--language-key", dest="language_keys", action="append", default=None)
+    parser.add_argument("--technology-key", dest="technology_keys", action="append", default=None)
     parser.add_argument("--clear-negation-of", dest="clear_negation_of", action="store_true")
     parser.add_argument("--lesson-stdin", action="store_true")
     args = parser.parse_args()

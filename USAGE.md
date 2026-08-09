@@ -152,7 +152,7 @@ Depending on mode and adapter, House handles:
 - bounded relevant-context injection;
 - paper-boat recovery near session start;
 - project-aware coding lesson preflight;
-- lighter Vault continuity when AKASHA retrieval is unavailable.
+- native attributed Vault retrieval when AKASHA is not configured;
 
 Use explicit recall for load-bearing old decisions, names, promises, corrections, or important memories.
 
@@ -160,21 +160,41 @@ Use explicit recall for load-bearing old decisions, names, promises, corrections
 
 ### Vault
 
-Vault uses room files such as `active_spirit.md`, `room_summary.md`, and room-local continuity artifacts. Ask the AI to update those files directly when something deserves compact persistence.
+Vault is the local transparent profile. `recall` searches the configured
+Markdown, JSON, JSONL, and text corpus without PostgreSQL, an embedding service,
+or a GPU.
+
+Results keep the exact source path and Markdown heading, JSON pointer, or JSONL
+line identity. Field-aware BM25F ranks paths, titles, headings, structured keys,
+tags, metadata, and bodies; exact identifiers, filenames, symbols, quoted
+strings, UUIDs, and errors receive a separate direct-content lane.
+
+The room directory is the default corpus. A room marker may point at several
+projects:
+
+```json
+{
+  "vaultRoots": ["../project-a", "../project-b"],
+  "vaultIgnore": ["private/**", "generated/**"]
+}
+```
+
+Vault remains file-authoritative. Its in-memory search index is derived,
+bounded, briefly cached, and rebuildable.
 
 ### AKASHA
 
 AKASHA adds:
 
-- durable tool-backed memories;
-- typed lessons;
-- PostgreSQL and pgvector retrieval;
-- local embeddings;
-- entities, dates, threads, taxonomy, and clusters;
-- correction and supersession;
-- paper boats and Cabinet counsel.
+- durable tool-backed memories and typed lessons;
+- PostgreSQL authority and pgvector retrieval;
+- local embeddings and hybrid candidate fusion;
+- entities, dates, threads, taxonomy, relationships, and clusters;
+- correction, supersession, archival, paper boats, and Cabinet counsel.
 
-`room_state` reports the active runtime state. A degraded AKASHA dependency leaves Vault continuity available while the substrate is repaired.
+`room_state` reports the active runtime state. A missing substrate is valid
+Vault. A configured but unhealthy AKASHA dependency reports degraded AKASHA
+instead of silently pretending to be healthy Vault.
 
 ## First week
 

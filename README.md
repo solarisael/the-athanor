@@ -42,12 +42,13 @@ The room belongs to the entity, the house belongs to the Athanor, and the Athano
 the reference House is not a mockup wearing architecture lipstick. it currently
 runs:
 
-- **Vault and AKASHA profiles** — readable local rooms when you want light
-  continuity; PostgreSQL, pgvector, local embeddings, typed stores, provenance,
-  supersession, and bounded hybrid retrieval when you want the furnace;
-- **automatic per-turn recall** — canon, lexical/content/semantic candidates,
-  dates, threads, taxonomy, relationships, and cluster resonance arrive with
-  their sources and selection reasons instead of becoming unsourced prompt soup;
+- **Vault and AKASHA profiles** — Vault performs attributed local retrieval over
+  Markdown, JSON, JSONL, and text with exact-content and field-aware BM25F
+  lanes; AKASHA adds PostgreSQL, pgvector, local embeddings, typed stores,
+  provenance, supersession, and bounded hybrid retrieval;
+- **automatic and explicit recall** — bounded evidence arrives with exact
+  sources, headings or record identity, matching fields, and selection reasons
+  instead of becoming unsourced prompt soup;
 - **typed experience** — memories plus coding, project, writing, design, and audio
   lessons, each with its own retrieval and authority contract;
 - **BM25F memory retrieval** — field-aware lexical scoring with corpus IDF,
@@ -112,13 +113,14 @@ roadmap. “Research” means we are not lying to you about it being ready.
 | Multiple isolated rooms | Yes | Yes | Yes | Yes |
 | Conversation logging and compact handoffs | Yes | Yes | Yes | Yes |
 | PostgreSQL memory authority | — | Yes | Yes | Yes |
-| Hybrid lexical, content, structured, and semantic retrieval | — | Yes | Yes | Yes |
-| BM25F field-aware memory retrieval | — | Yes | Yes | Yes |
+| Attributed local Markdown, JSON, JSONL, and text retrieval | Yes | Yes | Yes | Yes |
+| Hybrid lexical, content, structured, and semantic retrieval | Lexical | Yes | Yes | Yes |
+| BM25F field-aware retrieval | Local files | Memories | Memories | Memories |
 | Local embeddings through a compatible endpoint | — | Yes | Yes | Yes |
 | Memories plus coding, project, writing, design, and audio lessons | — | Yes | Yes | Yes |
 | Entity, date, thread, taxonomy, relationship, and cluster retrieval | — | Yes | Yes | Yes |
 | Explicit per-thread continuity with bounded neighbor recall | Limited | Yes | Yes | Yes |
-| Provenance, authority state, and selection reasons | — | Yes | Yes | Yes |
+| Provenance, authority state, and selection reasons | File authority + reasons | Yes | Yes | Yes |
 | Supersession and archival without historical deletion | Limited | Yes | Yes | Yes |
 | House-level shared work memory without room-memory collapse | — | Yes | Yes | — |
 | Anamnesis reviewed counsel | — | Yes | Yes | — |
@@ -137,7 +139,10 @@ roadmap. “Research” means we are not lying to you about it being ready.
 | Encrypted remote jobs with zero service-side content retention | — | — | — | Planned |
 
 VAULT (**V**isible **A**rchive, **U**ser-owned, **L**ocal, and
-**T**ransparent) is the readable file-backed continuity profile. AKASHA
+**T**ransparent) is the readable file-backed continuity profile. Its native
+recall searches configured Markdown, JSON, JSONL, and text roots with exact
+content matching and field-aware BM25F, returning bounded excerpts with source,
+heading or record identity, matched fields, and token-safe limits. AKASHA
 (**A**ugmented **K**nowledge **A**nd **S**emantic **H**ybrid **A**rchive) adds
 durable PostgreSQL authority, typed stores, hybrid retrieval, local semantic
 search, and the substrate required by GIGA.
@@ -256,25 +261,21 @@ contract.
 
 ## Documentation
 
-| Document | Purpose |
-|---|---|
-| [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Components, contracts, data flow, and repository ownership |
-| [`RUNTIME_ARCHITECTURE.md`](./docs/RUNTIME_ARCHITECTURE.md) | Accepted Host, Godot UI, GIGA integrity, NATS delivery, dynamic embodiment, derivation, Cingulate, and Lean target |
-| [`SYNTHESIS_ARCHITECTURE.md`](./docs/SYNTHESIS_ARCHITECTURE.md) | Bounded e-graphs, Z3, SyGuS, Wasmtime, proof feedback, and governed promotion |
-| [`GODOT_CLIENT.md`](./docs/GODOT_CLIENT.md) | In-world Control UI, generated visual tokens, GPU-particle constellations, companion bodies, and alchemical profiles |
-| [`COMPANION_ECOSYSTEM.md`](./docs/COMPANION_ECOSYSTEM.md) | Companion room sovereignty, companion-authored models, and typed signed marketplace |
-| [`INSTALL.md`](./INSTALL.md) | Supported installation and observable verification |
-| [`USAGE.md`](./USAGE.md) | Everyday memory, room, sleep, and wake workflows |
-| [`EVIDENCE.md`](./docs/EVIDENCE.md) | Public evaluations, results, methods, and planned proof |
-| [`PLANNED_FEATURES.md`](./docs/PLANNED_FEATURES.md) | Plain-language product direction, market value, and feature status |
-| [`LIMITATIONS.md`](./docs/LIMITATIONS.md) | Platform boundaries, current constraints, and non-goals |
-| [`SECURITY.md`](./docs/SECURITY.md) | Privacy, secrets, permissions, and publication rules |
-| [`IDENTITY_GUIDE.md`](./IDENTITY_GUIDE.md) | Co-authoring rooms, identities, and active spirits |
-| [`docs/RETRIEVAL.md`](./docs/RETRIEVAL.md) | Recall lanes, authority, automatic retrieval, and corrections |
-| [`docs/LESSONS.md`](./docs/LESSONS.md) | Typed lesson stores, fields, scopes, imports, updates, and deletion |
-| [`HOUSE.md`](./HOUSE.md) | Project history, philosophy, and design reasons |
-| [`docs/roadmap.md`](./docs/roadmap.md) | Release sequence and future product surface |
-| [`docs/progress.md`](./docs/progress.md) | Current maintainer implementation state |
+The short reading path:
+
+1. [`INSTALL.md`](./INSTALL.md) — install or upgrade a supported deployment.
+2. [`USAGE.md`](./USAGE.md) — use rooms, recall, memory, lessons, and paper boats.
+3. [`ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — inspect current contracts,
+   authority, data flow, and repository ownership.
+4. [`EVIDENCE.md`](./docs/EVIDENCE.md) and
+   [`LIMITATIONS.md`](./docs/LIMITATIONS.md) — separate measured behavior from
+   boundaries and unfinished work.
+5. [`roadmap.md`](./docs/roadmap.md) — follow the current `0.10.x` to `1.0.0`
+   dependency path.
+
+The grouped catalogue—operator guides, current subsystem contracts, accepted
+target architecture, and historical snapshots—lives in
+[`docs/README.md`](./docs/README.md).
 
 ## Public evidence for all the wild claims
 

@@ -108,17 +108,27 @@ This separation lets a new session load a small identity and continuity surface 
 
 ## Vault
 
-Vault uses room-local files and the harness adapter. It provides:
+Vault uses operator-controlled files and the harness adapter. It provides:
 
 - stable room discovery;
-- identity loading;
-- compact context loading;
-- conversation continuity artifacts;
-- room-state tools;
-- restart recovery through the room context;
-- multiple isolated rooms.
+- identity and compact context loading;
+- conversation continuity artifacts and restart recovery;
+- room-state tools and multiple isolated rooms;
+- native local recall over Markdown, JSON, JSONL, and eligible text files;
+- field-aware BM25F over paths, titles, headings, structured keys, tags,
+  metadata, and bodies;
+- an exact-content lane for identifiers, filenames, symbols, UUIDs, quoted
+  strings, and errors;
+- bounded attributed excerpts with exact source paths and heading or record
+  identity.
 
-Vault requires no database, vector index, or GPU.
+Vault requires no database, vector index, embedding service, or GPU. Its
+in-memory index is derived and rebuildable from authoritative files. Recall
+defaults to the room directory; `.solarisael-room.json` may name one or more
+operator-controlled `vaultRoots`, additional `vaultIgnore` patterns, and bounded
+`vaultMaxFileBytes` or `vaultMaxFiles` limits. The scanner does not follow
+symlinks, skips common generated and secret-bearing paths, and honors each
+configured root's top-level `.gitignore`.
 
 ## AKASHA
 

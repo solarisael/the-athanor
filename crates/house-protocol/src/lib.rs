@@ -73,6 +73,10 @@ pub struct RememberParams {
     pub trigger_context: Option<String>,
     #[serde(default, rename = "exampleText")]
     pub example_text: Option<String>,
+    #[serde(default, rename = "languageKeys")]
+    pub language_keys: Vec<String>,
+    #[serde(default, rename = "technologyKeys")]
+    pub technology_keys: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default = "default_backup")]
@@ -913,6 +917,8 @@ impl TryFrom<RememberParams> for RememberRequest {
                 || params.proof_pattern.is_some()
                 || params.trigger_context.is_some()
                 || params.example_text.is_some()
+                || !params.language_keys.is_empty()
+                || !params.technology_keys.is_empty()
                 || !params.tags.is_empty())
         {
             return Err(ProtocolError::InvalidParams(
@@ -977,6 +983,8 @@ impl TryFrom<RememberParams> for RememberRequest {
                     proof_pattern: params.proof_pattern,
                     trigger_context: params.trigger_context,
                     example_text: params.example_text,
+                    language_keys: params.language_keys,
+                    technology_keys: params.technology_keys,
                     tags: params.tags,
                 },
             )
@@ -1884,6 +1892,10 @@ pub struct GigaCodingLessonPromotionPayloadParams {
     pub shape: RequiredNullable<String>,
     pub proof_pattern: String,
     pub trigger_context: String,
+    #[serde(default)]
+    pub language_keys: Vec<String>,
+    #[serde(default)]
+    pub technology_keys: Vec<String>,
     pub tags: Vec<String>,
 }
 
@@ -1895,6 +1907,10 @@ pub struct GigaProjectLessonPromotionPayloadParams {
     pub project: String,
     pub proof_pattern: String,
     pub trigger_context: String,
+    #[serde(default)]
+    pub language_keys: Vec<String>,
+    #[serde(default)]
+    pub technology_keys: Vec<String>,
     pub tags: Vec<String>,
 }
 
@@ -2207,6 +2223,8 @@ impl GigaPromotionTargetParams {
                 payload.shape.0,
                 payload.proof_pattern,
                 payload.trigger_context,
+                payload.language_keys,
+                payload.technology_keys,
                 payload.tags,
             )
             .map(GigaPromotionPayload::CodingLesson),
@@ -2216,6 +2234,8 @@ impl GigaPromotionTargetParams {
                 payload.project,
                 payload.proof_pattern,
                 payload.trigger_context,
+                payload.language_keys,
+                payload.technology_keys,
                 payload.tags,
             )
             .map(GigaPromotionPayload::ProjectLesson),
@@ -3214,6 +3234,8 @@ mod tests {
             proof_pattern: None,
             trigger_context: None,
             example_text: None,
+            language_keys: vec![],
+            technology_keys: vec![],
             register: vec![],
             tags: vec![],
             backup: true,
@@ -3240,6 +3262,8 @@ mod tests {
             proof_pattern: None,
             trigger_context: None,
             example_text: None,
+            language_keys: vec![],
+            technology_keys: vec![],
             tags: vec![],
             backup: true,
         };
@@ -3265,6 +3289,8 @@ mod tests {
                 proof_pattern: None,
                 trigger_context: None,
                 example_text: None,
+                language_keys: vec![],
+                technology_keys: vec![],
                 tags: vec![],
                 backup: true,
             };

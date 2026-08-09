@@ -8,7 +8,8 @@ For work, a House carries project decisions, conventions, lessons, corrections, 
 
 ## Capabilities
 
-Vault keeps continuity in files. AKASHA adds database-backed memory and search.
+Vault provides local attributed project search. AKASHA adds authoritative
+database memory, semantic retrieval, typed stores, and larger governed archives.
 
 | Capability | Vault | AKASHA |
 |---|:---:|:---:|
@@ -16,16 +17,19 @@ Vault keeps continuity in files. AKASHA adds database-backed memory and search.
 | Restart continuity and room-local context | Yes | Yes |
 | Multiple isolated rooms | Yes | Yes |
 | Conversation logging and compact handoffs | Yes | Yes |
+| Markdown, JSON, JSONL, and text retrieval | Yes | Yes |
+| Exact-content and field-aware BM25F retrieval | Yes | Yes |
+| Attributed excerpts and selection reasons | Yes | Yes |
 | PostgreSQL memory authority | — | Yes |
-| Hybrid lexical, content, structured, and semantic retrieval | — | Yes |
-| Local embeddings through a compatible endpoint | — | Yes |
-| Memories, coding lessons, project lessons, writing lessons, design lessons, and audio lessons | — | Yes |
+| Semantic retrieval through compatible local embeddings | — | Yes |
+| Typed memories and coding, project, writing, design, and audio lessons | — | Yes |
 | Entity, date, thread, taxonomy, relationship, and cluster retrieval | — | Yes |
-| Provenance, authority state, and selection reasons | — | Yes |
 | Corrections through supersession without historical deletion | Limited | Yes |
-| Memory lifecycle tools: `remember`, `recall`, `sleep`, and `wake` | — | Yes |
+| Durable `remember`, `sleep`, and `wake` stores | File continuity | Typed AKASHA stores |
 
-Vault is a complete file-backed continuity system. AKASHA adds durable database memory, typed stores, local semantic search, and larger archives.
+Vault can search one or several configured project roots without a database or
+GPU. AKASHA gives durable records explicit authority and lifecycle while adding
+semantic and structured retrieval lanes.
 
 ## Public evidence
 

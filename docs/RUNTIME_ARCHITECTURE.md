@@ -416,6 +416,64 @@ Policy decides whether stronger evidence, a changed baseline, or repeated
 recurrence returns it to review. A Curio remains a deliberate separate state;
 recurrence alone cannot promote either a dismissal or a Curio.
 
+### 6.6 Selective becoming and executable lesson triggers
+
+Continuity is governed selection, not maximum retention. The runtime preserves
+provenance while allowing authority and active influence to change. Review
+surfaces and receipts distinguish:
+
+- **never mine** — considered but refused as part of the lineage;
+- **once true** — formerly authoritative, now historical;
+- **not here** — valid only outside the current room, project, or register;
+- **not now** — dormant outside the current task or lifecycle state;
+- **superseded** — replaced by a named newer authority.
+
+Striatum derives an inspectable state vector from trusted room, project,
+language, technology, work-kind, task-shape, phase, register, and lifecycle
+facts. Eligibility is a hard boundary before ranking. It does not fill a quota:
+an empty active set below the calibrated confidence floor is correct.
+
+An eligible lesson can declare one of four intervention modes:
+
+```text
+advisory
+deferred_reminder
+interrupt_and_retry
+proof_gated
+```
+
+Task-shaped lessons may also carry a versioned executable trigger contract.
+Cheap deterministic gates run first over event type, tool, path, glob, and AST
+shape. A semantic trigger uses a bounded local model only after state has
+reduced the set, and receives one lesson contract plus exact current evidence.
+It returns a structured match or silence, exact evidence references,
+confidence, and proposed intervention. The model cannot grant authority,
+install a trigger, or choose a harder intervention than the reviewed lesson
+permits.
+
+The trigger lifecycle follows the proven TTSR anatomy where the harness
+supports it: scoped stream observation, optional interruption, removal of an
+invalid partial continuation, hidden rule injection, clean retry, repeat
+suppression, and persisted firing history. Matching is not limited to regex;
+path, tool, AST, semantic, boundary-test, and later formal adapters share one
+receipt contract.
+
+Every firing records the lesson and specification version, active state,
+matched condition, source/tool/path, evidence references, intervention,
+dismissal or override, recurrence, expected evidence, observed evidence,
+outcome, and reviewed false-positive or false-negative status. These receipts
+are the maturation path from human guidance to Cingulate obligations and
+selected Lean proofs.
+
+Resident local-model prompts are worker contracts. The reference House writes
+them in the A Squall quest register: bracketed system frame, precise role and
+target, voiced objectives, animated responsibilities that encode real
+invariants, exact nouns, and explicit refusal. JSON schemas and validators
+remain the machine boundary. Resident classifier constitutions may exceed the
+350-word dispatch-quest ceiling when their stable taxonomy requires it, but
+they remain concept-minimal and are evaluated against the prior prompt on the
+same blinded corpus.
+
 ## 7. PostgreSQL outbox and NATS JetStream
 
 NATS JetStream is the accepted candidate for delivery and wake-up, not for
@@ -678,12 +736,14 @@ background-event consumer only after that pilot proves the transport contract.
 
 ## 10. Cingulate enforcement and outcome closure
 
-Cingulate consumes active lessons, derived obligations, task lifecycle events,
-refinement transactions, and proof receipts.
+Cingulate consumes active and fired lesson contracts, executable-trigger
+receipts, derived obligations, task lifecycle events, refinement transactions,
+and proof receipts.
 
-Its first skeleton lands during GIGA integrity work so schemas do not need a
-later retrofit. Hard enforcement waits until event and derivation surfaces are
-stable.
+Its first skeleton lands during GIGA integrity work so Striatum's local firing,
+evidence, dismissal, recurrence, and outcome records become the native input
+rather than a schema retrofitted later. Hard enforcement waits until event and
+derivation surfaces are stable.
 
 Cingulate can emit three levels:
 
@@ -722,8 +782,11 @@ A lesson can mature through:
 
 ```text
 human-readable lesson
-  -> stable activation anatomy
-  -> deterministic proof pattern
+  -> state-conditioned eligibility
+  -> executable trigger with exact evidence
+  -> reviewed firing and outcome history
+  -> deterministic evidence adapter
+  -> Cingulate proof obligation
   -> optional formal obligation
 ```
 

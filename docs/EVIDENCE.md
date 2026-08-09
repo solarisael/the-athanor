@@ -121,6 +121,31 @@ Publish p50 and p95 latency with:
 - cold versus warm runs;
 - query lane composition.
 
+
+### End-to-end task efficiency
+
+**Contract:** For the same model, harness, task corpus, and success rubric, an
+Athanor-enabled run should reduce rediscovery, authority mistakes, user
+corrections, or time to the first correct action enough to justify the context
+and retrieval it adds.
+
+Publish paired baseline and Athanor runs with:
+
+- total uncached input, cache-write, cache-read, and output tokens when the
+  provider exposes them;
+- maximum and average active context size;
+- retrieval latency and total task elapsed time;
+- time and tool calls before the first correct action;
+- repeated searches or explanations;
+- stale-authority mistakes and user corrections;
+- final test, review, or task-success result;
+- storage profile and which context organs activated.
+
+Do not collapse short isolated tasks and long-horizon continuity work into one
+average. Report them as separate workload classes. Until this evaluation exists,
+The Athanor may claim bounded attributed retrieval and continuity behavior, but
+not proven net token savings or improved final answers.
+
 ### Clean-machine installation
 
 **Contract:** A tool-capable agent can install the supported topology on a clean Windows machine, create the first room, connect OMP, pass the static verifier, recover continuity after restart, and—when selected—complete the AKASHA lifecycle.

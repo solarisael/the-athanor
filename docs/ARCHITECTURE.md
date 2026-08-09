@@ -106,6 +106,35 @@ House keeps four concerns separate:
 
 This separation lets a new session load a small identity and continuity surface while retrieving deeper evidence only when the current turn needs it.
 
+## Current operational capability topology
+
+The reference implementation is more than the four storage/context layers
+above. The table below is the current machine-readable map for cold evaluators:
+
+| Surface | Current role | Owner | Authority |
+|---|---|---|---|
+| Room identity and state | Stable room key, operator, active spirit, identity contract, compact live context | Core + adapter + operator-owned files | Room files and explicit state writes |
+| Vault retrieval | Attributed Markdown, JSON, JSONL, and text search through exact-content and field-aware BM25F lanes | Core, exposed by the adapter | The selected files remain authoritative |
+| AKASHA memory | Durable memories, chunks, entities, dates, threads, continuation edges, relationships, taxonomy, and lifecycle | Substrate + PostgreSQL | PostgreSQL; current/superseded/archived state is explicit |
+| Paper boats | Room-scoped continuity across closed sessions, including stale-boat detection when later memories exist | Adapter + active storage profile | Orientation for the next session, not canon |
+| Typed lessons | Coding, project, writing, design, and audio guidance with store-specific scope and proof fields | Core contracts + substrate stores | Active typed record within its declared scope |
+| Striatum | State-conditioned coding/project lesson activation after deterministic eligibility rails, bounded semantic ranking, and hysteresis | Core + adapter + substrate ranking | Selects active lessons; does not create authority |
+| Canon and controlled vocabulary | Load-bearing assertions plus bounded lexical expansion from authoritative entities, active threads, and lesson metadata | Core + substrate | Canon governs generation; expansion only locates evidence |
+| Anamnesis Cabinet | Reviewed pillars and lived cycles supplied as bounded counsel | Substrate + adapter | Advisory only; never canon or memory authority |
+| GIGA Hippocampus Stage 1 | Exact turn events, asynchronous classification, non-authoritative candidates, review, Curios, promotion, and queue maintenance | Adapter event boundary + substrate worker/store | Candidate until reviewed and explicitly promoted |
+| Design-system catalogue | Typed immutable/superseding design tokens, components, contracts, and guidelines | Substrate + adapter tools | Current catalogue record within the named design system |
+| Worker routing and familiars | Deterministic lanes, room-owned spellbooks, and validated harness-ready task packets | Core policy + adapter spawn boundary | Routing policy only; no memory or room authority |
+| Rust transport and health | Long-lived JSONL requests, cancellation/timeouts, crash replacement, compatibility checks, redacted diagnostics, and uncertain-write reconciliation | OMP adapter + Rust substrate | Transport carries receipts; it does not become authority |
+
+These surfaces are deliberately separate. A lesson is not a memory, Cabinet
+counsel is not canon, a GIGA candidate is not evidence, a familiar is not a
+second routing system, and transport success is not proof that a stored claim is
+true.
+
+Detailed contracts live in [`RETRIEVAL.md`](./RETRIEVAL.md),
+[`LESSONS.md`](./LESSONS.md), [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md), and
+[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md).
+
 ## Vault
 
 Vault uses operator-controlled files and the harness adapter. It provides:
@@ -193,6 +222,38 @@ The injection path is fail-open: retrieval errors are logged and do not block th
 
 Read [`RETRIEVAL.md`](./RETRIEVAL.md) for operational retrieval behavior.
 
+### Context assembly and token budgets
+
+The OMP adapter assembles context through distinct bounded organs:
+
+```text
+stable harness + room contract
+        │
+        ├── fresh-session paper boat
+        ├── fresh-session Anamnesis wake counsel
+        ├── routing-mode and exact keyword directives
+        ├── Striatum lessons or deterministic process lessons
+        ├── automatic Vault / AKASHA recall evidence
+        └── context-growth nudge
+        │
+        ▼
+hidden attributed context for the active model turn
+```
+
+Each organ has its own eligibility check, output cap, source attribution, and
+fail-open behavior. Fresh-session surfaces are injected once. Automatic recall
+can decline low-information turns; explicit `recall` exposes a broader evidence
+viewport. Repeated evidence is suppressed or saturated within the session, and
+stable additions are kept byte-stable where the harness can preserve provider
+prefix caching.
+
+The current adapter does **not** yet enforce one provider-tokenizer-aware
+aggregate budget across identity, tool schemas, paper boats, Anamnesis, lessons,
+recall, canon, thread neighbors, and directives. Independent bounds prevent one
+organ from becoming unbounded, but several valid organs can still stack into a
+large turn. This is a documented current limitation and a future Host-level
+coordination responsibility, not a proven net-token-saving claim.
+
 ## Authority and correction
 
 House distinguishes a stored event from what currently holds authority.
@@ -202,6 +263,24 @@ A new state claim may supersede an older state claim while preserving the old ro
 Canon assertions are injected separately from ordinary memory context. Where canon and a retrieved interpretation conflict, canon wins for generation.
 
 Corporate or project source authority remains a separate domain. An imported source document can remain the factual authority while House memories and embeddings locate it. Import profiles must preserve source class, path, version, scope, and precedence rather than flattening every document into generic memory.
+
+Authority is domain-specific rather than one universal row ladder:
+
+| Evidence class | What it may govern | What it may not do |
+|---|---|---|
+| Live enforced repository evidence and declared external project sources | Their named implementation or business domain | Become room identity or personal canon merely because they were indexed |
+| Canon assertions | Load-bearing identity, relationship, naming, and project assertions in their declared scope | Rewrite external source facts outside that scope |
+| Current typed project/design records and lessons | The project, design system, register, or craft scope they explicitly name | Gain broader scope through semantic similarity |
+| Active memories | Events and current continuity claims until corrected, superseded, or archived | Outrank conflicting canon or a declared external factual authority |
+| Anamnesis counsel | Suggest a previously lived path worth considering | Assert that the same pattern is happening now |
+| GIGA candidates, embeddings, clusters, and lexical expansion | Navigate toward possible evidence or review work | Promote themselves, become facts, or authorize an action |
+
+This is why Prism-like ledgers, curated Libraries, live repositories, or
+corporate systems do not need to be copied into generic memories. Vault can
+search them directly. When an AKASHA import profile indexes them, it must retain
+stable source identity, state, version, evidence anchors, and precedence.
+Athanor retrieval then leads the model to the governing claim or document
+without taking its authority away.
 
 ## Typed knowledge
 

@@ -52,6 +52,25 @@ Semantic proximity is a candidate signal, not factual authority. Important answe
 
 Retrieval is fail-open for conversation continuity. If PostgreSQL or embeddings are unavailable, the adapter keeps lighter room continuity usable and reports the degraded source rather than blocking the turn.
 
+## Context-budget boundary
+
+The current OMP adapter bounds each context organ independently. Room context,
+tool schemas, a fresh paper boat, Anamnesis wake counsel, active lessons,
+automatic recall, canon, thread neighbors, directives, and context-growth
+nudges each have their own eligibility and output rules.
+
+There is not yet one provider-tokenizer-aware coordinator that assigns a single
+turn budget across all of them. Several individually valid organs can therefore
+stack into a context surface that is larger than a short task warrants. Prefix
+caching can reduce billed cache-write cost for stable prefixes, but cached
+tokens still occupy model context and still depend on provider behavior.
+
+The Athanor has not yet publicly established that retrieval and continuity
+reduce total input tokens or total task cost against a no-Athanor baseline.
+Long-running work can plausibly avoid repeated explanation, searching, mistakes,
+and rediscovery; short isolated tasks may consume more input context. Treat net
+efficiency as an evaluation question, not a product claim.
+
 ## Memory boundary
 
 The Athanor is not indiscriminate transcript storage. Durable memory remains deliberate by default.

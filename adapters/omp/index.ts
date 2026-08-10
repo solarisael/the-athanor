@@ -265,7 +265,7 @@ export default function solarisaelHouseProof(pi) {
   pi.setLabel("The Athanor");
   let activeRoom: string | null = null;
 
-  const stopKittenProgress = pi.events?.on?.("task:subagent:progress", (payload: unknown) => {
+  const stopKittenProgress = pi.events?.on?.("task:subagent:event", (payload: unknown) => {
     if (kittenLineageDisabled() || !payload || typeof payload !== "object") return;
     const progress = payload as KittenQuestProgress;
     const id = String(progress.id ?? "").trim();

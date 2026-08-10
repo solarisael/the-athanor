@@ -183,7 +183,7 @@ describe("OMP adapter registration", () => {
     expect(labels).toEqual(["The Athanor"]);
     expect(hooks.map((hook) => hook.name)).toEqual(["tool_call", "context", "tool_result", "shutdown", "agent_end"]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
-    expect(eventChannels).toEqual(["task:subagent:progress", "task:subagent:lifecycle"]);
+    expect(eventChannels).toEqual(["task:subagent:event", "task:subagent:lifecycle"]);
   });
 
   test("registers the Solarisael tool surface", () => {

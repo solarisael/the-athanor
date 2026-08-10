@@ -4,17 +4,22 @@ This document records current support boundaries and non-goals. The product READ
 
 ## Supported installation path
 
-The guided public installation currently supports:
+Windows x64 with OMP is the only supported release target. Release 0.11.0 is
+the current late-beta line.
 
-- Windows 10 or 11;
+The Vault profile requires:
+
+- Windows 10 or 11 on x64;
 - OMP;
-- Bun;
-- the stable Rust MSVC toolchain;
-- Vault room files and the TypeScript OMP lifecycle adapter over Rust core contracts.
+- the `the-athanor-<version>-windows-x64-vault.zip` archive.
 
-AKASHA on the guided Windows path additionally uses:
+The Vault profile requires no substrate binary, no PostgreSQL, no embedding
+service, no WSL, and no Rust runtime.
 
-- the release-built Windows `solarisael-house-substrate.exe`;
+The AKASHA profile requires the Vault items and also:
+
+- the `the-athanor-<version>-windows-x64-akasha.zip` archive;
+- the release-built `athanor-substrate.exe` in the archive;
 - WSL 2 with Ubuntu;
 - PostgreSQL 16 with pgvector and `pg_trgm`;
 - Python 3.11+ for migrations, health, imports, and maintenance;
@@ -23,22 +28,30 @@ AKASHA on the guided Windows path additionally uses:
 
 The tested embedding default is Nemotron-3-Embed-1B through WSL ROCm Ollama on compatible AMD hardware. The mounted OMP memory path uses the long-lived Windows Rust process; Python support scripts are not a substitute for that runtime proof.
 
+One repository and one release own every installed component. Read
+[the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
+
 ## Other hosts
 
 | Host | Current state |
 |---|---|
-| Windows + OMP + Vault | Supported guided path |
-| Windows + OMP + WSL AKASHA | Supported guided Rust-first path split between the core, OMP, and substrate repositories |
+| Windows x64 + OMP + Vault | Supported release target |
+| Windows x64 + OMP + WSL AKASHA | Supported release target |
 | Native Linux | Database and support tools are adaptable; the current Windows executable and OMP integration require host-specific engineering and verification |
-| OpenCode | Adapter work predates the Rust cutover; it is not covered by the current guided installer |
-| macOS | Unsupported by the guided installation |
+| OpenCode | Adapter work predates the Rust cutover; it is not a supported release target |
+| macOS | Unsupported |
 | Other harnesses | Require an adapter over the core contracts |
 
 An adapted path becomes trustworthy when it proves the same observable contracts: adapter loading, room discovery, `room_state`, fresh-session continuity, and—when AKASHA is selected—a real substrate write/read lifecycle.
 
 ## Installation boundary
 
-Version 0.10 uses an AI-guided developer-shaped setup with a verified Rust-first runtime. The operator still needs a working harness and its authentication before the AI can take over. The 1.0 milestone adds a trusted native bootstrapper, ordinary-user onboarding, upgrades, uninstall behavior, backup, and recovery.
+The installer accepts the modes `vault` and `akasha`. A 0.10.x install upgrades
+only through the explicit `--migrate-legacy` flow. The operator still needs a
+working harness and its authentication before the AI can take over. The 1.0
+milestone adds a trusted native bootstrapper, ordinary-user onboarding,
+uninstall behavior, backup, and recovery. Read [`../INSTALL.md`](../INSTALL.md)
+for the current procedure.
 
 The current installer does not promise one-click setup on an otherwise empty machine.
 
@@ -107,7 +120,7 @@ The Athanor keeps continuity provider-portable, but it cannot remove provider-si
 
 ## Runtime-evolution boundary
 
-Version 0.10.1 does not yet ship the Godot client, Athanor Host WebSocket or
+The current release line does not yet ship the Godot client, Athanor Host WebSocket or
 delta synchronization, PostgreSQL-outbox/NATS delivery or idempotency ledger,
 background code-change indexing, incremental Prolog/Datalog facts and
 precomputed relations, invocation-time model routing, headless room targets,

@@ -32,7 +32,7 @@ export async function spawnPostgresSource(roomDir, args, prompt) {
       "python3",
       windowsPathToWsl(MEMORY_POSTGRES_SOURCE_SCRIPT),
       "--substrate-dir",
-      windowsPathToWsl(resolveSubstrateDir(roomDir)),
+      windowsPathToWsl(resolveSubstrateDir()),
       ...args,
     ],
     cwd: roomDir,

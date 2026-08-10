@@ -9,6 +9,7 @@ Lessons preserve reusable guidance in typed stores. They are not a second name f
 | `coding-lesson` | Transferable engineering or process rules | Should remain correct in another repository using the same tools |
 | `project-lesson` | Rules, constraints, and decisions owned by one project | Requires a stable project key |
 | `writing-lesson` | Durable prose, register, voice, and taste rules | Describes when the preference should shape writing |
+| `design-lesson` | Reusable design-system taste and rationale | Names the design system whose catalogue entries the rule governs |
 | `audio-lesson` | Reusable speech and audio-pipeline rules | Names the pipeline condition and observable result |
 | `memory` | An event, decision, realization, or thing that happened | Preserves retrieval-bearing context rather than an abstract rule |
 
@@ -70,9 +71,11 @@ Example:
 
 A coding lesson with `project` set remains a coding lesson. The project label improves provenance and general recall; it does not convert a global craft rule into a project-only constraint.
 
-## Writing and audio lessons
+## Writing, design, and audio lessons
 
 Writing lessons preserve a specific prose decision and when it should fire. Avoid vague instructions such as “write better.” Name the register, sentence behavior, humor mechanism, or prohibited shape.
+
+Design lessons preserve reusable design-system taste: why a token, component, contract, or guideline is shaped the way it is, and when the rule should govern new work. Bind each one to a named design system. The catalogue itself is read through the `design_doc` organ and written through `design_doc_write`; a design lesson refers to those entries rather than replacing them.
 
 Audio lessons preserve reusable pipeline behavior such as model choice, preprocessing, pronunciation, pacing, loudness, or export boundaries. Include the observable audio property that proves the rule.
 
@@ -117,7 +120,7 @@ Lesson retrieval is a task boundary, not an every-turn ritual. Refresh when the 
 
 ## Updating lessons
 
-`update_lesson` revises one coding, project, or writing lesson in place.
+`update_lesson` revises one coding, project, writing, or design lesson in place.
 
 The guard requires:
 
@@ -131,7 +134,7 @@ Update a lesson when its rule remains the same identity but wording, trigger, or
 
 ## Deleting lessons
 
-`delete_lesson` permanently deletes exactly one coding, project, or writing lesson. It requires the numeric ID and exact current title.
+`delete_lesson` permanently deletes exactly one coding, project, writing, or design lesson. It requires the numeric ID and exact current title.
 
 Use deletion for an obsolete rule that should no longer remain recoverable in the active lesson store. For consolidation, update and verify the surviving lesson first, then delete the redundant row.
 

@@ -186,7 +186,7 @@ def main() -> int:
         values = _json_object(args.values, "values")
         provenance = _json_object(args.provenance, "provenance")
         document_body = sys.stdin.read() if args.body_stdin else args.body
-        env = substrate_env(args.room_dir)
+        env = substrate_env()
         conn = psycopg2.connect(
             host=env.get("PGHOST"),
             port=env.get("PGPORT"),

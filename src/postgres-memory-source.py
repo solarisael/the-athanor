@@ -116,16 +116,11 @@ DEFAULT_CANDIDATE_MAX_TERMS = 10
 
 EMBED_TIMEOUT_SECS = 5.0
 
-# Per-turn retrieval visibility (2026-06-22). db-only memories — auto-recorded
-# sessions and paper-boats the OhMyPi session/sleep tools write straight to the
-# DB, never to a curated memory/*.md path — are normally excluded from injection
-# so the auto-session firehose can't swamp context. Paper-boats are the lone
-# exception: one deliberate, high-signal handoff per session that MUST stay
-# retrievable (a GLOSSOPETRAE thread lived only in boat 2147 and was invisible
-# to every pass). One policy, applied at every pass; assumes table alias `m`.
-RETRIEVAL_VISIBILITY_SQL = (
-    "(m.source_path NOT LIKE 'db-only/%%' OR m.type = 'paper-boat')"
-)
+# Per-turn retrieval visibility. Paper boats belong to wake, while direct
+# receipt/source lookup remains the deliberate door for historical access.
+# Ordinary recall keeps every other memory, including Postgres-only memories
+# whose source path is intentionally opaque. Assumes table alias `m`.
+RETRIEVAL_VISIBILITY_SQL = "COALESCE(m.type, '') <> 'paper-boat'"
 
 ERASURE_SCORE_DEMOTION = 8.0
 ARCHIVE_SCORE_DEMOTION = 10.0
@@ -845,7 +840,7 @@ def fetch_memory(conn, memory_id=None, source_path=None, claimed_room=None) -> d
     2026-07-09 retrieval architecture: ambient search stays room-scoped so
     each room keeps its own context; explicit handles cross rooms on purpose —
     a knock, not a key. Provenance is stamped so the caller always knows whose
-    memory it holds. Bypasses the db-only visibility filter: following a
+    memory it holds. Bypasses the per-turn visibility filter: following a
     receipt is deliberate, like a citation.
     """
     with conn.cursor(cursor_factory=DICT_CURSOR_FACTORY) as cur:
@@ -935,6 +930,7 @@ def load_cluster_resonance(
             WHERE mc.centroid IS NOT NULL
               AND m.room = ANY(%s)
               AND {RETRIEVAL_VISIBILITY_SQL}
+              AND (mc.label IS NULL OR mc.label NOT ILIKE 'paper boat%%')
               AND {memory_filter}
             GROUP BY mc.id, mc.label, mc.centroid
             ORDER BY activation DESC
@@ -1006,7 +1002,7 @@ def load_taxonomy(
             SELECT m.room, COALESCE(m.type, '') AS type, COUNT(*) AS count
             FROM memories m
             WHERE m.room = ANY(%s)
-              AND (m.source_path NOT LIKE 'db-only/%%' OR m.type = 'paper-boat')
+              AND COALESCE(m.type, '') <> 'paper-boat'
               AND {memory_filter}
             GROUP BY m.room, COALESCE(m.type, '')
             ORDER BY count DESC, m.room, type
@@ -1024,7 +1020,7 @@ def load_taxonomy(
             FROM memory_threads mt
             JOIN memories m ON m.id = mt.memory_id
             WHERE m.room = ANY(%s)
-              AND (m.source_path NOT LIKE 'db-only/%%' OR m.type = 'paper-boat')
+              AND COALESCE(m.type, '') <> 'paper-boat'
               AND {memory_filter}
             GROUP BY mt.thread_key
             ORDER BY count DESC, mt.thread_key
@@ -1584,7 +1580,7 @@ def main() -> int:
     parser.add_argument(
         "--substrate-dir",
         default=None,
-        help="Substrate directory override; otherwise SOLARISAEL_SUBSTRATE or the sibling default is used.",
+        help="Substrate directory override; otherwise ATHANOR_SUBSTRATE_ROOT or the structural <athanor-root>/substrate is used.",
     )
     parser.add_argument(
         "--mode",
@@ -1702,7 +1698,7 @@ def main() -> int:
     if args.scope_files:
         scope_files = [s.strip() for s in args.scope_files.split(",") if s.strip()]
 
-    substrate_dir = resolve_substrate_dir(room_dir, args.substrate_dir)
+    substrate_dir = resolve_substrate_dir(args.substrate_dir)
     env = load_postgres_env(substrate_dir)
     conn = connect(env)
     erasure_columns = detect_erasure_columns(conn)

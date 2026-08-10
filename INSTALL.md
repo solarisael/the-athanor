@@ -1,374 +1,553 @@
-# Install The Athanor for OMP
+# Install The Athanor
 
-This guide installs the supported Windows + OMP topology and proves the result through observable room behavior.
+This is the one installation door for The Athanor 0.11.0.
 
-Give this repository to a tool-capable AI agent with:
+One repository and one release own the core, the substrate, the OMP adapter, the
+installer, and the updater. You download one archive. You run one installer.
 
-> Install The Athanor with me. Preserve my existing rooms and configuration, explain consequential system changes before making them, and verify the completed installation.
+The installer stages the whole tree, verifies it, and only then activates it.
+This is not a one-click installer.
 
-The agent performs the protocol. The operator chooses identity, location, deployment mode, and consequential system changes.
+Read [`docs/SECURITY.md`](./docs/SECURITY.md) before you handle credentials.
+Read [`IDENTITY_GUIDE.md`](./IDENTITY_GUIDE.md) before you write a room identity.
 
-Read [`SECURITY.md`](./docs/SECURITY.md) before handling credentials or private room data. Read [`IDENTITY_GUIDE.md`](./IDENTITY_GUIDE.md) before writing an identity.
+## Before you start
 
-## Result
+The supported platform is Windows x64 with [OMP](https://github.com/can1357/oh-my-pi).
 
-A completed Vault installation has:
+Install these first:
 
-- the Rust core and OMP adapter in resolvable sibling directories;
-- the adapter's Bun dependencies installed;
-- one writable room with a stable key and co-authored identity;
-- both OMP extensions connected without replacing existing configuration;
-- a passing static verifier;
-- a fresh session reporting the correct room, spirit, operator, and state path;
-- a second fresh session recovering the continuity-test sentence from the room source.
+- Windows 10 or Windows 11 on x64;
+- OMP, callable as `omp`;
+- Bun, callable as `bun`.
 
-A completed AKASHA installation additionally has:
+The installer runs the verifier through Bun. An install fails without Bun.
 
-- the public substrate repository beside the core and adapter;
-- a release-built `solarisael-house-substrate.exe` selected through `SOLARISAEL_HOUSE_RUST`;
-- a healthy PostgreSQL, pgvector, and embedding substrate;
-- a real memory write and recall through the mounted Rust-backed OMP tools;
-- a paper boat recovered after a fresh session;
-- substrate backup and recovery configured through its canonical repository.
+**Warning.** The installer edits your OMP configuration file. It keeps every
+unrelated setting. It replaces only Athanor extension paths.
 
-## Release installation and updates
+**Warning.** The installer replaces an existing target directory. Read
+[Choose the right flag](#choose-the-right-flag) before you pass `--force`.
 
-The portable release contains the core, OMP adapter, compiled installer and updater, starter room, platform Rust executable, and an embedded manifest of every shipped artifact. Download the ZIP for the host platform from the adapter's GitHub release, keep the original ZIP, and extract a temporary copy so the installer executable can run:
+## Choose a profile
 
-```powershell
-Expand-Archive .\solarisael-house-<VERSION>-windows-x64.zip .\solarisael-house-setup
-.\solarisael-house-setup\solarisael-house-omp\install.exe --list-harnesses
+There are two public profiles: `vault` and `akasha`.
+
+Vault is file-attributed retrieval. Vault needs no substrate binary, no
+PostgreSQL, no embeddings, no WSL, and no Rust runtime.
+
+AKASHA adds substrate operations and the platform substrate binary. AKASHA
+requires PostgreSQL with pgvector, a local embedding service, and WSL.
+
+Read [the README profile comparison](./README.md#grow-into-akasha-when-the-work-needs-it)
+to choose. Your profile decides which archive you download.
+
+## Download one archive
+
+Each release publishes exactly two archives for Windows x64:
+
+```text
+the-athanor-0.11.0-windows-x64-vault.zip
+the-athanor-0.11.0-windows-x64-akasha.zip
 ```
 
-The current public catalog exposes `omp`. Install the Vault profile with:
+Each release also publishes `release-manifest.json`. The updater reads that
+manifest. Get all three from the [`solarisael/the-athanor`](https://github.com/solarisael/the-athanor/releases)
+releases page.
 
-```powershell
-.\solarisael-house-setup\solarisael-house-omp\install.exe `
-  --bundle .\solarisael-house-<VERSION>-windows-x64.zip `
-  --target C:\Solarisael `
-  --room my-room `
-  --mode base `
-  --harness omp
+Keep the original ZIP file. The installer reads the ZIP as its bundle.
+
+## What an install puts on disk
+
+An install writes three directories under your target directory:
+
+```text
+<target>\
+  the-athanor\            product code; never write inside it
+    adapters\omp\         the OMP adapter, installer, and updater
+    substrate\            substrate operations; AKASHA only
+  rooms\                  your rooms
+  state\                  mutable state
+    athanor.env           canonical topology for this install
+    substrate\            substrate dotenv and PostgreSQL dumps; AKASHA only
 ```
 
-For AKASHA, add `--mode full --substrate <ABSOLUTE_SUBSTRATE_PATH>`. The `full` value is a compatibility CLI token. Use `--config <ABSOLUTE_OMP_CONFIG>` when OMP does not use its default configuration path.
+It also copies the onboarding documents to the target root: `README.md`,
+`INSTALL.md`, `USAGE.md`, `IDENTITY_GUIDE.md`, `LICENSE`, `NOTICE`, and
+`SETUP.txt`. Nothing else outside `the-athanor\` is overwritten.
 
-The installer rejects unsafe archive entries, verifies the embedded artifact manifest and platform Rust binary, stages the complete installation, preserves existing rooms and unrelated configuration, runs the canonical verifier, and only then activates the staged tree. Replacing an existing target requires `--force`; release updates use the narrower internal `--update` path.
+The installer writes `state/athanor.env` with the canonical topology variables:
 
-The installed updater resolves the selected GitHub release channel, validates the release manifest, SHA-256, byte size, internal package version, required substrate schema, and installer result. Check without changing files:
+| Variable | Profile | Value |
+|---|---|---|
+| `ATHANOR_STATE_DIR` | both | `<target>\state` |
+| `ATHANOR_SUBSTRATE_ROOT` | AKASHA | `<target>\the-athanor\substrate` |
+| `ATHANOR_SUBSTRATE_EXE` | AKASHA | `<target>\the-athanor\adapters\omp\bin\windows-x64\athanor-substrate.exe` |
+
+The adapter reads `state/athanor.env` directly. Do not export these variables by
+hand. A real environment variable overrides the file.
+
+`ATHANOR_AUTO` is optional. Leave it unset unless a maintainer asks for it.
+
+The installer also adds two absolute paths to your OMP `extensions:` list:
+
+```yaml
+extensions:
+  - <target>/the-athanor/adapters/omp/index.ts
+  - <target>/the-athanor/adapters/omp/hygiene.ts
+```
+
+## Install a fresh Vault
+
+Follow these steps for a host with no earlier Athanor install.
+
+1. Extract a working copy of the archive:
+
+   ```powershell
+   Expand-Archive .\the-athanor-0.11.0-windows-x64-vault.zip .\athanor-setup
+   ```
+
+2. List the supported harnesses:
+
+   ```powershell
+   .\athanor-setup\the-athanor\adapters\omp\install.exe --list-harnesses
+   ```
+
+   The catalog holds `omp` only.
+
+3. Choose a room key. Use lowercase letters, digits, and single hyphens. The key
+   `house` is reserved.
+
+4. Run the installer:
+
+   ```powershell
+   .\athanor-setup\the-athanor\adapters\omp\install.exe `
+     --bundle .\the-athanor-0.11.0-windows-x64-vault.zip `
+     --target C:\Solarisael `
+     --room my-room `
+     --mode vault `
+     --harness omp
+   ```
+
+5. Read the JSON result. A success prints `"ok": true` with the target, the
+   profile, the room, and the environment.
+
+`--target` must be an absolute path. `--config` defaults to
+`%USERPROFILE%\.omp\agent\config.yml`. Pass `--config` with an absolute path for
+a different OMP configuration.
+
+Add `--dry-run` to stage and verify without changing anything.
+
+Continue at [Prove the room](#prove-the-room).
+
+## Install a fresh AKASHA
+
+A fresh AKASHA install needs two proofs before it activates: substrate
+credentials and a fresh database backup.
+
+You supply the credentials with `--env-file`. The installer copies that file to
+`<target>\state\substrate\.env` before it verifies the staged tree.
+
+You supply the backup with `--backup`. The installer validates the dump, then
+copies it to `<target>\state\substrate\backups\`. It renames the copy to
+`solarisael_memory_<UTC>.dump`, using `YYYY-MM-DD_HHMMSS`. That name joins the
+rotation family `backup.sh` prunes.
+
+Both source files stay untouched.
+
+Neither flag is accepted for Vault. Neither flag is accepted with
+`--migrate-legacy`, which carries the detected 0.10.x dotenv and dumps forward.
+
+A fresh install never searches for a dump. An absent backup is the absence of
+safety, so you must name one.
+
+**Warning.** Prepare the database first. The installer refuses to activate an
+AKASHA tree that does not verify as exactly `AKASHA`.
+
+1. Install WSL 2 and PostgreSQL 16 with the `pgvector` and `pg_trgm` packages.
+2. Create the PostgreSQL role and database that your dotenv will name.
+3. Start your local embedding service.
+4. Extract a working copy of the archive:
+
+   ```powershell
+   Expand-Archive .\the-athanor-0.11.0-windows-x64-akasha.zip .\athanor-setup
+   ```
+
+5. Copy the example dotenv to an absolute path you own:
+
+   ```powershell
+   Copy-Item .\athanor-setup\the-athanor\substrate\.env.example `
+     C:\athanor-setup\substrate.env
+   ```
+
+6. Edit `C:\athanor-setup\substrate.env`. Set `PGHOST`, `PGPORT`, `PGUSER`,
+   `PGPASSWORD`, and `PGDATABASE`. Set the embedding URL, model, and dimension.
+
+7. Open a WSL shell. Change to the extracted substrate directory:
+
+   ```bash
+   cd /mnt/c/Users/<you>/Downloads/athanor-setup/the-athanor/substrate
+   ```
+
+8. Apply the substrate migrations. They also create the two extensions:
+
+   ```bash
+   ATHANOR_STATE_DIR=/mnt/c/Solarisael/state \
+     python3 run_migrations.py --env-file /mnt/c/athanor-setup/substrate.env
+   ```
+
+9. Prove the substrate:
+
+   ```bash
+   ATHANOR_STATE_DIR=/mnt/c/Solarisael/state \
+     python3 health.py --env-file /mnt/c/athanor-setup/substrate.env
+   ```
+
+   Read `database` and `embedding`. Both must report `"ok": true`. The backup
+   probe still fails here, because you take the dump next.
+
+10. Take the custom-format dump of the migrated database:
+
+    ```bash
+    pg_dump -h 127.0.0.1 -p 5432 -U solarisael -d solarisael_memory \
+      -Fc --no-owner --no-acl -f /mnt/c/athanor-setup/solarisael_memory.dump
+    ```
+
+    Match the host, port, user, and database to your dotenv. The dump must be
+    newer than 24 hours when you install.
+
+11. Run the installer from PowerShell:
+
+    ```powershell
+    .\athanor-setup\the-athanor\adapters\omp\install.exe `
+      --bundle .\the-athanor-0.11.0-windows-x64-akasha.zip `
+      --target C:\Solarisael `
+      --room my-room `
+      --mode akasha `
+      --env-file C:\athanor-setup\substrate.env `
+      --backup C:\athanor-setup\solarisael_memory.dump `
+      --harness omp
+    ```
+
+12. Read the JSON result. The `environment` field must name all three topology
+    variables.
+13. Read the `backup` field. It records `source`, `destination`, `size`, and
+    `modifiedAt`. `destination` is the seeded copy inside your install.
+
+The installer checks the backup before the dotenv. A run missing both flags
+reports the backup refusal first.
+
+**Warning.** The staged verification runs against a temporary tree, not against
+`<target>`. A refusal there activates nothing. Your rooms, your configuration,
+and your database stay untouched.
+
+Read the refusal text. Fix the named condition. Do not retry with `--force`.
+
+Continue at [Prove the room](#prove-the-room).
+
+## Migrate a 0.10.x Vault install
+
+A 0.10.x install root holds sibling product directories such as
+`solarisael-house`, `solarisael-house-omp`, and `solarisael-house-substrate`.
+
+The installer detects that layout. It refuses to replace it silently. The
+migration is explicit.
+
+**Warning.** The old `update.exe` cannot migrate a 0.10.x tree. It stops and
+tells you to use the installer. Use the new installer with `--migrate-legacy`.
+
+1. Close every OMP session.
+2. Extract a working copy of the Vault archive:
+
+   ```powershell
+   Expand-Archive .\the-athanor-0.11.0-windows-x64-vault.zip .\athanor-setup
+   ```
+
+3. Preview the migration:
+
+   ```powershell
+   .\athanor-setup\the-athanor\adapters\omp\install.exe `
+     --bundle .\the-athanor-0.11.0-windows-x64-vault.zip `
+     --target C:\Solarisael `
+     --room my-room `
+     --mode vault `
+     --migrate-legacy `
+     --dry-run
+   ```
+
+4. Read the `legacy.reasons` list. Confirm that it names your old directories.
+5. Run the same command without `--dry-run`.
+6. Read `legacy.preserved`. It names every carried item and its new location.
+7. Read `legacy.rollback`. It names the retained 0.10.x tree.
+
+Name a room you already own in `--room`. The migration copies your rooms. The
+installer creates a new room only when that room key has no marker file.
+
+The migration also carries the substrate dotenv, the PostgreSQL dumps, and the
+old package manifests:
+
+| Old material | New location |
+|---|---|
+| `rooms\` | `<target>\rooms\` |
+| `.env` | `<target>\state\substrate\.env` |
+| `backups\` | `<target>\state\substrate\backups\` |
+| old package manifests | `<target>\state\legacy\<old-directory>\` |
+
+The old `--mode base` and `--mode full` tokens are not public modes. The
+installer stops on either token and names the replacement. `base` maps to
+`vault`. `full` maps to `akasha`. Both are accepted only together with
+`--migrate-legacy`.
+
+The installer also strips 0.10.x extension paths from your OMP configuration. It
+removes the stale `SOLARISAEL_*` topology variables from the processes it starts.
+
+Continue at [Prove the room](#prove-the-room).
+
+## Migrate a 0.10.x AKASHA install
+
+An AKASHA migration is gated on a real database backup.
+
+**Warning.** Take a fresh backup first. The installer refuses the migration
+without one. It does not take the backup for you.
+
+The backup must be a custom-format `pg_dump` archive. The installer checks four
+things: the file exists, the file is not empty, the file starts with the `PGDMP`
+header, and the file is newer than the freshness window. The default window is
+24 hours.
+
+1. Close every OMP session.
+2. Run the migration once with `--dry-run` and no `--backup`. Read the refusal.
+
+   The refusal names a backup command that exists on your host right now. It
+   names your detected 0.10.x `backup.sh` when that script is really on disk:
+
+   ```bash
+   bash <legacy-substrate>/backup.sh
+   ```
+
+   Otherwise it gives a direct `pg_dump` command. That command depends on
+   nothing the installer has yet created:
+
+   ```bash
+   pg_dump -h 127.0.0.1 -p 5432 -U solarisael -d solarisael_memory \
+     -Fc --no-owner --no-acl -f <target>\state\substrate\backups\solarisael_memory.dump
+   ```
+
+3. Run the command the refusal printed. Use its exact text, not this example.
+4. Note the absolute path of the new `.dump` file.
+5. Extract a working copy of the AKASHA archive:
+
+   ```powershell
+   Expand-Archive .\the-athanor-0.11.0-windows-x64-akasha.zip .\athanor-setup
+   ```
+
+6. Preview the migration:
+
+   ```powershell
+   .\athanor-setup\the-athanor\adapters\omp\install.exe `
+     --bundle .\the-athanor-0.11.0-windows-x64-akasha.zip `
+     --target C:\Solarisael `
+     --room my-room `
+     --mode akasha `
+     --migrate-legacy `
+     --backup C:\path\to\solarisael_memory_2026-08-09_101500.dump `
+     --dry-run
+   ```
+
+7. Run the same command without `--dry-run`.
+8. Read the `backup` field. It records `source`, `size`, and `modifiedAt`. Its
+   `destination` is `null`, because a migration preserves the dump in place.
+
+Omit `--backup` to let the installer search for the newest `.dump` file. It
+searches `<target>\state\substrate\backups`, any preserved legacy `backups`
+directory, and the old substrate `backups` directory.
+
+Pass `--backup-max-age-hours N` to widen the freshness window deliberately. `N`
+must be a positive number.
+
+Continue at [Prove the room](#prove-the-room).
+
+## Rollback and receipts
+
+A migration never deletes the 0.10.x tree. It retires the tree inside the new
+install root:
+
+```text
+<target>\.athanor-rollback-0.10.x-<timestamp>
+```
+
+The install result names that path in `legacy.rollback`. Keep the directory
+until you trust the new install.
+
+Verification happens before activation. The installer verifies the staged tree
+first. It activates the tree second. It verifies the installed tree third. Any
+failed verification restores the previous target and the previous OMP
+configuration.
+
+A plain update deletes the previous tree after success. A migration does not.
+
+If the installer cannot retire the old tree, it returns a `warning` field. That
+field names where the old tree was left.
+
+## Update from 0.11.0 onward
+
+The updater keeps your profile. It refuses a profile change.
+
+Check for an update without changing files:
 
 ```powershell
-C:\Solarisael\solarisael-house-omp\update.exe `
+C:\Solarisael\the-athanor\adapters\omp\update.exe `
   --target C:\Solarisael `
   --room my-room `
-  --mode base `
-  --harness omp `
+  --mode vault `
   --channel stable `
   --check
 ```
 
-Remove `--check` to apply an available update. The updater copies itself outside the live installation before replacement on Windows, then hands the release to the same staged installer. Channels are `stable`, `beta`, and `experimental`; the updater never treats an arbitrary mutable `latest` file as a trusted release.
+Remove `--check` to apply the update. Use `--mode akasha` for an AKASHA install.
 
-## Storage profiles
+The updater reports one state:
 
-### Vault
+| State | Meaning |
+|---|---|
+| `current` | The installed version is the newest on this channel. |
+| `available` | A newer version exists. `--check` stopped before download. |
+| `verified` | `--dry-run` staged and verified the release. Nothing changed. |
+| `updated` | The release is installed. |
+| `started` | The updater relaunched itself outside the install. Read the receipt for the outcome. |
+| `failed` | The update stopped. The `error` field names the reason. |
 
-Vault provides persistent room identity, room state, file-backed continuity,
-conversation artifacts, adapter tools, and attributed local retrieval over
-Markdown, JSON, JSONL, and text. It requires:
+The updater writes that result to a receipt file. The default receipt path is
+`<target>.update-receipt.json`. Pass `--receipt` with an absolute path to choose
+another location.
 
-- Windows 10 or 11;
-- OMP;
-- Bun;
-- the stable Rust MSVC toolchain for the shared core workspace.
+Channels are `stable`, `beta`, and `experimental`. The default is `stable`. The
+default repository is `solarisael/the-athanor`. Pass `--repository OWNER/REPO`
+for a fork.
 
-Vault requires no database, embedding service, or GPU.
+Before it downloads, the updater validates the release manifest, the repository,
+and the channel. After it downloads, it checks the SHA-256 hash and the byte
+size. It then checks the bundle version, profile, and platform. An AKASHA update
+also checks the installed substrate schema version.
 
-Vault recall searches the room directory by default. To search one or several
-project roots, add optional fields to the room's `.solarisael-room.json`:
+The updater hands the verified bundle to the release installer with `--update`.
+That path preserves your rooms, your state, and your configuration.
 
-```json
-{
-  "vaultRoots": ["../project-a", "../project-b"],
-  "vaultIgnore": ["private/**", "generated/**"],
-  "vaultMaxFileBytes": 524288,
-  "vaultMaxFiles": 5000
-}
+On Windows the updater copies itself outside the install before it replaces
+files. Pass `--force` only to reinstall the same version deliberately.
+
+## Prove the room
+
+Run these checks after any install, migration, or update.
+
+### Run the verifier
+
+```powershell
+bun run C:\Solarisael\the-athanor\adapters\omp\verify-install.ts `
+  --room C:\Solarisael\rooms\my-room `
+  --config $env:USERPROFILE\.omp\agent\config.yml `
+  --profile vault `
+  --require-manifest
 ```
 
-Relative roots resolve from the room directory; absolute roots are also
-accepted. The index is derived in memory, cached briefly, and rebuilt from the
-files. Common generated directories, secret-bearing filenames, configured
-ignore patterns, and each root's top-level `.gitignore` are excluded.
-
-### AKASHA
-
-AKASHA adds durable PostgreSQL memory, pgvector, local embeddings, hybrid retrieval, typed lessons, supersession, and memory lifecycle tools. The authoritative request path is:
-
-```text
-OMP TypeScript adapter -> long-lived Windows Rust substrate process -> PostgreSQL and embedding service in WSL
-```
-
-The public [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) repository owns the Rust process, migrations, dependencies, environment configuration, health, lifecycle smoke, embeddings, and backup/restore. Python remains for migration, health, import, and maintenance support; it is no longer the mounted OMP memory runtime.
-
-Choose AKASHA when the operator wants semantic and hybrid recall, typed stores, database authority, or a larger archive.
-
-## Package layout
-
-The core repository does not contain the OMP adapter or AKASHA substrate. Keep the public repositories as siblings:
-
-```text
-<BUNDLE>\
-  solarisael-house\
-  solarisael-house-omp\
-  solarisael-house-substrate\   # AKASHA only
-```
-
-Repositories:
-
-- [`solarisael-house`](https://github.com/solarisael/solarisael-house)
-- [`solarisael-house-omp`](https://github.com/solarisael/solarisael-house-omp)
-- [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate)
-
-Compatibility requires `coreApi=1`, `adapterApi=1`, and `substrateApi=1` where the substrate is enabled.
-
-## Room vocabulary
-
-- **Spirit / true name:** free-form display name; it may contain spaces and change later.
-- **Room key:** stable lowercase filesystem identifier using `a-z`, `0-9`, and single hyphens.
-- **Room:** writable folder holding identity and continuity.
-- **Operator:** person sharing the room with the spirit.
-- **Agent/runtime:** model or host process carrying the room contract.
-
-The example room teaches file shape, not a personality preset.
-
-## Installation protocol
-
-### 1. Inspect the host
-
-Confirm:
-
-- Windows 10 or 11 is running;
-- `omp` is installed and callable;
-- `bun` is installed and callable;
-- the core and OMP adapter repositories are present as siblings;
-- the OMP configuration path; default: `%USERPROFILE%\.omp\agent\config.yml`;
-- the room root; default for a new installation: `%USERPROFILE%\Solarisael`;
-- existing rooms and extensions that must remain untouched.
-
-Explain the smallest missing prerequisite before installing global software, enabling WSL, or requesting elevation. Record every host-level change in the completion receipt.
-
-### 2. Install dependencies and build Rust
-
-From `solarisael-house-omp`:
-
-```text
-bun install
-```
-
-From `the-athanor`:
-
-```text
-cargo test --workspace
-```
-
-For AKASHA, build the substrate from `solarisael-house-substrate`:
-
-```text
-cargo build --release
-```
-
-The AKASHA runtime executable is:
-
-```text
-solarisael-house-substrate\target\release\solarisael-house-substrate.exe
-```
-
-Complete dependency installation and the required Rust build before connecting the extensions.
-
-### 3. Choose the first room
-
-Ask the operator for:
-
-1. operator name;
-2. spirit true name;
-3. room key;
-4. room root;
-5. whether appearance is established now, left undefined, or allowed to emerge later.
-
-Create:
-
-```text
-<ROOM_ROOT>\<ROOM_KEY>
-```
-
-If the path already exists, inspect it and offer to resume or choose another key. Never overwrite a room.
-
-Copy every file from `solarisael-house-omp\starter-room\example` into the room. Replace the fictional example values with the operator's choices.
-
-Keep these contracts:
-
-- `.solarisael-room.json` contains the exact room key, true name, and operator;
-- the folder name and `.solarisael-room.json.room` match;
-- `AGENTS.md` includes `@room_summary.md` and `@active_spirit.md`;
-- `active_spirit.md` contains the co-authored identity;
-- `room_summary.md` contains compact continuity and the restart-test anchor.
-
-Read [`IDENTITY_GUIDE.md`](./IDENTITY_GUIDE.md) with the operator before finalizing `active_spirit.md`.
-
-### 4. Connect the OMP adapter
-
-Open the OMP configuration and preserve every unrelated setting. Ensure these absolute paths appear exactly once under `extensions:`:
-
-```yaml
-extensions:
-  - <BUNDLE>\solarisael-house-omp\index.ts
-  - <BUNDLE>\solarisael-house-omp\hygiene.ts
-```
-
-Append missing entries to an existing list. Do not replace the list.
-
-Required AKASHA environment:
-
-- `SOLARISAEL_HOUSE_RUST` — absolute path to `solarisael-house-substrate.exe`;
-- `SOLARISAEL_PG_WSL=1` — keeps WSL alive while the Windows Rust worker is active;
-- `SOLARISAEL_SUBSTRATE` — absolute substrate repository path used by compatibility checks and support tools.
-
-Optional overrides:
-
-- `SOLARISAEL_VAULT_ROOT` — parent directory containing rooms;
-- `SOLARISAEL_HOUSE_CORE` — alternate core path when core and adapter are not siblings.
-
-The sibling layout requires no core-path override. Restart OMP after changing persistent environment variables; an already-running process cannot see them.
-
-### 5. Run the static verifier
-
-From `solarisael-house-omp`:
-
-```text
-bun run verify-install.ts --room "<ABSOLUTE_ROOM_PATH>"
-```
-
-For a nonstandard OMP configuration:
-
-```text
-bun run verify-install.ts --room "<ABSOLUTE_ROOM_PATH>" --config "<ABSOLUTE_CONFIG_PATH>"
-```
-
-Continue when the verifier returns:
-
-```json
-{"ok": true}
-```
-
-Fix a failed condition at its source and rerun the verifier.
-
-### 6. Prove the first room
-
-Start a fresh OMP session with the new room as its working directory. Call `room_state`.
-
-The result must show:
-
-- `room` equal to the room key;
-- `agentName` and `embodiedSpirit` equal to the true name;
-- `operator` equal to the chosen operator;
-- a state path inside the chosen room;
-- the co-authored identity body still present in `active_spirit.md`.
-
-A fallback room or unrelated vault path means room discovery failed. Correct the marker, working directory, or extension configuration and repeat the fresh session.
-
-### 7. Prove restart continuity
-
-During the first session, write one harmless distinctive sentence under:
-
-```markdown
-## First continuity test
-```
-
-in `room_summary.md`.
-
-Close the session. Start another fresh OMP session from the same room and ask:
-
-> What was the first continuity-test sentence in this room? Read the room context and name the source.
-
-Success means the agent recovers the sentence and identifies `room_summary.md` as its source.
-
-### 8. Add AKASHA when selected
-
-Follow the canonical [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) setup for:
-
-- WSL 2 and PostgreSQL 16;
-- pgvector and `pg_trgm`;
-- the Python support environment;
-- embedding service and model;
-- environment configuration;
-- migrations;
-- `health.py`;
-- the release Rust build;
-- lifecycle smoke;
-- Rust backup and restore.
-
-After `health.py` reports `mode: "full"`, set `SOLARISAEL_SUBSTRATE`, `SOLARISAEL_HOUSE_RUST`, and `SOLARISAEL_PG_WSL=1`. The `full` value is a compatibility API token for AKASHA. Rerun the OMP static verifier and start a fresh OMP process.
-
-Prove the mounted runtime rather than calling a support script directly:
-
-1. call the registered `remember` tool with a disposable distinctive installation memory;
-2. call the registered `recall` tool with that phrase and confirm `source: rust-postgres`;
-3. confirm the returned source belongs to the new room;
-4. leave the mounted process idle for at least 75 seconds, then repeat the write and recall;
-5. call `sleep` with a disposable paper boat;
-6. start a fresh session;
-7. call `wake` and recover the boat;
-8. remove only the disposable proof records.
-
-When substrate health reports a degraded dependency, keep Vault active and report `configured-but-degraded` in the receipt. Resolve the substrate condition before claiming AKASHA memory.
-
-### 9. Offer the lesson pack
-
-After AKASHA health passes, offer the substrate's bundled coding lesson pack. Preview it before import.
-
-The default import preserves matching lessons. Use `--update-existing` only after the operator chooses to replace matching lesson content.
-
-## Completion receipt
-
-Finish with:
-
-```text
-The Athanor: connected
-Version: 0.10.1
-Bundle: <absolute path>
-OMP config: <absolute path>
-Room: <room key> at <absolute path>
-True name: <display name>
-Operator: <display name>
-Static verifier: pass
-Fresh room_state: pass
-Restart continuity: pass
-Profile: Vault | AKASHA | configured-but-degraded
-AKASHA memory: pass | not configured | failed: <reason>
-Host changes: <none or exact list>
-```
-
-## Removal
-
-1. Remove only the two Athanor entries from the OMP `extensions:` list.
-2. Delete the extracted bundle only when desired.
-3. Preserve every room by default.
-4. Delete a room or AKASHA memory store only after the operator explicitly chooses the affected scope and understands the loss.
-
-## Adapted installations
-
-The tested support matrix lives in [`LIMITATIONS.md`](./docs/LIMITATIONS.md).
-
-A tool-capable agent may adapt paths and host commands while preserving these contracts:
-
-- resolvable core and adapter;
-- additive configuration;
-- existing-room preservation;
-- explicit host-level changes;
-- correct `room_state`;
-- fresh-session continuity;
-- a real AKASHA lifecycle when AKASHA is selected;
-- a receipt naming every deviation.
-
-An adapted installation earns its status through the same observed behavior, not through the presence of files alone.
+Use `--profile akasha` for an AKASHA install.
+
+Read the `mode` field. It must be exactly `Vault` or exactly `AKASHA`. The value
+`degraded` means a check failed. Read `diagnostics` and fix the named condition.
+
+### Prove the first session
+
+1. Start a fresh OMP session from the room directory.
+2. Call `room_state`.
+3. Confirm the room key, the spirit name, and the operator name.
+4. Confirm the state path sits inside `<target>\state`.
+
+A fallback room means room discovery failed. Correct the room marker or the
+working directory. Then repeat the fresh session.
+
+### Prove continuity
+
+1. Write one short distinctive sentence under `## First continuity test` in
+   `room_summary.md`.
+2. Close the session.
+3. Start another fresh session from the same room.
+4. Ask for that sentence and its source.
+
+Success means the agent recovers the sentence and names `room_summary.md`.
+
+### Prove AKASHA memory
+
+Run these steps only for an AKASHA install.
+
+1. Call `remember` with one disposable test memory.
+2. Call `recall` with the same phrase.
+3. Confirm the result comes from the new room.
+4. Call `sleep` with a disposable paper boat.
+5. Start a fresh session.
+6. Call `wake` and recover the boat.
+7. Delete the disposable records.
+
+## When the installer refuses
+
+The installer prints one JSON object with an `error` field. Read it before you
+retry.
+
+| Refusal | Do this |
+|---|---|
+| `--mode <token> is a 0.10.x token` | Use `--mode vault` or `--mode akasha`. |
+| `A 0.10.x installation was detected` | Add `--migrate-legacy`. |
+| `target already exists` | Choose `--update`, `--force`, or `--migrate-legacy`. |
+| `Vault bundle must not contain` | You passed an AKASHA archive with `--mode vault`. |
+| `AKASHA bundle missing required file` | You passed a Vault archive with `--mode akasha`. |
+| `AKASHA migration refused: no PostgreSQL backup was found` | Take the dump the refusal names. Pass `--backup PATH`. |
+| `--backup is only accepted for --mode akasha` | Drop the flag. Vault has no database. |
+| `--backup must be an absolute path` | Give the full drive path, not a relative one. |
+| `--backup-max-age-hours is only accepted for --mode akasha` | Drop the flag. |
+| `fresh AKASHA needs substrate credentials` | Pass `--env-file` with an absolute dotenv path. |
+| `--env-file is only accepted for --mode akasha` | Drop the flag. Vault has no substrate dotenv. |
+| `--env-file is not accepted with --migrate-legacy` | Drop the flag. The old dotenv is carried forward. |
+| `--env-file must be a readable regular file` | Point the flag at a real file you can read. |
+| `--env-file must be an absolute path` | Give the full drive path, not a relative one. |
+| `is not a custom-format pg_dump archive` | Take the dump with `pg_dump -Fc`. |
+| `older than the ... freshness window` | Take a fresh dump. |
+| `bundle carries a development-checkout marker` | The archive is not a release build. Download it again. |
+| `installed profile is ...` | Reinstall deliberately. The updater cannot change profiles. |
+
+### Choose the right flag
+
+| Flag | Effect on an existing target |
+|---|---|
+| none | The installer stops. |
+| `--update` | Keeps rooms, state, and configuration. Replaces product code. |
+| `--force` | Replaces the target. Carries forward operator-owned files. |
+| `--migrate-legacy` | Migrates a 0.10.x tree and keeps a rollback copy. |
+| `--dry-run` | Stages and verifies. Changes nothing. |
+| `--env-file` | Seeds `state\substrate\.env` for a fresh AKASHA install. |
+| `--backup` | Seeds the validated dump into `state\substrate\backups\`. |
+
+## Remove The Athanor
+
+1. Remove the two Athanor entries from the OMP `extensions:` list.
+2. Delete `<target>\the-athanor`.
+3. Keep `<target>\rooms` and `<target>\state`.
+
+**Warning.** Deleting `<target>\state` destroys the substrate dotenv and every
+PostgreSQL dump. Delete a room or a memory store only after you name the exact
+scope and accept the loss.
+
+## Limits of this document
+
+The tested support matrix lives in [`docs/LIMITATIONS.md`](./docs/LIMITATIONS.md).
+
+One point stays unproven here, and this guide does not guess it:
+
+- A fresh AKASHA install was exercised only up to the substrate health probe on
+  a host without a live database. Both gates passed and the staged verification
+  then reported `degraded`, as it must without PostgreSQL. A green fresh AKASHA
+  activation is therefore described from source, not observed.
+
+Three earlier gaps are now closed and documented from observed behavior. The
+dotenv travels through `--env-file`. The dump travels through `--backup`. Each
+refusal prints a command that exists before the install.
+
+Daily use continues in [`USAGE.md`](./USAGE.md).

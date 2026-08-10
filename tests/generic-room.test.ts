@@ -78,13 +78,49 @@ describe("generic room keys", () => {
     }
   });
 
+  // The shared test preload forces the JSON memory source so no suite can touch
+  // a live substrate. A test that claims to prove the Postgres argv must
+  // therefore select the Postgres path itself, or it silently proves nothing.
+  async function withPostgresSourceSelected<T>(body: () => Promise<T>): Promise<T> {
+    const priorSource = process.env.SOLARISAEL_MEMORY_SOURCE;
+    const priorDisable = process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES;
+    delete process.env.SOLARISAEL_MEMORY_SOURCE;
+    process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES = "0";
+    try {
+      return await body();
+    } finally {
+      if (priorSource === undefined) delete process.env.SOLARISAEL_MEMORY_SOURCE;
+      else process.env.SOLARISAEL_MEMORY_SOURCE = priorSource;
+      if (priorDisable === undefined) delete process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES;
+      else process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES = priorDisable;
+    }
+  }
+
   test("forwards the exact custom room to Postgres", async () => {
     const { loadMemoryLexicalSources } = await import("../src/memory-sources.ts");
     observedPostgresArgv = null;
-    await loadMemoryLexicalSources("/tmp/aurora-lab", "aurora-lab", "blue hinge");
+    await withPostgresSourceSelected(() =>
+      loadMemoryLexicalSources("/tmp/aurora-lab", "aurora-lab", "blue hinge"));
     expect(observedPostgresArgv).toContain("--room");
     const roomIndex = observedPostgresArgv.indexOf("--room");
     expect(observedPostgresArgv[roomIndex + 1]).toBe("aurora-lab");
+  });
+
+  test("forced json memory source never reaches Postgres", async () => {
+    // The opposite of the case above, and the one the preload actually pins:
+    // with json forced, the Postgres child must not be spawned at all.
+    const { loadMemoryLexicalSources } = await import("../src/memory-sources.ts");
+    observedPostgresArgv = null;
+    const prior = process.env.SOLARISAEL_MEMORY_SOURCE;
+    process.env.SOLARISAEL_MEMORY_SOURCE = "json";
+    try {
+      const result = await loadMemoryLexicalSources("/tmp/aurora-lab", "aurora-lab", "blue hinge");
+      expect(result.indexSource).toBe("json");
+      expect(observedPostgresArgv).toBe(null);
+    } finally {
+      if (prior === undefined) delete process.env.SOLARISAEL_MEMORY_SOURCE;
+      else process.env.SOLARISAEL_MEMORY_SOURCE = prior;
+    }
   });
 
   test("preserves explicit cross-room memory handles", async () => {
@@ -125,13 +161,48 @@ describe("generic room keys", () => {
   });
 
   test("rejects relative substrate overrides", () => {
-    const prior = process.env.SOLARISAEL_SUBSTRATE;
-    process.env.SOLARISAEL_SUBSTRATE = "relative/substrate";
+    const prior = process.env.ATHANOR_SUBSTRATE_ROOT;
+    process.env.ATHANOR_SUBSTRATE_ROOT = "relative/substrate";
     try {
-      expect(() => resolveSubstrateDir(path.join(tmpdir(), "aurora-lab"))).toThrow(/absolute path/);
+      expect(() => resolveSubstrateDir()).toThrow(/absolute path/);
     } finally {
-      if (prior === undefined) delete process.env.SOLARISAEL_SUBSTRATE;
-      else process.env.SOLARISAEL_SUBSTRATE = prior;
+      if (prior === undefined) delete process.env.ATHANOR_SUBSTRATE_ROOT;
+      else process.env.ATHANOR_SUBSTRATE_ROOT = prior;
+    }
+  });
+
+  test("resolves the substrate structurally inside the product tree", () => {
+    const prior = process.env.ATHANOR_SUBSTRATE_ROOT;
+    delete process.env.ATHANOR_SUBSTRATE_ROOT;
+    try {
+      // Structural, so it must not move with the process working directory and
+      // must not be derived from any room directory.
+      const resolved = resolveSubstrateDir();
+      expect(path.isAbsolute(resolved)).toBe(true);
+      expect(path.basename(resolved)).toBe("substrate");
+      const previous = process.cwd();
+      process.chdir(tmpdir());
+      try {
+        expect(resolveSubstrateDir()).toBe(resolved);
+      } finally {
+        process.chdir(previous);
+      }
+    } finally {
+      if (prior !== undefined) process.env.ATHANOR_SUBSTRATE_ROOT = prior;
+    }
+  });
+
+  test("does not accept the pre-cutover substrate variable", () => {
+    const priorNew = process.env.ATHANOR_SUBSTRATE_ROOT;
+    const priorOld = process.env.SOLARISAEL_SUBSTRATE;
+    delete process.env.ATHANOR_SUBSTRATE_ROOT;
+    process.env.SOLARISAEL_SUBSTRATE = path.join(tmpdir(), "legacy-substrate");
+    try {
+      expect(resolveSubstrateDir()).not.toBe(process.env.SOLARISAEL_SUBSTRATE);
+    } finally {
+      if (priorNew !== undefined) process.env.ATHANOR_SUBSTRATE_ROOT = priorNew;
+      if (priorOld === undefined) delete process.env.SOLARISAEL_SUBSTRATE;
+      else process.env.SOLARISAEL_SUBSTRATE = priorOld;
     }
   });
 });

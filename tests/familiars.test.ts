@@ -69,6 +69,7 @@ describe("familiar dispatch", () => {
       target: "src/example.ts",
       context: [{ mode: "exact", source: "src/example.ts" }],
       acceptance: ["Report the exact symbols found."],
+      lessonBodies: ["A worker contract is a quest, not a wall."],
     });
 
     expect(receipt).toMatchObject({
@@ -86,6 +87,7 @@ describe("familiar dispatch", () => {
       },
     });
     expect(receipt.spawnPacket?.args.context).toContain("Familiar: Cisma (cisma)");
+    expect(receipt.spawnPacket?.args.context).toContain("A worker contract is a quest, not a wall.");
   });
 
   test("rejects names absent from the spellbook", () => {

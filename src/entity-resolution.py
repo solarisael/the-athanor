@@ -108,7 +108,7 @@ def fetch_matches(query: str, room: str, room_dir: str | Path, limit: int = DEFA
         return []
     conn = None
     try:
-        env = substrate_env(room_dir)
+        env = substrate_env()
         conn = psycopg2.connect(host=env.get("PGHOST"), port=env.get("PGPORT"), user=env.get("PGUSER"), password=env.get("PGPASSWORD"), dbname=env.get("PGDATABASE"), connect_timeout=2)
         with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
             cur.execute(

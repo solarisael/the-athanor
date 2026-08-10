@@ -110,6 +110,65 @@ class CanonicalLessonsTests(unittest.TestCase):
         self.assertEqual(result["lessons"][0]["languageKeys"], ["rust"])
         self.assertEqual(result["lessons"][0]["technologyKeys"], ["postgresql"])
 
+
+    def test_threaded_match_drags_authority_eligible_mates_beyond_initial_limit(self):
+        matched = {
+            **LESSON,
+            "id": 340,
+            "project": "the-athanor",
+            "thread_keys": ["subagent-dispatch"],
+            "language_keys": ["typescript"],
+            "technology_keys": ["omp"],
+        }
+        mate = {
+            **LESSON,
+            "id": 317,
+            "title": "Quest register",
+            "project": "the-athanor",
+            "thread_keys": ["subagent-dispatch"],
+            "language_keys": ["typescript"],
+            "technology_keys": ["omp"],
+        }
+        conn = Connection([[matched], [mate], [TAXONOMY]])
+
+        result = lessons.fetch_lessons(
+            conn,
+            lesson_type="coding",
+            room="kintsu",
+            shape="process",
+            project="the-athanor",
+            register=None,
+            stage=None,
+            query="kitten dispatch",
+            limit=1,
+            language_keys=["typescript"],
+            technology_keys=["omp"],
+        )
+
+        self.assertEqual([row["id"] for row in result["lessons"]], [340, 317])
+        self.assertEqual(result["lessons"][1]["threadKeys"], ["subagent-dispatch"])
+        expansion_sql, expansion_args = conn.cursor_obj.calls[1]
+        self.assertIn("thread_keys && %s", expansion_sql)
+        self.assertIn("NOT (id = ANY(%s))", expansion_sql)
+        self.assertIn("scope = ANY(%s)", expansion_sql)
+        self.assertIn("project = %s", expansion_sql)
+        self.assertIn("(cardinality(language_keys) = 0 OR language_keys && %s)", expansion_sql)
+        self.assertIn("(cardinality(technology_keys) = 0 OR technology_keys && %s)", expansion_sql)
+        self.assertNotIn("lesson_tsv", expansion_sql)
+        self.assertNotIn("shape = %s", expansion_sql)
+        self.assertEqual(
+            expansion_args,
+            (
+                "coding",
+                ["subagent-dispatch"],
+                [340],
+                ["house", "kintsu"],
+                "the-athanor",
+                ["typescript"],
+                ["omp"],
+                49,
+            ),
+        )
     def test_project_type_requires_an_explicit_project(self):
         with self.assertRaisesRegex(ValueError, "require --project"):
             lessons.fetch_lessons(

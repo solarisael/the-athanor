@@ -55,7 +55,10 @@ Keep the capitalized article in:
 - presentation titles;
 - legal product references.
 
-Use lowercase `athanor` only for a future technical identifier. The executable, package, domain, and repository identifiers remain open until namespace review finishes.
+Use lowercase `athanor` for technical identifiers. The repository is
+`the-athanor`. The substrate executable is `athanor-substrate.exe`. Topology
+variables use the `ATHANOR_` prefix. The domain identifier stays open until
+namespace review finishes.
 
 Do not use The Athanor as the name of one queue or worker.
 
@@ -543,7 +546,9 @@ Observed activity date: 2026-07-23.
 
 The operator accepted the collisions as a deliberate product choice. Distinction must come from depth, specificity, and execution.
 
-The formal brand **The Athanor** supplies the defining article. A qualified executable, package, domain, and repository namespace remains mandatory before cutover.
+The formal brand **The Athanor** supplies the defining article. The technical
+namespace now uses `athanor`. A qualified domain remains mandatory before public
+launch.
 
 ## 19. Legal and namespace gate
 
@@ -586,9 +591,24 @@ Do not use bare **Athanor** as the formal product label. The public brand is **T
 
 ## 21. Repository and package cutover
 
-The current repositories keep their names until one planned cutover.
+The public repository is now [`solarisael/the-athanor`](https://github.com/solarisael/the-athanor).
+One repository holds core, substrate, the OMP adapter, the installer, the
+updater, workflows, and canonical docs. The public archive, profile, installer
+mode, executable, and topology names carry no legacy tokens. Read
+[the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
 
-Create a repository-wide legacy-token inventory. Include every spelling, capitalization, and serialized form of:
+These legacy tokens remain deliberately. They are installed identifiers, not
+public product names:
+
+- the `solarisael` GitHub organization;
+- the `.solarisael-room.json` room marker;
+- `SOLARISAEL_*` runtime environment variables;
+- internal source identifiers that carry the same prefix.
+
+Solarisael House now means only the reference House. It is not a platform name.
+
+Keep a legacy-token inventory for any later rename. Include every spelling,
+capitalization, and serialized form of:
 
 - Solarisael House as a platform name;
 - Base and Base House;
@@ -598,8 +618,7 @@ Create a repository-wide legacy-token inventory. Include every spelling, capital
 - akashic write and akashic-write;
 - transient cloud worker;
 - zero-retention worker;
-- `SOLARISAEL_` environment variables;
-- current repository and package prefixes.
+- `SOLARISAEL_` environment variables.
 
 The cutover must inspect:
 
@@ -726,7 +745,7 @@ Resolve these remaining public cutover items:
 
 ## 27. Related documents
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) defines current repository and authority boundaries.
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) defines current component ownership, the installed layout, and authority boundaries.
 - [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) defines the accepted Host, UI, delivery, embodiment, derivation, and proof runtime.
 - [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) defines bounded e-graph, Z3, SyGuS, Wasmtime, proof-feedback, and promotion contracts.
 - [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) defines the spatial client and presentation-body boundary.

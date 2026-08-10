@@ -72,19 +72,71 @@ Prolog/Datalog derivations, Cingulate enforcement, and optional Lean-backed
 lessons, lives in
 [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md).
 
-## Repository ownership
+## Repository layout and component ownership
 
-The Athanor uses separate repositories so the core does not depend on one harness or one database deployment.
+One repository owns The Athanor. The public repository is
+[`solarisael/the-athanor`](https://github.com/solarisael/the-athanor). One
+release publishes every component below. This table is canonical. Other
+documents link to it instead of repeating it.
 
-| Repository | Responsibility |
+| Component path | Responsibility |
 |---|---|
-| [`the-athanor`](https://github.com/solarisael/the-athanor) | Provider-neutral core contracts, retrieval orchestration, ranking, room identity logic, deterministic worker routing, Rust protocol/core crates, and canonical documentation |
-| [`solarisael-house-omp`](https://github.com/solarisael/solarisael-house-omp) | OMP extension entrypoint, lifecycle hooks, room integration, tool schemas, static verifier, starter room, portable bundle, and adapter tests |
-| [`solarisael-house-substrate`](https://github.com/solarisael/solarisael-house-substrate) | PostgreSQL schema and migrations, pgvector, embeddings, memory and lesson writes, retrieval sources, health, lifecycle smoke, and backup/restore |
-| `solarisael-house-opencode` | OpenCode adapter for the same core contracts |
-| Future Godot client package | Presentation and interaction over the versioned Host contract; no room, memory, or delivery authority |
+| `src/`, `crates/house-core`, `crates/house-protocol` | Provider-neutral core contracts, retrieval orchestration, ranking, room identity logic, and deterministic worker routing |
+| `crates/house-substrate`, `substrate/` | AKASHA substrate operations: PostgreSQL schema and migrations, pgvector, embeddings, memory and lesson writes, retrieval sources, health, and backup/restore |
+| `adapters/omp/` | OMP extension entrypoint, lifecycle hooks, room integration, localhost administrative GUI, tool schemas, static verifier, starter room, installer, and updater |
+| `.github/workflows/` | Continuous integration and the single release pipeline |
+| `docs/`, `README.md`, `INSTALL.md`, `USAGE.md`, `HOUSE.md`, `IDENTITY_GUIDE.md` | Canonical documentation |
+
+One repository does not merge the internal authority boundaries. The core does
+not import the OMP adapter. The core does not require PostgreSQL. The Vault
+profile runs without any substrate component. Each boundary stays enforced by
+contract, not by repository distance.
 
 The public API boundaries are `coreApi=1`, `adapterApi=1`, and `substrateApi=1`.
+
+### Installed layout
+
+The installer writes three sibling directories under the operator's target
+directory:
+
+| Installed path | Content |
+|---|---|
+| `<target>/the-athanor` | Product code for the installed release |
+| `<target>/rooms` | Operator-owned rooms |
+| `<target>/state` | Mutable state, including the `athanor.env` topology file |
+
+### Topology configuration
+
+The OMP adapter reads the topology from `<target>/state/athanor.env`. That file
+sets only these keys:
+
+| Variable | Profile | Purpose |
+|---|---|---|
+| `ATHANOR_STATE_DIR` | Vault and AKASHA | Mutable state directory |
+| `ATHANOR_SUBSTRATE_ROOT` | AKASHA | Substrate operations root |
+| `ATHANOR_SUBSTRATE_EXE` | AKASHA | Path of `athanor-substrate.exe` |
+| `ATHANOR_AUTO` | Optional | Set to `1` to discover the bundled substrate executable, then PATH |
+
+A development checkout without this file is valid. A Vault install that needs
+no override is also valid.
+
+### Release and support target
+
+Release 0.11.0 is the current late-beta line. Windows x64 with OMP is the only
+supported release target. Each release publishes exactly two archives:
+
+| Archive | Profile |
+|---|---|
+| `the-athanor-<version>-windows-x64-vault.zip` | Vault |
+| `the-athanor-<version>-windows-x64-akasha.zip` | AKASHA |
+
+The installer accepts the modes `vault` and `akasha`. The AKASHA archive also
+carries `adapters/omp/bin/windows-x64/athanor-substrate.exe`. The Vault archive
+carries no substrate binary.
+
+The OpenCode adapter line is historical. It is not a supported release target.
+A native Godot client is planned. It is specified in
+[`GODOT_CLIENT.md`](./GODOT_CLIENT.md) and is not released.
 
 ## Room model
 
@@ -129,7 +181,7 @@ above. The table below is the current machine-readable map for cold evaluators:
 | Canon and controlled vocabulary | Load-bearing assertions plus bounded lexical expansion from authoritative entities, active threads, and lesson metadata | Core + substrate | Canon governs generation; expansion only locates evidence |
 | Anamnesis Cabinet | Reviewed pillars and lived cycles supplied as bounded counsel | Substrate + adapter | Advisory only; never canon or memory authority |
 | GIGA Hippocampus Stage 1 | Exact turn events, asynchronous classification, non-authoritative candidates, review, Curios, promotion, and queue maintenance | Adapter event boundary + substrate worker/store | Candidate until reviewed and explicitly promoted |
-| Design-system catalogue | Typed immutable/superseding design tokens, components, contracts, and guidelines | Substrate + adapter tools | Current catalogue record within the named design system |
+| Design-system catalogue | Typed immutable/superseding design tokens, components, contracts, and guidelines, read through `design_doc` and written through `design_doc_write` | Substrate + adapter tools | Current catalogue record within the named design system |
 | Worker routing and familiars | Deterministic lanes, room-owned spellbooks, and validated harness-ready task packets | Core policy + adapter spawn boundary | Routing policy only; no memory or room authority |
 | Rust transport and health | Long-lived JSONL requests, cancellation/timeouts, crash replacement, compatibility checks, redacted diagnostics, and uncertain-write reconciliation | OMP adapter + Rust substrate | Transport carries receipts; it does not become authority |
 
@@ -158,7 +210,8 @@ Vault uses operator-controlled files and the harness adapter. It provides:
 - bounded attributed excerpts with exact source paths and heading or record
   identity.
 
-Vault requires no database, vector index, embedding service, or GPU. Its
+Vault requires no database, vector index, embedding service, or GPU. Vault also
+requires no substrate binary, no PostgreSQL, no WSL, and no Rust runtime. Its
 in-memory index is derived and rebuildable from authoritative files. Recall
 defaults to the room directory; `.solarisael-room.json` may name one or more
 operator-controlled `vaultRoots`, additional `vaultIgnore` patterns, and bounded
@@ -297,6 +350,8 @@ The Athanor uses separate stores because different knowledge requires different 
 - coding lessons record transferable engineering rules;
 - project lessons record project-bound rules and constraints;
 - writing lessons record prose and voice craft;
+- design lessons record reusable design-system taste bound to a named design
+  system and its catalogue entries;
 - audio lessons record reusable audio-pipeline rules;
 - Cabinet entries preserve bounded counsel and lived cycles.
 
@@ -333,19 +388,10 @@ New harnesses implement adapters over the same core contracts. Organizational
 deployments add access control, source connectors, and import profiles above the
 substrate.
 
-The next extension order is contractual: thin Godot UI over the Host; GIGA
-integrity; Origami/Crane/Pawprint and Paper Boat wake contracts; PostgreSQL
-outbox plus one JetStream mailbox and the `boat.ready` wake path; dynamic
-local/provider models and explicit cold/familiar/reflection/dialogue targets;
-engine-neutral incremental Datalog; Cingulate routing into deterministic checks,
-bounded e-graph/SyGuS repair, optional Z3, and selected Lean obligations,
-including production-bound Origami transitions; then governed
-sandbox/canary/promotion.
-
-Post-1.0 surfaces deepen the same contracts: one functional Control tree
-presented in-world, a GPU-particle constellation, self-chosen companion bodies,
-constitutional child-room sovereignty, governed companion-authored models, and
-a typed signed marketplace. None becomes a parallel authority path.
+Extension order and release gates are owned by
+[`roadmap.md`](./roadmap.md); this document does not restate them. What matters
+architecturally is the invariant: every extension, before and after `1.0.0`,
+lands on the same core contracts, and none becomes a parallel authority path.
 
 Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for runtime order,
 [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) for proof/synthesis,

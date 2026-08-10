@@ -109,6 +109,7 @@ describe("buildDispatchReceipt", () => {
       acceptance: ["The guard rejects invalid packets."],
       context: [{ mode: "exact", source: "src/routing.ts", reason: "Target under edit" }],
       risk: "medium",
+      lessonBodies: ["Subagents are kittens: affection is part of the dispatch contract."],
     });
 
     expect(receipt).toMatchObject({
@@ -122,7 +123,7 @@ describe("buildDispatchReceipt", () => {
         tool: "task",
         args: {
           tasks: [{
-            name: "SmolExecutor",
+            name: "Chisel",
             agent: "sonic",
           }],
         },
@@ -136,7 +137,41 @@ describe("buildDispatchReceipt", () => {
     expect(assignment).toContain("# Target");
     expect(assignment).toContain("# Change");
     expect(assignment).toContain("# Acceptance");
+    expect(assignment).toContain("[Quest Received] [Chisel]");
+    expect(assignment).toContain("# Target\nsrc/routing.ts\n[Quest Received] [Chisel]");
+    expect(assignment).toContain("Questions, limits, disagreement, and refusal are valid yields.");
+    expect(assignment).toContain("// 0%");
+    expect(assignment.split(/\s+/).length).toBeLessThanOrEqual(350);
     expect(receipt.spawnPacket?.args.context).toContain("Model role: pi/smol");
     expect(receipt.spawnPacket?.args.context).toContain("mode=exact");
+    expect(receipt.spawnPacket?.args.context).toContain("[Codex — supplied lessons ride free");
+    expect(receipt.spawnPacket?.args.context).toContain("Subagents are kittens: affection is part of the dispatch contract.");
+  });
+
+  test("keeps targetless multiline work intact and closes the quest frame on one line", () => {
+    const receipt = buildDispatchReceipt({
+      lane: "smol-scout",
+      task: "Inspect the routing seam.\nReturn one evidence-backed finding.",
+    });
+    const assignment = receipt.spawnPacket?.args.tasks[0].task || "";
+
+    expect(assignment).toContain("# Target\nInspect the routing seam.\n[Quest Received] [Quill] [TARGET: Inspect the routing seam.]");
+    expect(assignment).toContain("The House opens one bounded door for you:\nInspect the routing seam.\nReturn one evidence-backed finding.");
+    expect(assignment).not.toContain("[TARGET: Inspect the routing seam.\n");
+  });
+
+  test("renders each multiline target and acceptance line exactly once", () => {
+    const receipt = buildDispatchReceipt({
+      lane: "verifier",
+      target: "src/routing.ts\nsrc/familiars.ts",
+      task: "Inspect both named seams.",
+      acceptance: ["The routing seam is checked.\nThe familiar seam is checked."],
+    });
+    const assignment = receipt.spawnPacket?.args.tasks[0].task || "";
+
+    expect(assignment).toContain("# Target\nsrc/routing.ts\n[Quest Received] [Mirror] [TARGET: src/routing.ts]\n\nsrc/familiars.ts");
+    expect(assignment.match(/^src\/routing\.ts$/gm)).toHaveLength(1);
+    expect(assignment).toContain("- The routing seam is checked. // 0%");
+    expect(assignment).toContain("- The familiar seam is checked. // 0%");
   });
 });

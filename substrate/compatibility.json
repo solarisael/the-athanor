@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "name": "athanor-substrate",
+  "version": "0.1.0",
+  "substrateApi": 1,
+  "coreApi": 1,
+  "adapterApi": 1,
+  "schemaVersion": 14,
+  "embedding": {
+    "defaultModel": "hf.co/zenmagnets/Nemotron-3-Embed-1B-Q4_K_M-GGUF:latest",
+    "dimension": 2048
+  },
+  "compatibleCoreApis": [1],
+  "compatibleAdapterApis": [1]
+}

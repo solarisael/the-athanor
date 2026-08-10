@@ -1076,6 +1076,7 @@ pub struct RememberLessonDetails {
     pub example_text: Option<String>,
     pub language_keys: Vec<String>,
     pub technology_keys: Vec<String>,
+    pub thread_keys: Vec<String>,
     pub tags: Vec<String>,
 }
 
@@ -1105,6 +1106,7 @@ pub struct RememberRequest {
     example_text: Option<String>,
     language_keys: Vec<String>,
     technology_keys: Vec<String>,
+    thread_keys: Vec<String>,
     tags: Vec<String>,
 }
 
@@ -1163,6 +1165,7 @@ impl RememberRequest {
             example_text,
             language_keys,
             technology_keys,
+            thread_keys,
             tags,
         ) = match details {
             RememberDetails::Memory(details) => {
@@ -1186,6 +1189,7 @@ impl RememberRequest {
                     None,
                     None,
                     None,
+                    Vec::new(),
                     Vec::new(),
                     Vec::new(),
                     Vec::new(),
@@ -1214,6 +1218,7 @@ impl RememberRequest {
                     details.example_text,
                     details.language_keys,
                     details.technology_keys,
+                    details.thread_keys,
                     details.tags,
                 )
             }
@@ -1224,6 +1229,7 @@ impl RememberRequest {
             || register.len() > MAX_ARRAY_VALUES
             || language_keys.len() > MAX_ARRAY_VALUES
             || technology_keys.len() > MAX_ARRAY_VALUES
+            || thread_keys.len() > MAX_ARRAY_VALUES
             || tags.len() > MAX_ARRAY_VALUES
         {
             return Err(DomainError::TooManyValues {
@@ -1289,8 +1295,8 @@ impl RememberRequest {
             });
         }
         let language_keys = normalize_eligibility_keys("language_keys", language_keys)?;
-        let technology_keys =
-            normalize_eligibility_keys("technology_keys", technology_keys)?;
+        let technology_keys = normalize_eligibility_keys("technology_keys", technology_keys)?;
+        let thread_keys = normalize_eligibility_keys("thread_keys", thread_keys)?;
         let mut normalized_register = Vec::with_capacity(register.len());
         for value in register {
             let value = value.trim();
@@ -1354,6 +1360,7 @@ impl RememberRequest {
             example_text,
             language_keys,
             technology_keys,
+            thread_keys,
             tags,
         })
     }
@@ -1414,6 +1421,9 @@ impl RememberRequest {
     }
     pub fn technology_keys(&self) -> &[String] {
         &self.technology_keys
+    }
+    pub fn thread_keys(&self) -> &[String] {
+        &self.thread_keys
     }
     pub fn tags(&self) -> &[String] {
         &self.tags
@@ -3544,6 +3554,7 @@ pub struct GigaCodingLessonPromotionPayload {
     trigger_context: String,
     language_keys: Vec<String>,
     technology_keys: Vec<String>,
+    thread_keys: Vec<String>,
     tags: Vec<String>,
 }
 
@@ -3556,6 +3567,7 @@ impl GigaCodingLessonPromotionPayload {
         trigger_context: String,
         language_keys: Vec<String>,
         technology_keys: Vec<String>,
+        thread_keys: Vec<String>,
         tags: Vec<String>,
     ) -> Result<Self, DomainError> {
         Ok(Self {
@@ -3572,6 +3584,7 @@ impl GigaCodingLessonPromotionPayload {
                 "target.payload.technology_keys",
                 technology_keys,
             )?,
+            thread_keys: normalize_eligibility_keys("target.payload.thread_keys", thread_keys)?,
             tags: giga_promotion_strings("target.payload.tags", tags)?,
         })
     }
@@ -3597,6 +3610,9 @@ impl GigaCodingLessonPromotionPayload {
     pub fn technology_keys(&self) -> &[String] {
         &self.technology_keys
     }
+    pub fn thread_keys(&self) -> &[String] {
+        &self.thread_keys
+    }
     pub fn tags(&self) -> &[String] {
         &self.tags
     }
@@ -3611,6 +3627,7 @@ pub struct GigaProjectLessonPromotionPayload {
     trigger_context: String,
     language_keys: Vec<String>,
     technology_keys: Vec<String>,
+    thread_keys: Vec<String>,
     tags: Vec<String>,
 }
 
@@ -3623,6 +3640,7 @@ impl GigaProjectLessonPromotionPayload {
         trigger_context: String,
         language_keys: Vec<String>,
         technology_keys: Vec<String>,
+        thread_keys: Vec<String>,
         tags: Vec<String>,
     ) -> Result<Self, DomainError> {
         Ok(Self {
@@ -3639,6 +3657,7 @@ impl GigaProjectLessonPromotionPayload {
                 "target.payload.technology_keys",
                 technology_keys,
             )?,
+            thread_keys: normalize_eligibility_keys("target.payload.thread_keys", thread_keys)?,
             tags: giga_promotion_strings("target.payload.tags", tags)?,
         })
     }
@@ -3663,6 +3682,9 @@ impl GigaProjectLessonPromotionPayload {
     }
     pub fn technology_keys(&self) -> &[String] {
         &self.technology_keys
+    }
+    pub fn thread_keys(&self) -> &[String] {
+        &self.thread_keys
     }
     pub fn tags(&self) -> &[String] {
         &self.tags
@@ -4217,6 +4239,7 @@ mod tests {
             example_text: Some("Use the token, not a one-off value.".into()),
             language_keys: vec![],
             technology_keys: vec![],
+            thread_keys: vec![],
             tags: vec!["accessibility".into()],
         };
         let request = RememberRequest::new_lesson(
@@ -4227,7 +4250,10 @@ mod tests {
             details(),
         )
         .unwrap();
-        assert_eq!(request.example_text(), Some("Use the token, not a one-off value."));
+        assert_eq!(
+            request.example_text(),
+            Some("Use the token, not a one-off value.")
+        );
 
         let mut invalid = details();
         invalid.scope = Some("house".into());
@@ -4260,6 +4286,7 @@ mod tests {
             example_text: None,
             language_keys: vec![" rust ".into(), "rust".into()],
             technology_keys: vec!["postgresql".into()],
+            thread_keys: vec!["subagent-dispatch".into()],
             tags: vec![],
         };
         let request = RememberRequest::new_lesson(
@@ -4272,6 +4299,7 @@ mod tests {
         .unwrap();
         assert_eq!(request.language_keys(), &["rust"]);
         assert_eq!(request.technology_keys(), &["postgresql"]);
+        assert_eq!(request.thread_keys(), &["subagent-dispatch"]);
 
         let mut invalid = RememberLessonDetails {
             backup: false,
@@ -4285,23 +4313,30 @@ mod tests {
             example_text: None,
             language_keys: vec!["rust".into()],
             technology_keys: vec![],
+            thread_keys: vec![],
             tags: vec![],
         };
-        assert!(RememberRequest::new_lesson(
-            RoomKey::new("lab").unwrap(),
-            RememberKind::WritingLesson,
-            "Wrong family".into(),
-            "Must refuse keys.".into(),
-            invalid.clone(),
-        ).is_err());
+        assert!(
+            RememberRequest::new_lesson(
+                RoomKey::new("lab").unwrap(),
+                RememberKind::WritingLesson,
+                "Wrong family".into(),
+                "Must refuse keys.".into(),
+                invalid.clone(),
+            )
+            .is_err()
+        );
         invalid.language_keys = vec!["Rust".into()];
-        assert!(RememberRequest::new_lesson(
-            RoomKey::new("lab").unwrap(),
-            RememberKind::CodingLesson,
-            "Bad slug".into(),
-            "Must refuse malformed keys.".into(),
-            invalid,
-        ).is_err());
+        assert!(
+            RememberRequest::new_lesson(
+                RoomKey::new("lab").unwrap(),
+                RememberKind::CodingLesson,
+                "Bad slug".into(),
+                "Must refuse malformed keys.".into(),
+                invalid,
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -4801,6 +4836,7 @@ mod tests {
                     "inherited environment state reaches a child tool process".into(),
                     vec!["rust".into()],
                     vec![],
+                    vec!["subagent-dispatch".into()],
                     vec!["environment".into()],
                 )
                 .unwrap(),
@@ -4839,6 +4875,7 @@ mod tests {
                     "queue work crosses a durable transaction boundary".into(),
                     vec![],
                     vec!["postgresql".into()],
+                    vec!["subagent-dispatch".into()],
                     vec!["queue".into()],
                 )
                 .unwrap(),
@@ -4996,6 +5033,7 @@ mod tests {
                     vec![],
                     vec![],
                     vec![],
+                    vec![],
                 )
                 .unwrap(),
             )
@@ -5061,6 +5099,7 @@ mod tests {
                 vec![],
                 vec![],
                 vec![],
+                vec![],
             )
             .is_err()
         );
@@ -5071,6 +5110,7 @@ mod tests {
                 Some(" ".into()),
                 "proof".into(),
                 "trigger".into(),
+                vec![],
                 vec![],
                 vec![],
                 vec![],
@@ -5089,6 +5129,7 @@ mod tests {
                     vec![],
                     vec![],
                     vec![],
+                    vec![],
                 )
                 .is_err()
             );
@@ -5103,6 +5144,7 @@ mod tests {
                 vec![],
                 vec![],
                 vec![],
+                vec![],
             )
             .is_err()
         );
@@ -5114,6 +5156,7 @@ mod tests {
                     "project".into(),
                     proof_pattern.into(),
                     trigger_context.into(),
+                    vec![],
                     vec![],
                     vec![],
                     vec![],

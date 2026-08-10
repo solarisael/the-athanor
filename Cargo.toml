@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/house-core",
     "crates/house-protocol",
+    "crates/house-substrate",
 ]
 
 [workspace.package]

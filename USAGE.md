@@ -1,12 +1,16 @@
 # Using The Athanor
 
-Installation gives an AI a persistent room. Daily use is a small loop: enter the room, work or live together, preserve what matters, and leave a handoff when the session ends.
+Installation gives an AI a persistent room. Your rooms live at
+`<target>/rooms/<room-key>`, beside the product tree and the state directory.
+Read [`INSTALL.md`](./INSTALL.md) if you have not installed yet. Daily use is a
+small loop: enter the room, work or live together, preserve what matters, and
+leave a handoff when the session ends.
 
 House loads identity and compact continuity automatically. Durable memory remains deliberate by default so important trails do not disappear inside indiscriminate transcript storage.
 
 ## Everyday loop
 
-1. **Enter the room.** Start the harness from the room directory. Identity and compact continuity load with the session.
+1. **Enter the room.** Start the harness from `<target>/rooms/<room-key>`. Identity and compact continuity load with the session.
 2. **Work or live together.** Talk normally. Use recall when older evidence matters.
 3. **Keep what matters.** Record durable events, decisions, preferences, corrections, and reusable lessons.
 4. **Leave a paper boat.** At a meaningful stopping point, write a compact handoff for the next session.
@@ -64,17 +68,18 @@ Use a typed lesson when the durable content is a rule rather than an event:
 - **Coding lesson:** transferable engineering or process craft.
 - **Project lesson:** a rule or constraint owned by one project.
 - **Writing lesson:** prose, voice, register, or taste.
+- **Design lesson:** reusable design-system taste bound to a named design system.
 - **Audio lesson:** reusable audio and speech-pipeline behavior.
 
 Examples:
 
 > Save this as a shared coding lesson: verify the extracted archive, not only the build script.
 
-> This is a Multistock project lesson, not a global coding rule.
+> This is an example-project project lesson, not a global coding rule.
 
 > Keep this as a writing lesson for my voice.
 
-Read [`docs/LESSONS.md`](./docs/LESSONS.md) for fields, scopes, proof patterns, workspace imports, automatic coding preflight, guarded updates, and deletion.
+Read [`docs/LESSONS.md`](./docs/LESSONS.md) for fields, scopes, proof patterns, workspace imports, automatic coding preflight, guarded updates, and deletion. The `lessons` organ queries the typed registry; `design_doc` and `design_doc_write` read and write the design-system catalogue that design lessons refer to.
 
 ## Sleep with a paper boat
 
@@ -211,8 +216,10 @@ That is enough. House becomes deeper as the room accumulates deliberate continui
 
 ## Reference map
 
+- Install, migrate, and update: [`INSTALL.md`](./INSTALL.md)
 - Retrieval and corrections: [`docs/RETRIEVAL.md`](./docs/RETRIEVAL.md)
 - Typed lessons and imports: [`docs/LESSONS.md`](./docs/LESSONS.md)
 - Identity and room design: [`IDENTITY_GUIDE.md`](./IDENTITY_GUIDE.md)
 - Privacy and destructive operations: [`SECURITY.md`](./docs/SECURITY.md)
 - Platform and product boundaries: [`LIMITATIONS.md`](./docs/LIMITATIONS.md)
+- Project history and design reasons: [`HOUSE.md`](./HOUSE.md)

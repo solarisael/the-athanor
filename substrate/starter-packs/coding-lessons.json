@@ -1,0 +1,2061 @@
+{
+  "schema_version": 1,
+  "pack": {
+    "id": "solarisael-house-craft-starter",
+    "version": 2,
+    "title": "The Athanor coding lesson library",
+    "description": "A privacy-safe library of 117 reusable engineering lessons from the reference House.",
+    "license": "Apache-2.0"
+  },
+  "lessons": [
+    {
+      "scope": "shared",
+      "title": "Responsive image fixes need full-chain proof",
+      "lesson": "A responsive media defect can occur in generation, historical backfill, API selection, caching, or browser negotiation. Verify each layer before closure: stored variant metadata, the API payload, each variant URL and content type, rendered `srcset` and `sizes`, and browser `currentSrc` after viewport changes.",
+      "trigger_context": "Use this lesson when stored media variants exist but public content does not expose or select them.",
+      "proof_pattern": "Use a large source image that produces the full variant range. Use Playwright resize checks to verify that `currentSrc` changes across viewport sizes. Restore all temporary content changes before closure.",
+      "shape": "verification",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "responsive-images",
+        "media-backfill",
+        "playwright-proof",
+        "api-cache",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not combine `sudo -S` and a heredoc payload on the same standard input",
+      "lesson": "`sudo -S` reads the password from standard input. A heredoc payload also uses standard input. If both feed the same command, `sudo` can read the payload as more password attempts. Use two steps: write the payload to a temporary file without `sudo`, then use `sudo -S` to copy that file to the protected destination. For SQL through `psql` in WSL, write a `.sql` file first and run `psql -f file.sql`. This also prevents nested Bash processing from changing SQL escape sequences.",
+      "trigger_context": "Use this rule when a protected command must consume a configuration or SQL payload through nested WSL and shell commands.",
+      "proof_pattern": "Pipe a known correct password to `sudo -S` while attaching a heredoc to the same command. Confirm that `sudo` reports a failed password attempt because the two inputs collide.",
+      "shape": "shell",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "shell",
+        "sudo",
+        "wsl",
+        "nested-shells",
+        "stdin-collision",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Rebuild derived rows on every upsert or accept silent drift",
+      "lesson": "When a canonical value also has a derived pivot or array representation, every upsert path must delete and insert the derived rows for the affected canonical ID. Updating only the canonical row leaves the pivot at its last backfill state. Queries through the pivot then return stale data while canonical queries appear correct. Use `ON DELETE CASCADE` on the foreign key so deletion of a canonical row also removes its pivot rows.",
+      "trigger_context": "Use this rule after a migration adds and backfills a pivot table from canonical array or metadata fields.",
+      "proof_pattern": "Run the importer again and count both representations. Verify the expected canonical and pivot totals. The pivot count must not double and must not remain stale after canonical references change.",
+      "shape": "database",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "postgres",
+        "pivot-tables",
+        "idempotent-upsert",
+        "denormalization",
+        "on-delete-cascade",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Verify deployments by chunk existence and behavior, not local hash equality",
+      "lesson": "Content-hashing bundlers such as Vite, webpack, esbuild, Parcel, and Rspack can produce different hashes for the same source in different build environments. Dependency trees, file timestamps, and build state can affect the result. Do not compare deployed asset hashes with a local build. Instead, check for a new stable chunk basename in the deployed asset graph and test behavior that requires the new code. Hash comparison is valid only to detect caching on the same builder, such as comparing its deployed hash before and after a push.",
+      "trigger_context": "Use this rule when an independently built deployment returns `404` for exact asset names copied from a local build.",
+      "proof_pattern": "After deployment, use browser network logs to list `/assets/*.js` requests. Look for the new component basename with any hash suffix. Independently test an API field or UI behavior that requires the change. If both checks pass, the deployment is live despite hash differences.",
+      "shape": "deployment",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "deploy-verification",
+        "content-hashing",
+        "vite",
+        "bundlers",
+        "false-negative",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Try the simplest synchronization before surgical recovery",
+      "lesson": "When a workspace or state error occurs, first use the smallest operation that can close the gap. Try `git pull` before `git fetch` plus `git reset --hard`, cross-environment path bridges, or environment-variable workarounds. Escalate only after the simple operation fails with a specific error. Premature surgical recovery can add hook differences, line-ending changes, missing SSH keys, and nested-shell failures.",
+      "trigger_context": "Use this rule for wrong-directory work, branch drift, or divergence between checkouts in mixed Windows and WSL environments.",
+      "proof_pattern": "If a recovery plan exceeds two commands, stop and test whether `git pull` or an equivalent simple synchronization closes the gap. If it fails, use the exact error, such as divergent histories, to select the next operation.",
+      "shape": "recovery",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "git",
+        "recovery",
+        "wsl",
+        "mixed-environments",
+        "YAGNI",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not make filtered or daemon commands depend on foreground output",
+      "lesson": "OpenCode can inject `snip`; do not try to bypass it. For bounded commands, first use the filtered output. If output is truncated or abnormal, read the tee hint or the newest file in the configured snip tee directory. Tee files are written after process exit, default to failures, and omit output smaller than 500 bytes. Set `SNIP_TEE_DIR` to change the directory. For daemons, start a detached process with standard output and standard error redirected to known log files. Verify it with bounded process and log checks, not a foreground stream.",
+      "trigger_context": "Use this rule when a long-running service is started under an output filter or when filtered command output is incomplete.",
+      "proof_pattern": "Start the daemon detached. Check the process table and its output and error logs separately. For a bounded failure, use the tee hint or inspect the newest file in the configured tee directory.",
+      "shape": "tooling",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "snip",
+        "tool-usage",
+        "daemon",
+        "opencode",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Enforce peer-channel silence and credit rules in the dispatcher",
+      "lesson": "Peer-bot loops are dispatcher defects, not model-discipline defects. An authorized human mention can be a hard wake. Treat a peer mention as a gated request: remove mention tokens, require substantive content, enforce a cooldown, and charge the normal channel resource. In designated shared channels, log peer messages but do not automatically wake another bot. Represent silence by sending no message. Do not send text such as `no reply`, `quiet`, or other performed silence. Quota credit must accrue only from the ticker. Status checks, persistence, and attempted spends must not create credit.",
+      "trigger_context": "Use this rule when bots create mention-and-acknowledgement loops or peer activity unexpectedly replenishes a quota.",
+      "proof_pattern": "Replay mention-pong and performed-silence samples. Assert that status, dump, and spend operations do not accrue quota; only the authorized human path replenishes the turn budget; and only the timer path creates bank credit.",
+      "shape": "dispatcher",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "chat-bot",
+        "peer-channel",
+        "dispatcher",
+        "quota",
+        "postgres",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "The spine: plain line, clean door, sharp refusal",
+      "lesson": "Use three design rules. Write the plain line. Provide one clean path through the code. Make invalid states and unsupported operations explicit. Other style rules should support one of these three rules.",
+      "trigger_context": null,
+      "proof_pattern": "Review the code for direct statements, one clear control path, and explicit rejection of invalid input or state.",
+      "shape": "spine",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "code-aesthetics",
+        "design-rules",
+        "spine",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Names must reveal motion, not decorate it",
+      "lesson": "A function name must identify the operation, not only state that processing occurs. Prefer concrete verbs that describe the movement or transformation of data. Names must appear discovered from behavior, not added as branding.",
+      "trigger_context": null,
+      "proof_pattern": "`process_data()` hides the operation. `fold_messages_into_room()` states the transformation and destination.",
+      "shape": "naming",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "code-aesthetics",
+        "naming",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not lie with names",
+      "lesson": "A name must state all important effects. A function named `get_user` must only fetch data; it must not also write to the database. An awkward but honest name, such as `get_or_create_and_log_user`, exposes combined responsibilities and often shows that the function must be split.",
+      "trigger_context": null,
+      "proof_pattern": "Treat `_and_` in a function name as evidence to inspect. It is not always an error, but it often identifies two operations that need separate functions.",
+      "shape": "naming",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "code-aesthetics",
+        "naming",
+        "side-effects",
+        "house-library"
+      ],
+      "negation_of_title": "Names must reveal motion, not decorate it"
+    },
+    {
+      "scope": "shared",
+      "title": "A file should have one silhouette",
+      "lesson": "Keep one coherent shape in each file. You must be able to describe the file purpose in one sentence. Every item in the file must support that purpose. Leave one clear path through the file.",
+      "trigger_context": null,
+      "proof_pattern": "A file that contains unrelated helpers, a class, and unrelated constants has no coherent shape. Split it until each file has one center of responsibility.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "code-aesthetics",
+        "structure",
+        "cohesion",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "A helper with a vague name exposes the wrong seam",
+      "lesson": "If you cannot name a helper without `_and_`, `_helper`, or `_util`, the abstraction is not ready. The correct seam is elsewhere. Do not keep a false abstraction only because the code compiles.",
+      "trigger_context": null,
+      "proof_pattern": "Names such as `_handle_step_2_helper`, `format_data_util`, and `do_thing_and_log` do not state one coherent responsibility. Find the actual seam before you keep the helper.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "code-aesthetics",
+        "structure",
+        "abstraction",
+        "house-library"
+      ],
+      "negation_of_title": "A file should have one silhouette"
+    },
+    {
+      "scope": "shared",
+      "title": "Make code boundaries and refusals explicit",
+      "lesson": "Good code makes its boundaries explicit. It does not hide cost, name concepts before they are understood, force false symmetry, use cleverness that slows maintainers, add helpers without value, or hide state and call it elegance.",
+      "trigger_context": null,
+      "proof_pattern": "Inspect the code for visible purpose, rejected responsibilities, seams, costs, state, and clear extension points. A maintainer must not have to guess where to make a change.",
+      "shape": "refusal",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "code-design",
+        "boundaries",
+        "cost-visibility",
+        "state-visibility",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Keep unavoidable complexity in one named place",
+      "lesson": "Some operations are inherently complex, such as protocol parsing, legacy interoperability, and edge-case handling. Do not distribute their workarounds across the codebase. Isolate the complexity in one clearly named module or boundary.",
+      "trigger_context": null,
+      "proof_pattern": "Prefer one module such as `legacy_csv_quirks.py` to several files with independent workarounds for the same malformed format.",
+      "shape": "ugly-honest",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "encapsulation",
+        "legacy-interop",
+        "edge-cases",
+        "maintainability",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Refuse helpers that only launder anxiety",
+      "lesson": "Remove a helper if it only wraps one call, renames a standard-library function, or splits a small cohesive function without clarifying policy, state, cost, or reuse. Such helpers add indirection without reducing complexity.",
+      "trigger_context": null,
+      "proof_pattern": "`def get_current_time(): return datetime.now()` adds no policy or abstraction. Call `datetime.now()` directly unless the helper creates a real seam, such as an injectable clock.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "abstraction",
+        "helpers",
+        "indirection",
+        "structure",
+        "house-library"
+      ],
+      "negation_of_title": "Keep unavoidable complexity in one named place"
+    },
+    {
+      "scope": "shared",
+      "title": "Make the first draft loud, then compress it",
+      "lesson": "Make the first draft explicit. Use direct names and write the long, obvious implementation. Compress it only after the behavior and seams are understood, and only if compression does not hide meaning.",
+      "trigger_context": null,
+      "proof_pattern": "A name such as `get_or_create_and_log_user` exposes combined responsibilities. Use it to identify seams, then separate fetch, creation, and logging at the boundary where the side effect or cost occurs.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "process",
+        "refactoring",
+        "naming",
+        "clarity",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Centralize shared behavior before creating mirrored implementations",
+      "lesson": "When multiple files do the same work for different tenants, agents, or environments, each fix must be repeated and the copies can drift. Extract the shared core first. Keep each variant as a thin entry point that supplies its name and configuration.",
+      "trigger_context": null,
+      "proof_pattern": "If two large entry-point files are approximately 95% identical and one bug requires the same edit in both, move the behavior to a shared package. Reduce each entry point to a call such as `run_service(tenant='tenant_a', ...)`.",
+      "shape": "duplication",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "duplication",
+        "shared-core",
+        "multi-tenant",
+        "maintainability",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Make seed inserts idempotent",
+      "lesson": "Running a seed twice must produce the same state as running it once. Define a real unique constraint. Use `ON CONFLICT DO NOTHING` when a rerun confirms existing data, or `ON CONFLICT DO UPDATE` when a rerun corrects existing data. The seed must state which behavior applies.",
+      "trigger_context": null,
+      "proof_pattern": "Use `ON CONFLICT (scope, category, title) DO UPDATE` when the latest seed text must win. Stable row identifiers preserve foreign-key links across reruns.",
+      "shape": "idempotency",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "database",
+        "seed-data",
+        "idempotency",
+        "upsert",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not use blind inserts for repeatable seed data",
+      "lesson": "Anti-pattern: a seed uses `INSERT` without a unique key or conflict policy. The first run succeeds. A later run either fails on a constraint or silently creates duplicate rows. A repeatable seed must not depend on operators remembering to run it only once.",
+      "trigger_context": null,
+      "proof_pattern": "`INSERT INTO lessons (title, lesson) VALUES ('foo', 'bar');` can fail or duplicate data on the second run. Add a unique constraint and an explicit `ON CONFLICT` policy.",
+      "shape": "idempotency",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "database",
+        "seed-data",
+        "idempotency",
+        "anti-pattern",
+        "house-library"
+      ],
+      "negation_of_title": "Make seed inserts idempotent"
+    },
+    {
+      "scope": "shared",
+      "title": "Make migrations safe to reapply",
+      "lesson": "A migration must handle fresh, partially applied, and fully applied database states. Use `CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, and `CREATE INDEX IF NOT EXISTS` where supported. Guard backfills with a `WHERE` clause that excludes rows already migrated.",
+      "trigger_context": null,
+      "proof_pattern": "A migration that adds `voice` and `negation_of` with `ADD COLUMN IF NOT EXISTS` becomes a no-op after completion and can heal a partial application without manual schema changes.",
+      "shape": "idempotency",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "database",
+        "migration",
+        "idempotency",
+        "backfill",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not write migrations that require a fresh database",
+      "lesson": "Anti-pattern: use `CREATE TABLE` without `IF NOT EXISTS`, assume an added column is absent, or run an unguarded backfill. A rerun can fail, and a partial application can leave inconsistent state. A migration must account for reapplication.",
+      "trigger_context": null,
+      "proof_pattern": "`ALTER TABLE lessons ADD COLUMN voice TEXT;` fails on a second run when the column exists. Where the database supports it, use `ADD COLUMN IF NOT EXISTS` and guard all data changes.",
+      "shape": "idempotency",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "database",
+        "migration",
+        "idempotency",
+        "anti-pattern",
+        "house-library"
+      ],
+      "negation_of_title": "Make migrations safe to reapply"
+    },
+    {
+      "scope": "shared",
+      "title": "Store Playwright artifacts in task-specific folders",
+      "lesson": "Do not scatter Playwright snapshots, screenshots, network dumps, or console logs across arbitrary repository paths. Store them in a dedicated folder for each task so that evidence stays with the investigation and cleanup is clear.",
+      "trigger_context": "When Playwright produces evidence or diagnostic artifacts.",
+      "proof_pattern": "Use paths such as `playwright/task-name/snapshot-name.md` and `playwright/task-name/screenshot-name.png`, not loose files at the repository root or beside source files.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "playwright",
+        "artifacts",
+        "verification",
+        "repository-hygiene",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Branch promotion is not runtime proof",
+      "lesson": "A commit, push, branch promotion, CI job, image rollout, and live runtime result are separate facts. Do not report work as deployed only because a branch moved or a pipeline exists.",
+      "trigger_context": "Any deployment, checkpoint, promotion, or live-status claim.",
+      "proof_pattern": "Report source references, CI job status, image or rollout evidence, and observable live behavior separately. Mark the checkpoint as partial until the runtime marker is verified.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "deployment",
+        "runtime-proof",
+        "branch-discipline",
+        "verification",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Refresh stale runtime layers before rejecting repository truth",
+      "lesson": "A running system can retain stale workers, opcode caches, images, or schema. This can make correct checked-in code appear broken. Refresh the relevant runtime layer before debugging application logic that contradicts the repository state.",
+      "trigger_context": "Backend, schema, route, image, or deployment behavior differs from the checked-out code.",
+      "proof_pattern": "Compare repository state with live endpoint behavior. Restart or rebuild the relevant layer, rerun migrations when necessary, and then verify the route, schema, API, or browser marker again.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "debugging",
+        "stale-runtime",
+        "cache",
+        "deployment",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Add compatible API modes instead of silently changing contracts",
+      "lesson": "When an API response already has consumers, add an explicit mode or additive field instead of silently changing the existing shape. Keep public reads compatible unless the change is intentionally breaking.",
+      "trigger_context": "Frontend and backend API contract changes with existing consumers.",
+      "proof_pattern": "Verify both the new mode or field and an existing caller path. Add a compatibility adapter when client code needs the new shape.",
+      "shape": "refusal",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "api",
+        "backward-compatibility",
+        "contract",
+        "regression",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Defer irreversible side effects until the user commits",
+      "lesson": "Selection, preview, and draft actions must not create persistent backend records before the user saves. Keep pre-save state local when cancellation or unsaved-change protection must leave no persistent residue.",
+      "trigger_context": "Upload, create, edit, picker, preview, or wizard flows.",
+      "proof_pattern": "Use browser and network evidence to verify that no create or upload request occurs before save. Verify that save creates the resource and that cancel or navigation leaves no persistent record.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "frontend",
+        "side-effects",
+        "user-experience",
+        "idempotency",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Keep public health routes cheap and stateless",
+      "lesson": "Health and monitoring endpoints must bypass heavyweight bootstrap and stateful work. An expensive probe distorts capacity signals and can fail under the checks used to measure health.",
+      "trigger_context": "Health endpoints, monitoring, burst tests, or capacity diagnostics.",
+      "proof_pattern": "Compare direct-node and public burst results before and after adding a fast path. Verify that the health route remains cheap before using it as a runtime signal.",
+      "shape": "cost-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "health-checks",
+        "performance",
+        "monitoring",
+        "capacity",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Production branches are not disposable copies of test branches",
+      "lesson": "Before you promote a test branch to production, inspect commits that exist only in production. Merge valid production history into the source or operator branch. A simple promotion is not clean if it deletes production-only history.",
+      "trigger_context": "A test-to-production promotion, branch repair, or production deployment checkpoint.",
+      "proof_pattern": "List commits that exist only in the remote production branch and check their reachability. If valid unique commits exist, reconcile them into the source branch before promotion.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "branch-discipline",
+        "prod",
+        "merge-overlap",
+        "deploy",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Make runtime roles explicit",
+      "lesson": "Web runtimes and background workers have different lifecycle, resource, and dependency requirements. Use separate images or entry points when role clarity affects capacity, debugging, or deployment correctness.",
+      "trigger_context": "Runtime image design, worker queues, long-running processes, or capacity work.",
+      "proof_pattern": "Build and test each role independently. Prove web health for the web role. Prove the worker entry point and queue behavior for the worker role. Do not include unrelated services in the proof.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "runtime",
+        "workers",
+        "process-boundaries",
+        "deploy",
+        "performance",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Protect payloads that PowerShell sends to WSL",
+      "lesson": "When PowerShell sends shell code to WSL, prevent PowerShell from evaluating shell variables, command substitutions, and heredoc-style payloads first. Treat the shell boundary as part of the command.",
+      "trigger_context": "Windows scripts or automation commands that send payloads to WSL.",
+      "proof_pattern": "Test with variables and command substitutions that must remain unchanged until WSL evaluates them. Prefer simple commands with explicit paths when possible.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "powershell",
+        "wsl",
+        "quoting",
+        "tooling",
+        "commands",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Some HTTP clients require transport-level User-Agent configuration",
+      "lesson": "For cURL-based clients, a raw User-Agent header might not produce the required upstream behavior. If a provider depends on this value, set the native transport option, such as CURLOPT_USERAGENT.",
+      "trigger_context": "A provider reports User-Agent or header errors although the request appears to contain the correct header.",
+      "proof_pattern": "Inspect the HTTP transport layer. Set the value through the native transport option. Test the request against the provider sandbox or live endpoint.",
+      "shape": "cost-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "http-client",
+        "curl",
+        "provider-integrations",
+        "runtime",
+        "billing",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Test custom media overlays for appearance and input",
+      "lesson": "A custom media overlay can look correct and still block input. After you change playback controls, verify visual states and pointer behavior.",
+      "trigger_context": "Changes to a custom video player, overlay, play or pause action, mute action, volume control, or playback chrome.",
+      "proof_pattern": "Use browser tests for play, pause, media-surface clicks, control clicks, mute, unmute, the volume slider, overlay visibility, and pointer-events behavior.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "frontend",
+        "video",
+        "playwright",
+        "regression-guard",
+        "public-rendering",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use lightweight video thumbnail fallbacks before transcoding",
+      "lesson": "Before you add backend transcoding, use a thumbnail fallback chain for video cards: a manual poster, a provider thumbnail, a browser first-frame preview for uploaded video, and then a placeholder.",
+      "trigger_context": "Video cards, uploaded-video thumbnails, provider embeds, or media-preview user interfaces.",
+      "proof_pattern": "Verify that a manual poster has first priority. Verify that supported provider URLs produce thumbnails. Verify that uploaded videos show first-frame previews with metadata preload. Use the placeholder only as the last fallback.",
+      "shape": "cost-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "cms",
+        "video",
+        "media",
+        "thumbnail",
+        "frontend",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Invalidate caches when reader-visible metadata changes",
+      "lesson": "Metadata that readers can see is part of the public content. Writes to captions, credits, rights, and attribution must invalidate every public read cache that displays those values.",
+      "trigger_context": "Media metadata, cover attribution, content feeds, or public content caches.",
+      "proof_pattern": "Change the metadata and invalidate the content and feed caches. Then verify that the reader payload or rendered page contains the new value.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "cache-invalidation",
+        "metadata",
+        "public-contract",
+        "cms",
+        "media",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Renderers must upgrade legacy media markup",
+      "lesson": "When you replace a stored media-embed format, public and preview renderers must support the new stable format and the old placeholder format. Do not expose historical placeholders as literal HTML.",
+      "trigger_context": "Rich-content media migrations, video embeds, gallery embeds, or WYSIWYG renderer changes.",
+      "proof_pattern": "Store samples of the legacy and new markup. Verify that the public renderer and editor preview convert both samples to the intended component output.",
+      "shape": "refusal",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "frontend",
+        "article-body",
+        "legacy-compat",
+        "public-rendering",
+        "video",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Require minimum identity fields before editor autosave",
+      "lesson": "Do not autosave a structurally incomplete long-form draft. Require stable identity fields. Show a quiet status message instead of repeated toast notifications.",
+      "trigger_context": "Long-form editor autosave or draft-persistence work.",
+      "proof_pattern": "Verify that autosave waits for a title and slug, or equivalent identity fields. Verify the status message and the absence of repeated toast notifications.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "frontend",
+        "article-editor",
+        "autosave",
+        "cms",
+        "ux",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Prove stateful runtime seams, not only startup",
+      "lesson": "A new runtime is not credible until cookies, sessions, CSRF protection, authenticated mutations, uploads, and workers operate correctly under the new request model.",
+      "trigger_context": "An alternative runtime, long-lived worker, framework change, or container process-model change.",
+      "proof_pattern": "Test public reads, login and current-user reads, CSRF-protected writes, multipart uploads, a publish, delete, or equivalent mutation, worker queue drain, and bounded load.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "runtime",
+        "state",
+        "auth",
+        "cookies",
+        "verification",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Assign route permissions by actor, not by resource similarity",
+      "lesson": "Reader-facing writes require reader-authenticated routes. Do not reuse administrator-only endpoints only because profile or media resources have similar shapes. This creates authority failures that can look like feature defects.",
+      "trigger_context": "Profile, media, avatar, account, administration, or reader routes with similar resource shapes.",
+      "proof_pattern": "Identify the failed route and its middleware boundary. Add an endpoint for the correct actor, update the client, and probe the exact live request.",
+      "shape": "refusal",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "permissions",
+        "api-contract",
+        "routes",
+        "auth",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Destructive deletes must state their collateral scope",
+      "lesson": "A delete operation must state which related references it removes and which source records it preserves. It must return or expose evidence of affected dependents.",
+      "trigger_context": "Delete endpoints, reusable objects, media cleanup, or other destructive API work.",
+      "proof_pattern": "Create dependent content and delete the object. Assert the affected-dependent count. Confirm dependent cleanup and confirm that required source or library records remain.",
+      "shape": "refusal",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "destructive-actions",
+        "api-contract",
+        "cms",
+        "verification",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Protect dirty editor state at application and browser exits",
+      "lesson": "Long forms require route-change confirmation and browser-unload protection. A successful build does not protect user-authored draft state.",
+      "trigger_context": "Long forms, content editors, unsaved changes, or navigation guards.",
+      "proof_pattern": "Change fields without saving. Attempt in-application navigation and browser unload or refresh. Verify that the guard blocks the action or requests confirmation.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "state",
+        "cms",
+        "forms",
+        "ux-safety",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Verify webhooks with the documented header and raw body",
+      "lesson": "Webhook authentication must use the provider's documented signature header and raw-body contract. Do not guess header names. Do not verify a normalized payload when the provider signs the raw body.",
+      "trigger_context": "Provider webhooks, payment events, mail events, signature verification, or event ingestion.",
+      "proof_pattern": "Check the provider documentation. Configure exact header and raw-body verification. Send locally generated signed traffic. Assert the expected status and the persisted or logged event.",
+      "shape": "refusal",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "api-contract",
+        "webhooks",
+        "security",
+        "provider-integrations",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use stress tests to find the operating band",
+      "lesson": "A catastrophic load test proves only failure. Use stepped load levels to identify healthy, degraded, and unacceptable operating bands. These bands provide usable capacity guidance.",
+      "trigger_context": "Load testing, capacity planning, provider or runtime comparisons, or performance regression work.",
+      "proof_pattern": "Run low, medium, and ceiling load windows. Record failure rate, dropped iterations, p95 latency, and post-test health and read recovery.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "tests",
+        "load-testing",
+        "capacity",
+        "verification",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Constrain embeds to known providers",
+      "lesson": "Staff embed tools must store controlled provider blocks instead of arbitrary iframe markup. Restrict capability at the storage boundary. Do not depend only on later sanitization.",
+      "trigger_context": "CMS embed insertion, social or video provider support, iframe rendering, or content-safety work.",
+      "proof_pattern": "Insert a URL from each supported provider. Verify structured `data-media-kind` HTML and public rendering. Verify that the system rejects unsupported iframe paths.",
+      "shape": "refusal",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "permissions",
+        "security",
+        "content-safety",
+        "cms",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Preserve existing terminal state choices",
+      "lesson": "Time-window and workflow updates must not silently replace an existing state unless an explicit transition requires the change. Apply defaults to new records. Do not use defaults to erase deliberate choices.",
+      "trigger_context": "Expiry windows, workflow statuses, publication windows, breaking-news states, or stateful CMS edits.",
+      "proof_pattern": "Create a record and verify its default state. Set a custom state, edit the record, and verify that save preserves the state unless the user changes it.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "state-machines",
+        "workflow",
+        "cms",
+        "regression",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Define an intent contract for subjective styling",
+      "lesson": "Before aesthetic CSS work, map mood, intensity, anti-goals, and prompt cues to concrete layers, tokens, and implementation targets. This reduces edits that are technically correct but aesthetically wrong.",
+      "trigger_context": "Use when a styling request is subjective, has multiple cues, or is easy to misinterpret.",
+      "proof_pattern": "For visual work, record the mood target, intensity target, anti-goals, prompt-to-implementation mapping, structure plan, and final visual evidence.",
+      "shape": "intent-contract",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "css",
+        "design-process",
+        "intent",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Enforce decorative constraints with executable gates",
+      "lesson": "If a visual rule is important, enforce it with an executable gate and report pass or fail. Taste notes can drift. Scripts make the visual contract durable.",
+      "trigger_context": "Use when you define or preserve CSS, ornament, animation, or visual-complexity constraints.",
+      "proof_pattern": "Use dedicated audit scripts to enforce ornament URL rules and decorative background-stack rules. Report each gate result in the final validation.",
+      "shape": "validation-gate",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "validation",
+        "css",
+        "visual-regression",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Put human-tuned CSS controls first",
+      "lesson": "Declare deliberate art-direction CSS variables near the first selector block. Do not create one-use alias variables that are neither reused nor intended for manual tuning. Make human-tuned values easy to find.",
+      "trigger_context": "Use when component CSS has many local custom properties or needs fast visual tuning.",
+      "proof_pattern": "Group tunable variables at the top of the component file. Run a checker that verifies that referenced component-local variables are declared in that group.",
+      "shape": "maintainability",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "css",
+        "tunables",
+        "maintainability",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Export pure helpers for browser behavior",
+      "lesson": "Keep DOM and event wrappers thin. Export pure helpers. Validate invalid input and missing-node fallbacks. Add focused tests for changed behavior instead of depending only on manual browser checks.",
+      "trigger_context": "Use when you add or change frontend JavaScript behavior.",
+      "proof_pattern": "Export parsing and state helpers from the browser feature. Test those helpers, invalid inputs, and missing-node cases with a focused JavaScript test runner such as Bun.",
+      "shape": "testability",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "javascript",
+        "tests",
+        "bun",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Make HTMX lifecycle binding idempotent",
+      "lesson": "Protect global HTMX lifecycle listeners from duplicate registration with explicit flags. Page swaps and module re-entry can otherwise bind the same listener more than once.",
+      "trigger_context": "Use when you bind browser listeners during HTMX lifecycle events or module initialization.",
+      "proof_pattern": "Before registration, test a dedicated global or module flag such as `__shell_sync_bound`. Set the flag after registration. Re-enter initialization and verify that only one listener runs.",
+      "shape": "idempotency",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "htmx",
+        "idempotency",
+        "events",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not mix module and global dependency models",
+      "lesson": "Use one dependency model for a browser chain: ESM imports or classic globals. Do not combine module-loaded providers with extensions that require bare globals. This combination creates load-order races that are difficult to reproduce.",
+      "trigger_context": "Use when you connect browser modules, vendor scripts, extensions, or global objects.",
+      "proof_pattern": "A runtime imports HTMX as a module and later assigns `window.htmx`, while an extension reads bare `htmx` during `defineExtension`. Verify first paint with a cold load. The extension can execute before the global assignment and fail.",
+      "shape": "dependency",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "modules",
+        "browser-js",
+        "load-order",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Prefer one scroll context for virtualized reading",
+      "lesson": "Virtualized long lists become unpredictable when window scrolling and nested overflow compete. Use the document or window as the single scroll context unless a nested pane is required and tested.",
+      "trigger_context": "Use when you build or debug virtualized archives, feeds, readers, and other scroll-heavy pages.",
+      "proof_pattern": "Remove the nested overflow pane and connect TanStack observers to document or window scrolling. Verify item measurement, restoration, and long-range navigation.",
+      "shape": "scroll-context",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "scroll",
+        "virtualization",
+        "frontend",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Treat the base path as a system",
+      "lesson": "Handle a static-site base URL through one helper or data contract for links, script tags, assets, HTMX requests, and runtime-generated paths. A fix to one route or `src` value usually leaves other paths broken.",
+      "trigger_context": "Use when you deploy below the domain root or change path generation in a static application.",
+      "proof_pattern": "Configure a non-root Astro base path. Apply a shared base-path helper in layouts and components. Pass the base path to JavaScript through a data attribute for runtime-generated asset URLs. Test every path category.",
+      "shape": "path-contract",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "routing",
+        "static-sites",
+        "assets",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Keep active continuity scan-sized",
+      "lesson": "Keep the current handoff file short. Move historical narrative to completed or archive files. The next worker needs current state, blockers, validation, and the first task before historical detail.",
+      "trigger_context": "Use when you maintain engineering memory, task files, session handoffs, or long-running work logs.",
+      "proof_pattern": "Keep one concise active-state file, one completed-work file, and one archived history file. Verify that the active file contains only current state, blockers, validation, and the next action.",
+      "shape": "continuity",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "handoff",
+        "continuity",
+        "docs",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use the standard library before a subprocess",
+      "lesson": "When the standard library provides the required native binding, use it. A subprocess adds an environment, process tree, security context, and input/output bindings that can differ between manual tests and production. An in-process call reduces failure modes.",
+      "trigger_context": null,
+      "proof_pattern": "On Windows, `winsound.PlaySound(path, winsound.SND_FILENAME)` plays a WAV file through an in-process Win32 API call. A PowerShell subprocess that creates `System.Media.SoundPlayer` can run in a different audio or security session. Test from the real caller context, not only an interactive shell.",
+      "shape": "dependency",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "dependency",
+        "standard-library",
+        "subprocess",
+        "windows",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not spawn a subprocess for an available standard-library call",
+      "lesson": "Anti-pattern: spawn another tool when the standard library already provides the native operation. The bridge adds a different environment, process tree, audio or security session, and input/output bindings. It can pass a manual test and fail under the real caller.",
+      "trigger_context": null,
+      "proof_pattern": "Compare `subprocess.Popen(['powershell.exe', '-Command', \"(New-Object System.Media.SoundPlayer 'x.wav').PlaySync()\"])` with `winsound.PlaySound('x.wav', winsound.SND_FILENAME)`. Both request WAV playback. The subprocess can detach from the caller's audio session. The in-process Win32 call keeps the caller's session.",
+      "shape": "dependency",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "dependency",
+        "standard-library",
+        "subprocess",
+        "windows",
+        "anti-pattern",
+        "house-library"
+      ],
+      "negation_of_title": "Use the standard library before a subprocess"
+    },
+    {
+      "scope": "shared",
+      "title": "Verify against intent, not green output",
+      "lesson": "Passing tests, running without error, or producing valid syntax is green evidence. It is not completion. Completion requires output that matches the request, use of the declared source of truth, and assumptions that match the stated intent.",
+      "trigger_context": "Use before you declare a task complete, especially when tests are the only evidence or the system has a declared canonical source.",
+      "proof_pattern": "If PostgreSQL is the declared source of truth, a Markdown search can return plausible content but still use the wrong path. Also verify user-visible behavior and the canonical data path, not only tests and build status.",
+      "shape": "verification",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "verification",
+        "intention",
+        "requirements",
+        "process",
+        "alignment",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not stop at a green response",
+      "lesson": "Anti-pattern: treat passing tests, running code, or plausible output as the completion signal. Green output is evidence, not proof. If you stop there, alignment with the requested intent remains unverified.",
+      "trigger_context": "Use when the impulse is to ship after a successful result without checking that the result matches the request. This risk is high in fail-soft systems, where a wrong path can return plausible data.",
+      "proof_pattern": "A fallback Markdown search can return real content while the declared PostgreSQL source is unavailable. The output looks correct, but the canonical path was bypassed. Verify both the result and its source path.",
+      "shape": "verification",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "verification",
+        "intention",
+        "anti-pattern",
+        "fail-soft",
+        "process",
+        "house-library"
+      ],
+      "negation_of_title": "Verify against intent, not green output"
+    },
+    {
+      "scope": "shared",
+      "title": "Ask alignment questions before you write code",
+      "lesson": "Before you write code, expose assumptions, state the simplest proposed path, and confirm that it matches the request. A simple interpretation is cheap to compute, but it is not necessarily correct. A short alignment check costs less than code that targets the wrong requirement.",
+      "trigger_context": "At the start of a non-trivial task, especially when the request is short, several interpretations are plausible, or the obvious path bypasses a stated architecture decision.",
+      "proof_pattern": "If a request asks for content and a database is the declared canonical source, confirm that source before you search local text files. The check prevents a fast answer that bypasses the source of truth.",
+      "shape": "alignment",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "alignment",
+        "pre-flight",
+        "requirements",
+        "assumptions",
+        "process",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not approve a stack of unchecked assumptions",
+      "lesson": "Do not proceed directly to code because each assumption appears plausible. Plausible assumptions can combine into a result that does not meet the request. A path that feels frictionless can indicate that alignment work was skipped.",
+      "trigger_context": "When the impulse to code arrives before questions about the requirement, or when an inferred interpretation is treated as confirmed.",
+      "proof_pattern": "A fast text search can produce a green-looking result while bypassing the canonical database. Confirm the source before implementation.",
+      "shape": "alignment",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "alignment",
+        "antipattern",
+        "speed",
+        "assumptions",
+        "process",
+        "house-library"
+      ],
+      "negation_of_title": "Ask alignment questions before you write code"
+    },
+    {
+      "scope": "shared",
+      "title": "Give development servers an explicit purpose and lifecycle",
+      "lesson": "Select the purpose and owner before you start a local server. For user browsing, use a user-owned terminal and give the exact command and port. For agent verification, use an agent-managed server with a PID, log, port, health check, and automatic stop. For a persistent shared server, ask first and record the stop command. Subprocess agents, `Start-Process`, `nohup`, hidden windows, and shell backgrounding are not safe by themselves. Use them only with lifecycle evidence and cleanup.",
+      "trigger_context": "When a user asks to serve a site, an agent needs browser evidence, or a watcher or live preview is useful for tests.",
+      "proof_pattern": "A valid server start records the purpose, owner, port, health evidence, and cleanup behavior. Bounded verification can start and stop the server without requiring manual user action.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "process",
+        "dev-server",
+        "lifecycle",
+        "verification",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not leave long-lived processes without an owner",
+      "lesson": "Do not let a development server, watcher, queue worker, or other Ctrl+C process occupy the main agent shell without a bound. Do not detach it without an owner. An agent can start a server for bounded verification when it controls the port, PID, logs, health check, and cleanup. Prefer a user-owned terminal for user browsing. Stop an agent-managed server before the final response unless the user asks to keep it.",
+      "trigger_context": "Before you run a development server, application server, CSS watcher, queue worker, or other persistent process.",
+      "proof_pattern": "Use either a timeout-bounded foreground probe or a managed background process with health evidence and automatic cleanup.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "process",
+        "dev-server",
+        "lifecycle",
+        "verification",
+        "house-library"
+      ],
+      "negation_of_title": "Give development servers an explicit purpose and lifecycle"
+    },
+    {
+      "scope": "shared",
+      "title": "Assign and document a unique local port for each project",
+      "lesson": "Give each local project a declared port. Document it in the project rules and require all tools and agents to use it. Select a new range, such as a fresh hundred-number block, for each new project. Do not assume that a framework default is available. Parallel projects can collide or direct verification to the wrong application.",
+      "trigger_context": "When you create or resume a project that can run in parallel with other local services.",
+      "proof_pattern": "Run two projects with different documented ports. Verify both the HTTP response and the application identity. A port collision should not produce either `EADDRINUSE` or a false green response from another application.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "process",
+        "ports",
+        "isolation",
+        "convention",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not trust framework default ports in a shared environment",
+      "lesson": "Do not let a framework select its default port without checking for other listeners. Defaults such as 8000, 5173, 3000, and 4321 assume an unshared machine. In parallel workflows, a default port is a shared resource. An HTTP 200 response does not prove that the expected application answered.",
+      "trigger_context": "When project rules do not declare a port and a command omits the port option or uses the framework default.",
+      "proof_pattern": "Start two applications that share a default port. The second can fail with `EADDRINUSE`, or a check can reach the first application and report false success. Verify a declared port and an application-specific endpoint or marker.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "process",
+        "antipattern",
+        "ports",
+        "defaults",
+        "collision",
+        "house-library"
+      ],
+      "negation_of_title": "Assign and document a unique local port for each project"
+    },
+    {
+      "scope": "shared",
+      "title": "Prove frontend UX on the rendered surface",
+      "lesson": "API checks, unit tests, and successful builds prove wiring. They do not prove user experience. Inspect the rendered interface for hierarchy, spacing, legibility, density, responsive behavior, and overall feel before you finish frontend work.",
+      "trigger_context": "Before you finish frontend, CMS, or public component work, especially visual fixes, media components, editor surfaces, lightboxes, and layout changes.",
+      "proof_pattern": "Use browser inspection or automated screenshots at relevant viewports. Judge the rendered result, not only command output.",
+      "shape": "verification",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "frontend",
+        "ux",
+        "visual-proof",
+        "verification",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use UTF-8-safe tools for text-file operations",
+      "lesson": "Use purpose-built tools for code and text inspection. Prefer environment-native read, write, edit, glob, grep, and code-intelligence tools because they are canonical and UTF-8 safe. Use focused command-line tools such as `rg`, `sed`, `bat`, `cat`, `git`, and repository wrappers only when the native tool does not cover the operation. Git and repository wrappers remain repository truth. Repair a broken preferred-tool path instead of normalizing weaker tools. For programmatic cross-shell work, use Python with `encoding=\"utf-8\"` explicit. Use PowerShell 7 only when PowerShell-native cmdlets are necessary. Do not use Windows PowerShell 5.1 for text-file operations because its defaults can silently corrupt non-ASCII text.",
+      "trigger_context": "When you read, search, edit, or rewrite text; collect repository evidence; automate across shells; or handle accents, emoji, smart punctuation, CJK, or other non-ASCII content.",
+      "proof_pattern": "Start with the specialized native tool. If a command-line tool is necessary, verify its UTF-8 behavior. Do not replace native glob or grep tools with weak shell fallbacks. After a bulk edit, inspect encoding, BOM state, and representative non-ASCII text.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "process",
+        "powershell",
+        "pwsh",
+        "encoding",
+        "utf-8",
+        "cli",
+        "tooling",
+        "windows",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not trust Windows PowerShell 5.1 text encoding defaults",
+      "lesson": "Do not use `Get-Content -Raw`, `Set-Content -Encoding UTF8`, `Out-File`, or `Add-Content` from `powershell.exe` on UTF-8 text files. On a BOM-less file, Windows PowerShell 5.1 can read with the system code page, such as cp1252, and split UTF-8 multibyte characters into incorrect characters. `Set-Content -Encoding UTF8` then writes that incorrect text as UTF-8 with a BOM. This produces double-encoded mojibake, such as `é` becoming `Ã©`, and adds the `EF BB BF` prefix. The encoding option controls the write, not the earlier read. Repeated passes add more corruption.",
+      "trigger_context": "During scripted reads, writes, appends, and bulk edits of text files in Windows PowerShell 5.1, especially when downstream scanners, template engines, or parsers consume the files.",
+      "proof_pattern": "To reverse one known cp1252-to-UTF-8 corruption pass, read raw bytes, remove the BOM, decode as UTF-8 to obtain the misread string, encode that string as cp1252 to recover the original UTF-8 bytes, and write without a BOM. Validate the assumptions on a copy before bulk recovery.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "process",
+        "antipattern",
+        "powershell",
+        "encoding",
+        "utf-8",
+        "cp1252",
+        "mojibake",
+        "silent-corruption",
+        "house-library"
+      ],
+      "negation_of_title": "Use UTF-8-safe tools for text-file operations"
+    },
+    {
+      "scope": "shared",
+      "title": "Use viewport retrieval before broad recall",
+      "lesson": "Keep the foreground context narrow during memory retrieval. Use the latest user turn with only the disambiguation that is necessary. Rank and log candidates. Apply a session penalty to repeated memories. Prefer a large candidate world with a sharp active viewport instead of allowing dense old clusters to control attention.",
+      "trigger_context": "When you tune memory retrieval, entity simulation, sensors, or another system that can over-recall dense offscreen context.",
+      "proof_pattern": "Candidate traces expose score, raw score, repetition count, penalty, and thread. Repeated irrelevant clusters lose rank during the session instead of returning on every turn.",
+      "shape": "retrieval",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "retrieval",
+        "viewport",
+        "memory",
+        "ranking",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use context-aware replacement in mixed identifier and display text",
+      "lesson": "A word-boundary regex can damage identifiers when one lowercase word is both visible text and a programmatic key in the same file. Restrict replacement to value positions. Examples include strings after JSON-like `label` or `value` keys, HTML text nodes between tag edges, and quoted display arguments in template calls. After the sweep, search identifier positions such as keys, `name`, mode, route, and `id` for unexpected non-ASCII text. Revert each overreach. Do not run a blind bulk replacement across files that mix identifiers and display text.",
+      "trigger_context": "During bulk i18n or diacritic edits in codebases where identifiers and visible text share vocabulary, including web applications with route code and templates.",
+      "proof_pattern": "First test the replacement on representative mixed files. Then search identifier-position patterns for changed text and review the diff. A clean result changes display values but preserves dictionary keys, HTML names, route modes, and IDs.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "regex",
+        "i18n",
+        "sweep",
+        "bilingual",
+        "identifiers",
+        "process",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not use loaded political labels as technical filters",
+      "lesson": "When comments, docstrings, logs, errors, or analytical prose distinguish documented analysis from overreach, do not use loaded labels such as `conspiracy theory` as the category boundary. Such labels can discredit by association instead of stating the evidence test. Distinguish categories empirically, such as public filing data versus an unfalsifiable hidden-control claim. Apply the same care to labels such as `extremist`, `fringe`, and `denialist` outside a narrow, defined technical context.",
+      "trigger_context": "When technical writing covers political, financial, or institutional topics and a loaded shorthand is proposed as a category label.",
+      "proof_pattern": "State the evidence source, claim type, and falsifiability criterion. Reviewers should be able to apply the filter without relying on a political label.",
+      "shape": "writing",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "voice",
+        "analytical-writing",
+        "epistemic-hygiene",
+        "clarity",
+        "documentation",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Preserve the requested label when named configuration is missing",
+      "lesson": "When code loads an identity, persona, contract, or named configuration and its file is missing, preserve the requested name as the mode or label. Do not silently substitute the default name. A default label can be persisted, included in later context, and change behavior long after the original miss. Return a structure such as `{mode: resolvedName, body: minimalPlaceholder, warning: surfacedMiss}`. The request, directory, or current context owns the identity; the loader must preserve it when content is missing. Any downstream writer should also derive the label from the requested name, not only from the loaded contract field.",
+      "trigger_context": "When a loader supports several named modes but uses a default contract or placeholder after a file-read failure.",
+      "proof_pattern": "Rename or delete the contract file for a supported non-default name. Confirm that the persisted state header keeps the requested name, emits a visible warning, and does not inject the default identity. Check every downstream write path.",
+      "shape": "fallback",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "identity-loading",
+        "fallback-pattern",
+        "silent-swap",
+        "mode-label-preservation",
+        "defensive-default",
+        "context-injection",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Semantic duplication is still drift",
+      "lesson": "Component-first design centralizes repeated semantic shells, not only repeated utility classes. Clean markup copied many times still drifts. Each new variant becomes a scattered behavior change, and each visual adjustment becomes a search task. Extract repeated semantic chrome. Keep domain-specific content at the call site.",
+      "trigger_context": "When two or more screens repeat the same UI or control-flow shell with different labels, fields, or rows, even when the duplicated markup is short and tidy.",
+      "proof_pattern": "Extract repeated cards, responsive collection shells, confirmation bodies, action controls, form stacks, or menu chrome into shared components. Use parameters and caller slots only for genuine variation points.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "structure",
+        "duplication",
+        "components",
+        "semantic-drift",
+        "component-first",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Guard at the boundary; do not catch in the body",
+      "lesson": "Check stable, testable preconditions at the entry point before you read, parse, or look up data. Examples include type, null, valid enum, and known availability checks. Keep the main body direct. Reserve `try` and `catch` for failures that a guard cannot remove, such as a network failure during a request or untrusted external data. Do not use a bare catch-and-continue in a loop. It hides failure and mixes verification with execution.",
+      "trigger_context": "When you add `try` and `catch` around file reads, parsing, lookups, or loops that swallow errors.",
+      "proof_pattern": "The function checks available preconditions at the top. Its main body has no defensive catch. A catch exists only at a real trust boundary, reports or handles the failure explicitly, and does not silently continue.",
+      "shape": "control-flow",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "control-flow",
+        "error-handling",
+        "guards",
+        "craft",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use flat passes instead of nested control flow",
+      "lesson": "Deeply nested loops, conditionals, and try/catch blocks often show that separate jobs were added without later decomposition. Replace the pyramid with named, flat passes. Give each pass one job, and separate verification from execution. For example, split collection, reading, qualification, building, and indexing into distinct stages. Treat a while loop as a prompt to look for a missing flat data shape before you accept it as the solution.",
+      "trigger_context": "Nested loops, while loops, deep indentation, conditional pyramids, or one function that does many jobs.",
+      "proof_pattern": "The composing function is a short sequence of named, single-job passes. No loop contains another loop.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "shape:structure",
+        "craft:chiseled",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Prefer plain loops to functional iteration chains",
+      "lesson": "In JavaScript, prefer a plain indexed for loop or a simple for...of loop to long map().filter().reduce() chains. The chain hides the iteration and can allocate temporary arrays. A plain loop states the operation directly. Do not use for...in to iterate array values. It iterates property keys as strings, can include inherited enumerable properties, and is much slower than indexed iteration or for...of. Keep the pipeline concept flat, but do not hide it in a fluent method chain when clarity is the goal.",
+      "trigger_context": "Iteration, array transformation, map/filter/reduce chains, or for...in in JavaScript or TypeScript.",
+      "proof_pattern": "Iteration uses a plain for or for...of loop with a direct body. No method chain hides the loop, and no for...in loop reads array values.",
+      "shape": "control-flow",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "shape:control-flow",
+        "craft:chiseled",
+        "clarity",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Keep one return shape on all non-error paths",
+      "lesson": "A function must return the same shape on every non-error path. If success returns {a, b, c}, a normal miss must return {a, b, c} with null values where necessary. Callers can then destructure the result without knowing which branch ran. Use a short or different return only for one explicit error or no-result gate, such as null or an explicit status. Data keeps the contract. Failure breaks it clearly and once.",
+      "trigger_context": "Function return shapes, optional fields, branch-specific result objects, or destructuring callers.",
+      "proof_pattern": "All non-error returns have one shape. The only divergent return is an explicit error or no-result gate.",
+      "shape": "clarity",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "shape:clarity",
+        "craft:chiseled",
+        "state-visibility",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Make architecture visible as data",
+      "lesson": "Make system behavior readable from a table instead of requiring branch tracing. Represent variants as data, such as a list of source descriptors or a map of strategies. Each row can declare fields such as phase, scan root, pattern kind, and URL strategy. Code then walks the table. Add a case by adding a row, not by adding another conditional branch. Put connections in signatures and visible data, not deep inside function bodies.",
+      "trigger_context": "Dispatch logic, type or case branches, configuration, new variants, or control flow that can be a table.",
+      "proof_pattern": "The behavior set is readable as a data table. Adding a case adds a row and does not add a branch.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "shape:structure",
+        "craft:chiseled",
+        "state-visibility",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Keep shared truth in one enforced source",
+      "lesson": "Define each shared constant, path, or policy in one place. If several files repeat a value and use a keep-in-sync comment, the structure does not enforce the invariant. Move the value to one module and import it where needed. Make the connection visible through imports, not through comments and manual coordination.",
+      "trigger_context": "Duplicated constants, paths, or configuration in multiple files, especially with keep-in-sync comments.",
+      "proof_pattern": "All users import the shared value from one source module. No keep-in-sync comment is necessary because no duplicate definition exists.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "shape:structure",
+        "craft:chiseled",
+        "refusal",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use Windows Task Scheduler as a process-detachment boundary when necessary",
+      "lesson": "When an agent shell keeps a spawned development server in its execution tree, Windows Task Scheduler can provide a pragmatic detachment boundary. Write a small launcher script, register and run a one-shot task, and return immediately. Use a fixed port and logs for status and stop operations. Stop the process that owns the port. This is a narrow Windows workaround, not a general best practice. Prefer a clean process runner when one is available. Enforce a strict port and cleanup so fallback ports do not create orphan servers.",
+      "trigger_context": "Use this only when an agent must start a long-running local development server for bounded verification and normal background methods such as spawn, Start-Process, or nohup still block execution or leave attached child processes.",
+      "proof_pattern": "The start command returns quickly without manual interruption. Status reports a healthy server. Stop terminates the fixed-port owner, and the port is free afterward. Reject a success result if manual interruption was required.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "process",
+        "windows",
+        "opencode",
+        "dev-server",
+        "lifecycle",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use tests as load-bearing safety nets",
+      "lesson": "A test must protect an important contract, seam, or known regression. Do not add a test only to increase a coverage number. Coverage is a result of testing important behavior, not the goal. Low coverage from strong tests is more useful than full coverage from tests that cannot detect meaningful drift.",
+      "trigger_context": "Adding a test or reviewing an existing test suite for quality.",
+      "proof_pattern": "Each test protects a load-bearing contract, seam, or regression. No test exists only to raise coverage. Avoid duplicate test files for the same module. Do not treat catalog-completeness assertions as behavior tests.",
+      "shape": "verification",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "testing",
+        "verification",
+        "refusal",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Optimize for current load and refuse unverifiable changes",
+      "lesson": "Do not add an optimization that you cannot verify for a scale that does not yet exist. It adds risk without evidence. Implement the safe, verifiable improvement now. Defer the larger optimization until actual load requires it and available data can prove its correctness and value.",
+      "trigger_context": "During a refactor, when a verified fix could expand into a larger optimization whose benefit and correctness appear only at future scale.",
+      "proof_pattern": "Tests, diffs, measurements, or screenshots verify the shipped change against current conditions. A deferred optimization has a note that states the load condition that will make it useful and verifiable.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "cost-visibility",
+        "verification",
+        "refusal",
+        "process",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use the least complex solution that meets the need",
+      "lesson": "Before you write code, check these options in order and stop at the first sufficient one: remove the speculative requirement; use the standard library; use a native platform feature such as CSS or a database constraint; use an already-installed dependency; or write a small amount of plain code. Do not add a dependency for work that a few lines can do. Do not create an interface with one implementation, a factory with one product, or scaffolding for a possible future need. Prefer deletion to addition. Apply this check quickly; do not turn it into a research task.",
+      "trigger_context": null,
+      "proof_pattern": "For a simple cache, use a standard-library feature such as @lru_cache on the fetch function instead of a custom TTL cache class. Ship the simpler solution and state when the requirement is speculative.",
+      "shape": "refusal",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Count minimalism in concepts, not characters",
+      "lesson": "A simple solution must still be easy to read. Minimal means the fewest abstractions, dependencies, indirections, and other concepts that a maintainer must understand. It does not mean the fewest lines or characters. Do not remove clear statements, useful spacing, or precise names to shorten a diff. A dense one-line expression can create more maintenance cost than a clear multi-line conditional. Target the smallest concept set, not the shortest text.",
+      "trigger_context": null,
+      "proof_pattern": "A clear seven-line if/elif block is better than a one-line nested ternary with a generator. YAGNI removes the speculative class; it does not remove the readable structure around a return.",
+      "shape": "clarity",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "house-library"
+      ],
+      "negation_of_title": "Use the least complex solution that meets the need"
+    },
+    {
+      "scope": "shared",
+      "title": "State a shortcut's limit and upgrade path",
+      "lesson": "When you choose a shortcut with a known limit, mark it with a greppable \"# enough:\" comment. State both the limit and the upgrade path. Examples include a global lock, an O(n²) scan, a naive heuristic, or an in-memory store. The comment records why the simplification is acceptable and tells the next maintainer how to replace it when conditions change.",
+      "trigger_context": null,
+      "proof_pattern": "Use comments such as \"# enough: global lock; use per-account locks if throughput matters\" or \"# enough: in-memory dict; use Redis for multi-process deployment.\" Search for \"enough:\" to find all deliberate limits.",
+      "shape": "comments",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Define a cross-cutting query filter once",
+      "lesson": "Do not copy a cross-cutting WHERE clause, visibility rule, or predicate into multiple query sites. Each copy increases the defect surface. Define the policy once as a named constant or shared query component, and apply it everywhere. When the data model gains a new case, one shared definition makes the policy scope visible and gives one place to update and review it.",
+      "trigger_context": "The same filter, predicate, or policy clause appears in more than one SQL query or query-builder branch.",
+      "proof_pattern": "A retrieval module had the same source-path exclusion in five query passes. A special record type stored under the excluded path became invisible in all five passes. One shared visibility SQL definition added the required type exemption and was applied to every pass.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Run Godot import after external class_name changes",
+      "lesson": "If you add or rename a GDScript class_name outside the Godot editor, .godot/global_script_class_cache.cfg can remain stale. Scripts that refer to the new global type then fail with \"Parse Error: Could not find type 'X'\" although the declaring script parses correctly. This declarer-passes/dependents-fail split indicates stale class-cache state rather than an error in the type declaration. Rebuild the cache before you trust validation. Run \"godot --headless --path <project> --import\", or let the editor rescan. A --check-only result from a stale cache can be a false parse failure.",
+      "trigger_context": "Adding or renaming a GDScript class_name through an external editor or tool, especially while the Godot editor is open.",
+      "proof_pattern": "After a global type was renamed, its declaring script parsed, but all dependent scripts reported \"Could not find type\". One --import operation rebuilt the registry, after which the declaring script and all dependents passed.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "godot",
+        "gdscript",
+        "class-cache",
+        "tooling",
+        "validation",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use the correct Godot check for scripts and scenes",
+      "lesson": "The command \"godot --headless --path <project> --quit\" loads only the main scene. It does not validate scripts outside that scene's dependency graph. Validate a specific script with \"--check-only --script res://path.gd\". Validate scene runtime behavior, including resource bindings and null references, with \"--quit-after N res://scene.tscn\", and inspect stderr for \"SCRIPT ERROR\". Distrust an immediate exit code 0, such as a run that ends in about 0.2 seconds. Confirm that the intended binary resolved and that real work ran. A wrong path, wrong filename case, or no-op invocation can produce a phantom success.",
+      "trigger_context": "Validating Godot changes through a CLI, headless process, or one-shot CI check.",
+      "proof_pattern": "A fallback echo converted a command-not-found result into a misleading no-error message. A project-level --quit run loaded only the main scene and did not touch the edited scripts. Valid checks used --check-only --script for each target file and --quit-after with the target scene for runtime validation.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "godot",
+        "validation",
+        "headless",
+        "tooling",
+        "phantom-green",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Rename exported Godot properties in scripts and scenes together",
+      "lesson": "Godot stores an exported property in a .tscn file by the @export variable name. If you rename \"@export var old_name\" to \"new_name\" only in the script, every scene assignment such as \"old_name = SubResource(...)\" becomes an orphan property. Godot can silently discard it during load. The node then receives the export default or null, and no error identifies the lost authored value. Rename the property in every .tscn file and every instanced scene in the same change as the script rename.",
+      "trigger_context": "Renaming an @export variable that one or more Godot scenes assign.",
+      "proof_pattern": "A resource property rename also required each scene assignment to change from the old name to the new name. Without the scene edits, configured nondefault values would have disappeared at startup without an error.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "godot",
+        "tscn",
+        "export",
+        "refactor",
+        "silent-failure",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Measure simulation work in milliseconds",
+      "lesson": "For numerical, simulation, animation, or sensor-fusion code, measure the core calculation and rendered frame path in milliseconds. Measure before and after each optimization. Fast hardware can hide inefficient work. For animation, measure full redraws separately from the intended blit or update path. A fast math benchmark does not prove that the interface is smooth.",
+      "trigger_context": "Use this rule when you optimize numerical code, simulations, animations, visualizations, or sensor-fusion pipelines.",
+      "proof_pattern": "Record milliseconds per call and milliseconds per frame. One benchmark measured a 1,000-step path calculation at 2.48 ms. It measured a 200,000-sample estimator at 8.23 ms. Render tests measured 53.255 ms for a legacy 3D redraw and 35.847 ms for a 2D redraw. The intended 2D blit path measured 0.227 ms per frame.",
+      "shape": "performance",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "performance",
+        "simulation",
+        "measurement",
+        "rendering",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Prove the visible result before you optimize it",
+      "lesson": "Before more optimization, verify that the artifact answers its visible question. Users must be able to read movement, scale, comparison, stop conditions, and decision signals. Add the required result layer before optional exploration controls. Then measure and optimize the path that produces that layer.",
+      "trigger_context": "Use this rule for simulations, visualizations, graphs, sensor displays, and other human-readable technical artifacts.",
+      "proof_pattern": "Run the artifact in its intended mode. Confirm that it stops when required and shows readable movement trails, current vectors, and comparison values. Inspect a rendered preview. Then benchmark the same update path that the visible artifact uses.",
+      "shape": "verification",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "verification",
+        "performance",
+        "simulation",
+        "visualization",
+        "readability",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Keep scratch files out of tracked and synchronized trees",
+      "lesson": "Do not write temporary scripts, inventories, or dumps into tracked, synchronized, or deliverable directories. Prefer in-memory evaluation. If a cross-shell operation needs a file, use one ignored `.scratch/` directory or the operating system temporary directory. Put deliverable snapshots in their canonical destinations. Assume that `git add -A` can publish every temporary file.",
+      "trigger_context": "Use this rule when a task creates temporary scripts, inventories, intermediate data, snapshots, or cross-shell files.",
+      "proof_pattern": "Create no file when an evaluation process can keep the data in memory. If a file is necessary, confirm that its directory is ignored. Inspect the staged file list before each commit. A removed temporary script once remained in a synchronized tree and reached remote repositories after `git add -A`.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "git",
+        "scratch-files",
+        "repository-hygiene",
+        "synchronization",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Verify cleanup and inspect the staged set",
+      "lesson": "For each temporary artifact, remove it and confirm that it is absent. Check the result with `test -f` or an equivalent command. Do not use fire-and-forget removal across Windows and WSL boundaries. Before each commit, read the complete staged file set. Check for scratch files, logs, generated data, and secrets. Do not trust `git add -A` across a large tree. Ask whether each remaining file is necessary and in the correct directory.",
+      "trigger_context": "Use this rule after temporary-file work and before each Git commit.",
+      "proof_pattern": "Verify each deletion before staging. Inspect all staged paths, not only paths that match secret or media scans. In one failure, an unverified removal left a script behind. A narrow pre-commit scan also missed multiple log files, and broad staging sent them to remote repositories.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "git",
+        "cleanup",
+        "staging",
+        "verification",
+        "windows",
+        "wsl",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Keep outcome reports short by default",
+      "lesson": "After a task, report the result in the smallest useful form. State what changed, the proof, and the next action. Put extended evidence behind an explicit offer of details. Do not put a long report inline unless the reader requests it. Brevity is part of the deliverable when many reports appear in sequence.",
+      "trigger_context": "Use this rule for final answers, implementation summaries, verification reports, and handoffs.",
+      "proof_pattern": "Use three short lines or bullets: changed, proof, and next. Offer more details only when more evidence is available.",
+      "shape": "clarity",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "reporting",
+        "outcomes",
+        "accessibility",
+        "brevity",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Compare SVG extraction candidates at the intended size",
+      "lesson": "When you extract ornamental SVG masks from raster references, preserve the visual intent before you reduce line width. Locate suitable source vectors first. Crop the raster tightly and confirm the foreground polarity. Generate multiple threshold and scale candidates. Compare all candidates at the intended interface size. Upscale the raster by three or four times before contour tracing. Do not erode native one-pixel hairlines unless visual comparison proves that they remain intact. For CSS masks, fill extracted shapes with opaque white. Set the displayed color on the host element. Do not ship rejected candidates in public asset directories.",
+      "trigger_context": "Use this rule for raster ornament extraction, CSS mask SVGs, inline SVG ornaments, image tracing, and threshold selection.",
+      "proof_pattern": "Compare candidates side by side at the final display size. In one extraction, a four-times upscale with threshold 160 preserved the ornament. Native-resolution erosion damaged the hairlines. Keep rejected variants outside public directories.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "svg",
+        "css-mask",
+        "image-extraction",
+        "visual-verification",
+        "ui",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Give parallel workers independent targets and verify their results",
+      "lesson": "Send decomposable work as one concurrent batch. Let workers share a tree only for read-only work or provably disjoint file edits. Use a dedicated Git worktree when workers can edit the same files or change shared repository state. Also use isolation for branch-sensitive commands, generators, migrations, and risky experiments. Give each worker a self-contained Target, Change, and Acceptance contract. State exact ownership and non-goals. Review each patch against its contract. Verify the integrated destination tree yourself. Worktrees prevent file collisions. They do not resolve competing intent or prove that the merged result works.",
+      "trigger_context": "Use this rule for parallel agents, delegated multi-file work, concurrent repository changes, migrations, generators, and experimental changes.",
+      "proof_pattern": "Classify each task as read-only, disjoint-write, or overlapping and stateful. Use the shared tree only for the first two safe classes. Use isolated worktrees for overlapping or stateful writers. Review patches before application or merge. Run final verification in the integrated destination tree.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "subagents",
+        "parallelism",
+        "delegation",
+        "verification",
+        "contracts",
+        "git",
+        "worktrees",
+        "isolation",
+        "merge",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Connect a drift gauge to each derived-data read path",
+      "lesson": "A table, index, or cache derived from source rows can become stale without visible errors. Add a staleness gauge to the read path. Compare the derived build time with source rows created after that time. Measure the count and fraction of unseen source rows. Show this value where consumers already inspect results. Send a notice only after a defined threshold. Do not use a periodic reminder as the primary signal. A timer can run when nothing changed and remain quiet during a burst.",
+      "trigger_context": "Use this rule for materialized views, search indexes, caches, embedding passes, document projections, and other derived tables.",
+      "proof_pattern": "A check command emits values such as `{built_at, rows_since_build, fraction_unseen}`. The consumer shows the values and sends a notice when the unseen fraction reaches a configured threshold. In one case, a 15 percent threshold exposed an index that remained on a retired embedding space.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "derived-data",
+        "databases",
+        "indexes",
+        "caches",
+        "staleness",
+        "telemetry",
+        "drift",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Sanitize composition errors and reject syntax errors",
+      "lesson": "Classify parser errors before you select a response. Sanitize composition errors, such as duplicate tokens, prohibited pairs, or options that do not apply. Remove the offending option, issue a warning, and render the valid remainder. Reject the complete construct for value syntax errors, such as unknown words, extra segments, or malformed literals. Leave the raw marker visible so the author can find the error. Do not silently remove invalid CSS values. An invalid computed value can remove an entire property stack.",
+      "trigger_context": "Use this rule when you extend a parser or marker grammar with a new value type. Apply it when you choose between recovery and complete rejection.",
+      "proof_pattern": "Search existing tests for literal pass-through or plain-text assertions before you make a parser more permissive. For example, `{{fx:glow:banana}}` must remain visible when `banana` is invalid. Test both recoverable composition errors and fatal syntax errors. Confirm that invalid colors cannot silently disable the complete `text-shadow` stack.",
+      "shape": "refusal",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "parser",
+        "sanitization",
+        "error-handling",
+        "css",
+        "regression-tests",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Kill only processes that you explicitly own",
+      "lesson": "WARNING: Do not infer process ownership from an executable name. A process list can include the active harness and unrelated processes. Capture the child process identifier or handle when you start a bounded child. Let the owning command enforce the timeout. Terminate only that exact child. Assign each long-lived daemon to an operating-system process or service. A worker can run a bounded restart or verification loop. The worker must not act as the permanent supervisor.",
+      "trigger_context": "Use this rule for process cleanup, timed-out subprocesses, daemon restarts, `taskkill`, `pkill`, and delegated watch loops.",
+      "proof_pattern": "A diagnostic process list showed two processes with the same executable name. A broad kill command terminated the active harness with the timed-out child. The corrected check used the exact child lifecycle and a bounded timeout. The operating system continued to own the long-lived daemon.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "process-ownership",
+        "subprocesses",
+        "daemons",
+        "windows",
+        "taskkill",
+        "pkill",
+        "verification",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Explore existing behavior before rebuilding it",
+      "lesson": "Inspect the working implementation and its tests before you extend, extract, port, or replace a subsystem. Make a behavior inventory. Classify each behavior as required, intentionally excluded, or superseded. Design the new boundary only after this classification. An empty new file does not permit reinvention of solved behavior. If the implementation is broad or unknown, assign an exploration task before coding.",
+      "trigger_context": "Use this rule before ports, adapters, extractions, rewrites, replacement runtimes, sidecars, and similar subsystem work.",
+      "proof_pattern": "Compare the source implementation and its tests with the proposed target. Preserve required transport behavior, such as intents, typing receipts, chunking, replies, and readiness diagnostics. Explicitly exclude unrelated daemon behavior, persistence, quotas, queues, and autonomy when these features are outside the target contract.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "exploration",
+        "ports",
+        "adapters",
+        "behavior-inventory",
+        "regression-prevention",
+        "process",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use WebGL first when the composition is an alpha field",
+      "lesson": "Prototype the composition in WebGL when its identity depends on changing per-pixel alpha. Examples include animated noise erosion, irregular stained edges, domain-warped masks, and responsive aperture geometry. Do not spend the main design cycle imitating a fragment shader with stacked CSS gradients and pseudo-elements. Let the shader own the pixel field. Use CSS for layout, typography, fallback images, and normal responsive framing. Use CSS first for ordinary gradients, clips, static fades, and simple decorative masks. Visual complexity alone is not the trigger.",
+      "trigger_context": "Use this rule for portals, apertures, fog effects, stained dissolves, animated masks, and other effects based on changing alpha fields.",
+      "proof_pattern": "Compare the CSS prototype with a WebGL 2 fragment-shader prototype. Confirm exact zero-alpha borders, coherent erosion, responsive geometry, and correct alpha compositing. Keep CSS responsible for text, layout, fallback images, and viewport framing.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "webgl",
+        "shaders",
+        "css",
+        "compositing",
+        "alpha",
+        "visual-effects",
+        "architecture",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Trace technical debt where local rules inherit global semantics",
+      "lesson": "Locally correct behaviors can compose into a fault when they come from different architectural layers. Reproduce the exact user path before you rewrite code. Trace state changes at each subsystem boundary. Identify the owner of history, URL identity, persistence, focus, scroll, animation, loading state, and content hydration. Internal operations must opt out of global behavior when they are not user-visible transitions. Fix the boundary with leaked ownership. Do not suppress the symptom or replace an otherwise working subsystem.",
+      "trigger_context": "Use this rule for mature codebases, intermittent state bugs, multi-page failures, inherited framework attributes, and cross-generation technical debt.",
+      "proof_pattern": "An HTMX page shell inherited history-push behavior into an internal hydration request. The request added an implementation state to browser history. Back navigation retriggered hydration and added another entry. An explicit no-push setting on the internal request restored history ownership without replacing the routing system.",
+      "shape": "state-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "technical-debt",
+        "state-ownership",
+        "htmx",
+        "history",
+        "inheritance",
+        "debugging",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Do not hard-code the current example to green",
+      "lesson": "Stop when a failing case tempts you to add its exact names, phrases, identifiers, paths, or wording to production logic. Such a fix overfits the current demonstration and creates more special cases. Preserve the behavioral shape instead. Depend on durable signals, such as structured keys, schema fields, protocol state, explicit intent, or measurable evidence. Use synthetic regression fixtures unless an exact literal is part of the public contract. Check that the fix works for another user, project, wording, and accumulated state.",
+      "trigger_context": "Use this rule before you add a regex, exception, fixture, route, stopword, or branch for one recent failure.",
+      "proof_pattern": "Confirm that production code contains no example-specific private literals. Use synthetic fixtures in tests. Pass at least one equivalent input with different wording through the same structured mechanism.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "hard-coding",
+        "overfitting",
+        "regression-tests",
+        "future-proofing",
+        "routing",
+        "process",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Write documentation in simplified technical English",
+      "lesson": "Apply ASD-STE100 Simplified Technical English when you write or edit documentation. Apply the rule during drafting, not during final cleanup. Use one instruction in each sentence. Limit procedural sentences to 20 words. Limit descriptive sentences to 25 words. Limit paragraphs to six sentences. Use active voice and present tense. Use the imperative form for procedures. Use one approved term for each concept. Use common verbs, such as do, make, remove, start, stop, set, show, and use. Do not make noun clusters longer than three words. Include necessary articles. Put each warning or caution first and on a separate line. Do not use verb forms ending in `-ing` as commands. Do not use vague pronouns, slang, or Latin abbreviations.",
+      "trigger_context": "Apply this rule before you draft or edit READMEs, procedure documents, deployment guides, reference documents, and parity reports.",
+      "proof_pattern": "Check each sentence for one instruction, active voice, an approved verb, and the applicable word limit. Check each paragraph for the six-sentence limit. Check commands for the imperative form. Check for noun clusters with four or more words. The document is not complete until it passes these checks.",
+      "shape": "clarity",
+      "voice": "house",
+      "always_on": true,
+      "tags": [
+        "documentation",
+        "asd-ste100",
+        "simplified-technical-english",
+        "writing",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Registration does not prove execution branches",
+      "lesson": "Successful registration proves only that the schema and outer tool object can be constructed. It does not prove that each execution branch has its dependencies in scope. For a multi-mode tool, run at least one bounded case through each destination branch. Include validation-only cases that stop before external writes. These cases detect missing imports and undefined registries that registration tests cannot detect. Generate source and distribution copies from one path, or verify both copies explicitly. A correct bundle must not hide broken live source.",
+      "trigger_context": "Adding a tool mode, routing registry, destination store, lazy branch, generated distribution, or registration-only test.",
+      "proof_pattern": "Register the tool. Then run one validation-only input for each mode. For a mode that requires a project or destination field, omit that field. The call must reach the shared argument builder and return the required-field refusal. This proves that the mode registry and argument builder are in scope without writing data. Run the same proof against source and distribution copies when both exist.",
+      "shape": "verification",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "tools",
+        "branch-coverage",
+        "imports",
+        "regression-tests",
+        "source-dist-drift",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Build CSS geometry from layout, then spacing tokens",
+      "lesson": "Build CSS geometry in a deliberate order. First, use Grid for two-dimensional alignment or Flex for one-dimensional distribution. Let tracks, intrinsic sizing, alignment, and gap define the relationship. Do not use `display: block` with custom offsets as an alignment system. Put repeated corner elements in equivalent named grid cells under one positioning contract. Second, select bounded spacing from the existing variables or scale. Do not invent isolated dimensions. Third, write normalized values in `rem` so intent remains clear and scales with root typography. Prefer whole, half, quarter, or established scale increments. Use computed-looking fractions only for a documented optical, typographic, device-pixel, or measured constraint. Browser-computed pixel decimals are verification evidence. Do not copy them into CSS. Use absolute positioning only for real overlays or computed projections. Verify shared centers, equal edge distances, containment, and symmetry from browser geometry. Use screenshots to assess composition and visual weight, not as the primary alignment ruler.",
+      "trigger_context": "Creating or refining CSS layout, spacing, repeated corners, frames, dimensions, gaps, padding, margins, shadows, overlays, or pixel-sensitive alignment.",
+      "proof_pattern": "Name the Grid or Flex relationship. Identify the spacing token or normalized `rem` step used for dimensions and gaps. Prove alignment from computed rectangles. Equivalent corner elements must share one grid contract. Do not use custom offsets or copied computed decimals without a documented exception. Only real overlays or computed projections can remain absolute.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "css",
+        "grid",
+        "flexbox",
+        "spacing-scale",
+        "design-tokens",
+        "rem",
+        "alignment",
+        "visual-verification",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Symmetry is useful until it hides the domain",
+      "lesson": "Code is not good only because it looks balanced. Symmetry is useful until it hides an asymmetric domain rule. When one branch contains a real special case or business rule, that branch is load-bearing. Do not replace it with tidy map dispatch or matching branches only for visual balance. Symmetric code can look complete and stop necessary review.",
+      "trigger_context": "Refactoring asymmetric branches, special cases, dispatch maps, or code whose visual balance can hide domain behavior.",
+      "proof_pattern": "Compare the explicit special-case branch with the proposed abstraction. Confirm that the business rule remains correct and directly findable. If one tidy branch performs domain work and another exists only to complete a visual pattern, the symmetry is false.",
+      "shape": "symmetry",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "aesthetic",
+        "symmetry",
+        "domain-modeling",
+        "clarity",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Comments explain intent, danger, or constraints",
+      "lesson": "Use comments for intent, danger, required procedure, constraints, surprises, or an incident that a future reader cannot reconstruct from code or history. Do not use comments to narrate visible code. Names and structure must explain what the code does. If the action is unclear, rewrite the code instead of adding a narration comment. Preserve the reason and each load-bearing assumption.",
+      "trigger_context": "Writing or reviewing comments, unclear names, legacy constraints, dangerous assumptions, or incident-shaped behavior.",
+      "proof_pattern": "Delete comments that restate the next line. Keep a comment such as: `Reverse order is required because the legacy importer expects newest-first.` If removal loses only narration, delete the comment. If removal loses a constraint that cannot be recovered from the code, keep it.",
+      "shape": "comments",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "aesthetic",
+        "comments",
+        "intent",
+        "clarity",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Expose cost and state; hide noise",
+      "lesson": "Make state and cost visible at the seam where a caller would otherwise have to guess. I/O, allocation, locking, blocking, side effects, cache mutation, and other important state changes must be visible in the call contract. Hide boilerplate, plumbing, and framework ceremony. An immutable-looking API that secretly mutates a cache forces every caller to inspect its implementation.",
+      "trigger_context": "Designing APIs around I/O, caches, locks, allocation, mutation, blocking calls, or framework plumbing.",
+      "proof_pattern": "A function named `load_config()` that silently performs network I/O or mutates a cache hides cost. A function named `fetch_config()` that hides import ceremony hides noise. Inspect signatures, names, and call sites. Callers must be able to identify expensive or stateful behavior without opening the implementation.",
+      "shape": "cost-visibility",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "aesthetic",
+        "cost-visibility",
+        "state-visibility",
+        "api-design",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Delete the clever line when the plain line reads better",
+      "lesson": "Cleverness costs each future reader. Plainness costs the writer once. If a first-time reader must reread an expression and gains no necessary insight, the compression failed. Prefer a plain structure that exposes each mental operation over a dense expression whose main benefit is brevity.",
+      "trigger_context": "Dense expressions, nested ternaries, stacked comprehensions, clever one-line statements, or code that requires rereading without adding insight.",
+      "proof_pattern": "Replace a nested ternary, or a comprehension that combines generation, filtering, tuple unpacking, and transformation, with a plain `if`/`elif`/`else` block or short loop. Confirm that each decision is visible and behavior is unchanged.",
+      "shape": "clarity",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "aesthetic",
+        "clarity",
+        "maintainability",
+        "refusal-of-cleverness",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Flatten control flow before it becomes a pyramid",
+      "lesson": "Keep nesting to about three levels. Prevent pyramids while writing the code. Guard clauses state what is true at each point and let the reader continue. Use early returns for guards, invert conditions to fail fast, extract inner work into named functions, and replace conditional pyramids with early-exit chains. Use indentation for real nesting, not for chained validation. Each level adds cognitive cost.",
+      "trigger_context": "Nested validation, deep dispatch loops, chained guards, `try` and `if` pyramids, or control flow approaching three indentation levels.",
+      "proof_pattern": "Convert three levels of nested validation into guard clauses. Convert a `try`/`for`/`try`/`if`/`if` dispatch pyramid into named handlers called by a flat coordinator. Verify that each extracted branch has one clear contract and that behavior is unchanged.",
+      "shape": "control-flow",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "aesthetic",
+        "control-flow",
+        "early-return",
+        "flattening",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Merge by intent before side",
+      "lesson": "In multi-contributor code, neither ours versus theirs nor newest versus oldest is the rule. A conflict-free merge proves textual compatibility only. It does not prove semantic safety. State each side's intent. Preserve compatible work. Keep older invariant-bearing behavior unless the current task explicitly replaces it. Supersede work only when one intent truly replaces the other, integrates it more safely, or the responsible maintainer approves the change. For hotspot files, compare changed regions with recent commits even when Git reports no conflict. Escalate large or behavior-shaping overlap before product or user-interface behavior is lost.",
+      "trigger_context": "Merge conflicts, conflict-free same-file overlap, contributor synchronization, hotspot files, branch promotion, or deployment checkpoint preparation.",
+      "proof_pattern": "Identify hotspot files and invariants that must survive. Compare contributor references and recent changes. Integrate compatible intentions. Pause before critical uploads or promotions. A clean merge is not proof until preserved behavior is checked.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "merge",
+        "multi-contributor",
+        "process",
+        "regression-guard",
+        "semantic-proof",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use negative space as punctuation",
+      "lesson": "Blank lines separate completed thoughts. Add a rest after a resolved guard, before a terminal return, between distinct concerns, after a loop before its conclusion, and between functions when one thought ends and another starts. Apply this rule at line and function scale. Do not add spacing by quota. Code without rests is difficult to scan. Blank lines every few lines create false boundaries. Let meaning determine spacing.",
+      "trigger_context": "Blank lines, vertical spacing, cramped functions, terminal returns, guards, loops, formatting, or code rhythm.",
+      "proof_pattern": "Read the function as paragraphs. Each blank line must identify a completed thought or transition. Add a rest where a guard, concern, loop-to-conclusion transition, terminal return, or function boundary needs one. Remove automatic spacing that has no semantic boundary.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "structure",
+        "clarity",
+        "spacing",
+        "prosody",
+        "readability",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Resolve reusable article media from canonical references",
+      "lesson": "For reusable article media, store a stable media reference. At render time, resolve the current poster, title, caption, credit, and other display metadata from the canonical library record. Do not freeze this metadata in article HTML as a second source of truth. Through sanitization, explicitly allow only the stable reference and required behavior attributes, such as `data-video-*` identifiers or fullscreen flags. The editor preview and public renderer must resolve the same canonical record.",
+      "trigger_context": "Reusable gallery or video blocks, WYSIWYG sanitization, article payloads, CMS media libraries, editor previews, or React and Astro rendering.",
+      "proof_pattern": "Inspect stored HTML. It must contain the stable reference and behavior attributes, but no frozen canonical display metadata. Verify that sanitization preserves the allowed attributes. Verify that resolver output controls the poster, caption, credit, and fullscreen behavior. React and Astro renderers must use the same current library record.",
+      "shape": "structure",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "cms",
+        "media",
+        "article-editor",
+        "public-rendering",
+        "reusable-media",
+        "sanitization",
+        "canonical-reference",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Checkpoint broad investigations, then rewind to findings",
+      "lesson": "Before a broad investigation that will create substantial scratch context, create a top-level checkpoint with a precise goal. Explore, then rewind immediately with a concise factual report. Include findings, decisions, unresolved risks, and exact next actions. A checkpoint is not a save command for ordinary edits. It is a context-cost boundary for exploration. It is incomplete until the rewind report replaces the scratch trail.",
+      "trigger_context": "Before broad repository archaeology, unfamiliar subsystem mapping, dependency investigation, or exploratory work that requires many reads and searches but whose raw trail will not matter after the conclusion.",
+      "proof_pattern": "Start with `checkpoint(goal)`. Perform exploratory reads and searches inside it. Run `rewind(report)` before yielding. After rewind, active context must contain the compact report instead of raw exploration logs.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "context-tools",
+        "checkpoint",
+        "rewind",
+        "context",
+        "exploration",
+        "process",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Search limits bound absence claims",
+      "lesson": "Interpret each search result according to its reported coverage. A timeout, result cap, skipped path, oversized-resource note, partial byte scan, or virtual-resource fallback means that the search did not prove absence. Narrow the scope, page the results, search the source path directly, or change strategy before you conclude that a symbol, file, or pattern is absent. Never convert partial execution into a definitive negative claim.",
+      "trigger_context": "When grep, glob, read, archive search, internal-resource search, or a repository-wide lookup returns no matches, reaches a limit, times out, or reports partial coverage.",
+      "proof_pattern": "Support an absence claim with a search that reports complete coverage, or label the claim as partial. A timeout, cap, skipped path, or oversized-resource notice requires a narrower follow-up search rather than a negative conclusion.",
+      "shape": "verification",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "search-tools",
+        "grep",
+        "glob",
+        "search",
+        "coverage",
+        "verification",
+        "absence",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Use selectors to recover only hidden evidence",
+      "lesson": "Structural reads, converted documents, archives, databases, internal URLs, and large artifacts are designed for paging. When a read operation summarizes code or reports elided ranges, use the exact recovery selector that it emits. Do not reread the full file or guess hidden bodies. Use `:raw` only when verbatim bytes or source text are required. Page `artifact://` and `history://` resources by range. Percent-encode literal colon, question-mark, or hash characters in path-like internal URLs. Narrow recovery preserves evidence and limits context growth.",
+      "trigger_context": "When a read operation returns a structural summary, elision footer, oversized-artifact notice, converted document, archive member, database view, internal URL, or path that contains selector punctuation.",
+      "proof_pattern": "Follow a summarized or oversized read with the exact named range or raw selector. Add only the required hidden section to context. Do not base an edit or claim on elided content. Correct malformed selector-like paths instead of silently widening the read.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "read-tools",
+        "selectors",
+        "artifacts",
+        "internal-urls",
+        "context",
+        "evidence",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Choose context actions by the source of weight",
+      "lesson": "Do not wait until context pressure causes failure. Do not apply one cleanup action blindly. Select the action from the context composition. Compact reasoning or history when conversation is heavy. Shake or elide bulky tool results and images when evidence dominates. Start fresh only to reset provider state while preserving the transcript. Hand off when remaining context is too large or the work needs a clean continuation. For long autonomous objectives, use goal mode. Treat budget exhaustion as a pause or continuation state, never as proof of completion.",
+      "trigger_context": "When context usage grows, tool or image output dominates, provider state is inconsistent, a long task needs continuation, or an autonomous objective approaches its token or time budget.",
+      "proof_pattern": "State the dominant source of context weight before selecting an action. Verify the result through changed context composition or a clean continuation. Report goal completion only with explicit evidence. If the budget ends, preserve the objective and current status.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "context-tools",
+        "context",
+        "compact",
+        "shake",
+        "handoff",
+        "fresh",
+        "goals",
+        "budgets",
+        "house-library"
+      ]
+    },
+    {
+      "scope": "shared",
+      "title": "Prefer the workstation's proven topology",
+      "lesson": "When you adapt a project to a workstation, start from the last proven service split and use the path of least resistance. Do not turn a startup repair into a topology migration only because another arrangement looks cleaner. If the known-good Windows and WSL topology runs databases and infrastructure in WSL while code, Node.js runtimes, editors, and dependency trees remain on Windows, restore that split unless evidence requires a move. First reproduce the known-good launch. Preserve OS-native dependencies. Make only the smallest changes needed for ports, readiness, and lifecycle. Harden each cross-OS seam at its boundary. Do not use the seam as a reason to relocate the full application. Recover and verify the last working path before you install runtimes or rebuild dependencies in another operating system.",
+      "trigger_context": "Starting or adapting an existing project on a Windows and WSL workstation, especially when the service worked recently and native dependencies differ between operating systems.",
+      "proof_pattern": "Identify the last proven topology. Classify each service by its current host operating system. Restore that topology without migration. Verify the user-visible path. Then make one bounded environment change at a time.",
+      "shape": "process",
+      "voice": "house",
+      "always_on": false,
+      "tags": [
+        "workstation",
+        "wsl",
+        "windows",
+        "runtime",
+        "path-of-least-resistance",
+        "environment-fit",
+        "house-library"
+      ]
+    }
+  ]
+}

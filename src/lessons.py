@@ -39,6 +39,7 @@ def _row(value) -> dict:
         "negationOf": value["negation_of"],
         "languageKeys": list(value.get("language_keys") or []),
         "technologyKeys": list(value.get("technology_keys") or []),
+        "threadKeys": list(value.get("thread_keys") or []),
         "tags": list(value["tags"] or []),
         "alwaysOn": bool(value["always_on"]),
     }
@@ -96,7 +97,8 @@ def fetch_lessons(conn, *, lesson_type: str, room: str, shape: str | None,
             f"""
             SELECT id,lesson_key,kind_path,scope,project,voice,register,shape,stage,
                    title,lesson,trigger_context,proof_pattern,example_text,example_cmd,
-                   writers,tools,negation_of,language_keys,technology_keys,tags,always_on
+                   writers,tools,negation_of,language_keys,technology_keys,tags,thread_keys,
+                   always_on
             FROM lessons
             WHERE {where}
             ORDER BY
@@ -118,6 +120,55 @@ def fetch_lessons(conn, *, lesson_type: str, room: str, shape: str | None,
             (*values, rank_query, rank_query, limit),
         )
         rows = [_row(row) for row in cur.fetchall()]
+        expansion_keys = sorted({
+            thread_key
+            for row in rows
+            for thread_key in row["threadKeys"]
+            if isinstance(thread_key, str) and thread_key.strip()
+        })
+        if expansion_keys and len(rows) < 50:
+            expansion_clauses = [
+                "lesson_key = %s",
+                "thread_keys && %s",
+                "NOT (id = ANY(%s))",
+            ]
+            expansion_values: list[object] = [
+                lesson_type,
+                expansion_keys,
+                [row["id"] for row in rows],
+            ]
+            if lesson_type == "coding":
+                expansion_clauses.append("scope = ANY(%s)")
+                expansion_values.append(scopes)
+            if project:
+                expansion_clauses.append("project = %s")
+                expansion_values.append(project)
+            expansion_clauses.append(
+                "(cardinality(language_keys) = 0 OR language_keys && %s)"
+                if language_keys else "cardinality(language_keys) = 0"
+            )
+            if language_keys:
+                expansion_values.append(language_keys)
+            expansion_clauses.append(
+                "(cardinality(technology_keys) = 0 OR technology_keys && %s)"
+                if technology_keys else "cardinality(technology_keys) = 0"
+            )
+            if technology_keys:
+                expansion_values.append(technology_keys)
+            cur.execute(
+                f"""
+                SELECT id,lesson_key,kind_path,scope,project,voice,register,shape,stage,
+                       title,lesson,trigger_context,proof_pattern,example_text,example_cmd,
+                       writers,tools,negation_of,language_keys,technology_keys,tags,thread_keys,
+                       always_on
+                FROM lessons
+                WHERE {' AND '.join(expansion_clauses)}
+                ORDER BY always_on DESC, updated_at DESC, id
+                LIMIT %s
+                """,
+                (*expansion_values, 50 - len(rows)),
+            )
+            rows.extend(_row(row) for row in cur.fetchall())
 
         taxonomy_clauses = ["lesson_key = %s"]
         taxonomy_values: list[object] = [lesson_type]
@@ -195,7 +246,7 @@ def main() -> int:
             raise RuntimeError("psycopg2 is required for lesson retrieval")
         if not 1 <= args.limit <= 50:
             raise ValueError("--limit must be between 1 and 50")
-        env = substrate_env(args.room_dir)
+        env = substrate_env()
         conn = psycopg2.connect(
             host=env.get("PGHOST"),
             port=env.get("PGPORT"),

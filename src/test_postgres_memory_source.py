@@ -141,6 +141,9 @@ class PostgresMemorySourceIsolationTests(unittest.TestCase):
         hot_sql, hot_args = conn.cursor_obj.calls[1]
         self.assertIn("m.room = ANY(%s)", profile_sql)
         self.assertIn("m.room = ANY(%s)", hot_sql)
+        self.assertIn("COALESCE(m.type, '') <> 'paper-boat'", profile_sql)
+        self.assertIn("COALESCE(m.type, '') <> 'paper-boat'", hot_sql)
+        self.assertIn("mc.label NOT ILIKE 'paper boat%%'", profile_sql)
         self.assertEqual(profile_args[1], ["active-room", "house"])
         self.assertEqual(hot_args[2], ["active-room", "house"])
 

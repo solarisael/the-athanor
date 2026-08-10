@@ -221,7 +221,7 @@ Destructive lesson deletion requires the exact numeric ID and current title. Bro
 
 Room and memory deletion require explicit operator intent and a clear statement of the affected scope. Preserve the room by default when removing an adapter or bundle.
 
-Back up AKASHA before migrations, bulk imports, retention changes, or destructive maintenance. The substrate repository owns canonical backup and restore procedures.
+Back up AKASHA before migrations, bulk imports, retention changes, or destructive maintenance. The substrate component owns the canonical backup and restore procedures.
 
 ## Public evidence and demonstrations
 
@@ -242,6 +242,6 @@ Public demonstrations use a sterile demo House with synthetic rooms, projects, d
 
 ## Vulnerability reports
 
-Report security defects privately to the repository owner before publishing exploit details or private-data exposure. Include the affected repository and API version, a minimal synthetic reproduction, expected boundary, observed result, and whether private data was exposed.
+Report security defects privately to the repository owner before publishing exploit details or private-data exposure. Include the affected component, the release version, and the API version. Add a minimal synthetic reproduction, the expected boundary, the observed result, and whether private data was exposed.
 
 Do not attach real room data to a report.

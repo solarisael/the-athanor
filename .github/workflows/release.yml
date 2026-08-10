@@ -1,0 +1,123 @@
+name: Release The Athanor
+
+# The Athanor publishes one supported platform: windows-x64. Every release
+# carries exactly two archives, the Vault and AKASHA profiles of that platform,
+# plus the single release manifest the updater fetches by name.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semantic version already present in package.json and adapters/omp/package.json"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    name: Build and publish windows-x64
+    runs-on: windows-latest
+    env:
+      REQUIRED_SCHEMA_VERSION: "13"
+      RELEASE_REPOSITORY: solarisael/the-athanor
+    steps:
+      - name: Check out The Athanor
+        uses: actions/checkout@v4
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Resolve immutable release identity
+        id: resolve
+        shell: bash
+        env:
+          REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${REQUESTED#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "invalid semantic version: $version" >&2
+            exit 1
+          fi
+          adapter="$(jq -r .version adapters/omp/package.json)"
+          root="$(jq -r .version package.json)"
+          if [[ "$version" != "$adapter" ]]; then
+            echo "version $version does not match adapters/omp/package.json $adapter" >&2
+            exit 1
+          fi
+          if [[ "$version" != "$root" ]]; then
+            echo "version $version does not match package.json $root" >&2
+            exit 1
+          fi
+          case "$version" in
+            *-beta|*-beta.*|*-beta+*|*-beta-*) channel=beta ;;
+            *-experimental|*-experimental.*|*-experimental+*|*-experimental-*) channel=experimental ;;
+            *-exp|*-exp.*|*-exp+*|*-exp-*) channel=experimental ;;
+            *-*) echo "prerelease version must use beta, experimental, or exp" >&2; exit 1 ;;
+            *) channel=stable ;;
+          esac
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "CHANNEL=$channel" >> "$GITHUB_ENV"
+      - name: Install workspace dependencies
+        run: bun install
+      - name: Build the substrate binary
+        run: cargo build --release --locked -p athanor-substrate
+      - name: Build the Vault and AKASHA archives
+        shell: bash
+        env:
+          ATHANOR_SUBSTRATE_EXE: ${{ github.workspace }}\target\release\athanor-substrate.exe
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          bun run adapters/omp/build-portable.ts --out-dir dist --profile all
+      - name: Build the single release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          vault="dist/the-athanor-$VERSION-windows-x64-vault.zip"
+          akasha="dist/the-athanor-$VERSION-windows-x64-akasha.zip"
+          for archive in "$vault" "$akasha"; do
+            [[ -f "$archive" ]] || { echo "builder did not produce $archive" >&2; exit 1; }
+          done
+          produced=(dist/*.zip)
+          if [[ ${#produced[@]} -ne 2 ]]; then
+            echo "expected exactly the vault and akasha archives, found ${#produced[@]}: ${produced[*]}" >&2
+            exit 1
+          fi
+          bun run adapters/omp/build-release-manifest.ts \
+            --version "$VERSION" \
+            --output dist/release-manifest.json \
+            --channel "$CHANNEL" \
+            --repository "$RELEASE_REPOSITORY" \
+            --required-schema "$REQUIRED_SCHEMA_VERSION" \
+            --asset "$vault" \
+            --asset "$akasha"
+      - name: Retain immutable release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: the-athanor-${{ env.VERSION }}-windows-x64
+          path: |
+            dist/the-athanor-${{ env.VERSION }}-windows-x64-vault.zip
+            dist/the-athanor-${{ env.VERSION }}-windows-x64-akasha.zip
+            dist/release-manifest.json
+          if-no-files-found: error
+      - name: Publish the canonical release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          prerelease: ${{ env.CHANNEL != 'stable' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/the-athanor-${{ env.VERSION }}-windows-x64-vault.zip
+            dist/the-athanor-${{ env.VERSION }}-windows-x64-akasha.zip
+            dist/release-manifest.json

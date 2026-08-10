@@ -13,7 +13,7 @@ The language is intentionally allowed to be magical. `Spirit` can produce a diff
 
 ## The generated header
 
-The first four lines of `active_spirit.md` are maintained by the House and must retain this exact shape:
+The first three lines of `active_spirit.md`, followed by one blank line, are maintained by the House and must retain this exact shape:
 
 ```markdown
 # Active Spirit: TRUE NAME

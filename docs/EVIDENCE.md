@@ -53,11 +53,11 @@ The pilot does not measure paraphrase recall, semantic-only recall, final-answer
 
 ### Artifact
 
-[`solarisael-house-omp/evals/2026-07-22-room-retrieval-pilot.json`](https://github.com/solarisael/solarisael-house-omp/blob/main/evals/2026-07-22-room-retrieval-pilot.json)
+[`adapters/omp/evals/2026-07-22-room-retrieval-pilot.json`](https://github.com/solarisael/the-athanor/blob/main/adapters/omp/evals/2026-07-22-room-retrieval-pilot.json)
 
 ## Existing executable contracts
 
-The repositories include automated coverage for core and adapter behavior. The public suites cover contracts including:
+The repository includes automated coverage for core, substrate, and adapter behavior. The public suites cover contracts including:
 
 - generic room discovery and isolation;
 - memory JSON source behavior;
@@ -76,7 +76,7 @@ These tests establish implementation contracts. They are not substitutes for pub
 
 ## Next public evidence
 
-The 0.10.x proof phase expands the evidence surface in this order.
+The `0.11.0` proof phase expands the evidence surface in this order.
 
 ### Restart continuity
 
@@ -148,13 +148,13 @@ not proven net token savings or improved final answers.
 
 ### Clean-machine installation
 
-**Contract:** A tool-capable agent can install the supported topology on a clean Windows machine, create the first room, connect OMP, pass the static verifier, recover continuity after restart, and—when selected—complete the AKASHA lifecycle.
+**Contract:** A tool-capable agent can install the supported topology on a clean Windows x64 machine, create the first room, connect OMP, pass the static verifier, recover continuity after restart, and—when selected—complete the AKASHA lifecycle.
 
 Installation evidence reports user intervention, elevation, restarts, elapsed time, and every failed prerequisite.
 
 ### Migration, backup, and recovery
 
-**Contract:** The Rust cutover and later upgrades preserve rooms, memories, lessons, authority state, and lifecycle behavior. A documented backup restores to a fresh environment and passes the same health and retrieval checks.
+**Contract:** The `--migrate-legacy` upgrade from 0.10.x and later upgrades preserve rooms, memories, lessons, authority state, and lifecycle behavior. Migration verifies the new install before activation. It retains a `.athanor-rollback-0.10.x-<timestamp>` directory. An AKASHA migration requires a fresh PGDMP backup receipt. A documented backup restores to a fresh environment and passes the same health and retrieval checks.
 
 ### Final-answer grounding
 
@@ -181,9 +181,10 @@ A useful external evaluation should provide:
 
 1. a precise contract;
 2. a sanitized reproducible fixture;
-3. the House, adapter, and substrate versions;
+3. the release version and the storage profile;
 4. environment details;
 5. raw machine-readable results without private content;
 6. a short interpretation that stays within the measured scope.
 
-Open evidence issues against the repository that owns the failing contract: core behavior in `the-athanor`, OMP runtime behavior in `solarisael-house-omp`, and database or embedding behavior in `solarisael-house-substrate`.
+Open evidence issues in [`solarisael/the-athanor`](https://github.com/solarisael/the-athanor). Name the failing component from
+[the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).

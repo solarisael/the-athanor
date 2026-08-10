@@ -1,8 +1,16 @@
 node_modules/
 .env
 .env.*
+!.env.example
 __pycache__/
 *.pyc
 *.pyo
 .DS_Store
 /target/
+dist/
+.venv/
+.pytest_cache/
+# Mutable substrate state never belongs in the product tree; development
+# checkouts fall back here when ATHANOR_STATE_DIR is unset.
+/state/
+*.dump

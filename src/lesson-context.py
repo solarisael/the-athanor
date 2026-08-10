@@ -175,7 +175,7 @@ def main() -> int:
 
     try:
         if psycopg2 is None: raise RuntimeError("psycopg2 unavailable")
-        env = substrate_env(args.room_dir)
+        env = substrate_env()
         conn = psycopg2.connect(host=env.get("PGHOST"), port=env.get("PGPORT"), user=env.get("PGUSER"), password=env.get("PGPASSWORD"), dbname=env.get("PGDATABASE"), connect_timeout=2)
         try: result = retrieve_lesson_context(
             conn, args.room, args.project, args.shape, args.term,

@@ -1,0 +1,20 @@
+{
+  "name": "the-athanor-omp",
+  "version": "0.11.0",
+  "description": "The Athanor OMP adapter and portable distribution.",
+  "author": "Sol",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/solarisael/the-athanor.git", "directory": "adapters/omp" },
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "build:installer": "bun build installer.ts --compile --outfile install.exe",
+    "build:updater": "bun build updater.ts --compile --outfile update.exe",
+    "build:portable": "bun run build-portable.ts",
+    "build:release-manifest": "bun run build-release-manifest.ts",
+    "gui": "bun run gui-server.ts",
+    "verify:install": "bun run verify-install.ts",
+    "test:focused": "bun test tests/discovery.test.ts tests/portable-bundle.test.ts tests/installer.test.ts tests/updater.test.ts tests/verify-install.test.ts tests/gui-server.test.ts",
+    "test": "bun test --max-concurrency 1 --isolate"
+  }
+}

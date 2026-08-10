@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "evaluation": "room-local exact-title retrieval pilot",
+  "date": "2026-07-22",
+  "privacy": {
+    "raw_prompts_published": false,
+    "memory_titles_published": false,
+    "memory_ids_published": false,
+    "source_paths_published": false,
+    "raw_receipts_published": false
+  },
+  "method": {
+    "targets_per_room": 10,
+    "targets_unique": true,
+    "target_selection": "ten recent active, non-superseded memories owned by the evaluated room",
+    "query_form": "simple exact-title ask",
+    "bootstrap": "authentic room startup files in disposable isolated directories",
+    "session_mode": "fresh ephemeral process with no saved OMP session",
+    "scoring_source": "first pre-turn recall telemetry receipt",
+    "viewport_hit": "the intended memory title appeared in a selected viewport bundle",
+    "top_1": "the intended memory title appeared in the first selected viewport bundle"
+  },
+  "rooms": {
+    "kodo": {
+      "model": "sonnet 5",
+      "queries": 10,
+      "viewport_hits": 9,
+      "viewport_recall_percent": 90,
+      "top_1_hits": 7,
+      "top_1_percent": 70,
+      "irrelevant_only_injections": 1,
+      "irrelevant_only_percent": 10,
+      "retrieval_errors": 0
+    },
+    "kintsu": {
+      "model": "5.6-luna",
+      "queries": 10,
+      "viewport_hits": 10,
+      "viewport_recall_percent": 100,
+      "top_1_hits": 9,
+      "top_1_percent": 90,
+      "irrelevant_only_injections": 0,
+      "irrelevant_only_percent": 0,
+      "retrieval_errors": 0
+    }
+  },
+  "combined": {
+    "queries": 20,
+    "viewport_hits": 19,
+    "viewport_recall_percent": 95,
+    "top_1_hits": 16,
+    "top_1_percent": 80,
+    "irrelevant_only_injections": 1,
+    "irrelevant_only_percent": 5,
+    "retrieval_errors": 0
+  },
+  "limitations": [
+    "This is a small calibration pilot, not a release-quality benchmark.",
+    "Exact-title asks test favorable phrase matching and do not measure paraphrase robustness.",
+    "The answering models were not used to grade retrieval relevance."
+  ]
+}

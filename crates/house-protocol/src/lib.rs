@@ -77,6 +77,8 @@ pub struct RememberParams {
     pub language_keys: Vec<String>,
     #[serde(default, rename = "technologyKeys")]
     pub technology_keys: Vec<String>,
+    #[serde(default, rename = "threadKeys")]
+    pub thread_keys: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default = "default_backup")]
@@ -919,6 +921,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                 || params.example_text.is_some()
                 || !params.language_keys.is_empty()
                 || !params.technology_keys.is_empty()
+                || !params.thread_keys.is_empty()
                 || !params.tags.is_empty())
         {
             return Err(ProtocolError::InvalidParams(
@@ -985,6 +988,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                     example_text: params.example_text,
                     language_keys: params.language_keys,
                     technology_keys: params.technology_keys,
+                    thread_keys: params.thread_keys,
                     tags: params.tags,
                 },
             )
@@ -1896,6 +1900,9 @@ pub struct GigaCodingLessonPromotionPayloadParams {
     pub language_keys: Vec<String>,
     #[serde(default)]
     pub technology_keys: Vec<String>,
+    #[serde(default)]
+    pub thread_keys: Vec<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
 }
 
@@ -1911,6 +1918,9 @@ pub struct GigaProjectLessonPromotionPayloadParams {
     pub language_keys: Vec<String>,
     #[serde(default)]
     pub technology_keys: Vec<String>,
+    #[serde(default)]
+    pub thread_keys: Vec<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
 }
 
@@ -2225,6 +2235,7 @@ impl GigaPromotionTargetParams {
                 payload.trigger_context,
                 payload.language_keys,
                 payload.technology_keys,
+                payload.thread_keys,
                 payload.tags,
             )
             .map(GigaPromotionPayload::CodingLesson),
@@ -2236,6 +2247,7 @@ impl GigaPromotionTargetParams {
                 payload.trigger_context,
                 payload.language_keys,
                 payload.technology_keys,
+                payload.thread_keys,
                 payload.tags,
             )
             .map(GigaPromotionPayload::ProjectLesson),
@@ -3204,7 +3216,10 @@ mod tests {
         .unwrap();
         assert_eq!(design.kind(), RememberKind::DesignLesson);
         assert_eq!(design.register(), &["general"]);
-        assert_eq!(design.example_text(), Some("Use the token, not a one-off value."));
+        assert_eq!(
+            design.example_text(),
+            Some("Use the token, not a one-off value.")
+        );
 
         let memory = RequestEnvelope::parse_line(
             r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"kintsu","kind":"memory","title":"T","body":"B","register":["fiction"]}}"#,
@@ -3236,6 +3251,7 @@ mod tests {
             example_text: None,
             language_keys: vec![],
             technology_keys: vec![],
+            thread_keys: vec![],
             register: vec![],
             tags: vec![],
             backup: true,
@@ -3264,6 +3280,7 @@ mod tests {
             example_text: None,
             language_keys: vec![],
             technology_keys: vec![],
+            thread_keys: vec![],
             tags: vec![],
             backup: true,
         };
@@ -3291,6 +3308,7 @@ mod tests {
                 example_text: None,
                 language_keys: vec![],
                 technology_keys: vec![],
+                thread_keys: vec![],
                 tags: vec![],
                 backup: true,
             };

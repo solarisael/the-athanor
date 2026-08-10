@@ -4,10 +4,20 @@ Start with the root [`README.md`](../README.md) for the public current state.
 Everything below has one job; dated snapshots live under `history/` and do not
 compete with current contracts.
 
+## Audience paths
+
+- [`../README.md`](../README.md) — default introduction for people who want
+  better AI work tools
+- [`FOR_EXPLORERS.md`](./FOR_EXPLORERS.md) — latent-space and cognitive-
+  infrastructure argument for advanced readers
+- [`EXPLAINING_THE_ATHANOR.md`](./EXPLAINING_THE_ATHANOR.md) — canonical graph
+  and traversal paths for agents or people explaining the system to peers and
+  users
+
 ## Current contracts
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current components, authority, data
-  flow, repository ownership, and extension boundaries
+  flow, component ownership, installed layout, and extension boundaries
 - [`RETRIEVAL.md`](./RETRIEVAL.md) — Vault and AKASHA recall behavior,
   attribution, authority, corrections, and debugging
 - [`LESSONS.md`](./LESSONS.md) — typed lesson stores, scopes, lifecycle, and
@@ -53,7 +63,7 @@ surface is already shipped.
 
 ## Release path and history
 
-- [`roadmap.md`](./roadmap.md) — concise current `0.10.x` to `1.0.0` dependency
+- [`roadmap.md`](./roadmap.md) — concise current `0.11.0` to `1.0.0` dependency
   path
 - [`../HOUSE.md`](../HOUSE.md) — project history, philosophy, and design reasons
 - [`history/`](./history/) — dated plans, progress snapshots, and development

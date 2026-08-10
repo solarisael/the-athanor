@@ -139,7 +139,7 @@ def main() -> int:
     try:
         if psycopg2 is None:
             raise RuntimeError("psycopg2 is required for design document retrieval")
-        env = substrate_env(args.room_dir)
+        env = substrate_env()
         conn = psycopg2.connect(
             host=env.get("PGHOST"),
             port=env.get("PGPORT"),

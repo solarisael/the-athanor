@@ -36,9 +36,10 @@ The following surfaces described here are specified or planned, not current:
 - companion-authored models and marketplace artifacts;
 - the in-world Godot renderer and GPU-particle constellation.
 
-The current GIGA queue remains PostgreSQL-owned. No document in this repository
-may imply that NATS, the GUI, dynamic embodiment, formal backends, companion
-training, or the marketplace already ships.
+The current GIGA queue remains PostgreSQL-owned. The localhost administrative
+GUI in `adapters/omp/gui` is current. No document in this repository may imply
+that NATS, the Godot control surface, dynamic embodiment, formal backends,
+companion training, or the marketplace already ships.
 
 ## 2. Load-bearing invariants
 
@@ -1022,13 +1023,17 @@ marketplace packages, and the spatial presentation ecosystem depend on these
 contracts but do not block the personal-House 1.0 release. See
 [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md).
 
-## 13. Repository ownership
+## 13. Component ownership
+
+One repository owns every current component. The canonical layout table lives in
+[`ARCHITECTURE.md`](./ARCHITECTURE.md#repository-layout-and-component-ownership).
+This table adds only the runtime surfaces above it.
 
 | Surface | Canonical owner |
 |---|---|
-| Logical Host, invocation, event, refinement, and proof contracts | `the-athanor` core and protocol crates |
-| OMP lifecycle, tool, task, and live-session integration | `solarisael-house-omp` |
-| PostgreSQL authority, outbox rows, code-change facts, materialized derivations, GIGA jobs, outcomes, proof receipts, and health | `solarisael-house-substrate` |
+| Logical Host, invocation, event, refinement, and proof contracts | `crates/house-core` and `crates/house-protocol` |
+| OMP lifecycle, tool, task, and live-session integration | `adapters/omp` |
+| PostgreSQL authority, outbox rows, code-change facts, materialized derivations, GIGA jobs, outcomes, proof receipts, and health | `crates/house-substrate` and `substrate/` |
 | Godot rendering and interaction | A separate client package implementing `GODOT_CLIENT.md`; no core authority |
 | NATS deployment and relay | Deployment/runtime integration; behavior remains defined by core contracts |
 | Model-provider implementations | Replaceable adapter/provider modules |
@@ -1038,8 +1043,8 @@ contracts but do not block the personal-House 1.0 release. See
 | Wasmtime execution profile | Replaceable capability-sandbox provider; never the universal worker runtime |
 | Companion model registry and marketplace verification | Post-1.0 services implementing `COMPANION_ECOSYSTEM.md` |
 
-A repository move must not move authority. Contracts remain versioned across
-repository boundaries.
+Moving a component must not move authority. Contracts remain versioned across
+component boundaries.
 
 ## 14. Non-goals
 
@@ -1067,7 +1072,7 @@ This architecture does not:
 ## 15. Related documents
 
 - [`roadmap.md`](./roadmap.md) — release and dependency order
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current system and repository boundaries
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current system, component ownership, and installed layout
 - [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — House, room, spirit, custody, and product axes
 - [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — e-graphs, Z3, SyGuS, Wasmtime, proof feedback, and governed promotion
 - [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) — in-world Control UI, GPU-particle constellation, and alchemical profiles

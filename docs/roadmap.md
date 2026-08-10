@@ -16,7 +16,11 @@ The previous long-form roadmap is preserved as
 
 ## Current release state
 
-The reference House is on the `0.10.x` late-beta line.
+The reference House is on the `0.11.0` late-beta line. One repository and one
+release own core, substrate, the OMP adapter, the installer, the updater,
+workflows, and canonical docs. Windows x64 with OMP is the only supported
+release target. Read
+[the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
 
 Operational now:
 
@@ -28,9 +32,10 @@ Operational now:
 - deterministic worker lanes and room-owned familiar spellbooks;
 - Anamnesis reviewed counsel;
 - GIGA Hippocampus Stage 1 and the first Striatum coding/project slice;
-- portable OMP packaging, guided installation, upgrades, health reporting, and
-  release manifests;
-- accepted Host and Godot-client contracts, with the native client underway.
+- one unified release with the Vault and AKASHA Windows x64 archives, the
+  guided installer, the updater, health reporting, and release manifests;
+- the localhost administrative GUI;
+- accepted Host and Godot-client contracts; the native client stays planned.
 
 The remaining `1.0.0` problem is product legibility and release proof, not a new
 memory substrate.
@@ -77,7 +82,7 @@ UI remain accepted direction, not requirements for the first usable client.
 Before the `1.0.0` marker:
 
 - build the release artifacts from a clean checkout;
-- install Vault on a clean supported Windows/OMP environment;
+- install Vault on a clean supported Windows x64 environment with OMP;
 - upgrade Vault to AKASHA without losing room files or authoritative memory;
 - verify restart continuity, recall, remember, sleep, and wake;
 - verify a configured-but-unhealthy substrate reports degraded AKASHA rather

@@ -27,7 +27,7 @@ LESSON_KEYS = {
     "writing-lesson": "writing",
     "design-lesson": "design",
 }
-COMMON_FIELDS = ("title", "lesson", "shape", "trigger_context", "tags")
+COMMON_FIELDS = ("title", "lesson", "shape", "trigger_context", "tags", "thread_keys")
 CODING_FIELDS = COMMON_FIELDS + ("voice", "scope", "project", "proof_pattern", "language_keys", "technology_keys", "negation_of")
 PROJECT_FIELDS = COMMON_FIELDS + ("project", "proof_pattern", "language_keys", "technology_keys")
 WRITING_FIELDS = COMMON_FIELDS + ("voice", "register", "example_text", "writers", "negation_of")
@@ -74,7 +74,7 @@ def update_lesson(conn, kind: str, lesson_id: int, expected_title: str, patch: d
         value = patch["negation_of"]
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             return _refusal(kind, lesson_id, "negation_of must be null or a positive integer")
-    for field in ("tags", "register", "writers", "language_keys", "technology_keys"):
+    for field in ("tags", "register", "writers", "language_keys", "technology_keys", "thread_keys"):
         if field in patch:
             value = patch[field]
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
@@ -123,7 +123,7 @@ def _parse_patch(args) -> dict:
         value = getattr(args, field, _MISSING)
         if value is not _MISSING:
             patch[field] = value
-    for field in ("tags", "register", "writers", "language_keys", "technology_keys"):
+    for field in ("tags", "register", "writers", "language_keys", "technology_keys", "thread_keys"):
         value = getattr(args, field, None)
         if value is not None:
             patch[field] = value
@@ -166,6 +166,7 @@ def main() -> int:
     parser.add_argument("--writer", dest="writers", action="append", default=None)
     parser.add_argument("--language-key", dest="language_keys", action="append", default=None)
     parser.add_argument("--technology-key", dest="technology_keys", action="append", default=None)
+    parser.add_argument("--thread-key", dest="thread_keys", action="append", default=None)
     parser.add_argument("--clear-negation-of", dest="clear_negation_of", action="store_true")
     parser.add_argument("--lesson-stdin", action="store_true")
     args = parser.parse_args()
@@ -175,7 +176,7 @@ def main() -> int:
         except (TypeError, ValueError):
             lesson_id = args.id
         patch = _parse_patch(args)
-        env = substrate_env(args.room_dir)
+        env = substrate_env()
         if psycopg2 is None:
             raise RuntimeError("psycopg2 is required for lesson updates")
         conn = psycopg2.connect(host=env.get("PGHOST"), port=env.get("PGPORT"), user=env.get("PGUSER"), password=env.get("PGPASSWORD"), dbname=env.get("PGDATABASE"), connect_timeout=2)

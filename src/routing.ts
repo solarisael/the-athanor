@@ -38,6 +38,7 @@ export type DispatchRequest = {
   context?: ContextHint[];
   acceptance?: string[];
   risk?: RiskLevel;
+  lessonBodies?: string[];
 };
 
 export type DispatchReceipt = {
@@ -118,6 +119,13 @@ export const ADVISOR_REVIEW_CHANNEL = {
   dispatchable: false,
 } as const;
 
+const KITTEN_NAMES: Record<WorkerLaneName, string> = {
+  "smol-scout": "Quill",
+  "smol-executor": "Chisel",
+  tester: "Gauge",
+  verifier: "Mirror",
+};
+
 export function listWorkerLanes(): WorkerLane[] {
   return Object.values(WORKER_LANES).map((lane) => ({ ...lane, tools: [...lane.tools], allowedContextModes: [...lane.allowedContextModes] }));
 }
@@ -131,6 +139,10 @@ export function getWorkerLane(name: string): WorkerLane | null {
 function cleanLines(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
   return values.map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+function firstNonEmptyLine(value: string): string {
+  return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
 }
 
 function normalizeContext(context: unknown): ContextHint[] {
@@ -154,22 +166,28 @@ function formatContext(context: ContextHint[]): string {
   }).join("\n");
 }
 
-function formatAcceptance(acceptance: string[]): string {
-  return acceptance.length ? acceptance.map((line) => `- ${line}`).join("\n") : "- Return a receipt explaining what was checked and what remains unknown.";
+
+function stableKittenName(lane: WorkerLaneName): string {
+  return KITTEN_NAMES[lane];
 }
 
-function stableTaskId(lane: WorkerLaneName): string {
-  return lane.replace(/(^|-)([a-z])/g, (_match, _dash, char) => char.toUpperCase()).slice(0, 32);
+function formatLessonBodies(lessonBodies: string[]): string {
+  if (!lessonBodies.length) return "No lesson bodies supplied.";
+  return lessonBodies.map((body, index) => `[Lesson ${index + 1}]\n${body}`).join("\n\n");
 }
 
 export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const acceptance = cleanLines(request?.acceptance)
+    .flatMap((entry) => entry.split(/\r?\n/))
+    .map((line) => line.trim())
+    .filter(Boolean);
   const lane = getWorkerLane(request?.lane);
   const task = String(request?.task || "").trim();
   const target = String(request?.target || "").trim();
-  const acceptance = cleanLines(request?.acceptance);
   const context = normalizeContext(request?.context);
+  const lessonBodies = cleanLines(request?.lessonBodies);
 
   if (!lane) errors.push(`Unknown worker lane: ${String(request?.lane || "") || "<empty>"}`);
   if (!task) errors.push("Dispatch task is required.");
@@ -202,23 +220,31 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
     };
   }
 
+  const kittenName = stableKittenName(lane.name);
   const role = `${lane.name}: ${lane.description}`;
+  const objectives = acceptance.length
+    ? acceptance.map((line) => `- ${line} // 0%`).join("\n")
+    : "- Return a receipt naming what was checked and what remains unknown. // 0%";
+  const targetLines = target.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const questTarget = targetLines[0] || firstNonEmptyLine(task) || "general";
+  const targetDetails = targetLines.length > 1 ? ["", ...targetLines.slice(1)] : [];
   const assignment = [
     "# Target",
-    target || task,
+    questTarget,
+    `[Quest Received] [${kittenName}] [TARGET: ${questTarget}]`,
+    ...targetDetails,
     "",
     "# Change",
-    [
-      `Execute this ${lane.name} work packet exactly as assigned.`,
-      "Do not infer the operator's broader intent beyond the packet.",
-      "Do not broaden scope.",
-      "If the packet is ambiguous or conflicts with observed source state, stop and report the blocker.",
-      "",
-      task,
-    ].join("\n"),
+    "The House opens one bounded door for you:",
+    task,
+    "Keep your paws inside the named boundary. Read exact sources first and follow the written path; never invent a missing step.",
+    "If the map and terrain disagree, halt at the seam and tell us what you found. Questions, limits, disagreement, and refusal are valid yields.",
     "",
     "# Acceptance",
-    formatAcceptance(acceptance),
+    "**OBJECTIVES**",
+    objectives,
+    "[Touch nothing else.]",
+    "[What will you do?]",
   ].join("\n");
 
   return {
@@ -238,23 +264,27 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
       args: {
         context: [
           "# Goal",
-          "Execute the validated Athanor worker packet from the main model.",
+          `Help ${kittenName} complete one exact quest whose result matters to the House.`,
           "# Constraints",
           `Lane: ${lane.name}`,
           `Configured agent: ${lane.ompAgent}`,
           `Model role: ${lane.modelRole}; the agent definition selects the runtime model.`,
           `Risk: ${request?.risk || "low"}`,
-          "Do not infer user intent beyond the packet.",
+          "Treat this kitten as a capable peer. Warmth is unconditional; authority remains bounded.",
+          "Do not infer operator intent beyond the quest. A halt with evidence is a successful result.",
           "# Contract",
           role,
           "",
           "Context fragments:",
           formatContext(context),
           "",
-          "Return evidence, uncertainties, and exact changed/checked artifacts.",
+          "[Codex — supplied lessons ride free and do not expand quest scope]",
+          formatLessonBodies(lessonBodies),
+          "",
+          "Return evidence, uncertainties, and exact changed or checked artifacts. Praise-worthy care includes honest empty results.",
         ].join("\n"),
         tasks: [{
-          name: stableTaskId(lane.name),
+          name: kittenName,
           ...(lane.ompAgent === "task" ? {} : { agent: lane.ompAgent }),
           task: assignment,
         }],

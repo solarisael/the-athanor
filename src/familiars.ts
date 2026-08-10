@@ -44,6 +44,7 @@ export type FamiliarDispatchRequest = {
   context?: ContextHint[];
   acceptance?: string[];
   risk?: RiskLevel;
+  lessonBodies?: string[];
 };
 
 export type FamiliarDispatchReceipt = DispatchReceipt & {
@@ -212,6 +213,7 @@ export function buildFamiliarDispatchReceipt(
     context: request.context,
     acceptance: request.acceptance,
     risk: request.risk,
+    lessonBodies: request.lessonBodies,
   });
   const spawnPacket = dispatch.spawnPacket
     ? {

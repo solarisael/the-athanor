@@ -71,7 +71,7 @@ def main() -> int:
     parser.add_argument("--expected-title", required=True)
     args = parser.parse_args()
     try:
-        env = substrate_env(args.room_dir)
+        env = substrate_env()
         if psycopg2 is None:
             raise RuntimeError("psycopg2 is required for lesson deletion")
         conn = psycopg2.connect(host=env.get("PGHOST"), port=env.get("PGPORT"), user=env.get("PGUSER"), password=env.get("PGPASSWORD"), dbname=env.get("PGDATABASE"), connect_timeout=2)

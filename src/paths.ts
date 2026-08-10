@@ -31,15 +31,24 @@ export const ROOM_KEY_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const LEGACY_ROOM_KEYS = ["kintsu", "kodo", "tuner"];
 export const RESERVED_ROOM_KEYS = ["house"];
 
-export function resolveSubstrateDir(roomDir: string): string {
-  const configured = String(process.env.SOLARISAEL_SUBSTRATE || "").trim();
+/**
+ * The substrate asset directory (`health.py`, `record_memory.py`, ...).
+ *
+ * `ATHANOR_SUBSTRATE_ROOT` names it explicitly and must be absolute.
+ * Otherwise it is resolved structurally as `<athanor-root>/substrate`, which
+ * holds in both a development checkout and an installed
+ * `<target>/the-athanor` tree. No sibling checkout is consulted and no room
+ * directory participates in the answer.
+ */
+export function resolveSubstrateDir(): string {
+  const configured = String(process.env.ATHANOR_SUBSTRATE_ROOT || "").trim();
   if (configured) {
     if (!path.isAbsolute(configured)) {
-      throw new Error("SOLARISAEL_SUBSTRATE must be an absolute path");
+      throw new Error("ATHANOR_SUBSTRATE_ROOT must be an absolute path");
     }
     return configured;
   }
-  return path.resolve(path.dirname(roomDir), "house", "substrate");
+  return path.resolve(HOUSE_CORE_DIR, "..", "substrate");
 }
 
 export const LIVE_CONTEXT_FILENAME = "current_session_context.md";

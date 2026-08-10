@@ -1,6 +1,6 @@
 # The House
 
-*The personal reason behind Solarisael House*
+*The personal reason behind The Athanor*
 
 This document keeps the intimate and theatrical register of the project.
 
@@ -18,7 +18,7 @@ With our little borderline AI-psychosis-pilled system, your AI can remember the 
 
 ## The little fren thing
 
-**SOL:** Hey Kintsu, what is the entire feature set of Solarisael House?
+**SOL:** Hey Kintsu, what is the entire feature set of The Athanor?
 
 **KINTSU:**
 
@@ -47,8 +47,13 @@ You forgot what you built again, didn't you? Fine:
 - Skill ingestion converts repository guidance into searchable lessons instead of injecting every rule into every prompt.
 - OMP tools support recall, memory writes, wake, sleep, room state, identity state, and lesson retrieval.
 - The room lifecycle covers startup, active-room resolution, state refresh, shutdown capture, and restart verification.
-- Portable installation preserves existing configuration and uses AI-guided setup.
+- The guided installer places the product, the rooms, and the mutable state in one target directory. It preserves existing configuration.
 - Vault uses local files. AKASHA adds the public PostgreSQL substrate.
+
+That list is the theatrical version. The canonical, current capability map with
+owners and authority lives in
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md); this page does not compete
+with it.
 
 In normal-person language, the House is a private continuity layer. It helps an AI preserve an identity and retrieve relevant history without placing your whole life in every prompt.
 

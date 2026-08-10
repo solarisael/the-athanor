@@ -1,0 +1,5 @@
+[test]
+# The adapter's guard refuses to run any test while live substrate, Rust, or
+# PostgreSQL configuration is present. `bun test` from the repository root now
+# reaches adapters/omp/tests, so the guard must load here too.
+preload = ["./adapters/omp/tests/test-setup.ts"]

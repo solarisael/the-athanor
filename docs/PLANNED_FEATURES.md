@@ -34,26 +34,15 @@ Self-hosting remains available. Managed services must support complete export.
 
 ## What works now
 
-The Athanor is an operational late beta. Solarisael House is its working reference House. The platform runs daily and has external installations.
+The Athanor is an operational late beta on the `0.11.0` line. Windows x64 with
+OMP is the only supported release target. Solarisael House is the working
+reference House, and the platform runs daily there.
 
-Current capabilities include:
-
-- persistent identity contracts and separate private rooms;
-- compact handoffs and automatic bounded recall across restarts;
-- PostgreSQL memory authority and typed memory, lesson, and counsel stores;
-- lexical, structured, semantic, date, thread, taxonomy, relationship, and
-  cluster retrieval;
-- local embeddings through a compatible endpoint;
-- exact source provenance, authority labels, supersession, and archival;
-- room-local memory plus a House commons for shared work;
-- deterministic worker lanes and room-owned familiar spellbooks;
-- GIGA Hippocampus Stage 1: event-ID processing, non-authoritative candidates,
-  review, Curios, promotion, health, and safe queue maintenance;
-- GIGA Striatum's first coding/project slice: bounded reviewed lessons remain
-  warm across an observed project work state with explicit activation reasons;
-- adapters for more than one AI harness.
-
-The public evidence document separates measured results from planned claims.
+The canonical, current capability map — surfaces, owners, and authority — lives
+in [`ARCHITECTURE.md`](./ARCHITECTURE.md). This page does not copy it; it maps
+plain-language promises to status so the planned column below has something
+honest to sit against. Measured results are separated from planned claims in
+[`EVIDENCE.md`](./EVIDENCE.md).
 
 ## Planned feature map
 
@@ -62,6 +51,7 @@ The public evidence document separates measured results from planned claims.
 | GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current |
 | Curios | Keep selected hunches until later context makes them meaningful | Current |
 | GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Current — coding/project slice |
+| Localhost administrative GUI | Use the current local browser-based administrative surface | Current |
 | Athanor Host and thin Godot UI | Give people one visible control surface whose initial snapshot becomes fine-grained versioned deltas | Specified |
 | GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Specified |
 | PostgreSQL outbox and NATS delivery | Deliver opaque event IDs with explicit deduplication windows and durable database idempotency | Specified |
@@ -328,23 +318,14 @@ Relay or ANON can provide remote compute. Durable continuity can remain under op
 
 ## The path to 1.0
 
-The 0.10.x sequence first locks the Host, invocation, event, Origami/Crane/
-Pawprint, Paper Boat wake, refinement, and proof contracts. It then builds the
-thin Godot UI, strengthens GIGA evidence and outcome integrity, proves one
-PostgreSQL-outbox/JetStream mailbox and the `boat.ready` wake path, and only
-then adds dynamic model and room execution.
+The release path and its dependency order are owned by
+[`roadmap.md`](./roadmap.md). This page states what each feature promises and
+whether it is current, specified, planned, or research; it does not maintain a
+second release sequence.
 
-The 1.0 release adds supported ordinary-user installation around that stable
-Host and UI. It must preserve existing Houses during installation, upgrade,
-backup, and recovery.
-
-Bounded Prolog/Datalog derivations, complete Cingulate enforcement, optional
-e-graph/Z3/SyGuS/Wasmtime backends, proof-guided repair, and selected Lean-backed
-lessons follow in dependency order. They are not automatically 1.0 requirements.
-
-Later releases deepen the in-world Godot client and add OMEGA, ANON, group rooms,
-companion room sovereignty, companion-authored model bodies, presentation
-packages, and the typed signed marketplace.
+One boundary belongs here rather than in the roadmap: the `1.0` release adds
+supported ordinary-user installation around a stable Host and UI, and it must
+preserve existing Houses during installation, upgrade, backup, and recovery.
 
 See [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the runtime
 sequence, [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) for formal

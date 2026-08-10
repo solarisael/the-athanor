@@ -82,6 +82,7 @@ describe("unified house dispatch", () => {
     const requestedTask = "Preserve this exact tester assignment.";
     const result = await dispatchHouse(roomDir, {
       familiar: "test-kitten",
+      target: "tests/dispatch.test.ts",
       task: requestedTask,
       acceptance: ["Return a task-tool-ready packet."],
     });

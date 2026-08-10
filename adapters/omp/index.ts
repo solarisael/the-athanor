@@ -263,6 +263,7 @@ async function recordAutomaticContextTelemetry(
 
 export default function solarisaelHouseProof(pi) {
   pi.setLabel("The Athanor");
+  let activeRoom: string | null = null;
 
   const stopKittenProgress = pi.events?.on?.("task:subagent:progress", (payload: unknown) => {
     if (kittenLineageDisabled() || !payload || typeof payload !== "object") return;
@@ -284,7 +285,7 @@ export default function solarisaelHouseProof(pi) {
     const progress = kittenQuestProgress.get(id);
     if (!progress) return;
     const toolCallId = String(lifecycle.parentToolCallId ?? progress.parentToolCallId ?? "").trim();
-    const room = kittenRoomsByToolCallId.get(toolCallId) || kittenRoomsByAgentId.get(id);
+    const room = kittenRoomsByToolCallId.get(toolCallId) || kittenRoomsByAgentId.get(id) || activeRoom;
     if (!room) return;
     try {
       const report = await readKittenReport(lifecycle.sessionFile ?? progress.sessionFile);
@@ -316,6 +317,7 @@ export default function solarisaelHouseProof(pi) {
     );
 
     const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx.cwd);
+    activeRoom = room;
     const timestamp = Date.now();
     const additions = [];
     let houseState = null;

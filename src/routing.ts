@@ -181,7 +181,7 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
   const warnings: string[] = [];
   const acceptance = cleanLines(request?.acceptance)
     .flatMap((entry) => entry.split(/\r?\n/))
-    .map((line) => line.trim())
+    .map((line) => line.replace(/^\s*[-*]\s+/, "").replace(/\s*\/\/\s*0%\s*$/, "").trim())
     .filter(Boolean);
   const lane = getWorkerLane(request?.lane);
   const task = String(request?.task || "").trim();
@@ -192,6 +192,7 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
   if (!lane) errors.push(`Unknown worker lane: ${String(request?.lane || "") || "<empty>"}`);
   if (!task) errors.push("Dispatch task is required.");
   if (lane?.requiresAcceptance && acceptance.length === 0) errors.push(`${lane.name} requires at least one acceptance item.`);
+  if (lane?.canEdit && !target) errors.push(`${lane.name} requires an exact target.`);
 
   if (lane) {
     for (const item of context) {
@@ -201,6 +202,7 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
     if (lane.canEdit && !context.some((item) => item.mode === "exact" || item.mode === "retrieve-only")) {
       warnings.push(`${lane.name} can edit; provide exact or retrieve-only context before executing.`);
     }
+    if (!target) warnings.push(`${lane.name} has no explicit target; lineage uses the general domain.`);
   }
 
   if (errors.length || !lane) {
@@ -226,12 +228,14 @@ export function buildDispatchReceipt(request: DispatchRequest): DispatchReceipt 
     ? acceptance.map((line) => `- ${line} // 0%`).join("\n")
     : "- Return a receipt naming what was checked and what remains unknown. // 0%";
   const targetLines = target.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const questTarget = targetLines[0] || firstNonEmptyLine(task) || "general";
+  const questTarget = targetLines[0] || "general";
+  const frameTarget = questTarget.replaceAll("[", "(").replaceAll("]", ")");
+  if (frameTarget !== questTarget) warnings.push("Quest frame target brackets were rendered as parentheses.");
   const targetDetails = targetLines.length > 1 ? ["", ...targetLines.slice(1)] : [];
   const assignment = [
     "# Target",
     questTarget,
-    `[Quest Received] [${kittenName}] [TARGET: ${questTarget}]`,
+    `[Quest Received] [${kittenName}] [TARGET: ${frameTarget}]`,
     ...targetDetails,
     "",
     "# Change",

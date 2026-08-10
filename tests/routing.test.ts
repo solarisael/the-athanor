@@ -67,6 +67,7 @@ describe("buildDispatchReceipt", () => {
   test("rejects edit-capable lanes that omit explicit acceptance criteria", () => {
     const receipt = buildDispatchReceipt({
       lane: "smol-executor",
+      target: "src/example.ts",
       task: "Update one exact function.",
       context: [{ mode: "exact", source: "src/example.ts" }],
     });
@@ -85,6 +86,7 @@ describe("buildDispatchReceipt", () => {
   test("rejects image-ok context for smol-executor", () => {
     const receipt = buildDispatchReceipt({
       lane: "smol-executor",
+      target: "src/example.ts",
       task: "Apply this bounded change.",
       acceptance: ["The changed behavior is covered."],
       context: [{ mode: "image-ok", source: "mockup.png" }],
@@ -154,9 +156,9 @@ describe("buildDispatchReceipt", () => {
       task: "Inspect the routing seam.\nReturn one evidence-backed finding.",
     });
     const assignment = receipt.spawnPacket?.args.tasks[0].task || "";
-
-    expect(assignment).toContain("# Target\nInspect the routing seam.\n[Quest Received] [Quill] [TARGET: Inspect the routing seam.]");
+    expect(assignment).toContain("# Target\ngeneral\n[Quest Received] [Quill] [TARGET: general]");
     expect(assignment).toContain("The House opens one bounded door for you:\nInspect the routing seam.\nReturn one evidence-backed finding.");
+    expect(receipt.warnings).toContain("smol-scout has no explicit target; lineage uses the general domain.");
     expect(assignment).not.toContain("[TARGET: Inspect the routing seam.\n");
   });
 
@@ -165,7 +167,7 @@ describe("buildDispatchReceipt", () => {
       lane: "verifier",
       target: "src/routing.ts\nsrc/familiars.ts",
       task: "Inspect both named seams.",
-      acceptance: ["The routing seam is checked.\nThe familiar seam is checked."],
+      acceptance: ["- The routing seam is checked. // 0%\n* The familiar seam is checked."],
     });
     const assignment = receipt.spawnPacket?.args.tasks[0].task || "";
 
@@ -173,5 +175,27 @@ describe("buildDispatchReceipt", () => {
     expect(assignment.match(/^src\/routing\.ts$/gm)).toHaveLength(1);
     expect(assignment).toContain("- The routing seam is checked. // 0%");
     expect(assignment).toContain("- The familiar seam is checked. // 0%");
+    expect(assignment.match(/\/\/ 0%/g)).toHaveLength(2);
+  });
+
+  test("keeps bracketed targets parseable and requires edit targets", () => {
+    const bracketed = buildDispatchReceipt({
+      lane: "verifier",
+      target: "src/routes/[id].ts",
+      task: "Inspect the dynamic route.",
+      acceptance: ["The frame remains parseable."],
+    });
+    const assignment = bracketed.spawnPacket?.args.tasks[0].task || "";
+    expect(assignment).toContain("# Target\nsrc/routes/[id].ts\n[Quest Received] [Mirror] [TARGET: src/routes/(id).ts]");
+    expect(bracketed.warnings).toContain("Quest frame target brackets were rendered as parentheses.");
+
+    const missing = buildDispatchReceipt({
+      lane: "smol-executor",
+      task: "Edit one seam.",
+      acceptance: ["The seam changes."],
+      context: [{ mode: "exact", source: "src/routing.ts" }],
+    });
+    expect(missing.errors).toContain("smol-executor requires an exact target.");
+    expect(missing.spawnPacket).toBeNull();
   });
 });

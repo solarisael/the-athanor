@@ -5,8 +5,7 @@ param(
     [switch]$SkipBackup,
     [ValidateRange(1, 365)]
     [int]$BackupKeep = 14,
-    [string]$Cargo = "cargo",
-    [string]$Python = "python"
+    [string]$Cargo = "cargo"
 )
 
 Set-StrictMode -Version Latest
@@ -165,8 +164,8 @@ try {
     if (Test-Path $stagedPdb -PathType Leaf) {
         Copy-Item $stagedPdb $livePdb -Force
     }
-    Invoke-Checked -Label "ordered database migrations" -FilePath $Python -ArgumentList @(
-        (Join-Path $substrateRoot "run_migrations.py")
+    Invoke-Checked -Label "ordered database migrations" -FilePath $liveExe -ArgumentList @(
+        "migrations"
     )
     Invoke-Checked -Label "semantic vocabulary refresh" -FilePath $liveExe -ArgumentList @(
         "semantic-vocabulary-refresh"
@@ -183,8 +182,8 @@ try {
 }
 
 Remove-Item $previousExe, $previousPdb -Force -ErrorAction SilentlyContinue
-Invoke-Checked -Label "Full-mode health proof" -FilePath $Python -ArgumentList @(
-    (Join-Path $substrateRoot "health.py")
+Invoke-Checked -Label "Full-mode health proof" -FilePath $liveExe -ArgumentList @(
+    "health", "--substrate-dir", $substrateRoot
 )
 
 Write-Host "==> deployment complete"

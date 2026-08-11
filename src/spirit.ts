@@ -50,6 +50,42 @@ export function normalizeRoomName(value) {
   return legacyRoomKeys.has(normalized) ? normalized : null;
 }
 
+export function validateAmbientRoom(roomDir, roomName) {
+  const effectiveRoomDir = path.resolve(String(roomDir || process.cwd()));
+  const roomFromPath = normalizeRoomName(path.basename(effectiveRoomDir));
+  const requestedRoom = roomName === undefined || roomName === null
+    ? path.basename(effectiveRoomDir)
+    : roomName;
+  const resolvedRoom = normalizeRoomName(requestedRoom);
+
+  if (!roomFromPath) {
+    return {
+      ok: false,
+      effectiveRoomDir,
+      requestedRoom,
+      error: `unknown room path: ${path.basename(effectiveRoomDir)}`,
+    };
+  }
+  if (!resolvedRoom) {
+    return {
+      ok: false,
+      effectiveRoomDir,
+      requestedRoom,
+      error: `unknown room: ${String(requestedRoom)}`,
+    };
+  }
+  if (roomFromPath !== resolvedRoom) {
+    return {
+      ok: false,
+      effectiveRoomDir,
+      requestedRoom,
+      error: `room name/path mismatch: ${resolvedRoom} != ${roomFromPath}`,
+    };
+  }
+
+  return { ok: true, effectiveRoomDir, requestedRoom, resolvedRoom };
+}
+
 export function normalizeAgentName(value) {
   return safeIdentityName(value) || DEFAULT_AGENT_NAME;
 }

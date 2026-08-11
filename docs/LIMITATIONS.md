@@ -4,29 +4,29 @@ This document records current support boundaries and non-goals. The product READ
 
 ## Supported installation path
 
-Windows x64 with OMP is the only supported release target. Release 0.11.0 is
-the current late-beta line.
+Windows 11 x64 with OMP is the only supported release target.
+`1.0.0-rc.1` is the current native candidate.
 
-The Vault profile requires:
+The ordinary managed install requires:
 
-- Windows 10 or 11 on x64;
-- OMP;
-- the `the-athanor-<version>-windows-x64-vault.zip` archive.
+- Administrator elevation;
+- the checksum-published native installer;
+- a supported OMP installation and its model/provider authentication;
+- sufficient storage for the bundled PostgreSQL, NATS, Godot client, immutable
+  release versions, database, and backups.
 
-The Vault profile requires no substrate binary, no PostgreSQL, no embedding
-service, no WSL, and no Rust runtime.
+The installer carries Godot 4.7.1, PostgreSQL 18.4-2, pgvector 0.8.6, NATS
+2.14.4, and every Athanor Rust binary. It does not require WSL, Python, Bun,
+Cargo, a Rust toolchain, a Godot editor, or a separately installed database or
+broker.
 
-The AKASHA profile requires the Vault items and also:
+Vault remains a database-free runtime profile. AKASHA uses the managed
+PostgreSQL authority by default. The advanced external-database mode requires an
+operator-provided PostgreSQL 18 server with pgvector 0.8.6 and `pg_trgm`; it does
+not weaken schema, migration, backup, or readiness requirements.
 
-- the `the-athanor-<version>-windows-x64-akasha.zip` archive;
-- the release-built `athanor-substrate.exe` in the archive;
-- WSL 2 with Ubuntu;
-- PostgreSQL 16 with pgvector and `pg_trgm`;
-- Python 3.11+ for migrations, health, imports, and maintenance;
-- a compatible local embedding endpoint;
-- approximately 10 GB of free storage for the tested setup.
-
-The tested embedding default is Nemotron-3-Embed-1B through WSL ROCm Ollama on compatible AMD hardware. The mounted OMP memory path uses the long-lived Windows Rust process; Python support scripts are not a substitute for that runtime proof.
+Local semantic embeddings still require a compatible configured embedding
+endpoint. No GPU or embedding model is bundled in the 1.0 candidate.
 
 One repository and one release own every installed component. Read
 [the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
@@ -35,25 +35,26 @@ One repository and one release own every installed component. Read
 
 | Host | Current state |
 |---|---|
-| Windows x64 + OMP + Vault | Supported release target |
-| Windows x64 + OMP + WSL AKASHA | Supported release target |
-| Native Linux | Database and support tools are adaptable; the current Windows executable and OMP integration require host-specific engineering and verification |
-| OpenCode | Adapter work predates the Rust cutover; it is not a supported release target |
+| Windows 11 x64 + OMP | Supported release-candidate target |
+| Windows 10 x64 | Installer target but not locally re-proved for this candidate |
+| Native Linux | Rust components are portable in principle; installer, service, Godot package, and OMP integration require host-specific engineering and verification |
+| OpenCode | Historical adapter line; unsupported |
 | macOS | Unsupported |
-| Other harnesses | Require an adapter over the core contracts |
+| Other harnesses | Require an adapter over the Rust contracts |
 
 An adapted path becomes trustworthy when it proves the same observable contracts: adapter loading, room discovery, `room_state`, fresh-session continuity, and—when AKASHA is selected—a real substrate write/read lifecycle.
 
 ## Installation boundary
 
-The installer accepts the modes `vault` and `akasha`. A 0.10.x install upgrades
-only through the explicit `--migrate-legacy` flow. The operator still needs a
-working harness and its authentication before the AI can take over. The 1.0
-milestone adds a trusted native bootstrapper, ordinary-user onboarding,
-uninstall behavior, backup, and recovery. Read [`../INSTALL.md`](../INSTALL.md)
-for the current procedure.
+The native installer manages one immutable-version topology. A bounded first
+install backs up only the named legacy 0.10.x product trees; it never executes
+legacy Python, WSL, Bun, or shell behavior as a fallback. The operator still
+needs a working OMP installation and its provider authentication before the AI
+can use the adapter. Read [`../INSTALL.md`](../INSTALL.md) for managed/external
+database modes, readiness, rollback, uninstall, and explicit purge.
 
-The current installer does not promise one-click setup on an otherwise empty machine.
+The installer is locally built and payload-verified. A clean-machine elevated
+installation remains a public evidence gap, not a completed claim.
 
 ## Retrieval boundary
 
@@ -120,31 +121,33 @@ The Athanor keeps continuity provider-portable, but it cannot remove provider-si
 
 ## Runtime-evolution boundary
 
-The current release line does not yet ship the Godot client, Athanor Host WebSocket or
-delta synchronization, PostgreSQL-outbox/NATS delivery or idempotency ledger,
-background code-change indexing, incremental Prolog/Datalog facts and
-precomputed relations, invocation-time model routing, headless room targets,
-complete Cingulate, e-graph/egglog normalization, Z3, SyGuS, Wasmtime sandbox
-profiles, proof-guided repair, the resource-bounded Lean checker, in-world
-SubViewport presentation, the GPU-particle constellation, companion room
-sovereignty, companion-authored model training, or the signed marketplace.
+The current release line does not ship background code-change indexing,
+incremental Prolog/Datalog facts and precomputed relations, invocation-time model
+routing, headless room targets, complete Cingulate, e-graph/egglog
+normalization, Z3, SyGuS, Wasmtime sandbox profiles, proof-guided repair, the
+resource-bounded Lean checker, in-world SubViewport presentation, the
+GPU-particle constellation, companion room sovereignty, companion-authored model
+training, or the signed marketplace.
 
-These capabilities have accepted dependency and technical contracts in
+The authenticated Host, typed snapshot/delta/resync path, Recall Policy, narrow
+PostgreSQL-outbox/NATS Paper Boat lane, restart replay, native lifecycle, and
+functional 2D Godot screens are current. NATS remains delivery-only and never
+becomes memory authority.
+
+The broader capabilities have accepted dependency and technical contracts in
 [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md),
 [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md),
 [`GODOT_CLIENT.md`](./GODOT_CLIENT.md), and
 [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md). Documentation labels them
 as specified, planned, or research until observable implementation gates pass.
 
-The current worker lanes still obtain their runtime models from harness agent
-definitions; per-dispatch model override remains unsupported. The current GIGA
-queue remains PostgreSQL-owned. A model process kept warm is not a persistent
-room, and no current broker should be treated as memory authority.
+Worker lanes still obtain their runtime models from harness agent definitions;
+per-dispatch model override remains unsupported. A model process kept warm is
+not a persistent room.
 
-The current personal House also has no online training service, companion model
+The current personal House has no online training service, companion model
 registry, package signature/revocation service, marketplace, autonomous child
-room creation, or constitutional resource scheduler. The current Godot plan is
-architecture, not a rendered client or performance result.
+room creation, or constitutional resource scheduler.
 
 ## Organizational boundary
 

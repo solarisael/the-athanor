@@ -1,0 +1,392 @@
+[gd_resource type="Theme" load_steps=24 format=3]
+
+[ext_resource type="FontFile" path="res://assets/fonts/AtkinsonHyperlegibleNext-Variable.woff2" id="1_body"]
+[ext_resource type="FontFile" path="res://assets/fonts/CinzelDecorative-Bold.woff2" id="2_ritual"]
+[ext_resource type="FontFile" path="res://assets/fonts/JetBrainsMono-Variable.woff2" id="3_mono"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_mantle"]
+bg_color = Color(0.0189863, 0.01942671, 0.02301076, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 18.0
+content_margin_top = 18.0
+content_margin_right = 18.0
+content_margin_bottom = 18.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_vessel"]
+bg_color = Color(0.03446452, 0.03512804, 0.04040454, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+content_margin_left = 18.0
+content_margin_top = 18.0
+content_margin_right = 18.0
+content_margin_bottom = 18.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_aether"]
+bg_color = Color(0.05868481, 0.05967549, 0.06723587, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.83797062, 0.72687352, 0.54300893, 1)
+corner_radius_top_left = 14
+corner_radius_top_right = 14
+corner_radius_bottom_right = 14
+corner_radius_bottom_left = 14
+content_margin_left = 18.0
+content_margin_top = 18.0
+content_margin_right = 18.0
+content_margin_bottom = 18.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_ornament"]
+bg_color = Color(0.00149408, 0.00156714, 0.00227788, 1)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+content_margin_left = 18.0
+content_margin_top = 18.0
+content_margin_right = 18.0
+content_margin_bottom = 18.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_ground"]
+bg_color = Color(0.0073513, 0.00770492, 0.01112268, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_seam"]
+bg_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_nigredo"]
+bg_color = Color(0.41545436, 0.44709097, 0.51049677, 1)
+content_margin_left = 10.0
+content_margin_top = 5.0
+content_margin_right = 10.0
+content_margin_bottom = 5.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_albedo"]
+bg_color = Color(0.79630636, 0.85254711, 0.90822486, 1)
+content_margin_left = 10.0
+content_margin_top = 5.0
+content_margin_right = 10.0
+content_margin_bottom = 5.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_citrinitas"]
+bg_color = Color(0.91730827, 0.61586595, 0.37729094, 1)
+content_margin_left = 10.0
+content_margin_top = 5.0
+content_margin_right = 10.0
+content_margin_bottom = 5.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_rubedo"]
+bg_color = Color(0.91335716, 0.31343307, 0.29260271, 1)
+content_margin_left = 10.0
+content_margin_top = 5.0
+content_margin_right = 10.0
+content_margin_bottom = 5.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_codex"]
+bg_color = Color(0.56916483, 0.55055809, 0.70991199, 1)
+content_margin_left = 10.0
+content_margin_top = 5.0
+content_margin_right = 10.0
+content_margin_bottom = 5.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_top_bar"]
+bg_color = Color(0.00149408, 0.00156714, 0.00227788, 1)
+border_width_bottom = 1
+border_color = Color(0.76193195, 0.64497094, 0.44939537, 0.75)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_chrome_bar"]
+bg_color = Color(0.0189863, 0.01942671, 0.02301076, 1)
+border_width_bottom = 1
+border_color = Color(0.47126942, 0.45411264, 0.42637103, 0.35)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_status_dock"]
+bg_color = Color(0.0189863, 0.01942671, 0.02301076, 1)
+border_width_top = 1
+border_color = Color(0.76193195, 0.64497094, 0.44939537, 0.65)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_paper_boat"]
+bg_color = Color(0.03446452, 0.03512804, 0.04040454, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.47126942, 0.45411264, 0.42637103, 0.45)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+content_margin_left = 18.0
+content_margin_top = 14.0
+content_margin_right = 18.0
+content_margin_bottom = 14.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_button"]
+bg_color = Color(0.0189863, 0.01942671, 0.02301076, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.47126942, 0.45411264, 0.42637103, 0.4)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 10.0
+content_margin_top = 5.0
+content_margin_right = 10.0
+content_margin_bottom = 5.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_button_hover"]
+bg_color = Color(0.05868481, 0.05967549, 0.06723587, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.83797062, 0.72687352, 0.54300893, 0.8)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 10.0
+content_margin_top = 5.0
+content_margin_right = 10.0
+content_margin_bottom = 5.0
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_button_active"]
+bg_color = Color(0.03446452, 0.03512804, 0.04040454, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 10.0
+content_margin_top = 5.0
+content_margin_right = 10.0
+content_margin_bottom = 5.0
+
+[sub_resource type="StyleBoxEmpty" id="StyleBox_button_empty"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_button_disabled"]
+bg_color = Color(0.0073513, 0.00770492, 0.01112268, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.47126942, 0.45411264, 0.42637103, 0.18)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+content_margin_left = 10.0
+content_margin_top = 5.0
+content_margin_right = 10.0
+content_margin_bottom = 5.0
+
+[resource]
+default_font = ExtResource("1_body")
+default_font_size = 18
+Label/colors/font_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorTitle/base_type = &"Label"
+AthanorTitle/colors/font_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorTitle/fonts/font = ExtResource("2_ritual")
+AthanorTitle/font_sizes/font_size = 38
+AthanorHeading/base_type = &"Label"
+AthanorHeading/colors/font_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorHeading/fonts/font = ExtResource("1_body")
+AthanorHeading/font_sizes/font_size = 24
+AthanorBody/base_type = &"Label"
+AthanorBody/colors/font_color = Color(0.70042545, 0.67890535, 0.64412206, 1)
+AthanorBody/fonts/font = ExtResource("1_body")
+AthanorBody/font_sizes/font_size = 18
+AthanorKicker/base_type = &"Label"
+AthanorKicker/colors/font_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+AthanorKicker/fonts/font = ExtResource("3_mono")
+AthanorKicker/font_sizes/font_size = 13
+AthanorCaption/base_type = &"Label"
+AthanorCaption/colors/font_color = Color(0.70042545, 0.67890535, 0.64412206, 1)
+AthanorCaption/fonts/font = ExtResource("1_body")
+AthanorCaption/font_sizes/font_size = 14
+AthanorMutedOrnament/base_type = &"Label"
+AthanorMutedOrnament/colors/font_color = Color(0.47126942, 0.45411264, 0.42637103, 1)
+AthanorMutedOrnament/fonts/font = ExtResource("1_body")
+AthanorMutedOrnament/font_sizes/font_size = 13
+AthanorPhaseLabel/base_type = &"Label"
+AthanorPhaseLabel/colors/font_color = Color(0.00149408, 0.00156714, 0.00227788, 1)
+AthanorPhaseLabel/fonts/font = ExtResource("3_mono")
+AthanorPhaseLabel/font_sizes/font_size = 13
+AthanorMantle/base_type = &"PanelContainer"
+AthanorMantle/styles/panel = SubResource("StyleBox_mantle")
+AthanorVessel/base_type = &"PanelContainer"
+AthanorVessel/styles/panel = SubResource("StyleBox_vessel")
+AthanorAether/base_type = &"PanelContainer"
+AthanorAether/styles/panel = SubResource("StyleBox_aether")
+AthanorOrnament/base_type = &"PanelContainer"
+AthanorOrnament/styles/panel = SubResource("StyleBox_ornament")
+AthanorGround/base_type = &"Panel"
+AthanorGround/styles/panel = SubResource("StyleBox_ground")
+AthanorSeam/base_type = &"Panel"
+AthanorSeam/styles/panel = SubResource("StyleBox_seam")
+AthanorNigredo/base_type = &"PanelContainer"
+AthanorNigredo/styles/panel = SubResource("StyleBox_nigredo")
+AthanorAlbedo/base_type = &"PanelContainer"
+AthanorAlbedo/styles/panel = SubResource("StyleBox_albedo")
+AthanorCitrinitas/base_type = &"PanelContainer"
+AthanorCitrinitas/styles/panel = SubResource("StyleBox_citrinitas")
+AthanorRubedo/base_type = &"PanelContainer"
+AthanorRubedo/styles/panel = SubResource("StyleBox_rubedo")
+AthanorCodex/base_type = &"PanelContainer"
+AthanorCodex/styles/panel = SubResource("StyleBox_codex")
+AthanorOuterMargin/base_type = &"MarginContainer"
+AthanorOuterMargin/constants/margin_left = 60
+AthanorOuterMargin/constants/margin_top = 42
+AthanorOuterMargin/constants/margin_right = 60
+AthanorOuterMargin/constants/margin_bottom = 26
+AthanorMainColumn/base_type = &"VBoxContainer"
+AthanorMainColumn/constants/separation = 18
+AthanorHeader/base_type = &"VBoxContainer"
+AthanorHeader/constants/separation = 4
+AthanorSection/base_type = &"VBoxContainer"
+AthanorSection/constants/separation = 12
+AthanorPhaseStrip/base_type = &"HBoxContainer"
+AthanorPhaseStrip/constants/separation = 16
+AthanorSurfaceGrid/base_type = &"GridContainer"
+AthanorSurfaceGrid/constants/h_separation = 20
+AthanorSurfaceGrid/constants/v_separation = 26
+AthanorCardContent/base_type = &"VBoxContainer"
+AthanorCardContent/constants/separation = 4
+AthanorTopBar/base_type = &"PanelContainer"
+AthanorTopBar/styles/panel = SubResource("StyleBox_top_bar")
+AthanorChromeBar/base_type = &"PanelContainer"
+AthanorChromeBar/styles/panel = SubResource("StyleBox_chrome_bar")
+AthanorStatusDock/base_type = &"PanelContainer"
+AthanorStatusDock/styles/panel = SubResource("StyleBox_status_dock")
+AthanorPaperBoat/base_type = &"PanelContainer"
+AthanorPaperBoat/styles/panel = SubResource("StyleBox_paper_boat")
+AthanorBrand/base_type = &"Label"
+AthanorBrand/colors/font_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorBrand/fonts/font = ExtResource("2_ritual")
+AthanorBrand/font_sizes/font_size = 22
+AthanorMeta/base_type = &"Label"
+AthanorMeta/colors/font_color = Color(0.47126942, 0.45411264, 0.42637103, 1)
+AthanorMeta/fonts/font = ExtResource("3_mono")
+AthanorMeta/font_sizes/font_size = 11
+AthanorPageKicker/base_type = &"Label"
+AthanorPageKicker/colors/font_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+AthanorPageKicker/fonts/font = ExtResource("3_mono")
+AthanorPageKicker/font_sizes/font_size = 11
+AthanorPageTitle/base_type = &"Label"
+AthanorPageTitle/colors/font_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorPageTitle/fonts/font = ExtResource("1_body")
+AthanorPageTitle/font_sizes/font_size = 28
+AthanorStatusLabel/base_type = &"Label"
+AthanorStatusLabel/colors/font_color = Color(0.47126942, 0.45411264, 0.42637103, 1)
+AthanorStatusLabel/fonts/font = ExtResource("3_mono")
+AthanorStatusLabel/font_sizes/font_size = 10
+AthanorStatusValue/base_type = &"Label"
+AthanorStatusValue/colors/font_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorStatusValue/fonts/font = ExtResource("1_body")
+AthanorStatusValue/font_sizes/font_size = 16
+AthanorTab/base_type = &"Button"
+AthanorTab/colors/font_color = Color(0.70042545, 0.67890535, 0.64412206, 1)
+AthanorTab/colors/font_hover_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorTab/fonts/font = ExtResource("3_mono")
+AthanorTab/font_sizes/font_size = 11
+AthanorTab/styles/normal = SubResource("StyleBox_button")
+AthanorTab/styles/hover = SubResource("StyleBox_button_hover")
+AthanorTab/styles/pressed = SubResource("StyleBox_button_active")
+AthanorTab/styles/focus = SubResource("StyleBox_button_active")
+AthanorTab/colors/font_disabled_color = Color(0.47126942, 0.45411264, 0.42637103, 1)
+AthanorTab/styles/disabled = SubResource("StyleBox_button_disabled")
+AthanorTabActive/base_type = &"Button"
+AthanorTabActive/colors/font_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorTabActive/colors/font_hover_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorTabActive/fonts/font = ExtResource("3_mono")
+AthanorTabActive/font_sizes/font_size = 11
+AthanorTabActive/styles/normal = SubResource("StyleBox_button_active")
+AthanorTabActive/styles/hover = SubResource("StyleBox_button_hover")
+AthanorTabActive/styles/pressed = SubResource("StyleBox_button_active")
+AthanorTabActive/styles/focus = SubResource("StyleBox_button_active")
+AthanorTabActive/colors/font_disabled_color = Color(0.47126942, 0.45411264, 0.42637103, 1)
+AthanorTabActive/styles/disabled = SubResource("StyleBox_button_disabled")
+AthanorTextAction/base_type = &"Button"
+AthanorTextAction/colors/font_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+AthanorTextAction/colors/font_hover_color = Color(0.83797062, 0.72687352, 0.54300893, 1)
+AthanorTextAction/fonts/font = ExtResource("3_mono")
+AthanorTextAction/font_sizes/font_size = 11
+AthanorTextAction/styles/normal = SubResource("StyleBox_button_empty")
+AthanorTextAction/styles/hover = SubResource("StyleBox_button_empty")
+AthanorTextAction/styles/pressed = SubResource("StyleBox_button_empty")
+AthanorTextAction/styles/focus = SubResource("StyleBox_button_empty")
+AthanorShell/base_type = &"VBoxContainer"
+AthanorShell/constants/separation = 0
+AthanorChromeMargin/base_type = &"MarginContainer"
+AthanorChromeMargin/constants/margin_left = 18
+AthanorChromeMargin/constants/margin_top = 8
+AthanorChromeMargin/constants/margin_right = 18
+AthanorChromeMargin/constants/margin_bottom = 8
+AthanorBarRow/base_type = &"HBoxContainer"
+AthanorBarRow/constants/separation = 12
+AthanorNavigationColumn/base_type = &"VBoxContainer"
+AthanorNavigationColumn/constants/separation = 6
+AthanorNavigationRow/base_type = &"HBoxContainer"
+AthanorNavigationRow/constants/separation = 8
+AthanorContentMargin/base_type = &"MarginContainer"
+AthanorContentMargin/constants/margin_left = 24
+AthanorContentMargin/constants/margin_top = 20
+AthanorContentMargin/constants/margin_right = 24
+AthanorContentMargin/constants/margin_bottom = 20
+AthanorContentColumn/base_type = &"VBoxContainer"
+AthanorContentColumn/constants/separation = 12
+AthanorPaperColumn/base_type = &"VBoxContainer"
+AthanorPaperColumn/constants/separation = 8
+AthanorStatusMargin/base_type = &"MarginContainer"
+AthanorStatusMargin/constants/margin_left = 18
+AthanorStatusMargin/constants/margin_top = 10
+AthanorStatusMargin/constants/margin_right = 18
+AthanorStatusMargin/constants/margin_bottom = 10
+AthanorStatusColumn/base_type = &"VBoxContainer"
+AthanorStatusColumn/constants/separation = 8
+AthanorStatusGrid/base_type = &"GridContainer"
+AthanorStatusGrid/constants/h_separation = 28
+AthanorStatusRow/base_type = &"HBoxContainer"
+AthanorStatusRow/constants/separation = 14
+AthanorField/base_type = &"LineEdit"
+AthanorField/colors/caret_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+AthanorField/colors/font_color = Color(0.87692922, 0.85448235, 0.81821482, 1)
+AthanorField/colors/font_placeholder_color = Color(0.47126942, 0.45411264, 0.42637103, 1)
+AthanorField/colors/font_selected_color = Color(0.00149408, 0.00156714, 0.00227788, 1)
+AthanorField/colors/font_uneditable_color = Color(0.70042545, 0.67890535, 0.64412206, 1)
+AthanorField/colors/selection_color = Color(0.76193195, 0.64497094, 0.44939537, 0.35)
+AthanorField/fonts/font = ExtResource("3_mono")
+AthanorField/font_sizes/font_size = 12
+AthanorField/styles/focus = SubResource("StyleBox_button_active")
+AthanorField/styles/normal = SubResource("StyleBox_button")
+AthanorField/styles/read_only = SubResource("StyleBox_button_disabled")
+AthanorInstrumentColumn/base_type = &"VBoxContainer"
+AthanorInstrumentColumn/constants/separation = 6
+AthanorInstrumentRow/base_type = &"HBoxContainer"
+AthanorInstrumentRow/constants/separation = 20

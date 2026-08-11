@@ -1,6 +1,6 @@
 {
   "name": "the-athanor",
-  "version": "0.11.0",
+  "version": "1.0.0-rc.1",
   "description": "A persistent identity, continuity, and memory platform for AI agents and collaborators.",
   "author": "Sol",
   "license": "Apache-2.0",
@@ -12,20 +12,15 @@
     "adapters/omp"
   ],
   "scripts": {
-    "test": "bun run test:core && bun run test:python && bun run test:substrate && bun run test:omp",
+    "test": "bun run test:core && bun run test:python && bun run test:substrate && bun run test:rust && bun run test:omp",
     "test:core": "bun test tests/*.test.ts",
     "test:api": "bun test tests/api-contract.test.ts",
     "test:python": "python -m unittest discover -s src -p \"test_*.py\"",
     "test:substrate": "cd substrate && python -m pytest",
     "test:rust": "cargo test --workspace",
     "test:omp": "cd adapters/omp && bun run test",
-    "test:omp:focused": "cd adapters/omp && bun run test:focused",
     "build:substrate": "cargo build --release -p athanor-substrate",
-    "build:portable": "bun run adapters/omp/build-portable.ts",
-    "build:release-manifest": "bun run adapters/omp/build-release-manifest.ts",
-    "build:installer": "cd adapters/omp && bun run build:installer",
-    "build:updater": "cd adapters/omp && bun run build:updater",
-    "gui": "cd adapters/omp && bun run gui",
-    "verify:install": "cd adapters/omp && bun run verify:install"
+    "build:godot": "cargo build -p athanor-godot --target-dir clients/godot/target",
+    "build:native": "pwsh -File installer/build-native-release.ps1 -Version 1.0.0-rc.1 -OutDir dist/native"
   }
 }

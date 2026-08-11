@@ -52,8 +52,12 @@ const zod = {
 };
 
 const substrateEnv = "ATHANOR_SUBSTRATE_ROOT";
+const executableEnv = "ATHANOR_SUBSTRATE_EXE";
+const fixtureEnv = "SOLARISAEL_TEST_SUBSTRATE_HEALTH_SCRIPT";
 const temporaryRoots: string[] = [];
 const originalSubstrate = process.env[substrateEnv];
+const originalExecutable = process.env[executableEnv];
+const originalFixture = process.env[fixtureEnv];
 
 function registeredTools(): CapturedTool[] {
   const tools: CapturedTool[] = [];
@@ -71,17 +75,24 @@ function toolJson(result: ToolResult) {
 async function sleepingSubstrate() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "omp-lane-status-timeout-"));
   temporaryRoots.push(dir);
+  const fixture = path.join(dir, "health-fixture.js");
   await writeFile(
-    path.join(dir, "health.py"),
-    ["import time", "time.sleep(8)", "print('{}')"].join("\n") + "\n",
+    fixture,
+    "setTimeout(() => console.log('{}'), 8_000);\n",
     "utf8",
   );
   process.env[substrateEnv] = dir;
+  process.env[executableEnv] = process.execPath;
+  process.env[fixtureEnv] = fixture;
 }
 
 afterEach(async () => {
   if (originalSubstrate === undefined) delete process.env[substrateEnv];
   else process.env[substrateEnv] = originalSubstrate;
+  if (originalExecutable === undefined) delete process.env[executableEnv];
+  else process.env[executableEnv] = originalExecutable;
+  if (originalFixture === undefined) delete process.env[fixtureEnv];
+  else process.env[fixtureEnv] = originalFixture;
   await Promise.all(temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -112,11 +123,11 @@ describe("routing tool feedback", () => {
         ok: false,
         configured: true,
         mode: "degraded",
-        reason: "health.py timed out",
+        reason: "Rust substrate health timed out",
         diagnostics: [{
           category: "operation",
           stage: "startup",
-          expected: { command: "python3 health.py", timeoutMs: 3_000 },
+          expected: { command: "athanor-substrate health", timeoutMs: 3_000 },
           observed: { timedOut: true },
         }],
       },

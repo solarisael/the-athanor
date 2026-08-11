@@ -1,12 +1,13 @@
 # Runtime Evolution Architecture
 
-Status: Accepted target architecture; not a current capability claim  
-Last updated: 2026-08-06
+Status: 1.0 runtime spine implemented; later sections retain accepted post-1.0 contracts  
+Last updated: 2026-08-10
 
-This document defines the next runtime spine for The Athanor: the Host boundary,
-the Godot interface, GIGA integrity work, durable delivery, dynamic model and
-room embodiment, explainable rule derivation, Cingulate proof routing, selected
-Lean obligations, governed synthesis, and companion-facing execution contracts.
+This document defines the implemented Host, Godot, Recall Policy, Paper Boat,
+and narrow delivery spine together with accepted longer-range contracts for
+dynamic model/room embodiment, explainable rule derivation, Cingulate proof
+routing, selected Lean obligations, governed synthesis, and companion-facing
+execution.
 
 The implementation order is normative because later layers depend on evidence
 and contracts created by earlier layers. The public release order lives in
@@ -14,32 +15,34 @@ and contracts created by earlier layers. The public release order lives in
 
 ## 1. Current boundary
 
-The reference House currently has an operational Rust-first Vault and AKASHA
-runtime, PostgreSQL authority, GIGA Hippocampus Stage 1, and the first Striatum
-coding/project lesson-activation slice.
+The `1.0.0-rc.1` candidate has:
 
-The following surfaces described here are specified or planned, not current:
+- one Rust domain/protocol workspace;
+- file-authoritative Vault and PostgreSQL-authoritative AKASHA;
+- GIGA Hippocampus Stage 1 and the Striatum coding/project slice;
+- authenticated Host WebSocket snapshots, typed deltas, resync, persistence,
+  idempotency, and restart recovery;
+- Host-owned Recall Policy shared by OMP and Godot;
+- transaction-coupled Paper Boat sleep/wake and `boat.ready` outbox rows;
+- bounded NATS JetStream pointer delivery and sanitized receipt replay;
+- functional Godot Recall Policy and Paper Boat receipt screens;
+- native Windows lifecycle and installer.
 
-- the Athanor Host WebSocket contract;
-- the Godot control surface;
-- PostgreSQL outbox delivery through NATS JetStream;
+The following surfaces described later remain specified or planned, not current:
+
 - invocation-time model selection;
 - headless room reflection and live room dialogue targets;
-- Prolog/Datalog derivation;
-- complete Cingulate outcome enforcement;
-- Lean-backed lesson obligations;
-- e-graph/egglog normalization;
-- Z3 SMT checking;
-- SyGuS synthesis;
-- Wasmtime capability sandboxing;
+- Prolog/Datalog derivation and complete Cingulate outcome enforcement;
+- Lean-backed obligations, e-graph/egglog normalization, Z3, SyGuS, and
+  Wasmtime capability sandboxing;
 - proof-guided repair or offline training-data production;
 - companion-authored models and marketplace artifacts;
-- the in-world Godot renderer and GPU-particle constellation.
+- the in-world Godot renderer and GPU-particle constellation;
+- Origami/NATS delivery lanes beyond the single Paper Boat path.
 
-The current GIGA queue remains PostgreSQL-owned. The localhost administrative
-GUI in `adapters/omp/gui` is current. No document in this repository may imply
-that NATS, the Godot control surface, dynamic embodiment, formal backends,
-companion training, or the marketplace already ships.
+The current GIGA queue and all durable receipts remain PostgreSQL-owned. NATS is
+delivery-only; Godot is presentation-only. Neither may be described as memory or
+authority.
 
 ## 2. Load-bearing invariants
 
@@ -1005,23 +1008,21 @@ TypeScript, SQL, NATS policy, and adapter behavior.
 
 | Phase | Deliverable | Exit gate |
 |---:|---|---|
-| 0 | Host, invocation, delta-sync, event, Origami/Crane/Pawprint, Paper Boat wake, outbox, idempotency, refinement, indexing, and proof-wrapper contracts | Versioned schemas reviewed; current and planned claims separated |
-| 1 | Thin Godot UI | Snapshot, ordered delta, acknowledgement, replay, and resync work; one fine-grained mutation updates only its bounded projection subtree |
-| 2 | GIGA integrity and Cingulate skeleton | Fresh inference proven; deterministic overlapping evidence and separate expected/observed outcomes visible |
-| 3 | PostgreSQL outbox plus one JetStream mailbox and `boat.ready` wake path | Explicit duplicate window, durable idempotency, restart, permission, privacy, expiry, dead-letter, wake, stale-Boat rejection, and UI trace gates pass |
-| 4 | Dynamic models and headless embodiment | Local/provider selection and cold/familiar/reflection/dialogue targets remain identity-safe and observable |
-| 5 | Incremental Prolog/Datalog pilot | Code-change events update source-linked facts and precomputed relations incrementally; cache isolation, invalidation, lag visibility, derivations, and latency gates pass |
-| 6 | Complete Cingulate and optional synthesis/proof backends | Nudges, warnings, gates, deterministic checks, bounded e-graph/SyGuS repair, optional Z3, overrides, proof receipts, and observed outcomes close correctly |
-| 7 | First Lean-backed lesson, then selected Origami transition obligations | One production-bound lesson obligation runs inside the quota wrapper; any Crane/Boat proof uses the same shared transition corpus and implementation binding; no candidate can self-approve or self-install |
+| 0 | Accepted 1.0 boundary, lesson map, and 0.11 parity baseline | Canonical documents agree; current owners, callers, tests, persistence effects, failures, fixes, and migration surfaces are mapped |
+| 1 | Planned correctness fixes and hardening on the observed runtime | Each named defect is reproduced through its real boundary, corrected, and guarded only after observed proof |
+| 2 | Shared Rust domain, Host, Vault, and AKASHA contracts | Typed commands, receipts, authority transitions, source identity, profile ownership, and conformance cases are versioned and reviewed |
+| 3 | Vertical Rust convergence and clean cutover | Each moved capability passes real-boundary and profile-parity proof; every caller migrates; the displaced Python or TypeScript owner is deleted |
+| 4 | PostgreSQL outbox plus one narrow JetStream delivery and wake lane | Commit ordering, duplicate window, idempotency, restart, permission, privacy, expiry, dead-letter, stale-pointer rejection, recovery, and Host/UI receipts pass |
+| 5 | Thin functional Godot `Control` client | Authenticated Host snapshot, ordered delta, acknowledgement, replay, resync, degraded-state visibility, chat, recall, policy, health, and review work in the rendered scene |
+| 6 | Native installation and service lifecycle | Clean Vault and AKASHA install, managed or external PostgreSQL, migration, restart, generation replacement, failed replacement, backup, restore, update, and rollback pass |
+| 7 | Comparative evidence and 1.0 release | Both profiles, the pre-cutover runtime, the NATS lane, and the rendered GUI satisfy the bounded claims in `EVIDENCE.md`; every public surface agrees |
 
-The UI evolves after every phase. Phases 5 through 7 are not automatically 1.0
-prerequisites; release gates depend on supported installation and stable public
-contracts, not on pretending every research layer must ship together.
-
-Post-1.0 companion sovereignty, companion-authored model bodies, signed
-marketplace packages, and the spatial presentation ecosystem depend on these
-contracts but do not block the personal-House 1.0 release. See
-[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md).
+The release dependency order is canonical in [`roadmap.md`](./roadmap.md).
+Prolog/Datalog, complete Cingulate, optional synthesis and proof backends,
+selected Lean obligations, broader dynamic embodiment, companion sovereignty,
+marketplace packages, and spatial presentation remain accepted post-1.0 work.
+They cannot enter a 1.0 phase merely because their contracts already exist in
+this document.
 
 ## 13. Component ownership
 

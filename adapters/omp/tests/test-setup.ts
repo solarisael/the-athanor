@@ -99,9 +99,6 @@ function assertIsolatedPostgresTarget(): void {
       + "matches the database identity in the configured substrate .env",
     );
   }
-  if (process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES === "1") {
-    fail("SOLARISAEL_HOUSE_DISABLE_POSTGRES=1 disables the isolated PostgreSQL test target");
-  }
 }
 
 function assertNoRenamedConfiguration(): void {
@@ -141,13 +138,8 @@ assertNoLiveConfiguration();
 
 process.env.SOLARISAEL_GIGA_ENABLED = "0";
 
-if (process.env[ISOLATED_POSTGRES_GATE] === "1") {
-  process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES = "0";
-  delete process.env.SOLARISAEL_MEMORY_SOURCE;
-} else {
+if (process.env[ISOLATED_POSTGRES_GATE] !== "1") {
   // Bun itself is a valid inert child for tests that exercise enabled-GIGA
   // validation; unlike the production binary it cannot open the substrate.
   process.env.ATHANOR_SUBSTRATE_EXE = process.execPath;
-  process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES = "1";
-  process.env.SOLARISAEL_MEMORY_SOURCE = "json";
 }

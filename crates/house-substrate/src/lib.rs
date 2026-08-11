@@ -1,10 +1,16 @@
 mod anamnesis;
 pub mod backup;
 mod bm25f;
+mod canon;
 mod cluster;
 mod config;
+mod entity;
 mod giga;
 mod giga_worker;
+mod health;
+mod lesson;
+pub mod migrations;
+mod paper_boat;
 mod recall;
 mod remember;
 pub mod state;
@@ -14,17 +20,32 @@ pub use anamnesis::{
     anamnesis_write,
 };
 pub use backup::{backup, restore};
+pub use canon::{canon_read, canon_write};
 pub use cluster::{
     ClusterGroup, ClusterMaintenanceResult, ClusterMembers, ClusterStaleness, cluster_is_stale,
     cluster_maintenance, cluster_staleness, spherical_kmeans,
 };
 pub use config::{AppError, Config};
+pub use entity::{EntityMatch, EntityResolveParams, EntityResolveResult, entity_resolve};
 pub use giga::{
     giga_candidate_list, giga_candidate_store, giga_event_claim, giga_event_finish,
     giga_event_ingest, giga_event_replay, giga_health, giga_promote, giga_queue_maintenance,
     giga_review,
 };
-pub use giga_worker::giga_process;
+pub use giga_worker::{GigaWorkerHandle, giga_process, spawn_giga_worker};
+pub use health::{
+    SubstrateHealthOptions, SubstrateHealthResult, substrate_health, substrate_health_with_config,
+};
+pub use lesson::{
+    DesignDocument, DesignDocumentFilters, DesignDocumentQueryParams, DesignDocumentQueryResult,
+    DesignDocumentTaxonomy, DesignDocumentWriteParams, DesignDocumentWriteReceipt,
+    LessonContextFilters, LessonContextMatch, LessonContextParams, LessonContextRecord,
+    LessonContextResult, LessonDeleteParams, LessonFamily, LessonFilters, LessonMutationReceipt,
+    LessonQueryParams, LessonQueryResult, LessonRecord, LessonTaxonomy, LessonUpdateParams,
+    design_document_query, design_document_write, lesson_context, lesson_delete, lesson_query,
+    lesson_update,
+};
+pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
 pub use recall::{RecallParams, RecallResult, recall, refresh_semantic_vocabulary};
 pub use remember::{RememberReceipt, RememberRequest, ThreadContinuation, remember};
 

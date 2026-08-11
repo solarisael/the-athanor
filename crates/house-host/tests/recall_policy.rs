@@ -1,0 +1,1055 @@
+use athanor_house_delivery::broker::Broker;
+use chrono::{Duration, SecondsFormat, Utc};
+use futures_util::{SinkExt, StreamExt};
+use house_host::{Host, HostConfig};
+use house_protocol::{
+    BOAT_RECEIPT_SCHEMA_VERSION, BOAT_RECEIPT_SUBJECT, BoatReceiptProjection,
+    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
+    RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_COMPLETE_REFRESH,
+    RECALL_POLICY_DELTA, RECALL_POLICY_EVALUATE, RECALL_POLICY_INVALIDATE_AFTER_COMPACTION,
+    RECALL_POLICY_RESYNC, RECALL_POLICY_SET_REQUESTED_MODE, RECALL_POLICY_SNAPSHOT,
+    RECALL_POLICY_SUBSCRIBE,
+};
+use serde_json::{Value, json};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::Path;
+use tempfile::TempDir;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use tokio::time::{Duration as TokioDuration, timeout};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::{HeaderValue, StatusCode, header};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+
+const TOKEN: &str = "test-only-host-token";
+type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+struct RunningHost {
+    address: SocketAddr,
+    shutdown: Option<oneshot::Sender<()>>,
+    task: JoinHandle<Result<(), String>>,
+}
+
+impl RunningHost {
+    async fn stop(mut self) {
+        self.shutdown.take().expect("shutdown sender").send(()).ok();
+        timeout(TokioDuration::from_secs(2), self.task)
+            .await
+            .expect("Host shutdown timed out")
+            .expect("Host task panicked")
+            .expect("Host shutdown failed");
+    }
+}
+
+fn write_room_state(root: &Path) {
+    let runtime = root.join("room").join(".omp").join("runtime");
+    std::fs::create_dir_all(&runtime).expect("create room runtime");
+    std::fs::write(
+        runtime.join("solarisael-house-state.json"),
+        serde_json::to_vec_pretty(&json!({
+            "version": 1,
+            "room": "kintsu",
+            "operator": "Sol",
+            "customTop": { "preserve": true },
+            "recallPolicy": {
+                "requestedMode": "auto",
+                "resolvedMode": "conversation",
+                "activeProject": null,
+                "resolutionReason": "default",
+                "lastRefreshReason": null,
+                "lastRefreshAt": null,
+                "workingSetEntries": 0,
+                "recoveryPending": false,
+                "recoveryTerms": [],
+                "degraded": null,
+                "updatedAt": null,
+                "customPolicy": ["preserve", 7]
+            }
+        }))
+        .expect("serialize fixture"),
+    )
+    .expect("write room state");
+}
+
+fn config(root: &Path) -> HostConfig {
+    HostConfig {
+        bind: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        ws_path: "/athanor/v1/ws".into(),
+        bearer_token: TOKEN.into(),
+        room_dir: root.join("room"),
+        state_dir: root.join("host-state"),
+        house_id: "solarisael".into(),
+        room: "kintsu".into(),
+        spirit: "Kintsu".into(),
+        session: "operator-session".into(),
+        recipient: "house-host".into(),
+        akasha_enabled: false,
+        nats_url: None,
+    }
+}
+
+async fn start(root: &Path) -> RunningHost {
+    start_with_config(config(root)).await
+}
+
+async fn start_with_config(config: HostConfig) -> RunningHost {
+    let host = Host::new(config).expect("construct Host");
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test Host");
+    let address = listener.local_addr().expect("test Host address");
+    let (shutdown, receiver) = oneshot::channel();
+    let task = tokio::spawn(host.serve(listener, async move {
+        let _ = receiver.await;
+    }));
+    RunningHost {
+        address,
+        shutdown: Some(shutdown),
+        task,
+    }
+}
+
+fn ws_url(host: &RunningHost) -> String {
+    format!("ws://{}/athanor/v1/ws", host.address)
+}
+
+async fn connect(host: &RunningHost) -> Socket {
+    let mut request = ws_url(host)
+        .into_client_request()
+        .expect("WebSocket request");
+    request.headers_mut().insert(
+        header::AUTHORIZATION,
+        HeaderValue::from_static("Bearer test-only-host-token"),
+    );
+    connect_async(request)
+        .await
+        .expect("authenticated socket")
+        .0
+}
+
+async fn send(socket: &mut Socket, value: &Value) {
+    socket
+        .send(Message::Text(value.to_string().into()))
+        .await
+        .expect("send command");
+}
+
+async fn receive(socket: &mut Socket) -> Value {
+    let message = timeout(TokioDuration::from_secs(2), socket.next())
+        .await
+        .expect("Host response timed out")
+        .expect("Host closed before response")
+        .expect("WebSocket response failed");
+    serde_json::from_str(message.to_text().expect("text response")).expect("JSON response")
+}
+
+async fn receive_for(socket: &mut Socket, correlation_id: &str, kind: &str) -> Value {
+    loop {
+        let value = receive(socket).await;
+        if value["correlation_id"] == correlation_id && value["command_or_event_type"] == kind {
+            return value;
+        }
+    }
+}
+
+fn command(kind: &str, message_id: &str, idempotency_key: &str, bound: bool) -> Value {
+    let expires = (Utc::now() + Duration::minutes(2)).to_rfc3339_opts(SecondsFormat::Millis, true);
+    json!({
+        "schema_version": 1,
+        "message_id": message_id,
+        "house_id": if bound { "solarisael" } else { "" },
+        "sender_room": if bound { "kintsu" } else { "" },
+        "sender_spirit": if bound { "Kintsu" } else { "" },
+        "sender_session": if bound { "operator-session" } else { "" },
+        "recipient": if bound { "house-host" } else { "" },
+        "command_or_event_type": kind,
+        "correlation_id": message_id,
+        "causation_id": "",
+        "reply_target": if bound { "operator-session" } else { "" },
+        "idempotency_key": idempotency_key,
+        "source_record_refs": [],
+        "scope": if bound { "room:kintsu:recall_policy" } else { "" },
+        "visibility": if bound { "operator" } else { "" },
+        "authority_class": if bound { "room_state" } else { "" },
+        "created_at": Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+        "expires_at": expires,
+        "max_hops": 1,
+        "projection_id": "recall_policy"
+    })
+}
+
+fn receipt_subscribe_command(message_id: &str) -> Value {
+    let mut value = command(PAPER_BOAT_RECEIPT_SUBSCRIBE, message_id, message_id, false);
+    value["projection_id"] = json!(PAPER_BOAT_RECEIPT_PROJECTION_ID);
+    value
+}
+
+fn set_command(message_id: &str, key: &str, base_version: u64, mode: &str) -> Value {
+    let mut value = command(RECALL_POLICY_SET_REQUESTED_MODE, message_id, key, true);
+    let object = value.as_object_mut().expect("command object");
+    object.insert("base_version".into(), json!(base_version));
+    object.insert(
+        "mutations".into(),
+        json!([{ "mutation_type": "field_update", "field": "requested_mode", "value": mode }]),
+    );
+    value
+}
+
+fn evaluate_command(
+    message_id: &str,
+    key: &str,
+    session: &str,
+    intent: &str,
+    terms: &[&str],
+    active_project: Option<&str>,
+    conversation_tokens: u64,
+    working_set_present: bool,
+) -> Value {
+    let mut value = command(RECALL_POLICY_EVALUATE, message_id, key, true);
+    let object = value.as_object_mut().expect("command object");
+    object.insert("sender_session".into(), json!(session));
+    object.insert("reply_target".into(), json!(session));
+    object.insert(
+        "facts".into(),
+        json!({
+            "query_route": {
+                "intent": intent,
+                "terms": terms,
+                "required_terms": terms,
+                "recognized_entities": []
+            },
+            "active_project": active_project,
+            "conversation_tokens": conversation_tokens,
+            "working_set_present": working_set_present
+        }),
+    );
+    value
+}
+
+fn complete_command(message_id: &str, key: &str, session: &str, query_terms: &[&str]) -> Value {
+    let mut value = command(RECALL_POLICY_COMPLETE_REFRESH, message_id, key, true);
+    let object = value.as_object_mut().expect("command object");
+    object.insert("sender_session".into(), json!(session));
+    object.insert("reply_target".into(), json!(session));
+    object.insert(
+        "refresh".into(),
+        json!({
+            "query_terms": query_terms,
+            "refresh_reason": "empty-working-set",
+            "entries": 2,
+            "has_working_set": true,
+            "warning": null
+        }),
+    );
+    value
+}
+
+fn invalidate_command(message_id: &str, key: &str, session: &str, summary: &str) -> Value {
+    let mut value = command(
+        RECALL_POLICY_INVALIDATE_AFTER_COMPACTION,
+        message_id,
+        key,
+        true,
+    );
+    let object = value.as_object_mut().expect("command object");
+    object.insert("sender_session".into(), json!(session));
+    object.insert("reply_target".into(), json!(session));
+    object.insert("compaction_summary".into(), json!(summary));
+    value
+}
+
+#[tokio::test]
+async fn auth_health_and_snapshot_are_explicit() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+
+    let response = reqwest::get(format!("http://{}/health", host.address))
+        .await
+        .expect("health request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let health: Value = response.json().await.expect("health JSON");
+    assert_eq!(health["projection_id"], "recall_policy");
+    assert_eq!(health["websocket_path"], "/athanor/v1/ws");
+    assert_eq!(health["akasha_delivery"]["broker_status"], "disabled");
+    assert_eq!(health["akasha_delivery"]["latest_event_id"], Value::Null);
+
+    let unauthenticated = connect_async(ws_url(&host))
+        .await
+        .expect_err("missing bearer refused");
+    let status = match unauthenticated {
+        tokio_tungstenite::tungstenite::Error::Http(response) => response.status(),
+        other => panic!("unexpected unauthenticated error: {other}"),
+    };
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let mut socket = connect(&host).await;
+    send(
+        &mut socket,
+        &command(RECALL_POLICY_SUBSCRIBE, "sub-1", "sub-key-1", false),
+    )
+    .await;
+    let snapshot = receive(&mut socket).await;
+    assert_eq!(snapshot["command_or_event_type"], RECALL_POLICY_SNAPSHOT);
+    assert_eq!(snapshot["state"]["requested_mode"], "auto");
+    assert_eq!(snapshot["state"]["resolved_mode"], "conversation");
+    assert!(
+        snapshot["state_hash"]
+            .as_str()
+            .is_some_and(|hash| hash.len() == 64)
+    );
+    assert_eq!(snapshot["sender_session"], "operator-session");
+    assert_eq!(snapshot["reply_target"], "house-host");
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn missing_broker_is_degraded_and_receipt_projection_never_invents_content() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let mut host_config = config(root.path());
+    host_config.akasha_enabled = true;
+    host_config.nats_url = None;
+    let host = start_with_config(host_config).await;
+
+    let health: Value = reqwest::get(format!("http://{}/health", host.address))
+        .await
+        .expect("health request")
+        .json()
+        .await
+        .expect("health JSON");
+    assert_eq!(health["akasha_delivery"]["broker_status"], "degraded");
+    assert_eq!(health["akasha_delivery"]["broker_configured"], false);
+
+    let mut socket = connect(&host).await;
+    send(&mut socket, &receipt_subscribe_command("receipt-subscribe")).await;
+    let event = receive_for(
+        &mut socket,
+        "receipt-subscribe",
+        PAPER_BOAT_RECEIPT_SNAPSHOT,
+    )
+    .await;
+    assert_eq!(event["projection_id"], PAPER_BOAT_RECEIPT_PROJECTION_ID);
+    assert_eq!(event["authority_class"], "delivery_receipt");
+    assert_eq!(event["state"]["status"], "degraded");
+    assert_eq!(event["state"]["receipt"], Value::Null);
+    assert!(event.get("body").is_none());
+    assert!(event.get("title").is_none());
+    host.stop().await;
+}
+
+#[tokio::test]
+#[ignore = "requires the test-owned NATS endpoint"]
+async fn nats_receipts_are_strict_room_scoped_and_ordered_on_the_host_socket() {
+    let nats_url = std::env::var("SOLARISAEL_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let mut host_config = config(root.path());
+    host_config.akasha_enabled = true;
+    host_config.nats_url = Some(nats_url.clone());
+    let host = start_with_config(host_config).await;
+    let mut socket = connect(&host).await;
+    send(&mut socket, &receipt_subscribe_command("receipt-subscribe")).await;
+    let initial = receive_for(
+        &mut socket,
+        "receipt-subscribe",
+        PAPER_BOAT_RECEIPT_SNAPSHOT,
+    )
+    .await;
+    assert_eq!(initial["projection_id"], PAPER_BOAT_RECEIPT_PROJECTION_ID);
+    while timeout(TokioDuration::from_millis(50), socket.next())
+        .await
+        .is_ok()
+    {}
+
+    let client = async_nats::connect(nats_url).await.expect("NATS publisher");
+    let fixture = json!({
+        "schema_version": 1,
+        "event_id": "8d2c04ae-ef20-4fbc-8141-d0259cbf495f",
+        "record_id": "42",
+        "room": "other",
+        "processed_at": "2026-08-10T09:30:00Z",
+        "original_stream_sequence": 8_000_000_000_u64,
+        "integrity_sha256": "a".repeat(64)
+    });
+    client
+        .publish(
+            BOAT_RECEIPT_SUBJECT,
+            serde_json::to_vec(&fixture).unwrap().into(),
+        )
+        .await
+        .expect("publish foreign receipt");
+    client.flush().await.expect("flush foreign receipt");
+    assert!(
+        timeout(TokioDuration::from_millis(250), socket.next())
+            .await
+            .is_err(),
+        "a foreign-room receipt must not produce a Host event"
+    );
+
+    let mut private = fixture.clone();
+    private["room"] = json!("kintsu");
+    private["body"] = json!("private prose");
+    client
+        .publish(
+            BOAT_RECEIPT_SUBJECT,
+            serde_json::to_vec(&private).unwrap().into(),
+        )
+        .await
+        .expect("publish private receipt");
+    client.flush().await.expect("flush private receipt");
+    let refused = receive(&mut socket).await;
+    assert_eq!(refused["state"]["status"], "refused");
+    assert_eq!(refused["state"]["receipt"], Value::Null);
+    assert!(!refused.to_string().contains("private prose"));
+
+    let mut valid = fixture;
+    valid["room"] = json!("kintsu");
+    client
+        .publish(
+            BOAT_RECEIPT_SUBJECT,
+            serde_json::to_vec(&valid).unwrap().into(),
+        )
+        .await
+        .expect("publish valid receipt");
+    client.flush().await.expect("flush valid receipt");
+    let delivered = receive(&mut socket).await;
+    assert_eq!(delivered["state"]["status"], "delivered");
+    assert_eq!(delivered["sequence"], 8_000_000_000_u64);
+    assert_eq!(delivered["state"]["receipt"]["record_id"], "42");
+    assert_eq!(delivered["sender_room"], "kintsu");
+    assert!(delivered.get("body").is_none());
+    assert!(delivered.get("title").is_none());
+    host.stop().await;
+}
+
+#[tokio::test]
+#[ignore = "requires the test-owned NATS endpoint"]
+async fn retained_receipt_published_before_host_is_replayed_to_the_room_projection() {
+    let nats_url = std::env::var("SOLARISAEL_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
+    let broker = Broker::connect(&nats_url).await.expect("delivery broker");
+    broker.configure().await.expect("exact delivery streams");
+    let event_id = uuid::Uuid::new_v4();
+    let original_stream_sequence =
+        u64::try_from(Utc::now().timestamp_micros()).expect("positive test clock");
+    let projection = BoatReceiptProjection {
+        schema_version: BOAT_RECEIPT_SCHEMA_VERSION,
+        event_id: event_id.to_string(),
+        record_id: "424242".into(),
+        room: "kintsu".into(),
+        processed_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+        original_stream_sequence,
+        integrity_sha256: "b".repeat(64),
+    };
+    broker
+        .publish_receipt(
+            event_id,
+            serde_json::to_vec(&projection).expect("serialize retained projection"),
+        )
+        .await
+        .expect("publish retained receipt before Host starts");
+
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let mut host_config = config(root.path());
+    host_config.akasha_enabled = true;
+    host_config.nats_url = Some(nats_url);
+    let host = start_with_config(host_config).await;
+    let mut socket = connect(&host).await;
+    send(
+        &mut socket,
+        &receipt_subscribe_command("retained-receipt-subscribe"),
+    )
+    .await;
+    let expected_event_id = event_id.to_string();
+    let delivered = timeout(TokioDuration::from_secs(5), async {
+        loop {
+            let event = receive(&mut socket).await;
+            if event["state"]["receipt"]["event_id"].as_str() == Some(expected_event_id.as_str()) {
+                break event;
+            }
+        }
+    })
+    .await
+    .expect("retained receipt replay timed out");
+    assert_eq!(delivered["state"]["status"], "delivered");
+    assert_eq!(delivered["state"]["receipt"]["record_id"], "424242");
+    assert_eq!(delivered["sequence"], original_stream_sequence);
+    assert!(delivered.get("body").is_none());
+    assert!(delivered.get("title").is_none());
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn set_retry_conflict_refusals_and_resync_preserve_authority() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut socket = connect(&host).await;
+    send(
+        &mut socket,
+        &command(RECALL_POLICY_SUBSCRIBE, "sub-1", "sub-key-1", false),
+    )
+    .await;
+    let initial = receive(&mut socket).await;
+    let base_version = initial["version"].as_u64().expect("snapshot version");
+
+    let authored = set_command("set-1", "durable-key", base_version, "quiet");
+    send(&mut socket, &authored).await;
+    let accepted = receive(&mut socket).await;
+    let delta = receive(&mut socket).await;
+    assert_eq!(
+        accepted["command_or_event_type"],
+        RECALL_POLICY_COMMAND_ACCEPTED
+    );
+    assert_eq!(delta["command_or_event_type"], RECALL_POLICY_DELTA);
+    assert_eq!(delta["base_version"], base_version);
+    assert_eq!(delta["next_version"], base_version + 1);
+    let mutations = delta["mutations"].as_array().expect("typed mutations");
+    for (field, value) in [
+        ("requested_mode", json!("quiet")),
+        ("resolved_mode", json!("quiet")),
+        ("resolution_reason", json!("explicit-override")),
+    ] {
+        assert!(
+            mutations.iter().any(|mutation| {
+                mutation["mutation_type"] == "field_update"
+                    && mutation["field"] == field
+                    && mutation["value"] == value
+            }),
+            "missing {field} delta"
+        );
+    }
+    assert_eq!(delta["source_event_ids"][0], accepted["event_id"]);
+
+    send(&mut socket, &authored).await;
+    let duplicate = receive(&mut socket).await;
+    assert_eq!(duplicate, accepted);
+    assert!(
+        timeout(TokioDuration::from_millis(100), socket.next())
+            .await
+            .is_err()
+    );
+
+    let conflict = set_command("set-1", "durable-key", base_version, "work");
+    send(&mut socket, &conflict).await;
+    let conflict = receive(&mut socket).await;
+    assert_eq!(
+        conflict["command_or_event_type"],
+        RECALL_POLICY_COMMAND_REFUSED
+    );
+    assert!(
+        conflict["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("different command body"))
+    );
+
+    send(
+        &mut socket,
+        &set_command("stale-1", "stale-key", base_version, "work"),
+    )
+    .await;
+    let stale = receive(&mut socket).await;
+    assert_eq!(
+        stale["command_or_event_type"],
+        RECALL_POLICY_COMMAND_REFUSED
+    );
+    assert!(
+        stale["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("stale base_version"))
+    );
+
+    let mut foreign = set_command("foreign-1", "foreign-key", base_version + 1, "work");
+    foreign["sender_room"] = json!("other-room");
+    send(&mut socket, &foreign).await;
+    let foreign = receive(&mut socket).await;
+    assert_eq!(
+        foreign["command_or_event_type"],
+        RECALL_POLICY_COMMAND_REFUSED
+    );
+    assert!(
+        foreign["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("foreign"))
+    );
+
+    let mut malformed = command(RECALL_POLICY_RESYNC, "bad-1", "bad-key", true);
+    malformed["invented_field"] = json!(true);
+    send(&mut socket, &malformed).await;
+    let malformed = receive(&mut socket).await;
+    assert_eq!(
+        malformed["command_or_event_type"],
+        RECALL_POLICY_COMMAND_REFUSED
+    );
+    assert!(
+        malformed["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("unknown field"))
+    );
+
+    let mut unknown_version = command(RECALL_POLICY_RESYNC, "version-1", "version-key", true);
+    unknown_version["schema_version"] = json!(2);
+    send(&mut socket, &unknown_version).await;
+    let unknown_version = receive(&mut socket).await;
+    assert_eq!(
+        unknown_version["command_or_event_type"],
+        RECALL_POLICY_COMMAND_REFUSED
+    );
+    assert!(
+        unknown_version["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("unsupported schema_version"))
+    );
+
+    let unknown_type = command("athanor.recall_policy.invented", "type-1", "type-key", true);
+    send(&mut socket, &unknown_type).await;
+    let unknown_type = receive(&mut socket).await;
+    assert_eq!(
+        unknown_type["command_or_event_type"],
+        RECALL_POLICY_COMMAND_REFUSED
+    );
+    assert!(
+        unknown_type["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("unknown command_or_event_type"))
+    );
+
+    send(
+        &mut socket,
+        &command(RECALL_POLICY_RESYNC, "sync-1", "sync-key", true),
+    )
+    .await;
+    let snapshot = receive(&mut socket).await;
+    assert_eq!(snapshot["command_or_event_type"], RECALL_POLICY_SNAPSHOT);
+    assert_eq!(snapshot["state"]["requested_mode"], "quiet");
+    assert_eq!(snapshot["version"], base_version + 1);
+
+    let persisted: Value = serde_json::from_slice(
+        &std::fs::read(
+            root.path()
+                .join("room/.omp/runtime/solarisael-house-state.json"),
+        )
+        .expect("persisted room state"),
+    )
+    .expect("persisted room JSON");
+    assert_eq!(persisted["customTop"]["preserve"], true);
+    assert_eq!(
+        persisted["recallPolicy"]["customPolicy"],
+        json!(["preserve", 7])
+    );
+    assert_eq!(persisted["recallPolicy"]["requestedMode"], "quiet");
+    assert_eq!(persisted["recallPolicy"]["resolvedMode"], "quiet");
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn cursor_and_idempotency_receipt_survive_restart() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+
+    let mut socket = connect(&host).await;
+    send(
+        &mut socket,
+        &command(RECALL_POLICY_SUBSCRIBE, "sub-1", "sub-key-1", false),
+    )
+    .await;
+    let initial = receive(&mut socket).await;
+    let authored = set_command(
+        "restart-set",
+        "restart-key",
+        initial["version"].as_u64().expect("version"),
+        "work",
+    );
+    send(&mut socket, &authored).await;
+    let accepted = receive(&mut socket).await;
+    let delta = receive(&mut socket).await;
+    host.stop().await;
+
+    let restarted = start(root.path()).await;
+    let mut socket = connect(&restarted).await;
+    send(
+        &mut socket,
+        &command(RECALL_POLICY_SUBSCRIBE, "sub-2", "sub-key-2", false),
+    )
+    .await;
+    let snapshot = receive(&mut socket).await;
+    assert_eq!(snapshot["version"], delta["next_version"]);
+    assert_eq!(snapshot["sequence"], delta["sequence"]);
+    assert_eq!(snapshot["state_hash"], delta["state_hash"]);
+    assert_eq!(snapshot["state"]["requested_mode"], "work");
+
+    send(&mut socket, &authored).await;
+    assert_eq!(receive(&mut socket).await, accepted);
+    assert!(
+        timeout(TokioDuration::from_millis(100), socket.next())
+            .await
+            .is_err()
+    );
+    restarted.stop().await;
+}
+#[tokio::test]
+async fn resync_reloads_external_room_state_and_makes_old_versions_stale() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut socket = connect(&host).await;
+    send(
+        &mut socket,
+        &command(
+            RECALL_POLICY_SUBSCRIBE,
+            "external-sub",
+            "external-sub-key",
+            false,
+        ),
+    )
+    .await;
+    let initial = receive(&mut socket).await;
+    let old_version = initial["version"].as_u64().expect("initial version");
+
+    let state_path = root
+        .path()
+        .join("room/.omp/runtime/solarisael-house-state.json");
+    let mut persisted: Value =
+        serde_json::from_slice(&std::fs::read(&state_path).expect("read external room state"))
+            .expect("external room JSON");
+    persisted["recallPolicy"]["requestedMode"] = json!("work");
+    persisted["recallPolicy"]["resolvedMode"] = json!("work");
+    persisted["recallPolicy"]["resolutionReason"] = json!("external-authority-change");
+    std::fs::write(
+        &state_path,
+        serde_json::to_vec_pretty(&persisted).expect("serialize external room state"),
+    )
+    .expect("write external room state");
+
+    send(
+        &mut socket,
+        &command(
+            RECALL_POLICY_RESYNC,
+            "external-sync",
+            "external-sync-key",
+            true,
+        ),
+    )
+    .await;
+    let snapshot = receive(&mut socket).await;
+    assert_eq!(snapshot["command_or_event_type"], RECALL_POLICY_SNAPSHOT);
+    assert_eq!(snapshot["version"], old_version + 1);
+    assert_eq!(snapshot["state"]["requested_mode"], "work");
+    assert_eq!(
+        snapshot["state"]["resolution_reason"],
+        "external-authority-change"
+    );
+
+    send(
+        &mut socket,
+        &set_command("external-stale", "external-stale-key", old_version, "quiet"),
+    )
+    .await;
+    let stale = receive(&mut socket).await;
+    assert_eq!(
+        stale["command_or_event_type"],
+        RECALL_POLICY_COMMAND_REFUSED
+    );
+    assert!(
+        stale["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("stale base_version"))
+    );
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn graceful_shutdown_drains_upgraded_websocket_tasks() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut socket = connect(&host).await;
+    let RunningHost { shutdown, task, .. } = host;
+    shutdown.expect("shutdown sender").send(()).ok();
+    timeout(TokioDuration::from_secs(2), task)
+        .await
+        .expect("detached upgrade task prevented shutdown drain")
+        .expect("Host task panicked")
+        .expect("Host shutdown failed");
+    let closed = timeout(TokioDuration::from_secs(1), socket.next())
+        .await
+        .expect("socket did not close after cancellation");
+    assert!(closed.is_none() || matches!(closed, Some(Ok(Message::Close(_)))));
+}
+
+#[tokio::test]
+async fn host_resolves_modes_hysteresis_and_quiet_without_adapter_policy() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut socket = connect(&host).await;
+
+    let work = evaluate_command(
+        "mode-work",
+        "mode-work-key",
+        "mode-session",
+        "technical_project",
+        &["athanor", "recall", "policy"],
+        Some("the-athanor"),
+        100,
+        false,
+    );
+    send(&mut socket, &work).await;
+    let work = receive_for(&mut socket, "mode-work", RECALL_POLICY_COMMAND_ACCEPTED).await;
+    assert_eq!(work["decision"]["refresh_reason"], "active-project-change");
+    assert_eq!(work["decision"]["should_recall"], true);
+
+    let complete = complete_command(
+        "mode-complete",
+        "mode-complete-key",
+        "mode-session",
+        &["athanor", "recall", "policy"],
+    );
+    send(&mut socket, &complete).await;
+    let complete = receive_for(&mut socket, "mode-complete", RECALL_POLICY_COMMAND_ACCEPTED).await;
+    assert_eq!(complete["state"]["working_set_entries"], 2);
+
+    let first_contact = evaluate_command(
+        "mode-contact-1",
+        "mode-contact-key-1",
+        "mode-session",
+        "casual_contact",
+        &["hello"],
+        Some("the-athanor"),
+        200,
+        true,
+    );
+    send(&mut socket, &first_contact).await;
+    let first_contact = receive_for(
+        &mut socket,
+        "mode-contact-1",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    assert_eq!(first_contact["decision"]["resolved_mode"], "mixed");
+
+    let second_contact = evaluate_command(
+        "mode-contact-2",
+        "mode-contact-key-2",
+        "mode-session",
+        "casual_contact",
+        &["cuddles"],
+        Some("the-athanor"),
+        300,
+        false,
+    );
+    send(&mut socket, &second_contact).await;
+    let second_contact = receive_for(
+        &mut socket,
+        "mode-contact-2",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    assert_eq!(second_contact["decision"]["resolved_mode"], "conversation");
+    assert_eq!(
+        second_contact["state"]["resolution_reason"],
+        "conversation-hysteresis-complete"
+    );
+
+    let quiet = set_command(
+        "mode-quiet",
+        "mode-quiet-key",
+        second_contact["version"].as_u64().expect("current version"),
+        "quiet",
+    );
+    send(&mut socket, &quiet).await;
+    receive_for(&mut socket, "mode-quiet", RECALL_POLICY_COMMAND_ACCEPTED).await;
+    let quiet_lookup = evaluate_command(
+        "mode-quiet-lookup",
+        "mode-quiet-lookup-key",
+        "mode-session",
+        "memory_lookup",
+        &["remember", "athanor"],
+        Some("the-athanor"),
+        400,
+        false,
+    );
+
+    send(&mut socket, &quiet_lookup).await;
+    let quiet_lookup = receive_for(
+        &mut socket,
+        "mode-quiet-lookup",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    assert_eq!(quiet_lookup["decision"]["resolved_mode"], "quiet");
+    assert_eq!(quiet_lookup["decision"]["should_recall"], false);
+    assert_eq!(quiet_lookup["decision"]["clear_working_set"], true);
+    let conversation = set_command(
+        "mode-conversation",
+        "mode-conversation-key",
+        quiet_lookup["version"].as_u64().expect("current version"),
+        "conversation",
+    );
+    send(&mut socket, &conversation).await;
+    receive_for(
+        &mut socket,
+        "mode-conversation",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    let conversation_lookup = evaluate_command(
+        "mode-conversation-lookup",
+        "mode-conversation-lookup-key",
+        "mode-session",
+        "memory_lookup",
+        &["remember", "continuity"],
+        None,
+        500,
+        false,
+    );
+    send(&mut socket, &conversation_lookup).await;
+    let conversation_lookup = receive_for(
+        &mut socket,
+        "mode-conversation-lookup",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    assert_eq!(
+        conversation_lookup["decision"]["resolved_mode"],
+        "conversation"
+    );
+    assert_eq!(conversation_lookup["decision"]["should_recall"], true);
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn compaction_recovery_and_session_working_set_survive_host_restart() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut socket = connect(&host).await;
+    let invalidate = invalidate_command(
+        "recover-invalidate",
+        "recover-invalidate-key",
+        "recover-session",
+        "Recall Policy compaction recovery PostgreSQL continuity",
+    );
+    send(&mut socket, &invalidate).await;
+    let invalidated = receive_for(
+        &mut socket,
+        "recover-invalidate",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    assert_eq!(invalidated["state"]["recovery_pending"], true);
+    assert_eq!(
+        invalidated["state"]["last_refresh_reason"],
+        "compaction-invalidated"
+    );
+    host.stop().await;
+
+    let restarted = start(root.path()).await;
+    let mut socket = connect(&restarted).await;
+    let recover = evaluate_command(
+        "recover-evaluate",
+        "recover-evaluate-key",
+        "recover-session",
+        "memory_lookup",
+        &["continuity"],
+        None,
+        50,
+        false,
+    );
+    send(&mut socket, &recover).await;
+    let recover = receive_for(
+        &mut socket,
+        "recover-evaluate",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    assert_eq!(
+        recover["decision"]["refresh_reason"],
+        "post-compaction-recovery"
+    );
+    assert_eq!(recover["decision"]["should_recall"], true);
+    assert!(
+        recover["decision"]["query"]
+            .as_str()
+            .expect("query")
+            .contains("postgresql")
+    );
+
+    let complete = complete_command(
+        "recover-complete",
+        "recover-complete-key",
+        "recover-session",
+        &["continuity", "postgresql"],
+    );
+    send(&mut socket, &complete).await;
+    let complete = receive_for(
+        &mut socket,
+        "recover-complete",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    assert_eq!(complete["state"]["recovery_pending"], false);
+    assert_eq!(complete["state"]["recovery_terms"], json!([]));
+    restarted.stop().await;
+}
+
+#[tokio::test]
+async fn concurrent_authenticated_clients_keep_session_state_isolated() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut alpha = connect(&host).await;
+    let mut beta = connect(&host).await;
+
+    send(
+        &mut alpha,
+        &evaluate_command(
+            "alpha-evaluate",
+            "alpha-evaluate-key",
+            "alpha-session",
+            "technical_project",
+            &["alpha", "athanor", "work"],
+            Some("alpha-project"),
+            100,
+            false,
+        ),
+    )
+    .await;
+    send(
+        &mut beta,
+        &evaluate_command(
+            "beta-evaluate",
+            "beta-evaluate-key",
+            "beta-session",
+            "technical_project",
+            &["beta", "athanor", "work"],
+            Some("beta-project"),
+            100,
+            false,
+        ),
+    )
+    .await;
+
+    let alpha = receive_for(&mut alpha, "alpha-evaluate", RECALL_POLICY_COMMAND_ACCEPTED).await;
+    let beta = receive_for(&mut beta, "beta-evaluate", RECALL_POLICY_COMMAND_ACCEPTED).await;
+    assert_eq!(alpha["sender_session"], "alpha-session");
+    assert_eq!(beta["sender_session"], "beta-session");
+    assert_eq!(alpha["decision"]["resolved_mode"], "work");
+    assert_eq!(beta["decision"]["resolved_mode"], "work");
+    assert_ne!(alpha["version"], beta["version"]);
+    assert!(
+        alpha["state_hash"]
+            .as_str()
+            .is_some_and(|hash| !hash.is_empty())
+    );
+    assert!(
+        beta["state_hash"]
+            .as_str()
+            .is_some_and(|hash| !hash.is_empty())
+    );
+    host.stop().await;
+}

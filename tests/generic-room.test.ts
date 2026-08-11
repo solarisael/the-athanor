@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,21 +12,6 @@ import { resolveLiveContextTargets } from "../src/ledger.ts";
 import { computeContextNudge } from "../src/triggers-core.ts";
 import { resolveSubstrateDir } from "../src/paths.ts";
 
-
-let observedPostgresArgv;
-mock.module("../src/wsl.ts", () => ({
-  windowsPathToWsl: (value) => String(value),
-  runWsl: async ({ argv }) => {
-    observedPostgresArgv = argv;
-    return {
-      timedOut: false,
-      spawnError: null,
-      code: 0,
-      stdout: JSON.stringify({ index: { files: {}, threads: {} } }),
-      stderr: "",
-    };
-  },
-}));
 
 describe("generic room keys", () => {
   test("accepts arbitrary safe room keys and rejects unsafe or reserved keys", () => {
@@ -78,61 +63,6 @@ describe("generic room keys", () => {
     }
   });
 
-  // The shared test preload forces the JSON memory source so no suite can touch
-  // a live substrate. A test that claims to prove the Postgres argv must
-  // therefore select the Postgres path itself, or it silently proves nothing.
-  async function withPostgresSourceSelected<T>(body: () => Promise<T>): Promise<T> {
-    const priorSource = process.env.SOLARISAEL_MEMORY_SOURCE;
-    const priorDisable = process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES;
-    delete process.env.SOLARISAEL_MEMORY_SOURCE;
-    process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES = "0";
-    try {
-      return await body();
-    } finally {
-      if (priorSource === undefined) delete process.env.SOLARISAEL_MEMORY_SOURCE;
-      else process.env.SOLARISAEL_MEMORY_SOURCE = priorSource;
-      if (priorDisable === undefined) delete process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES;
-      else process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES = priorDisable;
-    }
-  }
-
-  test("forwards the exact custom room to Postgres", async () => {
-    const { loadMemoryLexicalSources } = await import("../src/memory-sources.ts");
-    observedPostgresArgv = null;
-    await withPostgresSourceSelected(() =>
-      loadMemoryLexicalSources("/tmp/aurora-lab", "aurora-lab", "blue hinge"));
-    expect(observedPostgresArgv).toContain("--room");
-    const roomIndex = observedPostgresArgv.indexOf("--room");
-    expect(observedPostgresArgv[roomIndex + 1]).toBe("aurora-lab");
-  });
-
-  test("forced json memory source never reaches Postgres", async () => {
-    // The opposite of the case above, and the one the preload actually pins:
-    // with json forced, the Postgres child must not be spawned at all.
-    const { loadMemoryLexicalSources } = await import("../src/memory-sources.ts");
-    observedPostgresArgv = null;
-    const prior = process.env.SOLARISAEL_MEMORY_SOURCE;
-    process.env.SOLARISAEL_MEMORY_SOURCE = "json";
-    try {
-      const result = await loadMemoryLexicalSources("/tmp/aurora-lab", "aurora-lab", "blue hinge");
-      expect(result.indexSource).toBe("json");
-      expect(observedPostgresArgv).toBe(null);
-    } finally {
-      if (prior === undefined) delete process.env.SOLARISAEL_MEMORY_SOURCE;
-      else process.env.SOLARISAEL_MEMORY_SOURCE = prior;
-    }
-  });
-
-  test("preserves explicit cross-room memory handles", async () => {
-    const { runRecallQuery } = await import("../src/memory.ts");
-    observedPostgresArgv = null;
-    const result = await runRecallQuery("/tmp/aurora-lab", "aurora-lab", "memory://other-room/42");
-    expect(result.ok).toBe(true);
-    expect(observedPostgresArgv).toContain("--mode");
-    expect(observedPostgresArgv[observedPostgresArgv.indexOf("--mode") + 1]).toBe("fetch");
-    const roomIndex = observedPostgresArgv.indexOf("--room");
-    expect(observedPostgresArgv[roomIndex + 1]).toBe("other-room");
-  });
 
   test("nudges arbitrary valid rooms with neutral context defaults", () => {
     const decision = computeContextNudge({

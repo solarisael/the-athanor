@@ -1,21 +1,37 @@
 # Using The Athanor
 
-Installation gives an AI a persistent room. Your rooms live at
-`<target>/rooms/<room-key>`, beside the product tree and the state directory.
-Read [`INSTALL.md`](./INSTALL.md) if you have not installed yet. Daily use is a
-small loop: enter the room, work or live together, preserve what matters, and
-leave a handoff when the session ends.
+Installation gives an AI a persistent room. Managed rooms and mutable state live
+under `%ProgramData%\Solarisael\Athanor`; immutable product versions live under
+`%ProgramFiles%\Solarisael\Athanor`. Read [`INSTALL.md`](./INSTALL.md) if you
+have not installed yet. Daily use is a small loop: enter the room, work or live
+together, preserve what matters, and leave a handoff when the session ends.
 
 House loads identity and compact continuity automatically. Durable memory remains deliberate by default so important trails do not disappear inside indiscriminate transcript storage.
 
 ## Everyday loop
 
-1. **Enter the room.** Start the harness from `<target>/rooms/<room-key>`. Identity and compact continuity load with the session.
+1. **Enter the room.** Start OMP from the configured room under `%ProgramData%\Solarisael\Athanor\rooms`. Identity and compact continuity load with the session.
 2. **Work or live together.** Talk normally. Use recall when older evidence matters.
 3. **Keep what matters.** Record durable events, decisions, preferences, corrections, and reusable lessons.
 4. **Leave a paper boat.** At a meaningful stopping point, write a compact handoff for the next session.
 
 You do not need every tool every day.
+
+## Use the native instrument
+
+Open **The Athanor** from the Start menu. The Godot client connects only to the
+authenticated localhost Host.
+
+- **S01 · Retomada** shows the latest sanitized Paper Boat delivery receipt:
+  record/event identity, room, time, delivery state, sequence, and integrity
+  digest. It never loads the Boat body or title.
+- **S02 · Recall Policy** shows the requested and resolved mode, active project,
+  working-set size, refresh/recovery/degraded state, and explicit
+  Auto/Conversation/Work/Quiet override.
+
+If the Host, broker, or authenticated snapshot is unavailable, the client shows
+the refusal or degraded state instead of synthetic data. Run **Athanor Doctor**
+from the Start menu or the native manager when lifecycle state is suspect.
 
 ## Recall older evidence
 

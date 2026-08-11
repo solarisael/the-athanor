@@ -4,12 +4,12 @@ import { classifyRetrievalQuery, parseRetrievalQuery, shouldAutoRecall } from ".
 describe("parseRetrievalQuery", () => {
   test("extracts raw path/code tokens while indexing their searchable parts", () => {
     const parsed = parseRetrievalQuery(
-      "Please inspect project-atlas/src/query-routing.ts and src/retrieval-candidates.ts before changing QueryRouteV1.",
+      "Please inspect project-atlas/src/query-routing.ts and crates/house-vault/src/lib.rs before changing QueryRouteV1.",
     );
 
     expect(parsed.codeTokens).toEqual([
       "project-atlas/src/query-routing.ts",
-      "src/retrieval-candidates.ts",
+      "crates/house-vault/src/lib.rs",
     ]);
     expect(parsed.terms).toEqual(expect.arrayContaining([
       "project",
@@ -17,8 +17,8 @@ describe("parseRetrievalQuery", () => {
       "src",
       "query",
       "routing",
-      "retrieval",
-      "candidates",
+      "vault",
+      "house",
     ]));
   });
 

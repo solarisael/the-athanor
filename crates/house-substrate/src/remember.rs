@@ -301,9 +301,10 @@ pub async fn remember(
         "recorded_at": chrono::Utc::now().to_rfc3339(),
     });
     let mut tx = pool.begin().await?;
-    let memory_id = write_memory_tx(
+    let (memory_id, _) = write_memory_tx(
         &mut tx,
         &req.room,
+        "memory",
         &req.title,
         &source_path,
         &req.body,
@@ -337,7 +338,7 @@ pub(crate) struct PreparedMemoryWrite {
     threads: Vec<String>,
     chunks: Vec<(String, usize, usize, Option<String>)>,
     vectors: Option<Vec<Vec<f32>>>,
-    warnings: Vec<String>,
+    pub(crate) warnings: Vec<String>,
 }
 
 pub(crate) async fn prepare_memory_write(
@@ -386,32 +387,80 @@ pub(crate) async fn prepare_memory_write(
 pub(crate) async fn write_memory_tx(
     tx: &mut Transaction<'_, Postgres>,
     room: &str,
+    memory_type: &str,
     title: &str,
     source_path: &str,
     body: &str,
     supersedes: &[i64],
     meta: Value,
     prepared: &PreparedMemoryWrite,
-) -> Result<i64, AppError> {
-    let memory_id: i64 = sqlx::query_scalar(
-        "INSERT INTO memories
-         (room,type,date,dates,title,source_path,body,threads,meta)
-         VALUES ($1,'memory',$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (room,source_path) DO UPDATE
-         SET type='memory',date=EXCLUDED.date,dates=EXCLUDED.dates,title=EXCLUDED.title,
-             body=EXCLUDED.body,threads=EXCLUDED.threads,meta=EXCLUDED.meta
-         RETURNING id",
-    )
-    .bind(room)
-    .bind(prepared.primary_date)
-    .bind(&prepared.dates)
-    .bind(title)
-    .bind(source_path)
-    .bind(body)
-    .bind(&prepared.threads)
-    .bind(meta)
-    .fetch_one(&mut **tx)
-    .await?;
+) -> Result<(i64, bool), AppError> {
+    let (memory_id, inserted) = if memory_type == "paper-boat" {
+        let inserted_id: Option<i64> = sqlx::query_scalar(
+            "INSERT INTO memories
+             (room,type,date,dates,title,source_path,body,threads,meta)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             ON CONFLICT (room,source_path) DO NOTHING
+             RETURNING id",
+        )
+        .bind(room)
+        .bind(memory_type)
+        .bind(prepared.primary_date)
+        .bind(&prepared.dates)
+        .bind(title)
+        .bind(source_path)
+        .bind(body)
+        .bind(&prepared.threads)
+        .bind(&meta)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if let Some(memory_id) = inserted_id {
+            (memory_id, true)
+        } else {
+            let existing: Option<(i64, String, String)> = sqlx::query_as(
+                "SELECT id,type,body FROM memories
+                 WHERE room=$1 AND source_path=$2
+                 FOR KEY SHARE",
+            )
+            .bind(room)
+            .bind(source_path)
+            .fetch_optional(&mut **tx)
+            .await?;
+            match existing {
+                Some((memory_id, existing_type, existing_body))
+                    if existing_type == memory_type && existing_body == body =>
+                {
+                    return Ok((memory_id, false));
+                }
+                _ => {
+                    return Err(AppError::Invalid(
+                        "paper boat source identity conflicts with a different record".into(),
+                    ));
+                }
+            }
+        }
+    } else {
+        sqlx::query_as(
+            "INSERT INTO memories
+             (room,type,date,dates,title,source_path,body,threads,meta)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             ON CONFLICT (room,source_path) DO UPDATE
+             SET type=EXCLUDED.type,date=EXCLUDED.date,dates=EXCLUDED.dates,title=EXCLUDED.title,
+                 body=EXCLUDED.body,threads=EXCLUDED.threads,meta=EXCLUDED.meta
+             RETURNING id,(xmax=0) AS inserted",
+        )
+        .bind(room)
+        .bind(memory_type)
+        .bind(prepared.primary_date)
+        .bind(&prepared.dates)
+        .bind(title)
+        .bind(source_path)
+        .bind(body)
+        .bind(&prepared.threads)
+        .bind(&meta)
+        .fetch_one(&mut **tx)
+        .await?
+    };
     for thread_key in &prepared.threads {
         let thread_id: i64 = sqlx::query_scalar(
             "INSERT INTO threads (room,thread_key) VALUES ($1,$2)
@@ -502,7 +551,7 @@ pub(crate) async fn write_memory_tx(
         .execute(&mut **tx)
         .await?;
     }
-    Ok(memory_id)
+    Ok((memory_id, inserted))
 }
 
 async fn write_continuations_tx(
@@ -673,11 +722,12 @@ async fn remember_lesson(
         .collect::<Vec<_>>();
     let register = normalize_strings(&req.register);
     let thread_keys = normalize_strings(&req.thread_keys);
-    let design_register = if req.kind == "design-lesson" && register.is_empty() {
-        vec!["general".to_owned()]
-    } else {
-        Vec::new()
-    };
+    let default_register =
+        if matches!(req.kind.as_str(), "writing-lesson" | "design-lesson") && register.is_empty() {
+            vec!["general".to_owned()]
+        } else {
+            Vec::new()
+        };
     let meta = serde_json::json!({
         "origin": "direct-db-write",
         "kind": req.kind,
@@ -718,10 +768,8 @@ async fn remember_lesson(
             meta,
         )
         .await?,
-        "writing-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,voice,register,shape,title,lesson,trigger_context,thread_keys,tags,source_memory_path,meta) VALUES ('writing','house',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (voice,title) WHERE lesson_key='writing' DO UPDATE SET register=EXCLUDED.register,shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta RETURNING id")
-            .bind(req.voice.as_deref().unwrap_or("general")).bind(&register).bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).fetch_one(&mut *tx).await?,
-        "design-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,voice,register,shape,title,lesson,trigger_context,proof_pattern,example_text,thread_keys,tags,source_memory_path,meta) VALUES ('design','house',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (voice,title) WHERE lesson_key='design' DO UPDATE SET register=EXCLUDED.register,shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,proof_pattern=EXCLUDED.proof_pattern,example_text=EXCLUDED.example_text,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta RETURNING id")
-            .bind(req.voice.as_deref().unwrap_or("general")).bind(if design_register.is_empty() { &register } else { &design_register }).bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&req.proof_pattern).bind(&req.example_text).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).fetch_one(&mut *tx).await?,
+        "writing-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,voice,register,shape,title,lesson,trigger_context,thread_keys,tags,source_memory_path,meta) VALUES ('writing','house',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (voice,title) WHERE lesson_key='writing' DO UPDATE SET register=EXCLUDED.register,shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta RETURNING id").bind(req.voice.as_deref().unwrap_or("general")).bind(if register.is_empty() { &default_register } else { &register }).bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).fetch_one(&mut *tx).await?,
+        "design-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,voice,register,shape,title,lesson,trigger_context,proof_pattern,example_text,thread_keys,tags,source_memory_path,meta) VALUES ('design','house',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (voice,title) WHERE lesson_key='design' DO UPDATE SET register=EXCLUDED.register,shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,proof_pattern=EXCLUDED.proof_pattern,example_text=EXCLUDED.example_text,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta RETURNING id").bind(req.voice.as_deref().unwrap_or("general")).bind(if register.is_empty() { &default_register } else { &register }).bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&req.proof_pattern).bind(&req.example_text).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).fetch_one(&mut *tx).await?,
         "audio-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,shape,title,lesson,trigger_context,thread_keys,tags,source_memory_path,meta) VALUES ('audio','house',$1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (title) WHERE lesson_key='audio' DO UPDATE SET shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta RETURNING id")
             .bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).fetch_one(&mut *tx).await?,
         _ => return Err(AppError::Invalid("unsupported remember kind".into())),

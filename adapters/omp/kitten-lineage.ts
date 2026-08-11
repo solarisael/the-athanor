@@ -47,6 +47,16 @@ export type KittenQuestMemory = {
 
 const compactLine = (value: unknown): string => String(value ?? "").replace(/\s+/g, " ").trim();
 
+export function kittenLifecycleJoinKey(payload: unknown): string {
+  const event = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {};
+  const parentToolCallId = compactLine(event.parentToolCallId);
+  const index = Number(event.index);
+  if (parentToolCallId && Number.isInteger(index) && index >= 0) return `${parentToolCallId}:${index}`;
+  return compactLine(event.id);
+}
+
 export function lineageSlug(value: unknown, fallback = "unknown"): string {
   const slug = compactLine(value)
     .normalize("NFKD")
@@ -170,6 +180,65 @@ export async function readKittenReport(sessionFile: unknown): Promise<string> {
 
 export function kittenQuestIdempotencyKey(toolCallId: unknown, resultId: unknown): string {
   return `${compactLine(toolCallId)}:${compactLine(resultId)}`;
+}
+
+type KittenLineageDiagnostics = {
+  progressEvents: number;
+  lifecycleEvents: number;
+  lifecycleWithoutProgress: number;
+  writeCommitted: number;
+  writeFailed: number;
+  lastProgressId: string | null;
+  lastLifecycleId: string | null;
+  lastLifecycleStatus: string | null;
+  lastProgressKeys: string[];
+  lastLifecycleKeys: string[];
+};
+
+const lineageDiagnostics: KittenLineageDiagnostics = {
+  progressEvents: 0,
+  lifecycleEvents: 0,
+  lifecycleWithoutProgress: 0,
+  writeCommitted: 0,
+  writeFailed: 0,
+  lastProgressId: null,
+  lastLifecycleId: null,
+  lastLifecycleStatus: null,
+  lastProgressKeys: [],
+  lastLifecycleKeys: [],
+};
+
+function safeKeys(payload: unknown): string[] {
+  return payload && typeof payload === "object" && !Array.isArray(payload)
+    ? Object.keys(payload).sort().slice(0, 24)
+    : [];
+}
+
+export function noteKittenProgress(payload: unknown, id: string): void {
+  lineageDiagnostics.progressEvents += 1;
+  lineageDiagnostics.lastProgressId = id || null;
+  lineageDiagnostics.lastProgressKeys = safeKeys(payload);
+}
+
+export function noteKittenLifecycle(payload: unknown, id: string, progressFound: boolean): void {
+  lineageDiagnostics.lifecycleEvents += 1;
+  if (!progressFound) lineageDiagnostics.lifecycleWithoutProgress += 1;
+  lineageDiagnostics.lastLifecycleId = id || null;
+  lineageDiagnostics.lastLifecycleStatus = compactLine((payload as Record<string, unknown>)?.status) || null;
+  lineageDiagnostics.lastLifecycleKeys = safeKeys(payload);
+}
+
+export function noteKittenLineageWrite(committed: boolean): void {
+  if (committed) lineageDiagnostics.writeCommitted += 1;
+  else lineageDiagnostics.writeFailed += 1;
+}
+
+export function kittenLineageDiagnostics(): KittenLineageDiagnostics {
+  return {
+    ...lineageDiagnostics,
+    lastProgressKeys: [...lineageDiagnostics.lastProgressKeys],
+    lastLifecycleKeys: [...lineageDiagnostics.lastLifecycleKeys],
+  };
 }
 
 export function kittenLineageDisabled(environ: Record<string, string | undefined> = process.env): boolean {

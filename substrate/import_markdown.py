@@ -265,7 +265,7 @@ def main() -> None:
                         help="also import memory/**/*.md files not listed in memory/index.json as legacy-unindexed rows")
     parser.add_argument("--env-file", default=str(state_paths.default_dotenv_path()))
     parser.add_argument("--no-backup", dest="backup", action="store_false",
-                        help="skip backup.sh after success (default: backup runs)")
+                        help="skip the Rust-owned backup after success (default: backup runs)")
     parser.set_defaults(backup=True)
     args = parser.parse_args()
 

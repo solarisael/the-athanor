@@ -127,8 +127,18 @@ describe("recall compactor", () => {
     expect(compact.contentChunks).toEqual([]);
   });
 
-  test("preserves recall warnings while suppressing raw chunks and defaults omitted warnings", () => {
-    const warnings = ["semantic retrieval disabled: embedding model unavailable"];
+  test("bounds recall warnings while suppressing raw chunks and omits empty warnings", () => {
+    const warnings = [
+      "w".repeat(400),
+      "second",
+      "third",
+      "fourth",
+      "fifth",
+      "sixth",
+      "seventh",
+      "eighth",
+      "ninth",
+    ];
     const compact = compactRecall({
       ok: true,
       found: true,
@@ -144,10 +154,13 @@ describe("recall compactor", () => {
       contentChunks: [{ body: "suppressed content chunk" }],
     });
 
-    expect(compact.warnings).toBe(warnings);
+    expect(compact.warnings).not.toBe(warnings);
+    expect(compact.warnings).toHaveLength(8);
+    expect(compact.warnings[0]).toBe("w".repeat(300));
+    expect(compact.warnings.slice(1)).toEqual(warnings.slice(1, 8));
     expect(compact.semanticChunks).toEqual([]);
     expect(compact.contentChunks).toEqual([]);
-    expect(compactRecall({ ok: true }).warnings).toEqual([]);
+    expect(compactRecall({ ok: true })).not.toHaveProperty("warnings");
   });
 
   test("filters reverse-canon matches unless directly named or tied to a surfaced candidate path", () => {

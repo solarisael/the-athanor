@@ -2101,9 +2101,10 @@ pub async fn giga_promote(
                     "GIGA memory promotion source changed during preparation".into(),
                 ));
             }
-            let memory_id = write_memory_tx(
+            let (memory_id, _) = write_memory_tx(
                 &mut tx,
                 &candidate_room,
+                "memory",
                 payload.title(),
                 &source_path,
                 payload.body(),

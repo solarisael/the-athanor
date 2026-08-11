@@ -125,17 +125,4 @@ describe("GIGA fail-open lifecycle", () => {
     }
   });
 
-  test("shutdown waits for tracked detached Rust processing before closing", async () => {
-    let resolve!: () => void;
-    const pending = new Promise<void>((done) => { resolve = done; });
-    __gigaTest.trackGigaProcess("event-1", pending);
-    const closing = closeGigaTransports();
-    let closed = false;
-    void closing.then(() => { closed = true; });
-    await Promise.resolve();
-    expect(closed).toBe(false);
-    resolve();
-    await closing;
-    expect(closed).toBe(true);
-  });
 });

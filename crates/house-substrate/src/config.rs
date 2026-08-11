@@ -11,7 +11,12 @@ use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 use std::{
-    collections::BTreeSet, env, fs, io, path::PathBuf, str::FromStr, sync::LazyLock, time::Duration,
+    collections::BTreeSet,
+    env, fs, io,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::LazyLock,
+    time::Duration,
 };
 use thiserror::Error;
 
@@ -196,11 +201,12 @@ fn configuration_observed(dotenv: &Dotenv, reason: &str) -> Value {
 fn is_write_operation(operation: &str) -> bool {
     matches!(
         operation,
-        "remember"
+        "canon_write"
+            | "remember"
+            | "paper_boat_sleep"
             | "anamnesis_write"
             | "cluster_maintenance"
             | "giga_event_ingest"
-            | "giga_process"
             | "giga_event_claim"
             | "giga_event_finish"
             | "giga_event_replay"
@@ -212,13 +218,16 @@ fn is_write_operation(operation: &str) -> bool {
 
 fn validation_owner(operation: &str) -> (&'static str, &'static str) {
     match operation {
+        "canon_write" => ("src/canon.rs", "canon_write"),
+        "canon_read" => ("src/canon.rs", "canon_read"),
         "remember" => ("src/remember.rs", "RememberRequest::validate"),
+        "paper_boat_sleep" => ("src/paper_boat.rs", "PaperBoatSleepRequest::new"),
+        "paper_boat_wake" => ("src/paper_boat.rs", "PaperBoatWakeRequest::new"),
         "recall" => ("src/recall.rs", "RecallParams::validate"),
         "anamnesis" => ("src/anamnesis.rs", "AnamnesisParams::validate"),
         "anamnesis_write" => ("src/anamnesis.rs", "anamnesis_write"),
         "cluster_maintenance" => ("src/cluster.rs", "cluster_maintenance"),
         "giga_event_ingest" => ("src/giga.rs", "giga_event_ingest"),
-        "giga_process" => ("src/giga_worker.rs", "giga_process"),
         "giga_event_claim" => ("src/giga.rs", "giga_event_claim"),
         "giga_event_finish" => ("src/giga.rs", "giga_event_finish"),
         "giga_event_replay" => ("src/giga.rs", "giga_event_replay"),
@@ -254,12 +263,13 @@ fn validation_target(message: &str) -> &'static str {
 fn database_owner(operation: &str) -> (&'static str, &'static str) {
     match operation {
         "remember" => ("src/remember.rs", "remember"),
+        "paper_boat_sleep" => ("src/paper_boat.rs", "paper_boat_sleep"),
+        "paper_boat_wake" => ("src/paper_boat.rs", "paper_boat_wake"),
         "recall" => ("src/recall.rs", "recall"),
         "anamnesis" => ("src/anamnesis.rs", "anamnesis"),
         "anamnesis_write" => ("src/anamnesis.rs", "anamnesis_write"),
         "cluster_maintenance" => ("src/cluster.rs", "cluster_maintenance"),
         "giga_event_ingest" => ("src/giga.rs", "giga_event_ingest"),
-        "giga_process" => ("src/giga_worker.rs", "giga_process"),
         "giga_event_claim" => ("src/giga.rs", "giga_event_claim"),
         "giga_event_finish" => ("src/giga.rs", "giga_event_finish"),
         "giga_event_replay" => ("src/giga.rs", "giga_event_replay"),
@@ -701,7 +711,14 @@ impl AppError {
 
 impl Config {
     pub fn from_env() -> Result<Self, AppError> {
-        let dotenv = Dotenv::load(dotenv_target());
+        Self::from_dotenv(Dotenv::load(dotenv_target()))
+    }
+
+    pub fn from_env_file(path: &Path) -> Result<Self, AppError> {
+        Self::from_dotenv(Dotenv::load(Some(path.to_path_buf())))
+    }
+
+    fn from_dotenv(dotenv: Dotenv) -> Result<Self, AppError> {
         let database_url = env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
             .ok()
             .or_else(|| configured_value("DATABASE_URL", &dotenv))

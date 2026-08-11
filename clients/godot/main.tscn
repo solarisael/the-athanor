@@ -1,0 +1,662 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Theme" path="res://theme/athanor_theme.tres" id="1_theme"]
+
+[node name="AthanorProbe" type="AthanorProbe"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("1_theme")
+resume_screen_button = NodePath("ApplicationShell/Navigation/Margin/Column/ScreenStrip/Resume")
+recall_policy_screen_button = NodePath("ApplicationShell/Navigation/Margin/Column/ScreenStrip/RecallPolicy")
+resume_page = NodePath("ApplicationShell/ContentViewport/Page")
+recall_policy_page = NodePath("ApplicationShell/ContentViewport/RecallPolicyPage")
+
+[node name="Ground" type="Panel" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_type_variation = &"AthanorGround"
+
+[node name="ApplicationShell" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorShell"
+
+[node name="TopBar" type="PanelContainer" parent="ApplicationShell"]
+custom_minimum_size = Vector2(0, 52)
+layout_mode = 2
+theme_type_variation = &"AthanorTopBar"
+
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/TopBar"]
+layout_mode = 2
+theme_type_variation = &"AthanorChromeMargin"
+
+[node name="Row" type="HBoxContainer" parent="ApplicationShell/TopBar/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorBarRow"
+
+[node name="Mark" type="Label" parent="ApplicationShell/TopBar/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorKicker"
+text = "◆"
+vertical_alignment = 1
+
+[node name="Brand" type="Label" parent="ApplicationShell/TopBar/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorBrand"
+text = "The Athanor"
+vertical_alignment = 1
+
+[node name="PrototypeDisclosure" type="Label" parent="ApplicationShell/TopBar/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "PROTÓTIPO · S01 SINTÉTICA · S02 SÓ COM DADOS REAIS DO HOST"
+vertical_alignment = 1
+
+[node name="Spacer" type="Control" parent="ApplicationShell/TopBar/Margin/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="SystemStates" type="HBoxContainer" parent="ApplicationShell/TopBar/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorBarRow"
+
+[node name="Nominal" type="Button" parent="ApplicationShell/TopBar/Margin/Row/SystemStates"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "nominal"
+
+[node name="Akasha" type="Button" parent="ApplicationShell/TopBar/Margin/Row/SystemStates"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "akasha degradado"
+
+[node name="GigaBacklog" type="Button" parent="ApplicationShell/TopBar/Margin/Row/SystemStates"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "giga backlog"
+
+[node name="Classifier" type="Button" parent="ApplicationShell/TopBar/Margin/Row/SystemStates"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "classifier fora"
+
+[node name="ViewControls" type="PanelContainer" parent="ApplicationShell"]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+theme_type_variation = &"AthanorChromeBar"
+
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/ViewControls"]
+layout_mode = 2
+theme_type_variation = &"AthanorChromeMargin"
+
+[node name="Row" type="HBoxContainer" parent="ApplicationShell/ViewControls/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorBarRow"
+
+[node name="Label" type="Label" parent="ApplicationShell/ViewControls/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "LAYOUT"
+vertical_alignment = 1
+
+[node name="Auto" type="Button" parent="ApplicationShell/ViewControls/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "AUTO"
+
+[node name="Desktop" type="Button" parent="ApplicationShell/ViewControls/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "DESKTOP"
+
+[node name="Narrow" type="Button" parent="ApplicationShell/ViewControls/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "ESTREITO"
+
+[node name="ReducedMotion" type="Button" parent="ApplicationShell/ViewControls/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "MOVIMENTO REDUZIDO"
+
+[node name="Navigation" type="PanelContainer" parent="ApplicationShell"]
+custom_minimum_size = Vector2(0, 84)
+layout_mode = 2
+theme_type_variation = &"AthanorChromeBar"
+
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/Navigation"]
+layout_mode = 2
+theme_type_variation = &"AthanorChromeMargin"
+
+[node name="Column" type="VBoxContainer" parent="ApplicationShell/Navigation/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorNavigationColumn"
+
+[node name="GroupStrip" type="HBoxContainer" parent="ApplicationShell/Navigation/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorNavigationRow"
+
+[node name="Conversation" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "CONVERSA"
+
+[node name="Memory" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "MEMÓRIA"
+
+[node name="Giga" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "GIGA"
+
+[node name="Familiars" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "FAMILIARES"
+
+[node name="Sources" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "SOURCES"
+
+[node name="System" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "SISTEMA"
+
+[node name="ScreenStrip" type="HBoxContainer" parent="ApplicationShell/Navigation/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorNavigationRow"
+
+[node name="Label" type="Label" parent="ApplicationShell/Navigation/Margin/Column/ScreenStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "TELA"
+vertical_alignment = 1
+
+[node name="Resume" type="Button" parent="ApplicationShell/Navigation/Margin/Column/ScreenStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "S01  RETOMADA"
+
+[node name="RecallPolicy" type="Button" parent="ApplicationShell/Navigation/Margin/Column/ScreenStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "S02  RECALL POLICY"
+
+[node name="Context" type="Label" parent="ApplicationShell/Navigation/Margin/Column/ScreenStrip"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "ROOM WORK · SPIRIT CINZA · PERFIL OPERADOR-LOCAL"
+vertical_alignment = 1
+
+[node name="ContentViewport" type="MarginContainer" parent="ApplicationShell"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorContentMargin"
+
+[node name="Page" type="VBoxContainer" parent="ApplicationShell/ContentViewport"]
+layout_mode = 2
+theme_type_variation = &"AthanorContentColumn"
+
+[node name="Kicker" type="Label" parent="ApplicationShell/ContentViewport/Page"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageKicker"
+text = "S01 · CONVERSA E RETOMADA"
+
+[node name="Title" type="Label" parent="ApplicationShell/ContentViewport/Page"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageTitle"
+text = "Onde paramos em Oficina"
+
+[node name="Lead" type="Label" parent="ApplicationShell/ContentViewport/Page"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "O último Paper Boat aparece somente como recibo sanitizado do Athanor Host: identidade, room, hora e estado de entrega."
+autowrap_mode = 2
+
+[node name="LastPaperBoat" type="AthanorPaperBoatReceipt" parent="ApplicationShell/ContentViewport/Page"]
+custom_minimum_size = Vector2(0, 128)
+layout_mode = 2
+theme_type_variation = &"AthanorPaperBoat"
+host_url = "ws://127.0.0.1:8787/athanor/v1/ws"
+timestamp_label = NodePath("Column/Header/Timestamp")
+status_label = NodePath("Column/Body")
+disclosure_label = NodePath("Column/RecoveredContext")
+
+[node name="Column" type="VBoxContainer" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat"]
+layout_mode = 2
+theme_type_variation = &"AthanorPaperColumn"
+
+[node name="Header" type="HBoxContainer" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorBarRow"
+
+[node name="Title" type="Label" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column/Header"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "Último paper boat"
+
+[node name="Spacer" type="Control" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Timestamp" type="Label" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column/Header"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "— · ROOM —"
+
+[node name="Body" type="Label" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "◇ PENDENTE · aguardando recibo verificado"
+autowrap_mode = 2
+
+[node name="RecoveredContext" type="Label" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "SEM AUTORIDADE · ESTE PAINEL MOSTRA SÓ O RECIBO SANITIZADO DO ATHANOR HOST · NENHUM BODY OU TITLE É CARREGADO"
+
+[node name="RecallPolicyPage" type="VBoxContainer" parent="ApplicationShell/ContentViewport"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"AthanorContentColumn"
+
+[node name="Kicker" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageKicker"
+text = "S02 · RECALL POLICY · INSTRUMENTO LIGADO AO ATHANOR HOST"
+
+[node name="Title" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageTitle"
+text = "Recall Policy"
+
+[node name="Instrument" type="AthanorRecallPolicy" parent="ApplicationShell/ContentViewport/RecallPolicyPage"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorVessel"
+host_url = "ws://127.0.0.1:8787/athanor/v1/ws"
+disclosure_label = NodePath("Margin/Column/Disclosure")
+url_field = NodePath("Margin/Column/Columns/LinkColumn/UrlField")
+connect_button = NodePath("Margin/Column/Columns/LinkColumn/LinkActions/Connect")
+disconnect_button = NodePath("Margin/Column/Columns/LinkColumn/LinkActions/Disconnect")
+snapshot_button = NodePath("Margin/Column/Columns/LinkColumn/LinkActions/Snapshot")
+link_state_label = NodePath("Margin/Column/Columns/LinkColumn/LinkState")
+link_detail_label = NodePath("Margin/Column/Columns/LinkColumn/LinkDetail")
+projection_meta_label = NodePath("Margin/Column/Columns/LinkColumn/ProjectionMeta")
+binding_label = NodePath("Margin/Column/Columns/LinkColumn/Binding")
+requested_mode_value = NodePath("Margin/Column/Columns/PolicyColumn/StateGrid/RequestedMode/Value")
+resolved_mode_value = NodePath("Margin/Column/Columns/PolicyColumn/StateGrid/ResolvedMode/Value")
+active_project_value = NodePath("Margin/Column/Columns/PolicyColumn/StateGrid/ActiveProject/Value")
+working_set_value = NodePath("Margin/Column/Columns/PolicyColumn/StateGrid/WorkingSet/Value")
+resolution_label = NodePath("Margin/Column/Columns/PolicyColumn/Resolution")
+refresh_label = NodePath("Margin/Column/Columns/PolicyColumn/Refresh")
+recovery_label = NodePath("Margin/Column/Columns/PolicyColumn/Recovery")
+health_label = NodePath("Margin/Column/Columns/PolicyColumn/Health")
+mode_auto_button = NodePath("Margin/Column/Columns/PolicyColumn/ModeRow/Auto")
+mode_conversation_button = NodePath("Margin/Column/Columns/PolicyColumn/ModeRow/Conversation")
+mode_work_button = NodePath("Margin/Column/Columns/PolicyColumn/ModeRow/Work")
+mode_quiet_button = NodePath("Margin/Column/Columns/PolicyColumn/ModeRow/Quiet")
+selection_label = NodePath("Margin/Column/Columns/PolicyColumn/Selection")
+apply_button = NodePath("Margin/Column/Columns/PolicyColumn/CommitRow/Apply")
+command_state_label = NodePath("Margin/Column/Columns/PolicyColumn/CommitRow/CommandState")
+unavailable_reason_label = NodePath("Margin/Column/Columns/PolicyColumn/Unavailable")
+
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusMargin"
+
+[node name="Column" type="VBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="Disclosure" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorKicker"
+text = "SEM AUTORIDADE · ESTE CLIENTE NÃO É AUTORIDADE DE MEMÓRIA, IDENTIDADE OU POLÍTICA · NENHUM ESTADO APARECE AQUI SEM SNAPSHOT AUTENTICADO DO ATHANOR HOST · HOUSE, ROOM, SPIRIT E SESSION VÊM SÓ DO SNAPSHOT DO HOST, NUNCA DO CONTEXTO SINTÉTICO DA CASCA NEM DA PASTA DE TRABALHO"
+autowrap_mode = 2
+
+[node name="Columns" type="HBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorInstrumentRow"
+
+[node name="LinkColumn" type="VBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="LinkLabel" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "ENDEREÇO WEBSOCKET DO ATHANOR HOST LOCAL"
+
+[node name="UrlField" type="LineEdit" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn"]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+theme_type_variation = &"AthanorField"
+text = "ws://127.0.0.1:8787/athanor/v1/ws"
+
+[node name="LinkActions" type="HBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorNavigationRow"
+
+[node name="Connect" type="Button" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn/LinkActions"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "CONECTAR"
+
+[node name="Disconnect" type="Button" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn/LinkActions"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "DESCONECTAR"
+
+[node name="Snapshot" type="Button" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn/LinkActions"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "PEDIR SNAPSHOT"
+
+[node name="LinkState" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "◇ SEM CONEXÃO"
+
+[node name="LinkDetail" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "nenhuma conexão iniciada nesta sessão"
+autowrap_mode = 2
+
+[node name="ProjectionMeta" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "PROJEÇÃO recall_policy · SCHEMA 1 · NENHUMA VERSÃO APLICADA"
+autowrap_mode = 2
+
+[node name="Binding" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "VÍNCULO DO HOST NÃO RECEBIDO · O CLIENTE NÃO DECLARA HOUSE, ROOM, SPIRIT NEM SESSION"
+autowrap_mode = 2
+
+[node name="PolicyColumn" type="VBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 1.4
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="StateGrid" type="GridContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusGrid"
+columns = 4
+
+[node name="RequestedMode" type="VBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid/RequestedMode"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "REQUESTED MODE"
+
+[node name="Value" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid/RequestedMode"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "—"
+
+[node name="ResolvedMode" type="VBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid/ResolvedMode"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "RESOLVED MODE"
+
+[node name="Value" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid/ResolvedMode"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "—"
+
+[node name="ActiveProject" type="VBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid/ActiveProject"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "ACTIVE PROJECT"
+
+[node name="Value" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid/ActiveProject"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "—"
+
+[node name="WorkingSet" type="VBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid/WorkingSet"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "WORKING SET"
+
+[node name="Value" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid/WorkingSet"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "—"
+
+[node name="Resolution" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "MOTIVO DA RESOLUÇÃO: sem snapshot do Host"
+autowrap_mode = 2
+
+[node name="Refresh" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "ÚLTIMO REFRESH —"
+
+[node name="Recovery" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "RECUPERAÇÃO —"
+autowrap_mode = 2
+
+[node name="Health" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "DEGRADAÇÃO —"
+
+[node name="ModeRow" type="HBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorNavigationRow"
+
+[node name="ModeLabel" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/ModeRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "PROPOR"
+vertical_alignment = 1
+
+[node name="Auto" type="Button" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/ModeRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "◇ AUTO"
+
+[node name="Conversation" type="Button" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/ModeRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "◇ CONVERSA"
+
+[node name="Work" type="Button" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/ModeRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "◇ TRABALHO"
+
+[node name="Quiet" type="Button" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/ModeRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "◇ SILÊNCIO"
+
+[node name="Selection" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "SELEÇÃO PROPOSTA: NENHUMA"
+
+[node name="CommitRow" type="HBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusRow"
+
+[node name="Apply" type="Button" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/CommitRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+disabled = true
+text = "APLICAR MODO SOLICITADO"
+
+[node name="CommandState" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/CommitRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "SEM COMANDO ENVIADO"
+vertical_alignment = 1
+
+[node name="Unavailable" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "AÇÃO INDISPONÍVEL: SEM CONEXÃO COM O HOST"
+autowrap_mode = 2
+
+[node name="StatusDock" type="PanelContainer" parent="ApplicationShell"]
+custom_minimum_size = Vector2(0, 112)
+layout_mode = 2
+theme_type_variation = &"AthanorStatusDock"
+
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/StatusDock"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusMargin"
+
+[node name="Column" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusColumn"
+
+[node name="IdentityGrid" type="GridContainer" parent="ApplicationShell/StatusDock/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusGrid"
+columns = 5
+
+[node name="House" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/House"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "HOUSE"
+
+[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/House"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "Casa Demonstração"
+
+[node name="Room" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Room"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "ROOM"
+
+[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Room"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "work"
+
+[node name="Spirit" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Spirit"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "SPIRIT"
+
+[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Spirit"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "Cinza"
+
+[node name="Profile" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Profile"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "PROFILE"
+
+[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Profile"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "operador-local"
+
+[node name="Health" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Health"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "HEALTH"
+
+[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Health"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "◆ Vault  ◆ AKASHA  ◆ GIGA 12"
+
+[node name="OperatorRow" type="HBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusRow"
+
+[node name="Focus" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/OperatorRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "FOCO CONVERSATION · CENÁRIO NOMINAL · ↻ MOVIMENTO NORMAL"
+vertical_alignment = 1
+
+[node name="Spacer" type="Control" parent="ApplicationShell/StatusDock/Margin/Column/OperatorRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="OpenTerminal" type="Button" parent="ApplicationShell/StatusDock/Margin/Column/OperatorRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorTextAction"
+text = "ABRIR TERMINAL ↗"
+
+[node name="SolarControl" type="Button" parent="ApplicationShell/StatusDock/Margin/Column/OperatorRow"]
+custom_minimum_size = Vector2(34, 30)
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "☼"

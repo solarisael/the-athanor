@@ -1,20 +1,25 @@
 //! Newline-delimited JSON wire protocol, version 1.
+mod host;
+
+pub use host::*;
 
 use house_core::{
     AnamnesisActivation, AnamnesisAddDetails, AnamnesisAddRequest, AnamnesisAppendReceipt,
     AnamnesisAppendRequest, AnamnesisFidelity, AnamnesisKind, AnamnesisReadMode,
-    AnamnesisReadRequest, AnamnesisReceipt, AnamnesisSeedRep, ClusterMaintenanceOperation,
+    AnamnesisReadRequest, AnamnesisReceipt, AnamnesisSeedRep, CanonAttribution, CanonPointer,
+    CanonReadRequest, CanonWriteReceipt, CanonWriteRequest, ClusterMaintenanceOperation,
     ClusterMaintenanceRequest, GigaAuthority, GigaCandidate, GigaCandidateKind,
     GigaClassifierIdentity, GigaCodingLessonPromotionPayload, GigaEvent, GigaEventClaimReceipt,
     GigaEventClaimRequest, GigaEventFinishOutcome, GigaEventFinishReceipt, GigaEventFinishRequest,
     GigaEventReplayReceipt, GigaEventReplayRequest, GigaEventType, GigaLifecycle,
-    GigaMemoryPromotionPayload, GigaProcessRequest, GigaProjectLessonPromotionPayload,
-    GigaPromotionAuthority, GigaPromotionPayload, GigaPromotionReceipt, GigaPromotionRequest,
-    GigaPublicationConsent, GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest,
-    GigaQueueMaintenanceScope, GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState,
-    GigaRisk, GigaScope, GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType,
-    GigaVisibility, RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails,
-    RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
+    GigaMemoryPromotionPayload, GigaProjectLessonPromotionPayload, GigaPromotionAuthority,
+    GigaPromotionPayload, GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
+    GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
+    GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
+    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, PaperBoatRecord,
+    PaperBoatSleepReceipt, PaperBoatSleepRequest, PaperBoatWakeReceipt, PaperBoatWakeRequest,
+    RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberReceipt,
+    RememberRequest, RoomKey, ThreadContinuation, UnboatedMemory,
 };
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -34,6 +39,56 @@ pub struct RequestEnvelope {
     pub params: Value,
 }
 
+fn default_substrate_backup_age_hours() -> f64 {
+    24.0
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SubstrateHealthParams {
+    #[serde(default)]
+    pub skip_embedding: bool,
+    #[serde(default = "default_substrate_backup_age_hours")]
+    pub max_backup_age_hours: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SubstrateMigrationsParams {}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PaperBoatSleepParams {
+    pub room: String,
+    pub body: String,
+    #[serde(default = "default_backup")]
+    pub backup: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PaperBoatWakeParams {
+    pub room: String,
+}
+
+impl TryFrom<PaperBoatSleepParams> for PaperBoatSleepRequest {
+    type Error = ProtocolError;
+
+    fn try_from(params: PaperBoatSleepParams) -> Result<Self, Self::Error> {
+        PaperBoatSleepRequest::new(params.room, params.body, params.backup)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<PaperBoatWakeParams> for PaperBoatWakeRequest {
+    type Error = ProtocolError;
+
+    fn try_from(params: PaperBoatWakeParams) -> Result<Self, Self::Error> {
+        PaperBoatWakeRequest::new(params.room)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ThreadContinuationParams {
@@ -51,6 +106,8 @@ pub struct RememberParams {
     pub body: String,
     #[serde(default)]
     pub source_path: Option<String>,
+    #[serde(default, rename = "sourceMemoryPath")]
+    pub source_memory_path: Option<String>,
     #[serde(default)]
     pub threads: Vec<String>,
     #[serde(default)]
@@ -121,6 +178,35 @@ pub struct RecallParams {
     pub content_min_similarity: f64,
     #[serde(default)]
     pub temporal_decay: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct VaultRecallParams {
+    pub room: String,
+    pub room_dir: String,
+    pub query: String,
+}
+
+impl VaultRecallParams {
+    fn validate(self) -> Result<Self, ProtocolError> {
+        if self.room.trim().is_empty() {
+            return Err(ProtocolError::InvalidParams(
+                "vault_recall room must be non-empty".into(),
+            ));
+        }
+        if self.room_dir.trim().is_empty() {
+            return Err(ProtocolError::InvalidParams(
+                "vault_recall room_dir must be non-empty".into(),
+            ));
+        }
+        if self.query.trim().is_empty() {
+            return Err(ProtocolError::InvalidParams(
+                "vault_recall query must be non-empty".into(),
+            ));
+        }
+        Ok(self)
+    }
 }
 
 fn deserialize_unit_fraction<'de, D>(deserializer: D) -> Result<f64, D::Error>
@@ -911,7 +997,8 @@ impl TryFrom<RememberParams> for RememberRequest {
             ));
         }
         if !kind.is_lesson()
-            && (params.shape.is_some()
+            && (params.source_memory_path.is_some()
+                || params.shape.is_some()
                 || params.voice.is_some()
                 || !params.register.is_empty()
                 || params.scope.is_some()
@@ -978,6 +1065,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                 params.body,
                 RememberLessonDetails {
                     backup: params.backup,
+                    source_memory_path: params.source_memory_path,
                     shape: params.shape,
                     voice: params.voice,
                     register: params.register,
@@ -1188,7 +1276,323 @@ impl AnamnesisWriteParams {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CanonAttributionParams {
+    pub actor: String,
+    pub origin: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CanonPointerParams {
+    pub file: String,
+    #[serde(default)]
+    pub lines: Option<[u32; 2]>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CanonWriteParams {
+    pub room: String,
+    pub name: String,
+    pub kind: String,
+    pub summary: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub search_boost: Option<String>,
+    #[serde(default)]
+    pub weighty: bool,
+    #[serde(default)]
+    pub pointer_files: Vec<CanonPointerParams>,
+    #[serde(default)]
+    pub summary_as_of: Option<String>,
+    #[serde(default)]
+    pub supersedes: Vec<String>,
+    pub attribution: CanonAttributionParams,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CanonReadParams {
+    pub room: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub include_history: bool,
+}
+
+fn canon_id(value: &str, field: &str) -> Result<u64, ProtocolError> {
+    value
+        .parse::<u64>()
+        .ok()
+        .filter(|id| *id > 0 && *id <= i64::MAX as u64)
+        .ok_or_else(|| {
+            ProtocolError::InvalidParams(format!("{field} must be a positive PostgreSQL BIGINT"))
+        })
+}
+
+impl TryFrom<CanonWriteParams> for CanonWriteRequest {
+    type Error = ProtocolError;
+
+    fn try_from(value: CanonWriteParams) -> Result<Self, Self::Error> {
+        let pointers = value
+            .pointer_files
+            .into_iter()
+            .map(|pointer| {
+                CanonPointer::new(
+                    pointer.file,
+                    pointer.lines.map(|lines| (lines[0], lines[1])),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+        let supersedes = value
+            .supersedes
+            .iter()
+            .map(|id| canon_id(id, "supersedes ID"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let attribution = CanonAttribution::new(value.attribution.actor, value.attribution.origin)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+        CanonWriteRequest::new(
+            value.room,
+            value.name,
+            value.kind,
+            value.summary,
+            value.aliases,
+            value.search_boost,
+            value.weighty,
+            pointers,
+            value.summary_as_of,
+            supersedes,
+            attribution,
+        )
+        .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+impl TryFrom<CanonReadParams> for CanonReadRequest {
+    type Error = ProtocolError;
+
+    fn try_from(value: CanonReadParams) -> Result<Self, Self::Error> {
+        let id = value
+            .id
+            .as_deref()
+            .map(|id| canon_id(id, "id"))
+            .transpose()?;
+        CanonReadRequest::new(value.room, id, value.name, value.include_history)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CanonEntityResult {
+    pub entity_id: String,
+    pub room: String,
+    pub name: String,
+    pub kind: String,
+    pub summary: String,
+    pub aliases: Vec<String>,
+    pub search_boost: Option<String>,
+    pub weighty: bool,
+    pub pointer_files: Value,
+    pub summary_as_of: Option<String>,
+    pub meta: Value,
+    pub authority: String,
+    pub superseded_by: Option<String>,
+    pub supersedes: Vec<String>,
+    pub attributed_by: String,
+    pub attribution_origin: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CanonReadResult {
+    pub ok: bool,
+    pub entities: Vec<CanonEntityResult>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct CanonWriteResult {
+    pub ok: bool,
+    pub durable: bool,
+    pub authority: String,
+    pub entity_authority: String,
+    pub entity_id: String,
+    pub room: String,
+    pub name: String,
+    pub superseded_entity_ids: Vec<String>,
+    pub attributed_by: String,
+    pub attribution_origin: String,
+}
+
+impl From<CanonWriteReceipt> for CanonWriteResult {
+    fn from(value: CanonWriteReceipt) -> Self {
+        Self {
+            ok: true,
+            durable: true,
+            authority: "postgres".into(),
+            entity_authority: "active".into(),
+            entity_id: value.entity_id().to_string(),
+            room: value.room().to_string(),
+            name: value.name().into(),
+            superseded_entity_ids: value
+                .superseded_entity_ids()
+                .iter()
+                .map(u64::to_string)
+                .collect(),
+            attributed_by: value.attribution().actor().into(),
+            attribution_origin: value.attribution().origin().into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct PaperBoatSleepResult {
+    pub ok: bool,
+    pub memory_id: String,
+    pub room: String,
+    pub source_path: String,
+    pub outbox_event_id: String,
+    pub inserted: bool,
+    pub durable: bool,
+    pub authority: String,
+    pub backup_status: String,
+    pub warnings: Vec<String>,
+}
+
+impl From<PaperBoatSleepReceipt> for PaperBoatSleepResult {
+    fn from(receipt: PaperBoatSleepReceipt) -> Self {
+        Self {
+            ok: true,
+            memory_id: receipt.memory_id().to_string(),
+            room: receipt.room().to_string(),
+            source_path: receipt.source_path().into(),
+            outbox_event_id: receipt.outbox_event_id().into(),
+            inserted: receipt.inserted(),
+            durable: receipt.durable(),
+            authority: "postgres".into(),
+            backup_status: receipt.backup_status().as_str().into(),
+            warnings: receipt.warnings().to_vec(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct PaperBoatUnboatedResult {
+    pub id: String,
+    pub title: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub source_path: String,
+    pub created_at: String,
+}
+
+impl From<&UnboatedMemory> for PaperBoatUnboatedResult {
+    fn from(memory: &UnboatedMemory) -> Self {
+        Self {
+            id: memory.id.to_string(),
+            title: memory.title.clone(),
+            kind: memory.kind.clone(),
+            source_path: memory.source_path.clone(),
+            created_at: memory.created_at.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct PaperBoatWakeResult {
+    pub ok: bool,
+    pub found: bool,
+    pub room: String,
+    pub id: Option<String>,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub date: Option<String>,
+    pub source_path: Option<String>,
+    pub created_at: Option<String>,
+    pub unboated: Vec<PaperBoatUnboatedResult>,
+    pub unboated_truncated: bool,
+    pub warnings: Vec<String>,
+}
+
+impl From<PaperBoatWakeReceipt> for PaperBoatWakeResult {
+    fn from(receipt: PaperBoatWakeReceipt) -> Self {
+        let room = receipt.room().to_string();
+        let warnings = receipt.warnings().to_vec();
+        match receipt.boat() {
+            Some(PaperBoatRecord {
+                id,
+                title,
+                body,
+                date,
+                source_path,
+                created_at,
+                unboated,
+                unboated_truncated,
+            }) => Self {
+                ok: true,
+                found: true,
+                room,
+                id: Some(id.to_string()),
+                title: Some(title.clone()),
+                body: Some(body.clone()),
+                date: date.clone(),
+                source_path: Some(source_path.clone()),
+                created_at: Some(created_at.clone()),
+                unboated: unboated.iter().map(Into::into).collect(),
+                unboated_truncated: *unboated_truncated,
+                warnings,
+            },
+            None => Self {
+                ok: true,
+                found: false,
+                room,
+                id: None,
+                title: None,
+                body: None,
+                date: None,
+                source_path: None,
+                created_at: None,
+                unboated: Vec::new(),
+                unboated_truncated: false,
+                warnings,
+            },
+        }
+    }
+}
+
 impl RequestEnvelope {
+    pub fn canon_write_request(self) -> Result<CanonWriteRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "canon_write" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<CanonWriteParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
+
+    pub fn canon_read_request(self) -> Result<CanonReadRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "canon_read" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<CanonReadParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
     pub fn remember_request(self) -> Result<RememberRequest, ProtocolError> {
         if self.protocol != PROTOCOL_VERSION {
             return Err(ProtocolError::ProtocolMismatch(self.protocol));
@@ -1200,6 +1604,29 @@ impl RequestEnvelope {
             .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
         params.try_into()
     }
+    pub fn paper_boat_sleep_request(self) -> Result<PaperBoatSleepRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "paper_boat_sleep" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<PaperBoatSleepParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
+
+    pub fn paper_boat_wake_request(self) -> Result<PaperBoatWakeRequest, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "paper_boat_wake" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<PaperBoatWakeParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .try_into()
+    }
     pub fn recall_request(self) -> Result<RecallRequest, ProtocolError> {
         if self.protocol != PROTOCOL_VERSION {
             return Err(ProtocolError::ProtocolMismatch(self.protocol));
@@ -1210,6 +1637,17 @@ impl RequestEnvelope {
         let params: RecallParams = serde_json::from_value(self.params)
             .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
         params.try_into()
+    }
+    pub fn vault_recall_request(self) -> Result<VaultRecallParams, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "vault_recall" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<VaultRecallParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
+            .validate()
     }
     pub fn cluster_maintenance_request(self) -> Result<ClusterMaintenanceRequest, ProtocolError> {
         if self.protocol != PROTOCOL_VERSION {
@@ -1264,17 +1702,6 @@ impl RequestEnvelope {
         }
         serde_json::from_value::<GigaEventParams>(self.params)
             .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?
-            .try_into()
-    }
-    pub fn giga_process_request(self) -> Result<GigaProcessRequest, ProtocolError> {
-        if self.protocol != PROTOCOL_VERSION {
-            return Err(ProtocolError::ProtocolMismatch(self.protocol));
-        }
-        if self.method != "giga_process" {
-            return Err(ProtocolError::UnknownMethod(self.method));
-        }
-        serde_json::from_value::<GigaProcessParams>(self.params)
-            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
             .try_into()
     }
     pub fn giga_event_claim_request(self) -> Result<GigaEventClaimRequest, ProtocolError> {
@@ -1366,6 +1793,32 @@ impl RequestEnvelope {
         serde_json::from_value::<GigaHealthParams>(self.params)
             .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?
             .try_into()
+    }
+    pub fn substrate_health_request(self) -> Result<SubstrateHealthParams, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "substrate_health" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        let params = serde_json::from_value::<SubstrateHealthParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+        if !params.max_backup_age_hours.is_finite() || params.max_backup_age_hours <= 0.0 {
+            return Err(ProtocolError::InvalidParams(
+                "maxBackupAgeHours must be a positive finite number".into(),
+            ));
+        }
+        Ok(params)
+    }
+    pub fn substrate_migrations_request(self) -> Result<SubstrateMigrationsParams, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "substrate_migrations" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value::<SubstrateMigrationsParams>(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
     }
     pub fn parse_line(line: &str) -> Result<Self, ProtocolError> {
         serde_json::from_str(line).map_err(|e| ProtocolError::Malformed(e.to_string()))
@@ -1680,12 +2133,6 @@ pub struct GigaEventParams {
     pub source_refs: Vec<GigaSourceRefParams>,
     pub lifecycle: GigaLifecycleParams,
     pub created_at: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct GigaProcessParams {
-    pub event_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -2146,15 +2593,6 @@ pub struct GigaHealthResult {
     pub failed_count: u64,
     pub candidates_by_kind_state: Vec<GigaHealthCount>,
     pub classifier: GigaClassifierHealthResult,
-}
-
-impl TryFrom<GigaProcessParams> for GigaProcessRequest {
-    type Error = ProtocolError;
-
-    fn try_from(value: GigaProcessParams) -> Result<Self, Self::Error> {
-        GigaProcessRequest::new(value.event_id)
-            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
-    }
 }
 
 impl TryFrom<GigaEventClaimParams> for GigaEventClaimRequest {
@@ -2835,6 +3273,73 @@ impl TryFrom<GigaReviewParams> for GigaReviewAction {
 mod tests {
     use super::*;
     use house_core::GigaPromotionKind;
+    #[test]
+    fn canon_wire_is_typed_and_refuses_flattened_or_malformed_fields() {
+        let write = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"c1","method":"canon_write","params":{"room":"house","name":"The Athanor","kind":"project","summary":"Current authority","pointerFiles":[{"file":"canon.md","lines":[2,7]}],"supersedes":["41"],"attribution":{"actor":"Kintsu","origin":"omp:call-1"}}}"#,
+        )
+        .unwrap()
+        .canon_write_request()
+        .unwrap();
+        assert_eq!(write.name(), "The Athanor");
+        assert_eq!(write.supersedes(), &[41]);
+
+        let malformed = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"c2","method":"canon_write","params":{"room":"house","name":"The Athanor","kind":"project","summary":"Current authority","pointerFiles":[{"file":"canon.md","lines":["2",7]}],"attribution":{"actor":"Kintsu","origin":"omp:call-2"}}}"#,
+        )
+        .unwrap()
+        .canon_write_request();
+        assert!(malformed.is_err());
+
+        let flattened = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"c3","method":"remember","params":{"room":"house","kind":"canon","title":"The Athanor","body":"Current authority"}}"#,
+        )
+        .unwrap()
+        .remember_request();
+        assert!(flattened.is_err());
+
+        let read = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"c4","method":"canon_read","params":{"room":"house","id":"41","includeHistory":true}}"#,
+        )
+        .unwrap()
+        .canon_read_request()
+        .unwrap();
+        assert!(read.include_history());
+    }
+
+    #[test]
+    fn paper_boat_methods_are_strict_and_domain_prefixed() {
+        let sleep = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"s1","method":"paper_boat_sleep","params":{"room":"kintsu","body":"tomorrow's letter"}}"#,
+        )
+        .unwrap()
+        .paper_boat_sleep_request()
+        .unwrap();
+        assert_eq!(sleep.room().as_str(), "kintsu");
+        assert!(sleep.backup());
+
+        let empty = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"s2","method":"paper_boat_sleep","params":{"room":"kintsu","body":" "}}"#,
+        )
+        .unwrap()
+        .paper_boat_sleep_request();
+        assert!(empty.is_err());
+
+        let unknown = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"w1","method":"wake","params":{"room":"kintsu"}}"#,
+        )
+        .unwrap()
+        .paper_boat_wake_request();
+        assert!(matches!(unknown, Err(ProtocolError::UnknownMethod(_))));
+
+        let wake = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"w2","method":"paper_boat_wake","params":{"room":"other-room"}}"#,
+        )
+        .unwrap()
+        .paper_boat_wake_request()
+        .unwrap();
+        assert_eq!(wake.room().as_str(), "other-room");
+    }
 
     #[test]
     fn diagnostic_details_round_trip_with_machine_actions() {
@@ -3239,6 +3744,7 @@ mod tests {
             title: "T".into(),
             body: "B".into(),
             source_path: None,
+            source_memory_path: None,
             threads: vec![],
             continues: vec![],
             supersedes: vec!["41".into(), "42".into(), "41".into()],
@@ -3268,6 +3774,7 @@ mod tests {
             title: "T".into(),
             body: "B".into(),
             source_path: None,
+            source_memory_path: None,
             threads: vec![],
             continues: vec![],
             shape: None,
@@ -3296,6 +3803,7 @@ mod tests {
                 title: "T".into(),
                 body: "B".into(),
                 source_path: None,
+                source_memory_path: None,
                 threads: vec![],
                 continues: vec![],
                 shape: None,
@@ -3401,6 +3909,41 @@ mod tests {
             serde_json::to_string(&params).unwrap(),
             r#"{"room":"lab","query":"alpha","semantic_top_k":8,"semantic_min_similarity":0.4,"content_top_k":8,"content_min_similarity":0.3,"temporal_decay":false}"#
         );
+    }
+
+    #[test]
+    fn vault_recall_is_a_strict_database_free_request_shape() {
+        let request = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"v","method":"vault_recall","params":{"room":"lab","room_dir":"/rooms/lab","query":"hinge protocol"}}"#,
+        )
+        .unwrap()
+        .vault_recall_request()
+        .unwrap();
+        assert_eq!(
+            request,
+            VaultRecallParams {
+                room: "lab".into(),
+                room_dir: "/rooms/lab".into(),
+                query: "hinge protocol".into(),
+            }
+        );
+        for params in [
+            serde_json::json!({"room":"","room_dir":"/rooms/lab","query":"hinge"}),
+            serde_json::json!({"room":"lab","room_dir":"","query":"hinge"}),
+            serde_json::json!({"room":"lab","room_dir":"/rooms/lab","query":" "}),
+            serde_json::json!({"room":"lab","room_dir":"/rooms/lab","query":"hinge","database_url":"forbidden"}),
+        ] {
+            assert!(
+                RequestEnvelope {
+                    protocol: 1,
+                    id: "v".into(),
+                    method: "vault_recall".into(),
+                    params,
+                }
+                .vault_recall_request()
+                .is_err()
+            );
+        }
     }
 
     #[test]
@@ -3739,38 +4282,6 @@ mod tests {
             "publication_consent": publication_consent,
             "reviewed_at": "2026-07-24T12:04:00Z"
         })
-    }
-
-    #[test]
-    fn giga_process_wire_accepts_only_an_event_id() {
-        let valid = RequestEnvelope {
-            protocol: 1,
-            id: "process".into(),
-            method: "giga_process".into(),
-            params: serde_json::json!({"event_id": "event-1"}),
-        }
-        .giga_process_request()
-        .unwrap();
-        assert_eq!(valid.event_id(), "event-1");
-
-        for params in [
-            serde_json::json!({}),
-            serde_json::json!({"event_id": ""}),
-            serde_json::json!({"event_id": " event-1"}),
-            serde_json::json!({"event_id": "event-1", "sources": []}),
-            serde_json::json!({"event_id": "event-1", "extra": true}),
-        ] {
-            assert!(
-                RequestEnvelope {
-                    protocol: 1,
-                    id: "process".into(),
-                    method: "giga_process".into(),
-                    params,
-                }
-                .giga_process_request()
-                .is_err()
-            );
-        }
     }
 
     #[test]
@@ -4381,5 +4892,35 @@ mod tests {
         let mut unknown_receipt_field = base;
         unknown_receipt_field["unexpected"] = serde_json::json!(true);
         assert!(serde_json::from_value::<GigaPromoteResult>(unknown_receipt_field).is_err());
+    }
+
+    #[test]
+    fn substrate_lifecycle_params_reject_ambiguous_or_partial_authority() {
+        let health = RequestEnvelope {
+            protocol: PROTOCOL_VERSION,
+            id: "health".into(),
+            method: "substrate_health".into(),
+            params: serde_json::json!({"skipEmbedding": true}),
+        }
+        .substrate_health_request()
+        .unwrap();
+        assert!(health.skip_embedding);
+        assert_eq!(health.max_backup_age_hours, 24.0);
+
+        let invalid_health = RequestEnvelope {
+            protocol: PROTOCOL_VERSION,
+            id: "health".into(),
+            method: "substrate_health".into(),
+            params: serde_json::json!({"maxBackupAgeHours": 0}),
+        };
+        assert!(invalid_health.substrate_health_request().is_err());
+
+        let partial = RequestEnvelope {
+            protocol: PROTOCOL_VERSION,
+            id: "migrations".into(),
+            method: "substrate_migrations".into(),
+            params: serde_json::json!({"through": 12}),
+        };
+        assert!(partial.substrate_migrations_request().is_err());
     }
 }

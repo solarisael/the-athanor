@@ -48,6 +48,7 @@ pub enum DomainError {
     MissingAnamnesisSeed,
     ExistingAnamnesisCycleRequired,
     InvalidAnamnesisRepNumber,
+    InvalidCanon { field: String, message: String },
     InvalidGiga { field: String, message: String },
     InvalidGigaTransition { from: String, to: String },
     InvalidGigaHash { field: String },
@@ -56,6 +57,7 @@ pub enum DomainError {
     GigaScopeViolation,
     GigaPointerOnly,
     UnknownGigaValue { field: String, value: String },
+    InvalidPaperBoat { field: String, message: String },
 }
 impl fmt::Display for DomainError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -108,6 +110,9 @@ impl fmt::Display for DomainError {
                 f.write_str("anamnesis append requires an existing cycle")
             }
             Self::InvalidAnamnesisRepNumber => f.write_str("rep number must be a positive integer"),
+            Self::InvalidCanon { field, message } => {
+                write!(f, "invalid canon {field}: {message}")
+            }
             Self::InvalidGiga { field, message } => write!(f, "invalid GIGA {field}: {message}"),
             Self::InvalidGigaTransition { from, to } => {
                 write!(f, "invalid GIGA review transition: {from} -> {to}")
@@ -122,6 +127,9 @@ impl fmt::Display for DomainError {
             Self::GigaScopeViolation => f.write_str("GIGA scope exceeds source scope"),
             Self::GigaPointerOnly => f.write_str("GIGA candidates must be pointer-only"),
             Self::UnknownGigaValue { field, value } => write!(f, "unknown GIGA {field}: {value}"),
+            Self::InvalidPaperBoat { field, message } => {
+                write!(f, "invalid paper boat {field}: {message}")
+            }
         }
     }
 }
@@ -689,6 +697,10 @@ impl RoomKey {
     pub fn for_memory_write(value: impl Into<String>) -> Result<Self, DomainError> {
         Self::build(value.into(), true)
     }
+    /// Canon may be room-local or shared in the House commons.
+    pub fn for_canon(value: impl Into<String>) -> Result<Self, DomainError> {
+        Self::build(value.into(), true)
+    }
 
     fn build(value: String, allow_house: bool) -> Result<Self, DomainError> {
         if value == "house" && !allow_house {
@@ -709,6 +721,337 @@ impl RoomKey {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CanonAuthority {
+    Active,
+    Superseded,
+    Archived,
+}
+
+impl CanonAuthority {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Superseded => "superseded",
+            Self::Archived => "archived",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, DomainError> {
+        match value {
+            "active" => Ok(Self::Active),
+            "superseded" => Ok(Self::Superseded),
+            "archived" => Ok(Self::Archived),
+            other => Err(DomainError::InvalidCanon {
+                field: "authority".into(),
+                message: format!("unknown authority: {other}"),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonAttribution {
+    actor: String,
+    origin: String,
+}
+
+impl CanonAttribution {
+    pub fn new(actor: String, origin: String) -> Result<Self, DomainError> {
+        let actor = canon_nonempty("attribution.actor", actor)?;
+        let origin = canon_nonempty("attribution.origin", origin)?;
+        Ok(Self { actor, origin })
+    }
+
+    pub fn actor(&self) -> &str {
+        &self.actor
+    }
+
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonPointer {
+    file: String,
+    lines: Option<(u32, u32)>,
+}
+
+impl CanonPointer {
+    pub fn new(file: String, lines: Option<(u32, u32)>) -> Result<Self, DomainError> {
+        let file = canon_nonempty("pointerFiles.file", file)?;
+        if matches!(lines, Some((start, end)) if start > end) {
+            return Err(DomainError::InvalidCanon {
+                field: "pointerFiles.lines".into(),
+                message: "start must not exceed end".into(),
+            });
+        }
+        Ok(Self { file, lines })
+    }
+
+    pub fn file(&self) -> &str {
+        &self.file
+    }
+
+    pub fn lines(&self) -> Option<(u32, u32)> {
+        self.lines
+    }
+}
+
+fn canon_nonempty(field: &str, value: String) -> Result<String, DomainError> {
+    let value = value.trim().to_owned();
+    if value.is_empty() {
+        return Err(DomainError::InvalidCanon {
+            field: field.into(),
+            message: "must not be blank".into(),
+        });
+    }
+    Ok(value)
+}
+
+const MAX_CANON_VALUES: usize = 64;
+
+fn canon_values(field: &str, values: Vec<String>) -> Result<Vec<String>, DomainError> {
+    if values.len() > MAX_CANON_VALUES {
+        return Err(DomainError::TooManyValues {
+            field: field.into(),
+        });
+    }
+    let mut normalized = Vec::with_capacity(values.len());
+    for value in values {
+        let value = canon_nonempty(field, value)?;
+        if !normalized.contains(&value) {
+            normalized.push(value);
+        }
+    }
+    Ok(normalized)
+}
+
+fn canon_date(value: String) -> Result<String, DomainError> {
+    let bytes = value.as_bytes();
+    let shaped = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| index == 4 || index == 7 || byte.is_ascii_digit());
+    if !shaped {
+        return Err(DomainError::InvalidCanon {
+            field: "summaryAsOf".into(),
+            message: "must use YYYY-MM-DD".into(),
+        });
+    }
+    Ok(value)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonWriteRequest {
+    room: RoomKey,
+    name: String,
+    kind: String,
+    summary: String,
+    aliases: Vec<String>,
+    search_boost: Option<String>,
+    weighty: bool,
+    pointer_files: Vec<CanonPointer>,
+    summary_as_of: Option<String>,
+    supersedes: Vec<u64>,
+    attribution: CanonAttribution,
+}
+
+impl CanonWriteRequest {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        room: String,
+        name: String,
+        kind: String,
+        summary: String,
+        aliases: Vec<String>,
+        search_boost: Option<String>,
+        weighty: bool,
+        pointer_files: Vec<CanonPointer>,
+        summary_as_of: Option<String>,
+        supersedes: Vec<u64>,
+        attribution: CanonAttribution,
+    ) -> Result<Self, DomainError> {
+        let room = RoomKey::for_canon(room)?;
+        let name = canon_nonempty("name", name)?;
+        let kind = canon_nonempty("kind", kind)?;
+        let summary = canon_nonempty("summary", summary)?;
+        let aliases = canon_values("aliases", aliases)?;
+        let search_boost = search_boost
+            .map(|value| canon_nonempty("searchBoost", value))
+            .transpose()?;
+        if pointer_files.len() > MAX_CANON_VALUES {
+            return Err(DomainError::TooManyValues {
+                field: "pointerFiles".into(),
+            });
+        }
+        if supersedes.len() > MAX_CANON_VALUES {
+            return Err(DomainError::TooManyValues {
+                field: "supersedes".into(),
+            });
+        }
+        if supersedes.iter().any(|id| *id == 0) {
+            return Err(DomainError::InvalidCanon {
+                field: "supersedes".into(),
+                message: "IDs must be positive".into(),
+            });
+        }
+        let mut supersedes = supersedes;
+        supersedes.sort_unstable();
+        supersedes.dedup();
+        let summary_as_of = summary_as_of.map(canon_date).transpose()?;
+        Ok(Self {
+            room,
+            name,
+            kind,
+            summary,
+            aliases,
+            search_boost,
+            weighty,
+            pointer_files,
+            summary_as_of,
+            supersedes,
+            attribution,
+        })
+    }
+
+    pub fn room(&self) -> &RoomKey {
+        &self.room
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
+    pub fn aliases(&self) -> &[String] {
+        &self.aliases
+    }
+    pub fn search_boost(&self) -> Option<&str> {
+        self.search_boost.as_deref()
+    }
+    pub fn weighty(&self) -> bool {
+        self.weighty
+    }
+    pub fn pointer_files(&self) -> &[CanonPointer] {
+        &self.pointer_files
+    }
+    pub fn summary_as_of(&self) -> Option<&str> {
+        self.summary_as_of.as_deref()
+    }
+    pub fn supersedes(&self) -> &[u64] {
+        &self.supersedes
+    }
+    pub fn attribution(&self) -> &CanonAttribution {
+        &self.attribution
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CanonSelector {
+    Id(u64),
+    Name(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonReadRequest {
+    room: RoomKey,
+    selector: CanonSelector,
+    include_history: bool,
+}
+
+impl CanonReadRequest {
+    pub fn new(
+        room: String,
+        id: Option<u64>,
+        name: Option<String>,
+        include_history: bool,
+    ) -> Result<Self, DomainError> {
+        let room = RoomKey::for_canon(room)?;
+        let selector = match (id, name) {
+            (Some(id), None) if id > 0 => CanonSelector::Id(id),
+            (None, Some(name)) => CanonSelector::Name(canon_nonempty("name", name)?),
+            _ => {
+                return Err(DomainError::InvalidCanon {
+                    field: "selector".into(),
+                    message: "provide exactly one positive id or nonblank name".into(),
+                });
+            }
+        };
+        Ok(Self {
+            room,
+            selector,
+            include_history,
+        })
+    }
+
+    pub fn room(&self) -> &RoomKey {
+        &self.room
+    }
+    pub fn selector(&self) -> &CanonSelector {
+        &self.selector
+    }
+    pub fn include_history(&self) -> bool {
+        self.include_history
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonWriteReceipt {
+    entity_id: u64,
+    room: RoomKey,
+    name: String,
+    superseded_entity_ids: Vec<u64>,
+    attribution: CanonAttribution,
+}
+
+impl CanonWriteReceipt {
+    pub fn new(
+        entity_id: u64,
+        room: String,
+        name: String,
+        superseded_entity_ids: Vec<u64>,
+        attribution: CanonAttribution,
+    ) -> Result<Self, DomainError> {
+        if entity_id == 0 {
+            return Err(DomainError::InvalidCanon {
+                field: "entityId".into(),
+                message: "must be positive".into(),
+            });
+        }
+        Ok(Self {
+            entity_id,
+            room: RoomKey::for_canon(room)?,
+            name: canon_nonempty("name", name)?,
+            superseded_entity_ids,
+            attribution,
+        })
+    }
+
+    pub fn entity_id(&self) -> u64 {
+        self.entity_id
+    }
+    pub fn room(&self) -> &RoomKey {
+        &self.room
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn superseded_entity_ids(&self) -> &[u64] {
+        &self.superseded_entity_ids
+    }
+    pub fn attribution(&self) -> &CanonAttribution {
+        &self.attribution
     }
 }
 
@@ -1066,6 +1409,7 @@ pub struct RememberMemoryDetails {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RememberLessonDetails {
     pub backup: bool,
+    pub source_memory_path: Option<String>,
     pub shape: Option<String>,
     pub voice: Option<String>,
     pub register: Vec<String>,
@@ -1092,6 +1436,7 @@ pub struct RememberRequest {
     title: String,
     body: String,
     source_path: Option<String>,
+    source_memory_path: Option<String>,
     threads: Vec<String>,
     continues: Vec<ThreadContinuation>,
     supersedes: Vec<u64>,
@@ -1151,6 +1496,7 @@ impl RememberRequest {
         }
         let (
             source_path,
+            source_memory_path,
             threads,
             continues,
             supersedes,
@@ -1177,6 +1523,7 @@ impl RememberRequest {
                 }
                 (
                     details.source_path,
+                    None,
                     details.threads,
                     details.continues,
                     details.supersedes,
@@ -1204,6 +1551,7 @@ impl RememberRequest {
                 }
                 (
                     None,
+                    details.source_memory_path,
                     Vec::new(),
                     Vec::new(),
                     Vec::new(),
@@ -1314,6 +1662,8 @@ impl RememberRequest {
         }
         let threads = normalized_threads;
         let source_path = source_path.and_then(|path| (!path.trim().is_empty()).then_some(path));
+        let source_memory_path =
+            source_memory_path.and_then(|path| (!path.trim().is_empty()).then_some(path));
         let mut normalized_continues = Vec::with_capacity(continues.len());
         for continuation in continues {
             let thread = continuation.thread.trim();
@@ -1346,6 +1696,7 @@ impl RememberRequest {
             title,
             body,
             source_path,
+            source_memory_path,
             threads,
             continues: normalized_continues,
             supersedes: unique_supersedes,
@@ -1379,6 +1730,9 @@ impl RememberRequest {
     }
     pub fn source_path(&self) -> Option<&str> {
         self.source_path.as_deref()
+    }
+    pub fn source_memory_path(&self) -> Option<&str> {
+        self.source_memory_path.as_deref()
     }
     pub fn threads(&self) -> &[String] {
         &self.threads
@@ -1498,6 +1852,233 @@ impl RememberReceipt {
     pub const fn authority(&self) -> Authority {
         Authority::Full
     }
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+pub const PAPER_BOAT_MAX_BODY_BYTES: usize = 64 * 1024;
+pub const PAPER_BOAT_MAX_UNBOATED: usize = 64;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaperBoatSleepRequest {
+    room: RoomKey,
+    body: String,
+    backup: bool,
+}
+
+impl PaperBoatSleepRequest {
+    pub fn new(room: String, body: String, backup: bool) -> Result<Self, DomainError> {
+        let room = RoomKey::for_memory_write(room)?;
+        if body.trim().is_empty() {
+            return Err(DomainError::InvalidPaperBoat {
+                field: "body".into(),
+                message: "must not be empty".into(),
+            });
+        }
+        if body.len() > PAPER_BOAT_MAX_BODY_BYTES {
+            return Err(DomainError::InvalidPaperBoat {
+                field: "body".into(),
+                message: format!("must be at most {PAPER_BOAT_MAX_BODY_BYTES} UTF-8 bytes"),
+            });
+        }
+        Ok(Self { room, body, backup })
+    }
+
+    pub fn room(&self) -> &RoomKey {
+        &self.room
+    }
+
+    pub fn body(&self) -> &str {
+        &self.body
+    }
+
+    pub const fn backup(&self) -> bool {
+        self.backup
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaperBoatWakeRequest {
+    room: RoomKey,
+}
+
+impl PaperBoatWakeRequest {
+    pub fn new(room: String) -> Result<Self, DomainError> {
+        Ok(Self {
+            room: RoomKey::for_memory_write(room)?,
+        })
+    }
+
+    pub fn room(&self) -> &RoomKey {
+        &self.room
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PaperBoatBackupStatus {
+    NotRequested,
+    Completed,
+    Failed,
+}
+
+impl PaperBoatBackupStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotRequested => "not_requested",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaperBoatSleepReceipt {
+    memory_id: u64,
+    room: RoomKey,
+    source_path: String,
+    outbox_event_id: String,
+    inserted: bool,
+    backup_status: PaperBoatBackupStatus,
+    warnings: Vec<String>,
+}
+
+impl PaperBoatSleepReceipt {
+    pub fn committed(
+        memory_id: u64,
+        room: RoomKey,
+        source_path: String,
+        outbox_event_id: String,
+        inserted: bool,
+        backup_status: PaperBoatBackupStatus,
+        warnings: Vec<String>,
+    ) -> Result<Self, DomainError> {
+        if memory_id == 0 {
+            return Err(DomainError::InvalidPaperBoat {
+                field: "memory_id".into(),
+                message: "must be positive".into(),
+            });
+        }
+        if source_path.trim().is_empty() {
+            return Err(DomainError::EmptySourcePath);
+        }
+        if outbox_event_id.trim().is_empty() {
+            return Err(DomainError::InvalidPaperBoat {
+                field: "outbox_event_id".into(),
+                message: "must not be empty".into(),
+            });
+        }
+        Ok(Self {
+            memory_id,
+            room,
+            source_path,
+            outbox_event_id,
+            inserted,
+            backup_status,
+            warnings,
+        })
+    }
+
+    pub const fn memory_id(&self) -> u64 {
+        self.memory_id
+    }
+
+    pub fn room(&self) -> &RoomKey {
+        &self.room
+    }
+
+    pub fn source_path(&self) -> &str {
+        &self.source_path
+    }
+
+    pub fn outbox_event_id(&self) -> &str {
+        &self.outbox_event_id
+    }
+
+    pub const fn inserted(&self) -> bool {
+        self.inserted
+    }
+
+    pub const fn backup_status(&self) -> PaperBoatBackupStatus {
+        self.backup_status
+    }
+
+    pub const fn durable(&self) -> bool {
+        true
+    }
+
+    pub const fn authority(&self) -> Authority {
+        Authority::Full
+    }
+
+    pub fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnboatedMemory {
+    pub id: u64,
+    pub title: String,
+    pub kind: String,
+    pub source_path: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaperBoatRecord {
+    pub id: u64,
+    pub title: String,
+    pub body: String,
+    pub date: Option<String>,
+    pub source_path: String,
+    pub created_at: String,
+    pub unboated: Vec<UnboatedMemory>,
+    pub unboated_truncated: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PaperBoatWakeReceipt {
+    room: RoomKey,
+    boat: Option<PaperBoatRecord>,
+    warnings: Vec<String>,
+}
+
+impl PaperBoatWakeReceipt {
+    pub fn new(
+        room: RoomKey,
+        boat: Option<PaperBoatRecord>,
+        warnings: Vec<String>,
+    ) -> Result<Self, DomainError> {
+        if let Some(boat) = &boat {
+            if boat.id == 0 || boat.body.trim().is_empty() {
+                return Err(DomainError::InvalidPaperBoat {
+                    field: "record".into(),
+                    message: "requires a positive ID and non-empty body".into(),
+                });
+            }
+            if boat.unboated.len() > PAPER_BOAT_MAX_UNBOATED {
+                return Err(DomainError::InvalidPaperBoat {
+                    field: "unboated".into(),
+                    message: format!("must contain at most {PAPER_BOAT_MAX_UNBOATED} records"),
+                });
+            }
+        }
+        Ok(Self {
+            room,
+            boat,
+            warnings,
+        })
+    }
+
+    pub fn room(&self) -> &RoomKey {
+        &self.room
+    }
+
+    pub fn boat(&self) -> Option<&PaperBoatRecord> {
+        self.boat.as_ref()
+    }
+
     pub fn warnings(&self) -> &[String] {
         &self.warnings
     }
@@ -2849,27 +3430,6 @@ pub const GIGA_MAX_PROCESS_SOURCES: usize = 8;
 pub const GIGA_MAX_PROCESS_SOURCE_BYTES: usize = 8_000;
 pub const GIGA_MAX_PROCESS_WINDOW_BYTES: usize = 24_000;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GigaProcessRequest {
-    event_id: String,
-}
-
-impl GigaProcessRequest {
-    pub fn new(event_id: String) -> Result<Self, DomainError> {
-        if event_id.is_empty() || event_id.len() > 512 || event_id.trim() != event_id {
-            return Err(DomainError::InvalidGiga {
-                field: "event_id".into(),
-                message: "must be a trimmed identifier of at most 512 bytes".into(),
-            });
-        }
-        Ok(Self { event_id })
-    }
-
-    pub fn event_id(&self) -> &str {
-        &self.event_id
-    }
-}
-
 pub const GIGA_MAX_LEASE_SECONDS: u32 = 3_600;
 pub const GIGA_MAX_EVENT_ATTEMPTS: u32 = 5;
 pub const GIGA_MAX_CANDIDATES_PER_EVENT: u32 = 1;
@@ -4157,6 +4717,37 @@ mod tests {
         assert!(RoomKey::for_memory_write("Living").is_err());
         assert!(RoomKey::new("house").is_err());
     }
+    #[test]
+    fn canon_is_a_distinct_typed_store_with_strict_selectors() {
+        assert!(RememberKind::parse("canon").is_err());
+        assert_eq!(
+            CanonAuthority::parse("active").unwrap(),
+            CanonAuthority::Active
+        );
+        assert!(CanonAuthority::parse("current").is_err());
+        let attribution = CanonAttribution::new("Kintsu".into(), "omp:Sol:call-1".into()).unwrap();
+        let pointer = CanonPointer::new("canon/source.md".into(), Some((4, 9))).unwrap();
+        let write = CanonWriteRequest::new(
+            "house".into(),
+            "The Athanor".into(),
+            "project".into(),
+            "PostgreSQL-authoritative canon".into(),
+            vec!["Athanor".into()],
+            None,
+            true,
+            vec![pointer],
+            Some("2026-08-10".into()),
+            vec![7, 7],
+            attribution,
+        )
+        .unwrap();
+        assert_eq!(write.supersedes(), &[7]);
+        assert!(CanonReadRequest::new("house".into(), Some(7), None, true).is_ok());
+        assert!(
+            CanonReadRequest::new("house".into(), Some(7), Some("The Athanor".into()), true,)
+                .is_err()
+        );
+    }
 
     #[test]
     fn recall_constructor_compatibility_defaults_decay_off_and_builder_opts_in() {
@@ -4183,6 +4774,42 @@ mod tests {
         assert_eq!(receipt.source_path(), "memory.md");
         assert!(receipt.durable());
         assert_eq!(receipt.authority(), Authority::Full);
+    }
+
+    #[test]
+    fn paper_boat_requests_bound_body_and_preserve_room_scope() {
+        assert!(PaperBoatSleepRequest::new("".into(), "body".into(), true).is_err());
+        assert!(PaperBoatSleepRequest::new("lab".into(), " ".into(), true).is_err());
+        assert!(
+            PaperBoatSleepRequest::new(
+                "lab".into(),
+                "x".repeat(PAPER_BOAT_MAX_BODY_BYTES + 1),
+                true,
+            )
+            .is_err()
+        );
+        let request = PaperBoatSleepRequest::new("lab".into(), "body".into(), true).unwrap();
+        assert_eq!(request.room().as_str(), "lab");
+        assert!(request.backup());
+        assert!(PaperBoatWakeRequest::new("other-room".into()).is_ok());
+    }
+
+    #[test]
+    fn failed_backup_receipt_keeps_postgres_durability_explicit() {
+        let receipt = PaperBoatSleepReceipt::committed(
+            7,
+            RoomKey::for_memory_write("lab").unwrap(),
+            "db-only/paper-boats/sha256-deadbeef.md".into(),
+            "event-7".into(),
+            true,
+            PaperBoatBackupStatus::Failed,
+            vec!["backup failed after PostgreSQL commit".into()],
+        )
+        .unwrap();
+        assert!(receipt.durable());
+        assert_eq!(receipt.authority(), Authority::Full);
+        assert_eq!(receipt.backup_status(), PaperBoatBackupStatus::Failed);
+        assert_eq!(receipt.warnings().len(), 1);
     }
 
     #[test]
@@ -4229,6 +4856,7 @@ mod tests {
 
         let details = || RememberLessonDetails {
             backup: true,
+            source_memory_path: Some("memory/design.md".into()),
             shape: Some("component-contract".into()),
             voice: Some("solarisael".into()),
             register: vec!["general".into()],
@@ -4254,6 +4882,7 @@ mod tests {
             request.example_text(),
             Some("Use the token, not a one-off value.")
         );
+        assert_eq!(request.source_memory_path(), Some("memory/design.md"));
 
         let mut invalid = details();
         invalid.scope = Some("house".into());
@@ -4276,6 +4905,7 @@ mod tests {
     fn lesson_eligibility_keys_normalize_and_reject_wrong_families() {
         let details = RememberLessonDetails {
             backup: false,
+            source_memory_path: None,
             shape: Some("process".into()),
             voice: None,
             register: vec![],
@@ -4303,6 +4933,7 @@ mod tests {
 
         let mut invalid = RememberLessonDetails {
             backup: false,
+            source_memory_path: None,
             shape: None,
             voice: Some("general".into()),
             register: vec![],

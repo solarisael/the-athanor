@@ -4,7 +4,7 @@ This directory is a component of the [The Athanor](../../README.md) repository.
 It is not a separate checkout and not a separate release.
 
 The adapter connects The Athanor to [Oh My Pi (OMP)](https://github.com/can1357/oh-my-pi).
-In an installed tree it lives at `<target>/the-athanor/adapters/omp`.
+In an installed tree it lives under the active immutable product version.
 
 **Do not install from this directory.** The one installation door is
 [`INSTALL.md`](../../INSTALL.md) at the repository root.
@@ -22,99 +22,68 @@ In an installed tree it lives at `<target>/the-athanor/adapters/omp`.
 ## What this adapter adds
 
 - OMP lifecycle hooks for room context and end-of-session continuity;
-- Athanor organs for room state, memory, recall, lessons, paper boats, and routing;
-- native Vault retrieval over Markdown, JSON, JSONL, and text roots, with
-  exact-content and field-aware BM25F lanes plus attributed excerpts;
+- 26 named Athanor organs for state, retrieval, memory, typed lessons, counsel,
+  Paper Boats, GIGA, and routing;
+- Host-owned Recall Policy presentation and bounded working-set injection;
+- automatic bounded-worker lineage joined across OMP progress/lifecycle events;
 - room-local conversation logging and compact live context;
-- a long-lived Rust transport for authoritative AKASHA memory operations;
-- a hygiene extension that keeps host-generated context out of authored continuity;
-- state-conditioned Striatum activation that keeps up to six eligible coding or
-  project lessons warm;
-- a localhost administrative GUI;
-- the portable bundle builder, the installer, the updater, and the verifier.
+- long-lived Rust transports for Vault and AKASHA behavior.
 
-TypeScript owns the OMP lifecycle, room discovery, context shaping, packaging,
-and installation. Rust owns the shared contracts and the authoritative AKASHA
-process.
+TypeScript owns only the harness-facing registration, room discovery, lifecycle
+translation, bounded context presentation, and Rust transport. Rust owns domain
+validation, authority, retrieval, persistence, Recall Policy state, delivery,
+health, migrations, backup/restore, and native lifecycle.
 
-The adapter fails open. An absent substrate is valid Vault. A configured but
-unhealthy database, embedder, or substrate binary reports `degraded`, never
-healthy AKASHA.
+The adapter fails open for conversation continuity. A configured but unhealthy
+AKASHA dependency reports `degraded`; it never invents healthy state or silently
+becomes a second authority.
 
-## Modules
 
-| File | Role |
+## Runtime modules
+
+| File or directory | Role |
 |---|---|
-| `index.ts` | OMP extension entrypoint; exports `ADAPTER_API_VERSION` |
-| `hygiene.ts` | Second OMP extension entrypoint |
-| `install-layout.ts` | The one description of installed topology and archive names |
-| `installer.ts` | The public installation door; compiles to `install.exe` |
-| `install-legacy.ts` | 0.10.x detection and the AKASHA backup gate |
-| `updater.ts` | Release resolution and staged update; compiles to `update.exe` |
-| `verify-install.ts` | The canonical verifier |
-| `build-portable.ts` | Builds the two public archives |
-| `build-release-manifest.ts` | Writes the single `release-manifest.json` |
-| `harnesses.ts` | The public harness catalog |
+| `index.ts` | OMP extension entrypoint |
+| `athanor-root.ts` | Installed/development root resolution |
+| `discovery.ts` | Rust executable discovery |
+| `rust-transport.ts` | Bounded long-lived JSONL transport |
+| `giga.ts` | OMP-side GIGA event bridge; Rust owns claims and transitions |
+| `kitten-lineage.ts` | OMP task-lineage observation |
+| `solarisael-house-proof/` | Named tool schemas and thin Host/Rust adapters |
+| `starter-room/` | Example room material |
 
-`install-layout.ts` is the single source of path truth. Every other door reads
-it, so a path can never mean two things in two files.
+Packaging, installation, migration, update, rollback, doctor, uninstall, and
+purge are owned by `crates/athanor-install` and `installer/`, not this adapter.
+The native release builder copies only the modules required at runtime; tests,
+historical portable builders, and development assets are excluded.
 
-## Build the archives
+## Build the native release
 
-Run from the repository root. Both profiles build for the host platform only.
+Run the checksum-pinned Windows assembly from a Visual Studio x64 developer
+environment:
 
-```text
-bun install
-bun run adapters/omp/build-portable.ts --out-dir dist --profile all
+```powershell
+pwsh -File installer/build-native-release.ps1 `
+  -Version 1.0.0-rc.1 `
+  -OutDir dist/native
 ```
 
-That writes two archives:
+The script builds Rust into an isolated staging target, compiles pgvector into
+the bundled EnterpriseDB tree, imports the Godot project against its
+GDExtension, rejects Godot load errors, and writes a byte-size/SHA-256 manifest.
+Inno Setup then compiles the single Windows installer from
+`installer/athanor.iss`.
 
-```text
-dist/the-athanor-<version>-windows-x64-vault.zip
-dist/the-athanor-<version>-windows-x64-akasha.zip
+## Verify an installed tree
+
+```powershell
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" doctor
 ```
 
-The AKASHA build needs a substrate executable. Set `ATHANOR_SUBSTRATE_EXE` to
-its absolute path, or set `ATHANOR_AUTO=1`. Build one with:
-
-```text
-cargo build --release --locked -p athanor-substrate
-```
-
-Use `--profile vault` or `--profile akasha` to build one archive.
-
-The builder refuses to ship generated, cached, or credential-bearing files. The
-Vault archive carries no substrate binary, no substrate operations, and no
-PostgreSQL, embedding, WSL, or Rust runtime asset.
-
-## Release pipeline
-
-A `v*` tag or a manual dispatch runs the Windows x64 release job. It builds the
-substrate binary, compiles `install.exe` and `update.exe`, builds both archives,
-runs the tests, and publishes the release.
-
-The job also writes one `release-manifest.json`. That manifest records the
-channel, the version, the tag, the repository, the required substrate schema,
-and each asset's name, SHA-256 hash, and byte size. The updater fetches it by
-name.
-
-The package version must match the requested release version. A stable release
-rejects a prerelease version. A beta or experimental release requires the
-matching prerelease marker.
-
-## Verify a tree
-
-```text
-bun run verify-install.ts --room "<ABSOLUTE_ROOM_PATH>" --profile vault
-```
-
-Add `--profile akasha` for an AKASHA tree. Add `--require-manifest` to also check
-the package manifest, the artifact hashes, and the installed topology. A
-development checkout has no `rooms/` or `state/` sibling, so omit
-`--require-manifest` there.
-
-Read the `mode` field. It is exactly `Vault`, exactly `AKASHA`, or `degraded`.
+Doctor validates the activation pointer, release manifest and every installed
+artifact, service registration, and persistent data root. It exits nonzero on a
+failed contract. Runtime surfaces report exactly `Vault`, `AKASHA`, or
+`degraded`; no adapter fallback fabricates a healthier mode.
 
 ## Retrieval evaluation
 

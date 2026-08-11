@@ -1,15 +1,18 @@
 use crate::{
     AppError, Config,
     config::HTTP_CLIENT,
-    giga::{database_now, event_from_store, giga_candidate_store_and_finish, giga_event_finish},
+    giga::{
+        database_now, event_from_store, giga_candidate_store_and_finish, giga_event_claim,
+        giga_event_finish,
+    },
 };
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Utc};
 use house_core::{
     GIGA_MAX_EVENT_ATTEMPTS, GIGA_MAX_PROCESS_SOURCE_BYTES, GIGA_MAX_PROCESS_SOURCES,
     GIGA_MAX_PROCESS_WINDOW_BYTES, GigaAuthority, GigaCandidate, GigaCandidateKind,
-    GigaClassifierIdentity, GigaEvent, GigaEventFinishOutcome, GigaEventFinishRequest,
-    GigaEventType, GigaProcessRequest, GigaReviewState, GigaScope, GigaScores, GigaSourceRef,
-    GigaSourceType, GigaVisibility,
+    GigaClassifierIdentity, GigaEvent, GigaEventClaimReceipt, GigaEventClaimRequest,
+    GigaEventFinishOutcome, GigaEventFinishRequest, GigaEventType, GigaReviewState, GigaScope,
+    GigaScores, GigaSourceRef, GigaSourceType, GigaVisibility, RoomKey,
 };
 use house_protocol::{GigaClassifierHealthResult, GigaProcessResult, RequiredNullable};
 use reqwest::{RequestBuilder, Url};
@@ -18,7 +21,7 @@ use serde_json::{Value, json, value::RawValue};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use std::{collections::HashMap, env, sync::LazyLock, time::Duration};
-use tokio::fs;
+use tokio::{fs, sync::watch, task::JoinHandle};
 use uuid::Uuid;
 
 pub const GIGA_PROMPT_VERSION: &str = "agents-a1-akashic-librarian-v3";
@@ -26,8 +29,9 @@ pub const GIGA_MODEL_TAG: &str = "hf.co/InternScience/Agents-A1-4B-Q4_K_M-GGUF:l
 pub const GIGA_MODEL_MANIFEST_DIGEST: &str =
     "96ca1ea02b302bf5cd1118d637f12a5af7c2a5aa465837532448bd6e54db4ceb";
 const GIGA_DEFAULT_OLLAMA_ENDPOINT: &str = "http://127.0.0.1:11434";
-const GIGA_LEASE_SECONDS: i64 = 300;
+const GIGA_LEASE_SECONDS: u32 = 300;
 const GIGA_RETRY_DELAY_SECONDS: u32 = 30;
+const GIGA_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const GIGA_MODEL_TIMEOUT: Duration = Duration::from_secs(60);
 const GIGA_MAX_OLLAMA_RESPONSE_BYTES: usize = 64 * 1024;
 const GIGA_MAX_MODEL_RATIONALE_BYTES: usize = 4 * 1024;
@@ -242,20 +246,16 @@ struct ExtractionOutput {
     retrieval_terms: Vec<String>,
 }
 
-enum ClaimState {
-    Claimed {
-        event: GigaEvent,
-        attempt_count: u32,
-    },
-    WaitUntil {
-        attempt_count: u32,
-        candidate_count: u32,
-        last_error: Option<String>,
-    },
-    Terminal {
-        event: GigaEvent,
-        result: GigaProcessResult,
-    },
+pub struct GigaWorkerHandle {
+    shutdown: watch::Sender<bool>,
+    task: JoinHandle<()>,
+}
+
+impl GigaWorkerHandle {
+    pub async fn shutdown(self) {
+        let _ = self.shutdown.send(true);
+        let _ = self.task.await;
+    }
 }
 
 fn domain_failure() -> WorkerFailure {
@@ -266,6 +266,10 @@ fn classifier_enabled() -> bool {
     env::var("SOLARISAEL_GIGA_ENABLED").ok().as_deref() == Some("1")
         && env::var("SOLARISAEL_HIPPOCAMPUS_ENABLED").ok().as_deref() == Some("1")
         && env::var("SOLARISAEL_REPLAY_MODE").ok().as_deref() != Some("1")
+}
+
+fn claim_owner_enabled() -> bool {
+    classifier_enabled() && env::var("SOLARISAEL_GIGA_CLAIM_OWNER").ok().as_deref() == Some("1")
 }
 
 pub(crate) fn giga_classifier_enabled() -> bool {
@@ -1060,177 +1064,91 @@ fn safe_error_class(value: Option<String>) -> Option<String> {
     })
 }
 
-fn terminal_result(
-    event_id: &str,
-    state: &str,
-    candidate_count: i32,
-    attempt_count: i32,
-    error_class: Option<String>,
-) -> Result<GigaProcessResult, AppError> {
-    let outcome = match state {
-        "succeeded" => GigaEventFinishOutcome::Succeeded.as_str(),
-        "failed" => GigaEventFinishOutcome::Failed.as_str(),
-        _ => {
-            return Err(AppError::Invalid(
-                "stored GIGA queue state is invalid".into(),
-            ));
-        }
-    };
-    Ok(GigaProcessResult {
-        event_id: event_id.into(),
-        outcome: outcome.into(),
-        candidate_count: u32::try_from(candidate_count)
-            .map_err(|_| AppError::Invalid("stored GIGA candidate count is invalid".into()))?,
-        attempt_count: u32::try_from(attempt_count)
-            .map_err(|_| AppError::Invalid("stored GIGA attempt count is invalid".into()))?,
-        error_class: RequiredNullable(safe_error_class(error_class)),
-    })
-}
-
-async fn claim_exact(pool: &PgPool, event_id: &str) -> Result<ClaimState, AppError> {
+async fn validate_claim(
+    pool: &PgPool,
+    claim: &GigaEventClaimReceipt,
+) -> Result<(GigaEvent, u32), AppError> {
+    let claimed_event = claim
+        .event()
+        .ok_or_else(|| AppError::Invalid("GIGA process requires a claimed event".into()))?;
+    let attempt_count = claim
+        .attempt_count()
+        .ok_or_else(|| AppError::Invalid("GIGA process claim has no attempt".into()))?;
+    let claimed_at = DateTime::parse_from_rfc3339(claim.claimed_at())
+        .map_err(|_| AppError::Invalid("GIGA process claim time is invalid".into()))?
+        .with_timezone(&Utc);
+    let claimed_lease_expires_at = DateTime::parse_from_rfc3339(
+        claim
+            .lease_expires_at()
+            .ok_or_else(|| AppError::Invalid("GIGA process claim has no lease expiry".into()))?,
+    )
+    .map_err(|_| AppError::Invalid("GIGA process lease expiry is invalid".into()))?
+    .with_timezone(&Utc);
     let mut tx = pool.begin().await?;
     let row = sqlx::query(
-        "SELECT room,queue_state,available_at,locked_by,lease_expires_at,replay_count,
-                attempt_count,candidate_count,last_error
-         FROM giga_events WHERE event_id=$1 FOR UPDATE",
+        "SELECT room,queue_state,locked_by,locked_at,lease_expires_at,attempt_count,replay_count
+         FROM giga_events WHERE event_id=$1 FOR SHARE",
     )
-    .bind(event_id)
+    .bind(claimed_event.event_id())
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| AppError::Invalid("GIGA process event does not exist".into()))?;
-    let claimed_at = database_now(&mut tx).await?;
     let room: String = row
         .try_get::<Option<String>, _>("room")?
         .ok_or_else(|| AppError::Invalid("GIGA process event has no room".into()))?;
-    let state: String = row.try_get("queue_state")?;
-    let previous_attempt: i32 = row.try_get("attempt_count")?;
-    let candidate_count: i32 = row.try_get("candidate_count")?;
-    if matches!(state.as_str(), "succeeded" | "failed") {
-        let result = terminal_result(
-            event_id,
-            &state,
-            candidate_count,
-            previous_attempt,
-            row.try_get("last_error")?,
-        )?;
-        let event = event_from_store(&mut tx, event_id).await?;
-        tx.commit().await?;
-        return Ok(ClaimState::Terminal { event, result });
+    let queue_state: String = row.try_get("queue_state")?;
+    let locked_by: Option<String> = row.try_get("locked_by")?;
+    let locked_at: Option<DateTime<Utc>> = row.try_get("locked_at")?;
+    let lease_expires_at: Option<DateTime<Utc>> = row.try_get("lease_expires_at")?;
+    let stored_attempt_count: i32 = row.try_get("attempt_count")?;
+    if room != claim.room().as_str()
+        || claimed_event.room() != claim.room()
+        || queue_state != "running"
+        || locked_by.as_deref() != Some(claim.worker_id())
+        || locked_at != Some(claimed_at)
+        || lease_expires_at != Some(claimed_lease_expires_at)
+        || stored_attempt_count != i32::try_from(attempt_count).unwrap_or(i32::MAX)
+    {
+        return Err(AppError::Invalid(
+            "GIGA process claim is not the active event lease".into(),
+        ));
+    }
+    let now = database_now(&mut tx).await?;
+    if now >= claimed_lease_expires_at {
+        return Err(AppError::Invalid("GIGA process lease has expired".into()));
     }
     let replay_count: i32 = row.try_get("replay_count")?;
-    let previous_running = state == "running";
-    if previous_running {
-        let lease_expires_at = row
-            .try_get::<Option<DateTime<Utc>>, _>("lease_expires_at")?
-            .ok_or_else(|| AppError::Invalid("running GIGA event has no lease expiry".into()))?;
-        if lease_expires_at > claimed_at {
-            tx.commit().await?;
-            return Ok(ClaimState::WaitUntil {
-                attempt_count: u32::try_from(previous_attempt)
-                    .map_err(|_| AppError::Invalid("GIGA attempt count is invalid".into()))?,
-                candidate_count: u32::try_from(candidate_count)
-                    .map_err(|_| AppError::Invalid("GIGA candidate count is invalid".into()))?,
-                last_error: row.try_get("last_error")?,
-            });
-        }
-        sqlx::query(
-            "UPDATE giga_event_attempts
-             SET outcome='lease_expired',error_class=$4,finished_at=$5
-             WHERE event_id=$1 AND replay_count=$2 AND attempt_count=$3 AND finished_at IS NULL",
-        )
-        .bind(event_id)
-        .bind(replay_count)
-        .bind(previous_attempt)
-        .bind(if previous_attempt >= GIGA_MAX_EVENT_ATTEMPTS as i32 {
-            "GigaLeaseExpiredRetryExhausted"
-        } else {
-            "GigaLeaseExpired"
-        })
-        .bind(claimed_at)
-        .execute(&mut *tx)
-        .await?;
-    } else if state != "pending" {
-        return Err(AppError::Invalid(
-            "stored GIGA queue state is invalid".into(),
-        ));
-    } else {
-        let available_at: DateTime<Utc> = row.try_get("available_at")?;
-        if available_at > claimed_at {
-            tx.commit().await?;
-            return Ok(ClaimState::WaitUntil {
-                attempt_count: u32::try_from(previous_attempt)
-                    .map_err(|_| AppError::Invalid("GIGA attempt count is invalid".into()))?,
-                candidate_count: u32::try_from(candidate_count)
-                    .map_err(|_| AppError::Invalid("GIGA candidate count is invalid".into()))?,
-                last_error: row.try_get("last_error")?,
-            });
-        }
-    }
-    if previous_attempt >= GIGA_MAX_EVENT_ATTEMPTS as i32 {
-        sqlx::query(
-            "UPDATE giga_events
-             SET queue_state='failed',locked_by=NULL,locked_at=NULL,lease_expires_at=NULL,
-                 last_error='GigaRetryExhausted',processed_at=$2,last_finished_at=$2,updated_at=$2
-             WHERE event_id=$1",
-        )
-        .bind(event_id)
-        .bind(claimed_at)
-        .execute(&mut *tx)
-        .await?;
-        let event = event_from_store(&mut tx, event_id).await?;
-        let result = terminal_result(
-            event_id,
-            "failed",
-            candidate_count,
-            previous_attempt,
-            Some("GigaRetryExhausted".into()),
-        )?;
-        tx.commit().await?;
-        return Ok(ClaimState::Terminal { event, result });
-    }
-    let attempt_count = previous_attempt + 1;
-    let lease_expires_at = claimed_at + ChronoDuration::seconds(GIGA_LEASE_SECONDS);
-    sqlx::query(
-        "UPDATE giga_events
-         SET queue_state='running',attempt_count=$2,
-             retry_count=retry_count+CASE WHEN $3 THEN 1 ELSE 0 END,
-             locked_by=$4,locked_at=$5,lease_expires_at=$6,candidate_count=0,
-             processed_at=NULL,last_finished_at=NULL,updated_at=$5
-         WHERE event_id=$1",
+    let active_attempts: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM giga_event_attempts
+         WHERE event_id=$1 AND replay_count=$2 AND attempt_count=$3
+           AND worker_id=$4 AND claimed_at=$5 AND lease_expires_at=$6 AND finished_at IS NULL",
     )
-    .bind(event_id)
-    .bind(attempt_count)
-    .bind(previous_running)
-    .bind(GIGA_WORKER_ID.as_str())
-    .bind(claimed_at)
-    .bind(lease_expires_at)
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query(
-        "INSERT INTO giga_event_attempts
-         (event_id,replay_count,attempt_count,room,worker_id,claimed_at,lease_expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)",
-    )
-    .bind(event_id)
+    .bind(claimed_event.event_id())
     .bind(replay_count)
-    .bind(attempt_count)
-    .bind(room)
-    .bind(GIGA_WORKER_ID.as_str())
+    .bind(stored_attempt_count)
+    .bind(claim.worker_id())
     .bind(claimed_at)
-    .bind(lease_expires_at)
-    .execute(&mut *tx)
+    .bind(claimed_lease_expires_at)
+    .fetch_one(&mut *tx)
     .await?;
-    let event = event_from_store(&mut tx, event_id).await?;
+    if active_attempts != 1 {
+        return Err(AppError::Invalid(
+            "GIGA process claim has no unique active attempt".into(),
+        ));
+    }
+    let stored_event = event_from_store(&mut tx, claimed_event.event_id()).await?;
+    if &stored_event != claimed_event {
+        return Err(AppError::Invalid(
+            "GIGA process claim event does not match durable event".into(),
+        ));
+    }
     tx.commit().await?;
-    Ok(ClaimState::Claimed {
-        event,
-        attempt_count: u32::try_from(attempt_count)
-            .map_err(|_| AppError::Invalid("GIGA attempt count is invalid".into()))?,
-    })
+    Ok((stored_event, attempt_count))
 }
 
 fn finish_request(
     event: &GigaEvent,
+    worker_id: &str,
     outcome: GigaEventFinishOutcome,
     candidate_count: u32,
     error_class: Option<&str>,
@@ -1238,7 +1156,7 @@ fn finish_request(
     GigaEventFinishRequest::new(
         event.room().clone(),
         event.event_id().into(),
-        GIGA_WORKER_ID.to_string(),
+        worker_id.into(),
         outcome,
         candidate_count,
         error_class.map(str::to_owned),
@@ -1266,12 +1184,13 @@ fn process_result(
 async fn finish_attempt(
     pool: &PgPool,
     event: &GigaEvent,
+    worker_id: &str,
     attempt_count: u32,
     outcome: GigaEventFinishOutcome,
     candidate_count: u32,
     error_class: Option<&str>,
 ) -> Result<GigaProcessResult, AppError> {
-    let request = finish_request(event, outcome, candidate_count, error_class)?;
+    let request = finish_request(event, worker_id, outcome, candidate_count, error_class)?;
     giga_event_finish(pool, request).await?;
     Ok(process_result(
         event,
@@ -1285,10 +1204,11 @@ async fn finish_attempt(
 async fn store_candidate_and_finish(
     pool: &PgPool,
     event: &GigaEvent,
+    worker_id: &str,
     attempt_count: u32,
     candidate: GigaCandidate,
 ) -> Result<GigaProcessResult, AppError> {
-    let request = finish_request(event, GigaEventFinishOutcome::Succeeded, 1, None)?;
+    let request = finish_request(event, worker_id, GigaEventFinishOutcome::Succeeded, 1, None)?;
     giga_candidate_store_and_finish(pool, candidate, request).await?;
     Ok(process_result(
         event,
@@ -1313,35 +1233,9 @@ fn source_digest(event: &GigaEvent) -> String {
 pub async fn giga_process(
     pool: &PgPool,
     config: &Config,
-    request: GigaProcessRequest,
+    claim: &GigaEventClaimReceipt,
 ) -> Result<GigaProcessResult, AppError> {
-    let (event, attempt_count) = match claim_exact(pool, request.event_id()).await? {
-        ClaimState::Terminal { event, result } => {
-            resolve_sources_from_ledger(config, &event)
-                .await
-                .map_err(|failure| {
-                    AppError::Invalid(format!("GIGA process failed: {}", failure.class))
-                })?;
-            return Ok(result);
-        }
-        ClaimState::WaitUntil {
-            attempt_count,
-            candidate_count,
-            last_error,
-        } => {
-            return Ok(GigaProcessResult {
-                event_id: request.event_id().into(),
-                outcome: GigaEventFinishOutcome::Retry.as_str().into(),
-                candidate_count,
-                attempt_count,
-                error_class: RequiredNullable(last_error),
-            });
-        }
-        ClaimState::Claimed {
-            event,
-            attempt_count,
-        } => (event, attempt_count),
-    };
+    let (event, attempt_count) = validate_claim(pool, claim).await?;
     let source_hash = source_digest(&event);
     let event_hash = sha256_bytes(event.event_id().as_bytes());
     let result = resolve_sources_from_ledger(config, &event).await;
@@ -1371,6 +1265,7 @@ pub async fn giga_process(
                     return finish_attempt(
                         pool,
                         &event,
+                        claim.worker_id(),
                         attempt_count,
                         GigaEventFinishOutcome::Succeeded,
                         1,
@@ -1392,6 +1287,7 @@ pub async fn giga_process(
             let result = finish_attempt(
                 pool,
                 &event,
+                claim.worker_id(),
                 attempt_count,
                 GigaEventFinishOutcome::Succeeded,
                 0,
@@ -1412,7 +1308,14 @@ pub async fn giga_process(
             Ok(result)
         }
         Ok(Some(candidate)) => {
-            let result = store_candidate_and_finish(pool, &event, attempt_count, candidate).await?;
+            let result = store_candidate_and_finish(
+                pool,
+                &event,
+                claim.worker_id(),
+                attempt_count,
+                candidate,
+            )
+            .await?;
             tracing::info!(
                 operation = "giga_process",
                 event_hash = %event_hash,
@@ -1445,9 +1348,98 @@ pub async fn giga_process(
                 model_digest = GIGA_MODEL_MANIFEST_DIGEST,
                 prompt_version = GIGA_PROMPT_VERSION,
             );
-            finish_attempt(pool, &event, attempt_count, outcome, 0, Some(failure.class)).await
+            finish_attempt(
+                pool,
+                &event,
+                claim.worker_id(),
+                attempt_count,
+                outcome,
+                0,
+                Some(failure.class),
+            )
+            .await
         }
     }
+}
+
+async fn giga_worker_loop(
+    pool: PgPool,
+    config: Config,
+    room: RoomKey,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    loop {
+        if *shutdown.borrow() {
+            return;
+        }
+        let request = match GigaEventClaimRequest::new(
+            room.clone(),
+            GIGA_WORKER_ID.to_string(),
+            GIGA_LEASE_SECONDS,
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                tracing::warn!(operation = "giga_worker", error = %error);
+                return;
+            }
+        };
+        let claim = tokio::select! {
+            changed = shutdown.changed() => {
+                let _ = changed;
+                return;
+            }
+            claim = giga_event_claim(&pool, request) => claim,
+        };
+        match claim {
+            Ok(claim) if claim.event().is_some() => {
+                let processed = tokio::select! {
+                    changed = shutdown.changed() => {
+                        let _ = changed;
+                        return;
+                    }
+                    processed = giga_process(&pool, &config, &claim) => processed,
+                };
+                if let Err(error) = processed {
+                    tracing::warn!(operation = "giga_worker", error = %error);
+                }
+                continue;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(operation = "giga_worker_claim", error = %error);
+            }
+        }
+        tokio::select! {
+            changed = shutdown.changed() => {
+                let _ = changed;
+                return;
+            }
+            _ = tokio::time::sleep(GIGA_POLL_INTERVAL) => {}
+        }
+    }
+}
+
+pub fn spawn_giga_worker(
+    pool: &PgPool,
+    config: &Config,
+) -> Result<Option<GigaWorkerHandle>, AppError> {
+    if !claim_owner_enabled() {
+        return Ok(None);
+    }
+    let room = config
+        .giga_source_room
+        .as_deref()
+        .ok_or_else(|| AppError::Config("enabled GIGA worker requires a source room".into()))?;
+    let room = RoomKey::new(room)
+        .map_err(|error| AppError::Config(format!("invalid GIGA source room: {error}")))?;
+    let (shutdown, receiver) = watch::channel(false);
+    let task = tokio::spawn(giga_worker_loop(
+        pool.clone(),
+        config.clone(),
+        room,
+        receiver,
+    ));
+    Ok(Some(GigaWorkerHandle { shutdown, task }))
 }
 
 #[cfg(test)]
@@ -1723,5 +1715,29 @@ mod tests {
         );
         assert!(stored.len() <= GIGA_MAX_STORED_RATIONALE_BYTES);
         assert!(stored.ends_with(GIGA_RATIONALE_TRUNCATION_MARKER));
+    }
+
+    #[tokio::test]
+    async fn pre_signaled_shutdown_exits_before_any_claim() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://unused:unused@127.0.0.1:1/unused")
+            .unwrap();
+        let config = Config {
+            database_url: "unused".into(),
+            embed_url: None,
+            embed_model: "unused".into(),
+            embed_dimension: 1,
+            embed_required: false,
+            test_embedding_disabled: true,
+            giga_source_ledger_dir: None,
+            giga_source_room: Some("lab".into()),
+        };
+        let (_shutdown, receiver) = watch::channel(true);
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            giga_worker_loop(pool, config, RoomKey::new("lab").unwrap(), receiver),
+        )
+        .await
+        .expect("a pre-signaled shutdown must not wait for PostgreSQL");
     }
 }

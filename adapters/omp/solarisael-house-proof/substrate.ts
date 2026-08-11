@@ -1,24 +1,66 @@
-// WSL/substrate interop for the OMP adapter.
-// Silhouette: call the house Python scripts and return small JSON-ish results.
+// Substrate health plus the Rust-owned Paper Boat lifecycle.
 
 import path from "node:path";
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import {
-  DESIGN_DOCS_SCRIPT,
-  DESIGN_DOC_WRITE_SCRIPT,
-  DIAGNOSTIC_TIMEOUT_MS,
-  LESSONS_SCRIPT,
-  WRITE_TIMEOUT_MS,
-} from "./constants.ts";
+import { DIAGNOSTIC_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "./constants.ts";
+import { discoverRustExecutable } from "../discovery.ts";
 import { ATHANOR_ROOT } from "../athanor-root.ts";
+import { RustJsonlTransport, RustTransportError, RustTransportOutcomeUnknownError } from "../rust-transport.ts";
 
 const DIAGNOSTIC_OWNER = {
   component: "solarisael-house-omp",
   path: "solarisael-house-proof/substrate.ts",
   symbol: "substrateHealth",
 };
+
+const paperBoatTransports = new Map();
+
+function paperBoatTransport() {
+  const executable = discoverRustExecutable();
+  if (!executable) return { executable: null, transport: null };
+  let transport = paperBoatTransports.get(executable);
+  if (transport && !transport.usable) {
+    paperBoatTransports.delete(executable);
+    void transport.close().catch(() => {});
+    transport = null;
+  }
+  if (!transport) {
+    transport = new RustJsonlTransport({ executable });
+    paperBoatTransports.set(executable, transport);
+  }
+  return { executable, transport };
+}
+
+function paperBoatFailure(method, error) {
+  if (error instanceof RustTransportError) {
+    return {
+      ok: false,
+      error: error.message,
+      code: error.code,
+      retryable: error.retryable,
+      details: error.details,
+    };
+  }
+  if (error instanceof RustTransportOutcomeUnknownError) {
+    return {
+      ok: false,
+      error: `Rust ${method} outcome is unknown after dispatch`,
+      code: "outcome_unknown",
+      outcome: "unknown",
+      retryable: method === "paper_boat_sleep",
+      details: error.details || null,
+    };
+  }
+  return { ok: false, error: error?.message || String(error) };
+}
+
+export function closePaperBoatTransports() {
+  for (const [executable, transport] of paperBoatTransports) {
+    paperBoatTransports.delete(executable);
+    void transport.close().catch(() => {});
+  }
+}
 
 function redactText(value) {
   return String(value || "")
@@ -108,77 +150,25 @@ export function substrateConfigurationError() {
   return `ATHANOR_SUBSTRATE_ROOT must be an absolute path when configured (got ${configuredPath})`;
 }
 
-/**
- * The substrate a write is about to use, or the reason there is none.
- *
- * Unlike {@link substrateConfigurationError} this treats "unset" as a refusal:
- * a writer with nowhere to write must say so rather than guess a directory.
- */
-export function requireSubstrate() {
-  const dir = configuredSubstrateRoot();
-  if (!dir) {
-    return { error: "ATHANOR_SUBSTRATE_ROOT is not configured; substrate operations are unavailable" };
-  }
-  const shapeError = substrateConfigurationError();
-  if (shapeError) return { error: shapeError };
-  return { dir };
-}
 
-/**
- * The dotenv health.py should read: `<state-root>/substrate/.env`.
- *
- * `null` when this process does not know the state root, which is the
- * development case — health.py then resolves it structurally from its own
- * location, and that is the honest answer there.
- *
- * Only an absolute state root is used. A relative one would resolve against
- * whatever the WSL side's working directory happens to be, which is exactly
- * the silent-wrong-path class this cutover removed.
- */
+/** The dotenv passed to the native Rust health command when state is known. */
 export function healthDotenvPath() {
   const stateDir = String(process.env.ATHANOR_STATE_DIR || "").trim();
   if (!stateDir || !isAbsolutePath(stateDir)) return null;
   return path.join(stateDir, "substrate", ".env");
 }
 
-/**
- * The substrate executable health.py should report on.
- *
- * Forwarded for DIAGNOSTICS only. This adapter is not a configuration owner
- * for the executable \u2014 discovery.ts already resolved it, and health.py has no
- * say in the matter. It is passed because ATHANOR_SUBSTRATE_EXE is a Windows
- * process variable that does not cross into WSL, so without it health.py falls
- * back to `<product>/target/release/athanor-substrate` and reports an installed
- * binary at `adapters/omp/bin/<platform>/athanor-substrate.exe` as missing.
- *
- * `null` when unset or relative, exactly as with the dotenv: health.py then
- * resolves structurally, which is the honest answer in a development checkout.
- */
+/** The explicitly selected native Rust substrate executable, when absolute. */
 export function substrateExePath() {
   const executable = String(process.env.ATHANOR_SUBSTRATE_EXE || "").trim();
   if (!executable || !isAbsolutePath(executable)) return null;
   return executable;
 }
 
-export function substratePaths(dir) {
-  return {
-    dir,
-    health: path.join(dir, "health.py"),
-    recordMemory: path.join(dir, "record_memory.py"),
-    catchBoat: path.join(dir, "catch_boat.py"),
-  };
-}
 
 /**
- * The diagnostic blocks health.py gathers. Every one of them is a fact in its
- * own right, not a consequence of the substrate being healthy, and a verifier
- * needs them most precisely when it is degraded.
- *
- * Twice now a block was dropped here and a downstream assertion evaluated
- * against `undefined` and blamed the wrong subsystem: `topology` first, then
- * `database`, which turned an unreachable server into "schema required 13;
- * got undefined". Naming them as a set ends that pattern instead of waiting
- * for the third one.
+ * The diagnostic blocks Rust gathers. Each remains independently useful when
+ * the aggregate verdict is degraded.
  */
 export const HEALTH_REPORT_BLOCKS = ["scripts", "database", "embedding", "retrieval", "backup", "topology"];
 
@@ -195,8 +185,8 @@ function substrateDegraded({ configured, dir, reason, degradedReasons = [], diag
   const safeReason = redactText(reason);
   const safeReasons = degradedReasons.map(redactText);
   return {
-    // Report blocks first: the adapter's own verdict fields below are
-    // authoritative and must never be shadowed by health.py's payload.
+    // Report blocks first: the adapter's own verdict fields below remain
+    // authoritative and cannot be shadowed by the Rust payload.
     ...report,
     ok: configured ? false : null,
     configured,
@@ -271,7 +261,7 @@ export async function substrateHealth(timeoutMs = DIAGNOSTIC_TIMEOUT_MS) {
     });
   }
 
-  const { dir, health } = substratePaths(configuredPath);
+  const dir = configuredPath;
   const dirError = await pathAccessError(dir);
   if (dirError) {
     const missing = dirError.code === "ENOENT";
@@ -289,54 +279,68 @@ export async function substrateHealth(timeoutMs = DIAGNOSTIC_TIMEOUT_MS) {
       }),
     });
   }
-  const healthError = await pathAccessError(health);
-  if (healthError) {
-    const missing = healthError.code === "ENOENT";
-    const reason = missing ? `configured substrate health script is missing: ${health}` : `configured substrate health script is unavailable: ${health} (${errorMessage(healthError)})`;
+  let executable;
+  try {
+    executable = substrateExePath() || discoverRustExecutable();
+  } catch (error) {
+    const reason = `configured Rust substrate executable is invalid: ${errorMessage(error)}`;
     return degraded({
       dir,
       reason,
       diagnostic: healthDiagnostic({
         category: "filesystem",
-        expected: { file: health, accessible: true },
-        observed: { file: health, accessible: false, error: errorMessage(healthError) },
-        evidence: [{ source: "filesystem", code: healthError.code || "unknown", target: health }],
-        targets: [{ kind: "file", path: health }, configTarget],
-        nextChecks: [{ action: missing ? "restore_health_script" : "repair_filesystem_access", target: { path: health } }],
+        expected: { executable: true },
+        observed: { executable: false, error: errorMessage(error) },
+        evidence: [{ source: "executable-selection", error: errorMessage(error) }],
+        targets: [{ kind: "environment", name: "ATHANOR_SUBSTRATE_EXE" }],
+        nextChecks: [{ action: "select_substrate_executable", target: { name: "ATHANOR_SUBSTRATE_EXE" } }],
+      }),
+    });
+  }
+  const executableError = executable ? await pathAccessError(executable) : { code: "ENOENT", message: "no Rust substrate executable selected" };
+  if (executableError) {
+    const reason = executable
+      ? `configured Rust substrate executable is unavailable: ${executable} (${errorMessage(executableError)})`
+      : "Rust substrate executable is unavailable";
+    return degraded({
+      dir,
+      reason,
+      diagnostic: healthDiagnostic({
+        category: "filesystem",
+        expected: { executable, accessible: true },
+        observed: { executable, accessible: false, error: errorMessage(executableError) },
+        evidence: [{ source: "filesystem", code: executableError.code || "unknown", target: executable }],
+        targets: [{ kind: "file", path: executable || "athanor-substrate" }],
+        nextChecks: [{ action: "restore_substrate_executable", target: { path: executable || "athanor-substrate" } }],
       }),
     });
   }
 
-  // health.py runs inside WSL. ATHANOR_STATE_DIR is a Windows process
-  // variable and does NOT cross that boundary without a global WSLENV
-  // dependency, so the dotenv travels as an argv value instead — the one form
-  // that always survives the hop. When the state root is unknown to this
-  // process we pass nothing and let health.py resolve structurally, which is
-  // the correct answer for a development checkout.
-  const argv = ["--cd", "~", "python3", windowsPathToWsl(health)];
+  const argv = ["health", "--substrate-dir", dir, "--skip-embedding"];
   const stateDotenv = healthDotenvPath();
-  if (stateDotenv) argv.push("--env-file", windowsPathToWsl(stateDotenv));
-  const executable = substrateExePath();
-  if (executable) argv.push("--substrate-exe", windowsPathToWsl(executable));
+  if (stateDotenv) argv.push("--env-file", stateDotenv);
+  const fixture = String(process.env.SOLARISAEL_TEST_SUBSTRATE_HEALTH_SCRIPT || "").trim();
+  const command = fixture ? process.execPath : executable;
+  const commandArgs = fixture ? [fixture, ...argv] : argv;
   let probe;
   try {
-    probe = await runWslDiagnostic({ argv, stdin: "", timeoutMs });
+    probe = await runWslDiagnostic({ command, args: commandArgs, stdin: "", timeoutMs });
   } catch (error) {
     probe = { spawnError: errorMessage(error), timedOut: false, code: null, stdout: "", stderr: "" };
   }
   if (probe.timedOut || probe.spawnError) {
-    const reason = probe.timedOut ? "health.py timed out" : `health.py launch failed: ${probe.spawnError}`;
+    const reason = probe.timedOut ? "Rust substrate health timed out" : `Rust substrate health launch failed: ${probe.spawnError}`;
     return degraded({
       dir,
       reason,
       diagnostic: healthDiagnostic({
         category: "operation",
         stage: "startup",
-        expected: { command: "python3 health.py", timeoutMs },
+        expected: { command: "athanor-substrate health", timeoutMs },
         observed: { timedOut: Boolean(probe.timedOut), spawned: !probe.spawnError, exitCode: probe.code },
         evidence: [{ source: "process", stderr: redactText(String(probe.stderr || "")).slice(0, 512) }],
-        targets: [{ kind: "script", path: health }, { kind: "service", name: "wsl.exe" }],
-        nextChecks: [{ action: "run_health_command", target: { argv } }, { action: "verify_python_runtime", target: { command: "python3" } }],
+        targets: [{ kind: "file", path: executable }],
+        nextChecks: [{ action: "run_health_command", target: { executable, argv } }],
         retry: "safe_now",
       }),
     });
@@ -349,30 +353,30 @@ export async function substrateHealth(timeoutMs = DIAGNOSTIC_TIMEOUT_MS) {
   } catch (error) {
     return degraded({
       dir,
-      reason: `health.py returned malformed JSON: ${errorMessage(error)}`,
+      reason: `Rust substrate health returned malformed JSON: ${errorMessage(error)}`,
       diagnostic: healthDiagnostic({
         category: "protocol",
         stage: "response_encode",
         expected: { json: "health verdict object" },
         observed: { stdoutBytes: raw.length, exitCode: probe.code },
         evidence: [{ source: "process", stderr: redactText(String(probe.stderr || "")).slice(0, 512) }],
-        targets: [{ kind: "script", path: health }],
-        nextChecks: [{ action: "run_health_command", target: { path: health } }, { action: "validate_health_json", target: { path: health } }],
+        targets: [{ kind: "file", path: executable }],
+        nextChecks: [{ action: "run_health_command", target: { executable, argv } }, { action: "validate_health_json", target: { executable } }],
       }),
     });
   }
   if (!verdict || typeof verdict !== "object" || Array.isArray(verdict)) {
     return degraded({
       dir,
-      reason: "health.py returned an invalid JSON verdict",
+      reason: "Rust substrate health returned an invalid JSON verdict",
       diagnostic: healthDiagnostic({
         category: "protocol",
         stage: "response_encode",
         expected: { type: "object" },
         observed: { type: Array.isArray(verdict) ? "array" : typeof verdict },
-        evidence: [{ source: "health.py", exitCode: probe.code }],
-        targets: [{ kind: "script", path: health }],
-        nextChecks: [{ action: "validate_health_json", target: { path: health } }],
+        evidence: [{ source: "athanor-substrate", exitCode: probe.code }],
+        targets: [{ kind: "file", path: executable }],
+        nextChecks: [{ action: "validate_health_json", target: { executable } }],
       }),
     });
   }
@@ -396,10 +400,10 @@ export async function substrateHealth(timeoutMs = DIAGNOSTIC_TIMEOUT_MS) {
   }
 
   let reason = reportedReasons.join("; ");
-  if (!apiCompatible) reason = `substrate API mismatch: health.py reported ${String(verdict.substrateApi)}, expected 1`;
-  else if (!reason && verdict.mode !== "full") reason = `health.py reported mode ${String(verdict.mode)}, expected full`;
-  else if (!reason && verdict.ok !== true) reason = "health.py reported an unhealthy substrate";
-  else if (!reason) reason = "health.py returned an incomplete full-mode verdict";
+  if (!apiCompatible) reason = `substrate API mismatch: Rust reported ${String(verdict.substrateApi)}, expected 1`;
+  else if (!reason && verdict.mode !== "full") reason = `Rust substrate reported mode ${String(verdict.mode)}, expected full`;
+  else if (!reason && verdict.ok !== true) reason = "Rust substrate reported an unhealthy substrate";
+  else if (!reason) reason = "Rust substrate returned an incomplete full-mode verdict";
   const lower = reason.toLowerCase();
   const category = /embed|model|vector/.test(lower) ? "embedding" : /database|postgres|sqlite|sql/.test(lower) ? "database" : !apiCompatible ? "protocol" : "operation";
   const stage = category === "embedding" ? "embedding_request" : category === "database" ? "database_connect" : category === "protocol" ? "validation" : "startup";
@@ -407,20 +411,18 @@ export async function substrateHealth(timeoutMs = DIAGNOSTIC_TIMEOUT_MS) {
     dir,
     reason,
     degradedReasons: reportedReasons.length ? reportedReasons : [reason],
-    // Every diagnostic block health.py gathered, carried through unchanged.
-    // See HEALTH_REPORT_BLOCKS for why this is a set rather than a hand-picked
-    // field or two.
+    // Every diagnostic block Rust gathered survives the degraded path.
     report: healthReport(verdict),
     diagnostic: healthDiagnostic({
       category,
       stage,
       expected: { ok: true, mode: "full", substrateApi: 1 },
       observed: { ok: verdict.ok === true, mode: verdict.mode, substrateApi: verdict.substrateApi, degradedReasons: reportedReasons },
-      evidence: [{ source: "health.py", exitCode: probe.code, reason: redactText(reason) }],
-      targets: [{ kind: "script", path: health }, category === "database" ? { kind: "service", name: "database" } : category === "embedding" ? { kind: "service", name: "embedding" } : { kind: "contract", path: "compatibility.json" }],
+      evidence: [{ source: "athanor-substrate", exitCode: probe.code, reason: redactText(reason) }],
+      targets: [{ kind: "file", path: executable }, category === "database" ? { kind: "service", name: "database" } : category === "embedding" ? { kind: "service", name: "embedding" } : { kind: "contract", path: "compatibility.json" }],
       nextChecks: [
-        { action: category === "database" ? "verify_database_connectivity" : category === "embedding" ? "verify_embedding_provider" : "validate_health_contract", target: { path: health } },
-        { action: "rerun_substrate_health", target: { path: health } },
+        { action: category === "database" ? "verify_database_connectivity" : category === "embedding" ? "verify_embedding_provider" : "validate_health_contract", target: { executable } },
+        { action: "rerun_substrate_health", target: { executable } },
       ],
       retry: "after_change",
     }),
@@ -471,7 +473,7 @@ export function diagnosticInvocation(argv, environ = process.env) {
   };
 }
 
-export function runWslDiagnostic({ argv, stdin, timeoutMs = DIAGNOSTIC_TIMEOUT_MS }) {
+export function runWslDiagnostic({ argv, command, args, env, stdin, timeoutMs = DIAGNOSTIC_TIMEOUT_MS }) {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -485,7 +487,9 @@ export function runWslDiagnostic({ argv, stdin, timeoutMs = DIAGNOSTIC_TIMEOUT_M
     };
     let invocation;
     try {
-      invocation = diagnosticInvocation(argv);
+      invocation = command
+        ? { command, args: Array.isArray(args) ? args : [], env }
+        : diagnosticInvocation(argv);
     } catch (error) {
       finish({
         timedOut: false,
@@ -570,78 +574,76 @@ export function memorySourcePath(title, now = new Date()) {
   return `memory/omp_${now.toISOString().replace(/[:.]/g, "-")}_${String(title || "memory").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "memory"}.md`;
 }
 
-export async function writeSessionMemory({ room, title, body, backup, type = "session", sourcePath, threads = [], continues = [], supersedes = [], timeoutMs = WRITE_TIMEOUT_MS }) {
-  const substrate = requireSubstrate();
-  if (substrate.error) return { ok: false, error: substrate.error };
-  const { recordMemory } = substratePaths(substrate.dir);
-  const resolvedSourcePath = sourcePath || memorySourcePath(title);
-  const argv = [
-    "--cd", "~",
-    "python3", windowsPathToWsl(recordMemory),
-    "--room", room,
-    "--type", String(type || "session"),
-    "--title", String(title || "OMP memory"),
-    "--source-path", resolvedSourcePath,
-    "--body-stdin",
-  ];
-  for (const thread of Array.isArray(threads) ? threads : []) argv.push("--thread", String(thread));
-  for (const memoryId of Array.isArray(supersedes) ? supersedes : []) argv.push("--supersedes", String(memoryId));
-  for (const continuation of Array.isArray(continues) ? continues : []) {
-    argv.push("--continues", JSON.stringify(continuation));
+export async function sleepBoat(room, body, { signal } = {}) {
+  const { executable, transport } = paperBoatTransport();
+  if (!transport || !executable) {
+    return { ok: false, error: "Rust substrate executable is unavailable; paper boat was not written" };
   }
-  if (!backup) argv.push("--no-backup");
-  const probe = await runWslDiagnostic({ argv, stdin: body, timeoutMs });
-  if (probe.timedOut) return { ok: false, error: "record_memory timed out" };
-  if (probe.spawnError) return { ok: false, error: probe.spawnError };
-  if (probe.code !== 0) return { ok: false, error: String(probe.stderr || "").trim() || `record_memory exited ${probe.code}` };
-  const summary = String(probe.stdout || "").trim();
-  const idMatch = /id=(\d+)/.exec(summary);
-  return { ok: true, id: idMatch ? Number(idMatch[1]) : null, summary, sourcePath: resolvedSourcePath };
-}
-
-// Lesson-store write path (remember store routing). All lesson scripts share
-// the shape: --title inline, lesson text on stdin (--lesson-stdin), optional
-// scalar/tag flags built by stores.buildStoreArgs. Body goes via stdin, never
-// inline argv — cross-shell-boundary payloads break inline (lesson 163).
-export async function writeLessonStore({ store, title, body, extraArgs = [], timeoutMs = WRITE_TIMEOUT_MS }) {
-  const substrate = requireSubstrate();
-  if (substrate.error) return { ok: false, error: substrate.error };
-  const { dir } = substratePaths(substrate.dir);
-  const script = path.join(dir, store.script);
-  const argv = [
-    "--cd", "~",
-    "python3", windowsPathToWsl(script),
-    "--title", String(title || "OMP lesson"),
-    "--lesson-stdin",
-    ...extraArgs,
-  ];
-  if (store.noBackup) argv.push("--no-backup");
-  const probe = await runWslDiagnostic({ argv, stdin: body, timeoutMs });
-  if (probe.timedOut) return { ok: false, error: `${store.script} timed out` };
-  if (probe.spawnError) return { ok: false, error: probe.spawnError };
-  if (probe.code !== 0) return { ok: false, error: String(probe.stderr || "").trim() || `${store.script} exited ${probe.code}` };
-  const summary = String(probe.stdout || "").trim();
-  const idMatch = /id=\s*(\d+)/.exec(summary);
-  return { ok: true, id: idMatch ? Number(idMatch[1]) : null, summary };
-}
-
-export async function catchBoat(room) {
-  const substrate = requireSubstrate();
-  if (substrate.error) return { ok: false, error: substrate.error };
-  const { catchBoat: script } = substratePaths(substrate.dir);
-  const argv = ["--cd", "~", "python3", windowsPathToWsl(script), "--room", room];
-  const stateDotenv = healthDotenvPath();
-  if (stateDotenv) argv.push("--env-file", windowsPathToWsl(stateDotenv));
-  const probe = await runWslDiagnostic({ argv, stdin: "" });
-  if (probe.timedOut) return { ok: false, error: "catch_boat timed out" };
-  if (probe.spawnError) return { ok: false, error: probe.spawnError };
-  if (probe.code !== 0) return { ok: false, error: String(probe.stderr || "").trim() || `catch_boat exited ${probe.code}` };
   try {
-    return { ok: true, ...JSON.parse(String(probe.stdout || "{}")) };
-  } catch (err) {
-    return { ok: false, error: err?.message || String(err), stdout: String(probe.stdout || "").slice(0, 1200) };
+    const result = await transport.request("paper_boat_sleep", {
+      room,
+      body,
+      backup: true,
+    }, {
+      signal: signal || undefined,
+      timeoutMs: WRITE_TIMEOUT_MS,
+      settleDefinitively: true,
+    });
+    if (!result || typeof result !== "object" || Array.isArray(result)
+      || result.ok !== true || result.durable !== true || result.authority !== "postgres"
+      || !/^[1-9]\d*$/.test(String(result.memory_id || ""))
+      || typeof result.source_path !== "string" || !result.source_path
+      || typeof result.outbox_event_id !== "string" || !result.outbox_event_id
+      || !["not_requested", "completed", "failed"].includes(result.backup_status)
+      || !Array.isArray(result.warnings) || result.warnings.length > 64
+      || !result.warnings.every((warning) => typeof warning === "string" && warning.length <= 4096)) {
+      paperBoatTransports.delete(executable);
+      void transport.close().catch(() => {});
+      return paperBoatFailure("paper_boat_sleep", new RustTransportOutcomeUnknownError());
+    }
+    return result;
+  } catch (error) {
+    if (!transport.usable) paperBoatTransports.delete(executable);
+    return paperBoatFailure("paper_boat_sleep", error);
   }
 }
+
+export async function catchBoat(room, { signal } = {}) {
+  const { executable, transport } = paperBoatTransport();
+  if (!transport || !executable) {
+    return { ok: false, error: "Rust substrate executable is unavailable; paper boat wake is unavailable" };
+  }
+  try {
+    const result = await transport.request("paper_boat_wake", { room }, {
+      signal: signal || undefined,
+      timeoutMs: WRITE_TIMEOUT_MS,
+    });
+    const boundedUnboated = Array.isArray(result?.unboated)
+      && result.unboated.length <= 64
+      && result.unboated.every((memory) => memory && typeof memory === "object"
+        && /^[1-9]\d*$/.test(String(memory.id || ""))
+        && typeof memory.title === "string" && memory.title.length <= 512
+        && typeof memory.type === "string" && memory.type.length <= 128
+        && typeof memory.source_path === "string" && memory.source_path.length <= 2048
+        && typeof memory.created_at === "string" && memory.created_at.length <= 128);
+    if (!result || typeof result !== "object" || Array.isArray(result)
+      || result.ok !== true || typeof result.found !== "boolean"
+      || result.room !== room || !boundedUnboated
+      || (result.found && (typeof result.body !== "string" || result.body.length > 65536
+        || typeof result.title !== "string" || result.title.length > 512
+        || typeof result.source_path !== "string" || result.source_path.length > 2048
+        || typeof result.created_at !== "string" || result.created_at.length > 128))
+      || !Array.isArray(result.warnings) || result.warnings.length > 64
+      || !result.warnings.every((warning) => typeof warning === "string" && warning.length <= 4096)) {
+      return { ok: false, error: "Rust paper_boat_wake returned an invalid bounded receipt" };
+    }
+    return result;
+  } catch (error) {
+    if (!transport.usable) paperBoatTransports.delete(executable);
+    return paperBoatFailure("paper_boat_wake", error);
+  }
+}
+
 
 export function formatUnboatedWarning(boat) {
   const orphans = Array.isArray(boat?.unboated) ? boat.unboated : [];
@@ -675,289 +677,3 @@ export function formatWakeContext(boat) {
   ].filter((line) => line !== null).join("\n");
 }
 
-export async function runLessons(effectiveRoomDir, room, filters) {
-  const argv = [
-    "--cd", "~",
-    "python3", windowsPathToWsl(LESSONS_SCRIPT),
-    "--room-dir", windowsPathToWsl(effectiveRoomDir),
-    "--room", room,
-    "--type", String(filters.type),
-    "--limit", String(filters.limit ?? 12),
-  ];
-  for (const key of ["shape", "project", "register", "stage", "query"]) {
-    const value = filters[key];
-    if (typeof value === "string" && value.trim()) {
-      argv.push(`--${key}`, value.trim());
-    }
-  }
-  for (const value of filters.languageKeys || []) {
-    if (typeof value === "string" && value.trim()) argv.push("--language-key", value.trim());
-  }
-  for (const value of filters.technologyKeys || []) {
-    if (typeof value === "string" && value.trim()) argv.push("--technology-key", value.trim());
-  }
-  const probe = await runWslDiagnostic({ argv, stdin: "" });
-  if (probe.timedOut) return { ok: false, lessons: [], taxonomy: [], error: "lessons query timed out" };
-  if (probe.spawnError) return { ok: false, lessons: [], taxonomy: [], error: probe.spawnError };
-  if (probe.code !== 0) {
-    return { ok: false, lessons: [], taxonomy: [], error: String(probe.stderr || "").trim() || `lessons query exited ${probe.code}` };
-  }
-  try {
-    const parsed = JSON.parse(String(probe.stdout || "{}"));
-    if (parsed?.ok !== true) {
-      return { ok: false, lessons: [], taxonomy: [], error: parsed?.error || "lessons query refused" };
-    }
-    return {
-      ...parsed,
-      ok: true,
-      lessons: Array.isArray(parsed.lessons) ? parsed.lessons : [],
-      taxonomy: Array.isArray(parsed.taxonomy) ? parsed.taxonomy : [],
-    };
-  } catch (error) {
-    return { ok: false, lessons: [], taxonomy: [], error: `lessons query returned invalid JSON: ${error?.message || String(error)}` };
-  }
-}
-
-export async function runDesignDocs(effectiveRoomDir, filters) {
-  const argv = [
-    "--cd", "~",
-    "python3", windowsPathToWsl(DESIGN_DOCS_SCRIPT),
-    "--room-dir", windowsPathToWsl(effectiveRoomDir),
-    "--system", String(filters.system),
-    "--limit", String(filters.limit ?? 12),
-  ];
-  for (const [key, flag] of [
-    ["docType", "--doc-type"],
-    ["name", "--name"],
-    ["group", "--group"],
-    ["query", "--query"],
-  ]) {
-    const value = filters[key];
-    if (typeof value === "string" && value.trim()) argv.push(flag, value.trim());
-  }
-  if (filters.includeSuperseded === true) argv.push("--include-superseded");
-
-  const probe = await runWslDiagnostic({ argv, stdin: "" });
-  if (probe.timedOut) return { ok: false, documents: [], taxonomy: [], error: "design document query timed out" };
-  if (probe.spawnError) return { ok: false, documents: [], taxonomy: [], error: probe.spawnError };
-  if (probe.code !== 0) {
-    return { ok: false, documents: [], taxonomy: [], error: String(probe.stderr || "").trim() || `design document query exited ${probe.code}` };
-  }
-  try {
-    const parsed = JSON.parse(String(probe.stdout || "{}"));
-    if (parsed?.ok !== true) {
-      return { ok: false, documents: [], taxonomy: [], error: parsed?.error || "design document query refused" };
-    }
-    return {
-      ...parsed,
-      ok: true,
-      documents: Array.isArray(parsed.documents) ? parsed.documents : [],
-      taxonomy: Array.isArray(parsed.taxonomy) ? parsed.taxonomy : [],
-    };
-  } catch (error) {
-    return { ok: false, documents: [], taxonomy: [], error: `design document query returned invalid JSON: ${error?.message || String(error)}` };
-  }
-}
-
-export async function writeDesignDoc({
-  effectiveRoomDir,
-  system,
-  docType,
-  name,
-  group,
-  values,
-  body,
-  provenance,
-  tags,
-  supersedes,
-  allowIdentityChange,
-  timeoutMs = WRITE_TIMEOUT_MS,
-}) {
-  const argv = [
-    "--cd", "~",
-    "python3", windowsPathToWsl(DESIGN_DOC_WRITE_SCRIPT),
-    "--room-dir", windowsPathToWsl(effectiveRoomDir),
-    "--system", String(system),
-    "--doc-type", String(docType),
-    "--name", String(name),
-  ];
-  if (typeof group === "string" && group.trim()) argv.push("--group", group.trim());
-  if (values !== undefined) argv.push("--values", JSON.stringify(values));
-  if (provenance !== undefined) argv.push("--provenance", JSON.stringify(provenance));
-  for (const tag of Array.isArray(tags) ? tags : []) argv.push("--tag", String(tag));
-  if (supersedes !== undefined) argv.push("--supersedes", String(supersedes));
-  if (allowIdentityChange === true) argv.push("--allow-identity-change");
-  const hasBody = body !== undefined;
-  if (hasBody) argv.push("--body-stdin");
-
-  const probe = await runWslDiagnostic({ argv, stdin: hasBody ? String(body) : "", timeoutMs });
-  if (probe.timedOut) return { ok: false, error: "design document write timed out" };
-  if (probe.spawnError) return { ok: false, error: probe.spawnError };
-  if (probe.code !== 0) return { ok: false, error: String(probe.stderr || "").trim() || `design document write exited ${probe.code}` };
-  try {
-    const parsed = JSON.parse(String(probe.stdout || "{}"));
-    return parsed?.ok === true ? { ...parsed, ok: true } : { ...parsed, ok: false };
-  } catch (err) {
-    return { ok: false, error: err?.message || String(err), stdout: String(probe.stdout || "").slice(0, 1200) };
-  }
-}
-
-export async function deleteLesson({ effectiveRoomDir, kind, id, expectedTitle, timeoutMs = WRITE_TIMEOUT_MS }) {
-  const script = path.join(ATHANOR_ROOT, "src", "delete-lesson.py");
-  const argv = [
-    "--cd", "~",
-    "python3", windowsPathToWsl(script),
-    "--room-dir", windowsPathToWsl(effectiveRoomDir),
-    "--kind", String(kind),
-    "--id", String(id),
-    "--expected-title", String(expectedTitle),
-  ];
-  const probe = await runWslDiagnostic({ argv, stdin: "", timeoutMs });
-  if (probe.timedOut) return { ok: false, deleted: false, error: "delete-lesson timed out" };
-  if (probe.spawnError) return { ok: false, deleted: false, error: probe.spawnError };
-  if (probe.code !== 0) return { ok: false, deleted: false, error: String(probe.stderr || "").trim() || `delete-lesson exited ${probe.code}` };
-  try {
-    const parsed = JSON.parse(String(probe.stdout || "{}"));
-    if (parsed?.ok !== true || parsed?.deleted !== true) return { ok: false, deleted: false, ...parsed };
-    return { ...parsed, ok: true, deleted: true };
-  } catch (err) {
-    return { ok: false, deleted: false, error: err?.message || String(err), stdout: String(probe.stdout || "").slice(0, 1200) };
-  }
-}
-export async function updateLesson({
-  effectiveRoomDir,
-  kind,
-  id,
-  expectedTitle,
-  patch = {},
-  timeoutMs = WRITE_TIMEOUT_MS,
-}) {
-  const patchKeys = ["title", "body", "shape", "triggerContext", "tags", "threadKeys", "voice", "scope", "project", "proofPattern", "languageKeys", "technologyKeys", "register", "exampleText", "writers", "negationOf"];
-  if (!patchKeys.some((key) => Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== undefined)) {
-    return { ok: false, updated: false, error: "at least one update field is required" };
-  }
-  const script = path.join(ATHANOR_ROOT, "src", "update-lesson.py");
-  const argv = [
-    "--cd", "~",
-    "python3", windowsPathToWsl(script),
-    "--room-dir", windowsPathToWsl(effectiveRoomDir),
-    "--kind", String(kind),
-    "--id", String(id),
-    "--expected-title", String(expectedTitle),
-  ];
-  const values = [
-    ["title", "--title"],
-    ["shape", "--shape"],
-    ["triggerContext", "--trigger-context"],
-    ["voice", "--voice"],
-    ["scope", "--scope"],
-    ["project", "--project"],
-    ["proofPattern", "--proof-pattern"],
-    ["exampleText", "--example-text"],
-    ["negationOf", "--negation-of"],
-  ];
-  for (const [key, flag] of values) {
-    if (Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== null && patch[key] !== undefined) {
-      argv.push(flag, String(patch[key]));
-    }
-  }
-  for (const [key, flag] of [["register", "--register"], ["writers", "--writer"], ["languageKeys", "--language-key"], ["technologyKeys", "--technology-key"], ["threadKeys", "--thread-key"]]) {
-    if (Object.prototype.hasOwnProperty.call(patch, key)) {
-      for (const value of Array.isArray(patch[key]) ? patch[key] : []) argv.push(flag, String(value));
-    }
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "negationOf") && patch.negationOf === null) {
-    argv.push("--clear-negation-of");
-  }
-  if (Object.prototype.hasOwnProperty.call(patch, "tags")) {
-    for (const tag of Array.isArray(patch.tags) ? patch.tags : []) argv.push("--tag", String(tag));
-  }
-  const hasBody = Object.prototype.hasOwnProperty.call(patch, "body");
-  if (hasBody) argv.push("--lesson-stdin");
-  const probe = await runWslDiagnostic({ argv, stdin: hasBody ? String(patch.body ?? "") : "", timeoutMs });
-  if (probe.timedOut) return { ok: false, updated: false, error: "update-lesson timed out" };
-  if (probe.spawnError) return { ok: false, updated: false, error: probe.spawnError };
-  if (probe.code !== 0) return { ok: false, updated: false, error: String(probe.stderr || "").trim() || `update-lesson exited ${probe.code}` };
-  try {
-    const parsed = JSON.parse(String(probe.stdout || "{}"));
-    if (parsed?.ok !== true || parsed?.updated !== true) return { ...parsed, ok: false, updated: false };
-    return { ...parsed, ok: true, updated: true };
-  } catch (err) {
-    return { ok: false, updated: false, error: err?.message || String(err), stdout: String(probe.stdout || "").slice(0, 1200) };
-  }
-}
-
-async function runCabinetWriter({ room, payload, append = false, timeoutMs = WRITE_TIMEOUT_MS }) {
-  const substrate = requireSubstrate();
-  if (substrate.error) return { ok: false, error: substrate.error };
-  const { dir } = substratePaths(substrate.dir);
-  const script = path.join(dir, "record_cabinet_entry.py");
-  const temp = await mkdtemp(path.join(tmpdir(), "anamnesis-"));
-  const files = new Map();
-  try {
-    const argv = ["--cd", "~", "python3", windowsPathToWsl(script), "--room", String(room), append ? "append-rep" : "add"];
-    const add = (flag, value) => { if (value !== undefined && value !== null && String(value) !== "") argv.push(flag, String(value)); };
-    const addFile = async (key, flag, value) => {
-      if (value === undefined || value === null || String(value) === "") return;
-      const target = path.join(temp, `${key}.txt`);
-      await writeFile(target, String(value), "utf8");
-      files.set(key, target);
-      argv.push(flag, windowsPathToWsl(target));
-    };
-    if (append) {
-      add("--title", payload?.title);
-      add("--rep-number", payload?.repNumber);
-      add("--occurred-on", payload?.occurredOn);
-      await addFile("how-it-went", "--how-it-went-file", payload?.howItWent);
-      await addFile("portal-pull", "--portal-pull-file", payload?.portalPull);
-      await addFile("lighter", "--lighter-file", payload?.lighter);
-      for (const source of Array.isArray(payload?.sourcePaths) ? payload.sourcePaths : []) add("--source-path", source);
-    } else {
-      add("--kind", payload?.kind);
-      add("--fidelity", payload?.fidelity);
-      add("--activation", payload?.activation);
-      if (payload?.dormant) argv.push("--dormant");
-      add("--title", payload?.title); add("--shape", payload?.shape);
-      if (payload?.allowEmptyCycle) argv.push("--allow-empty-cycle");
-      await addFile("ramp", "--ramp-file", payload?.ramp);
-      await addFile("counsel", "--counsel-file", payload?.counsel);
-      await addFile("peak", "--peak-file", payload?.peak);
-      await addFile("beginning", "--beginning-file", payload?.beginning);
-      await addFile("verify-note", "--verify-note-file", payload?.verifyNote);
-      for (const value of Array.isArray(payload?.canon) ? payload.canon : []) add("--canon", value);
-      for (const value of Array.isArray(payload?.sourcePaths) ? payload.sourcePaths : []) add("--source-path", value);
-      for (const value of Array.isArray(payload?.tags) ? payload.tags : []) add("--tag", value);
-      if (payload?.seedRep) {
-        add("--seed-rep-number", payload.seedRep.number);
-        add("--seed-rep-on", payload.seedRep.occurredOn);
-        await addFile("seed-rep-how", "--seed-rep-how-file", payload.seedRep.howItWent);
-        await addFile("seed-rep-portal", "--seed-rep-portal-file", payload.seedRep.portalPull);
-        await addFile("seed-rep-lighter", "--seed-rep-lighter-file", payload.seedRep.lighter);
-      }
-    }
-    const probe = await runWslDiagnostic({ argv, stdin: "", timeoutMs });
-    if (probe.timedOut) return { ok: false, error: "record_cabinet_entry timed out" };
-    if (probe.spawnError) return { ok: false, error: probe.spawnError };
-    if (probe.code !== 0) return { ok: false, error: String(probe.stderr || "").trim() || `record_cabinet_entry exited ${probe.code}` };
-    const summary = String(probe.stdout || "").trim();
-    const idPattern = append ? /cabinet rep:\s*id=(\d+)/i : /cabinet add:\s*id=(\d+)/i;
-    const idMatch = idPattern.exec(summary);
-    return {
-      ok: true,
-      ...(idMatch ? { id: Number(idMatch[1]) } : {}),
-      summary: summary.slice(0, 1200),
-    };
-  } catch (err) {
-    return { ok: false, error: err?.message || String(err) };
-  } finally {
-    await rm(temp, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-export function writeAnamnesisDrawer({ room, payload, timeoutMs = WRITE_TIMEOUT_MS }) {
-  return runCabinetWriter({ room, payload, timeoutMs });
-}
-
-export function appendAnamnesisRep({ room, payload, timeoutMs = WRITE_TIMEOUT_MS }) {
-  return runCabinetWriter({ room, payload, append: true, timeoutMs });
-}

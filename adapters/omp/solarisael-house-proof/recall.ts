@@ -1,8 +1,7 @@
 // Recall adapter for OMP.
-// AKASHA routes through the Rust substrate; absent Rust is the valid Vault
-// profile and routes to the canonical core's local file retrieval.
+// AKASHA and Vault both route through Rust. Vault uses a database-free
+// filesystem method; OMP only selects the installed profile and presents it.
 
-import { loadHouseMemory } from "./core.ts";
 import { RustJsonlTransport, RustTransportError } from "../rust-transport.ts";
 import { discoverRustExecutable } from "../discovery.ts";
 
@@ -335,7 +334,6 @@ export function compactRecall(result, { includeTaxonomy = false } = {}) {
     contentChunks,
     dateMatches,
     queryDates: Array.isArray(result?.queryDates) ? result.queryDates : [],
-    warnings: Array.isArray(result?.warnings) ? result.warnings : [],
     ...(taxonomy ? { taxonomy } : {}),
     ...(clusterNudge ? { clusterNudge } : {}),
     ...(resonance ? { clusterResonance: resonance } : {}),
@@ -381,26 +379,6 @@ function validClusterResonance(value) {
     && Array.isArray(value.hot) && value.hot.every(validClusterHot);
 }
 
-export async function recallWithFallback(effectiveRoomDir, room, query) {
-  try {
-    const memory = await loadHouseMemory();
-    const result = await memory.runVaultRecallQuery(effectiveRoomDir, room, query);
-    return result?.ok
-      ? { ok: true, result }
-      : { ok: false, result: { ok: false, query, error: result?.error || "Vault recall failed", code: "vault_recall_failure", retryable: true } };
-  } catch (error) {
-    return {
-      ok: false,
-      result: {
-        ok: false,
-        query,
-        error: error instanceof Error ? error.message : String(error),
-        code: "vault_recall_failure",
-        retryable: true,
-      },
-    };
-  }
-}
 
 const rustRecallTransports = new Map();
 
@@ -500,23 +478,37 @@ function temporalDecayUnsupported(error) {
 export async function recallWithRouting(effectiveRoomDir, room, query, { signal, temporalDecay = false } = {}) {
   const executable = discoverRustExecutable();
   const transport = rustRecallTransport();
-  if (!transport) return recallWithFallback(effectiveRoomDir, room, query);
-  const baseParams = {
-    room,
-    query,
-    semantic_top_k: 8,
-    semantic_min_similarity: RECALL_SEMANTIC_MIN_SIM,
-    content_top_k: 8,
-    content_min_similarity: RECALL_CONTENT_MIN_SIM,
-  };
-  const params = temporalDecay ? { ...baseParams, temporal_decay: true } : baseParams;
+  if (!transport) {
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        query,
+        error: "Rust Vault/AKASHA runtime is unavailable",
+        code: "rust_runtime_unavailable",
+        retryable: false,
+      },
+    };
+  }
+  const vaultProfile = !String(process.env.ATHANOR_SUBSTRATE_ROOT || "").trim();
+  const baseParams = vaultProfile
+    ? { room, room_dir: effectiveRoomDir, query }
+    : {
+      room,
+      query,
+      semantic_top_k: 8,
+      semantic_min_similarity: RECALL_SEMANTIC_MIN_SIM,
+      content_top_k: 8,
+      content_min_similarity: RECALL_CONTENT_MIN_SIM,
+    };
+  const params = temporalDecay && !vaultProfile ? { ...baseParams, temporal_decay: true } : baseParams;
   const requestOptions = { signal, timeoutMs: RECALL_TIMEOUT_MS };
   try {
     let result;
     try {
-      result = await transport.request("recall", params, requestOptions);
+      result = await transport.request(vaultProfile ? "vault_recall" : "recall", params, requestOptions);
     } catch (error) {
-      if (!temporalDecay || !temporalDecayUnsupported(error)) throw error;
+      if (vaultProfile || !temporalDecay || !temporalDecayUnsupported(error)) throw error;
       result = await transport.request("recall", baseParams, requestOptions);
     }
     const validationError = validRustRecallResult(result, query);

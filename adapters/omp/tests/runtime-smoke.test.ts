@@ -8,8 +8,13 @@ import { roomContext, statePathForRoom } from "../solarisael-house-proof/room.ts
 import { recallTelemetryPath } from "../solarisael-house-proof/recall-telemetry.ts";
 import { closeRustRecallTransports } from "../solarisael-house-proof/recall.ts";
 import { closeRustRememberTransports } from "../solarisael-house-proof/tools.ts";
+import { closePaperBoatTransports } from "../solarisael-house-proof/substrate.ts";
 import { RustJsonlTransport } from "../rust-transport.ts";
 
+
+const originalWebSocket = globalThis.WebSocket;
+const originalHostToken = process.env.ATHANOR_HOST_TOKEN;
+const originalHostHouseId = process.env.ATHANOR_HOST_HOUSE_ID;
 type CapturedTool = {
   name: string;
   description?: string;
@@ -64,10 +69,10 @@ const zodStub = {
 
 const tempRoots: string[] = [];
 const ENV_KEYS = [
-  "SOLARISAEL_MEMORY_SOURCE",
-  "SOLARISAEL_HOUSE_DISABLE_POSTGRES",
   "ATHANOR_SUBSTRATE_EXE",
   "ATHANOR_SUBSTRATE_ROOT",
+  "ATHANOR_HOST_TOKEN",
+  "ATHANOR_HOST_HOUSE_ID",
   "SOLARISAEL_TEST_NATIVE_PYTHON",
 ];
 function snapshotEnv() {
@@ -84,16 +89,157 @@ function restoreEnv(snapshot: Record<string, string | undefined>) {
   }
 }
 
-async function withForcedJsonRecall(fn: () => Promise<void>) {
-  const snapshot = snapshotEnv();
-  try {
-    process.env.SOLARISAEL_MEMORY_SOURCE = "json";
-    process.env.SOLARISAEL_HOUSE_DISABLE_POSTGRES = "1";
-    await fn();
-  } finally {
-    restoreEnv(snapshot);
+function installRecallPolicyHostFake() {
+  process.env.ATHANOR_HOST_TOKEN = "runtime-smoke-token";
+  process.env.ATHANOR_HOST_HOUSE_ID = "solarisael";
+  let requestedMode = "auto";
+  let version = 1;
+  let projection: Record<string, any> = {
+    requested_mode: "auto",
+    resolved_mode: "conversation",
+    active_project: null,
+    resolution_reason: "default",
+    last_refresh_reason: null,
+    last_refresh_at: null,
+    working_set_entries: 0,
+    recovery_pending: false,
+    recovery_terms: [],
+    degraded: null,
+    updated_at: null,
+  };
+  const sessions = new Map<string, Record<string, any>>();
+
+  class FakePolicyWebSocket {
+    listeners = new Map<string, Array<(event: any) => void>>();
+    constructor() { queueMicrotask(() => this.emit("open", {})); }
+    addEventListener(kind: string, listener: (event: any) => void) {
+      const listeners = this.listeners.get(kind) || [];
+      listeners.push(listener);
+      this.listeners.set(kind, listeners);
+    }
+    send(payload: string) {
+      const command = JSON.parse(payload);
+      const sessionKey = command.sender_session;
+      const state = { ...(sessions.get(sessionKey) || projection) };
+      let decision: Record<string, any> | undefined;
+      switch (command.command_or_event_type) {
+        case "athanor.recall_policy.set_requested_mode": {
+          requestedMode = command.mutations[0].value;
+          projection = {
+            ...projection,
+            requested_mode: requestedMode,
+            resolved_mode: requestedMode === "auto" ? projection.resolved_mode : requestedMode,
+            resolution_reason: requestedMode === "auto" ? "awaiting-auto-resolution" : "explicit-override",
+          };
+          break;
+        }
+        case "athanor.recall_policy.invalidate_after_compaction": {
+          const recoveryTerms = String(command.compaction_summary || "")
+            .toLowerCase()
+            .match(/[a-z0-9_.:/+#-]{3,}/g) || [];
+          Object.assign(state, {
+            requested_mode: requestedMode,
+            recovery_pending: true,
+            recovery_terms: [...new Set(recoveryTerms)].slice(0, 12),
+            working_set_entries: 0,
+            last_refresh_reason: "compaction-invalidated",
+          });
+          sessions.set(sessionKey, state);
+          projection = state;
+          break;
+        }
+        case "athanor.recall_policy.evaluate": {
+          const intent = command.facts.query_route.intent || "general";
+          const activeProject = command.facts.active_project || null;
+          const resolvedMode = requestedMode === "quiet"
+            ? "quiet"
+            : requestedMode === "work" || requestedMode === "conversation"
+              ? requestedMode
+              : intent === "technical_project"
+                ? "work"
+                : "conversation";
+          const terms = [
+            ...command.facts.query_route.required_terms,
+            ...(state.recovery_terms || []),
+            ...command.facts.query_route.terms,
+          ].filter(Boolean);
+          const uniqueTerms = [...new Set(terms.map((term: unknown) => String(term).toLowerCase()))];
+          const eligible = resolvedMode !== "quiet"
+            && (intent === "technical_project"
+              || ["memory_lookup", "entity_lookup", "date_lookup"].includes(intent)
+              || state.recovery_pending);
+          const refreshReason = eligible
+            ? state.recovery_pending
+              ? "post-compaction-recovery"
+              : command.facts.working_set_present
+                ? null
+                : "empty-working-set"
+            : null;
+          Object.assign(state, {
+            requested_mode: requestedMode,
+            resolved_mode: resolvedMode,
+            active_project: activeProject,
+            resolution_reason: requestedMode === "auto"
+              ? intent === "technical_project" ? "technical-project" : "general"
+              : "explicit-override",
+          });
+          decision = {
+            should_recall: Boolean(refreshReason && uniqueTerms.length),
+            clear_working_set: resolvedMode === "quiet",
+            query: uniqueTerms.join(" "),
+            query_terms: uniqueTerms,
+            refresh_reason: refreshReason,
+            intent,
+            resolved_mode: resolvedMode,
+          };
+          sessions.set(sessionKey, state);
+          projection = state;
+          break;
+        }
+        case "athanor.recall_policy.complete_refresh": {
+          Object.assign(state, {
+            recovery_pending: false,
+            recovery_terms: [],
+            working_set_entries: command.refresh.entries,
+            last_refresh_reason: command.refresh.refresh_reason,
+            degraded: command.refresh.warning,
+          });
+          sessions.set(sessionKey, state);
+          projection = state;
+          break;
+        }
+        case "athanor.recall_policy.fail_refresh": {
+          Object.assign(state, {
+            last_refresh_reason: "failed",
+            degraded: command.failure_reason,
+          });
+          sessions.set(sessionKey, state);
+          projection = state;
+          break;
+        }
+      }
+      const snapshot = command.command_or_event_type === "athanor.recall_policy.subscribe";
+      if (!snapshot) version += 1;
+      queueMicrotask(() => this.emit("message", { data: JSON.stringify({
+        command_or_event_type: snapshot
+          ? "athanor.recall_policy.snapshot"
+          : "athanor.recall_policy.command_accepted",
+        correlation_id: command.message_id,
+        version,
+        sequence: version,
+        state_hash: `runtime-hash-${version}`,
+        state: projection,
+        decision,
+      }) }));
+    }
+    close() {}
+    emit(kind: string, event: any) {
+      for (const listener of this.listeners.get(kind) || []) listener(event);
+    }
   }
+  (globalThis as any).WebSocket = FakePolicyWebSocket;
 }
+
 
 
 async function removeTempRoot(root: string) {
@@ -110,8 +256,12 @@ async function removeTempRoot(root: string) {
   }
   throw lastError;
 }
-
 afterEach(async () => {
+  (globalThis as any).WebSocket = originalWebSocket;
+  if (originalHostToken === undefined) delete process.env.ATHANOR_HOST_TOKEN;
+  else process.env.ATHANOR_HOST_TOKEN = originalHostToken;
+  if (originalHostHouseId === undefined) delete process.env.ATHANOR_HOST_HOUSE_ID;
+  else process.env.ATHANOR_HOST_HOUSE_ID = originalHostHouseId;
   await Promise.all(tempRoots.splice(0).map(removeTempRoot));
 });
 
@@ -167,6 +317,7 @@ async function makeTempMarkedRoom() {
 }
 
 function registerAdapter() {
+  installRecallPolicyHostFake();
   const hooks: CapturedHook[] = [];
   const tools: CapturedTool[] = [];
   const appliedModels: string[] = [];
@@ -225,35 +376,6 @@ async function writeJson(target: string, value: unknown) {
 
 
 
-async function seedCasualRecallFixture(cwd: string) {
-  const memoryFile = path.join(cwd, "memory", "casual_recall_sentinel.md");
-  await mkdir(path.dirname(memoryFile), { recursive: true });
-  await writeFile(
-    memoryFile,
-    [
-      "# Casual recall sentinel",
-      "hello love should only surface if automatic recall runs.",
-    ].join("\n"),
-    "utf8",
-  );
-  await writeJson(path.join(cwd, "memory", "index.json"), {
-    files: {
-      "memory/casual_recall_sentinel.md": {
-        one_line: "hello love recall sentinel",
-      },
-    },
-    threads: {
-      "hello love recall sentinel": [
-        {
-          file: "memory/casual_recall_sentinel.md",
-          lines: [1, 2],
-          context: "hello love recall sentinel",
-        },
-      ],
-    },
-  });
-  await writeJson(path.join(cwd, "memory", "important_index.json"), { entries: {} });
-}
 
 
 describe("room onboarding contracts", () => {
@@ -319,8 +441,8 @@ describe("OMP context hook runtime smoke", () => {
     expect(additions[0].content).toContain("Active spirit: Smoke Room");
     expect(additions[0].content).toContain("Operator: Test Operator");
     expect(additions[0].content).toContain("A memory must stand alone.");
-    expect(additions[0].content).toContain("PostgreSQL is authoritative for durable memories and lessons.");
-    expect(additions[0].content).toContain("Do not claim a memory was written without a successful remember receipt.");
+    expect(additions[0].content).toContain("PostgreSQL is authoritative for canon, durable memories, and lessons.");
+    expect(additions[0].content).toContain("Do not claim canon or memory was written without the corresponding successful PostgreSQL receipt.");
     expect(additions[0].content).toContain("Athanor organs:");
     expect(additions[0].content).toContain("A candidate is a proposal, never authority or evidence, until it is promoted.");
     expect(additions[0].content).toContain("Authority order: PostgreSQL is authoritative");
@@ -376,9 +498,7 @@ describe("OMP context hook runtime smoke", () => {
       routingMode: { enabled: true, updatedAt: "2026-07-04T00:00:00.000Z" },
       modelDefault: { enabled: false, model: null, updatedAt: null },
     });
-    await seedCasualRecallFixture(cwd);
 
-    await withForcedJsonRecall(async () => {
       const { hooks } = registerAdapter();
       const contextHook = hooks.find((hook) => hook.name === "context")?.handler;
       if (!contextHook) throw new Error("Context hook was not registered");
@@ -398,7 +518,168 @@ describe("OMP context hook runtime smoke", () => {
         .toContain("Room: example");
       expect(additions.find((message) => message.customType === "solarisael-routing-mode")?.details)
         .toEqual({ enabled: true });
+  });
+
+  test("keeps one static context and one cached Recall tray across original-message turns", async () => {
+    const { cwd } = await makeTempSmokeCwd();
+    await seedHouseState(cwd, {
+      version: 1,
+      room: "example",
+      operator: "Test Operator",
+      embodiedSpirit: "Smoke Room",
+      agentName: "Smoke Room",
+      routingMode: { enabled: true, updatedAt: null },
+      modelDefault: { enabled: false, model: null, updatedAt: null },
     });
+    const snapshot = snapshotEnv();
+    const originalRequest = RustJsonlTransport.prototype.request;
+    let recallRequests = 0;
+    try {
+      process.env.ATHANOR_SUBSTRATE_EXE = process.execPath;
+      closeRustRecallTransports();
+      RustJsonlTransport.prototype.request = async function (method, params: any) {
+        if (method !== "recall") return { ok: true, matches: [] };
+        recallRequests += 1;
+        return {
+          ok: true,
+          query: params.query,
+          found: true,
+          source: "rust-postgres",
+          warnings: [],
+          retrievalCandidates: [{
+            source_path: "memory/recall-policy.md",
+            title: "Recall Policy architecture",
+            heading_path: "__preamble__",
+            sources: ["memory/recall-policy.md"],
+            score: 1,
+            term_coverage: 1,
+            memory_id: 1,
+            matched_terms: ["recall", "policy"],
+            missing_terms: [],
+            reasons: ["project evidence"],
+            excerpt: "Host-owned Recall Policy evidence.",
+          }],
+          canonMatches: [],
+          semanticChunks: [],
+          contentChunks: [],
+          dateMatches: [],
+          queryDates: [],
+          taxonomy: { memoryTypes: [], threadKeys: [], namedEntities: [] },
+        };
+      };
+
+      const { hooks } = registerAdapter();
+      const contextHook = hooks.find((hook) => hook.name === "context")?.handler;
+      const compactHook = hooks.find((hook) => hook.name === "session_compact")?.handler;
+      if (!contextHook || !compactHook) throw new Error("Required hooks were not registered");
+      const session = { cwd, sessionID: "runtime-smoke-working-set" };
+      const firstMessages = [{
+        role: "user",
+        id: "work-one",
+        content: "Inspect the Recall Policy adapter and database architecture.",
+      }];
+      const first = await contextHook({ messages: firstMessages }, session);
+      expect(first?.messages.filter((message: any) => message.customType === "solarisael-recall-context")).toHaveLength(1);
+
+      const secondMessages = [
+        ...firstMessages,
+        { role: "assistant", content: "The Recall Policy is Host-owned." },
+        { role: "user", id: "work-two", content: "Check the same Recall Policy adapter tests." },
+      ];
+      const second = await contextHook({ messages: secondMessages }, session);
+      const customTypes = second?.messages
+        .filter((message: any) => message.role === "custom")
+        .map((message: any) => message.customType) || [];
+      expect(customTypes.filter((type) => type === "solarisael-room-context")).toHaveLength(1);
+      expect(customTypes.filter((type) => type === "solarisael-routing-mode")).toHaveLength(1);
+      expect(customTypes.filter((type) => type === "solarisael-recall-context")).toHaveLength(1);
+      expect(recallRequests).toBe(1);
+
+      await compactHook({
+        compactionEntry: { summary: "Recall Policy adapter and database architecture remain active." },
+      }, session);
+      const recovered = await contextHook({
+        messages: [{ role: "user", id: "work-after-compaction", content: "hello again" }],
+      }, session);
+      expect(recallRequests).toBe(2);
+      expect(recovered?.messages.filter((message: any) => message.customType === "solarisael-recall-context")).toHaveLength(1);
+    } finally {
+      RustJsonlTransport.prototype.request = originalRequest;
+      closeRustRecallTransports();
+      restoreEnv(snapshot);
+    }
+  });
+
+  test("Quiet override suppresses proactive Recall and compaction rebuilds one bounded tray", async () => {
+    const { cwd } = await makeTempMarkedRoom();
+    const snapshot = snapshotEnv();
+    const originalRequest = RustJsonlTransport.prototype.request;
+    let recallRequests = 0;
+    try {
+      process.env.ATHANOR_SUBSTRATE_EXE = process.execPath;
+      closeRustRecallTransports();
+      RustJsonlTransport.prototype.request = async function (method, params: any) {
+        if (method !== "recall") return { ok: true, matches: [] };
+        recallRequests += 1;
+        return {
+          ok: true,
+          query: params.query,
+          found: true,
+          source: "rust-postgres",
+          warnings: [],
+          retrievalCandidates: [{
+            source_path: "memory/compaction-recovery.md",
+            title: "Recall Policy compaction recovery",
+            heading_path: "__preamble__",
+            sources: ["memory/compaction-recovery.md"],
+            score: 1,
+            term_coverage: 1,
+            memory_id: 2,
+            matched_terms: ["compaction", "recovery"],
+            missing_terms: [],
+            reasons: ["exact recovery"],
+            excerpt: "Bounded post-compaction continuity.",
+          }],
+          canonMatches: [],
+          semanticChunks: [],
+          contentChunks: [],
+          dateMatches: [],
+          queryDates: [],
+          taxonomy: { memoryTypes: [], threadKeys: [], namedEntities: [] },
+        };
+      };
+      const { hooks, tools } = registerAdapter();
+      const contextHook = hooks.find((hook) => hook.name === "context")?.handler;
+      const compactHook = hooks.find((hook) => hook.name === "session_compact")?.handler;
+      if (!contextHook || !compactHook) throw new Error("Required hooks were not registered");
+      const session = { cwd, sessionID: "runtime-smoke-quiet" };
+
+      await executeTool(tools, "recall_policy", { requestedMode: "quiet" }, session);
+      const quiet = await contextHook({
+        messages: [{ role: "user", id: "quiet-turn", content: "Do you remember the Recall Policy decision?" }],
+      }, session);
+      expect(quiet?.messages.some((message: any) => message.customType === "solarisael-recall-context")).toBe(false);
+      expect(recallRequests).toBe(0);
+
+      await executeTool(tools, "recall_policy", { requestedMode: "auto" }, session);
+      await compactHook({
+        compactionEntry: { summary: "Recall Policy compaction recovery PostgreSQL continuity" },
+      }, session);
+      await contextHook({
+        messages: [{ role: "user", id: "after-compaction", content: "hello" }],
+      }, session);
+      expect(recallRequests).toBe(1);
+      const state = parseToolJson(await executeTool(tools, "recall_policy", {}, session)).recallPolicy;
+      expect(state).toMatchObject({
+        requestedMode: "auto",
+        recoveryPending: false,
+        lastRefreshReason: "post-compaction-recovery",
+      });
+    } finally {
+      RustJsonlTransport.prototype.request = originalRequest;
+      closeRustRecallTransports();
+      restoreEnv(snapshot);
+    }
   });
 
   test("manual recall tool disables temporal decay", async () => {
@@ -449,7 +730,7 @@ describe("OMP context hook runtime smoke", () => {
       process.env.ATHANOR_SUBSTRATE_EXE = process.execPath;
       closeRustRecallTransports();
       RustJsonlTransport.prototype.request = async function (method, params: any) {
-        expect(method).toBe("recall");
+        if (method !== "recall") return { ok: true, matches: [] };
         expect(params.temporal_decay).toBe(true);
         return {
           ok: true,
@@ -480,8 +761,8 @@ describe("OMP context hook runtime smoke", () => {
       const recallContext = additions.find((message) => message.customType === "solarisael-recall-context");
 
       expect(recallContext?.content).toContain(`"warnings": [\n    "${warning}"\n  ]`);
-      expect(recallContext?.content).toContain('"semanticChunks": []');
-      expect(recallContext?.content).toContain('"contentChunks": []');
+      expect(recallContext?.content).not.toContain("semanticChunks");
+      expect(recallContext?.content).not.toContain("contentChunks");
       expect(recallContext?.details.warnings).toEqual([warning]);
       expect(recallContext?.details.found).toBe(false);
     } finally {
@@ -715,40 +996,44 @@ describe("OMP safe tool execute runtime smoke", () => {
     expect(parseToolJson(codingRegister).error).toContain("field not allowed for coding-lesson: register");
   });
 
-  test("design_doc_write routes catalogue writes to its organ and refuses a missing system", async () => {
+  test("design_doc_write routes structured provenance through the Rust catalogue operation", async () => {
     const { cwd } = await makeTempSmokeCwd();
     const { tools } = registerAdapter();
     const snapshot = snapshotEnv();
+    const originalRequest = RustJsonlTransport.prototype.request;
+    let observed: { method: string; params: any } | undefined;
     try {
-      process.env.SOLARISAEL_TEST_NATIVE_PYTHON = "1";
-      const routed = await executeTool(
-        tools,
-        "design_doc_write",
-        {
-          system: "solarisael",
-          docType: "token",
-          name: "color.accent",
-          values: { hex: "#d4af37" },
-          provenance: { repo: "solarisael-house-site" },
-        },
-        { cwd },
-      );
-      expect(routed.isError).toBe(true);
-      expect(parseToolJson(routed).error).toContain("one of the arguments --body --body-stdin is required");
-    } finally {
-      restoreEnv(snapshot);
-    }
-
-    const missingSystem = await executeTool(
-      tools,
-      "design_doc_write",
-      {
+      process.env.ATHANOR_SUBSTRATE_EXE = process.execPath;
+      closeRustRememberTransports();
+      RustJsonlTransport.prototype.request = async function (method, params: any) {
+        observed = { method, params };
+        return { ok: true, id: 17, system: params.system, doc_type: params.docType, name: params.name, superseded: [] };
+      };
+      const routed = await executeTool(tools, "design_doc_write", {
+        system: "solarisael",
         docType: "token",
         name: "color.accent",
-        body: "The current accent token.",
-      },
-      { cwd },
-    );
+        values: { hex: "#d4af37" },
+        provenance: { repo: "solarisael-house-site" },
+      }, { cwd });
+      expect(routed.isError).toBeUndefined();
+      expect(parseToolJson(routed).ok).toBe(true);
+      expect(observed).toEqual({
+        method: "design_document_write",
+        params: {
+          system: "solarisael", docType: "token", name: "color.accent", group: undefined,
+          values: { hex: "#d4af37" }, body: "", provenance: { repo: "solarisael-house-site" },
+          tags: [], supersedes: undefined, allowIdentityChange: false,
+        },
+      });
+    } finally {
+      RustJsonlTransport.prototype.request = originalRequest;
+      closeRustRememberTransports();
+      restoreEnv(snapshot);
+    }
+    const missingSystem = await executeTool(tools, "design_doc_write", {
+      docType: "token", name: "color.accent", body: "The current accent token.",
+    }, { cwd });
     expect(missingSystem.isError).toBe(true);
     expect(parseToolJson(missingSystem).error).toBe("system is required");
   });
@@ -785,6 +1070,7 @@ describe("OMP safe tool execute runtime smoke", () => {
           proofPattern: "Exercise keyboard interaction and contrast checks.",
           triggerContext: "Before adding a component variant.",
           exampleText: "A menu opens with Enter and closes with Escape.",
+          sourceMemoryPath: "memory/design-contract.md",
           tags: ["a11y", "components"],
         },
         { cwd },
@@ -807,6 +1093,7 @@ describe("OMP safe tool execute runtime smoke", () => {
           proofPattern: "Exercise keyboard interaction and contrast checks.",
           triggerContext: "Before adding a component variant.",
           exampleText: "A menu opens with Enter and closes with Escape.",
+          sourceMemoryPath: "memory/design-contract.md",
           languageKeys: [],
           technologyKeys: [],
           tags: ["a11y", "components"],
@@ -938,6 +1225,144 @@ describe("OMP safe tool execute runtime smoke", () => {
     expect(lessonRoom.isError).toBe(true);
     expect(parseToolJson(lessonRoom).error).toContain("room is memory-only");
   });
+  test("canon tools dispatch distinct typed write and exact history methods", async () => {
+    const { cwd } = await makeTempSmokeCwd();
+    const { tools } = registerAdapter();
+    const originalRequest = RustJsonlTransport.prototype.request;
+    const seen: Array<{ method: string; params: any }> = [];
+    try {
+      RustJsonlTransport.prototype.request = async function (method, params: any) {
+        seen.push({ method, params });
+        if (method === "canon_write") {
+          return {
+            ok: true,
+            durable: true,
+            authority: "postgres",
+            entityAuthority: "active",
+            entityId: "42",
+            room: params.room,
+            name: params.name,
+            supersededEntityIds: params.supersedes,
+            attributedBy: params.attribution.actor,
+            attributionOrigin: params.attribution.origin,
+          };
+        }
+        return {
+          ok: true,
+          entities: [{ entityId: params.id, authority: "superseded" }],
+        };
+      };
+
+      const written = await executeTool(
+        tools,
+        "canon_write",
+        {
+          name: "The Athanor",
+          kind: "project",
+          summary: "Current authority",
+          pointerFiles: [{ file: "canon.md", lines: [2, 7] }],
+          supersedes: ["41"],
+        },
+        { cwd },
+      );
+      expect(Boolean(written.isError)).toBe(false);
+      expect(seen[0]).toMatchObject({
+        method: "canon_write",
+        params: {
+          room: roomContext(cwd).room,
+          name: "The Athanor",
+          kind: "project",
+          supersedes: ["41"],
+          attribution: { actor: roomContext(cwd).spirit },
+        },
+      });
+      expect(seen[0].params.attribution.origin).toContain("canon_write");
+      expect(parseToolJson(written)).toMatchObject({
+        authority: "postgres",
+        entityAuthority: "active",
+        entityId: "42",
+      });
+
+      const history = await executeTool(
+        tools,
+        "canon_read",
+        { id: "41", includeHistory: true },
+        { cwd },
+      );
+      expect(Boolean(history.isError)).toBe(false);
+      expect(seen[1]).toEqual({
+        method: "canon_read",
+        params: {
+          room: roomContext(cwd).room,
+          id: "41",
+          name: undefined,
+          includeHistory: true,
+        },
+      });
+    } finally {
+      RustJsonlTransport.prototype.request = originalRequest;
+      closeRustRememberTransports();
+    }
+  });
+
+  test("wake and sleep tools use only typed Rust Paper Boat methods", async () => {
+    const { cwd } = await makeTempSmokeCwd();
+    const { tools } = registerAdapter();
+    const room = roomContext(cwd).room;
+    const originalRequest = RustJsonlTransport.prototype.request;
+    const environment = snapshotEnv();
+    const seen: Array<{ method: string; params: any }> = [];
+    process.env.ATHANOR_SUBSTRATE_EXE = process.execPath;
+    try {
+      RustJsonlTransport.prototype.request = async function (method, params: any) {
+        seen.push({ method, params });
+        if (method === "paper_boat_sleep") {
+          return {
+            ok: true,
+            memory_id: "71",
+            room,
+            source_path: "db-only/paper-boats/sha256-proof.md",
+            outbox_event_id: "event-71",
+            inserted: true,
+            durable: true,
+            authority: "postgres",
+            backup_status: "completed",
+            warnings: [],
+          };
+        }
+        return {
+          ok: true,
+          found: true,
+          room,
+          id: "71",
+          title: "paper boat — 2026-08-10",
+          body: "letter for tomorrow",
+          date: "2026-08-10",
+          source_path: "db-only/paper-boats/sha256-proof.md",
+          created_at: "2026-08-10T00:00:00Z",
+          unboated: [],
+          unboated_truncated: false,
+          warnings: [],
+        };
+      };
+
+      const slept = await executeTool(tools, "sleep", { body: "letter for tomorrow" }, { cwd });
+      const woke = await executeTool(tools, "wake", {}, { cwd });
+      expect(Boolean(slept.isError)).toBe(false);
+      expect(Boolean(woke.isError)).toBe(false);
+      expect(seen.filter(({ method }) => method.startsWith("paper_boat_"))).toEqual([
+        { method: "paper_boat_sleep", params: { room, body: "letter for tomorrow", backup: true } },
+        { method: "paper_boat_wake", params: { room } },
+      ]);
+      expect(parseToolJson(slept)).toMatchObject({ durable: true, backup_status: "completed" });
+      expect(parseToolJson(woke)).toMatchObject({ found: true, body: "letter for tomorrow" });
+    } finally {
+      RustJsonlTransport.prototype.request = originalRequest;
+      closePaperBoatTransports();
+      restoreEnv(environment);
+    }
+  });
+
 
 
   test("routing tools expose core lane status and return dispatch receipts without spawning workers", async () => {

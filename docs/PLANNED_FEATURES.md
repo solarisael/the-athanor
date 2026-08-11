@@ -34,9 +34,9 @@ Self-hosting remains available. Managed services must support complete export.
 
 ## What works now
 
-The Athanor is an operational late beta on the `0.11.0` line. Windows x64 with
-OMP is the only supported release target. Solarisael House is the working
-reference House, and the platform runs daily there.
+The `1.0.0-rc.1` native Windows x64 candidate is locally built and verified.
+OMP is the supported harness. Solarisael House remains the working reference
+House.
 
 The canonical, current capability map — surfaces, owners, and authority — lives
 in [`ARCHITECTURE.md`](./ARCHITECTURE.md). This page does not copy it; it maps
@@ -51,11 +51,12 @@ honest to sit against. Measured results are separated from planned claims in
 | GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current |
 | Curios | Keep selected hunches until later context makes them meaningful | Current |
 | GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Current — coding/project slice |
-| Localhost administrative GUI | Use the current local browser-based administrative surface | Current |
-| Athanor Host and thin Godot UI | Give people one visible control surface whose initial snapshot becomes fine-grained versioned deltas | Specified |
+| Native Godot operator client | Show live Recall Policy and sanitized Paper Boat delivery receipts without becoming a second authority | Current — 1.0 candidate |
+| Athanor Host | Give clients one authenticated snapshot/delta/resync surface with restart-safe cursors and idempotency | Current — 1.0 candidate |
+| Session Recall Policy | Make proactive retrieval visible and mode-aware without requiring ordinary users to understand retrieval engineering | Current — Rust Host + OMP + Godot |
 | GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Specified |
-| PostgreSQL outbox and NATS delivery | Deliver opaque event IDs with explicit deduplication windows and durable database idempotency | Specified |
-| Origami, Cranes, Pawprints, and Paper Boat wake delivery | Fold recipient-specific handoffs mechanically, preserve room provenance, and wake from authoritative Boats without placing private bodies in the broker | Specified |
+| PostgreSQL outbox and NATS delivery | Deliver bounded opaque pointers with explicit duplicate windows and durable PostgreSQL idempotency | Current — `boat.ready` lane |
+| Paper Boat sleep, wake, and delivery receipt | Commit the Boat and outbox together, wake from PostgreSQL authority, and show only sanitized receipt metadata | Current — 1.0 candidate |
 | Dynamic model and room execution | Choose local or hosted model bodies independently from cold workers, familiars, reflections, and live room dialogue | Specified |
 | Incremental Prolog/Datalog derivations | Index code changes in the background, update only affected facts, and answer common queries from precomputed authorized relations | Planned |
 | Lean-backed lesson obligations | Check selected production-bound invariants inside an aggressively resource-limited wrapper | Planned |
@@ -72,7 +73,7 @@ honest to sit against. Measured results are separated from planned claims in
 | BM25F lexical retrieval | Rank structured memory fields with a principled field-aware sparse baseline | Current |
 | Nemotron-controlled lexical bridge | Expand through at most three authoritative stored concepts into a lower-priority attributed BM25F lane | Current |
 | Learned-sparse retrieval successor | Add a separate local learned lexical model only if measured misses justify its cost | Research — model open |
-| Vault upgrade | Move file memories into semantic search without making them second class | Specified |
+| Vault file-authoritative retrieval | Search attributed local file evidence without PostgreSQL or a second mutable truth store | Current — Rust |
 | Hallway | Let private rooms share messages and state without merging identities | Specified |
 | OMEGA | Give organizations shared knowledge with separate company, team, and personal spirits | Specified |
 | ANON | Use dedicated remote compute without leaving job content in the service | Specified |
@@ -114,13 +115,66 @@ environment compositions with occlusion, fog, reflection, emission, LUTs,
 particles, and camera work. Balanced, compatibility/web, accessibility, and
 focused-2D profiles preserve meaning where the full renderer is unavailable.
 
+## Recall Policy: continuity without per-turn freight
+
+The Rust Host persists the requested mode in room state, resolves `Auto` per
+session with work-immediate/conversation-hysteresis behavior, replaces one
+bounded Recall working set instead of accumulating per-turn payloads, invalidates
+it after compaction, and exposes the same status and overrides through OMP and
+the Godot client.
+Within one visible compaction epoch, an evidence identity is eligible for one
+automatic exposure. Later refreshes hard-suppress it instead of merely lowering
+its rank; compaction resets the exposure set so recovery may rehydrate evidence
+that the compacted context no longer carries.
+
+The Host owns one observable Recall Policy for each active session. The client
+shows both the requested mode and the resolved scope:
+
+- `Auto` resolves to conversation, work, or a mixed scope with hysteresis and
+  explains the active project, room reach, and reason;
+- `Conversation` prioritizes room continuity, relationships, chronology, and
+  shared vocabulary;
+- `Work` prioritizes the active project, exact decisions, code history, and
+  eligible lessons;
+- `Quiet` disables proactive retrieval while preserving explicit recall and
+  exact retrieval when the model cannot safely answer a named fact.
+
+An explicit operator choice wins. Modes govern memory eligibility, ranking,
+trigger sensitivity, and evidence budget; they never replace the active spirit
+or turn work mode into a generic assistant voice.
+
+Recall refreshes at wake, after compaction, when mode or active project changes,
+when the cached working set becomes stale, or when the turn contains a genuine
+prior-reference need. Token growth is a backstop measured only over new
+conversation state, not the fixed bootstrap. A self-contained turn does not
+trigger retrieval merely because another message arrived.
+
+Mixed turns are decomposed into small retrieval needs instead of embedding the
+raw message as one diluted query. Lexical BM25F, semantic similarity, exact
+entities, authority, room, project, record type, and chronology contribute to a
+fused decision before the final confidence gate. The automatic viewport filters
+weak candidates before model context. The current OMP slice injects at most two
+bounded selected records and omits raw prompts, missing terms, thread neighbors,
+taxonomy, and cluster resonance. Header-first retrieval followed by selective
+body hydration remains a Host/substrate protocol upgrade rather than a claim
+about the current Rust Recall response. Hydrated records form a deduplicated
+working set that survives ordinary turns and is rebuilt after compaction or a
+scope change.
+
+The native Godot client renders `Recall: Auto · Work`, requested/resolved modes,
+active project or room scope, refresh reason, evidence count, recovery state,
+and degradation directly from the authenticated Host snapshot and typed deltas.
+Cluster resonance and other retrieval telemetry remain inspectable diagnostics
+rather than default model context.
+
 ## Delivery and living-room execution
 
-PostgreSQL remains the durable authority for messages, events, sources, review,
-and outcomes. A transactional outbox can publish opaque record IDs to NATS
-JetStream so rooms and workers receive durable delivery, retries, and wake-up
-signals. Private prose stays in PostgreSQL and consumers acknowledge only after
-committing an idempotent result.
+PostgreSQL is the durable authority for messages, events, sources, review, and
+outcomes. A transactional outbox publishes bounded `boat.ready` pointers to NATS
+JetStream. Private prose stays in PostgreSQL; consumers acknowledge only after
+committing one idempotent receipt. The Host replays retained sanitized receipt
+projections after restart and the Godot client renders that receipt without
+inventing or loading a Boat body.
 
 Origami supplies versioned crease patterns for recipient-specific handoffs.
 Active handoffs are Cranes; Paper Boats remain living continuity messages across

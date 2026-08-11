@@ -1,7 +1,7 @@
 # Godot Client and Spatial Presentation Architecture
 
-Status: Accepted target architecture; not a current capability claim  
-Last updated: 2026-08-06
+Status: Functional 2D client ships in `1.0.0-rc.1`; spatial presentation remains target architecture  
+Last updated: 2026-08-10
 
 This document defines how the thin Godot client inherits Solarisael's visual
 system, remains a replaceable presentation body, and grows from functional 2D
@@ -9,8 +9,13 @@ controls into an in-world spatial interface and GPU-particle constellation.
 
 ## 1. Current boundary
 
-The Godot client does not currently ship. The Athanor Host, WebSocket projection
-protocol, delta synchronization, spatial renderer, companion bodies, and
+The native candidate ships a Godot 4.7.1 client, Rust GDExtension, authenticated
+Host WebSocket link, live Recall Policy screen, and sanitized Paper Boat receipt
+screen. It applies real Host snapshots, typed deltas, resync, restart replay, and
+degraded/refused states.
+
+Conversation composition, source inspection, GIGA review, the spatial renderer,
+companion bodies, generated cross-platform token pipeline, and maximal
 alchemical environment profiles remain planned.
 
 The Solarisael website is the canonical visual and interaction source. The
@@ -109,8 +114,9 @@ strings on every node. Typed exported properties may remain editor-visible.
 
 ## 5. Functional 2D first, presented in-world
 
-The first usable interface is built from ordinary Godot `Control` nodes so chat,
-recall, review, health, approvals, and text input can be tested without spatial
+The shipped 1.0 slice uses ordinary Godot `Control` nodes for Recall Policy and
+Paper Boat delivery receipts. Later 2D slices may add conversation, source
+inspection, GIGA review, approvals, and other Host projections before spatial
 presentation.
 
 The accepted presentation is nevertheless in-world:

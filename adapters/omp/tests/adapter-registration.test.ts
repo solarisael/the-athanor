@@ -145,6 +145,8 @@ function registerAdapter() {
 
 const expectedToolNames = [
   "recall",
+  "canon_read",
+  "canon_write",
   "remember",
   "delete_lesson",
   "update_lesson",
@@ -162,6 +164,8 @@ const expectedToolNames = [
   "familiar_dispatch",
   "house_dispatch",
   "house_routing_mode",
+  "kitten_lineage_status",
+  "recall_policy",
   "house_model_default",
   "giga_candidate_list",
   "giga_health",
@@ -181,9 +185,9 @@ describe("OMP adapter registration", () => {
     const { labels, hooks, eventChannels } = registerAdapter();
 
     expect(labels).toEqual(["The Athanor"]);
-    expect(hooks.map((hook) => hook.name)).toEqual(["tool_call", "context", "tool_result", "shutdown", "agent_end"]);
+    expect(hooks.map((hook) => hook.name)).toEqual(["tool_call", "context", "session_compact", "tool_result", "shutdown", "agent_end"]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
-    expect(eventChannels).toEqual(["task:subagent:event", "task:subagent:lifecycle"]);
+    expect(eventChannels).toEqual(["task:subagent:progress", "task:subagent:lifecycle"]);
   });
 
   test("registers the Solarisael tool surface", () => {
@@ -194,6 +198,8 @@ describe("OMP adapter registration", () => {
     expect(new Set(tools.map((tool) => tool.name))).toEqual(new Set(expectedToolNames));
     expect(toolMap(tools)).toMatchObject({
       recall: { approval: "read" },
+      canon_read: { approval: "read" },
+      canon_write: { approval: "write" },
       remember: { approval: "write" },
       delete_lesson: { approval: "write" },
       update_lesson: { approval: "write" },
@@ -211,12 +217,43 @@ describe("OMP adapter registration", () => {
       familiar_dispatch: { approval: "read" },
       house_dispatch: { approval: "read" },
       house_routing_mode: { approval: "write" },
+      kitten_lineage_status: { approval: "read" },
+      recall_policy: { approval: "write" },
       house_model_default: { approval: "write" },
       giga_promote_memory: { approval: "write" },
       giga_promote_coding_lesson: { approval: "write" },
       giga_promote_project_lesson: { approval: "write" },
     });
   });
+  test("canon tools refuse ambiguous selectors and malformed typed pointers before dispatch", async () => {
+    const tools = toolMap(registerAdapter().tools);
+    const context = { cwd: process.cwd() };
+    const ambiguous = await tools.canon_read.execute?.(
+      "canon-read-1",
+      { id: "7", name: "The Athanor" },
+      undefined,
+      undefined,
+      context,
+    ) as { isError?: boolean; content?: Array<{ text: string }> };
+    expect(ambiguous.isError).toBe(true);
+    expect(ambiguous.content?.[0]?.text).toContain("exactly one");
+
+    const malformed = await tools.canon_write.execute?.(
+      "canon-write-1",
+      {
+        name: "The Athanor",
+        kind: "project",
+        summary: "Current authority",
+        pointerFiles: [{ file: "canon.md", lines: [8, 2] }],
+      },
+      undefined,
+      undefined,
+      context,
+    ) as { isError?: boolean; content?: Array<{ text: string }> };
+    expect(malformed.isError).toBe(true);
+    expect(malformed.content?.[0]?.text).toContain("[start,end]");
+  });
+
 
   test("teaches the humane continuity register at every memory boundary", () => {
     const tools = toolMap(registerAdapter().tools);
@@ -243,6 +280,44 @@ describe("OMP adapter registration", () => {
         type: "object",
         fields: {
           query: { type: "string" },
+        },
+      },
+      canon_read: {
+        type: "object",
+        fields: {
+          id: { type: "string", pattern: "^[1-9]\\d*$", optional: true },
+          name: { type: "string", optional: true },
+          includeHistory: { type: "boolean", optional: true },
+          room: { type: "enum", values: ["house"], optional: true },
+        },
+      },
+      canon_write: {
+        type: "object",
+        fields: {
+          name: { type: "string" },
+          kind: { type: "string" },
+          summary: { type: "string" },
+          aliases: { type: "array", element: { type: "string" }, optional: true },
+          searchBoost: { type: "string", optional: true },
+          weighty: { type: "boolean", optional: true },
+          pointerFiles: {
+            type: "array",
+            element: {
+              type: "object",
+              fields: {
+                file: { type: "string" },
+                lines: { type: "array", element: { type: "number" }, optional: true },
+              },
+            },
+            optional: true,
+          },
+          summaryAsOf: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$", optional: true },
+          supersedes: {
+            type: "array",
+            element: { type: "string", pattern: "^[1-9]\\d*$" },
+            optional: true,
+          },
+          room: { type: "enum", values: ["house"], optional: true },
         },
       },
       remember: {
@@ -281,6 +356,7 @@ describe("OMP adapter registration", () => {
           technologyKeys: { type: "array", element: { type: "string" }, optional: true },
           threadKeys: { type: "array", element: { type: "string" }, optional: true },
           tags: { type: "array", element: { type: "string" }, optional: true },
+          sourceMemoryPath: { type: "string", optional: true },
         },
       },
       delete_lesson: {
@@ -419,6 +495,17 @@ describe("OMP adapter registration", () => {
         },
       },
       room_state: { type: "object", fields: {} },
+      kitten_lineage_status: { type: "object", fields: {} },
+      recall_policy: {
+        type: "object",
+        fields: {
+          requestedMode: {
+            type: "enum",
+            values: ["auto", "conversation", "work", "quiet"],
+            optional: true,
+          },
+        },
+      },
       set_room_state: {
         type: "object",
         fields: {

@@ -38,21 +38,20 @@ House core
    └──────── AKASHA ──────── PostgreSQL + pgvector + embeddings
 ```
 
-### Planned Host and delivery plane
+### Host and delivery plane
 
-The next runtime slice adds a versioned Athanor Host between interactive clients
-and the current adapters. The thin Godot client will use only Host WebSocket
-commands and events. It will not connect directly to PostgreSQL, NATS, model
+The Athanor Host is the authenticated versioned boundary between interactive
+clients and the Rust runtime. The thin Godot client uses only Host WebSocket
+commands and events. It does not connect directly to PostgreSQL, NATS, model
 endpoints, or harness internals.
 
 ```text
 Godot client ───────┐
-                    ├── Athanor Host ── core contracts ── Vault / AKASHA
-harness adapters ───┘                         │
-                                             ├── invocation router
-                                             └── PostgreSQL outbox
-                                                        │
-                                                        └── NATS delivery
+                    ├── Athanor Host ── Rust contracts ── Vault / AKASHA
+OMP adapter ─────────┘                         │
+                                              └── PostgreSQL outbox
+                                                          │
+                                                          └── NATS JetStream
 ```
 
 PostgreSQL remains authoritative. The outbox records durable publication intent
@@ -60,12 +59,11 @@ in the same transaction as the domain event. NATS JetStream may deliver opaque
 record IDs and wake consumers, but it never becomes memory, review state, or a
 second conversation ledger.
 
-Origami defines versioned recipient-specific folds over the same Host envelope:
-Cranes carry active handoffs, Paper Boats carry living continuity across sleep,
-and room-scoped Pawprints provide provenance and integrity. NATS carries only
-bounded Crane routing; consumers reload authoritative bodies from PostgreSQL.
-The model receives the unfolded legible context, not a covert instruction
-channel.
+Paper Boat sleep commits its continuity row and `boat.ready` outbox event in one
+PostgreSQL transaction. NATS carries only bounded pointer and sanitized receipt
+projections; wake reloads the complete Boat from PostgreSQL authority. Cranes,
+general Origami folds, and Pawprints beyond this implemented lane remain
+specified extensions of the same envelope rather than current release claims.
 
 The complete accepted target, including dynamic model and room execution,
 Prolog/Datalog derivations, Cingulate enforcement, and optional Lean-backed
@@ -81,62 +79,68 @@ documents link to it instead of repeating it.
 
 | Component path | Responsibility |
 |---|---|
-| `src/`, `crates/house-core`, `crates/house-protocol` | Provider-neutral core contracts, retrieval orchestration, ranking, room identity logic, and deterministic worker routing |
-| `crates/house-substrate`, `substrate/` | AKASHA substrate operations: PostgreSQL schema and migrations, pgvector, embeddings, memory and lesson writes, retrieval sources, health, and backup/restore |
-| `adapters/omp/` | OMP extension entrypoint, lifecycle hooks, room integration, localhost administrative GUI, tool schemas, static verifier, starter room, installer, and updater |
-| `.github/workflows/` | Continuous integration and the single release pipeline |
-| `docs/`, `README.md`, `INSTALL.md`, `USAGE.md`, `HOUSE.md`, `IDENTITY_GUIDE.md` | Canonical documentation |
+| `crates/house-core`, `crates/house-protocol` | Provider-neutral domain, authority, and wire contracts |
+| `crates/house-vault` | Strict database-free, file-authoritative Vault retrieval |
+| `crates/house-substrate`, `substrate/` | PostgreSQL-authoritative AKASHA operations, migrations, retrieval, typed stores, GIGA, health, backup, and restore |
+| `crates/house-host` | Authenticated snapshots, typed deltas, resync, Recall Policy, and receipt projection |
+| `crates/house-delivery` | Transactional outbox publication and bounded JetStream consumption |
+| `crates/athanor-install`, `installer/` | Native service lifecycle, immutable staging, rollback, doctor, and Windows installer |
+| `clients/godot/` | Thin Godot operator client |
+| `adapters/omp/` | OMP entrypoint, room integration, named tools, and Rust transport |
+| `.github/workflows/` | Continuous integration and native release assembly |
+| `docs/`, root Markdown | Canonical documentation |
 
 One repository does not merge the internal authority boundaries. The core does
 not import the OMP adapter. The core does not require PostgreSQL. The Vault
 profile runs without any substrate component. Each boundary stays enforced by
 contract, not by repository distance.
 
-The public API boundaries are `coreApi=1`, `adapterApi=1`, and `substrateApi=1`.
+The public API boundaries are `hostApi=1`, `substrateApi=1`, `deliveryApi=1`,
+and `godotApi=4.7`.
 
 ### Installed layout
 
-The installer writes three sibling directories under the operator's target
-directory:
+Immutable product versions and mutable operator data are separate:
 
 | Installed path | Content |
 |---|---|
-| `<target>/the-athanor` | Product code for the installed release |
-| `<target>/rooms` | Operator-owned rooms |
-| `<target>/state` | Mutable state, including the `athanor.env` topology file |
+| `%ProgramFiles%\Solarisael\Athanor\bin` | Native lifecycle manager |
+| `%ProgramFiles%\Solarisael\Athanor\versions\<version>` | Verified immutable runtime, OMP adapter, Godot client, PostgreSQL, and NATS |
+| `%ProgramData%\Solarisael\Athanor\config` | Runtime configuration |
+| `%ProgramData%\Solarisael\Athanor\secrets` | ACL-restricted generated secrets |
+| `%ProgramData%\Solarisael\Athanor\data` | PostgreSQL and NATS durable data |
+| `%ProgramData%\Solarisael\Athanor\rooms` | Operator-owned rooms |
+| `%ProgramData%\Solarisael\Athanor\state` | Host state |
+| `%ProgramData%\Solarisael\Athanor\backups` | Upgrade, rollback, and legacy pre-install backups |
 
-### Topology configuration
+`current.json` atomically selects the active immutable version. The
+`SolarisaelAthanor` Windows service starts only the exact children under that
+version, reports readiness after PostgreSQL, NATS, delivery, and Host pass their
+contracts, and drains them in reverse dependency order.
 
-The OMP adapter reads the topology from `<target>/state/athanor.env`. That file
-sets only these keys:
-
-| Variable | Profile | Purpose |
-|---|---|---|
-| `ATHANOR_STATE_DIR` | Vault and AKASHA | Mutable state directory |
-| `ATHANOR_SUBSTRATE_ROOT` | AKASHA | Substrate operations root |
-| `ATHANOR_SUBSTRATE_EXE` | AKASHA | Path of `athanor-substrate.exe` |
-| `ATHANOR_AUTO` | Optional | Set to `1` to discover the bundled substrate executable, then PATH |
-
-A development checkout without this file is valid. A Vault install that needs
-no override is also valid.
+The OMP adapter discovers the installed Rust substrate through the runtime
+environment written by the native manager. Development checkouts may still set
+explicit executable/state overrides; those variables are topology inputs, not
+behavioral owners.
 
 ### Release and support target
 
-Release 0.11.0 is the current late-beta line. Windows x64 with OMP is the only
-supported release target. Each release publishes exactly two archives:
+`1.0.0-rc.1` is the current native Windows x64 candidate. OMP is the supported
+harness. The release artifact is one checksum-published installer:
 
-| Archive | Profile |
-|---|---|
-| `the-athanor-<version>-windows-x64-vault.zip` | Vault |
-| `the-athanor-<version>-windows-x64-akasha.zip` | AKASHA |
+```text
+The-Athanor-<version>-windows-x64.exe
+The-Athanor-<version>-windows-x64.exe.sha256
+```
 
-The installer accepts the modes `vault` and `akasha`. The AKASHA archive also
-carries `adapters/omp/bin/windows-x64/athanor-substrate.exe`. The Vault archive
-carries no substrate binary.
+The payload pins PostgreSQL 18.4-2, pgvector 0.8.6, NATS 2.14.4, and Godot
+4.7.1. The ordinary managed install needs no WSL, Python, Bun, Cargo, Godot
+editor, or separately installed database/broker. An explicit advanced mode may
+bind an operator-provided compatible PostgreSQL database.
 
-The OpenCode adapter line is historical. It is not a supported release target.
-A native Godot client is planned. It is specified in
-[`GODOT_CLIENT.md`](./GODOT_CLIENT.md) and is not released.
+The OpenCode adapter line and the two portable Vault/AKASHA archives are
+historical. Vault and AKASHA are runtime authority profiles inside one release,
+not separate packages.
 
 ## Room model
 

@@ -1,60 +1,46 @@
 #!/usr/bin/env python3
-"""Shared backup runner for substrate write helpers."""
+"""Transport legacy Python writers to the Rust-owned backup operation."""
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+import state_paths
 
-def _backup_command(script: Path) -> list[str] | None:
-    if sys.platform != "win32":
-        return ["bash", str(script)]
-
-    win_path_forward = str(script).replace("\\", "/")
-    try:
-        translated = subprocess.run(
-            ["wsl.exe", "--", "wslpath", "-a", win_path_forward],
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError as err:
-        print(f"  WARN: WSL is unavailable: {err}", file=sys.stderr)
-        return None
-    if translated.returncode != 0:
-        print(
-            f"  WARN: wslpath failed (rc={translated.returncode}): "
-            f"{translated.stderr.strip()}",
-            file=sys.stderr,
-        )
-        return None
-
-    return ["wsl.exe", "--", "bash", translated.stdout.strip()]
+def _substrate_executable() -> Path:
+    configured = os.environ.get("ATHANOR_SUBSTRATE_EXE", "").strip()
+    return Path(configured) if configured else state_paths.release_binary()
 
 
 def run_backup(anchor_file: str | Path, *, skip: bool = False) -> None:
-    """Run backup.sh next to anchor_file without aborting the caller on failure."""
+    """Request a Rust backup without aborting the legacy writer on failure."""
     if skip:
         return
 
-    script = Path(anchor_file).resolve().parent / "backup.sh"
-    if not script.exists():
-        print(f"  WARN: backup.sh not found at {script}, skipping", file=sys.stderr)
+    executable = _substrate_executable()
+    if not executable.is_file():
+        print(f"  WARN: Rust substrate executable not found at {executable}, skipping backup", file=sys.stderr)
         return
-
-    command = _backup_command(script)
-    if command is None:
-        return
-
+    output_dir = Path(
+        os.environ.get("SOLARISAEL_BACKUP_DIR", "").strip()
+        or state_paths.substrate_state_dir() / "backups"
+    )
+    keep = os.environ.get("SOLARISAEL_BACKUP_KEEP", os.environ.get("KEEP", "3"))
     try:
-        result = subprocess.run(command, capture_output=True, text=True)
-    except FileNotFoundError as err:
-        print(f"  WARN: backup command unavailable: {err}", file=sys.stderr)
+        result = subprocess.run(
+            [str(executable), "backup", "--output-dir", str(output_dir), "--keep", str(keep)],
+            capture_output=True,
+            text=True,
+        )
+    except OSError as err:
+        print(f"  WARN: Rust backup command unavailable: {err}", file=sys.stderr)
         return
 
     if result.returncode != 0:
         print(
-            f"  WARN: backup failed (rc={result.returncode}): "
+            f"  WARN: Rust backup failed (rc={result.returncode}): "
             f"{result.stderr.strip()}",
             file=sys.stderr,
         )

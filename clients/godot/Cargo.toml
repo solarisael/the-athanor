@@ -1,0 +1,14 @@
+[package]
+name = "athanor-godot"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+chrono.workspace = true
+godot = { version = "=0.5.5", features = ["api-4-7"] }
+house-protocol = { path = "../../crates/house-protocol" }
+uuid.workspace = true

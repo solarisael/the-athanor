@@ -1,57 +1,38 @@
-// Generic named-entity resolution seam for OMP.
-// The House Python helper owns substrate access and lexical matching; this
-// wrapper only crosses the Windows/WSL boundary and keeps failures fail-open.
-
-import path from "node:path";
+// Generic named-entity resolution seam for OMP. Rust owns substrate access,
+// active-authority selection, lexical matching, ordering, and bounds.
 import { DIAGNOSTIC_TIMEOUT_MS } from "./constants.ts";
-import { ATHANOR_ROOT } from "../athanor-root.ts";
-import { runWslDiagnostic, windowsPathToWsl } from "./substrate.ts";
+import { discoverRustExecutable } from "../discovery.ts";
+import { RustJsonlTransport } from "../rust-transport.ts";
 
-export type EntityMatch = {
-  canonicalName: string;
-  kind: string;
-  matchedAlias: string;
-};
+export type EntityMatch = { canonicalName: string; kind: string; matchedAlias: string };
+export type EntityResolution = { ok: boolean; matches: EntityMatch[]; error?: string };
 
-export type EntityResolution = {
-  ok: boolean;
-  matches: EntityMatch[];
-  error?: string;
-};
+const transports = new Map<string, RustJsonlTransport>();
+function transport(roomDir: string): RustJsonlTransport | null {
+  const executable = discoverRustExecutable();
+  if (!executable) return null;
+  const key = `${executable}\0${roomDir}`;
+  let current = transports.get(key);
+  if (current && !current.usable) { transports.delete(key); void current.close().catch(() => {}); current = undefined; }
+  if (!current) { current = new RustJsonlTransport({ executable, cwd: roomDir }); transports.set(key, current); }
+  return current;
+}
 
-const SCRIPT = path.join(ATHANOR_ROOT, "src", "entity-resolution.py");
-
-export async function resolveEntities({
-  room,
-  roomDir,
-  query,
-  limit = 8,
-  timeoutMs = DIAGNOSTIC_TIMEOUT_MS,
-}: {
-  room: string;
-  roomDir: string;
-  query: string;
-  limit?: number;
-  timeoutMs?: number;
+export async function resolveEntities({ room, roomDir, query, limit = 8, timeoutMs = DIAGNOSTIC_TIMEOUT_MS }: {
+  room: string; roomDir: string; query: string; limit?: number; timeoutMs?: number;
 }): Promise<EntityResolution> {
-  const argv = [
-    "--cd", "~", "python3", windowsPathToWsl(SCRIPT),
-    "--room", String(room || ""),
-    "--room-dir", windowsPathToWsl(roomDir),
-    "--limit", String(limit),
-    "--query-stdin",
-  ];
-  const probe = await runWslDiagnostic({ argv, stdin: String(query || ""), timeoutMs });
-  if (probe.timedOut) return { ok: false, matches: [], error: "entity resolution timed out" };
-  if (probe.spawnError) return { ok: false, matches: [], error: probe.spawnError };
-  if (probe.code !== 0) return { ok: false, matches: [], error: String(probe.stderr || "").trim() || `entity resolution exited ${probe.code}` };
+  const client = transport(roomDir);
+  if (!client) return { ok: false, matches: [], error: "Rust substrate executable is unavailable" };
   try {
-    const parsed = JSON.parse(String(probe.stdout || "{}"));
-    const matches = Array.isArray(parsed?.matches) ? parsed.matches.filter((item) => (
-      item && typeof item.canonicalName === "string" && typeof item.kind === "string" && typeof item.matchedAlias === "string"
-    )) : [];
-    return { ok: true, matches };
+    const result = await client.request("entity_resolve", { room: String(room || ""), query: String(query || ""), limit }, { timeoutMs });
+    if (!result || typeof result !== "object" || Array.isArray(result)) return { ok: false, matches: [], error: "Rust entity resolver returned an invalid result" };
+    const value = result as Record<string, unknown>;
+    const matches = Array.isArray(value.matches) ? value.matches.filter((item) => {
+      const row = item as Record<string, unknown>;
+      return row && typeof row.canonicalName === "string" && typeof row.kind === "string" && typeof row.matchedAlias === "string";
+    }) as EntityMatch[] : [];
+    return { ok: value.ok === true, matches, ...(value.ok === true ? {} : { error: String(value.error || "entity resolution failed") }) };
   } catch (error) {
-    return { ok: false, matches: [], error: error?.message || String(error) };
+    return { ok: false, matches: [], error: error instanceof Error ? error.message : String(error) };
   }
 }

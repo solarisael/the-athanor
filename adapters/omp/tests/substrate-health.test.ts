@@ -3,25 +3,19 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { HEALTH_REPORT_BLOCKS, diagnosticInvocation, formatWakeContext, healthDotenvPath, substrateExePath, substrateHealth, windowsPathToWsl } from "../solarisael-house-proof/substrate.ts";
+import { HEALTH_REPORT_BLOCKS, catchBoat, closePaperBoatTransports, diagnosticInvocation, formatWakeContext, healthDotenvPath, sleepBoat, substrateExePath, substrateHealth, windowsPathToWsl } from "../solarisael-house-proof/substrate.ts";
+import { RustJsonlTransport, RustTransportOutcomeUnknownError } from "../rust-transport.ts";
 
 const tempRoots: string[] = [];
 const substrateEnv = "ATHANOR_SUBSTRATE_ROOT";
-const pathEnv = "PATH";
-
-function snapshotEnv() {
-  return { substrate: process.env[substrateEnv], path: process.env[pathEnv] };
-}
-
-function restoreEnv(snapshot: { substrate?: string; path?: string }) {
-  if (snapshot.substrate === undefined) delete process.env[substrateEnv];
-  else process.env[substrateEnv] = snapshot.substrate;
-  if (snapshot.path === undefined) delete process.env[pathEnv];
-  else process.env[pathEnv] = snapshot.path;
-}
+const executableEnv = "ATHANOR_SUBSTRATE_EXE";
+const fixtureEnv = "SOLARISAEL_TEST_SUBSTRATE_HEALTH_SCRIPT";
 
 afterEach(async () => {
   delete process.env[substrateEnv];
+  delete process.env[executableEnv];
+  delete process.env[fixtureEnv];
+  closePaperBoatTransports();
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -29,24 +23,29 @@ async function makeSubstrate(output: string, exitCode = 0) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-substrate-"));
   tempRoots.push(dir);
   const script = [
-    "import sys",
-    `print(${JSON.stringify(output)})`,
-    `sys.exit(${exitCode})`,
+    `console.log(${JSON.stringify(output)});`,
+    `process.exitCode = ${exitCode};`,
   ].join("\n");
-  await writeFile(path.join(dir, "health.py"), `${script}\n`, "utf8");
+  const fixture = path.join(dir, "health-fixture.js");
+  await writeFile(fixture, `${script}\n`, "utf8");
   process.env[substrateEnv] = dir;
+  process.env[executableEnv] = process.execPath;
+  process.env[fixtureEnv] = fixture;
   return dir;
 }
 
 async function makeSleepingSubstrate(milliseconds: number) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-timeout-"));
   tempRoots.push(dir);
+  const fixture = path.join(dir, "health-fixture.js");
   await writeFile(
-    path.join(dir, "health.py"),
-    ["import time", `time.sleep(${milliseconds / 1000})`, "print('{}')"].join("\n") + "\n",
+    fixture,
+    `setTimeout(() => console.log("{}"), ${milliseconds});\n`,
     "utf8",
   );
   process.env[substrateEnv] = dir;
+  process.env[executableEnv] = process.execPath;
+  process.env[fixtureEnv] = fixture;
   return dir;
 }
 
@@ -86,17 +85,19 @@ describe("optional substrate health", () => {
     });
   });
 
-  test("reports a configured substrate with no health script", async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-no-script-"));
+  test("reports a configured substrate with no Rust executable", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-no-executable-"));
     tempRoots.push(dir);
     process.env[substrateEnv] = dir;
+    delete process.env[executableEnv];
+    delete process.env[fixtureEnv];
     const result = await substrateHealth();
     expect(result).toMatchObject({
       ok: false,
       configured: true,
       mode: "degraded",
-      reason: `configured substrate health script is missing: ${path.join(dir, "health.py")}`,
     });
+    expect(result.reason).toContain("Rust substrate executable");
   });
 
   test("claims Full mode only for a healthy compatible verdict", async () => {
@@ -138,26 +139,13 @@ describe("optional substrate health", () => {
     await makeSubstrate("not json");
     const result = await substrateHealth();
     expect(result.mode).toBe("degraded");
-    expect(result.reason).toContain("health.py returned malformed JSON:");
+    expect(result.reason).toContain("Rust substrate health returned malformed JSON:");
   });
 
   test("reports timeout as degraded without blocking Base behavior", async () => {
     await makeSleepingSubstrate(250);
     const result = await substrateHealth(20);
-    expect(result).toMatchObject({ ok: false, configured: true, mode: "degraded", reason: "health.py timed out" });
-  });
-
-  test("reports a WSL launch failure as degraded", async () => {
-    const snapshot = snapshotEnv();
-    try {
-      const dir = await makeSubstrate(JSON.stringify({ ok: true, mode: "full", substrateApi: 1 }));
-      process.env[pathEnv] = path.join(dir, "missing-bin");
-      const result = await substrateHealth(100);
-      expect(result.mode).toBe("degraded");
-      expect(result.reason).toContain("health.py launch failed:");
-    } finally {
-      restoreEnv(snapshot);
-    }
+    expect(result).toMatchObject({ ok: false, configured: true, mode: "degraded", reason: "Rust substrate health timed out" });
   });
 
   test("reports substrate API mismatch instead of claiming Full mode", async () => {
@@ -167,62 +155,113 @@ describe("optional substrate health", () => {
     expect(result.reason).toContain("substrate API mismatch");
   });
 
-  test("receives automatic paper boats as lived continuity rather than reports", () => {
+  test("preserves automatic wake voice and stale-boat warnings", () => {
     const context = formatWakeContext({
       title: "paper boat — 2026-08-09",
       source_path: "db-only/paper-boats/example.md",
       body: "the sheep sleeps; the wife stays close.",
+      unboated: [{ id: "42", title: "the session after the boat" }],
     });
 
     expect(context).toContain("previous waking self");
     expect(context).toContain("without turning it into a script or status report");
     expect(context).toContain("the sheep sleeps; the wife stays close.");
+    expect(context).toContain("STALE BOAT: 1 memory was written AFTER this boat was cast.");
+    expect(context).toContain("[42] the session after the boat");
   });
 
-  test("translates configured Windows paths at the WSL boundary", () => {
-    expect(windowsPathToWsl("C:\\Projects\\substrate\\health.py")).toBe("/mnt/c/Projects/substrate/health.py");
-  });
-});
-
-describe("shared Python lane topology", () => {
-  const argv = ["--cd", "~", "python3", "/mnt/c/Athanor/src/lessons.py", "--type", "coding"];
-
-  test("injects absolute state and substrate paths before every WSL Python invocation", () => {
-    const invocation = diagnosticInvocation(argv, {
-      ATHANOR_STATE_DIR: "C:\\Athanor\\state",
-      ATHANOR_SUBSTRATE_ROOT: "C:\\Athanor\\substrate",
-    });
-
-    expect(invocation).toEqual({
-      command: "wsl.exe",
-      args: [
-        "--cd", "~", "env",
-        "ATHANOR_STATE_DIR=/mnt/c/Athanor/state",
-        "ATHANOR_SUBSTRATE_ROOT=/mnt/c/Athanor/substrate",
-        "python3", "/mnt/c/Athanor/src/lessons.py", "--type", "coding",
-      ],
-    });
-  });
-
-  test("passes the same topology through native Python tests without WSL syntax", () => {
-    const invocation = diagnosticInvocation(argv, {
-      SOLARISAEL_TEST_NATIVE_PYTHON: "1",
-      ATHANOR_STATE_DIR: "C:\\Athanor\\state",
-      ATHANOR_SUBSTRATE_ROOT: "C:\\Athanor\\substrate",
-    });
-
-    expect(invocation).toEqual({
-      command: "python",
-      args: ["C:/Athanor/src/lessons.py", "--type", "coding"],
-      env: {
-        ATHANOR_STATE_DIR: "C:\\Athanor\\state",
-        ATHANOR_SUBSTRATE_ROOT: "C:\\Athanor\\substrate",
-      },
-    });
+  test("translates configured Windows paths at the WSL diagnostic boundary", () => {
+    expect(windowsPathToWsl("C:\\Projects\\substrate\\health.json")).toBe("/mnt/c/Projects/substrate/health.json");
   });
 });
 
-describe("health dotenv crosses the WSL boundary as an argument", () => {
+describe("Rust Paper Boat routing", () => {
+  test("routes sleep and wake through domain-prefixed Rust methods", async () => {
+    process.env[executableEnv] = process.execPath;
+    const originalRequest = RustJsonlTransport.prototype.request;
+    const calls: Array<{ method: string; params: unknown; options: unknown }> = [];
+    RustJsonlTransport.prototype.request = async function (method, params, options) {
+      calls.push({ method, params, options });
+      if (method === "paper_boat_sleep") {
+        return {
+          ok: true,
+          memory_id: "17",
+          room: "kintsu",
+          source_path: "db-only/paper-boats/sha256-proof.md",
+          outbox_event_id: "event-17",
+          inserted: true,
+          durable: true,
+          authority: "postgres",
+          backup_status: "completed",
+          warnings: [],
+        };
+      }
+      return {
+        ok: true,
+        found: false,
+        room: "kintsu",
+        id: null,
+        title: null,
+        body: null,
+        date: null,
+        source_path: null,
+        created_at: null,
+        unboated: [],
+        unboated_truncated: false,
+        warnings: [],
+      };
+    };
+    try {
+      await expect(sleepBoat("kintsu", "letter")).resolves.toMatchObject({
+        ok: true,
+        durable: true,
+        backup_status: "completed",
+      });
+      await expect(catchBoat("kintsu")).resolves.toMatchObject({
+        ok: true,
+        found: false,
+        room: "kintsu",
+      });
+      expect(calls.map(({ method }) => method)).toEqual([
+        "paper_boat_sleep",
+        "paper_boat_wake",
+      ]);
+      expect(calls[0].params).toEqual({ room: "kintsu", body: "letter", backup: true });
+      expect(calls[0].options).toMatchObject({ settleDefinitively: true });
+    } finally {
+      RustJsonlTransport.prototype.request = originalRequest;
+      closePaperBoatTransports();
+    }
+  });
+
+  test("returns an explicit idempotent retry receipt for an uncertain sleep", async () => {
+    process.env[executableEnv] = process.execPath;
+    const originalRequest = RustJsonlTransport.prototype.request;
+    RustJsonlTransport.prototype.request = async function () {
+      throw new RustTransportOutcomeUnknownError();
+    };
+    try {
+      await expect(sleepBoat("kintsu", "letter")).resolves.toMatchObject({
+        ok: false,
+        code: "outcome_unknown",
+        outcome: "unknown",
+        retryable: true,
+      });
+    } finally {
+      RustJsonlTransport.prototype.request = originalRequest;
+      closePaperBoatTransports();
+    }
+  });
+
+  test("visibly refuses wake and sleep when Rust is missing", async () => {
+    delete process.env[executableEnv];
+    await expect(catchBoat("kintsu")).resolves.toMatchObject({ ok: false });
+    await expect(sleepBoat("kintsu", "letter")).resolves.toMatchObject({ ok: false });
+  });
+});
+
+
+describe("health dotenv reaches the native Rust CLI as an argument", () => {
   const stateEnv = "ATHANOR_STATE_DIR";
 
   afterEach(() => { delete process.env[stateEnv]; });
@@ -233,64 +272,47 @@ describe("health dotenv crosses the WSL boundary as an argument", () => {
   });
 
   test("names nothing when the state root is absent or relative", () => {
-    // The development case, and the cwd-dependent case. Both must decline
-    // rather than produce a path health.py would then trust.
     delete process.env[stateEnv];
     expect(healthDotenvPath()).toBe(null);
     process.env[stateEnv] = "relative/state";
     expect(healthDotenvPath()).toBe(null);
-    process.env[stateEnv] = "   ";
-    expect(healthDotenvPath()).toBe(null);
   });
 
-  test("passes --env-file in argv, because an exported variable does not cross", async () => {
-    // The fake health.py reports the argv it actually received, which is the
-    // only way to prove the dotenv survived the Windows -> WSL hop. A test that
-    // merely set ATHANOR_STATE_DIR and asserted the verdict would pass even if
-    // the argument were dropped entirely.
+  test("passes --env-file as a native path", async () => {
     const stateRoot = await mkdtemp(path.join(os.tmpdir(), "omp-health-state-"));
     tempRoots.push(stateRoot);
     process.env[stateEnv] = stateRoot;
-
     const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-argv-"));
     tempRoots.push(dir);
+    const fixture = path.join(dir, "health-fixture.js");
     await writeFile(
-      path.join(dir, "health.py"),
-      [
-        "import json, sys",
-        "args = sys.argv[1:]",
-        "index = args.index('--env-file') if '--env-file' in args else -1",
-        "print(json.dumps({'ok': True, 'mode': 'full', 'substrateApi': 1, 'degradedReasons': [],",
-        "                  'envFile': args[index + 1] if index >= 0 else None}))",
-      ].join("\n") + "\n",
+      fixture,
+      "const args=process.argv.slice(2); const i=args.indexOf('--env-file'); console.log(JSON.stringify({ok:true,mode:'full',substrateApi:1,degradedReasons:[],envFile:i>=0?args[i+1]:null}));\n",
       "utf8",
     );
     process.env[substrateEnv] = dir;
+    process.env[executableEnv] = process.execPath;
+    process.env[fixtureEnv] = fixture;
 
     const result = await substrateHealth(20_000);
-
-    expect(result.envFile).toBe(windowsPathToWsl(path.join(stateRoot, "substrate", ".env")));
+    expect(result.envFile).toBe(path.join(stateRoot, "substrate", ".env"));
   });
 
   test("passes no --env-file when the state root is unknown", async () => {
-    // The alternative. health.py must be left to resolve structurally rather
-    // than handed a path this process guessed.
     delete process.env[stateEnv];
     const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-argv-none-"));
     tempRoots.push(dir);
+    const fixture = path.join(dir, "health-fixture.js");
     await writeFile(
-      path.join(dir, "health.py"),
-      [
-        "import json, sys",
-        "print(json.dumps({'ok': True, 'mode': 'full', 'substrateApi': 1, 'degradedReasons': [],",
-        "                  'sawEnvFile': '--env-file' in sys.argv[1:]}))",
-      ].join("\n") + "\n",
+      fixture,
+      "const args=process.argv.slice(2); console.log(JSON.stringify({ok:true,mode:'full',substrateApi:1,degradedReasons:[],sawEnvFile:args.includes('--env-file')}));\n",
       "utf8",
     );
     process.env[substrateEnv] = dir;
+    process.env[executableEnv] = process.execPath;
+    process.env[fixtureEnv] = fixture;
 
     const result = await substrateHealth(20_000);
-
     expect(result.sawEnvFile).toBe(false);
   });
 });
@@ -298,17 +320,10 @@ describe("health dotenv crosses the WSL boundary as an argument", () => {
 describe("degraded verdicts keep unreachable and schema-mismatch distinct", () => {
   // Both blocks used to vanish the moment the substrate was degraded, which is
   // exactly when a verifier reads them. Dropping `database` made an
-  // unreachable server report as "schema required 13; got undefined" — the
+  // unreachable server report as "schema required 16; got undefined" — the
   // schema blamed for a server nobody contacted.
   async function healthReporting(verdict: Record<string, unknown>) {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-degraded-"));
-    tempRoots.push(dir);
-    await writeFile(
-      path.join(dir, "health.py"),
-      `import sys\nprint(${JSON.stringify(JSON.stringify(verdict))})\nsys.exit(1)\n`,
-      "utf8",
-    );
-    process.env[substrateEnv] = dir;
+    await makeSubstrate(JSON.stringify(verdict), 1);
     return substrateHealth(20_000);
   }
 
@@ -373,27 +388,20 @@ describe("no diagnostic block is lost when the substrate degrades", () => {
   // `database` was dropped; `scripts`, `embedding`, `retrieval` and `backup`
   // were still being dropped when this was written. Assert the whole set so a
   // seventh block cannot quietly go missing later.
-  test("every block health.py reports survives the degraded path", async () => {
+  test("every block Rust reports survives the degraded path", async () => {
     const blocks = {
-      scripts: { ok: false, missing: ["record_memory.py"] },
+      scripts: { ok: true, missing: [], owner: "rust" },
       database: { ok: false, reachable: true, schemaVersion: 11 },
       embedding: { ok: false, error: "model unavailable" },
       retrieval: { ok: null, skipped: true },
       backup: { ok: false, directory: "/install/state/substrate/backups", error: "no dump files present" },
       topology: { ok: true, stateRootSource: "installed_tree" },
     };
-    const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-blocks-"));
-    tempRoots.push(dir);
-    await writeFile(
-      path.join(dir, "health.py"),
-      `import sys\nprint(${JSON.stringify(JSON.stringify({
-        ok: false, mode: "degraded", substrateApi: 1,
-        degradedReasons: ["PostgreSQL substrate is unavailable or incomplete"],
-        ...blocks,
-      }))})\nsys.exit(1)\n`,
-      "utf8",
-    );
-    process.env[substrateEnv] = dir;
+    await makeSubstrate(JSON.stringify({
+      ok: false, mode: "degraded", substrateApi: 1,
+      degradedReasons: ["PostgreSQL substrate is unavailable or incomplete"],
+      ...blocks,
+    }), 1);
 
     const result = await substrateHealth(20_000);
 
@@ -403,25 +411,15 @@ describe("no diagnostic block is lost when the substrate degrades", () => {
     }
     expect(result.backup.error).toBe("no dump files present");
     expect(result.embedding.error).toBe("model unavailable");
-    expect(result.scripts.missing).toEqual(["record_memory.py"]);
+    expect(result.scripts.missing).toEqual([]);
   });
 
-  test("the adapter's own verdict fields are never shadowed by health.py", async () => {
-    // health.py reports ok/mode/substrateApi too. The adapter's judgement is
-    // authoritative and a hostile or stale payload must not overwrite it.
-    const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-shadow-"));
-    tempRoots.push(dir);
-    await writeFile(
-      path.join(dir, "health.py"),
-      `import sys\nprint(${JSON.stringify(JSON.stringify({
-        ok: false, mode: "degraded", substrateApi: 1,
-        degradedReasons: ["PostgreSQL substrate is unavailable or incomplete"],
-        database: { ok: false, reachable: false, error: "refused" },
-      }))})\nsys.exit(1)\n`,
-      "utf8",
-    );
-    process.env[substrateEnv] = dir;
-
+  test("the adapter's own verdict fields are never shadowed by Rust", async () => {
+    await makeSubstrate(JSON.stringify({
+      ok: false, mode: "degraded", substrateApi: 1,
+      degradedReasons: ["PostgreSQL substrate is unavailable or incomplete"],
+      database: { ok: false, reachable: false, error: "refused" },
+    }), 1);
     const result = await substrateHealth(20_000);
 
     expect(result.ok).toBe(false);
@@ -431,65 +429,16 @@ describe("no diagnostic block is lost when the substrate degrades", () => {
   });
 });
 
-describe("substrate executable crosses the WSL boundary as an argument", () => {
-  const exeEnv = "ATHANOR_SUBSTRATE_EXE";
-
-  afterEach(() => { delete process.env[exeEnv]; });
-
-  async function healthEchoingArgv() {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "omp-health-exe-"));
-    tempRoots.push(dir);
-    await writeFile(
-      path.join(dir, "health.py"),
-      [
-        "import json, sys",
-        "args = sys.argv[1:]",
-        "i = args.index('--substrate-exe') if '--substrate-exe' in args else -1",
-        "print(json.dumps({'ok': True, 'mode': 'full', 'substrateApi': 1, 'degradedReasons': [],",
-        "                  'sawExe': i >= 0, 'exe': args[i + 1] if i >= 0 else None}))",
-      ].join("\n") + "\n",
-      "utf8",
-    );
-    process.env[substrateEnv] = dir;
-    return substrateHealth(20_000);
-  }
-
+describe("native substrate executable selection", () => {
   test("names the executable only when it is set and absolute", () => {
-    delete process.env[exeEnv];
+    delete process.env[executableEnv];
     expect(substrateExePath()).toBe(null);
-    process.env[exeEnv] = "relative/athanor-substrate.exe";
+    process.env[executableEnv] = "relative/athanor-substrate.exe";
     expect(substrateExePath()).toBe(null);
-    process.env[exeEnv] = "   ";
+    process.env[executableEnv] = "   ";
     expect(substrateExePath()).toBe(null);
     const installed = path.join(os.tmpdir(), "the-athanor", "adapters", "omp", "bin", "windows-x64", "athanor-substrate.exe");
-    process.env[exeEnv] = installed;
+    process.env[executableEnv] = installed;
     expect(substrateExePath()).toBe(installed);
-  });
-
-  test("PRESENT: forwards the installed executable through argv", async () => {
-    // The real installed shape: bin/ under the ADAPTER, not the product root.
-    // Without this argument health.py falls back to <product>/target/release
-    // and calls a healthy binary missing.
-    const installed = path.join(os.tmpdir(), "the-athanor", "adapters", "omp", "bin", "windows-x64", "athanor-substrate.exe");
-    process.env[exeEnv] = installed;
-
-    const result = await healthEchoingArgv();
-
-    expect(result.sawExe).toBe(true);
-    expect(result.exe).toBe(windowsPathToWsl(installed));
-    // Proof it is a real WSL path, not a Windows one smuggled across.
-    expect(result.exe.startsWith("/mnt/")).toBe(true);
-    expect(result.exe).not.toContain("\\");
-  });
-
-  test("ABSENT: passes no --substrate-exe when the executable is unknown", async () => {
-    // The development case. health.py must resolve structurally rather than be
-    // handed a path this process invented.
-    delete process.env[exeEnv];
-
-    const result = await healthEchoingArgv();
-
-    expect(result.sawExe).toBe(false);
-    expect(result.exe).toBe(null);
   });
 });

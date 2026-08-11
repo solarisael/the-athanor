@@ -314,7 +314,7 @@ def main() -> None:
             sys.exit(f"FATAL: pgvector {ver[0]} too old; vector support needs 0.4+")
         cur.execute("SELECT to_regclass('memory_chunks')")
         if cur.fetchone()[0] is None:
-            sys.exit("FATAL: memory_chunks table missing — run run_migrations.py")
+            sys.exit("FATAL: memory_chunks table missing — run athanor-substrate migrations")
         if not rooms:
             cur.execute("SELECT DISTINCT room FROM memories ORDER BY room")
             rooms = [row[0] for row in cur.fetchall()]

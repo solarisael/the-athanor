@@ -3,7 +3,12 @@ resolver = "2"
 members = [
     "crates/house-core",
     "crates/house-protocol",
+    "crates/house-host",
     "crates/house-substrate",
+    "crates/house-delivery",
+    "crates/house-vault",
+    "crates/athanor-install",
+    "clients/godot",
 ]
 
 [workspace.package]
@@ -14,3 +19,18 @@ version = "0.1.0"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+anyhow = "1"
+async-nats = { version = "=0.50.0", default-features = false, features = ["jetstream", "ring", "server_2_10", "server_2_11", "server_2_12", "server_2_14"] }
+atomicwrites = "0.4"
+axum = { version = "0.8", features = ["json", "ws"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+futures-util = "0.3"
+hex = "0.4"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json", "uuid"] }
+tokio = { version = "1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["serde", "v4"] }

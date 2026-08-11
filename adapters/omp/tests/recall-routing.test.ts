@@ -1,11 +1,9 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { RustJsonlTransport, RustTransportError } from "../rust-transport.ts";
-import { closeRustRecallTransports, compactRecall, recallWithRouting } from "../solarisael-house-proof/recall.ts";
+import { closeRustRecallTransports, recallWithRouting } from "../solarisael-house-proof/recall.ts";
 
 const originalRust = process.env.ATHANOR_SUBSTRATE_EXE;
+const originalSubstrateRoot = process.env.ATHANOR_SUBSTRATE_ROOT;
 const originalRequest = RustJsonlTransport.prototype.request;
 
 const result = (query: string) => ({
@@ -23,12 +21,17 @@ const result = (query: string) => ({
 });
 
 describe("Rust recall routing", () => {
-  beforeEach(() => { process.env.ATHANOR_SUBSTRATE_EXE = process.execPath; });
+  beforeEach(() => {
+    process.env.ATHANOR_SUBSTRATE_EXE = process.execPath;
+    process.env.ATHANOR_SUBSTRATE_ROOT = "test-substrate";
+  });
   afterEach(() => {
     RustJsonlTransport.prototype.request = originalRequest;
     closeRustRecallTransports();
     if (originalRust === undefined) delete process.env.ATHANOR_SUBSTRATE_EXE;
     else process.env.ATHANOR_SUBSTRATE_EXE = originalRust;
+    if (originalSubstrateRoot === undefined) delete process.env.ATHANOR_SUBSTRATE_ROOT;
+    else process.env.ATHANOR_SUBSTRATE_ROOT = originalSubstrateRoot;
   });
 
   test("sends protocol recall params and accepts an authoritative result that omits warnings", async () => {
@@ -267,57 +270,55 @@ describe("Rust recall routing", () => {
 
 });
 
-test("routes an absent Rust substrate through attributed Vault file retrieval", async () => {
+test("routes the Vault profile through the database-free Rust method", async () => {
   const previousRust = process.env.ATHANOR_SUBSTRATE_EXE;
-  const previousAuto = process.env.ATHANOR_AUTO;
-  const root = await mkdtemp(path.join(os.tmpdir(), "omp-vault-routing-"));
-  const room = path.join(root, "vault-room");
-  await mkdir(room);
-  await writeFile(path.join(room, ".solarisael-room.json"), JSON.stringify({ version: 1, room: "vault-room" }));
-  await writeFile(path.join(room, "knowledge.md"), "# Furnace\nThe local retrieval receipt is VAULT-ROUTE-91.");
-  delete process.env.ATHANOR_SUBSTRATE_EXE;
-  delete process.env.ATHANOR_AUTO;
+  const previousSubstrateRoot = process.env.ATHANOR_SUBSTRATE_ROOT;
+  let observed: unknown;
+  process.env.ATHANOR_SUBSTRATE_EXE = process.execPath;
+  delete process.env.ATHANOR_SUBSTRATE_ROOT;
   closeRustRecallTransports();
+  RustJsonlTransport.prototype.request = async function (method, params) {
+    observed = { method, params };
+    return {
+      ...result("VAULT-ROUTE-91"),
+      source: "vault-files",
+      authority: "vault-files",
+      roots: ["/rooms/vault-room"],
+      scannedFiles: 2,
+      indexedDocuments: 3,
+      taxonomy: {
+        memoryTypes: ["vault-file"],
+        threadKeys: [],
+        namedEntities: [],
+        fileTypes: ["markdown", "json", "jsonl", "text"],
+      },
+    };
+  };
   try {
-    const routed = await recallWithRouting(room, "vault-room", "VAULT-ROUTE-91");
+    const routed = await recallWithRouting("/rooms/vault-room", "vault-room", "VAULT-ROUTE-91");
+    expect(observed).toEqual({
+      method: "vault_recall",
+      params: {
+        room: "vault-room",
+        room_dir: "/rooms/vault-room",
+        query: "VAULT-ROUTE-91",
+      },
+    });
     expect(routed).toMatchObject({
       ok: true,
-      result: { ok: true, source: "vault-files", found: true },
-    });
-    const candidate = (routed as any).result.retrievalCandidates[0];
-    expect(candidate).toMatchObject({
-      source_path: path.join(room, "knowledge.md").replaceAll("\\", "/"),
-      heading_path: "Furnace",
-    });
-    expect(candidate.reasons).toEqual(expect.arrayContaining([expect.stringContaining("exact content fields")]));
-    expect(compactRecall((routed as any).result, { includeTaxonomy: true })).toMatchObject({
-      source: "vault-files",
-      vault: {
+      result: {
+        ok: true,
+        source: "vault-files",
         authority: "vault-files",
-        roots: [room.replaceAll("\\", "/")],
-        scannedFiles: 2,
-        indexedDocuments: 3,
+        found: true,
       },
-      retrievalCandidates: [{
-        source_path: path.join(room, "knowledge.md").replaceAll("\\", "/"),
-        reasons: expect.arrayContaining([expect.stringContaining("exact content fields")]),
-      }],
-      taxonomy: { fileTypes: ["markdown", "json", "jsonl", "text"] },
     });
   } finally {
+    RustJsonlTransport.prototype.request = originalRequest;
+    closeRustRecallTransports();
     if (previousRust === undefined) delete process.env.ATHANOR_SUBSTRATE_EXE;
     else process.env.ATHANOR_SUBSTRATE_EXE = previousRust;
-    if (previousAuto === undefined) delete process.env.ATHANOR_AUTO;
-    else process.env.ATHANOR_AUTO = previousAuto;
-    await rm(root, { recursive: true, force: true });
+    if (previousSubstrateRoot === undefined) delete process.env.ATHANOR_SUBSTRATE_ROOT;
+    else process.env.ATHANOR_SUBSTRATE_ROOT = previousSubstrateRoot;
   }
-});
-
-test("manual and automatic consumers use the single routing seam", async () => {
-  const tools = await readFile(path.join(import.meta.dir, "..", "solarisael-house-proof", "tools.ts"), "utf8");
-  const index = await readFile(path.join(import.meta.dir, "..", "index.ts"), "utf8");
-  expect(tools).toContain("recallWithRouting");
-  expect(tools).not.toContain("recallWithFallback");
-  expect(index).toContain("recallWithRouting");
-  expect(index).not.toContain("recallWithFallback");
 });

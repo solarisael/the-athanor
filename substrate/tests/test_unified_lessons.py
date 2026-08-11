@@ -4,67 +4,12 @@ import re
 import unittest
 from pathlib import Path
 
-import query_audio_lessons
-import query_project_lessons
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "0008_unified_lessons.sql"
 DESIGN_MIGRATION = ROOT / "migrations" / "0011_design_lessons.sql"
-DESIGN_RECORDER = ROOT / "record_design_lesson.py"
 
-
-class RecordingCursor:
-    def __init__(self, rows: list[dict] | None = None) -> None:
-        self.rows = rows or []
-        self.calls: list[tuple[str, object]] = []
-
-    def execute(self, sql: str, params=None) -> None:
-        self.calls.append((sql, params))
-
-    def fetchall(self):
-        return self.rows
-
-
-class UnifiedLessonQueryTests(unittest.TestCase):
-    def test_project_query_paths_use_the_unified_table_and_project_discriminator(self) -> None:
-        rows = [{"id": 7, "project": "athanor", "title": "Keep", "lesson": "Typed"}]
-        cursor = RecordingCursor(rows)
-
-        self.assertIs(query_project_lessons.fetch_rows(cursor, "athanor", None, 4), rows)
-        self.assertIs(query_project_lessons.fetch_rows(cursor, "athanor", "release", 5), rows)
-        self.assertEqual(len(cursor.calls), 2)
-        for sql, _ in cursor.calls:
-            normalized = " ".join(sql.lower().split())
-            self.assertIn("from lessons", normalized)
-            self.assertIn("lesson_key = 'project'", normalized)
-            self.assertNotIn("project_lessons", normalized)
-        self.assertEqual(cursor.calls[0][1], ("athanor", 4))
-        self.assertEqual(cursor.calls[1][1], ("release", "release", "athanor", 5))
-
-    def test_audio_query_and_partner_lookup_cannot_cross_lesson_types(self) -> None:
-        rows = [{"id": 11, "shape": "spine", "title": "Listen", "lesson": "First"}]
-        cursor = RecordingCursor(rows)
-
-        self.assertIs(
-            query_audio_lessons.fetch_rows(
-                cursor,
-                query="noise",
-                stages=["denoise"],
-                shape="spine",
-                limit=3,
-                show_all=False,
-            ),
-            rows,
-        )
-        self.assertEqual(query_audio_lessons.fetch_by_ids(cursor, [11]), {11: rows[0]})
-        self.assertEqual(len(cursor.calls), 2)
-        for sql, _ in cursor.calls:
-            normalized = " ".join(sql.lower().split())
-            self.assertIn("from lessons", normalized)
-            self.assertIn("lesson_key = 'audio'", normalized)
-            self.assertNotIn("audio_lessons", normalized)
-        self.assertEqual(cursor.calls[1][1], ([11],))
 
 
 class UnifiedLessonMigrationTests(unittest.TestCase):
@@ -167,10 +112,6 @@ class DesignLessonMigrationTests(unittest.TestCase):
             self.assertIn(field, unified)
         self.assertNotIn("ADD COLUMN", self.sql)
 
-    def test_design_recorder_upsert_is_isolated_to_design_rows(self) -> None:
-        recorder = DESIGN_RECORDER.read_text(encoding="utf-8")
-        self.assertIn("('design', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)", recorder)
-        self.assertIn("ON CONFLICT (voice, title) WHERE lesson_key = 'design' DO UPDATE SET", recorder)
 
     def test_design_migration_registers_schema_version_eleven(self) -> None:
         self.assertIn("INSERT INTO schema_migrations (version) VALUES (11)", self.sql)

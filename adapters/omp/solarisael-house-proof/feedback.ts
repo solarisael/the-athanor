@@ -28,6 +28,7 @@ const WRITE_OPERATIONS = new Set([
   "set_room_state",
   "sleep",
   "house_routing_mode",
+  "recall_policy",
   "house_model_default",
   "anamnesis_write",
 ]);

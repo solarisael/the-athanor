@@ -8,11 +8,11 @@ its source attached. Corrected knowledge can replace stale guidance without
 erasing history. The model or provider carrying the work can change without
 making the project start from zero again.
 
-**Status:** `0.11.0`, operational late beta. The supported public path is Windows
-x64 with [OMP](https://github.com/can1357/oh-my-pi). Vault is usable without a
-database, embedding service, or GPU. AKASHA adds the PostgreSQL-backed memory
-and knowledge substrate. Other harnesses and platforms are not yet supported
-release targets.
+**Status:** `1.0.0-rc.1`, native Windows x64 release candidate. OMP is the
+supported harness. One Rust workspace owns the behavioral core, Vault retrieval,
+AKASHA PostgreSQL authority, Athanor Host, NATS delivery, native lifecycle, and
+Godot client. Vault remains database-free; AKASHA adds durable typed memory,
+lessons, canon, continuity, and governed background work.
 
 ## Choose your entrance
 
@@ -114,18 +114,18 @@ knowledge, deeper continuity, and governed cognitive machinery.
 
 ```mermaid
 flowchart TB
-    U[Operator and users] --> OMP[OMP harness]
-    OMP --> AD[OMP adapter]
-    AD --> CORE[The Athanor core]
-    CORE --> ROOM[Room contracts and continuity]
-    CORE --> RET[Retrieval and attributed context]
-    CORE --> ROUTE[Deterministic worker routing]
-    RET --> VAULT[Vault: local files]
-    RET --> AKASHA[AKASHA: PostgreSQL and local embeddings]
-    AKASHA --> HIP[Hippocampus Stage 1]
-    AKASHA --> STR[Striatum coding/project slice]
-    HIP --> CAND[Non-authoritative candidates]
-    STR --> LESSONS[Eligible typed lessons]
+    U[Operator] --> GUI[Godot client]
+    U --> OMP[OMP harness]
+    GUI --> HOST[Athanor Host]
+    OMP --> AD[Thin OMP adapter]
+    AD --> RUST[Shared Rust core and protocol]
+    HOST --> RUST
+    RUST --> VAULT[Vault: file-authoritative retrieval]
+    RUST --> AKASHA[AKASHA: PostgreSQL authority]
+    AKASHA --> OUTBOX[Transactional outbox]
+    OUTBOX --> NATS[NATS JetStream]
+    NATS --> HOST
+    AKASHA --> GIGA[GIGA candidates and typed lessons]
 ```
 
 Authority stays explicit:
@@ -149,34 +149,33 @@ contracts and [Hippocampus](./docs/HIPPOCAMPUS.md) for candidate authority.
 
 ## What exists now
 
-The reference House currently uses:
+The `1.0.0-rc.1` candidate includes:
 
-- Vault and AKASHA retrieval profiles;
-- automatic and explicit attributed recall;
-- typed memories plus coding, project, writing, design, and audio lessons;
-- guarded lesson updates and deletion;
-- design-system catalogue read/write organs;
-- room-local continuity, state, wake, sleep, and paper boats;
-- House commons without collapsing private room memory;
-- deterministic worker lanes and room-owned familiar spellbooks;
-- Anamnesis reviewed counsel;
-- GIGA Hippocampus Stage 1 event, candidate, review, and promotion flow;
-- GIGA Striatum's current coding/project lesson-activation slice;
-- 26 named OMP organs across retrieval, continuity, counsel, routing, design,
-  GIGA review, and House configuration.
+- one shared Rust contract layer and Rust-owned Vault/AKASHA behavior;
+- strict database-free Vault retrieval with attributed bounded evidence;
+- PostgreSQL-authoritative canon, memory, typed lessons, continuity, and GIGA;
+- typed Paper Boat sleep/wake with transaction-coupled `boat.ready` outbox rows;
+- NATS JetStream delivery carrying only bounded sanitized pointers and receipts;
+- an authenticated localhost Athanor Host with persisted snapshots, typed
+  deltas, resynchronization, idempotency, and restart recovery;
+- a Godot 4.7.1 client with live Recall Policy and sanitized Paper Boat receipt
+  screens;
+- one native Windows service supervisor, installer, updater/rollback path,
+  doctor, uninstall, and explicit purge boundary;
+- 26 named OMP organs whose adapter delegates behavioral authority to Rust.
 
-The localhost administrative GUI is current. It is not the planned native Godot
-client.
+## What is not a 1.0 release claim
 
-## What is not a current release claim
+The in-world 3D room, Datalog/Lean proof paths, Cingulate, OMEGA, ANON, Relay,
+group rooms, and the signed marketplace remain specified, planned, or research
+work. They are not counted as shipped behavior.
 
-Cingulate, the Athanor Host, the Godot client, NATS delivery, Datalog/Lean proof
-paths, OMEGA, ANON, and the signed marketplace remain specified, planned, or
-research work. They are not silently counted as shipped capabilities.
+The release candidate does not claim proven token savings, improved answer
+quality, support beyond Windows x64 + OMP, provider-side privacy, enterprise
+tenancy, or clean-machine installation evidence. The native installer is built
+and locally verified; clean-machine installation remains a separate public
+evaluation.
 
-The project does not currently claim proven token savings, improved answer
-quality, one-click installation, support beyond Windows + OMP, provider-side
-privacy, enterprise tenancy, or metaphysical identity continuity.
 
 [Planned Features](./docs/PLANNED_FEATURES.md) is the canonical status map.
 [Evidence](./docs/EVIDENCE.md) separates measurements from hypotheses.
@@ -184,47 +183,50 @@ privacy, enterprise tenancy, or metaphysical identity continuity.
 
 ## Install
 
-One repository and one release own the core, the substrate, the OMP adapter, the
-installer, the updater, and these documents. You download one archive and run
-one installer.
+One repository and one release own the substrate, Host, delivery, OMP adapter,
+Godot client, installer, updater, and install contract.
 
-The supported platform is Windows x64 with OMP and Bun.
-
-Each release publishes two archives for that platform:
+The supported ordinary package is one checksum-published native Windows x64
+installer:
 
 ```text
-the-athanor-<version>-windows-x64-vault.zip
-the-athanor-<version>-windows-x64-akasha.zip
+The-Athanor-<version>-windows-x64.exe
+The-Athanor-<version>-windows-x64.exe.sha256
 ```
 
-Pick the Vault archive for the file-attributed profile. It needs no substrate
-binary, no PostgreSQL, no embeddings, no WSL, and no Rust runtime.
+It carries the Rust runtime binaries, Godot 4.7.1, EnterpriseDB PostgreSQL
+18.4-2 with pgvector 0.8.6, and NATS Server 2.14.4. The installed service needs
+no WSL, Python, Bun, Cargo, Godot editor, or separately installed database/broker.
+PostgreSQL remains the durable AKASHA authority; Vault retrieval remains
+available as a runtime capability rather than a separate package.
 
-Pick the AKASHA archive for the durable-memory profile. It adds substrate
-operations and the platform substrate binary, and it requires PostgreSQL with
-`pgvector`, a local embedding service, and WSL 2.
+Immutable product versions live under
+`%ProgramFiles%\Solarisael\Athanor\versions`. Mutable databases, rooms, backups,
+configuration, logs, and ACL-restricted secrets live under
+`%ProgramData%\Solarisael\Athanor` and survive ordinary uninstall. An explicit
+advanced mode uses an operator-provided external PostgreSQL 18 + pgvector 0.8.6
+database while retaining the other packaged components.
 
-An install writes three directories under your target directory: `the-athanor`
-for product code, `rooms` for your rooms, and `state` for mutable state. It
-overwrites nothing else outside `the-athanor`.
+Installation verifies every staged artifact before activation, backs up before
+upgrade, runs ordered migrations, and requires Windows service readiness.
+Rollback uses the retained version pointer and pre-change database backup. A
+bounded legacy pre-install door only imports and backs up named 0.10.x trees; no
+legacy runtime is retained.
 
-A tool-capable installation agent can follow this exact request:
-
-> Install The Athanor with me. Preserve my existing rooms and configuration,
-> explain consequential system changes before making them, and verify the
-> completed installation.
-
-The installation is staged and verified; it is not advertised as one-click.
-Read [Install The Athanor](./INSTALL.md) before changing the host. A 0.10.x
-install needs the explicit migration path described there.
+Read [Install The Athanor](./INSTALL.md) for checksum verification, exact
+topology, external-database configuration, rollback, uninstall, and explicit
+purge contracts.
 
 ## Repository boundaries
 
 | Component | Owns |
 |---|---|
-| `crates/`, `src/`, `index.ts` | Provider-neutral core contracts, Rust core and protocol crates, Vault retrieval |
-| `adapters/omp/` | OMP adapter, lifecycle hooks, localhost administrative GUI, 26 named organs, starter room, installer, updater, verifier, and the portable bundle builder |
-| `substrate/` | AKASHA database, migrations, embeddings, typed stores, GIGA runtime, health, deployment, and backups |
+| `crates/house-core`, `crates/house-protocol` | Provider-neutral domain and wire contracts |
+| `crates/house-vault`, `crates/house-substrate` | File-authoritative Vault and PostgreSQL-authoritative AKASHA behavior |
+| `crates/house-host`, `crates/house-delivery` | Authenticated client projection and narrow JetStream delivery |
+| `crates/athanor-install`, `installer/` | Native lifecycle, immutable release staging, and Windows installer |
+| `clients/godot/` | Thin Godot operator client; no direct database or broker authority |
+| `adapters/omp/` | OMP lifecycle hooks and named tool surface delegated to Rust |
 
 All three live in [`solarisael/the-athanor`](https://github.com/solarisael/the-athanor)
 and ship in one release. Read
@@ -262,6 +264,7 @@ harness already has a supported adapter.
 
 ### Follow accepted direction
 
+- [Changelog](./CHANGELOG.md) — notable changes through the `1.0.0-rc.1` candidate
 - [Planned Features](./docs/PLANNED_FEATURES.md) — canonical status map
 - [Runtime Architecture](./docs/RUNTIME_ARCHITECTURE.md)
 - [Godot Client](./docs/GODOT_CLIENT.md)

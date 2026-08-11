@@ -58,18 +58,7 @@ export type {
   FamiliarSpellbookResult,
 } from "./familiars.ts";
 
-export {
-  LESSONS_SCRIPT,
-  MEMORY_POSTGRES_SOURCE_SCRIPT,
-  POSTGRES_MEMORY_SOURCE_SCRIPT,
-} from "./paths.ts";
-
-export {
-  runAnamnesisQuery,
-  runRecallQuery,
-  runVaultRecallQuery,
-} from "./memory.ts";
-export { clearVaultSearchCache, searchVault } from "./vault-search.ts";
+export { runAnamnesisQuery } from "./anamnesis.ts";
 
 export {
   logAssistantTurn,

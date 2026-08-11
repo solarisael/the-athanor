@@ -12,27 +12,21 @@ import {
   statePathForRoom,
   writeActiveSpiritSnapshot,
 } from "./room.ts";
+import { RecallPolicyHostClient } from "./recall-policy.ts";
+import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./anamnesis.ts";
 import {
-  appendAnamnesisRep,
   catchBoat,
-  deleteLesson,
-  runDesignDocs,
-  runLessons,
-  substrateHealth,
   memorySourcePath,
-  updateLesson,
-  writeAnamnesisDrawer,
-  writeDesignDoc,
-  writeLessonStore,
-  writeSessionMemory,
+  sleepBoat,
+  substrateHealth,
 } from "./substrate.ts";
 import { RustJsonlTransport, RustTransportError, RustTransportOutcomeUnknownError } from "../rust-transport.ts";
 import { discoverRustExecutable } from "../discovery.ts";
 import { laneStatus } from "./routing.ts";
 import { familiarStatus } from "./familiars.ts";
 import { dispatchHouse } from "./dispatch.ts";
-import { REMEMBER_STORES, buildStoreArgs } from "./stores.ts";
+import { REMEMBER_STORES, validateStoreFields } from "./stores.ts";
 import { WRITE_TIMEOUT_MS } from "./constants.ts";
 import {
   createToolRenderers,
@@ -189,10 +183,77 @@ function unknownLessonReceipt(error?: unknown): Record<string, unknown> {
   };
 }
 
+export async function writeRustCanon({ room, name, kind, summary, aliases, searchBoost, weighty, pointerFiles, summaryAsOf, supersedes, attribution, signal }) {
+  const executable = discoverRustExecutable();
+  const transport = rustRememberTransport();
+  if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
+  try {
+    const receipt = await transport.request("canon_write", {
+      room,
+      name,
+      kind,
+      summary,
+      aliases,
+      searchBoost,
+      weighty,
+      pointerFiles,
+      summaryAsOf,
+      supersedes,
+      attribution,
+    }, {
+      signal: signal || undefined,
+      timeoutMs: WRITE_TIMEOUT_MS,
+      settleDefinitively: true,
+    });
+    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
+      evictRustRememberTransport(executable, transport);
+      return {
+        ok: false,
+        error: "Rust canon write outcome is unknown after dispatch",
+        code: "outcome_unknown",
+        outcome: "unknown",
+        retryable: false,
+      };
+    }
+    return receipt as Record<string, unknown>;
+  } catch (error) {
+    if (!transport.usable) evictRustRememberTransport(executable, transport);
+    if (error instanceof RustTransportError) return rustFailureReceipt(error);
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      ...(isOutcomeUnknownError(error)
+        ? { code: "outcome_unknown", outcome: "unknown", retryable: false }
+        : {}),
+    };
+  }
+}
+
+export async function readRustCanon({ room, id, name, includeHistory, signal }) {
+  const executable = discoverRustExecutable();
+  const transport = rustRememberTransport();
+  if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
+  try {
+    return await transport.request("canon_read", {
+      room,
+      id,
+      name,
+      includeHistory,
+    }, {
+      signal: signal || undefined,
+      timeoutMs: WRITE_TIMEOUT_MS,
+    }) as Record<string, unknown>;
+  } catch (error) {
+    if (!transport.usable) evictRustRememberTransport(executable, transport);
+    if (error instanceof RustTransportError) return rustFailureReceipt(error);
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 export async function writeRustMemory({ room, title, body, threads, continues, supersedes, signal }) {
   const executable = discoverRustExecutable();
   const transport = rustRememberTransport();
-  if (!transport) return null;
+  if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
   const normalizeIdentityValues = (values: unknown) => [
     ...new Set(
       (Array.isArray(values) ? values : [])
@@ -263,13 +324,14 @@ export async function writeRustMemory({ room, title, body, threads, continues, s
 async function writeRustLesson({ room, kind, title, body, fields, backup, signal }) {
   const executable = discoverRustExecutable();
   const transport = rustRememberTransport();
-  if (!transport) return null;
+  if (!transport || !executable) return { ok: false, error: "Rust substrate executable is unavailable" };
   const params: Record<string, unknown> = {
     room, kind, title, body, shape: fields.shape ?? null, voice: fields.voice ?? null,
     register: Array.isArray(fields.register) ? fields.register : [],
     scope: fields.scope ?? null, project: fields.project ?? null,
     proofPattern: fields.proofPattern ?? null, triggerContext: fields.triggerContext ?? null,
     exampleText: fields.exampleText ?? null,
+    sourceMemoryPath: fields.sourceMemoryPath ?? null,
     languageKeys: Array.isArray(fields.languageKeys) ? fields.languageKeys : [],
     technologyKeys: Array.isArray(fields.technologyKeys) ? fields.technologyKeys : [],
     tags: Array.isArray(fields.tags) ? fields.tags : [], backup,
@@ -310,6 +372,28 @@ async function writeRustLesson({ room, kind, title, body, fields, backup, signal
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
+async function requestRustDomain(method: string, params: Record<string, unknown>, signal?: AbortSignal, write = false) {
+  const executable = discoverRustExecutable();
+  const transport = rustRememberTransport();
+  if (!transport || !executable) return { ok: false, error: "Rust substrate executable is unavailable" };
+  try {
+    const result = await transport.request(method, params, {
+      signal: signal || undefined,
+      timeoutMs: WRITE_TIMEOUT_MS,
+      ...(write ? { settleDefinitively: true } : {}),
+    });
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      if (write) evictRustRememberTransport(executable, transport);
+      return { ok: false, error: `Rust ${method} returned an invalid receipt` };
+    }
+    return result as Record<string, unknown>;
+  } catch (error) {
+    if (!transport.usable) evictRustRememberTransport(executable, transport);
+    if (error instanceof RustTransportError) return rustFailureReceipt(error);
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 
 function unknownAnamnesisReceipt(error?: unknown): Record<string, unknown> {
   return {
@@ -324,7 +408,7 @@ function unknownAnamnesisReceipt(error?: unknown): Record<string, unknown> {
 async function writeRustAnamnesis({ room, payload, signal }) {
   const executable = discoverRustExecutable();
   const transport = rustRememberTransport();
-  if (!transport || !executable) return null;
+  if (!transport || !executable) return { ok: false, error: "Rust substrate executable is unavailable" };
   const operation = payload?.operation;
   const params = { room, ...payload };
   try {
@@ -496,6 +580,115 @@ export function registerSolarisaelTools(pi) {
       }
     },
   });
+  registerHouseTool(pi, {
+    name: "canon_read",
+    label: "Athanor Canon Read",
+    description: "Read an exact PostgreSQL-authoritative canon entity by ID or active name. Set includeHistory to recover the complete retained correction/rename lineage.",
+    parameters: z.object({
+      id: z.string().regex(/^[1-9]\d*$/).optional()
+        .describe("Exact PostgreSQL canon entity ID. Supply either id or name, never both."),
+      name: z.string().optional()
+        .describe("Exact active canon name or alias. Supply either name or id, never both."),
+      includeHistory: z.boolean().optional()
+        .describe("Follow supersession links in both directions and return every retained authority row."),
+      room: z.enum(["house"]).optional()
+        .describe("Omit for this room; use house only for shared House canon."),
+    }),
+    approval: "read",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const { room } = roomContext(ctx.cwd);
+      const hasId = typeof params.id === "string" && params.id.length > 0;
+      const hasName = typeof params.name === "string" && params.name.trim().length > 0;
+      if (hasId === hasName) {
+        const result = { ok: false, error: "canon_read requires exactly one id or nonblank name" };
+        return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
+      }
+      if (hasId && BigInt(params.id) > 9223372036854775807n) {
+        const result = { ok: false, error: "canon_read id must fit a positive PostgreSQL BIGINT" };
+        return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
+      }
+      const result = await readRustCanon({
+        room: params.room === "house" ? "house" : room,
+        id: hasId ? params.id : undefined,
+        name: hasName ? params.name.trim() : undefined,
+        includeHistory: params.includeHistory === true,
+        signal,
+      });
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "canon_write",
+    label: "Athanor Canon Write",
+    description: [
+      "Create a new PostgreSQL-authoritative active canon entity.",
+      "This is a typed canon store, not a remember kind. It never overwrites by name.",
+      "Corrections and renames must list every active predecessor ID in supersedes; those rows remain recoverable through canon_read history.",
+    ].join("\n"),
+    parameters: z.object({
+      name: z.string().describe("The new active canonical name."),
+      kind: z.string().describe("The entity's explicit canon type."),
+      summary: z.string().describe("The complete current canonical assertion."),
+      aliases: z.array(z.string()).optional().describe("Exact alternate names."),
+      searchBoost: z.string().optional().describe("Additional deterministic lexical retrieval terms."),
+      weighty: z.boolean().optional().describe("Whether active recall should prioritize this entity."),
+      pointerFiles: z.array(z.object({
+        file: z.string(),
+        lines: z.array(z.number()).optional(),
+      })).optional().describe("Attributed source pointers; each optional line pair is [start,end]."),
+      summaryAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+        .describe("Date through which the assertion is current, YYYY-MM-DD."),
+      supersedes: z.array(z.string().regex(/^[1-9]\d*$/)).optional()
+        .describe("Explicit active canon entity IDs corrected or renamed by this write."),
+      room: z.enum(["house"]).optional()
+        .describe("Omit for this room; use house only for shared House canon."),
+    }),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const { room, spirit, operator } = roomContext(ctx.cwd);
+      const oversized = (params.supersedes || []).find((id) => BigInt(id) > 9223372036854775807n);
+      if (oversized) {
+        const result = { ok: false, error: `canon_write supersedes ID is outside PostgreSQL BIGINT range: ${oversized}` };
+        return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
+      }
+      const malformedPointer = (params.pointerFiles || []).find((pointer) => (
+        !pointer.file.trim()
+        || (pointer.lines !== undefined
+          && (pointer.lines.length !== 2
+            || pointer.lines.some((line) => !Number.isSafeInteger(line) || line < 0)
+            || pointer.lines[0] > pointer.lines[1]))
+      ));
+      if (malformedPointer) {
+        const result = { ok: false, error: "canon_write pointerFiles require a nonblank file and optional nonnegative [start,end] lines" };
+        return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
+      }
+      const result = await writeRustCanon({
+        room: params.room === "house" ? "house" : room,
+        name: params.name,
+        kind: params.kind,
+        summary: params.summary,
+        aliases: params.aliases || [],
+        searchBoost: params.searchBoost,
+        weighty: params.weighty === true,
+        pointerFiles: params.pointerFiles || [],
+        summaryAsOf: params.summaryAsOf,
+        supersedes: [...new Set(params.supersedes || [])],
+        attribution: { actor: spirit, origin: `omp:${operator}:${toolCallId}` },
+        signal,
+      });
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
 
   registerHouseTool(pi, {
     name: "remember",
@@ -531,6 +724,7 @@ export function registerSolarisaelTools(pi) {
       languageKeys: z.array(z.string()).optional().describe("coding/project lessons: language eligibility slugs; keyed lessons fire only when one matches the active language context."),
       technologyKeys: z.array(z.string()).optional().describe("coding/project lessons: technology eligibility slugs; keyed lessons fire only when one matches the active technology context."),
       tags: z.array(z.string()).optional().describe("lesson kinds: tags."),
+      sourceMemoryPath: z.string().optional().describe("Lesson kinds: provenance path of the source memory; the PostgreSQL lesson body remains authoritative."),
     }),
     approval: "write",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -542,7 +736,7 @@ export function registerSolarisaelTools(pi) {
       };
   
       if (kind === "memory") {
-        const lessonOnly = ["shape", "voice", "register", "scope", "project", "proofPattern", "triggerContext", "exampleText", "languageKeys", "technologyKeys", "threadKeys", "tags"].filter((key) => {
+        const lessonOnly = ["shape", "voice", "register", "scope", "project", "proofPattern", "triggerContext", "exampleText", "languageKeys", "technologyKeys", "threadKeys", "tags", "sourceMemoryPath"].filter((key) => {
           const value = params[key];
           return Array.isArray(value) ? value.length > 0 : value !== undefined && value !== null && value !== "";
         });
@@ -591,26 +785,15 @@ export function registerSolarisaelTools(pi) {
           return refuse(`supersedes accepts positive numeric memory IDs; invalid: ${invalidSupersedes.join(", ")}`);
         }
 
-        const rustConfigured = Boolean(discoverRustExecutable());
-        const result = rustConfigured
-          ? await writeRustMemory({
-            room: targetRoom,
-            title: params.title,
-            body: params.body,
-            threads,
-            continues,
-            supersedes: [...new Set(params.supersedes || [])],
-            signal,
-          })
-          : await writeSessionMemory({
-            room: targetRoom,
-            title: params.title,
-            body: params.body,
-            backup: false,
-            threads,
-            continues,
-            supersedes: [...new Set(params.supersedes || [])],
-          });
+        const result = await writeRustMemory({
+          room: targetRoom,
+          title: params.title,
+          body: params.body,
+          threads,
+          continues,
+          supersedes: [...new Set(params.supersedes || [])],
+          signal,
+        });
         return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
       }
   
@@ -634,18 +817,19 @@ export function registerSolarisaelTools(pi) {
         technologyKeys: params.technologyKeys,
         threadKeys: params.threadKeys,
         tags: params.tags,
+        sourceMemoryPath: params.sourceMemoryPath,
       };
-      const built = buildStoreArgs(kind, store, fields, { title: params.title, lesson: params.body });
-      if (!built.ok) return refuse(built.error);
-      const rustConfigured = Boolean(discoverRustExecutable());
+      const validation = validateStoreFields(kind, store, fields, { title: params.title, lesson: params.body });
+      if (!validation.ok) return refuse(validation.error);
       const rustFields = {
         ...fields,
         scope: kind === "coding-lesson" ? (params.scope || "shared") : params.scope,
         voice: kind === "writing-lesson" ? (params.voice || "general") : params.voice,
       };
-      const result = rustConfigured
-        ? await writeRustLesson({ room, kind, title: params.title, body: params.body, fields: rustFields, backup: !store.noBackup, signal })
-        : await writeLessonStore({ store, title: params.title, body: params.body, extraArgs: built.args });
+      const result = await writeRustLesson({
+        room, kind, title: params.title, body: params.body, fields: rustFields,
+        backup: store.backup, signal,
+      });
       return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });
@@ -664,14 +848,12 @@ export function registerSolarisaelTools(pi) {
       expectedTitle: z.string().describe("Exact current title required as a deletion guard (must be non-empty)."),
     }),
     approval: "write",
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { effectiveRoomDir } = roomContext(ctx.cwd);
-      const result = await deleteLesson({
-        effectiveRoomDir,
+    async execute(_toolCallId, params, signal) {
+      const result = await requestRustDomain("lesson_delete", {
         kind: params.kind,
         id: params.id,
         expectedTitle: params.expectedTitle,
-      });
+      }, signal, true);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -712,7 +894,7 @@ export function registerSolarisaelTools(pi) {
       clearNegationOf: z.boolean().optional().describe("Clear a coding or writing lesson's negation link; mutually exclusive with negationOf."),
     }),
     approval: "write",
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal) {
       if (!/^[1-9]\d*$/.test(String(params.id || ""))) return refuseToolResult("id must be a positive numeric ID");
       if (typeof params.expectedTitle !== "string" || params.expectedTitle.length === 0) {
         return refuseToolResult("expectedTitle must be non-empty and match the current title exactly");
@@ -738,14 +920,12 @@ export function registerSolarisaelTools(pi) {
       }
       delete patch.clearNegationOf;
       if (Object.keys(patch).length === 0) return refuseToolResult("at least one update field is required");
-      const { effectiveRoomDir } = roomContext(ctx.cwd);
-      const result = await updateLesson({
-        effectiveRoomDir,
+      const result = await requestRustDomain("lesson_update", {
         kind: params.kind,
         id: params.id,
         expectedTitle: params.expectedTitle,
         patch,
-      });
+      }, signal, true);
       return {
         isError: !(result.ok === true && result.updated === true),
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -760,9 +940,9 @@ export function registerSolarisaelTools(pi) {
     description: "Catch the latest paper boat and receive it as a letter from the room's previous waking self: orient from its concrete state, relationship register, uncertainty, and next door without turning it into a script or status report.",
     parameters: z.object({}),
     approval: "read",
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
-      const result = await catchBoat(room);
+      const result = await catchBoat(room, { signal });
       return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });
@@ -828,15 +1008,15 @@ export function registerSolarisaelTools(pi) {
       limit: z.number().default(12).describe("Maximum rows; integer from 1 through 50."),
     }),
     approval: "read",
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const { room } = roomContext(ctx.cwd);
       if (params.type === "project" && !params.project?.trim()) {
         return refuseToolResult("project lessons require project");
       }
       if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 50) {
         return refuseToolResult("limit must be an integer from 1 through 50");
       }
-      const result = await runLessons(effectiveRoomDir, room, params);
+      const result = await requestRustDomain("lesson_query", { room, ...params }, signal);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -859,7 +1039,7 @@ export function registerSolarisaelTools(pi) {
       limit: z.number().default(12).describe("Maximum rows; integer from 1 through 50."),
     }),
     approval: "read",
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal) {
       if (typeof params.system !== "string" || !params.system.trim()) {
         return refuseToolResult("system is required");
       }
@@ -869,8 +1049,7 @@ export function registerSolarisaelTools(pi) {
       if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 50) {
         return refuseToolResult("limit must be an integer from 1 through 50");
       }
-      const { effectiveRoomDir } = roomContext(ctx.cwd);
-      const result = await runDesignDocs(effectiveRoomDir, params);
+      const result = await requestRustDomain("design_document_query", params, signal);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -899,7 +1078,7 @@ export function registerSolarisaelTools(pi) {
       allowIdentityChange: z.boolean().optional().describe("Allow a superseded row to have a different identity."),
     }),
     approval: "write",
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal) {
       if (typeof params.system !== "string" || !params.system.trim()) {
         return refuseToolResult("system is required");
       }
@@ -912,20 +1091,18 @@ export function registerSolarisaelTools(pi) {
       if (params.supersedes !== undefined && !/^[1-9]\d*$/.test(String(params.supersedes))) {
         return refuseToolResult("supersedes must be a positive numeric document ID");
       }
-      const { effectiveRoomDir } = roomContext(ctx.cwd);
-      const result = await writeDesignDoc({
-        effectiveRoomDir,
+      const result = await requestRustDomain("design_document_write", {
         system: params.system,
         docType: params.docType,
         name: params.name,
         group: params.group,
-        values: params.values,
-        body: params.body,
-        provenance: params.provenance,
-        tags: params.tags,
+        values: params.values || {},
+        body: params.body || "",
+        provenance: params.provenance || {},
+        tags: params.tags || [],
         supersedes: params.supersedes,
-        allowIdentityChange: params.allowIdentityChange,
-      });
+        allowIdentityChange: params.allowIdentityChange === true,
+      }, signal, true);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -947,22 +1124,12 @@ export function registerSolarisaelTools(pi) {
       body: z.string().describe("Standalone Markdown paper boat in the active spirit's ordinary voice and the room's relationship register; concrete continuity for the next waking self, not a report."),
     }),
     approval: "write",
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
       // Sleep is the deliberate session boundary: classify whatever the buffer still holds
       // so the closing batch is not stranded until the next session's shutdown.
       flushGigaTurnsDetached(ctx);
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const title = `paper boat — ${new Date().toISOString().slice(0, 10)}`;
-      const result = await writeSessionMemory({
-        room,
-        title,
-        body: params.body,
-        backup: true,
-        type: "paper-boat",
-        sourcePath: `db-only/paper-boats/${stamp}.md`,
-        threads: ["paper boat / sleep / for tomorrow"],
-      });
+      const result = await sleepBoat(room, params.body, { signal });
       return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });
@@ -1098,6 +1265,73 @@ export function registerSolarisaelTools(pi) {
         content: [{ type: "text", text: JSON.stringify({ path: statePathForRoom(effectiveRoomDir), routingMode: next.routingMode }, null, 2) }],
         details: { room, ok: true, routingMode: next.routingMode },
       };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "kitten_lineage_status",
+    label: "Athanor Kitten Lineage Status",
+    description: "Inspect safe lifecycle event counters and payload keys for automatic bounded-worker lineage.",
+    parameters: z.object({}),
+    approval: "read",
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const { room } = roomContext(ctx.cwd);
+      const output = {
+        ok: true,
+        room,
+        disabled: process.env.ATHANOR_DISABLE_KITTEN_LINEAGE === "1",
+        diagnostics: kittenLineageDiagnostics(),
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+        details: output,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "recall_policy",
+    label: "Athanor Recall Policy",
+    description: "Read or set the room's proactive Recall mode. Auto resolves visibly; Conversation, Work, and Quiet are explicit overrides.",
+    parameters: z.object({
+      requestedMode: z.enum(["auto", "conversation", "work", "quiet"]).optional()
+        .describe("Requested Recall mode. Omit to inspect the current persisted policy."),
+    }),
+    approval: "write",
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      const session = String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir);
+      try {
+        const client = new RecallPolicyHostClient({ room, spirit, session });
+        const snapshot = params.requestedMode === undefined
+          ? await client.inspect()
+          : await client.setRequestedMode(params.requestedMode, toolCallId);
+        const output = {
+          ok: true,
+          room,
+          path: statePathForRoom(effectiveRoomDir),
+          recallPolicy: snapshot.recallPolicy,
+          version: snapshot.version,
+          sequence: snapshot.sequence,
+          stateHash: snapshot.stateHash,
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+          details: output,
+        };
+      } catch (error) {
+        const output = {
+          ok: false,
+          room,
+          degraded: true,
+          error: error instanceof Error ? error.message : String(error),
+        };
+        return {
+          isError: true,
+          content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+          details: output,
+        };
+      }
     },
   });
 
@@ -1245,15 +1479,13 @@ export function registerSolarisaelTools(pi) {
       if (!params.kind || !params.fidelity || !params.activation || !String(params.ramp || "").trim()) {
         return refuseToolResult("add requires kind, fidelity, activation, and ramp");
       }
-        const rust = await writeRustAnamnesis({ room, payload, signal: _signal });
-        const result = rust || await writeAnamnesisDrawer({ room, payload });
+        const result = await writeRustAnamnesis({ room, payload, signal: _signal });
         return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
       }
       if (!Number.isInteger(params.repNumber) || params.repNumber < 1 || !String(params.howItWent || "").trim() || !String(params.portalPull || "").trim() || !String(params.lighter || "").trim() || !Array.isArray(params.sourcePaths)) {
         return refuseToolResult("append-rep requires integer repNumber, howItWent, portalPull, lighter, and sourcePaths");
       }
-      const rust = await writeRustAnamnesis({ room, payload, signal: _signal });
-      const result = rust || await appendAnamnesisRep({ room, payload });
+      const result = await writeRustAnamnesis({ room, payload, signal: _signal });
       return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });

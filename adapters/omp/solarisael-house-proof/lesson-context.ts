@@ -1,7 +1,6 @@
-import path from "node:path";
 import { DIAGNOSTIC_TIMEOUT_MS } from "./constants.ts";
-import { ATHANOR_ROOT } from "../athanor-root.ts";
-import { runWslDiagnostic, windowsPathToWsl } from "./substrate.ts";
+import { discoverRustExecutable } from "../discovery.ts";
+import { RustJsonlTransport } from "../rust-transport.ts";
 
 export type LessonContextInput = {
   effectiveRoomDir: string;
@@ -24,7 +23,7 @@ export type LessonRecord = {
   proof_pattern?: string;
   trigger_context?: string;
   project?: string;
-  register?: string;
+  register?: string | string[];
   stage?: string[];
   language_keys?: string[];
   technology_keys?: string[];
@@ -43,31 +42,66 @@ export type LessonRanker = (query: string, passages: string[]) => Promise<number
 const EMPTY: LessonContext = {
   codingLessons: [], projectLessons: [], match: { scopes: [], projects: [], limit: 0 },
 };
+const transports = new Map<string, RustJsonlTransport>();
 
-/** Invoke the canonical structured query over the existing WSL substrate boundary. */
+function lessonTransport(roomDir: string): RustJsonlTransport | null {
+  const executable = discoverRustExecutable();
+  if (!executable) return null;
+  const key = `${executable}\0${roomDir}`;
+  let current = transports.get(key);
+  if (current && !current.usable) {
+    transports.delete(key);
+    void current.close().catch(() => {});
+    current = undefined;
+  }
+  if (!current) {
+    current = new RustJsonlTransport({ executable, cwd: roomDir });
+    transports.set(key, current);
+  }
+  return current;
+}
+
+
+/** Invoke Rust's typed authority and eligibility policy. */
 export async function runLessonContext(input: LessonContextInput): Promise<LessonContext> {
-  const script = path.join(ATHANOR_ROOT, "src", "lesson-context.py");
-  const argv = ["--cd", "~", "python3", windowsPathToWsl(script),
-    "--room-dir", windowsPathToWsl(input.effectiveRoomDir), "--room", String(input.room || "shared")];
-  for (const project of input.projects || []) argv.push("--project", String(project));
-  for (const shape of input.shapes || []) argv.push("--shape", String(shape));
-  for (const term of input.terms || []) argv.push("--term", String(term));
-  for (const stage of input.stages || []) argv.push("--stage", String(stage));
-  for (const register of input.registers || []) argv.push("--register", String(register));
-  for (const language of input.languages || []) argv.push("--language", String(language));
-  for (const technology of input.technologies || []) argv.push("--technology", String(technology));
-  argv.push("--limit", String(input.limit ?? 8));
+  const client = lessonTransport(input.effectiveRoomDir);
+  if (!client) return EMPTY;
   try {
-    const probe = await runWslDiagnostic({ argv, stdin: "", timeoutMs: DIAGNOSTIC_TIMEOUT_MS });
-    if (probe.timedOut || probe.spawnError || probe.code !== 0) return EMPTY;
-    const parsed = JSON.parse(String(probe.stdout || "{}"));
+    const parsed = await client.request("lesson_context", {
+      room: String(input.room || "shared"),
+      projects: input.projects || [],
+      shapes: input.shapes || [],
+      terms: input.terms || [],
+      stages: input.stages || [],
+      registers: input.registers || [],
+      languages: input.languages || [],
+      technologies: input.technologies || [],
+      limit: input.limit ?? 8,
+    }, { timeoutMs: DIAGNOSTIC_TIMEOUT_MS }) as Record<string, unknown>;
     return {
-      codingLessons: Array.isArray(parsed.codingLessons) ? parsed.codingLessons as LessonRecord[] : [],
-      projectLessons: Array.isArray(parsed.projectLessons) ? parsed.projectLessons as LessonRecord[] : [],
-      match: parsed.match && typeof parsed.match === "object" ? parsed.match : {},
+      codingLessons: Array.isArray(parsed?.codingLessons) ? parsed.codingLessons as LessonRecord[] : [],
+      projectLessons: Array.isArray(parsed?.projectLessons) ? parsed.projectLessons as LessonRecord[] : [],
+      match: parsed?.match && typeof parsed.match === "object" ? parsed.match as Record<string, unknown> : {},
     };
   } catch {
     return EMPTY;
+  }
+}
+
+export async function runLessonQuery(roomDir: string, room: string, filters: Record<string, unknown>) {
+  const client = lessonTransport(roomDir);
+  if (!client) return { ok: false, lessons: [], taxonomy: [], error: "Rust substrate executable is unavailable" };
+  try {
+    return await client.request("lesson_query", { room, ...filters }, {
+      timeoutMs: DIAGNOSTIC_TIMEOUT_MS,
+    }) as Record<string, unknown>;
+  } catch (error) {
+    return {
+      ok: false,
+      lessons: [],
+      taxonomy: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 

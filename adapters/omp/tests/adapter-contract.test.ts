@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { ADAPTER_API_VERSION } from "../index.ts";
-import { loadHouseCore, loadHouseLedger, loadHouseMemory } from "../solarisael-house-proof/core.ts";
+import {
+  loadHouseCore,
+  loadHouseLedger,
+} from "../solarisael-house-proof/core.ts";
 import { roomContext, supportedRoom } from "../solarisael-house-proof/room.ts";
 
 describe("OMP adapter contract", () => {
@@ -12,13 +15,9 @@ describe("OMP adapter contract", () => {
     expect(ADAPTER_API_VERSION).toBe(1);
     const core = await loadHouseCore();
     expect(core.CORE_API_VERSION).toBe(1);
-    expect(typeof core.runRecallQuery).toBe("function");
-    expect(typeof core.runVaultRecallQuery).toBe("function");
     expect(typeof core.runAnamnesisQuery).toBe("function");
     expect(typeof core.logUserTurn).toBe("function");
     expect(typeof core.logAssistantTurn).toBe("function");
-    expect(typeof (await loadHouseMemory()).runRecallQuery).toBe("function");
-    expect(typeof (await loadHouseMemory()).runVaultRecallQuery).toBe("function");
     expect(typeof (await loadHouseLedger()).logUserTurn).toBe("function");
   });
 

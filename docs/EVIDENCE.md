@@ -74,9 +74,65 @@ The repository includes automated coverage for core, substrate, and adapter beha
 
 These tests establish implementation contracts. They are not substitutes for public product-quality evaluations over representative corpora and user workflows.
 
+### Local 0.11 parity baseline — 2026-08-10
+
+The pre-convergence repository passed its ordinary isolated development suites on
+Windows 11 x64 with Rust/Cargo 1.95.0, Bun 1.3.14, and Python 3.12.10:
+
+| Surface | Result |
+|---|---:|
+| `cargo test --workspace` | 128 passed; 6 ignored |
+| `bun test tests/*.test.ts` | 83 passed |
+| `python -m unittest discover -s src -p "test_*.py"` | 57 passed |
+| `python -m pytest` under `substrate/` | 26 passed |
+| `bun test --max-concurrency 1 --isolate` under `adapters/omp/` | 300 passed; 1 skipped |
+
+The run explicitly removed live Athanor topology variables so development tests
+could not touch the active House. The declared Python `test` extra supplied
+pytest. This baseline includes the corrected bounded-warning compactor contract
+and schema-version-14 release pins.
+
+The ignored PostgreSQL integration suites were not run because no isolated
+`SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL` was configured. The counts above prove
+only the ordinary repository contracts; they do not establish database parity,
+clean installation, retrieval quality, latency, final-answer grounding, or
+end-to-end task improvement.
+
+### Local 1.0 release-candidate proof — 2026-08-10
+
+The converged `1.0.0-rc.1` candidate was exercised on Windows 11 x64 with
+Rust/Cargo 1.95.0, Bun 1.3.14, Python 3.12.10, Godot 4.7.1, PostgreSQL 18, and a
+test-owned NATS 2.14.4 JetStream endpoint.
+
+| Contract | Observed result |
+|---|---:|
+| Complete isolated development command | 43 root Bun tests, 12 Python unit tests, 12 substrate pytest tests, 192 Rust tests with 11 ignored, 195 OMP tests with 1 skipped |
+| PostgreSQL canon correction/history/active recall | 1 passed |
+| GIGA queue and atomic promotion | 1 passed |
+| Paper Boat sleep/wake idempotency and room scope | 1 passed |
+| PostgreSQL outbox + NATS restart/dedupe/receipt/poison lane | 1 passed |
+| Receipt published before Host start and replayed from JetStream | 1 passed |
+| Godot project import and scene smoke | passed on Godot 4.7.1 |
+| Live Godot Recall Policy screen | authenticated Host snapshot applied |
+| Live Godot Paper Boat screen | retained sanitized receipt rendered; no body/title |
+| Native payload manifest | 20,643 artifacts; every byte size and SHA-256 matched |
+| Packaged Godot executable | launched the staged project and GDExtension |
+| Inno Setup installer | compiled successfully |
+
+The release-candidate installer is
+`The-Athanor-1.0.0-rc.1-windows-x64.exe`, SHA-256
+`9956c29799d606adcfbf6c8e51a0603996ef7cfc4404f38ad293828225140ec0`.
+Dependency archives were checksum-pinned before extraction: PostgreSQL 18.4-2,
+pgvector 0.8.6, NATS 2.14.4, and Godot 4.7.1.
+
+This establishes local build, contract, live Host/NATS/PostgreSQL integration,
+Godot rendering, payload integrity, and installer compilation. It does not
+establish a clean-machine elevated install, upgrade from a real 0.10.x
+installation, public signing, or external publication.
+
 ## Next public evidence
 
-The `0.11.0` proof phase expands the evidence surface in this order.
+The post-1.0 public proof program expands the evidence surface in this order.
 
 ### Restart continuity
 

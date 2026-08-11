@@ -164,38 +164,6 @@ function rustFailure(error: unknown, transport: RustJsonlTransport) {
   };
 }
 
-function fallbackFailure(value: unknown, source: string) {
-  const result = value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-  if (result && typeof result.code === "string" && typeof result.retryable === "boolean") {
-    return {
-      ok: false,
-      error: typeof result.error === "string" ? result.error : `Anamnesis ${source} failed`,
-      code: result.code,
-      retryable: result.retryable,
-      ...(result.details === undefined ? {} : { details: result.details }),
-    };
-  }
-  return {
-    ok: false,
-    error: `Anamnesis ${source} failed`,
-    code: "anamnesis_fallback_failure",
-    retryable: true,
-    details: diagnosticDetails({
-      category: "operation",
-      stage: "request_parse",
-      operation: "anamnesis",
-      owner: { component: "solarisael-house-omp", path: "solarisael-house-proof/anamnesis.ts", symbol: "queryAnamnesis" },
-      expected: { source, result: "a successful anamnesis result" },
-      observed: observedShape(value),
-      evidence: [],
-      targets: ["solarisael-house-proof/anamnesis.ts#queryAnamnesis"],
-      nextChecks: [{ action: "inspect", target: "solarisael-house-proof/anamnesis.ts#queryAnamnesis" }],
-      execution: { request_dispatched: true, write_outcome: "not_started", retry: "safe_now" },
-    }),
-  };
-}
 
 function validRustAnamnesisResult(value: unknown, mode: string, room: string): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "result must be an object";
@@ -209,16 +177,14 @@ function validRustAnamnesisResult(value: unknown, mode: string, room: string): s
   if (!result.warnings.every((warning) => typeof warning === "string")) return "result.warnings must contain strings";
   return null;
 }
-import { loadHouseMemory } from "./core.ts";
 
 const EMPTY = { entries: [], warnings: [] };
 
-export async function queryAnamnesis(effectiveRoomDir, room, options = {}) {
+export async function queryAnamnesis(_effectiveRoomDir, room, options = {}) {
   const mode = options?.mode === "consult" ? "consult" : "wake";
   const query = String(options?.query || "").trim();
   if (mode === "consult" && !query) return { ok: false, mode, ...EMPTY, error: "consult requires a non-empty query" };
   const executable = discoverRustExecutable();
-  const configured = Boolean(executable);
   const transport = rustAnamnesisTransport();
   if (transport) {
     const requestedLimit = options?.limit === undefined ? ANAMNESIS_DEFAULT_LIMIT : Number(options.limit);
@@ -247,48 +213,26 @@ export async function queryAnamnesis(effectiveRoomDir, room, options = {}) {
       return { mode, ...EMPTY, ...rustFailure(error, transport) };
     }
   }
-  if (configured) {
-    return {
-      ok: false,
-      mode,
-      ...EMPTY,
-      error: "Rust anamnesis transport unavailable",
-      code: "rust_transport_unavailable",
-      retryable: true,
-      details: diagnosticDetails({
-        category: "transport",
-        stage: "startup",
-        operation: "anamnesis",
-        owner: { component: "solarisael-house-omp", path: "solarisael-house-proof/anamnesis.ts", symbol: "rustAnamnesisTransport" },
-        expected: { transport: "an available Rust JSONL transport" },
-        observed: { executable_configured: true, transport_available: false },
-        evidence: [],
-        targets: ["solarisael-house-proof/anamnesis.ts#rustAnamnesisTransport"],
-        nextChecks: [{ action: "inspect", target: "solarisael-house-proof/anamnesis.ts#rustAnamnesisTransport" }],
-        execution: { request_dispatched: false, write_outcome: "not_started", retry: "safe_now" },
-      }),
-    };
-  }
-  try {
-    const memory = await loadHouseMemory();
-    if (typeof memory?.runAnamnesisQuery !== "function") {
-      return { mode, ...EMPTY, ...fallbackFailure(undefined, "legacy fallback") };
-    }
-    const result = await memory.runAnamnesisQuery(effectiveRoomDir, room, {
-      mode,
-      ...(mode === "consult" ? { query } : {}),
-      ...(options?.limit !== undefined ? { limit: Number(options.limit) } : {}),
-    });
-    if (result?.ok !== true) return { mode, ...EMPTY, ...fallbackFailure(result, "legacy fallback") };
-    return {
-      ok: true,
-      mode,
-      entries: Array.isArray(result.entries) ? result.entries : [],
-      warnings: Array.isArray(result.warnings) ? result.warnings.map(String) : [],
-    };
-  } catch (err) {
-    return { mode, ...EMPTY, ...fallbackFailure(err, "legacy fallback") };
-  }
+  return {
+    ok: false,
+    mode,
+    ...EMPTY,
+    error: "Rust anamnesis transport unavailable",
+    code: "rust_transport_unavailable",
+    retryable: true,
+    details: diagnosticDetails({
+      category: "transport",
+      stage: "startup",
+      operation: "anamnesis",
+      owner: { component: "solarisael-house-omp", path: "solarisael-house-proof/anamnesis.ts", symbol: "rustAnamnesisTransport" },
+      expected: { transport: "an available Rust JSONL transport" },
+      observed: { executable_configured: Boolean(executable), transport_available: false },
+      evidence: [],
+      targets: ["solarisael-house-proof/anamnesis.ts#rustAnamnesisTransport"],
+      nextChecks: [{ action: "inspect", target: "solarisael-house-proof/anamnesis.ts#rustAnamnesisTransport" }],
+      execution: { request_dispatched: false, write_outcome: "not_started", retry: "safe_now" },
+    }),
+  };
 }
 
 function list(value) { return Array.isArray(value) ? value.filter(Boolean).map(String) : []; }

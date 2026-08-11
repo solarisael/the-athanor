@@ -1,26 +1,34 @@
 use athanor_substrate::backup::{backup_with_migrations, restore_checked, source_migrations};
+use athanor_substrate::migrations::{migration_pool, run_migrations};
 use athanor_substrate::{
-    AnamnesisParams, AnamnesisSeed, AnamnesisWrite, AppError, Config, RecallParams,
-    RememberRequest, ThreadContinuation as ServiceThreadContinuation, anamnesis, anamnesis_write,
-    cluster_maintenance, giga_candidate_list, giga_event_claim, giga_event_finish,
-    giga_event_ingest, giga_event_replay, giga_health, giga_process, giga_promote,
-    giga_queue_maintenance, giga_review, recall, refresh_semantic_vocabulary, remember,
+    AnamnesisParams, AnamnesisSeed, AnamnesisWrite, AppError, Config, DesignDocumentQueryParams,
+    DesignDocumentWriteParams, EntityResolveParams, LessonContextParams, LessonDeleteParams,
+    LessonQueryParams, LessonUpdateParams, RecallParams, RememberRequest, SubstrateHealthOptions,
+    ThreadContinuation as ServiceThreadContinuation, anamnesis, anamnesis_write, canon_read,
+    canon_write, cluster_maintenance, design_document_query, design_document_write, entity_resolve,
+    giga_candidate_list, giga_event_claim, giga_event_finish, giga_event_ingest, giga_event_replay,
+    giga_health, giga_promote, giga_queue_maintenance, giga_review, lesson_context, lesson_delete,
+    lesson_query, lesson_update, paper_boat_sleep, paper_boat_wake, recall,
+    refresh_semantic_vocabulary, remember, spawn_giga_worker, substrate_health,
+    substrate_health_with_config,
 };
 use chrono::NaiveDate;
 use house_core::{
     AnamnesisAddRequest as DomainAnamnesisAddRequest,
     AnamnesisAppendRequest as DomainAnamnesisAppendRequest,
-    AnamnesisReadRequest as DomainAnamnesisReadRequest,
+    AnamnesisReadRequest as DomainAnamnesisReadRequest, CanonReadRequest, CanonWriteRequest,
     ClusterMaintenanceRequest as DomainClusterMaintenanceRequest, GigaEvent, GigaEventClaimRequest,
-    GigaEventFinishRequest, GigaEventReplayRequest, GigaProcessRequest, GigaPromotionRequest,
-    GigaQueueMaintenanceRequest, GigaReviewAction, RecallRequest as DomainRecallRequest,
-    RememberRequest as DomainRememberRequest,
+    GigaEventFinishRequest, GigaEventReplayRequest, GigaPromotionRequest,
+    GigaQueueMaintenanceRequest, GigaReviewAction, PaperBoatSleepRequest, PaperBoatWakeRequest,
+    RecallRequest as DomainRecallRequest, RememberRequest as DomainRememberRequest,
 };
 use house_protocol::{
     GigaCandidateListRequest, GigaEventClaimResult, GigaEventFinishResult, GigaEventReplayResult,
-    GigaHealthRequest, GigaPromoteResult, PROTOCOL_VERSION, ProtocolError, ProtocolErrorBody,
-    RequestEnvelope, ResponseEnvelope, ResponsePayload, success,
+    GigaHealthRequest, GigaPromoteResult, PROTOCOL_VERSION, PaperBoatSleepResult,
+    PaperBoatWakeResult, ProtocolError, ProtocolErrorBody, RequestEnvelope, ResponseEnvelope,
+    ResponsePayload, SubstrateHealthParams, SubstrateMigrationsParams, VaultRecallParams, success,
 };
+use house_vault::{VaultRecallRequest, recall as vault_recall};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -32,13 +40,24 @@ use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 #[derive(Debug)]
 enum ProtocolRequest {
+    CanonWrite(CanonWriteRequest),
+    CanonRead(CanonReadRequest),
     Remember(RememberRequest),
+    PaperBoatSleep(PaperBoatSleepRequest),
+    PaperBoatWake(PaperBoatWakeRequest),
     Recall(RecallParams),
+    VaultRecall(VaultRecallParams),
     Anamnesis(AnamnesisParams),
     AnamnesisWrite(AnamnesisWrite),
+    LessonQuery(LessonQueryParams),
+    LessonContext(LessonContextParams),
+    LessonUpdate(LessonUpdateParams),
+    LessonDelete(LessonDeleteParams),
+    DesignDocumentQuery(DesignDocumentQueryParams),
+    DesignDocumentWrite(DesignDocumentWriteParams),
+    EntityResolve(EntityResolveParams),
     Cluster(DomainClusterMaintenanceRequest),
     GigaEvent(GigaEvent),
-    GigaProcess(GigaProcessRequest),
     GigaEventClaim(GigaEventClaimRequest),
     GigaEventFinish(GigaEventFinishRequest),
     GigaEventReplay(GigaEventReplayRequest),
@@ -47,6 +66,8 @@ enum ProtocolRequest {
     GigaCandidateList(GigaCandidateListRequest),
     GigaReview(GigaReviewAction),
     GigaHealth(GigaHealthRequest),
+    SubstrateHealth(SubstrateHealthParams),
+    SubstrateMigrations(SubstrateMigrationsParams),
 }
 
 fn invalid_params(message: impl Into<String>) -> ProtocolError {
@@ -100,7 +121,7 @@ fn remember_service_request(
         body: request.body().into(),
         lesson: None,
         source_path: request.source_path().map(str::to_owned),
-        source_memory_path: None,
+        source_memory_path: request.source_memory_path().map(str::to_owned),
         threads: request.threads().to_vec(),
         continues,
         supersedes,
@@ -232,14 +253,29 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
         return (id, Err(ProtocolError::ProtocolMismatch(envelope.protocol)));
     }
     let request = match envelope.method.as_str() {
+        "canon_write" => envelope
+            .canon_write_request()
+            .map(ProtocolRequest::CanonWrite),
+        "canon_read" => envelope
+            .canon_read_request()
+            .map(ProtocolRequest::CanonRead),
         "remember" => envelope
             .remember_request()
             .and_then(remember_service_request)
             .map(ProtocolRequest::Remember),
+        "paper_boat_sleep" => envelope
+            .paper_boat_sleep_request()
+            .map(ProtocolRequest::PaperBoatSleep),
+        "paper_boat_wake" => envelope
+            .paper_boat_wake_request()
+            .map(ProtocolRequest::PaperBoatWake),
         "recall" => envelope
             .recall_request()
             .map(recall_service_request)
             .map(ProtocolRequest::Recall),
+        "vault_recall" => envelope
+            .vault_recall_request()
+            .map(ProtocolRequest::VaultRecall),
         "anamnesis" => envelope
             .anamnesis_request()
             .map(anamnesis_service_request)
@@ -258,12 +294,30 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
             ))),
             None => Err(invalid_params("anamnesis_write requires operation")),
         },
+        "lesson_query" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::LessonQuery)
+            .map_err(|error| invalid_params(error.to_string())),
+        "lesson_context" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::LessonContext)
+            .map_err(|error| invalid_params(error.to_string())),
+        "lesson_update" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::LessonUpdate)
+            .map_err(|error| invalid_params(error.to_string())),
+        "lesson_delete" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::LessonDelete)
+            .map_err(|error| invalid_params(error.to_string())),
+        "design_document_query" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::DesignDocumentQuery)
+            .map_err(|error| invalid_params(error.to_string())),
+        "design_document_write" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::DesignDocumentWrite)
+            .map_err(|error| invalid_params(error.to_string())),
+        "entity_resolve" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::EntityResolve)
+            .map_err(|error| invalid_params(error.to_string())),
         "giga_event_ingest" => envelope
             .giga_event_ingest_request()
             .map(ProtocolRequest::GigaEvent),
-        "giga_process" => envelope
-            .giga_process_request()
-            .map(ProtocolRequest::GigaProcess),
         "giga_event_claim" => envelope
             .giga_event_claim_request()
             .map(ProtocolRequest::GigaEventClaim),
@@ -288,6 +342,12 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
         "giga_health" => envelope
             .giga_health_request()
             .map(ProtocolRequest::GigaHealth),
+        "substrate_health" => envelope
+            .substrate_health_request()
+            .map(ProtocolRequest::SubstrateHealth),
+        "substrate_migrations" => envelope
+            .substrate_migrations_request()
+            .map(ProtocolRequest::SubstrateMigrations),
         "cluster_maintenance" => envelope
             .cluster_maintenance_request()
             .map(ProtocolRequest::Cluster),
@@ -336,7 +396,6 @@ async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
         }
         Ok(out)
     };
-    let config = Config::from_env().map_err(|error| error.to_string())?;
     match command.as_str() {
         "backup" => {
             let values =
@@ -344,6 +403,7 @@ async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
             let keep = values[1]
                 .parse::<usize>()
                 .map_err(|_| "backup: --keep must be an integer".to_string())?;
+            let config = Config::from_env().map_err(|error| error.to_string())?;
             let pool = config.pool().await.map_err(|error| error.to_string())?;
             let source = source_migrations(&pool).await?;
             let manifest = backup_with_migrations(
@@ -357,6 +417,7 @@ async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
         "restore" => {
             let values = expect(&["--manifest", "--confirm-database"])
                 .map_err(|error| format!("restore: {error}"))?;
+            let config = Config::from_env().map_err(|error| error.to_string())?;
             let pool = config.pool().await.map_err(|error| error.to_string())?;
             restore_checked(
                 &pool,
@@ -367,10 +428,98 @@ async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
             .await?;
             println!("{{\"ok\":true}}");
         }
+        "health" => {
+            let mut env_file = None;
+            let mut substrate_dir = None;
+            let mut skip_embedding = false;
+            let mut max_backup_age_hours = 24.0;
+            let mut index = 0;
+            while index < args.len() {
+                match args[index].as_str() {
+                    "--skip-embedding" => {
+                        skip_embedding = true;
+                        index += 1;
+                    }
+                    "--env-file" | "--substrate-dir" | "--max-backup-age-hours" => {
+                        let value = args
+                            .get(index + 1)
+                            .ok_or_else(|| format!("health: {} requires a value", args[index]))?;
+                        match args[index].as_str() {
+                            "--env-file" => env_file = Some(PathBuf::from(value)),
+                            "--substrate-dir" => substrate_dir = Some(PathBuf::from(value)),
+                            "--max-backup-age-hours" => {
+                                max_backup_age_hours = value.parse::<f64>().map_err(|_| {
+                                    "health: --max-backup-age-hours must be a number".to_string()
+                                })?;
+                            }
+                            _ => unreachable!(),
+                        }
+                        index += 2;
+                    }
+                    argument => {
+                        return Err(format!("health: unexpected argument {argument}").into());
+                    }
+                }
+            }
+            if !max_backup_age_hours.is_finite() || max_backup_age_hours <= 0.0 {
+                return Err("health: --max-backup-age-hours must be positive and finite".into());
+            }
+            let state_root = env_file.as_ref().and_then(|path| {
+                (path.parent()?.file_name()?.to_str()? == "substrate")
+                    .then(|| path.parent()?.parent().map(PathBuf::from))
+                    .flatten()
+            });
+            let backup_directory = state_root
+                .as_ref()
+                .map(|root| root.join("substrate").join("backups"));
+            let config = env_file
+                .as_ref()
+                .map_or_else(Config::from_env, |path| Config::from_env_file(path));
+            let verdict = substrate_health_with_config(
+                SubstrateHealthOptions {
+                    skip_embedding,
+                    max_backup_age_hours,
+                    state_root,
+                    state_root_source: env_file.as_ref().map(|_| "explicit_env_file".into()),
+                    dotenv: env_file,
+                    substrate_dir,
+                    backup_directory,
+                },
+                config,
+            )
+            .await;
+            println!("{}", serde_json::to_string(&verdict)?);
+            if !verdict.ok {
+                return Err("substrate health is degraded".into());
+            }
+        }
+        "migrations" => {
+            let env_file = if args.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(
+                    expect(&["--env-file"])
+                        .map_err(|error| format!("migrations: {error}"))?
+                        .remove(0),
+                ))
+            };
+            let config = env_file
+                .as_ref()
+                .map_or_else(Config::from_env, |path| Config::from_env_file(path))
+                .map_err(|error| error.to_string())?;
+            let pool = migration_pool(&config)
+                .await
+                .map_err(|error| error.to_string())?;
+            let result = run_migrations(&pool)
+                .await
+                .map_err(|error| error.to_string())?;
+            println!("{}", serde_json::to_string(&result)?);
+        }
         "semantic-vocabulary-refresh" => {
             if !args.is_empty() {
                 return Err("semantic-vocabulary-refresh: no arguments accepted".into());
             }
+            let config = Config::from_env().map_err(|error| error.to_string())?;
             let pool = config.pool().await.map_err(|error| error.to_string())?;
             let refreshed = refresh_semantic_vocabulary(&pool, &config).await?;
             println!("{{\"ok\":true,\"refreshed\":{refreshed}}}");
@@ -459,13 +608,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let response = match request {
             Ok(request) => {
                 let operation = match &request {
+                    ProtocolRequest::CanonWrite(_) => "canon_write",
+                    ProtocolRequest::CanonRead(_) => "canon_read",
                     ProtocolRequest::Remember(_) => "remember",
+                    ProtocolRequest::PaperBoatSleep(_) => "paper_boat_sleep",
+                    ProtocolRequest::PaperBoatWake(_) => "paper_boat_wake",
                     ProtocolRequest::Recall(_) => "recall",
+                    ProtocolRequest::VaultRecall(_) => "vault_recall",
                     ProtocolRequest::Anamnesis(_) => "anamnesis",
                     ProtocolRequest::AnamnesisWrite(_) => "anamnesis_write",
+                    ProtocolRequest::LessonQuery(_) => "lesson_query",
+                    ProtocolRequest::LessonContext(_) => "lesson_context",
+                    ProtocolRequest::LessonUpdate(_) => "lesson_update",
+                    ProtocolRequest::LessonDelete(_) => "lesson_delete",
+                    ProtocolRequest::DesignDocumentQuery(_) => "design_document_query",
+                    ProtocolRequest::DesignDocumentWrite(_) => "design_document_write",
+                    ProtocolRequest::EntityResolve(_) => "entity_resolve",
                     ProtocolRequest::Cluster(_) => "cluster_maintenance",
                     ProtocolRequest::GigaEvent(_) => "giga_event_ingest",
-                    ProtocolRequest::GigaProcess(_) => "giga_process",
                     ProtocolRequest::GigaEventClaim(_) => "giga_event_claim",
                     ProtocolRequest::GigaEventFinish(_) => "giga_event_finish",
                     ProtocolRequest::GigaEventReplay(_) => "giga_event_replay",
@@ -474,15 +634,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::GigaCandidateList(_) => "giga_candidate_list",
                     ProtocolRequest::GigaReview(_) => "giga_review",
                     ProtocolRequest::GigaHealth(_) => "giga_health",
+                    ProtocolRequest::SubstrateHealth(_) => "substrate_health",
+                    ProtocolRequest::SubstrateMigrations(_) => "substrate_migrations",
                 };
                 let validation = match &request {
+                    ProtocolRequest::CanonWrite(_) | ProtocolRequest::CanonRead(_) => Ok(()),
                     ProtocolRequest::Remember(request) => request.validate(),
+                    ProtocolRequest::PaperBoatSleep(_) | ProtocolRequest::PaperBoatWake(_) => {
+                        Ok(())
+                    }
                     ProtocolRequest::Recall(request) => request.validate(),
+                    ProtocolRequest::VaultRecall(_) => Ok(()),
                     ProtocolRequest::Anamnesis(request) => request.validate().map(|_| ()),
                     ProtocolRequest::AnamnesisWrite(_)
+                    | ProtocolRequest::LessonQuery(_)
+                    | ProtocolRequest::LessonContext(_)
+                    | ProtocolRequest::LessonUpdate(_)
+                    | ProtocolRequest::LessonDelete(_)
+                    | ProtocolRequest::DesignDocumentQuery(_)
+                    | ProtocolRequest::DesignDocumentWrite(_)
+                    | ProtocolRequest::EntityResolve(_)
                     | ProtocolRequest::Cluster(_)
                     | ProtocolRequest::GigaEvent(_)
-                    | ProtocolRequest::GigaProcess(_)
                     | ProtocolRequest::GigaEventClaim(_)
                     | ProtocolRequest::GigaEventFinish(_)
                     | ProtocolRequest::GigaEventReplay(_)
@@ -490,136 +663,254 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     | ProtocolRequest::GigaPromote(_)
                     | ProtocolRequest::GigaCandidateList(_)
                     | ProtocolRequest::GigaReview(_)
-                    | ProtocolRequest::GigaHealth(_) => Ok(()),
+                    | ProtocolRequest::GigaHealth(_)
+                    | ProtocolRequest::SubstrateHealth(_)
+                    | ProtocolRequest::SubstrateMigrations(_) => Ok(()),
                 };
                 if let Err(error) = validation {
                     app_error(id, operation, error)
                 } else {
-                    let initialization_error = if runtime.is_none() {
-                        match Config::from_env() {
-                            Ok(config) => match config.pool().await {
-                                Ok(pool) => {
-                                    runtime = Some((config, pool));
-                                    None
-                                }
-                                Err(error) => Some(error),
-                            },
-                            Err(error) => Some(error),
+                    match request {
+                        ProtocolRequest::VaultRecall(request) => {
+                            match vault_recall(VaultRecallRequest {
+                                room_dir: PathBuf::from(request.room_dir),
+                                room: request.room,
+                                query: request.query,
+                            }) {
+                                Ok(result) => success_json(id, result)?,
+                                Err(error) => protocol_error(
+                                    id,
+                                    ProtocolError::InvalidParams(format!(
+                                        "{}: {error}",
+                                        error.code()
+                                    )),
+                                ),
+                            }
                         }
-                    } else {
-                        None
-                    };
-                    if let Some(error) = initialization_error {
-                        app_error(id, operation, error)
-                    } else {
-                        let (config, pool) = runtime
-                            .as_ref()
-                            .expect("successful initialization stores the runtime");
-                        match request {
-                            ProtocolRequest::Remember(request) => {
-                                match remember(pool, config, request).await {
+                        ProtocolRequest::SubstrateHealth(request) => {
+                            let result = substrate_health(SubstrateHealthOptions {
+                                skip_embedding: request.skip_embedding,
+                                max_backup_age_hours: request.max_backup_age_hours,
+                                ..Default::default()
+                            })
+                            .await;
+                            success_json(id, result)?
+                        }
+                        ProtocolRequest::SubstrateMigrations(_) => match Config::from_env() {
+                            Ok(config) => match migration_pool(&config).await {
+                                Ok(pool) => match run_migrations(&pool).await {
                                     Ok(result) => success_json(id, result)?,
                                     Err(error) => app_error(id, operation, error),
+                                },
+                                Err(error) => app_error(id, operation, error),
+                            },
+                            Err(error) => app_error(id, operation, error),
+                        },
+                        request => {
+                            let initialization_error = if runtime.is_none() {
+                                match Config::from_env() {
+                                    Ok(config) => match config.pool().await {
+                                        Ok(pool) => match spawn_giga_worker(&pool, &config) {
+                                            Ok(worker) => {
+                                                runtime = Some((config, pool, worker));
+                                                None
+                                            }
+                                            Err(error) => Some(error),
+                                        },
+                                        Err(error) => Some(error),
+                                    },
+                                    Err(error) => Some(error),
                                 }
-                            }
-                            ProtocolRequest::Recall(request) => {
-                                match recall(pool, config, request).await {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::Anamnesis(request) => {
-                                match anamnesis(pool, request).await {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::AnamnesisWrite(request) => {
-                                match anamnesis_write(pool, config, request).await {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::Cluster(request) => {
-                                match cluster_maintenance(
-                                    pool,
-                                    request.operation().as_str(),
-                                    request.dry_run(),
-                                    request.if_stale(),
-                                    request.k() as usize,
-                                )
-                                .await
-                                {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaEvent(request) => {
-                                match giga_event_ingest(pool, request).await {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaProcess(request) => {
-                                match giga_process(pool, config, request).await {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaEventClaim(request) => {
-                                match giga_event_claim(pool, request).await {
-                                    Ok(result) => {
-                                        success_json(id, GigaEventClaimResult::from(result))?
+                            } else {
+                                None
+                            };
+                            if let Some(error) = initialization_error {
+                                app_error(id, operation, error)
+                            } else {
+                                let (config, pool, _) = runtime
+                                    .as_ref()
+                                    .expect("successful initialization stores the runtime");
+                                match request {
+                                    ProtocolRequest::CanonWrite(request) => {
+                                        match canon_write(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
                                     }
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaEventFinish(request) => {
-                                match giga_event_finish(pool, request).await {
-                                    Ok(result) => {
-                                        success_json(id, GigaEventFinishResult::from(result))?
+                                    ProtocolRequest::CanonRead(request) => {
+                                        match canon_read(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
                                     }
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaEventReplay(request) => {
-                                match giga_event_replay(pool, request).await {
-                                    Ok(result) => {
-                                        success_json(id, GigaEventReplayResult::from(result))?
+                                    ProtocolRequest::Remember(request) => {
+                                        match remember(pool, config, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
                                     }
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaQueueMaintenance(request) => {
-                                match giga_queue_maintenance(pool, request).await {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaPromote(request) => {
-                                match giga_promote(pool, config, request).await {
-                                    Ok(result) => {
-                                        success_json(id, GigaPromoteResult::from(result))?
+                                    ProtocolRequest::PaperBoatSleep(request) => {
+                                        match paper_boat_sleep(pool, config, request).await {
+                                            Ok(receipt) => success_json(
+                                                id,
+                                                PaperBoatSleepResult::from(receipt),
+                                            )?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
                                     }
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaCandidateList(request) => {
-                                match giga_candidate_list(pool, request).await {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaReview(request) => {
-                                match giga_review(pool, request).await {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
-                                }
-                            }
-                            ProtocolRequest::GigaHealth(request) => {
-                                match giga_health(pool, request).await {
-                                    Ok(result) => success_json(id, result)?,
-                                    Err(error) => app_error(id, operation, error),
+                                    ProtocolRequest::PaperBoatWake(request) => {
+                                        match paper_boat_wake(pool, request).await {
+                                            Ok(receipt) => success_json(
+                                                id,
+                                                PaperBoatWakeResult::from(receipt),
+                                            )?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::Recall(request) => {
+                                        match recall(pool, config, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::Anamnesis(request) => {
+                                        match anamnesis(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::AnamnesisWrite(request) => {
+                                        match anamnesis_write(pool, config, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::LessonQuery(request) => {
+                                        match lesson_query(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::LessonContext(request) => {
+                                        match lesson_context(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::LessonUpdate(request) => {
+                                        match lesson_update(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::LessonDelete(request) => {
+                                        match lesson_delete(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::DesignDocumentQuery(request) => {
+                                        match design_document_query(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::DesignDocumentWrite(request) => {
+                                        match design_document_write(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::EntityResolve(request) => {
+                                        match entity_resolve(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::Cluster(request) => match cluster_maintenance(
+                                        pool,
+                                        request.operation().as_str(),
+                                        request.dry_run(),
+                                        request.if_stale(),
+                                        request.k() as usize,
+                                    )
+                                    .await
+                                    {
+                                        Ok(result) => success_json(id, result)?,
+                                        Err(error) => app_error(id, operation, error),
+                                    },
+                                    ProtocolRequest::GigaEvent(request) => {
+                                        match giga_event_ingest(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::GigaEventClaim(request) => {
+                                        match giga_event_claim(pool, request).await {
+                                            Ok(result) => success_json(
+                                                id,
+                                                GigaEventClaimResult::from(result),
+                                            )?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::GigaEventFinish(request) => {
+                                        match giga_event_finish(pool, request).await {
+                                            Ok(result) => success_json(
+                                                id,
+                                                GigaEventFinishResult::from(result),
+                                            )?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::GigaEventReplay(request) => {
+                                        match giga_event_replay(pool, request).await {
+                                            Ok(result) => success_json(
+                                                id,
+                                                GigaEventReplayResult::from(result),
+                                            )?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::GigaQueueMaintenance(request) => {
+                                        match giga_queue_maintenance(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::GigaPromote(request) => {
+                                        match giga_promote(pool, config, request).await {
+                                            Ok(result) => {
+                                                success_json(id, GigaPromoteResult::from(result))?
+                                            }
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::GigaCandidateList(request) => {
+                                        match giga_candidate_list(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::GigaReview(request) => {
+                                        match giga_review(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::GigaHealth(request) => {
+                                        match giga_health(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::VaultRecall(_)
+                                    | ProtocolRequest::SubstrateHealth(_)
+                                    | ProtocolRequest::SubstrateMigrations(_) => {
+                                        unreachable!(
+                                            "pre-configuration methods are handled before database initialization"
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -631,6 +922,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stdout.write_all(response.as_bytes()).await?;
         stdout.write_all(b"\n").await?;
         stdout.flush().await?;
+    }
+    if let Some((_, _, Some(worker))) = runtime {
+        worker.shutdown().await;
     }
     Ok(())
 }
@@ -729,6 +1023,34 @@ mod tests {
     }
 
     #[test]
+    fn paper_boat_dispatch_is_domain_prefixed_and_rejects_empty_rooms() {
+        let (_, sleep) = decode_line(
+            r#"{"protocol":1,"id":"s1","method":"paper_boat_sleep","params":{"room":"kintsu","body":"letter","backup":true}}"#,
+        );
+        assert!(matches!(sleep.unwrap(), ProtocolRequest::PaperBoatSleep(_)));
+        let (_, wake) = decode_line(
+            r#"{"protocol":1,"id":"w1","method":"paper_boat_wake","params":{"room":"kintsu"}}"#,
+        );
+        assert!(matches!(wake.unwrap(), ProtocolRequest::PaperBoatWake(_)));
+        let (_, empty) = decode_line(
+            r#"{"protocol":1,"id":"w2","method":"paper_boat_wake","params":{"room":""}}"#,
+        );
+        assert!(matches!(empty, Err(ProtocolError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn vault_recall_dispatch_has_no_database_parameters() {
+        let (_, valid) = decode_line(
+            r#"{"protocol":1,"id":"v1","method":"vault_recall","params":{"room":"room","room_dir":"/rooms/room","query":"needle"}}"#,
+        );
+        assert!(matches!(valid.unwrap(), ProtocolRequest::VaultRecall(_)));
+        let (_, invalid) = decode_line(
+            r#"{"protocol":1,"id":"v2","method":"vault_recall","params":{"room":"room","room_dir":"/rooms/room","query":"needle","database_url":"forbidden"}}"#,
+        );
+        assert!(matches!(invalid, Err(ProtocolError::InvalidParams(_))));
+    }
+
+    #[test]
     fn protocol_errors_have_current_codes() {
         let (id, result) =
             decode_line(r#"{"protocol":2,"id":"x","method":"remember","params":{}}"#);
@@ -748,5 +1070,49 @@ mod tests {
             }
             _ => panic!("expected anamnesis write"),
         }
+    }
+
+    #[test]
+    fn lesson_design_and_entity_protocols_are_strict_and_domain_prefixed() {
+        let (_, lesson) = decode_line(
+            r#"{"protocol":1,"id":"l1","method":"lesson_query","params":{"room":"kintsu","type":"coding","languageKeys":["rust"],"technologyKeys":["postgresql"],"limit":12}}"#,
+        );
+        assert!(matches!(lesson.unwrap(), ProtocolRequest::LessonQuery(_)));
+        let (_, design) = decode_line(
+            r##"{"protocol":1,"id":"d1","method":"design_document_write","params":{"system":"solarisael","docType":"token","name":"color.accent","values":{"hex":"#d4af37"},"provenance":{"source":"repo"},"supersedes":"7"}}"##,
+        );
+        assert!(matches!(
+            design.unwrap(),
+            ProtocolRequest::DesignDocumentWrite(_)
+        ));
+        let (_, entity) = decode_line(
+            r#"{"protocol":1,"id":"e1","method":"entity_resolve","params":{"room":"kintsu","query":"North Star","limit":8}}"#,
+        );
+        assert!(matches!(entity.unwrap(), ProtocolRequest::EntityResolve(_)));
+        let (_, invalid) = decode_line(
+            r#"{"protocol":1,"id":"l2","method":"lesson_query","params":{"room":"kintsu","type":"coding","database_url":"forbidden"}}"#,
+        );
+        assert!(matches!(invalid, Err(ProtocolError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn substrate_lifecycle_protocol_is_strict_and_domain_prefixed() {
+        let (_, health) = decode_line(
+            r#"{"protocol":1,"id":"h1","method":"substrate_health","params":{"skipEmbedding":true,"maxBackupAgeHours":12}}"#,
+        );
+        assert!(matches!(
+            health.unwrap(),
+            ProtocolRequest::SubstrateHealth(_)
+        ));
+        let (_, migrations) =
+            decode_line(r#"{"protocol":1,"id":"m1","method":"substrate_migrations","params":{}}"#);
+        assert!(matches!(
+            migrations.unwrap(),
+            ProtocolRequest::SubstrateMigrations(_)
+        ));
+        let (_, partial) = decode_line(
+            r#"{"protocol":1,"id":"m2","method":"substrate_migrations","params":{"from":12}}"#,
+        );
+        assert!(matches!(partial, Err(ProtocolError::InvalidParams(_))));
     }
 }

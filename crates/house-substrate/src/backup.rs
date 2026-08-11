@@ -18,7 +18,7 @@ use std::{
 use uuid::Uuid;
 
 const CONSOLIDATED_MIGRATIONS: &[&str] = &[
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14",
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
 ];
 const LEGACY_MIGRATIONS: &[&str] = &[
     "0001_create_memories",
@@ -172,6 +172,17 @@ pub struct Manifest {
     pub schema_migrations: Vec<String>,
     pub pg_dump_version: String,
     pub dump: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupHealth {
+    pub ok: bool,
+    pub directory: PathBuf,
+    pub newest: Option<String>,
+    pub age_hours: Option<f64>,
+    pub bytes: Option<u64>,
+    pub error: Option<String>,
 }
 
 fn use_wsl_pg() -> bool {
@@ -552,6 +563,13 @@ pub async fn restore_checked(
             "schema migration versions are incompatible".into(),
         ));
     }
+    let manifest: Manifest = serde_json::from_slice(&fs::read(manifest_path)?)
+        .map_err(|error| BackupError::Manifest(error.to_string()))?;
+    if normalize_migration_order(manifest.schema_migrations) != versions {
+        return Err(BackupError::Manifest(
+            "restore manifest schema does not match the target database authority".into(),
+        ));
+    }
     restore(database_url, manifest_path, confirm)
 }
 pub fn restore(database_url: &str, manifest_path: &Path, confirm: &str) -> Result<(), BackupError> {
@@ -615,6 +633,76 @@ pub fn default_backup_dir() -> Result<PathBuf, BackupError> {
     }
     Ok(crate::state::substrate_state_dir()?.join("backups"))
 }
+
+pub fn backup_health(max_age_hours: f64) -> Result<BackupHealth, BackupError> {
+    backup_health_in(default_backup_dir()?, max_age_hours)
+}
+
+pub fn backup_health_in(
+    directory: PathBuf,
+    max_age_hours: f64,
+) -> Result<BackupHealth, BackupError> {
+    if !max_age_hours.is_finite() || max_age_hours <= 0.0 {
+        return Err(BackupError::Config(
+            "maximum backup age must be a positive finite number".into(),
+        ));
+    }
+    if !directory.is_dir() {
+        return Ok(BackupHealth {
+            ok: false,
+            directory,
+            newest: None,
+            age_hours: None,
+            bytes: None,
+            error: Some("backup directory does not exist".into()),
+        });
+    }
+    let newest = fs::read_dir(&directory)?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            (path.extension().and_then(|value| value.to_str()) == Some("dump"))
+                .then(|| entry.metadata().ok().map(|metadata| (path, metadata)))
+                .flatten()
+        })
+        .max_by_key(|(_, metadata)| metadata.modified().ok());
+    let Some((dump, metadata)) = newest else {
+        return Ok(BackupHealth {
+            ok: false,
+            directory,
+            newest: None,
+            age_hours: None,
+            bytes: None,
+            error: Some("no dump files present".into()),
+        });
+    };
+    let modified = metadata.modified()?;
+    let age_hours = modified.elapsed().unwrap_or_default().as_secs_f64() / 3600.0;
+    let mut header = [0_u8; 5];
+    let header_ok = fs::File::open(&dump)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .is_ok()
+        && &header == b"PGDMP";
+    let mut problems = Vec::new();
+    if !header_ok {
+        problems.push("newest dump is not a pg_dump custom-format archive".to_owned());
+    }
+    if age_hours > max_age_hours {
+        problems.push(format!(
+            "newest dump is {age_hours:.1}h old, past the {max_age_hours:.0}h bound"
+        ));
+    }
+    Ok(BackupHealth {
+        ok: problems.is_empty(),
+        directory,
+        newest: dump
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned()),
+        age_hours: Some((age_hours * 100.0).round() / 100.0),
+        bytes: Some(metadata.len()),
+        error: (!problems.is_empty()).then(|| problems.join("; ")),
+    })
+}
 pub async fn run_post_write(pool: &PgPool, database_url: &str) -> Result<(), BackupError> {
     let keep = env::var("SOLARISAEL_BACKUP_KEEP")
         .ok()
@@ -675,6 +763,52 @@ mod tests {
         assert!(backup("postgres://host/db", Path::new("target/nope"), 0).is_err());
     }
 
+    #[test]
+    fn backup_health_requires_a_custom_format_dump() {
+        let dir = env::temp_dir().join(format!("athanor-health-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("db.dump"), b"not-a-dump").unwrap();
+        let health = backup_health_in(dir.clone(), 24.0).unwrap();
+        assert!(!health.ok);
+        assert!(health.error.unwrap().contains("custom-format"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn restore_refuses_wrong_or_ambiguous_database_authority_before_commands() {
+        let missing = Path::new("missing.manifest.json");
+        assert!(matches!(
+            restore("postgres://host/owned", missing, "other"),
+            Err(BackupError::Config(_))
+        ));
+
+        let dir = env::temp_dir().join(format!("athanor-restore-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let manifest = dir.join("ambiguous.manifest.json");
+        fs::write(
+            &manifest,
+            serde_json::to_vec(&Manifest {
+                database: "other".into(),
+                created_at: "2026-08-10T00:00:00Z".into(),
+                size: 0,
+                sha256: String::new(),
+                format: "custom".into(),
+                schema_migrations: CONSOLIDATED_MIGRATIONS
+                    .iter()
+                    .map(|value| (*value).into())
+                    .collect(),
+                pg_dump_version: "16".into(),
+                dump: "other.dump".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            restore("postgres://host/owned", &manifest, "owned"),
+            Err(BackupError::Manifest(_))
+        ));
+        fs::remove_dir_all(dir).unwrap();
+    }
     const TOC: &str = "\
 ;
 ; Archive created at 2026-08-09 11:04:12 UTC

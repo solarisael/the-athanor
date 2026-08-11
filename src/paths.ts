@@ -12,8 +12,6 @@ import { fileURLToPath } from "node:url";
 
 export const HOME = os.homedir();
 export const HOUSE_CORE_DIR = path.dirname(fileURLToPath(import.meta.url));
-// Compatibility name for modules moved out of the OpenCode adapter.
-export const PLUGIN_DIR = HOUSE_CORE_DIR;
 export const OPERATOR_DIR = path.join(HOME, ".local", "operators");
 export const RUNTIME_DIR = path.join(HOME, ".config", "opencode", "runtime", "solarisael-house");
 export const GLOBAL_STATE_PATH = path.join(RUNTIME_DIR, "global.json");
@@ -32,7 +30,7 @@ export const LEGACY_ROOM_KEYS = ["kintsu", "kodo", "tuner"];
 export const RESERVED_ROOM_KEYS = ["house"];
 
 /**
- * The substrate asset directory (`health.py`, `record_memory.py`, ...).
+ * The remaining substrate asset directory (`record_memory.py`, state helpers, ...).
  *
  * `ATHANOR_SUBSTRATE_ROOT` names it explicitly and must be absolute.
  * Otherwise it is resolved structurally as `<athanor-root>/substrate`, which
@@ -55,54 +53,6 @@ export const LIVE_CONTEXT_FILENAME = "current_session_context.md";
 export const LIVE_CONTEXT_JSON_FILENAME = "current_session_context.json";
 export const LIVE_CONTEXT_MAX_TURNS = 8;
 
-export const MEMORY_INDEX_FILENAME = path.join("memory", "index.json");
-export const MEMORY_IMPORTANT_INDEX_FILENAME = path.join("memory", "important_index.json");
-export const MEMORY_STATE_FILENAME = path.join("memory", "loaded_state.json");
-export const MEMORY_PREFETCH_FILENAME = path.join("memory", "prefetch.json");
-export const MEMORY_DEBUG_LOG_FILENAME = path.join("memory", "retrieval_debug.log");
-export const HOUSE_MEMORY_DIRNAME = "house";
-
-export const MEMORY_MAX_SYNC_INJECTIONS = 3;
-export const MEMORY_MAX_PREFETCH_QUEUE = 5;
-export const MEMORY_MAX_IMPORTANT_MATCHES = 8;
-export const MEMORY_MAX_INJECTION_CHARS = 8000;
-export const MEMORY_MAX_EXCERPT_CHARS = 3500;
-export const MEMORY_MIN_SCORE_TO_INJECT = 3;
-export const MEMORY_MIN_PROMPT_LEN = 3;
-export const MEMORY_CONCEPT_WEIGHT = 3.0;
-export const MEMORY_CONTEXT_WEIGHT = 1.0;
-export const MEMORY_FILE_ONE_LINE_WEIGHT = 0.5;
-export const MEMORY_SESSION_REPEAT_PENALTY_BASE = 0.75;
-// Audit ticket #2: touch-based recency decay half-life. Weight applied as
-// `exp(-ln2 * age_days / half_life)` where age is `now - last_touched_at`.
-// A 7-day half-life keeps recent activity prominent while steadily reducing
-// stale matches. Canon-touching threads exempt entirely (handled in
-// computeThreadRecencyPenalty). Dial 5↔10 once we feel how it plays.
-export const MEMORY_RECENCY_HALF_LIFE_DAYS = 7;
-export const MEMORY_DEBUG_TOP_CANDIDATES = 12;
-export const MEMORY_POSTGRES_SOURCE_SCRIPT = path.join(PLUGIN_DIR, "postgres-memory-source.py");
-export const MEMORY_POSTGRES_TIMEOUT_MS = 8000;
-export const MEMORY_SEMANTIC_TOP_K = 5;
-export const MEMORY_SEMANTIC_MIN_SIM = 0.40;
-// Audit ticket #4: when a semantic chunk on file F has cosine >= this
-// threshold, the lexical thread excerpt for the SAME file is redundant
-// (the semantic chunk view is more precise about what part is relevant).
-// Drop the lexical excerpts pointing at that file from the merge.
-// Lexical keeps the win on long-tail proper-noun / technical-identifier
-// matches that semantic doesn't find at high confidence.
-export const MEMORY_LEXICAL_DEMOTION_SIM_THRESHOLD = 0.60;
-// Content (pg_trgm GIN on memory_chunks.body) — added 2026-05-19 zeal pass.
-// Catches proper-noun / exact-string matches semantic cosine misses.
-// word_similarity threshold 0.30 means "noticeable substring overlap"; the
-// SQL filter already drops anything below this. The demotion threshold
-// for lexical-demotion is higher: a content hit at word_similarity >= 0.70
-// is strong enough to redundantize the lexical thread excerpt on same file.
-export const MEMORY_CONTENT_TOP_K = 5;
-export const MEMORY_CONTENT_MIN_SIM = 0.30;
-export const MEMORY_CONTENT_DEMOTION_SIM_THRESHOLD = 0.70;
-
-export const LESSONS_SCRIPT = path.join(PLUGIN_DIR, "lessons.py");
-export const LESSONS_TIMEOUT_MS = 2000;
 
 // Process-shape triggers live beside this file in the canonical core.
 // Re-exported here so moved adapter-era modules keep their `./paths.ts` path.
@@ -154,5 +104,3 @@ export {
   KEYWORD_TRIGGERS, ROOM_CONTEXT, NUDGE_BAND_SIZE, NUDGE_EVERY_TOKENS,
 } from "./constants.ts";
 
-
-export const POSTGRES_MEMORY_SOURCE_SCRIPT = MEMORY_POSTGRES_SOURCE_SCRIPT;

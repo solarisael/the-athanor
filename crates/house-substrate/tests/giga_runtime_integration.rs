@@ -5,9 +5,9 @@ use athanor_substrate::{
 };
 use house_core::{
     GigaAuthority, GigaCandidate, GigaCandidateKind, GigaClassifierIdentity,
-    GigaCodingLessonPromotionPayload, GigaEvent, GigaEventClaimRequest, GigaEventFinishOutcome,
-    GigaEventFinishRequest, GigaEventReplayRequest, GigaEventType, GigaLifecycle,
-    GigaMemoryPromotionPayload, GigaProcessRequest, GigaProjectLessonPromotionPayload,
+    GigaCodingLessonPromotionPayload, GigaEvent, GigaEventClaimReceipt, GigaEventClaimRequest,
+    GigaEventFinishOutcome, GigaEventFinishRequest, GigaEventReplayRequest, GigaEventType,
+    GigaLifecycle, GigaMemoryPromotionPayload, GigaProjectLessonPromotionPayload,
     GigaPromotionAuthority, GigaPromotionKind, GigaPromotionPayload, GigaPromotionRequest,
     GigaPublicationConsent, GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest,
     GigaQueueMaintenanceScope, GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState,
@@ -437,11 +437,14 @@ async fn queue_contracts(pool: &PgPool) -> TestResult {
     require(
         replay_generation_attempts == 1,
         "new replay attempts must be separate from retained prior history",
-    )
+    )?;
+    sqlx::query("DELETE FROM giga_events WHERE event_id = ANY($1)")
+        .bind(vec![concurrent_event, lease_event])
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 async fn queue_maintenance_contracts(pool: &PgPool) -> TestResult {
-    ingest_queue_event(pool, "maintenance-pending").await?;
-
     ingest_queue_event(pool, "maintenance-failed").await?;
     let failed = giga_event_claim(pool, claim_request("maintenance-failed-worker", 60)?).await?;
     require(
@@ -498,6 +501,7 @@ async fn queue_maintenance_contracts(pool: &PgPool) -> TestResult {
         )?,
     )
     .await?;
+    ingest_queue_event(pool, "maintenance-pending").await?;
 
     stage_candidate(
         pool,
@@ -719,6 +723,11 @@ async fn persisted_process_contract(pool: &PgPool, cfg: &Config) -> TestResult {
         giga_event_ingest(pool, event).await?.accepted,
         "persisted-source process event must be ingested",
     )?;
+    let claim = giga_event_claim(pool, claim_request("process-owner", 60)?).await?;
+    require(
+        claim.event().map(GigaEvent::event_id) == Some(event_id),
+        "processing must begin with the canonical room claim",
+    )?;
     let candidate = GigaCandidate::new(
         "process-persisted-candidate".into(),
         event_id.into(),
@@ -775,16 +784,77 @@ async fn persisted_process_contract(pool: &PgPool, cfg: &Config) -> TestResult {
     let mut process_config = cfg.clone();
     process_config.giga_source_ledger_dir = Some(directory.clone());
     process_config.giga_source_room = Some(ROOM.into());
-    let result = giga_process(
-        pool,
-        &process_config,
-        GigaProcessRequest::new(event_id.into())?,
-    )
-    .await?;
+    let stolen_claim = GigaEventClaimReceipt::new(
+        claim.room().clone(),
+        "process-intruder".into(),
+        claim.claimed_at().into(),
+        claim.event().cloned(),
+        claim.lease_expires_at().map(str::to_owned),
+        claim.attempt_count(),
+    )?;
+    require(
+        giga_process(pool, &process_config, &stolen_claim)
+            .await
+            .is_err(),
+        "processing must not steal another worker's active claim",
+    )?;
+    let result = giga_process(pool, &process_config, &claim).await?;
     require(
         result.outcome == "succeeded" && result.candidate_count == 1 && result.attempt_count == 1,
-        "event-id-only process must reload exact persisted text and finish",
+        "claimed process must reload exact persisted text and finish",
     )?;
+    let duplicate = giga_process(pool, &process_config, &claim).await;
+    require(
+        duplicate.is_err(),
+        "a finished claim must not be accepted for duplicate processing",
+    )?;
+    let attempts: i64 =
+        sqlx::query_scalar("SELECT COUNT(*)::bigint FROM giga_event_attempts WHERE event_id=$1")
+            .bind(event_id)
+            .fetch_one(pool)
+            .await?;
+    require(
+        attempts == 1,
+        "a duplicate process attempt must not create a second claim",
+    )?;
+
+    let expired_event_id = "process-expired-claim";
+    ingest_queue_event(pool, expired_event_id).await?;
+    let expired_claim = giga_event_claim(pool, claim_request("process-expired-owner", 60)?).await?;
+    sqlx::query(
+        "UPDATE giga_events
+         SET lease_expires_at=clock_timestamp()-INTERVAL '1 second'
+         WHERE event_id=$1 AND queue_state='running'",
+    )
+    .bind(expired_event_id)
+    .execute(pool)
+    .await?;
+    let expired_process = giga_process(pool, &process_config, &expired_claim).await;
+    require(
+        expired_process.is_err(),
+        "processing must reject an expired claim before reading or classifying sources",
+    )?;
+    let recovered = giga_event_claim(pool, claim_request("process-recovery-owner", 60)?).await?;
+    require(
+        recovered.event().map(GigaEvent::event_id) == Some(expired_event_id)
+            && recovered.attempt_count() == Some(2),
+        "the canonical claim owner must recover a shutdown-abandoned lease",
+    )?;
+    giga_event_finish(
+        pool,
+        finish_request(
+            expired_event_id,
+            "process-recovery-owner",
+            GigaEventFinishOutcome::Failed,
+            Some("shutdown_recovery_proof"),
+            None,
+        )?,
+    )
+    .await?;
+    sqlx::query("DELETE FROM giga_events WHERE event_id = ANY($1)")
+        .bind(vec![event_id, expired_event_id])
+        .execute(pool)
+        .await?;
     tokio::fs::remove_dir_all(directory).await?;
     Ok(())
 }
@@ -1141,14 +1211,21 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
             .bind(i64::try_from(memory_receipt.durable_id())?)
             .fetch_one(pool)
             .await?;
-    let memory_threads: i64 =
-        sqlx::query_scalar("SELECT count(*)::bigint FROM memory_threads WHERE memory_id=$1")
-            .bind(i64::try_from(memory_receipt.durable_id())?)
-            .fetch_one(pool)
-            .await?;
+    let memory_threads: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint
+         FROM thread_events e
+         JOIN threads t ON t.id=e.thread_id
+         WHERE e.memory_id=$1 AND t.room=$2",
+    )
+    .bind(i64::try_from(memory_receipt.durable_id())?)
+    .bind(ROOM)
+    .fetch_one(pool)
+    .await?;
     require(
         memory_chunks > 0 && memory_threads == 2,
-        "memory promotion must atomically persist recall chunks and thread links",
+        format!(
+            "memory promotion must atomically persist recall chunks and thread links; chunks={memory_chunks}, threads={memory_threads}"
+        ),
     )?;
 
     let altered_retry = promotion_request(
@@ -1617,17 +1694,24 @@ async fn queue_and_atomic_promotion_contracts() {
                     migration!("0005_giga_resonance.sql"),
                     migration!("0006_memory_thread_graph.sql"),
                     migration!("0007_giga_source_ordinal.sql"),
+                    migration!("0008_unified_lessons.sql"),
+                    migration!("0009_bm25f_memory_search.sql"),
+                    migration!("0010_semantic_vocabulary.sql"),
+                    migration!("0011_design_lessons.sql"),
+                    migration!("0012_design_documents.sql"),
+                    migration!("0013_lesson_eligibility_keys.sql"),
+                    migration!("0014_lesson_threads.sql"),
                 ] {
                     sqlx::raw_sql(migration).execute(&pool).await?;
                 }
                 sqlx::raw_sql(migration!("0005_giga_resonance.sql"))
                     .execute(&pool)
                     .await?;
-                queue_maintenance_contracts(&pool).await?;
+                persisted_process_contract(&pool, &cfg).await?;
                 queue_contracts(&pool).await?;
+                queue_maintenance_contracts(&pool).await?;
                 review_resonance_and_room_scope_contracts(&pool).await?;
                 promotion_contracts(&pool, &cfg).await?;
-                persisted_process_contract(&pool, &cfg).await?;
                 Ok(())
             }
             .await;

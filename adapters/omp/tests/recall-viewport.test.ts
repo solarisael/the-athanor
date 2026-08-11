@@ -60,6 +60,15 @@ describe("automatic recall viewport", () => {
     expect(result.keptCandidates).toHaveLength(1);
   });
 
+  test("hard-suppresses an identity after its first automatic exposure", () => {
+    const session = createRecallViewportSession();
+    const repeated = candidate({ id: "same" });
+    expect(automaticRecallViewport(recall([repeated]), { session }).keptCandidates).toEqual([repeated]);
+    const second = automaticRecallViewport(recall([repeated]), { session });
+    expect(second.keptCandidates).toEqual([]);
+    expect(second.suppressions).toEqual([{ identity: "same", reason: "saturated" }]);
+  });
+
   test("saturates repeated identities but permits another relevant result", () => {
     const session = createRecallViewportSession();
     const repeated = candidate({ id: "same" });

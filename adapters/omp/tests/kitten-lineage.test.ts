@@ -8,6 +8,7 @@ import {
   extractKittenLifecycleMemory,
   extractKittenQuestMemories,
   kittenLineageDisabled,
+  kittenLifecycleJoinKey,
   kittenQuestIdempotencyKey,
   kittenReportPath,
   questDomain,
@@ -81,8 +82,22 @@ describe("kitten quest lineage", () => {
     expect(kittenReportPath("C:/sessions/Quill.jsonl")).toBe("C:/sessions/Quill.md");
   });
 
+  test("joins progress and lifecycle by parent tool call plus task index", () => {
+    expect(kittenLifecycleJoinKey({
+      agent: "scout",
+      index: 2,
+      parentToolCallId: "call-9",
+    })).toBe("call-9:2");
+    expect(kittenLifecycleJoinKey({
+      id: "Quill",
+      index: 2,
+      parentToolCallId: "call-9",
+    })).toBe("call-9:2");
+    expect(kittenLifecycleJoinKey({ id: "Quill" })).toBe("Quill");
+  });
+
   test("derives bounded domain keys and stable idempotency keys", () => {
-    expect(questDomain("# Target\nC:\\work\\the-athanor\\src\\lessons.py\n# Change\nRepair it")).toBe("src-lessons-py");
+    expect(questDomain("# Target\nC:\\work\\the-athanor\\crates\\house-substrate\\src\\lesson.rs\n# Change\nRepair it")).toBe("src-lesson-rs");
     expect(kittenQuestIdempotencyKey("call-7", "Quill")).toBe("call-7:Quill");
   });
 

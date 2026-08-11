@@ -17,7 +17,6 @@ import { roomContext } from "./solarisael-house-proof/room.ts";
 const GIGA_EVENT_SCHEMA_VERSION = 1;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const RFC3339_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-const GIGA_SHUTDOWN_WAIT_MS = 5_000;
 const GIGA_READ_TIMEOUT_MS = 120_000;
 const GIGA_MAX_SOURCE_COUNT = 8;
 const GIGA_MAX_SOURCE_BYTES = 8_000;
@@ -25,7 +24,6 @@ const GIGA_MAX_WINDOW_BYTES = 24_000;
 const GIGA_PROMOTABLE_KINDS = new Set(["memory", "coding_lesson", "project_lesson"] as const);
 
 
-const gigaProcesses = new Map<string, Promise<void>>();
 let gigaClosing = false;
 
 const gigaTransports = new Map<string, RustJsonlTransport>();
@@ -504,6 +502,7 @@ function gigaTransport(cwd: string = process.cwd()): RustJsonlTransport | null {
       env: {
         SOLARISAEL_GIGA_SOURCE_LEDGER_DIR: ledgerDirectory,
         SOLARISAEL_GIGA_SOURCE_ROOM: trusted.room,
+        SOLARISAEL_GIGA_CLAIM_OWNER: "1",
       },
     });
     gigaTransports.set(key, transport);
@@ -920,33 +919,6 @@ export async function requestGigaQueueMaintenance(
 }
 
 
-// Substrate giga_process is single-attempt (07-30 starvation fix): a retryable
-// classifier failure returns outcome "retry" instead of looping inside the
-// worker. The adapter owns the retry cadence so the transport stays responsive
-// between attempts. The substrate's GIGA_MAX_EVENT_ATTEMPTS cap ends the loop:
-// at cap the event transitions to failed and outcome stops being "retry".
-const GIGA_PROCESS_RETRY_DELAY_MS = 15_000;
-const GIGA_PROCESS_MAX_ADAPTER_INVOCATIONS = 12;
-
-async function runGigaProcess(
-  transport: { request(method: string, params: JsonObject): Promise<unknown> },
-  eventID: string,
-): Promise<void> {
-  for (let invocation = 0; invocation < GIGA_PROCESS_MAX_ADAPTER_INVOCATIONS; invocation += 1) {
-    const result = await transport.request("giga_process", { event_id: eventID });
-    const outcome = (result as JsonObject | null)?.outcome;
-    if (gigaClosing || outcome !== "retry") return;
-    await new Promise((resolve) => setTimeout(resolve, GIGA_PROCESS_RETRY_DELAY_MS));
-    if (gigaClosing) return;
-  }
-}
-function trackGigaProcess(eventID: string, request: Promise<unknown>): void {
-  const tracked = request.then(() => undefined, () => undefined);
-  gigaProcesses.set(eventID, tracked);
-  void tracked.finally(() => {
-    if (gigaProcesses.get(eventID) === tracked) gigaProcesses.delete(eventID);
-  });
-}
 
 async function ingestLoggedTurns(ctx: any, loggedTurns: LoggedTurn[]): Promise<void> {
   if (gigaClosing || process.env.SOLARISAEL_GIGA_ENABLED !== "1" || !loggedTurns.length) return;
@@ -966,19 +938,15 @@ async function ingestLoggedTurns(ctx: any, loggedTurns: LoggedTurn[]): Promise<v
       || typeof response.duplicate !== "boolean"
       || (!response.accepted && !response.duplicate)
     ) return;
-    if (!gigaClosing && !gigaProcesses.has(event.event_id)) {
-      trackGigaProcess(
-        event.event_id,
-        runGigaProcess(transport, event.event_id),
-      );
-    }
+    // The substrate's single Rust worker owns queue claims, retries, and recovery.
+    // Ingestion only persists the event; this adapter never initiates processing.
   } catch {
     // GIGA is opt-in background work and must never block ordinary House behavior.
   }
 }
 
-// enough: in-memory turn buffer, dropped on hard crash. giga_process now reloads
-// stored source references and exact ledger text from event_id alone.
+// enough: in-memory turn buffer, dropped on hard crash. Rust processing reloads
+// stored source references and exact ledger text from the claimed event.
 // Danger: check both caps BEFORE appending — an over-deep or cross-session buffer loses
 // turns with no error. Project lesson 130 (the-athanor) carries the caps and the why.
 const GIGA_TURN_BUFFER_BYTES = 18_000;
@@ -1050,35 +1018,20 @@ export async function closeGigaTransports(): Promise<void> {
   gigaTurnBuffers.clear();
   await Promise.allSettled(pendingBuffers.map((buffer) => ingestLoggedTurns(buffer.ctx, buffer.turns)));
   gigaClosing = true;
-  const active = [...gigaProcesses.values()];
-  if (active.length) {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        Promise.allSettled(active),
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, GIGA_SHUTDOWN_WAIT_MS);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
+  // Closing stdin cancels the Rust worker between claims or during processing.
+  // An interrupted attempt remains lease-recoverable in PostgreSQL.
   const closing: Promise<void>[] = [];
   for (const [executable, transport] of gigaTransports) {
     gigaTransports.delete(executable);
     closing.push(transport.close());
   }
   await Promise.allSettled(closing);
-  gigaProcesses.clear();
 }
 
 export const __gigaTest = Object.freeze({
-  trackGigaProcess,
   isSubagentSessionContext,
   resetState() {
     gigaClosing = false;
-    gigaProcesses.clear();
     gigaTransports.clear();
   },
 });

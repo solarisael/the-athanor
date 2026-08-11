@@ -1,0 +1,1197 @@
+use crate::config::HostConfig;
+use crate::policy::{RecallPolicySession, apply_requested_mode};
+use crate::receipt::{ReceiptIngest, ReceiptTracker};
+use crate::store::{
+    DurableReceipt, HostDurableStore, ProjectionCursor, RoomStateStore, body_hash, state_hash,
+    timestamp,
+};
+use axum::extract::ws::{Message, WebSocket};
+use axum::extract::{State, WebSocketUpgrade};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::{Json, Router};
+use futures_util::{SinkExt, StreamExt};
+use house_protocol::{
+    BOAT_RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT, ClientCommand, CommandMeta,
+    CommandOutcomeEvent, DeltaEvent, EventMeta, HOST_SCHEMA_VERSION,
+    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
+    PaperBoatReceiptEvent, PaperBoatReceiptState, RECALL_POLICY_COMMAND_ACCEPTED,
+    RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA,
+    RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE,
+    RecallPolicyDecision, RecallPolicyMutation, RecallPolicyState, SnapshotEvent,
+    parse_client_command,
+};
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::Arc;
+use tokio::net::TcpListener;
+use tokio::sync::{Mutex, broadcast};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
+use uuid::Uuid;
+
+struct RuntimeState {
+    projection: RecallPolicyState,
+    sessions: HashMap<String, RecallPolicySession>,
+    cursor: ProjectionCursor,
+    durable: HostDurableStore,
+}
+
+#[derive(Clone)]
+struct AppState {
+    config: Arc<HostConfig>,
+    room_store: RoomStateStore,
+    runtime: Arc<Mutex<RuntimeState>>,
+    cancellation: CancellationToken,
+    tasks: TaskTracker,
+    deltas: broadcast::Sender<String>,
+    receipts: broadcast::Sender<String>,
+    receipt_tracker: Arc<Mutex<ReceiptTracker>>,
+}
+
+pub struct Host {
+    state: AppState,
+}
+
+impl Host {
+    pub fn new(config: HostConfig) -> Result<Self, String> {
+        config.validate()?;
+        let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone());
+        let projection = room_store.load()?;
+        let (durable, cursor, mut sessions) =
+            HostDurableStore::open(&config.state_dir, &projection)?;
+        if sessions.is_empty() {
+            sessions.insert(
+                config.session.clone(),
+                RecallPolicySession::from_projection(&projection),
+            );
+        }
+        let (deltas, _) = broadcast::channel(64);
+        let (receipts, _) = broadcast::channel(64);
+        let receipt_tracker = Arc::new(Mutex::new(ReceiptTracker::new(
+            config.akasha_enabled,
+            config.nats_url.is_some(),
+        )));
+        Ok(Self {
+            state: AppState {
+                config: Arc::new(config),
+                room_store,
+                runtime: Arc::new(Mutex::new(RuntimeState {
+                    projection,
+                    sessions,
+                    cursor,
+                    durable,
+                })),
+                cancellation: CancellationToken::new(),
+                tasks: TaskTracker::new(),
+                deltas,
+                receipts,
+                receipt_tracker,
+            },
+        })
+    }
+
+    pub async fn serve<F>(self, listener: TcpListener, shutdown: F) -> Result<(), String>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        if let Some(url) = self.state.config.nats_url.clone() {
+            self.state
+                .tasks
+                .spawn(run_receipt_bridge(self.state.clone(), url));
+        }
+        let ws_path = self.state.config.ws_path.clone();
+        let app = Router::new()
+            .route("/health", get(health))
+            .route(&ws_path, get(upgrade))
+            .with_state(self.state.clone());
+        let cancellation = self.state.cancellation.clone();
+        let tasks = self.state.tasks.clone();
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                shutdown.await;
+                cancellation.cancel();
+            })
+            .await
+            .map_err(|error| format!("Host server failed: {error}"))?;
+        self.state.cancellation.cancel();
+        tasks.close();
+        tasks.wait().await;
+        Ok(())
+    }
+}
+
+async fn health(State(state): State<AppState>) -> Json<Value> {
+    let runtime = state.runtime.lock().await;
+    let receipt_health = state.receipt_tracker.lock().await.health();
+    Json(json!({
+        "status": "ok",
+        "schema_version": HOST_SCHEMA_VERSION,
+        "websocket_path": state.config.ws_path,
+        "projection_id": RECALL_POLICY_PROJECTION_ID,
+        "version": runtime.cursor.version,
+        "sequence": runtime.cursor.sequence,
+        "state_hash": runtime.cursor.state_hash,
+        "akasha_delivery": receipt_health,
+    }))
+}
+
+async fn upgrade(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    websocket: WebSocketUpgrade,
+) -> Response {
+    if !authorized(&headers, &state.config.bearer_token) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "error": "unauthenticated",
+                "diagnostic": "Authorization: Bearer <token> is required"
+            })),
+        )
+            .into_response();
+    }
+    let tracker = state.tasks.clone();
+    websocket
+        .on_upgrade(move |socket| async move {
+            let task = tracker.spawn(handle_socket(socket, state));
+            let _ = task.await;
+        })
+        .into_response()
+}
+
+fn authorized(headers: &HeaderMap, expected: &str) -> bool {
+    let Some(value) = headers.get(header::AUTHORIZATION) else {
+        return false;
+    };
+    let Ok(value) = value.to_str() else {
+        return false;
+    };
+    let Some(candidate) = value.strip_prefix("Bearer ") else {
+        return false;
+    };
+    constant_time_equal(candidate.as_bytes(), expected.as_bytes())
+}
+
+fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
+    let mut difference = left.len() ^ right.len();
+    let longest = left.len().max(right.len());
+    for index in 0..longest {
+        let a = left.get(index).copied().unwrap_or(0);
+        let b = right.get(index).copied().unwrap_or(0);
+        difference |= usize::from(a ^ b);
+    }
+    difference == 0
+}
+
+async fn handle_socket(socket: WebSocket, state: AppState) {
+    let (mut sink, mut source) = socket.split();
+    let mut deltas = state.deltas.subscribe();
+    let mut receipts = state.receipts.subscribe();
+    let mut recall_subscribed = false;
+    let mut receipts_subscribed = false;
+    loop {
+        tokio::select! {
+            _ = state.cancellation.cancelled() => {
+                let _ = sink.send(Message::Close(None)).await;
+                return;
+            }
+            broadcast = deltas.recv(), if recall_subscribed => {
+                match broadcast {
+                    Ok(text) => {
+                        if sink.send(Message::Text(text.into())).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let text = diagnostic_refusal(&state, "projection delta stream lagged; resync required").await;
+                        let _ = sink.send(Message::Text(text.into())).await;
+                        return;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+            broadcast = receipts.recv(), if receipts_subscribed => {
+                match broadcast {
+                    Ok(text) => {
+                        if sink.send(Message::Text(text.into())).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => return,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+            incoming = source.next() => {
+                let Some(incoming) = incoming else { return; };
+                match incoming {
+                    Ok(Message::Text(text)) => {
+                        let requested = serde_json::from_str::<Value>(text.as_str())
+                            .ok()
+                            .and_then(|value| value.get("command_or_event_type").and_then(Value::as_str).map(str::to_owned));
+                        let responses = process_text(&state, text.as_str()).await;
+                        if requested.as_deref() == Some(RECALL_POLICY_SUBSCRIBE)
+                            && contains_event(&responses.direct, RECALL_POLICY_SNAPSHOT)
+                        {
+                            recall_subscribed = true;
+                        }
+                        if requested.as_deref() == Some(PAPER_BOAT_RECEIPT_SUBSCRIBE)
+                            && contains_event(&responses.direct, PAPER_BOAT_RECEIPT_SNAPSHOT)
+                        {
+                            receipts_subscribed = true;
+                        }
+                        for response in responses.direct {
+                            if sink.send(Message::Text(response.into())).await.is_err() {
+                                return;
+                            }
+                        }
+                        if let Some(delta) = responses.delta {
+                            let _ = state.deltas.send(delta);
+                        }
+                    }
+                    Ok(Message::Close(_)) => return,
+                    Ok(Message::Ping(payload)) => {
+                        if sink.send(Message::Pong(payload)).await.is_err() { return; }
+                    }
+                    Ok(Message::Pong(_)) => {}
+                    Ok(Message::Binary(_)) => {
+                        let text = diagnostic_refusal(&state, "binary WebSocket messages are not accepted").await;
+                        if sink.send(Message::Text(text.into())).await.is_err() { return; }
+                    }
+                    Err(_) => return,
+                }
+            }
+        }
+    }
+}
+
+fn contains_event(events: &[String], event_type: &str) -> bool {
+    events.iter().any(|event| {
+        serde_json::from_str::<Value>(event)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("command_or_event_type")
+                    .and_then(Value::as_str)
+                    .map(|kind| kind == event_type)
+            })
+            .unwrap_or(false)
+    })
+}
+
+struct Responses {
+    direct: Vec<String>,
+    delta: Option<String>,
+}
+
+async fn process_text(state: &AppState, text: &str) -> Responses {
+    let raw: Value = match serde_json::from_str(text) {
+        Ok(value) => value,
+        Err(error) => {
+            return Responses {
+                direct: vec![
+                    diagnostic_refusal(state, &format!("malformed JSON command: {error}")).await,
+                ],
+                delta: None,
+            };
+        }
+    };
+    let command_hash = match body_hash(&raw) {
+        Ok(hash) => hash,
+        Err(reason) => {
+            return Responses {
+                direct: vec![diagnostic_refusal(state, &reason).await],
+                delta: None,
+            };
+        }
+    };
+    let command = match parse_client_command(raw) {
+        Ok(command) => command,
+        Err(error) => {
+            let event = outcome_for_ids(
+                state,
+                &error.message_id,
+                &error.idempotency_key,
+                RECALL_POLICY_COMMAND_REFUSED,
+                Some(error.reason),
+            )
+            .await;
+            return Responses {
+                direct: vec![serialize(&event)],
+                delta: None,
+            };
+        }
+    };
+    if let Err(reason) = validate_command(state, &command) {
+        let event = outcome(
+            state,
+            command.meta(),
+            RECALL_POLICY_COMMAND_REFUSED,
+            Some(reason),
+        )
+        .await;
+        return Responses {
+            direct: vec![serialize(&event)],
+            delta: None,
+        };
+    }
+    match command {
+        ClientCommand::PaperBoatReceiptSubscribe { meta } => {
+            let receipt_state = state.receipt_tracker.lock().await.state();
+            let snapshot = receipt_snapshot(state, Some(&meta), receipt_state);
+            Responses {
+                direct: vec![serialize(&snapshot)],
+                delta: None,
+            }
+        }
+        ClientCommand::Subscribe { meta } | ClientCommand::Resync { meta } => {
+            let mut runtime = state.runtime.lock().await;
+            if let Err(reason) = refresh_from_room_state(state, &mut runtime) {
+                let failed = outcome_with_runtime(
+                    state,
+                    &meta,
+                    RECALL_POLICY_COMMAND_FAILED,
+                    Some(reason),
+                    &runtime,
+                    None,
+                );
+                return Responses {
+                    direct: vec![serialize(&failed)],
+                    delta: None,
+                };
+            }
+            let snapshot = snapshot(state, &meta, &runtime);
+            Responses {
+                direct: vec![serialize(&snapshot)],
+                delta: None,
+            }
+        }
+        ClientCommand::Acknowledge {
+            meta,
+            version,
+            sequence,
+        } => {
+            let runtime = state.runtime.lock().await;
+            let (kind, reason) = if version == runtime.cursor.version
+                && sequence == runtime.cursor.sequence
+            {
+                (RECALL_POLICY_COMMAND_ACCEPTED, None)
+            } else {
+                (
+                    RECALL_POLICY_COMMAND_REFUSED,
+                    Some(format!(
+                        "stale acknowledgement version/sequence {version}/{sequence}; current is {}/{}",
+                        runtime.cursor.version, runtime.cursor.sequence
+                    )),
+                )
+            };
+            let event = outcome_with_runtime(state, &meta, kind, reason, &runtime, None);
+            Responses {
+                direct: vec![serialize(&event)],
+                delta: None,
+            }
+        }
+        ClientCommand::SetRequestedMode {
+            meta,
+            base_version,
+            requested_mode,
+        } => set_requested_mode(state, meta, base_version, requested_mode, command_hash).await,
+        ClientCommand::Evaluate { meta, facts } => {
+            let mut runtime = state.runtime.lock().await;
+            if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
+                return response;
+            }
+            let requested_mode = runtime.projection.requested_mode;
+            let mut session = runtime
+                .sessions
+                .get(&meta.sender_session)
+                .cloned()
+                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            let decision = session.evaluate(requested_mode, facts);
+            let next = session.projection(timestamp());
+            runtime
+                .sessions
+                .insert(meta.sender_session.clone(), session);
+            commit_change(
+                state,
+                &mut runtime,
+                &meta,
+                command_hash,
+                next,
+                Some(decision),
+            )
+        }
+        ClientCommand::CompleteRefresh { meta, refresh } => {
+            let mut runtime = state.runtime.lock().await;
+            if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
+                return response;
+            }
+            let mut session = runtime
+                .sessions
+                .get(&meta.sender_session)
+                .cloned()
+                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            session.complete_refresh(refresh, timestamp());
+            let next = session.projection(timestamp());
+            runtime
+                .sessions
+                .insert(meta.sender_session.clone(), session);
+            commit_change(state, &mut runtime, &meta, command_hash, next, None)
+        }
+        ClientCommand::FailRefresh { meta, reason } => {
+            let mut runtime = state.runtime.lock().await;
+            if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
+                return response;
+            }
+            let mut session = runtime
+                .sessions
+                .get(&meta.sender_session)
+                .cloned()
+                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            session.fail_refresh(&reason, timestamp());
+            let next = session.projection(timestamp());
+            runtime
+                .sessions
+                .insert(meta.sender_session.clone(), session);
+            commit_change(state, &mut runtime, &meta, command_hash, next, None)
+        }
+        ClientCommand::InvalidateAfterCompaction { meta, summary } => {
+            let mut runtime = state.runtime.lock().await;
+            if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
+                return response;
+            }
+            let mut session = runtime
+                .sessions
+                .get(&meta.sender_session)
+                .cloned()
+                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            session.invalidate_after_compaction(&summary);
+            let next = session.projection(timestamp());
+            runtime
+                .sessions
+                .insert(meta.sender_session.clone(), session);
+            commit_change(state, &mut runtime, &meta, command_hash, next, None)
+        }
+    }
+}
+
+async fn set_requested_mode(
+    state: &AppState,
+    meta: CommandMeta,
+    base_version: u64,
+    requested_mode: house_protocol::RecallRequestedMode,
+    command_hash: String,
+) -> Responses {
+    let mut runtime = state.runtime.lock().await;
+    if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
+        return response;
+    }
+    if let Err(reason) = refresh_from_room_state(state, &mut runtime) {
+        let failed = outcome_with_runtime(
+            state,
+            &meta,
+            RECALL_POLICY_COMMAND_FAILED,
+            Some(reason),
+            &runtime,
+            None,
+        );
+        return Responses {
+            direct: vec![serialize(&failed)],
+            delta: None,
+        };
+    }
+    if base_version != runtime.cursor.version {
+        let refusal = outcome_with_runtime(
+            state,
+            &meta,
+            RECALL_POLICY_COMMAND_REFUSED,
+            Some(format!(
+                "stale base_version {base_version}; current version is {}",
+                runtime.cursor.version
+            )),
+            &runtime,
+            None,
+        );
+        let _ = runtime.durable.save_receipt(DurableReceipt {
+            idempotency_key: meta.idempotency_key.clone(),
+            body_hash: command_hash,
+            outcome: refusal.clone(),
+            stored_at: timestamp(),
+        });
+        return Responses {
+            direct: vec![serialize(&refusal)],
+            delta: None,
+        };
+    }
+    let next = apply_requested_mode(&runtime.projection, requested_mode, timestamp());
+    commit_change(state, &mut runtime, &meta, command_hash, next, None)
+}
+
+fn refresh_from_room_state(state: &AppState, runtime: &mut RuntimeState) -> Result<(), String> {
+    let projection = state.room_store.load()?;
+    let hash = state_hash(&projection)?;
+    if hash == runtime.cursor.state_hash {
+        return Ok(());
+    }
+    let version = runtime
+        .cursor
+        .version
+        .checked_add(1)
+        .ok_or_else(|| "projection version overflow while reloading room state".to_string())?;
+    let sequence = runtime
+        .cursor
+        .sequence
+        .checked_add(1)
+        .ok_or_else(|| "projection sequence overflow while reloading room state".to_string())?;
+    runtime.projection = projection;
+    runtime.cursor = ProjectionCursor {
+        projection_id: RECALL_POLICY_PROJECTION_ID.into(),
+        version,
+        sequence,
+        state_hash: hash,
+    };
+    runtime.sessions.clear();
+    runtime.sessions.insert(
+        state.config.session.clone(),
+        RecallPolicySession::fresh(&runtime.projection),
+    );
+    let sessions = runtime.sessions.clone();
+    let cursor = runtime.cursor.clone();
+    runtime.durable.save_sessions(&sessions)?;
+    runtime.durable.save_cursor(&cursor)
+}
+
+fn idempotency_response(
+    state: &AppState,
+    runtime: &RuntimeState,
+    meta: &CommandMeta,
+    command_hash: &str,
+) -> Option<Responses> {
+    let receipt = runtime.durable.receipt(&meta.idempotency_key)?;
+    if receipt.body_hash == command_hash {
+        return Some(Responses {
+            direct: vec![serialize(&receipt.outcome)],
+            delta: None,
+        });
+    }
+    let refusal = outcome_with_runtime(
+        state,
+        meta,
+        RECALL_POLICY_COMMAND_REFUSED,
+        Some("idempotency_key was already used for a different command body".into()),
+        runtime,
+        None,
+    );
+    Some(Responses {
+        direct: vec![serialize(&refusal)],
+        delta: None,
+    })
+}
+
+fn commit_change(
+    state: &AppState,
+    runtime: &mut RuntimeState,
+    meta: &CommandMeta,
+    command_hash: String,
+    next: RecallPolicyState,
+    decision: Option<RecallPolicyDecision>,
+) -> Responses {
+    let mutations = RecallPolicyMutation::between(&runtime.projection, &next);
+    let base_version = runtime.cursor.version;
+    let next_version = match base_version.checked_add(1) {
+        Some(version) => version,
+        None => {
+            let failed = outcome_with_runtime(
+                state,
+                meta,
+                RECALL_POLICY_COMMAND_FAILED,
+                Some("projection version overflow".into()),
+                runtime,
+                None,
+            );
+            return Responses {
+                direct: vec![serialize(&failed)],
+                delta: None,
+            };
+        }
+    };
+    let next_sequence = match runtime.cursor.sequence.checked_add(1) {
+        Some(sequence) => sequence,
+        None => {
+            let failed = outcome_with_runtime(
+                state,
+                meta,
+                RECALL_POLICY_COMMAND_FAILED,
+                Some("projection sequence overflow".into()),
+                runtime,
+                None,
+            );
+            return Responses {
+                direct: vec![serialize(&failed)],
+                delta: None,
+            };
+        }
+    };
+    let next_hash = match state_hash(&next) {
+        Ok(hash) => hash,
+        Err(reason) => {
+            let failed = outcome_with_runtime(
+                state,
+                meta,
+                RECALL_POLICY_COMMAND_FAILED,
+                Some(reason),
+                runtime,
+                None,
+            );
+            return Responses {
+                direct: vec![serialize(&failed)],
+                delta: None,
+            };
+        }
+    };
+    if let Err(reason) = state.room_store.write_policy(&next) {
+        let failed = outcome_with_runtime(
+            state,
+            meta,
+            RECALL_POLICY_COMMAND_FAILED,
+            Some(reason),
+            runtime,
+            None,
+        );
+        return Responses {
+            direct: vec![serialize(&failed)],
+            delta: None,
+        };
+    }
+    runtime.projection = next;
+    runtime.cursor = ProjectionCursor {
+        projection_id: RECALL_POLICY_PROJECTION_ID.into(),
+        version: next_version,
+        sequence: next_sequence,
+        state_hash: next_hash.clone(),
+    };
+    if let Err(reason) = runtime.durable.save_sessions(&runtime.sessions) {
+        let failed = outcome_with_runtime(
+            state,
+            meta,
+            RECALL_POLICY_COMMAND_FAILED,
+            Some(reason),
+            runtime,
+            None,
+        );
+        return Responses {
+            direct: vec![serialize(&failed)],
+            delta: None,
+        };
+    }
+    if let Err(reason) = runtime.durable.save_cursor(&runtime.cursor) {
+        let failed = outcome_with_runtime(
+            state,
+            meta,
+            RECALL_POLICY_COMMAND_FAILED,
+            Some(reason),
+            runtime,
+            None,
+        );
+        return Responses {
+            direct: vec![serialize(&failed)],
+            delta: None,
+        };
+    }
+    let accepted = outcome_with_runtime(
+        state,
+        meta,
+        RECALL_POLICY_COMMAND_ACCEPTED,
+        None,
+        runtime,
+        decision,
+    );
+    if let Err(reason) = runtime.durable.save_receipt(DurableReceipt {
+        idempotency_key: meta.idempotency_key.clone(),
+        body_hash: command_hash,
+        outcome: accepted.clone(),
+        stored_at: timestamp(),
+    }) {
+        let failed = outcome_with_runtime(
+            state,
+            meta,
+            RECALL_POLICY_COMMAND_FAILED,
+            Some(reason),
+            runtime,
+            None,
+        );
+        return Responses {
+            direct: vec![serialize(&failed)],
+            delta: None,
+        };
+    }
+    let delta_event_id = new_id();
+    let delta = DeltaEvent {
+        meta: event_meta(
+            state,
+            Some(meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            RECALL_POLICY_DELTA,
+            next_sequence,
+            next_hash,
+            delta_event_id.clone(),
+        ),
+        delta_id: delta_event_id,
+        base_version,
+        next_version,
+        source_event_ids: vec![accepted.meta.event_id.clone()],
+        mutations,
+        coalesce_key: "recall_policy".into(),
+    };
+    Responses {
+        direct: vec![serialize(&accepted)],
+        delta: Some(serialize(&delta)),
+    }
+}
+
+fn validate_command(state: &AppState, command: &ClientCommand) -> Result<(), String> {
+    let meta = command.meta();
+    if meta.max_hops != 1 {
+        return Err("max_hops must be exactly 1".into());
+    }
+    if meta.correlation_id != meta.message_id {
+        return Err("correlation_id must equal message_id for a client command".into());
+    }
+    let expires = chrono::DateTime::parse_from_rfc3339(&meta.expires_at)
+        .map_err(|_| "expires_at must be an RFC 3339 timestamp")?;
+    if expires <= chrono::Utc::now() {
+        return Err("command has expired".into());
+    }
+    let expected = &state.config;
+    let blank_binding = meta.house_id.is_empty()
+        && meta.sender_room.is_empty()
+        && meta.sender_spirit.is_empty()
+        && meta.sender_session.is_empty()
+        && meta.recipient.is_empty()
+        && meta.reply_target.is_empty()
+        && meta.scope.is_empty()
+        && meta.visibility.is_empty()
+        && meta.authority_class.is_empty();
+    if matches!(
+        command,
+        ClientCommand::Subscribe { .. } | ClientCommand::PaperBoatReceiptSubscribe { .. }
+    ) && blank_binding
+    {
+        return Ok(());
+    }
+    if meta.house_id != expected.house_id
+        || meta.sender_room != expected.room
+        || meta.sender_spirit != expected.spirit
+        || meta.sender_session.trim().is_empty()
+        || meta.sender_session.len() > 256
+        || meta.recipient != expected.recipient
+        || meta.reply_target != meta.sender_session
+        || meta.scope != expected.scope()
+        || meta.visibility != "operator"
+        || meta.authority_class != "room_state"
+    {
+        return Err(
+            "command binding is foreign or does not match the authenticated Host binding".into(),
+        );
+    }
+    Ok(())
+}
+
+fn snapshot(state: &AppState, meta: &CommandMeta, runtime: &RuntimeState) -> SnapshotEvent {
+    let snapshot_id = new_id();
+    SnapshotEvent {
+        meta: event_meta(
+            state,
+            Some(meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            RECALL_POLICY_SNAPSHOT,
+            runtime.cursor.sequence,
+            runtime.cursor.state_hash.clone(),
+            new_id(),
+        ),
+        snapshot_id,
+        version: runtime.cursor.version,
+        state: runtime.projection.clone(),
+    }
+}
+
+async fn outcome(
+    state: &AppState,
+    meta: &CommandMeta,
+    kind: &str,
+    reason: Option<String>,
+) -> CommandOutcomeEvent {
+    let runtime = state.runtime.lock().await;
+    outcome_with_runtime(state, meta, kind, reason, &runtime, None)
+}
+
+async fn outcome_for_ids(
+    state: &AppState,
+    message_id: &str,
+    idempotency_key: &str,
+    kind: &str,
+    reason: Option<String>,
+) -> CommandOutcomeEvent {
+    let fallback_id = new_id();
+    let message_id = if message_id.trim().is_empty() {
+        fallback_id.as_str()
+    } else {
+        message_id
+    };
+    let idempotency_key = if idempotency_key.trim().is_empty() {
+        message_id
+    } else {
+        idempotency_key
+    };
+    let runtime = state.runtime.lock().await;
+    CommandOutcomeEvent {
+        meta: event_meta(
+            state,
+            None,
+            message_id,
+            idempotency_key,
+            kind,
+            runtime.cursor.sequence,
+            runtime.cursor.state_hash.clone(),
+            new_id(),
+        ),
+        reason,
+        version: runtime.cursor.version,
+        state: Some(runtime.projection.clone()),
+        decision: None,
+    }
+}
+
+fn outcome_with_runtime(
+    state: &AppState,
+    meta: &CommandMeta,
+    kind: &str,
+    reason: Option<String>,
+    runtime: &RuntimeState,
+    decision: Option<RecallPolicyDecision>,
+) -> CommandOutcomeEvent {
+    CommandOutcomeEvent {
+        meta: event_meta(
+            state,
+            Some(meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            kind,
+            runtime.cursor.sequence,
+            runtime.cursor.state_hash.clone(),
+            new_id(),
+        ),
+        reason,
+        version: runtime.cursor.version,
+        state: Some(runtime.projection.clone()),
+        decision,
+    }
+}
+
+async fn diagnostic_refusal(state: &AppState, reason: &str) -> String {
+    let event = outcome_for_ids(
+        state,
+        "unparsed-command",
+        "unparsed-command",
+        RECALL_POLICY_COMMAND_REFUSED,
+        Some(reason.into()),
+    )
+    .await;
+    serialize(&event)
+}
+
+fn event_meta(
+    state: &AppState,
+    command: Option<&CommandMeta>,
+    correlation_id: &str,
+    idempotency_key: &str,
+    kind: &str,
+    sequence: u64,
+    state_hash: String,
+    event_id: String,
+) -> EventMeta {
+    let sender_session = command
+        .map(|meta| meta.sender_session.trim())
+        .filter(|session| !session.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| state.config.session.clone());
+    EventMeta {
+        schema_version: HOST_SCHEMA_VERSION,
+        event_id,
+        house_id: state.config.house_id.clone(),
+        sender_room: state.config.room.clone(),
+        sender_spirit: state.config.spirit.clone(),
+        sender_session: sender_session.clone(),
+        recipient: sender_session,
+        command_or_event_type: kind.into(),
+        correlation_id: correlation_id.into(),
+        causation_id: correlation_id.into(),
+        reply_target: state.config.recipient.clone(),
+        idempotency_key: idempotency_key.into(),
+        source_record_refs: Vec::new(),
+        scope: state.config.scope(),
+        visibility: "operator".into(),
+        authority_class: "room_state".into(),
+        created_at: timestamp(),
+        expires_at: None,
+        max_hops: 1,
+        projection_id: RECALL_POLICY_PROJECTION_ID.into(),
+        sequence,
+        state_hash,
+    }
+}
+
+fn receipt_snapshot(
+    state: &AppState,
+    command: Option<&CommandMeta>,
+    receipt_state: PaperBoatReceiptState,
+) -> PaperBoatReceiptEvent {
+    let receipt = receipt_state.receipt.as_ref();
+    let sequence = receipt
+        .map(|value| value.original_stream_sequence)
+        .unwrap_or(0);
+    let event_id = receipt
+        .map(|value| value.event_id.clone())
+        .unwrap_or_else(new_id);
+    let correlation_id = command
+        .map(|meta| meta.message_id.clone())
+        .unwrap_or_else(|| event_id.clone());
+    let idempotency_key = receipt
+        .map(|value| value.event_id.clone())
+        .or_else(|| command.map(|meta| meta.idempotency_key.clone()))
+        .unwrap_or_else(|| event_id.clone());
+    let state_hash = hex::encode(Sha256::digest(
+        serde_json::to_vec(&receipt_state)
+            .expect("typed receipt state contains no fallible JSON values"),
+    ));
+    PaperBoatReceiptEvent {
+        meta: EventMeta {
+            schema_version: HOST_SCHEMA_VERSION,
+            event_id,
+            house_id: state.config.house_id.clone(),
+            sender_room: state.config.room.clone(),
+            sender_spirit: state.config.spirit.clone(),
+            sender_session: state.config.session.clone(),
+            recipient: state.config.session.clone(),
+            command_or_event_type: PAPER_BOAT_RECEIPT_SNAPSHOT.into(),
+            correlation_id: correlation_id.clone(),
+            causation_id: correlation_id,
+            reply_target: state.config.recipient.clone(),
+            idempotency_key,
+            source_record_refs: Vec::new(),
+            scope: format!("room:{}:paper_boat_receipt", state.config.room),
+            visibility: "operator".into(),
+            authority_class: "delivery_receipt".into(),
+            created_at: receipt
+                .map(|value| value.processed_at.clone())
+                .unwrap_or_else(timestamp),
+            expires_at: None,
+            max_hops: 1,
+            projection_id: PAPER_BOAT_RECEIPT_PROJECTION_ID.into(),
+            sequence,
+            state_hash,
+        },
+        snapshot_id: new_id(),
+        state: receipt_state,
+    }
+}
+
+async fn run_receipt_bridge(state: AppState, nats_url: String) {
+    loop {
+        if state.cancellation.is_cancelled() {
+            return;
+        }
+        state.receipt_tracker.lock().await.connecting();
+        let callback_state = state.clone();
+        let client = match async_nats::ConnectOptions::new()
+            .event_callback(move |event| {
+                let callback_state = callback_state.clone();
+                async move {
+                    match event {
+                        async_nats::Event::Disconnected | async_nats::Event::Closed => {
+                            publish_receipt_degradation(
+                                &callback_state,
+                                "AKASHA delivery broker connection was lost",
+                            )
+                            .await;
+                        }
+                        async_nats::Event::Connected => {
+                            let receipt_state = {
+                                let mut tracker = callback_state.receipt_tracker.lock().await;
+                                tracker.connected();
+                                tracker.state()
+                            };
+                            let event = receipt_snapshot(&callback_state, None, receipt_state);
+                            let _ = callback_state.receipts.send(serialize(&event));
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .connect(&nats_url)
+            .await
+        {
+            Ok(client) => client,
+            Err(_) => {
+                publish_receipt_degradation(&state, "AKASHA delivery broker is unavailable").await;
+                if wait_receipt_retry(&state).await {
+                    return;
+                }
+                continue;
+            }
+        };
+        let context = async_nats::jetstream::new(client);
+        let stream = match context.get_stream(BOAT_RECEIPT_STREAM_NAME).await {
+            Ok(stream) => stream,
+            Err(_) => {
+                publish_receipt_degradation(
+                    &state,
+                    "AKASHA delivery receipt stream is not configured yet",
+                )
+                .await;
+                if wait_receipt_retry(&state).await {
+                    return;
+                }
+                continue;
+            }
+        };
+        let consumer = match stream
+            .create_consumer(async_nats::jetstream::consumer::pull::Config {
+                name: Some(format!("athanor-host-receipts-{}", Uuid::new_v4().simple())),
+                description: Some(
+                    "Bounded ephemeral Host replay of sanitized Paper Boat receipts".into(),
+                ),
+                deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
+                ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
+                ack_wait: std::time::Duration::from_secs(30),
+                max_deliver: 5,
+                filter_subject: BOAT_RECEIPT_SUBJECT.into(),
+                max_ack_pending: 64,
+                max_batch: 64,
+                max_expires: std::time::Duration::from_secs(5),
+                inactive_threshold: std::time::Duration::from_secs(30),
+                num_replicas: 1,
+                memory_storage: true,
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(consumer) => consumer,
+            Err(_) => {
+                publish_receipt_degradation(
+                    &state,
+                    "AKASHA delivery receipt replay consumer is unavailable",
+                )
+                .await;
+                if wait_receipt_retry(&state).await {
+                    return;
+                }
+                continue;
+            }
+        };
+        state.receipt_tracker.lock().await.connected();
+        'replay: loop {
+            let mut messages = match consumer
+                .fetch()
+                .max_messages(64)
+                .expires(std::time::Duration::from_secs(5))
+                .messages()
+                .await
+            {
+                Ok(messages) => messages,
+                Err(_) => {
+                    publish_receipt_degradation(
+                        &state,
+                        "AKASHA delivery receipt replay cannot start",
+                    )
+                    .await;
+                    break 'replay;
+                }
+            };
+            loop {
+                tokio::select! {
+                    _ = state.cancellation.cancelled() => return,
+                    incoming = messages.next() => {
+                        let Some(incoming) = incoming else {
+                            break;
+                        };
+                        let message = match incoming {
+                            Ok(message) => message,
+                            Err(_) => {
+                                publish_receipt_degradation(
+                                    &state,
+                                    "AKASHA delivery receipt replay failed",
+                                )
+                                .await;
+                                break 'replay;
+                            }
+                        };
+                        let outcome = {
+                            let mut tracker = state.receipt_tracker.lock().await;
+                            match tracker.ingest(&state.config.room, message.payload.as_ref()) {
+                                Ok(outcome) => Ok(outcome),
+                                Err(_) => {
+                                    tracker.refuse_malformed();
+                                    Err(tracker.state())
+                                }
+                            }
+                        };
+                        match outcome {
+                            Ok(ReceiptIngest::Accepted(_)) => {
+                                let receipt_state = state.receipt_tracker.lock().await.state();
+                                let event = receipt_snapshot(&state, None, receipt_state);
+                                let _ = state.receipts.send(serialize(&event));
+                            }
+                            Ok(ReceiptIngest::Duplicate | ReceiptIngest::Stale | ReceiptIngest::ForeignRoom) => {}
+                            Err(receipt_state) => {
+                                let event = receipt_snapshot(&state, None, receipt_state);
+                                let _ = state.receipts.send(serialize(&event));
+                            }
+                        }
+                        if message.ack().await.is_err() {
+                            publish_receipt_degradation(
+                                &state,
+                                "AKASHA delivery receipt acknowledgement failed",
+                            )
+                            .await;
+                            break 'replay;
+                        }
+                    }
+                }
+            }
+        }
+        if wait_receipt_retry(&state).await {
+            return;
+        }
+    }
+}
+
+async fn publish_receipt_degradation(state: &AppState, reason: &str) {
+    let receipt_state = {
+        let mut tracker = state.receipt_tracker.lock().await;
+        tracker.degraded(reason);
+        tracker.state()
+    };
+    let event = receipt_snapshot(state, None, receipt_state);
+    let _ = state.receipts.send(serialize(&event));
+}
+
+async fn wait_receipt_retry(state: &AppState) -> bool {
+    tokio::select! {
+        _ = state.cancellation.cancelled() => true,
+        _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => false,
+    }
+}
+
+fn serialize(value: &impl serde::Serialize) -> String {
+    serde_json::to_string(value).expect("typed Host events contain no fallible JSON values")
+}
+
+fn new_id() -> String {
+    Uuid::new_v4().to_string()
+}

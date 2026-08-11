@@ -40,6 +40,8 @@ const zod = {
 
 const HOUSE_TOOL_NAMES = [
   "recall",
+  "canon_read",
+  "canon_write",
   "remember",
   "delete_lesson",
   "update_lesson",
@@ -55,6 +57,8 @@ const HOUSE_TOOL_NAMES = [
   "familiar_dispatch",
   "house_dispatch",
   "house_routing_mode",
+  "kitten_lineage_status",
+  "recall_policy",
   "house_model_default",
   "anamnesis",
   "anamnesis_write",
@@ -193,7 +197,7 @@ describe("House tool feedback", () => {
       details: { execution: { write_outcome: "not_started" } },
     });
 
-    for (const operation of ["remember", "delete_lesson", "update_lesson", "set_room_state", "sleep", "house_routing_mode", "house_model_default", "anamnesis_write", "giga_promote_memory", "giga_promote_coding_lesson", "giga_promote_project_lesson"]) {
+    for (const operation of ["remember", "delete_lesson", "update_lesson", "set_room_state", "sleep", "house_routing_mode", "recall_policy", "house_model_default", "anamnesis_write", "giga_promote_memory", "giga_promote_coding_lesson", "giga_promote_project_lesson"]) {
       const result = normalizeToolResponse({
         isError: true,
         content: [{

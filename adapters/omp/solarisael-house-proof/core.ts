@@ -18,8 +18,6 @@ export async function loadHouseCore() {
     throw new Error(`Unsupported Athanor core API: expected ${CORE_API_VERSION}, got ${String(core.CORE_API_VERSION)}`);
   }
   for (const name of [
-    "runRecallQuery",
-    "runVaultRecallQuery",
     "runAnamnesisQuery",
     "logUserTurn",
     "logAssistantTurn",
@@ -34,14 +32,6 @@ export async function loadHouseCore() {
   return core;
 }
 
-export async function loadHouseMemory() {
-  const core = await loadHouseCore();
-  return {
-    runRecallQuery: core.runRecallQuery,
-    runVaultRecallQuery: core.runVaultRecallQuery,
-    runAnamnesisQuery: core.runAnamnesisQuery,
-  };
-}
 
 export async function loadHouseLedger() {
   const core = await loadHouseCore();

@@ -1,17 +1,12 @@
-name: Release The Athanor
-
-# The Athanor publishes one supported platform: windows-x64. Every release
-# carries exactly two archives, the Vault and AKASHA profiles of that platform,
-# plus the single release manifest the updater fetches by name.
+name: Release native Windows runtime
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
       version:
-        description: "Semantic version already present in package.json and adapters/omp/package.json"
+        description: "Semantic release version"
         required: true
         type: string
 
@@ -20,104 +15,49 @@ permissions:
 
 jobs:
   windows-x64:
-    name: Build and publish windows-x64
     runs-on: windows-latest
-    env:
-      REQUIRED_SCHEMA_VERSION: "13"
-      RELEASE_REPOSITORY: solarisael/the-athanor
     steps:
-      - name: Check out The Athanor
-        uses: actions/checkout@v4
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Resolve immutable release identity
-        id: resolve
-        shell: bash
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Resolve release version
+        shell: pwsh
         env:
           REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
-          set -euo pipefail
-          version="${REQUESTED#v}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
-            echo "invalid semantic version: $version" >&2
-            exit 1
-          fi
-          adapter="$(jq -r .version adapters/omp/package.json)"
-          root="$(jq -r .version package.json)"
-          if [[ "$version" != "$adapter" ]]; then
-            echo "version $version does not match adapters/omp/package.json $adapter" >&2
-            exit 1
-          fi
-          if [[ "$version" != "$root" ]]; then
-            echo "version $version does not match package.json $root" >&2
-            exit 1
-          fi
-          case "$version" in
-            *-beta|*-beta.*|*-beta+*|*-beta-*) channel=beta ;;
-            *-experimental|*-experimental.*|*-experimental+*|*-experimental-*) channel=experimental ;;
-            *-exp|*-exp.*|*-exp+*|*-exp-*) channel=experimental ;;
-            *-*) echo "prerelease version must use beta, experimental, or exp" >&2; exit 1 ;;
-            *) channel=stable ;;
-          esac
-          echo "VERSION=$version" >> "$GITHUB_ENV"
-          echo "CHANNEL=$channel" >> "$GITHUB_ENV"
-      - name: Install workspace dependencies
-        run: bun install
-      - name: Build the substrate binary
-        run: cargo build --release --locked -p athanor-substrate
-      - name: Build the Vault and AKASHA archives
-        shell: bash
-        env:
-          ATHANOR_SUBSTRATE_EXE: ${{ github.workspace }}\target\release\athanor-substrate.exe
+          $version = $env:REQUESTED -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') { throw "invalid semantic version: $version" }
+          $adapter = (Get-Content adapters/omp/package.json -Raw | ConvertFrom-Json).version
+          $root = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($adapter -ne $version -or $root -ne $version) { throw "release version must match both package manifests" }
+          "VERSION=$version" | Out-File $env:GITHUB_ENV -Append
+      - name: Stage checksum-verified native runtime
+        shell: pwsh
+        run: ./installer/build-native-release.ps1 -Version $env:VERSION -OutDir dist
+      - name: Compile the Inno installer
+        shell: pwsh
         run: |
-          set -euo pipefail
-          rm -rf dist
-          mkdir -p dist
-          bun run adapters/omp/build-portable.ts --out-dir dist --profile all
-      - name: Build the single release manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          vault="dist/the-athanor-$VERSION-windows-x64-vault.zip"
-          akasha="dist/the-athanor-$VERSION-windows-x64-akasha.zip"
-          for archive in "$vault" "$akasha"; do
-            [[ -f "$archive" ]] || { echo "builder did not produce $archive" >&2; exit 1; }
-          done
-          produced=(dist/*.zip)
-          if [[ ${#produced[@]} -ne 2 ]]; then
-            echo "expected exactly the vault and akasha archives, found ${#produced[@]}: ${produced[*]}" >&2
-            exit 1
-          fi
-          bun run adapters/omp/build-release-manifest.ts \
-            --version "$VERSION" \
-            --output dist/release-manifest.json \
-            --channel "$CHANNEL" \
-            --repository "$RELEASE_REPOSITORY" \
-            --required-schema "$REQUIRED_SCHEMA_VERSION" \
-            --asset "$vault" \
-            --asset "$akasha"
-      - name: Retain immutable release artifacts
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersion=$env:VERSION" "/DSourceRoot=$env:GITHUB_WORKSPACE\dist" "installer\athanor.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          $installer = Get-Item "dist\The-Athanor-$env:VERSION-windows-x64.exe"
+          $all = @(Get-ChildItem dist -Filter '*.exe' -File)
+          if ($all.Count -ne 1) { throw "release must contain exactly one Windows installer; found $($all.Count)" }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content "$($installer.FullName).sha256" -Encoding ascii
+      - name: Retain release proof
         uses: actions/upload-artifact@v4
         with:
           name: the-athanor-${{ env.VERSION }}-windows-x64
           path: |
-            dist/the-athanor-${{ env.VERSION }}-windows-x64-vault.zip
-            dist/the-athanor-${{ env.VERSION }}-windows-x64-akasha.zip
-            dist/release-manifest.json
+            dist/The-Athanor-${{ env.VERSION }}-windows-x64.exe
+            dist/The-Athanor-${{ env.VERSION }}-windows-x64.exe.sha256
           if-no-files-found: error
-      - name: Publish the canonical release
+      - name: Publish installer and checksum
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          prerelease: ${{ env.CHANNEL != 'stable' }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/the-athanor-${{ env.VERSION }}-windows-x64-vault.zip
-            dist/the-athanor-${{ env.VERSION }}-windows-x64-akasha.zip
-            dist/release-manifest.json
+            dist/The-Athanor-${{ env.VERSION }}-windows-x64.exe
+            dist/The-Athanor-${{ env.VERSION }}-windows-x64.exe.sha256

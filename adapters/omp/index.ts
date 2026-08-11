@@ -9,14 +9,18 @@ import {
   extractKittenQuestMemories,
   kittenLineageDisabled,
   kittenQuestIdempotencyKey,
+  kittenLifecycleJoinKey,
   readKittenReport,
+  noteKittenLifecycle,
+  noteKittenLineageWrite,
+  noteKittenProgress,
   type KittenQuestMemory,
   type KittenQuestProgress,
 } from "./kitten-lineage.ts";
 
 import { isFreshConversation, logUnseenConversationTurns } from "./solarisael-house-proof/conversation-log.ts";
 import { closeGigaTransports, ingestGigaLoggedTurnsDetached } from "./giga.ts";
-import { closeRustRecallTransports, compactRecall, recallWithRouting } from "./solarisael-house-proof/recall.ts";
+import { closeRustRecallTransports, recallWithRouting } from "./solarisael-house-proof/recall.ts";
 import { closeRustRememberTransports, writeRustMemory } from "./solarisael-house-proof/tools.ts";
 import { closeRustAnamnesisTransports } from "./solarisael-house-proof/anamnesis.ts";
 import { loadHouseQueryRouting } from "./solarisael-house-proof/core.ts";
@@ -28,11 +32,18 @@ import {
   roomContext,
   writeActiveSpiritSnapshot,
 } from "./solarisael-house-proof/room.ts";
-import { catchBoat, formatWakeContext } from "./solarisael-house-proof/substrate.ts";
+import { catchBoat, closePaperBoatTransports, formatWakeContext } from "./solarisael-house-proof/substrate.ts";
 import { messageText } from "./solarisael-house-proof/text.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./solarisael-house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./solarisael-house-proof/tools.ts";
 import { contextNudge, keywordReminder, processLessonsReminder, striatumLessonsReminder } from "./solarisael-house-proof/triggers.ts";
+import { activeLessonState } from "./solarisael-house-proof/lesson-working-state.ts";
+import {
+  compactAutomaticRecallPayload,
+  RecallPolicyHostClient,
+  type PersistedRecallPolicy,
+  type RecallPolicyDecision,
+} from "./solarisael-house-proof/recall-policy.ts";
 
 const wokenSessions = new Set();
 const modelDefaultsApplied = new Set();
@@ -69,9 +80,9 @@ function cacheKittenTaskRoom(room: string, toolCallId: unknown, input: unknown):
   trimOldestMap(kittenRoomsByAgentId, 1_024);
 }
 
-async function recordKittenQuest(room: string, toolCallId: unknown, record: KittenQuestMemory): Promise<void> {
+async function recordKittenQuest(room: string, toolCallId: unknown, record: KittenQuestMemory): Promise<boolean> {
   const key = kittenQuestIdempotencyKey(toolCallId, record.resultId);
-  if (recordedKittenQuests.has(key)) return;
+  if (recordedKittenQuests.has(key)) return true;
   recordedKittenQuests.add(key);
   trimOldestSet(recordedKittenQuests, 1_024);
   try {
@@ -84,9 +95,13 @@ async function recordKittenQuest(room: string, toolCallId: unknown, record: Kitt
       supersedes: [],
       signal: undefined,
     });
+    noteKittenLineageWrite(true);
+    return true;
   } catch {
     recordedKittenQuests.delete(key);
+    noteKittenLineageWrite(false);
     // Quest lineage is fail-open: task results must remain visible even if memory is unavailable.
+    return false;
   }
 }
 // Prompt-cache contract (2026-07-31): OMP context additions are transient and
@@ -97,12 +112,12 @@ async function recordKittenQuest(room: string, toolCallId: unknown, record: Kitt
 // session ($256) while only the system block ever cache-hit. The contract:
 // compute additions ONCE per user turn, memoize them byte-stable, and anchor
 // every turn's additions immediately after that turn's user message so the
-// rendered prefix never moves between requests. Freshness is per user turn:
-// each new user message computes fresh recall; replays only serve the
-// requests within (and after) its own turn.
-const turnAdditionMemos = new Map();
+// rendered prefix never moves between requests. Static additions remain
+// singletons, dynamic working sets replace their prior copy only on refresh,
+// and replayed requests receive the same memoized additions byte-for-byte.
+const turnAdditionMemos = new Map<string, Map<string, Array<Record<string, any>>>>();
 
-function turnAdditionMemo(sessionKey) {
+function turnAdditionMemo(sessionKey: string) {
   let memo = turnAdditionMemos.get(sessionKey);
   if (!memo) {
     memo = new Map();
@@ -114,7 +129,12 @@ function turnAdditionMemo(sessionKey) {
   return memo;
 }
 
-function turnKeysByMessage(messages) {
+function conversationTokenEstimate(messages: any[]): number {
+  const characters = messages.reduce((total, message) => total + messageText(message).length, 0);
+  return Math.ceil(characters / 4);
+}
+
+function turnKeysByMessage(messages: any[]) {
   const keys = new Map();
   let ordinal = 0;
   for (const message of messages) {
@@ -128,7 +148,7 @@ function turnKeysByMessage(messages) {
   return keys;
 }
 
-function anchorTurnAdditions(messages, turnKeys, memo) {
+function anchorTurnAdditions(messages: any[], turnKeys: Map<any, string>, memo: Map<string, Array<Record<string, any>>>) {
   const output = [];
   let inserted = false;
   for (const message of messages) {
@@ -142,6 +162,54 @@ function anchorTurnAdditions(messages, turnKeys, memo) {
   }
   return inserted ? { messages: output } : undefined;
 }
+
+const STABLE_CONTEXT_TYPES = new Set([
+  "solarisael-room-context",
+  "solarisael-routing-mode",
+  "solarisael-wake-context",
+  "solarisael-anamnesis-wake",
+]);
+const REPLACEABLE_CONTEXT_TYPES = new Set([
+  "solarisael-striatum-lessons",
+  "solarisael-recall-context",
+  "solarisael-context-nudge",
+]);
+
+function pruneTurnAdditionMemo(memo: Map<string, Array<Record<string, any>>>, visibleKeys: Set<string>): void {
+  for (const key of memo.keys()) {
+    if (!visibleKeys.has(key)) memo.delete(key);
+  }
+}
+
+function memoHasCustomType(memo: Map<string, Array<Record<string, any>>>, customType: string): boolean {
+  for (const additions of memo.values()) {
+    if (additions.some((addition) => addition.customType === customType)) return true;
+  }
+  return false;
+}
+
+function removeMemoCustomType(memo: Map<string, Array<Record<string, any>>>, customType: string): void {
+  for (const [key, additions] of memo) {
+    memo.set(key, additions.filter((addition) => addition.customType !== customType));
+  }
+}
+
+function mergeTurnAdditions(
+  memo: Map<string, Array<Record<string, any>>>,
+  currentTurnKey: string,
+  additions: Array<Record<string, any>>,
+): void {
+  const current: Array<Record<string, any>> = [];
+  for (const addition of additions) {
+    const customType = String(addition.customType || "");
+    if (STABLE_CONTEXT_TYPES.has(customType) && memoHasCustomType(memo, customType)) continue;
+    if (REPLACEABLE_CONTEXT_TYPES.has(customType)) removeMemoCustomType(memo, customType);
+    current.push(addition);
+  }
+  memo.set(currentTurnKey, current);
+}
+
+
 const recallViewportSessions = new Map();
 
 const REDACTED = "[REDACTED]";
@@ -265,16 +333,17 @@ export default function solarisaelHouseProof(pi) {
   pi.setLabel("The Athanor");
   let activeRoom: string | null = null;
 
-  const stopKittenProgress = pi.events?.on?.("task:subagent:event", (payload: unknown) => {
+  const stopKittenProgress = pi.events?.on?.("task:subagent:progress", (payload: unknown) => {
     if (kittenLineageDisabled() || !payload || typeof payload !== "object") return;
     const progress = payload as KittenQuestProgress;
-    const id = String(progress.id ?? "").trim();
-    if (!id) return;
-    kittenQuestProgress.set(id, progress);
+    const joinKey = kittenLifecycleJoinKey(progress);
+    noteKittenProgress(payload, joinKey);
+    if (!joinKey) return;
+    kittenQuestProgress.set(joinKey, progress);
     trimOldestMap(kittenQuestProgress, 1_024);
     const callId = String(progress.parentToolCallId ?? "").trim();
     const room = kittenRoomsByToolCallId.get(callId);
-    if (room) kittenRoomsByAgentId.set(id, room);
+    if (room) kittenRoomsByAgentId.set(joinKey, room);
   });
 
   const stopKittenLifecycle = pi.events?.on?.("task:subagent:lifecycle", async (payload: unknown) => {
@@ -282,18 +351,24 @@ export default function solarisaelHouseProof(pi) {
     const lifecycle = payload as Record<string, unknown>;
     if (!["completed", "failed", "aborted"].includes(String(lifecycle.status ?? ""))) return;
     const id = String(lifecycle.id ?? "").trim();
-    const progress = kittenQuestProgress.get(id);
+    const joinKey = kittenLifecycleJoinKey(lifecycle);
+    const progress = kittenQuestProgress.get(joinKey);
+    noteKittenLifecycle(payload, id, Boolean(progress));
     if (!progress) return;
     const toolCallId = String(lifecycle.parentToolCallId ?? progress.parentToolCallId ?? "").trim();
-    const room = kittenRoomsByToolCallId.get(toolCallId) || kittenRoomsByAgentId.get(id) || activeRoom;
+    const room = kittenRoomsByToolCallId.get(toolCallId)
+      || kittenRoomsByAgentId.get(joinKey)
+      || kittenRoomsByAgentId.get(id)
+      || activeRoom;
     if (!room) return;
     try {
       const report = await readKittenReport(lifecycle.sessionFile ?? progress.sessionFile);
       const record = extractKittenLifecycleMemory(progress, lifecycle, report);
       if (record) await recordKittenQuest(room, toolCallId, record);
     } finally {
-      kittenQuestProgress.delete(id);
+      kittenQuestProgress.delete(joinKey);
       kittenRoomsByToolCallId.delete(toolCallId);
+      kittenRoomsByAgentId.delete(joinKey);
       kittenRoomsByAgentId.delete(id);
     }
   });
@@ -352,10 +427,13 @@ export default function solarisaelHouseProof(pi) {
         // Live context and ledger writes are useful, but must never block context injection.
       }
     }
-    const memoSessionKey = `${room}:${ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir}`;
+    const hostSession = String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir);
+    const memoSessionKey = `${room}:${hostSession}`;
     const turnKeys = turnKeysByMessage(messages);
     const currentTurnKey = turnKeys.get(promptMessage);
     const turnMemo = turnAdditionMemo(memoSessionKey);
+    pruneTurnAdditionMemo(turnMemo, new Set(turnKeys.values()));
+    const policyClient = new RecallPolicyHostClient({ room, spirit, session: hostSession });
     if (currentTurnKey && turnMemo.has(currentTurnKey)) {
       // Later requests of the same turn replay identical bytes so the
       // Anthropic prefix cache can hit past the system block.
@@ -373,10 +451,11 @@ export default function solarisaelHouseProof(pi) {
           `Operator: ${houseState?.operator || operator}`,
           "Durable-memory discipline: remembering is care for a future self, not dossier work. Preserve the active spirit's ordinary voice and the room's relationship register alongside the concrete facts needed for recognition: names, observable details, actions, boundaries, uncertainty, and meaning.",
           "A memory must stand alone. Do not make it clinical, corporate, sanitized, or generic. A transcript is provenance, not the only substance.",
-          "In AKASHA, PostgreSQL is authoritative for durable memories and lessons. A source path is provenance or backup, never a substitute for the database body.",
-          "Do not claim a memory was written without a successful remember receipt.",
+          "In AKASHA, PostgreSQL is authoritative for canon, durable memories, and lessons. A source path is provenance or backup, never a substitute for the database body.",
+          "Do not claim canon or memory was written without the corresponding successful PostgreSQL receipt.",
           "Athanor organs: the tools below are named organs of this House, not anonymous harness utilities. Recognize each by purpose and read its live schema before use; invocation shapes change, purposes do not.",
           "recall: canon, memories, and semantic chunks. Search in the room's own natural language and receive results as lived continuity and evidence, preserving names, relationships, uncertainty, and meaning. No canonical match means say you do not have it, never extrapolate from adjacent matches.",
+          "canon_read and canon_write: exact typed canon authority. Writes never overwrite; a correction or rename explicitly supersedes retained predecessor IDs, and history remains readable.",
           "remember: the only durable write for memories and lessons. Write for the future self in the active room's natural voice; technical records may stay technical, but durability must not flatten them into assistant prose.",
           "lessons: canonical typed lesson registry. Supply type=coding before writing or changing code, once per task rather than once per session.",
           "anamnesis and anamnesis_write: counsel drawn from lived repetition. Counsel, never authority; a writer refusal stays final.",
@@ -531,65 +610,84 @@ export default function solarisaelHouseProof(pi) {
     }
 
     if (!existingTypes.has("solarisael-recall-context") && process.env.SOLARISAEL_DISABLE_AUTO_RECALL !== "1") {
-      let queryRoute = null;
+      let queryRoute: Record<string, any> | null = null;
+      let decision: RecallPolicyDecision | null = null;
+      let policyState: PersistedRecallPolicy | null = null;
       try {
         const { classifyRetrievalQuery } = await loadHouseQueryRouting();
         const preliminaryRoute = classifyRetrievalQuery(prompt);
-        const resolution = preliminaryRoute.entityResolutionSuggested
+        const snapshot = await policyClient.inspect();
+        policyState = snapshot.recallPolicy;
+        const resolution = policyState.requestedMode !== "quiet"
+          && preliminaryRoute.entityResolutionSuggested
           ? await resolveEntities({ room, roomDir: effectiveRoomDir, query: prompt })
           : { ok: true, matches: [] };
         queryRoute = classifyRetrievalQuery(prompt, {
           recognizedEntities: resolution.matches.map((match) => match.canonicalName),
         });
-        if (queryRoute.shouldAutoRecall) {
-          const recalled = await recallWithRouting(effectiveRoomDir, room, queryRoute.recallQuery || prompt, { temporalDecay: true });
+        const activeProject = activeLessonState(room)?.project?.project || null;
+        const evaluation = await policyClient.evaluate({
+          queryRoute,
+          conversationTokens: conversationTokenEstimate(messages),
+          activeProject,
+          workingSetPresent: existingTypes.has("solarisael-recall-context")
+            || memoHasCustomType(turnMemo, "solarisael-recall-context"),
+          idempotencyKey: currentTurnKey ? `${currentTurnKey}:evaluate` : undefined,
+        });
+        decision = evaluation.decision;
+        policyState = evaluation.snapshot.recallPolicy;
+        if (decision.clearWorkingSet) removeMemoCustomType(turnMemo, "solarisael-recall-context");
+
+        if (decision.shouldRecall && decision.refreshReason) {
+          const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, { temporalDecay: true });
           if (recalled.ok) {
-            const compact = compactRecall(recalled.result);
-            const viewportKey = `${ctx?.sessionID || ctx?.sessionId || "session"}:${room}`;
+            const viewportKey = `${memoSessionKey}:recall`;
             let viewportSession = recallViewportSessions.get(viewportKey);
             if (!viewportSession) {
               viewportSession = createRecallViewportSession();
               recallViewportSessions.set(viewportKey, viewportSession);
-              if (recallViewportSessions.size >= 64) {
-                recallViewportSessions.delete(recallViewportSessions.keys().next().value);
-              }
+              trimOldestMap(recallViewportSessions, 64);
             }
-            const viewport = automaticRecallViewport(compact, { session: viewportSession });
-            const filteredCanonMatches = viewport.keptCandidates.length ? compact.canonMatches : [];
-            const automaticCompact = {
-              ...compact,
+            const viewport = automaticRecallViewport(recalled.result, { session: viewportSession });
+            const automaticCompact = compactAutomaticRecallPayload({
+              ...recalled.result,
               retrievalCandidates: viewport.keptCandidates,
-              canonMatches: filteredCanonMatches,
-              semanticChunks: [],
-              contentChunks: [],
-              found: Boolean(
-                viewport.keptCandidates.length
-                || filteredCanonMatches.length
-                || compact.dateMatches?.length
-              ),
-            };
-            if (automaticCompact.found || automaticCompact.warnings.length) {
-              additions.push({
+            });
+            const recallMessage = automaticCompact.found || automaticCompact.warnings.length
+              ? {
                 role: "custom",
                 customType: "solarisael-recall-context",
                 content: [
                   "<system-reminder>",
-                  "Room-local Athanor recall for this user turn.",
+                  `Room-local Athanor Recall working set (${decision.resolvedMode}; ${decision.refreshReason}).`,
                   JSON.stringify(automaticCompact, null, 2),
                   "</system-reminder>",
                 ].join("\n"),
                 display: false,
                 details: {
-                  query: automaticCompact.query,
                   found: automaticCompact.found,
                   warnings: automaticCompact.warnings,
-                  queryRoute,
+                  mode: decision.resolvedMode,
+                  refreshReason: decision.refreshReason,
                   viewport: viewport.diagnostics,
                 },
                 attribution: "agent",
                 timestamp,
-              });
-            }
+              }
+              : null;
+            const completed = await policyClient.completeRefresh({
+              queryTerms: decision.queryTerms,
+              refreshReason: decision.refreshReason,
+              entries: automaticCompact.retrievalCandidates.length
+                + automaticCompact.canonMatches.length
+                + automaticCompact.dateMatches.length,
+              hasWorkingSet: Boolean(recallMessage),
+              warning: automaticCompact.warnings[0],
+              idempotencyKey: currentTurnKey ? `${currentTurnKey}:complete` : undefined,
+            });
+            policyState = completed.recallPolicy;
+            removeMemoCustomType(turnMemo, "solarisael-recall-context");
+            if (recallMessage) additions.push(recallMessage);
             await recordRecallTelemetry({
               effectiveRoomDir,
               sessionId: ctx?.sessionID || ctx?.sessionId,
@@ -598,9 +696,20 @@ export default function solarisaelHouseProof(pi) {
               route: queryRoute,
               status: automaticCompact.found ? "injected" : "empty",
               viewport: automaticCompact,
-              viewportDiagnostics: viewport.diagnostics,
+              viewportDiagnostics: {
+                ...viewport.diagnostics,
+                policy: {
+                  requestedMode: policyState.requestedMode,
+                  resolvedMode: policyState.resolvedMode,
+                  refreshReason: decision.refreshReason,
+                },
+              },
             });
           } else {
+            policyState = (await policyClient.failRefresh(
+              recalled.result?.error || "recall failed",
+              currentTurnKey ? `${currentTurnKey}:failed` : undefined,
+            )).recallPolicy;
             await recordAutomaticContextTelemetry({
               effectiveRoomDir,
               sessionId: ctx?.sessionID || ctx?.sessionId,
@@ -608,7 +717,7 @@ export default function solarisaelHouseProof(pi) {
               prompt,
               route: queryRoute,
               status: "error",
-              error: redactDiagnosticText(recalled.result?.error || "recall failed", [queryRoute?.recallQuery, prompt]),
+              error: redactDiagnosticText(recalled.result?.error || "recall failed", [decision.query, prompt]),
               diagnostic: automaticContextDiagnostic({
                 operation: "automatic_recall",
                 stage: "request_parse",
@@ -627,9 +736,17 @@ export default function solarisaelHouseProof(pi) {
             prompt,
             route: queryRoute,
             status: "skipped",
+            viewportDiagnostics: {
+              policy: {
+                requestedMode: policyState.requestedMode,
+                resolvedMode: policyState.resolvedMode,
+                reason: policyState.resolutionReason,
+              },
+            },
           });
         }
       } catch (error) {
+        console.warn(`[athanor] Recall Policy Host degraded: ${error instanceof Error ? error.message : String(error)}`);
         await recordAutomaticContextTelemetry({
           effectiveRoomDir,
           sessionId: ctx?.sessionID || ctx?.sessionId,
@@ -637,16 +754,16 @@ export default function solarisaelHouseProof(pi) {
           prompt,
           route: queryRoute,
           status: "error",
-          error: redactDiagnosticText(error, [queryRoute?.recallQuery, prompt]),
+          error: redactDiagnosticText(error, [decision?.query, prompt]),
           diagnostic: automaticContextDiagnostic({
             operation: "automatic_recall",
             stage: queryRoute ? "request_parse" : "configuration_load",
             error,
             route: queryRoute,
-            requestDispatched: Boolean(queryRoute?.shouldAutoRecall),
+            requestDispatched: Boolean(decision?.shouldRecall),
           }),
         }).catch(() => undefined);
-        // Context injection must fail open. Manual recall remains available.
+        // Host owns policy. Degraded automatic Recall never writes or evaluates a fallback owner.
       }
     }
 
@@ -663,10 +780,31 @@ export default function solarisaelHouseProof(pi) {
       });
     }
 
-    if (currentTurnKey) turnMemo.set(currentTurnKey, additions);
+    if (currentTurnKey) mergeTurnAdditions(turnMemo, currentTurnKey, additions);
     return anchorTurnAdditions(messages, turnKeys, turnMemo);
   });
 
+
+  pi.on("session_compact", async (event, ctx) => {
+    const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+    const hostSession = String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir);
+    const memoSessionKey = `${room}:${hostSession}`;
+    recallViewportSessions.delete(`${memoSessionKey}:recall`);
+    removeMemoCustomType(turnAdditionMemo(memoSessionKey), "solarisael-recall-context");
+    const summary = event?.compactionEntry?.summary ?? event?.summary;
+    try {
+      await new RecallPolicyHostClient({
+        room,
+        spirit,
+        session: hostSession,
+      }).invalidateAfterCompaction(
+        summary,
+        `compaction:${String(event?.compactionEntry?.id || event?.id || Bun.hash(String(summary ?? "")))}`,
+      );
+    } catch (error) {
+      console.warn(`[athanor] Recall Policy Host degraded during compaction: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
   pi.on("tool_result", async (event, ctx) => {
     if (event?.toolName !== "task" || kittenLineageDisabled()) return;
     const { room } = roomContext(ctx.cwd);
@@ -681,6 +819,7 @@ export default function solarisaelHouseProof(pi) {
   pi.on("shutdown", async () => {
     closeRustRecallTransports();
     closeRustRememberTransports();
+    closePaperBoatTransports();
     closeRustAnamnesisTransports();
     await closeGigaTransports();
     stopKittenProgress?.();

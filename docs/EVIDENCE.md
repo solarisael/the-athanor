@@ -130,6 +130,42 @@ Godot rendering, payload integrity, and installer compilation. It does not
 establish a clean-machine elevated install, upgrade from a real 0.10.x
 installation, public signing, or external publication.
 
+### Installed RC2 existing-House proof — 2026-08-11
+
+`1.0.0-rc.2` closed the last-mile seams exposed when RC1 was asked to install on
+the real Solarisael workstation.
+
+| Contract | Observed result |
+|---|---:|
+| Complete isolated repository command | passed: 43 root Bun, 12 Python unit, 12 substrate pytest, complete Rust workspace, 197 OMP with 1 skipped |
+| Focused native lifecycle | 9 lifecycle, 6 supervisor, and 1 OMP registration unit passed |
+| RC2 payload manifest | 20,645 artifacts; every byte size and SHA-256 matched |
+| Elevated external-authority installation | passed |
+| First external install backup | 119.5 MiB PostgreSQL dump plus manifest written before migration |
+| Windows service | `SolarisaelAthanor` reported `RUNNING` and stoppable |
+| Runtime children | NATS, delivery, `host:kintsu`, `host:kodo`; no Windows PostgreSQL child |
+| Loopback readiness | NATS `4222`, Kintsu `8787`, Kodo `8788` reachable |
+| Native doctor | release manifest, 20,645 artifact checksums, service, and persistent data all passed |
+| OMP ownership | exactly one stable Program Files loader; development `index.ts`/`hygiene.ts` entries removed |
+| OMP client secret | user-only ACL; 64-character token; no token in `config.yml` |
+| Installed Host authentication | Kintsu and Kodo each returned the correct independent Recall Policy snapshot |
+| Installed Godot launch | native manager launched Godot 4.7.1 for Kintsu with identity/token only in child environment |
+
+The exact installed topology reuses the authoritative WSL PostgreSQL database
+and therefore starts no second database on `5432`. Host processes use the real
+`kintsu` and `kodo` vault directories, distinct ports, and distinct durable
+state directories. OMP room commands select endpoints by exact room key and
+refuse a missing entry rather than crossing rooms.
+
+The proven installer is `The-Athanor-1.0.0-rc.2-windows-x64.exe`, SHA-256
+`1eff2d67bceed1367c623ed05e5f0c182cb4cbc19d231097c82f50d9434d5174`.
+Its setup wrapper now propagates a nonzero native-manager result instead of
+reporting a false successful installation.
+
+This closes elevated installation for the existing-House external-database
+topology. It does not yet prove a clean generic managed-database installation,
+a real 0.10.x upgrade/rollback, or signing.
+
 ## Next public evidence
 
 The post-1.0 public proof program expands the evidence surface in this order.

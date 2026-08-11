@@ -1,9 +1,10 @@
 use anyhow::{Result, bail};
 use athanor_install::{
-    boundaries::{FileSystem, RuntimeControl, SecretSource, ServiceManager},
-    installer::{InstallRequest, Installer},
+    boundaries::{FileSystem, NativeFileSystem, RuntimeControl, SecretSource, ServiceManager},
+    installer::{HouseInstallConfig, InstallRequest, Installer, OperatorIntegration},
     layout::{InstallLayout, SERVICE_NAME},
     manifest::{Artifact, Compatibility, ReleaseManifest, RollbackContract},
+    supervisor::HostRoomConfig,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -75,6 +76,10 @@ impl FileSystem for FakeFs {
         Ok(())
     }
     fn restrict_acl(&self, path: &Path) -> Result<()> {
+        self.acls.borrow_mut().push(path.into());
+        Ok(())
+    }
+    fn restrict_user_acl(&self, path: &Path, _: &str) -> Result<()> {
         self.acls.borrow_mut().push(path.into());
         Ok(())
     }
@@ -201,6 +206,8 @@ fn install_verifies_before_mutation_and_uninstall_preserves_data() -> Result<()>
         staging,
         manifest: release("1.0.0", bytes),
         external_database_url: None,
+        house_config: None,
+        operator_integration: None,
     })?;
     assert_eq!(outcome.version, "1.0.0");
     assert!(fs.exists(&layout.secrets()));
@@ -237,7 +244,9 @@ fn checksum_failure_does_not_create_install_directories() {
             .install(InstallRequest {
                 staging,
                 manifest: release("1.0.0", b"expected"),
-                external_database_url: None
+                external_database_url: None,
+                house_config: None,
+                operator_integration: None,
             })
             .is_err()
     );
@@ -292,11 +301,15 @@ fn upgrade_records_database_backup_and_rollback_restores_it() -> Result<()> {
         staging: one,
         manifest: release("1.0.0", b"one"),
         external_database_url: None,
+        house_config: None,
+        operator_integration: None,
     })?;
     installer.install(InstallRequest {
         staging: two,
         manifest: release("2.0.0", b"two"),
         external_database_url: None,
+        house_config: None,
+        operator_integration: None,
     })?;
     let rolled_back = installer.rollback()?;
     assert_eq!(rolled_back.version, "1.0.0");
@@ -325,4 +338,190 @@ fn manifest_rejects_an_unpinned_godot_runtime() {
     manifest.compatibility.godot = "4.8-stable".into();
 
     assert!(manifest.validate().is_err());
+}
+
+#[test]
+fn install_registers_one_stable_loader_and_uninstall_removes_only_owned_files() -> Result<()> {
+    let fs = FakeFs::default();
+    let services = FakeServices::default();
+    let runtime = FakeRuntime::default();
+    let layout = InstallLayout::new(Path::new("C:/Program Files"), Path::new("C:/ProgramData"));
+    let staging = PathBuf::from("C:/stage");
+    fs.files.borrow_mut().insert(
+        staging.join("bin/athanor-manage.exe"),
+        b"native-manager".to_vec(),
+    );
+    fs.files
+        .borrow_mut()
+        .insert(layout.omp_loader(), b"stable loader".to_vec());
+    let omp_config = PathBuf::from("C:/Users/Sol/.omp/agent/config.yml");
+    fs.files.borrow_mut().insert(
+        omp_config.clone(),
+        b"theme: dark\nextensions:\n  - C:/repo/the-athanor/adapters/omp/index.ts\n  - C:/repo/the-athanor/adapters/omp/hygiene.ts\n  - C:/foreign/extension.ts\n".to_vec(),
+    );
+    let client_config = PathBuf::from("C:/Users/Sol/.omp/agent/athanor/client.json");
+    let installer = Installer {
+        fs: &fs,
+        services: &services,
+        runtime: &runtime,
+        secrets: &FixedSecrets,
+        layout: layout.clone(),
+    };
+
+    let outcome = installer.install(InstallRequest {
+        staging,
+        manifest: release("1.0.0", b"native-manager"),
+        external_database_url: None,
+        house_config: None,
+        operator_integration: Some(OperatorIntegration {
+            omp_config_path: omp_config.clone(),
+            client_config_path: client_config.clone(),
+            operator_principal: "SOL\\Sol".into(),
+        }),
+    })?;
+
+    assert!(outcome.omp_registered);
+    let registered = String::from_utf8(fs.read(&omp_config)?)?;
+    assert_eq!(registered.matches("athanor-omp-loader.ts").count(), 1);
+    assert!(!registered.contains("/repo/the-athanor/adapters/omp"));
+    assert!(registered.contains("C:/foreign/extension.ts"));
+    assert!(!registered.contains("fixed-secret-material"));
+    let client: serde_json::Value = serde_json::from_slice(&fs.read(&client_config)?)?;
+    assert_eq!(client["hostToken"], "07".repeat(32));
+
+    installer.uninstall()?;
+    let unregistered = String::from_utf8(fs.read(&omp_config)?)?;
+    assert!(!unregistered.contains("athanor-omp-loader.ts"));
+    assert!(unregistered.contains("C:/foreign/extension.ts"));
+    assert!(!fs.exists(&client_config));
+    Ok(())
+}
+
+#[test]
+fn first_external_install_backs_up_authority_before_migration() -> Result<()> {
+    let fs = FakeFs::default();
+    let services = FakeServices::default();
+    let runtime = FakeRuntime::default();
+    let layout = InstallLayout::new(Path::new("C:/Program Files"), Path::new("C:/ProgramData"));
+    let staging = PathBuf::from("C:/stage");
+    fs.files.borrow_mut().insert(
+        staging.join("bin/athanor-manage.exe"),
+        b"native-manager".to_vec(),
+    );
+    fs.files.borrow_mut().insert(
+        layout.version("1.0.0").join("orphan.partial"),
+        b"partial".to_vec(),
+    );
+    let installer = Installer {
+        fs: &fs,
+        services: &services,
+        runtime: &runtime,
+        secrets: &FixedSecrets,
+        layout: layout.clone(),
+    };
+
+    installer.install(InstallRequest {
+        staging,
+        manifest: release("1.0.0", b"native-manager"),
+        external_database_url: Some("postgresql://external-authority".into()),
+        house_config: None,
+        operator_integration: None,
+    })?;
+
+    assert_eq!(
+        runtime.events.borrow().as_slice(),
+        ["backup", "migrate", "ready"]
+    );
+    assert!(!fs.exists(&layout.version("1.0.0").join("orphan.partial")));
+    Ok(())
+}
+
+#[test]
+fn custom_house_config_preserves_real_room_identity_and_rejects_missing_state() -> Result<()> {
+    let fs = FakeFs::default();
+    let services = FakeServices::default();
+    let runtime = FakeRuntime::default();
+    let layout = InstallLayout::new(Path::new("C:/Program Files"), Path::new("C:/ProgramData"));
+    let staging = PathBuf::from("C:/stage");
+    fs.files.borrow_mut().insert(
+        staging.join("bin/athanor-manage.exe"),
+        b"native-manager".to_vec(),
+    );
+    let rooms_root = PathBuf::from("C:/Solarisael/Obsidian/obsidian");
+    let state_root = PathBuf::from("C:/Solarisael/Obsidian/obsidian/house/state");
+    let house = HouseInstallConfig {
+        house_id: "solarisael".into(),
+        rooms_root: rooms_root.clone(),
+        operator_state_root: state_root.clone(),
+        default_room: "kintsu".into(),
+        rooms: vec![
+            HostRoomConfig {
+                room: "kintsu".into(),
+                spirit: "Kintsu".into(),
+                port: 8787,
+            },
+            HostRoomConfig {
+                room: "kodo".into(),
+                spirit: "Kodo".into(),
+                port: 8788,
+            },
+        ],
+    };
+    let request = || InstallRequest {
+        staging: staging.clone(),
+        manifest: release("1.0.0", b"native-manager"),
+        external_database_url: Some("postgresql://external-authority".into()),
+        house_config: Some(house.clone()),
+        operator_integration: None,
+    };
+    let installer = Installer {
+        fs: &fs,
+        services: &services,
+        runtime: &runtime,
+        secrets: &FixedSecrets,
+        layout: layout.clone(),
+    };
+
+    assert!(installer.install(request()).is_err());
+    assert!(services.events.borrow().is_empty());
+    for room in ["kintsu", "kodo"] {
+        fs.files.borrow_mut().insert(
+            rooms_root
+                .join(room)
+                .join(".omp/runtime/solarisael-house-state.json"),
+            format!(r#"{{"version":1,"room":"{room}"}}"#).into_bytes(),
+        );
+    }
+    installer.install(request())?;
+
+    let config: serde_json::Value = serde_json::from_slice(&fs.read(&layout.config())?)?;
+    assert_eq!(config["houseId"], "solarisael");
+    assert_eq!(config["roomsRoot"], rooms_root.display().to_string());
+    assert_eq!(
+        config["operatorStateRoot"],
+        state_root.display().to_string()
+    );
+    assert_eq!(config["rooms"].as_array().unwrap().len(), 2);
+    Ok(())
+}
+
+#[cfg(windows)]
+#[test]
+fn short_operator_name_resolves_to_a_windows_security_principal() -> Result<()> {
+    let root = std::env::temp_dir().join(format!(
+        "athanor-acl-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let principal = std::env::var("USERNAME")?;
+    NativeFileSystem.restrict_user_acl(&root, &principal)?;
+    let client = root.join("client.json");
+    std::fs::write(&client, b"private")?;
+    NativeFileSystem.restrict_user_acl(&client, &principal)?;
+    assert_eq!(std::fs::read(&client)?, b"private");
+    std::fs::remove_dir_all(&root)?;
+    Ok(())
 }

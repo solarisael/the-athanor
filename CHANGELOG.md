@@ -22,6 +22,27 @@ the exact implementation record.
 
 No changes yet.
 
+## [1.0.0-rc.2] - 2026-08-11
+
+### Fixed
+
+- Added one stable Program Files OMP loader that follows `current.json`, loads
+  the active adapter and hygiene extension exactly once, and replaces obsolete
+  source/version entries without rewriting unrelated OMP configuration.
+- Added an ACL-restricted per-user Host client projection. Tokens remain outside
+  `config.yml`; room endpoints are selected from the exact OMP room binding.
+- Replaced the invented single `local/home` Host with one supervised Host child
+  per configured House room, each using an exact vault directory, identity,
+  loopback port, and isolated durable state directory.
+- Made external-database first installation back up the existing PostgreSQL
+  authority before any migration, and restored it on first-install activation
+  failure.
+- Made the Windows service follow runtime-plan dependency order, reverse it for
+  shutdown, and refuse a child that exits before readiness instead of accepting
+  an unrelated listener on the same port.
+- Routed the Start-menu Godot client through the native manager so Host token,
+  room, spirit, and endpoint travel only in child-process environment.
+
 ## [1.0.0-rc.1] - 2026-08-10
 
 ### Added

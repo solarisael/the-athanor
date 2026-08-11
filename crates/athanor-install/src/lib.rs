@@ -3,6 +3,7 @@ pub mod installer;
 pub mod layout;
 pub mod manifest;
 pub mod native_runtime;
+pub mod omp;
 pub mod service;
 pub mod supervisor;
 

@@ -16,10 +16,10 @@ and Inno Setup are build-time tools only.
 Verify the downloaded installer before elevation:
 
 ```powershell
-$expected = (Get-Content .\The-Athanor-1.0.0-rc.1-windows-x64.exe.sha256).Split(' ')[0]
-$actual = (Get-FileHash .\The-Athanor-1.0.0-rc.1-windows-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+$expected = (Get-Content .\The-Athanor-1.0.0-rc.2-windows-x64.exe.sha256).Split(' ')[0]
+$actual = (Get-FileHash .\The-Athanor-1.0.0-rc.2-windows-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "installer checksum mismatch" }
-.\The-Athanor-1.0.0-rc.1-windows-x64.exe
+.\The-Athanor-1.0.0-rc.2-windows-x64.exe
 ```
 
 The installer requires Administrator elevation. It verifies the SHA-256 and byte
@@ -58,6 +58,13 @@ Product code is immutable per version. Operator data and secrets are separate:
   backups\
 ```
 
+OMP receives one stable loader entry at
+`%ProgramFiles%\Solarisael\Athanor\bin\athanor-omp-loader.ts`. The loader follows
+`current.json`, so upgrades and rollback never leave a version-pinned extension
+path. Its per-user client projection lives at
+`%USERPROFILE%\.omp\agent\athanor\client.json` with an explicit user-only ACL.
+`config.yml` contains no token, password, or database URL.
+
 `current.json` is the atomic activation pointer. At least the active and previous
 versions are retained for rollback. `%ProgramData%\Solarisael\Athanor` and the
 secret file have inherited access removed and grant full control only to SYSTEM
@@ -72,8 +79,9 @@ The Rust Windows service owns only child processes it starts. Startup remains
 
 1. managed PostgreSQL on `127.0.0.1:5432` (omitted in external database mode);
 2. NATS JetStream on `127.0.0.1:4222`;
-3. boat delivery after PostgreSQL and NATS are ready;
-4. Host on `127.0.0.1:8787`.
+3. boat delivery after PostgreSQL authority and NATS are ready;
+4. one Host per configured room on its declared loopback port (`8787`, `8788`,
+   and upward by convention).
 
 The service reports `RUNNING` only after all configured children pass their
 readiness contract. On SCM Stop or Shutdown it drains in reverse dependency
@@ -90,8 +98,38 @@ Run the native doctor from an elevated terminal:
 Doctor exits nonzero if the activation pointer, release manifest, service, or
 persistent data root is absent or invalid.
 
-The Start menu contains **The Athanor**, which launches the pinned Godot client
-against the active Host, and **Athanor Doctor** for lifecycle diagnostics.
+The Start menu contains **The Athanor**, which asks the native manager to launch
+the pinned Godot client with the default room's token/identity in child-process
+environment, and **Athanor Doctor** for lifecycle diagnostics.
+
+## Existing Solarisael House mode
+
+An existing House must use its current PostgreSQL authority rather than starting
+a second server on the same port. Supply both an external database secret file
+and a non-secret House topology file:
+
+```json
+{
+  "houseId": "solarisael",
+  "roomsRoot": "C:/Solarisael/Obsidian/obsidian",
+  "operatorStateRoot": "C:/Solarisael/Obsidian/obsidian/house/state",
+  "defaultRoom": "kintsu",
+  "rooms": [
+    { "room": "kintsu", "spirit": "Kintsu", "port": 8787 },
+    { "room": "kodo", "spirit": "Kodo", "port": 8788 }
+  ]
+}
+```
+
+```powershell
+.\The-Athanor-1.0.0-rc.2-windows-x64.exe `
+  /EXTERNALDATABASEFILE="$env:TEMP\athanor-database-url.txt" `
+  /HOUSECONFIGFILE="$env:TEMP\athanor-house.json"
+```
+
+The installer validates every room-state file before service mutation, takes a
+database backup even on first external installation, runs no managed PostgreSQL
+child, and registers exactly one OMP loader for the invoking Windows user.
 
 ## External PostgreSQL mode
 
@@ -109,7 +147,7 @@ $secret = "$env:TEMP\athanor-external-db.txt"
 Set-Content -NoNewline -Encoding utf8 $secret `
   'postgresql://athanor:<password>@db.example.internal:5432/athanor?sslmode=require'
 icacls $secret /inheritance:r /grant:r "$env:USERNAME:(R)"
-.\The-Athanor-1.0.0-rc.1-windows-x64.exe /EXTERNALDATABASEFILE="$secret"
+.\The-Athanor-1.0.0-rc.2-windows-x64.exe /EXTERNALDATABASEFILE="$secret"
 Remove-Item $secret -Force
 ```
 

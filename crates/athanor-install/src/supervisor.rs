@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::{
@@ -24,22 +24,8 @@ use windows_sys::Win32::{
     },
 };
 
-pub const START_ORDER: &[&str] = &["postgresql", "nats", "delivery", "host"];
-pub const STOP_ORDER: &[&str] = &["host", "delivery", "nats", "postgresql"];
 pub const START_TIMEOUT: Duration = Duration::from_secs(90);
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(30);
-fn default_room() -> String {
-    "home".into()
-}
-fn default_house() -> String {
-    "local".into()
-}
-fn default_spirit() -> String {
-    "athanor".into()
-}
-fn default_session() -> String {
-    "managed".into()
-}
 #[cfg(windows)]
 unsafe extern "system" fn ignore_supervisor_console_control(_: u32) -> i32 {
     1
@@ -73,7 +59,7 @@ pub enum Readiness {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcessSpec {
-    pub name: &'static str,
+    pub name: String,
     pub executable: PathBuf,
     pub arguments: Vec<OsString>,
     pub environment: BTreeMap<String, String>,
@@ -115,18 +101,19 @@ impl Processes for NativeProcesses {
         self.children
             .lock()
             .unwrap()
-            .insert(spec.name.into(), child);
+            .insert(spec.name.clone(), child);
         Ok(pid)
     }
     fn ready(&self, name: &str, readiness: &Readiness) -> Result<bool> {
-        if self
+        if let Some(status) = self
             .children
             .lock()
             .unwrap()
             .get_mut(name)
-            .is_some_and(|child| child.try_wait().ok().flatten().is_some())
+            .with_context(|| format!("managed child {name} is not owned by this supervisor"))?
+            .try_wait()?
         {
-            return Ok(false);
+            bail!("managed child {name} exited before readiness with {status}");
         }
         match readiness {
             Readiness::Tcp(address) => {
@@ -201,6 +188,14 @@ impl Processes for NativeProcesses {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostRoomConfig {
+    pub room: String,
+    pub spirit: String,
+    pub port: u16,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SupervisorConfig {
@@ -209,14 +204,9 @@ pub struct SupervisorConfig {
     pub database_port: u16,
     pub nats_host: String,
     pub nats_port: u16,
-    #[serde(default = "default_room")]
-    pub room: String,
-    #[serde(default = "default_house")]
+    pub rooms_root: PathBuf,
     pub house_id: String,
-    #[serde(default = "default_spirit")]
-    pub spirit: String,
-    #[serde(default = "default_session")]
-    pub session: String,
+    pub rooms: Vec<HostRoomConfig>,
 }
 
 pub struct Supervisor<P> {
@@ -227,16 +217,17 @@ impl<P: Processes> Supervisor<P> {
     where
         F: FnMut(u32, &str) -> Result<()>,
     {
-        let mut started: Vec<&str> = Vec::new();
-        for (index, name) in START_ORDER.iter().enumerate() {
-            let Some(spec) = specs.iter().find(|spec| spec.name == *name) else {
-                if *name == "postgresql" {
-                    continue;
-                }
-                bail!("managed runtime plan is missing required child {name}");
-            };
-            self.processes.spawn(spec)?;
-            started.push(name);
+        if specs.is_empty() {
+            bail!("managed runtime plan has no children");
+        }
+        let mut started = Vec::new();
+        for (index, spec) in specs.iter().enumerate() {
+            let name = spec.name.as_str();
+            if let Err(error) = self.processes.spawn(spec) {
+                self.stop_names(&started)?;
+                return Err(error);
+            }
+            started.push(name.to_owned());
             checkpoint((index + 1) as u32, name)?;
             let deadline = Instant::now() + START_TIMEOUT;
             while !self.processes.ready(name, &spec.readiness)? {
@@ -254,13 +245,16 @@ impl<P: Processes> Supervisor<P> {
     }
 
     pub fn stop(&self, specs: &[ProcessSpec]) -> Result<()> {
-        let started: Vec<&str> = specs.iter().map(|spec| spec.name).collect();
+        let started = specs
+            .iter()
+            .map(|spec| spec.name.clone())
+            .collect::<Vec<_>>();
         self.stop_names(&started)
     }
 
-    fn stop_names(&self, started: &[&str]) -> Result<()> {
+    fn stop_names(&self, started: &[String]) -> Result<()> {
         let mut failures = Vec::new();
-        for name in STOP_ORDER.iter().filter(|name| started.contains(name)) {
+        for name in started.iter().rev() {
             if let Err(error) = self.processes.request_stop(name) {
                 failures.push(format!("{name}: {error}"));
                 continue;
@@ -299,10 +293,46 @@ pub fn runtime_plan(
     };
     let database = loopback(&config.database_host, config.database_port)?;
     let nats = loopback(&config.nats_host, config.nats_port)?;
+    if config.house_id.trim().is_empty() {
+        bail!("houseId must not be empty");
+    }
+    if !config.rooms_root.is_absolute() {
+        bail!("roomsRoot must be absolute");
+    }
+    if config.rooms.is_empty() {
+        bail!("at least one Host room is required");
+    }
+    let mut room_keys = std::collections::BTreeSet::new();
+    let mut host_ports = std::collections::BTreeSet::new();
+    for room in &config.rooms {
+        let safe_room = !room.room.is_empty()
+            && room.room != "house"
+            && !room.room.starts_with('-')
+            && !room.room.ends_with('-')
+            && !room.room.contains("--")
+            && room
+                .room
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+        if !safe_room || room.spirit.trim().is_empty() {
+            bail!("Host room identity is invalid for {:?}", room.room);
+        }
+        if !room_keys.insert(room.room.clone()) {
+            bail!("duplicate Host room {:?}", room.room);
+        }
+        if !host_ports.insert(room.port)
+            || room.port == config.database_port
+            || room.port == config.nats_port
+        {
+            bail!("Host port {} is duplicate or reserved", room.port);
+        }
+        loopback("127.0.0.1", room.port)?;
+    }
+
     let mut specs = Vec::new();
     if config.database_mode == "managed" {
         specs.push(ProcessSpec {
-            name: "postgresql",
+            name: "postgresql".into(),
             executable: version_root.join("runtime/postgresql/bin/postgres.exe"),
             arguments: vec![
                 "-D".into(),
@@ -319,7 +349,7 @@ pub fn runtime_plan(
         bail!("databaseMode must be managed or external");
     }
     specs.push(ProcessSpec {
-        name: "nats",
+        name: "nats".into(),
         executable: version_root.join("runtime/nats/nats-server.exe"),
         arguments: vec![
             "-js".into(),
@@ -342,7 +372,7 @@ pub fn runtime_plan(
     ]);
     let delivery_executable = version_root.join("bin/athanor-house-delivery.exe");
     specs.push(ProcessSpec {
-        name: "delivery",
+        name: "delivery".into(),
         executable: delivery_executable.clone(),
         arguments: vec!["run".into()],
         environment: common.clone(),
@@ -352,30 +382,39 @@ pub fn runtime_plan(
             environment: common.clone(),
         },
     });
-    let mut host_env = common;
-    host_env.insert("ATHANOR_HOST_TOKEN".into(), host_token.into());
-    host_env.insert(
-        "ATHANOR_HOST_ROOM_DIR".into(),
-        data_root
-            .join("rooms")
-            .join(&config.room)
-            .display()
-            .to_string(),
-    );
-    host_env.insert(
-        "ATHANOR_HOST_STATE_DIR".into(),
-        data_root.join("state/host").display().to_string(),
-    );
-    host_env.insert("ATHANOR_HOST_HOUSE_ID".into(), config.house_id.clone());
-    host_env.insert("ATHANOR_HOST_ROOM".into(), config.room.clone());
-    host_env.insert("ATHANOR_HOST_SPIRIT".into(), config.spirit.clone());
-    host_env.insert("ATHANOR_HOST_SESSION".into(), config.session.clone());
-    specs.push(ProcessSpec {
-        name: "host",
-        executable: version_root.join("bin/house-host.exe"),
-        arguments: Vec::new(),
-        environment: host_env,
-        readiness: Readiness::Tcp("127.0.0.1:8787".parse().unwrap()),
-    });
+    for room in &config.rooms {
+        let mut host_env = common.clone();
+        host_env.insert("ATHANOR_HOST_TOKEN".into(), host_token.into());
+        host_env.insert(
+            "ATHANOR_HOST_ROOM_DIR".into(),
+            config.rooms_root.join(&room.room).display().to_string(),
+        );
+        host_env.insert(
+            "ATHANOR_HOST_STATE_DIR".into(),
+            data_root
+                .join("state/host")
+                .join(&room.room)
+                .display()
+                .to_string(),
+        );
+        host_env.insert("ATHANOR_HOST_HOUSE_ID".into(), config.house_id.clone());
+        host_env.insert("ATHANOR_HOST_ROOM".into(), room.room.clone());
+        host_env.insert("ATHANOR_HOST_SPIRIT".into(), room.spirit.clone());
+        host_env.insert(
+            "ATHANOR_HOST_SESSION".into(),
+            format!("managed:{}", room.room),
+        );
+        host_env.insert(
+            "ATHANOR_HOST_BIND".into(),
+            format!("127.0.0.1:{}", room.port),
+        );
+        specs.push(ProcessSpec {
+            name: format!("host:{}", room.room),
+            executable: version_root.join("bin/house-host.exe"),
+            arguments: Vec::new(),
+            environment: host_env,
+            readiness: Readiness::Tcp(loopback("127.0.0.1", room.port)?),
+        });
+    }
     Ok(specs)
 }

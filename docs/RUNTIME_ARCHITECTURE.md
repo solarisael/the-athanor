@@ -15,7 +15,7 @@ and contracts created by earlier layers. The public release order lives in
 
 ## 1. Current boundary
 
-The `1.0.0-rc.1` candidate has:
+The `1.0.0-rc.2` candidate has:
 
 - one Rust domain/protocol workspace;
 - file-authoritative Vault and PostgreSQL-authoritative AKASHA;

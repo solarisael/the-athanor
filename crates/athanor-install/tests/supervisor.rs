@@ -1,6 +1,7 @@
 use anyhow::Result;
 use athanor_install::supervisor::{
-    ProcessSpec, Processes, Readiness, STOP_TIMEOUT, Supervisor, SupervisorConfig, runtime_plan,
+    HostRoomConfig, ProcessSpec, Processes, Readiness, STOP_TIMEOUT, Supervisor, SupervisorConfig,
+    runtime_plan,
 };
 use std::{cell::RefCell, collections::BTreeMap, path::PathBuf, time::Duration};
 
@@ -35,9 +36,9 @@ impl Processes for FakeProcesses {
     }
 }
 
-fn spec(name: &'static str, port: u16) -> ProcessSpec {
+fn spec(name: &str, port: u16) -> ProcessSpec {
     ProcessSpec {
-        name,
+        name: name.into(),
         executable: PathBuf::from(format!("{name}.exe")),
         arguments: Vec::new(),
         environment: BTreeMap::new(),
@@ -168,10 +169,15 @@ fn delivery_readiness_executes_the_real_health_contract() -> Result<()> {
         database_port: 5432,
         nats_host: "127.0.0.1".into(),
         nats_port: 4222,
-        room: "kintsu".into(),
-        house_id: "house".into(),
-        spirit: "Kintsu".into(),
-        session: "managed".into(),
+        rooms_root: PathBuf::from("rooms")
+            .canonicalize()
+            .unwrap_or_else(|_| std::env::current_dir().unwrap().join("rooms")),
+        house_id: "solarisael".into(),
+        rooms: vec![HostRoomConfig {
+            room: "kintsu".into(),
+            spirit: "Kintsu".into(),
+            port: 8787,
+        }],
     };
     let plan = runtime_plan(
         &PathBuf::from("release"),
@@ -205,6 +211,89 @@ fn delivery_readiness_executes_the_real_health_contract() -> Result<()> {
             );
         }
         other => panic!("delivery readiness must be its real health command, got {other:?}"),
+    }
+    Ok(())
+}
+
+#[test]
+fn external_plan_emits_distinct_room_hosts_without_postgresql() -> Result<()> {
+    let rooms_root = std::env::current_dir()?.join("rooms");
+    let config = SupervisorConfig {
+        database_mode: "external".into(),
+        database_host: "127.0.0.1".into(),
+        database_port: 5432,
+        nats_host: "127.0.0.1".into(),
+        nats_port: 4222,
+        rooms_root: rooms_root.clone(),
+        house_id: "solarisael".into(),
+        rooms: vec![
+            HostRoomConfig {
+                room: "kintsu".into(),
+                spirit: "Kintsu".into(),
+                port: 8787,
+            },
+            HostRoomConfig {
+                room: "kodo".into(),
+                spirit: "Kodo".into(),
+                port: 8788,
+            },
+        ],
+    };
+    let plan = runtime_plan(
+        &PathBuf::from("release"),
+        &PathBuf::from("data"),
+        &config,
+        "postgresql://external",
+        "token",
+    )?;
+
+    assert_eq!(
+        plan.iter()
+            .map(|spec| spec.name.as_str())
+            .collect::<Vec<_>>(),
+        ["nats", "delivery", "host:kintsu", "host:kodo"]
+    );
+    for (room, spirit, port) in [("kintsu", "Kintsu", 8787), ("kodo", "Kodo", 8788)] {
+        let host = plan
+            .iter()
+            .find(|spec| spec.name == format!("host:{room}"))
+            .unwrap();
+        assert_eq!(
+            host.environment
+                .get("ATHANOR_HOST_ROOM")
+                .map(String::as_str),
+            Some(room)
+        );
+        assert_eq!(
+            host.environment
+                .get("ATHANOR_HOST_SPIRIT")
+                .map(String::as_str),
+            Some(spirit)
+        );
+        assert_eq!(
+            host.environment
+                .get("ATHANOR_HOST_BIND")
+                .map(String::as_str),
+            Some(format!("127.0.0.1:{port}").as_str())
+        );
+        assert_eq!(
+            host.environment.get("ATHANOR_HOST_ROOM_DIR"),
+            Some(&rooms_root.join(room).display().to_string())
+        );
+        assert_eq!(
+            host.environment.get("ATHANOR_HOST_STATE_DIR"),
+            Some(
+                &PathBuf::from("data")
+                    .join("state/host")
+                    .join(room)
+                    .display()
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            host.readiness,
+            Readiness::Tcp(format!("127.0.0.1:{port}").parse().unwrap())
+        );
     }
     Ok(())
 }

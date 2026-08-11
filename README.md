@@ -8,11 +8,13 @@ its source attached. Corrected knowledge can replace stale guidance without
 erasing history. The model or provider carrying the work can change without
 making the project start from zero again.
 
-**Status:** `1.0.0-rc.1`, native Windows x64 release candidate. OMP is the
+**Status:** `1.0.0-rc.2`, native Windows x64 release candidate. OMP is the
 supported harness. One Rust workspace owns the behavioral core, Vault retrieval,
 AKASHA PostgreSQL authority, Athanor Host, NATS delivery, native lifecycle, and
 Godot client. Vault remains database-free; AKASHA adds durable typed memory,
 lessons, canon, continuity, and governed background work.
+RC2 is installed on the reference Solarisael workstation in external-authority
+mode with separate Kintsu and Kodo Hosts and one stable OMP loader.
 
 ## Choose your entrance
 
@@ -149,7 +151,7 @@ contracts and [Hippocampus](./docs/HIPPOCAMPUS.md) for candidate authority.
 
 ## What exists now
 
-The `1.0.0-rc.1` candidate includes:
+The `1.0.0-rc.2` candidate includes:
 
 - one shared Rust contract layer and Rust-owned Vault/AKASHA behavior;
 - strict database-free Vault retrieval with attributed bounded evidence;
@@ -264,7 +266,7 @@ harness already has a supported adapter.
 
 ### Follow accepted direction
 
-- [Changelog](./CHANGELOG.md) — notable changes through the `1.0.0-rc.1` candidate
+- [Changelog](./CHANGELOG.md) — notable changes through the `1.0.0-rc.2` candidate
 - [Planned Features](./docs/PLANNED_FEATURES.md) — canonical status map
 - [Runtime Architecture](./docs/RUNTIME_ARCHITECTURE.md)
 - [Godot Client](./docs/GODOT_CLIENT.md)

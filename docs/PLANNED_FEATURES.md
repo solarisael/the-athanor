@@ -34,9 +34,9 @@ Self-hosting remains available. Managed services must support complete export.
 
 ## What works now
 
-The `1.0.0-rc.1` native Windows x64 candidate is locally built and verified.
-OMP is the supported harness. Solarisael House remains the working reference
-House.
+The `1.0.0-rc.2` native Windows x64 candidate is installed and live on the
+Solarisael workstation. OMP is the supported harness and Solarisael House
+remains the working reference House.
 
 The canonical, current capability map — surfaces, owners, and authority — lives
 in [`ARCHITECTURE.md`](./ARCHITECTURE.md). This page does not copy it; it maps

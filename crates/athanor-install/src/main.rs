@@ -2,13 +2,16 @@ use anyhow::{Context, Result, bail};
 use athanor_install::{
     boundaries::{NativeFileSystem, OsSecrets, ScServiceManager},
     doctor,
-    installer::{InstallRequest, Installer},
+    installer::{
+        CurrentRelease, HouseInstallConfig, InstallRequest, Installer, OperatorIntegration,
+    },
     layout::InstallLayout,
     manifest::ReleaseManifest,
     native_runtime::NativeRuntimeControl,
+    omp::ClientProjection,
     service,
 };
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::PathBuf, process::Command};
 
 fn value(arguments: &[String], flag: &str) -> Result<String> {
     let index = arguments
@@ -19,6 +22,19 @@ fn value(arguments: &[String], flag: &str) -> Result<String> {
         .get(index + 1)
         .cloned()
         .with_context(|| format!("{flag} requires a value"))
+}
+
+fn optional_value(arguments: &[String], flag: &str) -> Result<Option<String>> {
+    arguments
+        .iter()
+        .position(|argument| argument == flag)
+        .map(|index| {
+            arguments
+                .get(index + 1)
+                .cloned()
+                .with_context(|| format!("{flag} requires a value"))
+        })
+        .transpose()
 }
 
 fn layout() -> Result<InstallLayout> {
@@ -37,7 +53,7 @@ fn main() -> Result<()> {
     }
     if matches!(command, "help" | "--help" | "-h") {
         println!(
-            "Athanor native runtime manager\n\nCommands:\n  install --staging DIR --manifest FILE [--external-database-file FILE]\n  update --staging DIR --manifest FILE [--external-database-file FILE]\n  doctor\n  rollback\n  uninstall\n  purge --confirm-data-loss\n  service"
+            "Athanor native runtime manager\n\nCommands:\n  install --staging DIR --manifest FILE [--external-database-file FILE] [--house-config-file FILE] [--omp-config FILE --client-config FILE --operator-principal NAME]\n  update --staging DIR --manifest FILE [same options]\n  gui [--room ROOM]\n  doctor\n  rollback\n  uninstall\n  purge --confirm-data-loss\n  service"
         );
         return Ok(());
     }
@@ -74,16 +90,81 @@ fn main() -> Result<()> {
                     Ok::<_, anyhow::Error>(fs::read_to_string(file)?.trim().to_owned())
                 })
                 .transpose()?;
+            let house_config = arguments
+                .iter()
+                .position(|argument| argument == "--house-config-file")
+                .map(|index| {
+                    let file = arguments
+                        .get(index + 1)
+                        .context("--house-config-file requires a value")?;
+                    Ok::<_, anyhow::Error>(serde_json::from_slice::<HouseInstallConfig>(
+                        &fs::read(file)?,
+                    )?)
+                })
+                .transpose()?;
+            let operator_integration = match (
+                optional_value(&arguments, "--omp-config")?,
+                optional_value(&arguments, "--client-config")?,
+                optional_value(&arguments, "--operator-principal")?,
+            ) {
+                (None, None, None) => None,
+                (Some(omp_config), Some(client_config), Some(operator_principal)) => {
+                    Some(OperatorIntegration {
+                        omp_config_path: PathBuf::from(omp_config),
+                        client_config_path: PathBuf::from(client_config),
+                        operator_principal,
+                    })
+                }
+                _ => bail!(
+                    "--omp-config, --client-config, and --operator-principal must be supplied together"
+                ),
+            };
             let outcome = installer.install(InstallRequest {
                 staging,
                 manifest,
                 external_database_url,
+                house_config,
+                operator_integration,
             })?;
             println!(
                 "{}",
                 serde_json::to_string(
-                    &serde_json::json!({"ok": true, "version": outcome.version, "upgradedFrom": outcome.upgraded_from, "legacyImported": outcome.legacy_imported})
+                    &serde_json::json!({"ok": true, "version": outcome.version, "upgradedFrom": outcome.upgraded_from, "legacyImported": outcome.legacy_imported, "ompRegistered": outcome.omp_registered})
                 )?
+            );
+        }
+        "gui" => {
+            let user_profile =
+                PathBuf::from(env::var_os("USERPROFILE").context("USERPROFILE is unavailable")?);
+            let client_path = user_profile.join(".omp/agent/athanor/client.json");
+            let client: ClientProjection = serde_json::from_slice(
+                &fs::read(&client_path)
+                    .with_context(|| format!("read {}", client_path.display()))?,
+            )?;
+            client.validate()?;
+            let room = optional_value(&arguments, "--room")?
+                .unwrap_or_else(|| client.default_room.clone());
+            let endpoint = client
+                .endpoints
+                .get(&room)
+                .with_context(|| format!("installed Athanor has no endpoint for room {room:?}"))?;
+            let current: CurrentRelease = serde_json::from_slice(&fs::read(layout.current())?)?;
+            let version_root = layout.version(&current.version);
+            let child = Command::new(version_root.join("bin/athanor-gui.exe"))
+                .args([
+                    "--path",
+                    &version_root.join("runtime/godot").display().to_string(),
+                ])
+                .env("ATHANOR_HOST_TOKEN", &client.host_token)
+                .env("ATHANOR_HOST_HOUSE_ID", &client.house_id)
+                .env("ATHANOR_HOST_WS_URL", &endpoint.url)
+                .env("ATHANOR_HOST_ROOM", &room)
+                .env("ATHANOR_HOST_SPIRIT", &endpoint.spirit)
+                .spawn()
+                .context("launch installed Godot client")?;
+            println!(
+                "{}",
+                serde_json::json!({"ok": true, "room": room, "pid": child.id()})
             );
         }
         "doctor" => {

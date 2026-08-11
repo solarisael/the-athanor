@@ -104,28 +104,32 @@ Immutable product versions and mutable operator data are separate:
 
 | Installed path | Content |
 |---|---|
-| `%ProgramFiles%\Solarisael\Athanor\bin` | Native lifecycle manager |
+| `%ProgramFiles%\Solarisael\Athanor\bin` | Native lifecycle manager and stable OMP loader |
 | `%ProgramFiles%\Solarisael\Athanor\versions\<version>` | Verified immutable runtime, OMP adapter, Godot client, PostgreSQL, and NATS |
-| `%ProgramData%\Solarisael\Athanor\config` | Runtime configuration |
-| `%ProgramData%\Solarisael\Athanor\secrets` | ACL-restricted generated secrets |
-| `%ProgramData%\Solarisael\Athanor\data` | PostgreSQL and NATS durable data |
-| `%ProgramData%\Solarisael\Athanor\rooms` | Operator-owned rooms |
-| `%ProgramData%\Solarisael\Athanor\state` | Host state |
-| `%ProgramData%\Solarisael\Athanor\backups` | Upgrade, rollback, and legacy pre-install backups |
+| `%ProgramData%\Solarisael\Athanor\config` | Non-secret database mode and exact House room/port topology |
+| `%ProgramData%\Solarisael\Athanor\secrets` | ACL-restricted service secrets |
+| `%ProgramData%\Solarisael\Athanor\data` | Managed PostgreSQL and NATS durable data |
+| `%ProgramData%\Solarisael\Athanor\state\host\<room>` | Isolated Host projection state per room |
+| `%ProgramData%\Solarisael\Athanor\backups` | Upgrade, rollback, external-authority, and legacy pre-install backups |
+| `%USERPROFILE%\.omp\agent\athanor\client.json` | ACL-restricted per-user Host token and room endpoint projection |
 
 `current.json` atomically selects the active immutable version. The
 `SolarisaelAthanor` Windows service starts only the exact children under that
-version, reports readiness after PostgreSQL, NATS, delivery, and Host pass their
-contracts, and drains them in reverse dependency order.
+version: optional managed PostgreSQL, one NATS broker, one delivery worker, and
+one identity-bound Host per configured room. It reports `RUNNING` only after
+every child passes readiness and drains the runtime plan in reverse order.
 
-The OMP adapter discovers the installed Rust substrate through the runtime
-environment written by the native manager. Development checkouts may still set
-explicit executable/state overrides; those variables are topology inputs, not
-behavioral owners.
+OMP registers one stable loader under Program Files. The loader follows
+`current.json`, reads the invoking user's restricted client projection, sets
+Host/substrate paths and credentials only in process memory, then loads the
+active adapter and hygiene extension exactly once. Room-bound commands choose
+their endpoint by exact room key; missing entries fail closed rather than route
+to another room. Development checkouts may still set explicit topology
+overrides, but install removes duplicate source/version registration owners.
 
 ### Release and support target
 
-`1.0.0-rc.1` is the current native Windows x64 candidate. OMP is the supported
+`1.0.0-rc.2` is the current native Windows x64 candidate. OMP is the supported
 harness. The release artifact is one checksum-published installer:
 
 ```text

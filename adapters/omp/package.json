@@ -1,6 +1,6 @@
 {
   "name": "the-athanor-omp",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "The Athanor OMP adapter for the native Rust runtime.",
   "author": "Sol",
   "license": "Apache-2.0",

@@ -63,8 +63,8 @@ surface is already shipped.
 
 ## Release path and history
 
-- [`CHANGELOG.md`](../CHANGELOG.md) — notable changes through the `1.0.0-rc.1`
-  native release candidate
+- [`CHANGELOG.md`](../CHANGELOG.md) — notable changes through the `1.0.0-rc.2`
+  installed release candidate
 - [`roadmap.md`](./roadmap.md) — implemented 1.0 dependency path and remaining
   final-release evidence gates
 - [`../HOUSE.md`](../HOUSE.md) — project history, philosophy, and design reasons

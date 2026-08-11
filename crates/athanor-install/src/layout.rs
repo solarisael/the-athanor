@@ -35,6 +35,9 @@ impl InstallLayout {
     pub fn manager(&self) -> PathBuf {
         self.program.join("bin/athanor-manage.exe")
     }
+    pub fn omp_loader(&self) -> PathBuf {
+        self.program.join("bin/athanor-omp-loader.ts")
+    }
     pub fn current(&self) -> PathBuf {
         self.program.join(CURRENT_POINTER)
     }

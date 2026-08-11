@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$Out = [IO.Path]::GetFullPath((Join-Path $Root $OutDir))
+$Out = if ([IO.Path]::IsPathRooted($OutDir)) { [IO.Path]::GetFullPath($OutDir) } else { [IO.Path]::GetFullPath((Join-Path $Root $OutDir)) }
 $Work = Join-Path $env:RUNNER_TEMP "athanor-native-$Version"
 $Stage = Join-Path $Work "payload"
 Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
@@ -78,6 +78,7 @@ Copy-Item (Join-Path $ReleaseBin "athanor-manage.exe") $Bin
 Copy-Item (Join-Path $ReleaseBin "athanor-substrate.exe") $Bin
 Copy-Item (Join-Path $ReleaseBin "house-host.exe") $Bin
 Copy-Item (Join-Path $ReleaseBin "athanor-house-delivery.exe") $Bin
+Copy-Item (Join-Path $Root "adapters/omp/installed-loader.ts") (Join-Path $Bin "athanor-omp-loader.ts")
 $GodotExe = Get-ChildItem $GodotExtract -Filter "Godot_v4.7.1-stable_win64.exe" -Recurse | Select-Object -First 1
 if (-not $GodotExe) { throw "Godot archive did not contain the pinned Windows x64 executable" }
 Copy-Item $GodotExe.FullName (Join-Path $Bin "athanor-gui.exe")
@@ -102,8 +103,9 @@ $AdapterSource = Join-Path $Root "adapters/omp"
 $AdapterTarget = Join-Path $Stage "adapters/omp"
 New-Item $AdapterTarget -ItemType Directory -Force | Out-Null
 @(
-  "index.ts", "athanor-root.ts", "discovery.ts", "giga.ts", "kitten-lineage.ts",
-  "rust-transport.ts", "package.json", "bunfig.toml", "README.md", "LICENSE", "NOTICE"
+  "index.ts", "hygiene.ts", "athanor-root.ts", "discovery.ts", "giga.ts",
+  "kitten-lineage.ts", "rust-transport.ts", "package.json", "bunfig.toml",
+  "README.md", "LICENSE", "NOTICE"
 ) | ForEach-Object {
   Copy-Item (Join-Path $AdapterSource $_) $AdapterTarget
 }

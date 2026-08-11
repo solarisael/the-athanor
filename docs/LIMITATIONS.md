@@ -5,7 +5,7 @@ This document records current support boundaries and non-goals. The product READ
 ## Supported installation path
 
 Windows 11 x64 with OMP is the only supported release target.
-`1.0.0-rc.1` is the current native candidate.
+`1.0.0-rc.2` is the current native candidate.
 
 The ordinary managed install requires:
 
@@ -20,10 +20,11 @@ The installer carries Godot 4.7.1, PostgreSQL 18.4-2, pgvector 0.8.6, NATS
 Cargo, a Rust toolchain, a Godot editor, or a separately installed database or
 broker.
 
-Vault remains a database-free runtime profile. AKASHA uses the managed
-PostgreSQL authority by default. The advanced external-database mode requires an
-operator-provided PostgreSQL 18 server with pgvector 0.8.6 and `pg_trgm`; it does
-not weaken schema, migration, backup, or readiness requirements.
+Vault remains a database-free runtime profile. AKASHA uses managed PostgreSQL by
+default. Existing Houses must use explicit external-database mode when their
+authoritative PostgreSQL endpoint already owns the configured port. RC2 takes a
+first-install backup, starts no PostgreSQL child in that mode, and still requires
+schema 16 plus `vector`, `pg_trgm`, and `pgcrypto`.
 
 Local semantic embeddings still require a compatible configured embedding
 endpoint. No GPU or embedding model is bundled in the 1.0 candidate.

@@ -3,6 +3,8 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant},
 };
 
 pub trait FileSystem {
@@ -15,6 +17,7 @@ pub trait FileSystem {
     fn remove_file(&self, path: &Path) -> Result<()>;
     fn remove_tree(&self, path: &Path) -> Result<()>;
     fn restrict_acl(&self, path: &Path) -> Result<()>;
+    fn restrict_user_acl(&self, path: &Path, principal: &str) -> Result<()>;
 }
 
 pub trait ServiceManager {
@@ -87,13 +90,18 @@ impl FileSystem for NativeFileSystem {
     fn restrict_acl(&self, path: &Path) -> Result<()> {
         #[cfg(windows)]
         {
+            let (system_grant, administrators_grant) = if path.is_dir() {
+                ("SYSTEM:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F")
+            } else {
+                ("SYSTEM:F", "*S-1-5-32-544:F")
+            };
             let status = Command::new("icacls.exe")
                 .arg(path)
                 .args([
                     "/inheritance:r",
                     "/grant:r",
-                    "SYSTEM:(OI)(CI)F",
-                    "*S-1-5-32-544:(OI)(CI)F",
+                    system_grant,
+                    administrators_grant,
                 ])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -106,6 +114,60 @@ impl FileSystem for NativeFileSystem {
         #[cfg(not(windows))]
         {
             let _ = path;
+        }
+        Ok(())
+    }
+    fn restrict_user_acl(&self, path: &Path, principal: &str) -> Result<()> {
+        if principal.trim().is_empty() {
+            bail!("operator principal must not be empty");
+        }
+        #[cfg(windows)]
+        {
+            let resolved_principal = if principal.contains('\\') || principal.starts_with('*') {
+                principal.to_owned()
+            } else {
+                let output = Command::new("whoami.exe").output()?;
+                if !output.status.success() {
+                    bail!("failed to resolve the invoking Windows operator");
+                }
+                String::from_utf8(output.stdout)?.trim().to_owned()
+            };
+            let is_directory = path.is_dir();
+            let user_grant = if is_directory {
+                format!("{resolved_principal}:(OI)(CI)F")
+            } else {
+                format!("{resolved_principal}:F")
+            };
+            let system_grant = if is_directory {
+                "SYSTEM:(OI)(CI)F"
+            } else {
+                "SYSTEM:F"
+            };
+            let administrators_grant = if is_directory {
+                "*S-1-5-32-544:(OI)(CI)F"
+            } else {
+                "*S-1-5-32-544:F"
+            };
+            let status = Command::new("icacls.exe")
+                .arg(path)
+                .args([
+                    "/inheritance:r",
+                    "/grant:r",
+                    system_grant,
+                    administrators_grant,
+                    &user_grant,
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()?;
+            if !status.success() {
+                bail!("failed to restrict operator ACL on {}", path.display());
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (path, principal);
         }
         Ok(())
     }
@@ -184,7 +246,27 @@ impl ServiceManager for ScServiceManager {
         }
     }
     fn start(&self, name: &str) -> Result<()> {
-        self.run(&["start", name], false)
+        self.run(&["start", name], false)?;
+        #[cfg(windows)]
+        {
+            let deadline = Instant::now() + Duration::from_secs(120);
+            loop {
+                let output = Command::new("sc.exe").args(["query", name]).output()?;
+                let state = String::from_utf8_lossy(&output.stdout);
+                if output.status.success() && state.contains("STATE") && state.contains("RUNNING") {
+                    return Ok(());
+                }
+                if state.contains("STOPPED") {
+                    bail!("Windows service {name} stopped before reaching readiness");
+                }
+                if Instant::now() >= deadline {
+                    bail!("Windows service {name} did not report RUNNING within 120 seconds");
+                }
+                thread::sleep(Duration::from_millis(500));
+            }
+        }
+        #[cfg(not(windows))]
+        Ok(())
     }
     fn stop(&self, name: &str) -> Result<()> {
         self.run(&["stop", name], true)

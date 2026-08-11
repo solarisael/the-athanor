@@ -16,7 +16,7 @@ The previous long-form roadmap is preserved as
 
 ## Current release state
 
-The repository now carries the local `1.0.0-rc.1` native Windows x64 candidate.
+The repository now carries the installed `1.0.0-rc.2` native Windows x64 candidate.
 OMP is the supported harness. One Rust workspace owns the behavioral core,
 Vault, AKASHA, Host, delivery, native lifecycle, and Godot client. Read
 [the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
@@ -35,12 +35,13 @@ Implemented in the candidate:
 - one checksum-pinned payload carrying Godot 4.7.1, PostgreSQL 18.4-2,
   pgvector 0.8.6, and NATS 2.14.4.
 
-The local RC passed ordinary suites, isolated PostgreSQL/NATS integrations, live
-Godot rendering, manifest verification, packaged-client smoke, and Inno Setup
-compilation. The final `1.0.0` marker remains gated on clean-machine elevated
-installation evidence, real legacy upgrade evidence, signing/publication
-decisions, and the broader public evaluations named in
-[`EVIDENCE.md`](./EVIDENCE.md).
+RC2 passed ordinary suites, isolated PostgreSQL/NATS integrations, live Godot
+rendering, 20,645-artifact manifest verification, packaged-client smoke, Inno
+Setup compilation, and an elevated external-authority installation on the real
+Solarisael workstation. The installed service runs NATS, delivery, and separate
+Kintsu/Kodo Hosts while reusing the existing PostgreSQL authority. Final
+`1.0.0` remains gated on a clean generic managed install, real legacy upgrade,
+signing, and the broader public evaluations in [`EVIDENCE.md`](./EVIDENCE.md).
 
 The dependency path below records the completed implementation order and the
 still-open final release gates. Where the phase table in

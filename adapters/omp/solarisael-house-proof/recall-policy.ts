@@ -186,8 +186,41 @@ function requiredEnvironment(name: string): string {
   return value;
 }
 
+function hostUrlForCommand(command: Record<string, unknown>): string {
+  const override = normalizedText(process.env.ATHANOR_HOST_WS_URL);
+  if (override) return override;
+  const configured = normalizedText(process.env.ATHANOR_HOST_ENDPOINTS);
+  if (!configured) return DEFAULT_HOST_WS_URL;
+  let endpoints: unknown;
+  try {
+    endpoints = JSON.parse(configured);
+  } catch {
+    throw new RecallPolicyHostUnavailable("ATHANOR_HOST_ENDPOINTS is not valid JSON");
+  }
+  const room = normalizedText(command.sender_room);
+  const entry = endpoints && typeof endpoints === "object" && !Array.isArray(endpoints)
+    ? (endpoints as Record<string, unknown>)[room]
+    : null;
+  const url = entry && typeof entry === "object" && !Array.isArray(entry)
+    ? normalizedText((entry as Record<string, unknown>).url)
+    : "";
+  if (!url) {
+    throw new RecallPolicyHostUnavailable(`no installed Recall Policy Host endpoint exists for room ${room || "<empty>"}`);
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new RecallPolicyHostUnavailable(`installed Recall Policy Host endpoint for room ${room} is invalid`);
+  }
+  if (parsed.protocol !== "ws:" || !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) {
+    throw new RecallPolicyHostUnavailable(`installed Recall Policy Host endpoint for room ${room} must be loopback WebSocket`);
+  }
+  return url;
+}
+
 async function sendHostCommand(command: Record<string, unknown>): Promise<Record<string, any>> {
-  const url = normalizedText(process.env.ATHANOR_HOST_WS_URL) || DEFAULT_HOST_WS_URL;
+  const url = hostUrlForCommand(command);
   const token = requiredEnvironment("ATHANOR_HOST_TOKEN");
   return await new Promise<Record<string, any>>((resolve, reject) => {
     let settled = false;

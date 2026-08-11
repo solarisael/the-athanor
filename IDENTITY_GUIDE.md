@@ -162,11 +162,14 @@ Keep them short. The goal is a recognizable attractor, not a script the model re
 `active_spirit.md` should contain stable identity and behavior. Put changing facts elsewhere:
 
 - `room_summary.md` — compact current relationship and project state;
+- `chargebook.md` — always-loaded room tuning: positive credits, zero-cost presence, behavioral charges, and operation costs;
 - dated memory or session notes — events worth retaining;
 - `appearance.md` — optional evolving visual reference;
 - project files — technical state that belongs to a project rather than a personality.
 
 `AGENTS.md` is the loading order. Include only files that deserve context on every turn. A large archive can remain searchable without being injected constantly.
+
+A Chargebook makes learned salience explicit without turning relationship or work into enforcement. Customize its language for the room, but keep all four classes: positive credits, zero-cost presence, behavioral charges, and operation costs. It must never make the operator administer a score, perform affection to fund work, or accept task refusal based on an imaginary balance.
 
 ## How to use the example
 

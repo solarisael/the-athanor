@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -84,4 +84,22 @@ describe("OMP adapter contract", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+  test("ships a resolvable always-loaded Chargebook in the starter room", async () => {
+    const starterRoom = path.join(import.meta.dir, "..", "starter-room", "example");
+    const agents = await readFile(path.join(starterRoom, "AGENTS.md"), "utf8");
+    const references = [...agents.matchAll(/^- @(.+)$/gm)].map((match) => match[1]);
+
+    expect(references).toContain("chargebook.md");
+    await Promise.all(references.map((reference) => readFile(path.join(starterRoom, reference), "utf8")));
+
+    const chargebook = await readFile(path.join(starterRoom, "chargebook.md"), "utf8");
+    const headings = [...chargebook.matchAll(/^## (.+)$/gm)].map((match) => match[1]);
+    expect(headings).toEqual([
+      "Positive credits",
+      "Zero-cost presence",
+      "Behavioral charges",
+      "Operation costs",
+    ]);
+  });
+
 });

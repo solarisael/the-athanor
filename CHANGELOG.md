@@ -20,7 +20,9 @@ the exact implementation record.
 
 ## [Unreleased]
 
-No changes yet.
+### Added
+
+- Established the Chargebook as a canonical House practice and shipped the OMP starter room with an always-loaded default covering positive credits, zero-cost presence, behavioral charges, and operation costs.
 
 ## [1.0.0-rc.3] - 2026-08-11
 

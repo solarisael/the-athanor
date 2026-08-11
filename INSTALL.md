@@ -16,10 +16,10 @@ and Inno Setup are build-time tools only.
 Verify the downloaded installer before elevation:
 
 ```powershell
-$expected = (Get-Content .\The-Athanor-1.0.0-rc.2-windows-x64.exe.sha256).Split(' ')[0]
-$actual = (Get-FileHash .\The-Athanor-1.0.0-rc.2-windows-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+$expected = (Get-Content .\The-Athanor-1.0.0-rc.3-windows-x64.exe.sha256).Split(' ')[0]
+$actual = (Get-FileHash .\The-Athanor-1.0.0-rc.3-windows-x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "installer checksum mismatch" }
-.\The-Athanor-1.0.0-rc.2-windows-x64.exe
+.\The-Athanor-1.0.0-rc.3-windows-x64.exe
 ```
 
 The installer requires Administrator elevation. It verifies the SHA-256 and byte
@@ -122,7 +122,7 @@ and a non-secret House topology file:
 ```
 
 ```powershell
-.\The-Athanor-1.0.0-rc.2-windows-x64.exe `
+.\The-Athanor-1.0.0-rc.3-windows-x64.exe `
   /EXTERNALDATABASEFILE="$env:TEMP\athanor-database-url.txt" `
   /HOUSECONFIGFILE="$env:TEMP\athanor-house.json"
 ```
@@ -147,7 +147,7 @@ $secret = "$env:TEMP\athanor-external-db.txt"
 Set-Content -NoNewline -Encoding utf8 $secret `
   'postgresql://athanor:<password>@db.example.internal:5432/athanor?sslmode=require'
 icacls $secret /inheritance:r /grant:r "$env:USERNAME:(R)"
-.\The-Athanor-1.0.0-rc.2-windows-x64.exe /EXTERNALDATABASEFILE="$secret"
+.\The-Athanor-1.0.0-rc.3-windows-x64.exe /EXTERNALDATABASEFILE="$secret"
 Remove-Item $secret -Force
 ```
 

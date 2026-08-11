@@ -1,6 +1,6 @@
 {
   "name": "the-athanor",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "description": "A persistent identity, continuity, and memory platform for AI agents and collaborators.",
   "author": "Sol",
   "license": "Apache-2.0",
@@ -21,6 +21,6 @@
     "test:omp": "cd adapters/omp && bun run test",
     "build:substrate": "cargo build --release -p athanor-substrate",
     "build:godot": "cargo build -p athanor-godot --target-dir clients/godot/target",
-    "build:native": "pwsh -File installer/build-native-release.ps1 -Version 1.0.0-rc.2 -OutDir dist/native"
+    "build:native": "pwsh -File installer/build-native-release.ps1 -Version 1.0.0-rc.3 -OutDir dist/native"
   }
 }

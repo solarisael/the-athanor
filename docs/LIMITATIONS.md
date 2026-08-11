@@ -5,7 +5,7 @@ This document records current support boundaries and non-goals. The product READ
 ## Supported installation path
 
 Windows 11 x64 with OMP is the only supported release target.
-`1.0.0-rc.2` is the current native candidate.
+`1.0.0-rc.3` is the current native candidate.
 
 The ordinary managed install requires:
 

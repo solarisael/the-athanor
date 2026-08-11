@@ -166,6 +166,34 @@ This closes elevated installation for the existing-House external-database
 topology. It does not yet prove a clean generic managed-database installation,
 a real 0.10.x upgrade/rollback, or signing.
 
+### Installed RC3 core-resolution proof — 2026-08-11
+
+The first OMP restart against RC2 exposed one packaging omission:
+`solarisael-house-proof/core.ts` correctly resolved the product core through
+`ATHANOR_ROOT`, but the release payload had not staged root `index.ts` or its
+TypeScript dependencies under `src/`.
+
+RC3 stages the root entry plus 13 runtime TypeScript modules. The native builder
+now executes `loadHouseCore()` through the packaged adapter bridge and refuses
+the release when `CORE_API_VERSION !== 1` or any transitive module is absent.
+
+The RC2 → RC3 elevated upgrade succeeded against the real external PostgreSQL
+authority. The service returned to `RUNNING`; native doctor verified 20,659
+artifact hashes and reported installed version `1.0.0-rc.3`. An independent
+installed-loader reproduction returned:
+
+```json
+{
+  "api": 1,
+  "index": "file:///C:/Program%20Files/Solarisael/Athanor/versions/1.0.0-rc.3/adapters/omp/index.ts",
+  "rooms": ["kintsu", "kodo"]
+}
+```
+
+The proven RC3 installer is
+`The-Athanor-1.0.0-rc.3-windows-x64.exe`, SHA-256
+`5ad56051b05a8d27f32ecf1ded876b1f8f68f565ab1a6763911056b576da488f`.
+
 ## Next public evidence
 
 The post-1.0 public proof program expands the evidence surface in this order.

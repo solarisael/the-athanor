@@ -111,6 +111,20 @@ New-Item $AdapterTarget -ItemType Directory -Force | Out-Null
 }
 Copy-Item (Join-Path $AdapterSource "solarisael-house-proof") (Join-Path $AdapterTarget "solarisael-house-proof") -Recurse
 Copy-Item (Join-Path $AdapterSource "starter-room") (Join-Path $AdapterTarget "starter-room") -Recurse
+$CoreTarget = Join-Path $Stage "src"
+New-Item $CoreTarget -ItemType Directory -Force | Out-Null
+Copy-Item (Join-Path $Root "index.ts") (Join-Path $Stage "index.ts")
+Get-ChildItem (Join-Path $Root "src") -Filter "*.ts" -File | ForEach-Object {
+  Copy-Item $_.FullName $CoreTarget
+}
+$PreviousAthanorRoot = $env:ATHANOR_ROOT
+$env:ATHANOR_ROOT = $Stage
+$env:ATHANOR_CORE_SMOKE = Join-Path $AdapterTarget "solarisael-house-proof/core.ts"
+& bun --eval 'const { pathToFileURL } = await import("node:url"); const bridge = await import(pathToFileURL(process.env.ATHANOR_CORE_SMOKE).href); const core = await bridge.loadHouseCore(); if (core.CORE_API_VERSION !== 1) throw new Error("installed core API mismatch");'
+$CoreSmokeExitCode = $LASTEXITCODE
+$env:ATHANOR_ROOT = $PreviousAthanorRoot
+Remove-Item Env:ATHANOR_CORE_SMOKE
+if ($CoreSmokeExitCode -ne 0) { throw "installed OMP core import smoke failed" }
 Copy-Item (Join-Path $Root "installer/dependencies.json") (Join-Path $Stage "compatibility.json")
 
 $Artifacts = @()

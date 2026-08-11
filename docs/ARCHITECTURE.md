@@ -129,7 +129,7 @@ overrides, but install removes duplicate source/version registration owners.
 
 ### Release and support target
 
-`1.0.0-rc.2` is the current native Windows x64 candidate. OMP is the supported
+`1.0.0-rc.3` is the current native Windows x64 candidate. OMP is the supported
 harness. The release artifact is one checksum-published installer:
 
 ```text

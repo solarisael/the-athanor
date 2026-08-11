@@ -34,7 +34,7 @@ Self-hosting remains available. Managed services must support complete export.
 
 ## What works now
 
-The `1.0.0-rc.2` native Windows x64 candidate is installed and live on the
+The `1.0.0-rc.3` native Windows x64 candidate is installed and live on the
 Solarisael workstation. OMP is the supported harness and Solarisael House
 remains the working reference House.
 

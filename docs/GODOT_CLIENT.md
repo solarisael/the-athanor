@@ -1,6 +1,6 @@
 # Godot Client and Spatial Presentation Architecture
 
-Status: Functional 2D client ships in `1.0.0-rc.2`; spatial presentation remains target architecture
+Status: Functional 2D client ships in `1.0.0-rc.3`; spatial presentation remains target architecture
 Last updated: 2026-08-10
 
 This document defines how the thin Godot client inherits Solarisael's visual

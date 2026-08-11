@@ -22,6 +22,16 @@ the exact implementation record.
 
 No changes yet.
 
+## [1.0.0-rc.3] - 2026-08-11
+
+### Fixed
+
+- Staged the root TypeScript core entry and every runtime TypeScript dependency
+  required by the installed OMP adapter.
+- Added a release-build smoke that executes `loadHouseCore()` through the
+  packaged adapter bridge, preventing a loader that registers successfully but
+  fails when OMP first resolves the core module.
+
 ## [1.0.0-rc.2] - 2026-08-11
 
 ### Fixed

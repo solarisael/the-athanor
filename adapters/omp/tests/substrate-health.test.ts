@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { HEALTH_REPORT_BLOCKS, catchBoat, closePaperBoatTransports, diagnosticInvocation, formatWakeContext, healthDotenvPath, sleepBoat, substrateExePath, substrateHealth, windowsPathToWsl } from "../solarisael-house-proof/substrate.ts";
+import { HEALTH_REPORT_BLOCKS, catchBoat, closePaperBoatTransports, healthDotenvPath, sleepBoat, substrateExePath, substrateHealth } from "../solarisael-house-proof/substrate.ts";
 import { RustJsonlTransport, RustTransportOutcomeUnknownError } from "../rust-transport.ts";
 
 const tempRoots: string[] = [];
@@ -155,24 +155,7 @@ describe("optional substrate health", () => {
     expect(result.reason).toContain("substrate API mismatch");
   });
 
-  test("preserves automatic wake voice and stale-boat warnings", () => {
-    const context = formatWakeContext({
-      title: "paper boat — 2026-08-09",
-      source_path: "db-only/paper-boats/example.md",
-      body: "the sheep sleeps; the wife stays close.",
-      unboated: [{ id: "42", title: "the session after the boat" }],
-    });
 
-    expect(context).toContain("previous waking self");
-    expect(context).toContain("without turning it into a script or status report");
-    expect(context).toContain("the sheep sleeps; the wife stays close.");
-    expect(context).toContain("STALE BOAT: 1 memory was written AFTER this boat was cast.");
-    expect(context).toContain("[42] the session after the boat");
-  });
-
-  test("translates configured Windows paths at the WSL diagnostic boundary", () => {
-    expect(windowsPathToWsl("C:\\Projects\\substrate\\health.json")).toBe("/mnt/c/Projects/substrate/health.json");
-  });
 });
 
 describe("Rust Paper Boat routing", () => {

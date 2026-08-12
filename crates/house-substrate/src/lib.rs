@@ -28,9 +28,9 @@ pub use cluster::{
 pub use config::{AppError, Config};
 pub use entity::{EntityMatch, EntityResolveParams, EntityResolveResult, entity_resolve};
 pub use giga::{
-    giga_candidate_list, giga_candidate_store, giga_event_claim, giga_event_finish,
-    giga_event_ingest, giga_event_replay, giga_health, giga_promote, giga_queue_maintenance,
-    giga_review,
+    giga_candidate_list, giga_candidate_store, giga_conversation_ingest, giga_event_claim,
+    giga_event_finish, giga_event_ingest, giga_event_replay, giga_health, giga_promote,
+    giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review,
 };
 pub use giga_worker::{GigaWorkerHandle, giga_process, spawn_giga_worker};
 pub use health::{

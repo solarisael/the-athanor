@@ -129,8 +129,8 @@ overrides, but install removes duplicate source/version registration owners.
 
 ### Release and support target
 
-`1.0.0-rc.3` is the current native Windows x64 candidate. OMP is the supported
-harness. The release artifact is one checksum-published installer:
+`0.9.3` is the current native Windows x64 late-beta source version. OMP is the
+supported harness. The release artifact shape is one checksum-published installer:
 
 ```text
 The-Athanor-<version>-windows-x64.exe
@@ -180,18 +180,20 @@ above. The table below is the current machine-readable map for cold evaluators:
 
 | Surface | Current role | Owner | Authority |
 |---|---|---|---|
-| Room identity and state | Stable room key, operator, active spirit, identity contract, compact live context | Core + adapter + operator-owned files | Room files and explicit state writes |
-| Vault retrieval | Attributed Markdown, JSON, JSONL, and text search through exact-content and field-aware BM25F lanes | Core, exposed by the adapter | The selected files remain authoritative |
+| Room identity and state | Stable room key, operator, active spirit, identity contract, compact live context | Rust authority + thin adapter + operator-owned files | Room files and explicit state writes |
+| Vault retrieval | Attributed Markdown, JSON, JSONL, and text search through exact-content and field-aware BM25F lanes | Rust core, exposed by the adapter | The selected files remain authoritative |
 | AKASHA memory | Durable memories, chunks, entities, dates, threads, continuation edges, relationships, taxonomy, and lifecycle | Substrate + PostgreSQL | PostgreSQL; current/superseded/archived state is explicit |
-| Paper boats | Room-scoped continuity across closed sessions, including stale-boat detection when later memories exist | Adapter + active storage profile | Orientation for the next session, not canon |
-| Typed lessons | Coding, project, writing, design, and audio guidance with store-specific scope and proof fields | Core contracts + substrate stores | Active typed record within its declared scope |
-| Striatum | State-conditioned coding/project lesson activation after deterministic eligibility rails, bounded semantic ranking, and hysteresis | Core + adapter + substrate ranking | Selects active lessons; does not create authority |
-| Canon and controlled vocabulary | Load-bearing assertions plus bounded lexical expansion from authoritative entities, active threads, and lesson metadata | Core + substrate | Canon governs generation; expansion only locates evidence |
-| Anamnesis Cabinet | Reviewed pillars and lived cycles supplied as bounded counsel | Substrate + adapter | Advisory only; never canon or memory authority |
-| GIGA Hippocampus Stage 1 | Exact turn events, asynchronous classification, non-authoritative candidates, review, Curios, promotion, and queue maintenance | Adapter event boundary + substrate worker/store | Candidate until reviewed and explicitly promoted |
-| Design-system catalogue | Typed immutable/superseding design tokens, components, contracts, and guidelines, read through `design_doc` and written through `design_doc_write` | Substrate + adapter tools | Current catalogue record within the named design system |
-| Worker routing and familiars | Deterministic lanes, room-owned spellbooks, and validated harness-ready task packets | Core policy + adapter spawn boundary | Routing policy only; no memory or room authority |
-| Rust transport and health | Long-lived JSONL requests, cancellation/timeouts, crash replacement, compatibility checks, redacted diagnostics, and uncertain-write reconciliation | OMP adapter + Rust substrate | Transport carries receipts; it does not become authority |
+| Paper boats | Room-scoped continuity across closed sessions, including stale-boat detection when later memories exist | Rust substrate + adapter presentation | Orientation for the next session, not canon |
+| Typed lessons | Coding, project, writing, design, and audio guidance with store-specific scope and proof fields | Rust contracts + substrate stores | Active typed record within its declared scope |
+| Context analysis | Query classification, keyword/process triggers, and context-pressure nudges returned through a typed Host command | Rust core + Host | Policy result; no durable authority |
+| Recall viewport | Evidence qualification and per-session saturation over attributed Recall candidates | Rust Host | Selects a bounded view; source authority is unchanged |
+| Canon and controlled vocabulary | Load-bearing assertions plus bounded lexical expansion from authoritative entities, active threads, and lesson metadata | Rust core + substrate | Canon governs generation; expansion only locates evidence |
+| Anamnesis Cabinet | Reviewed pillars and lived cycles supplied as bounded counsel | Substrate + adapter presentation | Advisory only; never canon or memory authority |
+| GIGA Hippocampus Stage 1 | Exact turn events, asynchronous classification, non-authoritative candidates, review, Curios, promotion, and queue maintenance | Adapter event translation + substrate worker/store | Candidate until reviewed and explicitly promoted |
+| Design-system catalogue | Typed immutable/superseding design tokens, components, contracts, and guidelines, read through `design_doc` and written through `design_doc_write` | Substrate + adapter registration | Current catalogue record within the named design system |
+| Worker routing and familiars | Deterministic lanes, room-owned spellbooks, and validated harness-ready task packets | Typed Rust core + Host; adapter reads the room-local spellbook and presents the packet | Routing policy only; no memory or room authority |
+| Subagent lineage | OMP lifecycle/result shapes normalized into standalone quest-memory requests | Typed Rust core + Host; adapter translates OMP events | PostgreSQL becomes authoritative only after the ordinary memory write receipt |
+| Rust transport and health | Long-lived JSONL requests, cancellation/timeouts, crash replacement, compatibility checks, redacted diagnostics, and uncertain-write reconciliation | OMP transport skin + Rust substrate | Transport carries receipts; it does not become authority |
 
 These surfaces are deliberately separate. A lesson is not a memory, Cabinet
 counsel is not canon, a GIGA candidate is not evidence, a familiar is not a

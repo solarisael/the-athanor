@@ -5,10 +5,6 @@ import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { HOUSE_STATE_FILENAME, OBSIDIAN_ROOT } from "./constants.ts";
-import {
-  defaultPersistedRecallPolicy,
-  normalizePersistedRecallPolicy,
-} from "./recall-policy.ts";
 
 export function roomNameFromCwd(cwd) {
   return path.basename(String(cwd || "")).toLowerCase();
@@ -133,7 +129,6 @@ function defaultHouseState(room, spirit, operator = DEFAULT_OPERATOR) {
       model: null,
       updatedAt: null,
     },
-    recallPolicy: defaultPersistedRecallPolicy(),
     room,
   };
 }
@@ -168,7 +163,6 @@ export async function loadRoomState(effectiveRoomDir, room, spirit) {
       room,
       routingMode: { ...defaults.routingMode, ...(parsed.routingMode || {}) },
       modelDefault: { ...defaults.modelDefault, ...(parsed.modelDefault || {}) },
-      recallPolicy: normalizePersistedRecallPolicy(parsed.recallPolicy),
     };
   } catch {
     return defaultHouseState(room, spirit, operator);
@@ -177,18 +171,8 @@ export async function loadRoomState(effectiveRoomDir, room, spirit) {
 
 export async function saveRoomState(effectiveRoomDir, state) {
   const target = statePathForRoom(effectiveRoomDir);
-  let recallPolicy = state.recallPolicy;
-  try {
-    const current = JSON.parse(await readFile(target, "utf8"));
-    if (current?.recallPolicy && typeof current.recallPolicy === "object") {
-      recallPolicy = current.recallPolicy;
-    }
-  } catch {
-    // Initial room creation uses the default projection. After that, only Host writes policy.
-  }
   const next = {
     ...state,
-    recallPolicy,
     lastUpdatedAt: new Date().toISOString(),
   };
   await mkdir(path.dirname(target), { recursive: true });

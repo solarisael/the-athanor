@@ -14,9 +14,9 @@ turn accepted architecture documents into one giant checklist.
 The previous long-form roadmap is preserved as
 [`history/2026-08-06-roadmap-snapshot.md`](./history/2026-08-06-roadmap-snapshot.md).
 
-## Current release state
+## Current late-beta state
 
-The repository now carries the installed `1.0.0-rc.3` native Windows x64 candidate.
+The repository now carries the `0.9.3` native Windows x64 late-beta source.
 OMP is the supported harness. One Rust workspace owns the behavioral core,
 Vault, AKASHA, Host, delivery, native lifecycle, and Godot client. Read
 [the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
@@ -39,9 +39,13 @@ RC3 passed ordinary suites, isolated PostgreSQL/NATS integrations, live Godot
 rendering, 20,659-artifact manifest verification, packaged-client smoke, Inno
 Setup compilation, and an elevated external-authority installation on the real
 Solarisael workstation. The installed service runs NATS, delivery, and separate
-Kintsu/Kodo Hosts while reusing the existing PostgreSQL authority. Final
-`1.0.0` remains gated on a clean generic managed install, real legacy upgrade,
-signing, and the broader public evaluations in [`EVIDENCE.md`](./EVIDENCE.md).
+Kintsu/Kodo Hosts while reusing the existing PostgreSQL authority.
+
+The installed artifact still identifies as `1.0.0-rc.3`; that immutable label is
+retained as historical evidence, not current product maturity. Final `1.0.0`
+remains gated on the complete operator GUI, healthy continuity organs, a clean
+generic managed install, real legacy upgrade and rollback, signing, and the
+broader public evaluations in [`EVIDENCE.md`](./EVIDENCE.md).
 
 The dependency path below records the completed implementation order and the
 still-open final release gates. Where the phase table in
@@ -161,20 +165,34 @@ consumes authenticated Host commands, snapshots, deltas, replay, and
 resynchronization. It never connects directly to PostgreSQL, NATS, model
 providers, or harness internals.
 
-The 1.0 client gate is deliberately narrow:
+The implemented `0.9.3` slice proves that boundary with authenticated Recall
+Policy and sanitized Paper Boat receipt screens. Those two screens are the
+foundation, not the complete 1.0 client.
 
-- authenticate to the loopback Host without learning database or broker
-  credentials;
-- apply a real Recall Policy snapshot and typed updates;
-- expose the requested/resolved modes and explicit operator override;
-- render pending, delivered, refused, and degraded Paper Boat receipt states;
-- replay a retained sanitized receipt after Host restart;
-- never load or invent a Boat body/title.
+The 1.0 operator gate must make the state of a House legible:
 
-Both implemented screens were exercised in the real scene and inspected at the
-rendered surface. Conversation composition, source inspection, GIGA review,
-companion bodies, spatial Hallway presentation, and the memory constellation
-remain outside `1.0.0`.
+- rooms, spirits, sessions, active model bodies, identity bindings, and health;
+- messages among the operator, room agents, familiars, subagents, and other
+  authorized agents, with direction, lifecycle, delivery, and failure state;
+- Recall Policy, the active working set, selected sources, attribution,
+  selection reasons, freshness, degradation, and useful retrieval metrics;
+- memory, canon, lesson, and GIGA candidate authority and review state;
+- agent, familiar, and subagent dispatch lineage, current work, completion,
+  refusal, failure, and durable output;
+- Host, substrate, PostgreSQL, NATS, queue, delivery, backup, migration, and
+  version state at the level an operator can act on;
+- clear attention signals that distinguish healthy background activity from
+  pending decisions and failures.
+
+Every view consumes authoritative Host projections and links summary metrics to
+inspectable attributed records. The GUI must not infer a second truth from
+renderer state, expose private message bodies across unauthorized scopes, or
+make raw telemetry the only explanation.
+
+Conversation composition, source inspection, GIGA review, House and agent
+observability, and operational metrics therefore remain before `1.0.0`.
+Companion bodies, spatial Hallway presentation, and the memory constellation
+remain later work and do not block 1.0.
 
 ### 7. Make installation and lifecycle boring
 

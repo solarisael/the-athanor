@@ -8,13 +8,17 @@ its source attached. Corrected knowledge can replace stale guidance without
 erasing history. The model or provider carrying the work can change without
 making the project start from zero again.
 
-**Status:** `1.0.0-rc.3`, native Windows x64 release candidate. OMP is the
-supported harness. One Rust workspace owns the behavioral core, Vault retrieval,
-AKASHA PostgreSQL authority, Athanor Host, NATS delivery, native lifecycle, and
-Godot client. Vault remains database-free; AKASHA adds durable typed memory,
-lessons, canon, continuity, and governed background work.
-RC3 is installed on the reference Solarisael workstation in external-authority
-mode with separate Kintsu and Kodo Hosts and one stable OMP loader.
+**Status:** `0.9.3`, native Windows x64 late beta. OMP is the supported harness.
+One Rust workspace owns the behavioral core, Vault retrieval, AKASHA PostgreSQL
+authority, Athanor Host, NATS delivery, native lifecycle, and Godot client.
+Vault remains database-free; AKASHA adds durable typed memory, lessons, canon,
+continuity, and governed background work.
+
+The reference Solarisael workstation currently runs the locally proven build
+labeled `1.0.0-rc.3` in external-authority mode with separate Kintsu and Kodo
+Hosts and one stable OMP loader. That premature label remains attached to the
+immutable installed artifact and its evidence; it is not the active product
+version or a claim that the product has reached 1.0.
 
 ## Choose your entrance
 
@@ -151,7 +155,8 @@ contracts and [Hippocampus](./docs/HIPPOCAMPUS.md) for candidate authority.
 
 ## What exists now
 
-The `1.0.0-rc.3` candidate includes:
+The current `0.9.3` source, including behavior proven in the installed RC3
+artifact, includes:
 
 - one shared Rust contract layer and Rust-owned Vault/AKASHA behavior;
 - strict database-free Vault retrieval with attributed bounded evidence;
@@ -166,17 +171,23 @@ The `1.0.0-rc.3` candidate includes:
   doctor, uninstall, and explicit purge boundary;
 - 26 named OMP organs whose adapter delegates behavioral authority to Rust.
 
-## What is not a 1.0 release claim
+## What remains before 1.0
 
-The in-world 3D room, Datalog/Lean proof paths, Cingulate, OMEGA, ANON, Relay,
-group rooms, and the signed marketplace remain specified, planned, or research
-work. They are not counted as shipped behavior.
+The operator client is not yet a complete control surface. The current Godot
+slice shows Recall Policy and sanitized Paper Boat receipt state, but it does
+not yet expose ordinary conversation, source inspection, memory and canon
+authority, GIGA review, agent and subagent activity, inter-agent messages, or
+the operational metrics needed to understand the state of a House.
 
-The release candidate does not claim proven token savings, improved answer
+The 1.0 gate also requires healthy live continuity organs, clean generic
+installation, a real legacy upgrade and rollback, signing, and bounded public
+release evidence. The in-world 3D room, Datalog/Lean proof paths, Cingulate,
+OMEGA, ANON, Relay, group rooms, and the signed marketplace remain later work
+and do not block 1.0.
+
+The current late beta does not claim proven token savings, improved answer
 quality, support beyond Windows x64 + OMP, provider-side privacy, enterprise
-tenancy, or clean-machine installation evidence. The native installer is built
-and locally verified; clean-machine installation remains a separate public
-evaluation.
+tenancy, or clean-machine installation evidence.
 
 
 [Planned Features](./docs/PLANNED_FEATURES.md) is the canonical status map.
@@ -266,7 +277,7 @@ harness already has a supported adapter.
 
 ### Follow accepted direction
 
-- [Changelog](./CHANGELOG.md) — notable changes through the `1.0.0-rc.3` candidate
+- [Changelog](./CHANGELOG.md) — active `0.9.3` work and retained RC build history
 - [Planned Features](./docs/PLANNED_FEATURES.md) — canonical status map
 - [Runtime Architecture](./docs/RUNTIME_ARCHITECTURE.md)
 - [Godot Client](./docs/GODOT_CLIENT.md)

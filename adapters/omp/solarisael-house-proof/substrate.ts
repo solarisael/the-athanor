@@ -114,12 +114,6 @@ function healthDiagnostic({ category = "configuration", stage = "configuration_l
 }
 
 
-export function windowsPathToWsl(value) {
-  const source = String(value || "").replace(/\\/g, "/");
-  const match = /^([A-Za-z]):\/(.*)$/.exec(source);
-  if (!match) return source;
-  return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
-}
 
 function isAbsolutePath(value) {
   const source = String(value || "").trim();
@@ -324,7 +318,7 @@ export async function substrateHealth(timeoutMs = DIAGNOSTIC_TIMEOUT_MS) {
   const commandArgs = fixture ? [fixture, ...argv] : argv;
   let probe;
   try {
-    probe = await runWslDiagnostic({ command, args: commandArgs, stdin: "", timeoutMs });
+    probe = await runDiagnosticProcess({ command, args: commandArgs, stdin: "", timeoutMs });
   } catch (error) {
     probe = { spawnError: errorMessage(error), timedOut: false, code: null, stdout: "", stderr: "" };
   }
@@ -430,50 +424,8 @@ export async function substrateHealth(timeoutMs = DIAGNOSTIC_TIMEOUT_MS) {
 }
 
 
-function wslPathToWindows(value) {
-  const source = String(value || "");
-  const match = /^\/mnt\/([a-z])\/(.*)$/i.exec(source);
-  if (!match) return source;
-  return `${match[1].toUpperCase()}:/${match[2]}`;
-}
 
-function topologyEnvironment(environ = process.env) {
-  return ["ATHANOR_STATE_DIR", "ATHANOR_SUBSTRATE_ROOT"].flatMap((key) => {
-    const value = String(environ[key] || "").trim();
-    return value && isAbsolutePath(value) ? [[key, value]] : [];
-  });
-}
-
-function injectWslTopology(argv, environ = process.env) {
-  const pythonIndex = argv.indexOf("python3");
-  const assignments = topologyEnvironment(environ)
-    .map(([key, value]) => `${key}=${windowsPathToWsl(value)}`);
-  if (pythonIndex < 0 || assignments.length === 0) return [...argv];
-  return [
-    ...argv.slice(0, pythonIndex),
-    "env",
-    ...assignments,
-    ...argv.slice(pythonIndex),
-  ];
-}
-
-
-export function diagnosticInvocation(argv, environ = process.env) {
-  if (environ.SOLARISAEL_TEST_NATIVE_PYTHON !== "1") {
-    return { command: "wsl.exe", args: injectWslTopology(argv, environ) };
-  }
-  const pythonIndex = argv.indexOf("python3");
-  if (pythonIndex < 0 || pythonIndex === argv.length - 1) {
-    throw new Error("native Python test seam requires a python3 script invocation");
-  }
-  return {
-    command: "python",
-    args: argv.slice(pythonIndex + 1).map(wslPathToWindows),
-    env: Object.fromEntries(topologyEnvironment(environ)),
-  };
-}
-
-export function runWslDiagnostic({ argv, command, args, env, stdin, timeoutMs = DIAGNOSTIC_TIMEOUT_MS }) {
+export function runDiagnosticProcess({ command, args, env, stdin, timeoutMs = DIAGNOSTIC_TIMEOUT_MS }) {
   return new Promise((resolve) => {
     let stdout = "";
     let stderr = "";
@@ -485,21 +437,11 @@ export function runWslDiagnostic({ argv, command, args, env, stdin, timeoutMs = 
       if (timer !== undefined) clearTimeout(timer);
       resolve(value);
     };
-    let invocation;
-    try {
-      invocation = command
-        ? { command, args: Array.isArray(args) ? args : [], env }
-        : diagnosticInvocation(argv);
-    } catch (error) {
-      finish({
-        timedOut: false,
-        spawnError: error?.message || String(error),
-        code: null,
-        stdout,
-        stderr,
-      });
-      return;
-    }
+    const invocation = {
+      command,
+      args: Array.isArray(args) ? args : [],
+      env,
+    };
 
     let child;
     try {
@@ -589,18 +531,6 @@ export async function sleepBoat(room, body, { signal } = {}) {
       timeoutMs: WRITE_TIMEOUT_MS,
       settleDefinitively: true,
     });
-    if (!result || typeof result !== "object" || Array.isArray(result)
-      || result.ok !== true || result.durable !== true || result.authority !== "postgres"
-      || !/^[1-9]\d*$/.test(String(result.memory_id || ""))
-      || typeof result.source_path !== "string" || !result.source_path
-      || typeof result.outbox_event_id !== "string" || !result.outbox_event_id
-      || !["not_requested", "completed", "failed"].includes(result.backup_status)
-      || !Array.isArray(result.warnings) || result.warnings.length > 64
-      || !result.warnings.every((warning) => typeof warning === "string" && warning.length <= 4096)) {
-      paperBoatTransports.delete(executable);
-      void transport.close().catch(() => {});
-      return paperBoatFailure("paper_boat_sleep", new RustTransportOutcomeUnknownError());
-    }
     return result;
   } catch (error) {
     if (!transport.usable) paperBoatTransports.delete(executable);
@@ -618,25 +548,6 @@ export async function catchBoat(room, { signal } = {}) {
       signal: signal || undefined,
       timeoutMs: WRITE_TIMEOUT_MS,
     });
-    const boundedUnboated = Array.isArray(result?.unboated)
-      && result.unboated.length <= 64
-      && result.unboated.every((memory) => memory && typeof memory === "object"
-        && /^[1-9]\d*$/.test(String(memory.id || ""))
-        && typeof memory.title === "string" && memory.title.length <= 512
-        && typeof memory.type === "string" && memory.type.length <= 128
-        && typeof memory.source_path === "string" && memory.source_path.length <= 2048
-        && typeof memory.created_at === "string" && memory.created_at.length <= 128);
-    if (!result || typeof result !== "object" || Array.isArray(result)
-      || result.ok !== true || typeof result.found !== "boolean"
-      || result.room !== room || !boundedUnboated
-      || (result.found && (typeof result.body !== "string" || result.body.length > 65536
-        || typeof result.title !== "string" || result.title.length > 512
-        || typeof result.source_path !== "string" || result.source_path.length > 2048
-        || typeof result.created_at !== "string" || result.created_at.length > 128))
-      || !Array.isArray(result.warnings) || result.warnings.length > 64
-      || !result.warnings.every((warning) => typeof warning === "string" && warning.length <= 4096)) {
-      return { ok: false, error: "Rust paper_boat_wake returned an invalid bounded receipt" };
-    }
     return result;
   } catch (error) {
     if (!transport.usable) paperBoatTransports.delete(executable);
@@ -644,36 +555,4 @@ export async function catchBoat(room, { signal } = {}) {
   }
 }
 
-
-export function formatUnboatedWarning(boat) {
-  const orphans = Array.isArray(boat?.unboated) ? boat.unboated : [];
-  if (orphans.length === 0) return null;
-  const plural = orphans.length === 1 ? "memory was" : "memories were";
-  return [
-    `STALE BOAT: ${orphans.length} ${plural} written AFTER this boat was cast.`,
-    "A previous session wrote memories and ended without calling sleep, so this",
-    "boat does NOT describe the most recent session. Do not treat it as current.",
-    "Recover the missing session by recalling these before answering:",
-    ...orphans.map((m) => `  - [${m?.id}] ${String(m?.title || "untitled").trim()}`),
-  ].join("\n");
-}
-
-export function formatWakeContext(boat) {
-  const body = String(boat?.body || "").trim();
-  if (!body) return "";
-  const clipped = body.length > 6000 ? `${body.slice(0, 6000).trimEnd()}\n...[paper boat clipped ${body.length - 6000} chars]` : body;
-  const warning = formatUnboatedWarning(boat);
-  return [
-    "<system-reminder>",
-    warning,
-    warning ? "" : null,
-    "Automatic wake: latest paper boat for this room.",
-    "Receive it as lived continuity from the room's previous waking self: keep its voice, relationships, uncertainty, and concrete state intact; orient from it without turning it into a script or status report.",
-    boat?.title ? `Title: ${boat.title}` : null,
-    boat?.source_path ? `Source: ${boat.source_path}` : null,
-    "",
-    clipped,
-    "</system-reminder>",
-  ].filter((line) => line !== null).join("\n");
-}
 

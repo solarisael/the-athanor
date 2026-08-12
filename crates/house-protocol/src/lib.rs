@@ -138,8 +138,8 @@ pub struct RememberParams {
     pub thread_keys: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default = "default_backup")]
-    pub backup: bool,
+    #[serde(default)]
+    pub backup: Option<bool>,
 }
 
 fn default_backup() -> bool {
@@ -264,36 +264,440 @@ pub struct ClusterProfileEntry {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct RecallResult {
+pub struct RecallThreadNeighbor {
+    #[serde(default)]
+    pub thread: String,
+    #[serde(default)]
+    pub direction: String,
+    pub id: i64,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub source_path: String,
+    #[serde(default)]
+    pub excerpt: String,
+    #[serde(default)]
+    pub authority_state: String,
+    #[serde(default)]
+    pub superseded_by: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallCandidate {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub identity: Option<String>,
+    #[serde(default)]
+    pub candidate_id: Option<String>,
+    #[serde(default)]
+    pub memory_id: Option<i64>,
+    pub source_path: String,
+    pub title: String,
+    #[serde(default)]
+    pub heading_path: String,
+    #[serde(default)]
+    pub excerpt: String,
+    #[serde(default)]
+    pub sources: Vec<String>,
+    #[serde(default)]
+    pub score: Option<f64>,
+    #[serde(default)]
+    pub term_coverage: Value,
+    #[serde(default)]
+    pub matched_terms: Vec<String>,
+    #[serde(default)]
+    pub missing_terms: Vec<String>,
+    #[serde(default)]
+    pub reasons: Vec<String>,
+    #[serde(default)]
+    pub thread_key: Option<String>,
+    #[serde(default)]
+    pub thread_neighbors: Vec<RecallThreadNeighbor>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub chunk_index: Option<i64>,
+    #[serde(default)]
+    pub semantic_rank: Option<u64>,
+    #[serde(default)]
+    pub semantic_similarity: Option<f64>,
+    #[serde(default)]
+    pub semantic_score: Option<f64>,
+    #[serde(default)]
+    pub content_rank: Option<u64>,
+    #[serde(default)]
+    pub content_similarity: Option<f64>,
+    #[serde(default)]
+    pub content_score: Option<f64>,
+    #[serde(default)]
+    pub lexical_rank: Option<u64>,
+    #[serde(default)]
+    pub lexical_score: Option<f64>,
+    #[serde(default)]
+    pub bm25f_score: Option<f64>,
+    #[serde(default)]
+    pub bm25f_fields: Option<Value>,
+    #[serde(default)]
+    pub semantic_lexical_score: Option<f64>,
+    #[serde(default)]
+    pub semantic_lexical_fields: Option<Value>,
+    #[serde(default)]
+    pub semantic_lexical_concepts: Option<Value>,
+    #[serde(default)]
+    pub durability: Option<String>,
+    #[serde(default)]
+    pub temporal_weight: Option<f64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallCanonFile {
+    pub file: String,
+    #[serde(default)]
+    pub lines: Vec<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallCanonEntry {
+    #[serde(rename = "type")]
+    pub entry_type: String,
+    pub summary: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub weighty: bool,
+    #[serde(default)]
+    pub files: Vec<RecallCanonFile>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallCanonMatch {
+    #[serde(rename = "termKey")]
+    pub term_key: String,
+    pub entry: RecallCanonEntry,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallRawChunk {
+    #[serde(default)]
+    pub memory_id: Option<i64>,
+    #[serde(default)]
+    pub source_path: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub heading_path: String,
+    #[serde(default)]
+    pub sim: Option<f64>,
+    #[serde(default)]
+    pub ws: Option<f64>,
+    pub body: String,
+    #[serde(default)]
+    pub char_start: Option<i64>,
+    #[serde(default)]
+    pub char_end: Option<i64>,
+    #[serde(default)]
+    pub chunk_index: Option<i64>,
+    #[serde(default)]
+    pub durability: Option<String>,
+    #[serde(default)]
+    pub temporal_weight: Option<f64>,
+    #[serde(default)]
+    pub matched_terms: Vec<String>,
+    #[serde(default)]
+    pub missing_terms: Vec<String>,
+    #[serde(default)]
+    pub term_coverage: Value,
+    #[serde(default)]
+    pub evidence: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallDateMatch {
+    #[serde(default)]
+    pub source_path: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub dates: Vec<String>,
+    pub body_excerpt: String,
+    #[serde(default)]
+    pub excerpt: String,
+    #[serde(default)]
+    pub date: Option<String>,
+    #[serde(default)]
+    pub score: Option<f64>,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub matched_terms: Vec<String>,
+    #[serde(default)]
+    pub missing_terms: Vec<String>,
+    #[serde(default)]
+    pub term_coverage: Value,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecallTaxonomy {
+    #[serde(default)]
+    pub rooms: Vec<String>,
+    #[serde(default)]
+    pub memory_types: Vec<String>,
+    #[serde(default)]
+    pub thread_keys: Vec<String>,
+    #[serde(default)]
+    pub named_entities: Vec<String>,
+    #[serde(default)]
+    pub file_types: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallMemoryRecord {
+    pub source_path: String,
+    pub body: String,
+    #[serde(default, flatten)]
+    pub extra: std::collections::BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct RecallMemoryHandle {
+    pub path: String,
+    pub title: String,
+    #[serde(default)]
+    pub memory: Option<RecallMemoryRecord>,
+    #[serde(default, flatten)]
+    pub extra: std::collections::BTreeMap<String, Value>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallResultInput {
     pub ok: bool,
     pub query: String,
     pub found: bool,
     pub source: String,
     #[serde(rename = "retrievalCandidates")]
-    pub retrieval_candidates: Vec<Value>,
+    pub retrieval_candidates: Vec<RecallCandidate>,
     #[serde(rename = "canonMatches")]
-    pub canon_matches: Vec<Value>,
+    pub canon_matches: Vec<RecallCanonMatch>,
     #[serde(rename = "semanticChunks")]
-    pub semantic_chunks: Vec<Value>,
+    pub semantic_chunks: Vec<RecallRawChunk>,
     #[serde(rename = "contentChunks")]
-    pub content_chunks: Vec<Value>,
+    pub content_chunks: Vec<RecallRawChunk>,
     #[serde(rename = "dateMatches")]
-    pub date_matches: Vec<Value>,
+    pub date_matches: Vec<RecallDateMatch>,
     #[serde(rename = "queryDates")]
-    pub query_dates: Vec<Value>,
-    pub taxonomy: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_dates: Vec<String>,
+    pub taxonomy: RecallTaxonomy,
+    #[serde(default)]
+    pub authority: Option<String>,
+    #[serde(default)]
+    pub roots: Vec<String>,
+    #[serde(default, rename = "scannedFiles")]
+    pub scanned_files: Option<u64>,
+    #[serde(default, rename = "indexedDocuments")]
+    pub indexed_documents: Option<u64>,
+    #[serde(default)]
     pub cluster: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub clusters: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "clusterStaleness")]
+    #[serde(default, rename = "clusterStaleness")]
     pub cluster_staleness: Option<ClusterStalenessTelemetry>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "clusterResonance")]
+    #[serde(default, rename = "clusterResonance")]
     pub cluster_resonance: Option<ClusterResonanceTelemetry>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "memoryHandle")]
-    pub memory_handle: Option<Value>,
+    #[serde(default, rename = "memoryHandle")]
+    pub memory_handle: Option<RecallMemoryHandle>,
     #[serde(default)]
     pub warnings: Vec<String>,
+}
+
+pub type RecallResult = RecallResultInput;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecallViewportMode {
+    Automatic,
+    Manual,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallPresentationThreadNeighbor {
+    pub thread: String,
+    pub direction: String,
+    pub id: i64,
+    pub title: String,
+    pub source_path: String,
+    pub excerpt: String,
+    pub authority_state: String,
+    pub superseded_by: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallPresentationCandidate {
+    pub source_path: String,
+    pub title: String,
+    pub heading_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thread_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thread_neighbors: Vec<RecallPresentationThreadNeighbor>,
+    pub sources: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    pub term_coverage: Value,
+    pub matched_terms: Vec<String>,
+    pub missing_terms: Vec<String>,
+    pub reasons: Vec<String>,
+    pub excerpt: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallPresentationCanonMatch {
+    #[serde(rename = "termKey")]
+    pub term_key: String,
+    #[serde(rename = "type")]
+    pub entry_type: String,
+    pub summary: String,
+    pub files: Vec<RecallCanonFile>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallPresentationRawChunk {
+    pub source_path: String,
+    pub heading_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
+    pub body: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallPresentationDateMatch {
+    pub source_path: String,
+    pub title: String,
+    pub dates: Vec<String>,
+    pub body_excerpt: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecallPresentationTaxonomy {
+    pub rooms: Vec<String>,
+    pub memory_types: Vec<String>,
+    pub thread_keys: Vec<String>,
+    pub named_entities: Vec<String>,
+    pub file_types: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallPresentationClusterProfile {
+    pub label: String,
+    pub activation: f64,
+    pub members: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecallPresentationClusterResonance {
+    pub note: String,
+    pub profile: Vec<RecallPresentationClusterProfile>,
+    pub dormant_hot: Vec<Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallPresentationMemoryRecord {
+    pub source_path: String,
+    pub body: String,
+    pub frontmatter: Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallPresentationMemoryHandle {
+    pub path: String,
+    pub title: String,
+    pub memory: Option<RecallPresentationMemoryRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecallPresentationVault {
+    pub authority: String,
+    pub roots: Vec<String>,
+    pub scanned_files: u64,
+    pub indexed_documents: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecallPresentation {
+    pub ok: bool,
+    pub query: String,
+    pub found: bool,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vault: Option<RecallPresentationVault>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    #[serde(rename = "canonMatches")]
+    pub canon_matches: Vec<RecallPresentationCanonMatch>,
+    #[serde(rename = "retrievalCandidates")]
+    pub retrieval_candidates: Vec<RecallPresentationCandidate>,
+    #[serde(rename = "semanticChunks")]
+    pub semantic_chunks: Vec<RecallPresentationRawChunk>,
+    #[serde(rename = "contentChunks")]
+    pub content_chunks: Vec<RecallPresentationRawChunk>,
+    #[serde(rename = "dateMatches")]
+    pub date_matches: Vec<RecallPresentationDateMatch>,
+    #[serde(rename = "queryDates")]
+    pub query_dates: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub taxonomy: Option<RecallPresentationTaxonomy>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "clusterNudge")]
+    pub cluster_nudge: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "clusterResonance")]
+    pub cluster_resonance: Option<RecallPresentationClusterResonance>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "memoryHandle")]
+    pub memory_handle: Option<RecallPresentationMemoryHandle>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecallViewportSuppression {
+    pub identity: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecallViewportDiagnostics {
+    pub kept: u64,
+    pub suppressed: u64,
+    pub reasons: std::collections::HashMap<String, u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecallViewportResult {
+    pub kept_candidates: Vec<RecallPresentationCandidate>,
+    pub suppressions: Vec<RecallViewportSuppression>,
+    pub diagnostics: RecallViewportDiagnostics,
+    pub presentation: RecallPresentation,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -1064,7 +1468,10 @@ impl TryFrom<RememberParams> for RememberRequest {
                 params.title,
                 params.body,
                 RememberLessonDetails {
-                    backup: params.backup,
+                    backup: params.backup.unwrap_or(matches!(
+                        kind,
+                        RememberKind::ProjectLesson | RememberKind::AudioLesson
+                    )),
                     source_memory_path: params.source_memory_path,
                     shape: params.shape,
                     voice: params.voice,
@@ -1090,7 +1497,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                     threads: params.threads,
                     continues,
                     supersedes,
-                    backup: params.backup,
+                    backup: params.backup.unwrap_or(false),
                 },
             )
         };
@@ -1521,8 +1928,60 @@ pub struct PaperBoatWakeResult {
     pub unboated: Vec<PaperBoatUnboatedResult>,
     pub unboated_truncated: bool,
     pub warnings: Vec<String>,
+    pub wake_context: Option<String>,
 }
 
+fn bounded_wake_body(body: &str) -> String {
+    const LIMIT: usize = 6_000;
+    let length = body.chars().count();
+    if length <= LIMIT {
+        body.to_owned()
+    } else {
+        format!(
+            "{}\n...[paper boat clipped {} chars]",
+            body.chars().take(LIMIT).collect::<String>().trim_end(),
+            length - LIMIT,
+        )
+    }
+}
+
+fn wake_context(
+    title: &str,
+    source_path: &str,
+    body: &str,
+    unboated: &[PaperBoatUnboatedResult],
+) -> String {
+    let warning = (!unboated.is_empty()).then(|| {
+        let plural = if unboated.len() == 1 {
+            "memory was"
+        } else {
+            "memories were"
+        };
+        format!(
+            "STALE BOAT: {} {plural} written AFTER this boat was cast, so this boat does NOT describe the most recent session. Do not treat it as current.\nRecover the missing session by recalling these before answering:\n{}",
+            unboated.len(),
+            unboated
+                .iter()
+                .map(|memory| format!("  - [{}] {}", memory.id, memory.title.trim()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    });
+    [
+        Some("<system-reminder>".to_owned()),
+        warning,
+        Some("Automatic wake: latest paper boat for this room.".into()),
+        Some("Receive it as lived continuity from the room's previous waking self: keep its voice, relationships, uncertainty, and concrete state intact; orient from it without turning it into a script or status report.".into()),
+        Some(format!("Title: {title}")),
+        Some(format!("Source: {source_path}")),
+        Some(bounded_wake_body(body)),
+        Some("</system-reminder>".into()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("\n")
+}
 impl From<PaperBoatWakeReceipt> for PaperBoatWakeResult {
     fn from(receipt: PaperBoatWakeReceipt) -> Self {
         let room = receipt.room().to_string();
@@ -1537,20 +1996,24 @@ impl From<PaperBoatWakeReceipt> for PaperBoatWakeResult {
                 created_at,
                 unboated,
                 unboated_truncated,
-            }) => Self {
-                ok: true,
-                found: true,
-                room,
-                id: Some(id.to_string()),
-                title: Some(title.clone()),
-                body: Some(body.clone()),
-                date: date.clone(),
-                source_path: Some(source_path.clone()),
-                created_at: Some(created_at.clone()),
-                unboated: unboated.iter().map(Into::into).collect(),
-                unboated_truncated: *unboated_truncated,
-                warnings,
-            },
+            }) => {
+                let unboated = unboated.iter().map(Into::into).collect::<Vec<_>>();
+                Self {
+                    ok: true,
+                    found: true,
+                    room,
+                    id: Some(id.to_string()),
+                    title: Some(title.clone()),
+                    body: Some(body.clone()),
+                    date: date.clone(),
+                    source_path: Some(source_path.clone()),
+                    created_at: Some(created_at.clone()),
+                    wake_context: Some(wake_context(title, source_path, body, &unboated)),
+                    unboated,
+                    unboated_truncated: *unboated_truncated,
+                    warnings,
+                }
+            }
             None => Self {
                 ok: true,
                 found: false,
@@ -1563,6 +2026,7 @@ impl From<PaperBoatWakeReceipt> for PaperBoatWakeResult {
                 created_at: None,
                 unboated: Vec::new(),
                 unboated_truncated: false,
+                wake_context: None,
                 warnings,
             },
         }
@@ -1704,6 +2168,18 @@ impl RequestEnvelope {
             .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?
             .try_into()
     }
+    pub fn giga_conversation_ingest_request(
+        self,
+    ) -> Result<GigaConversationIngestParams, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_conversation_ingest" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
     pub fn giga_event_claim_request(self) -> Result<GigaEventClaimRequest, ProtocolError> {
         if self.protocol != PROTOCOL_VERSION {
             return Err(ProtocolError::ProtocolMismatch(self.protocol));
@@ -1761,6 +2237,16 @@ impl RequestEnvelope {
             .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?
             .try_into()
     }
+    pub fn giga_tool_promote_request(self) -> Result<GigaToolPromoteParams, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_tool_promote" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
+    }
     pub fn giga_review_request(self) -> Result<GigaReviewAction, ProtocolError> {
         if self.protocol != PROTOCOL_VERSION {
             return Err(ProtocolError::ProtocolMismatch(self.protocol));
@@ -1771,6 +2257,16 @@ impl RequestEnvelope {
         serde_json::from_value::<GigaReviewParams>(self.params)
             .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?
             .try_into()
+    }
+    pub fn giga_tool_review_request(self) -> Result<GigaToolReviewParams, ProtocolError> {
+        if self.protocol != PROTOCOL_VERSION {
+            return Err(ProtocolError::ProtocolMismatch(self.protocol));
+        }
+        if self.method != "giga_tool_review" {
+            return Err(ProtocolError::UnknownMethod(self.method));
+        }
+        serde_json::from_value(self.params)
+            .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
     }
     pub fn giga_candidate_list_request(self) -> Result<GigaCandidateListRequest, ProtocolError> {
         if self.protocol != PROTOCOL_VERSION {
@@ -2122,6 +2618,26 @@ impl GigaLifecycleParams {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct GigaConversationTurnParams {
+    pub role: String,
+    pub source_id: String,
+    pub content_hash: String,
+    pub session_id: String,
+    pub timestamp: String,
+    pub has_stable_id: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaConversationIngestParams {
+    pub room: String,
+    #[serde(default)]
+    pub project_keys: Vec<String>,
+    pub turns: Vec<GigaConversationTurnParams>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct GigaEventParams {
     pub event_schema_version: u8,
     pub event_id: String,
@@ -2389,6 +2905,70 @@ pub enum GigaPromotionTargetParams {
 pub struct GigaPublicationConsentParams {
     pub operator_approved: bool,
     pub reviewer_approved: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum GigaToolPromotionTargetParams {
+    Memory {
+        title: String,
+        body: String,
+        #[serde(default)]
+        threads: Vec<String>,
+    },
+    CodingLesson {
+        title: String,
+        body: String,
+        #[serde(default)]
+        shape: Option<String>,
+        #[serde(default)]
+        proof_pattern: Option<String>,
+        #[serde(default)]
+        trigger_context: Option<String>,
+        #[serde(default)]
+        language_keys: Vec<String>,
+        #[serde(default)]
+        technology_keys: Vec<String>,
+        #[serde(default)]
+        tags: Vec<String>,
+    },
+    ProjectLesson {
+        title: String,
+        body: String,
+        #[serde(default)]
+        proof_pattern: Option<String>,
+        #[serde(default)]
+        trigger_context: Option<String>,
+        #[serde(default)]
+        language_keys: Vec<String>,
+        #[serde(default)]
+        technology_keys: Vec<String>,
+        #[serde(default)]
+        tags: Vec<String>,
+        publication_approved: bool,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaToolPromoteParams {
+    pub candidate_id: String,
+    pub room: String,
+    pub reviewer_id: String,
+    pub operator_identity: String,
+    pub authorization_basis: String,
+    pub target: GigaToolPromotionTargetParams,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaToolReviewParams {
+    pub candidate_id: String,
+    pub room: String,
+    pub reviewer_id: String,
+    pub new_state: String,
+    pub reason: String,
+    pub authorization_basis: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -3756,11 +4336,11 @@ mod tests {
             trigger_context: None,
             example_text: None,
             language_keys: vec![],
-            technology_keys: vec![],
             thread_keys: vec![],
+            technology_keys: vec![],
             register: vec![],
             tags: vec![],
-            backup: true,
+            backup: Some(true),
         };
         assert_eq!(
             RememberRequest::try_from(params).unwrap().supersedes(),
@@ -3789,7 +4369,7 @@ mod tests {
             technology_keys: vec![],
             thread_keys: vec![],
             tags: vec![],
-            backup: true,
+            backup: Some(true),
         };
         assert_eq!(
             RememberRequest::try_from(params).unwrap().supersedes(),
@@ -3818,7 +4398,7 @@ mod tests {
                 technology_keys: vec![],
                 thread_keys: vec![],
                 tags: vec![],
-                backup: true,
+                backup: Some(true),
             };
             assert!(matches!(
                 RememberRequest::try_from(params),

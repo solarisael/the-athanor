@@ -1,26 +1,21 @@
 {
   "name": "the-athanor",
-  "version": "1.0.0-rc.3",
+  "version": "0.9.3",
   "description": "A persistent identity, continuity, and memory platform for AI agents and collaborators.",
   "author": "Sol",
   "license": "Apache-2.0",
   "repository": "github:solarisael/the-athanor",
   "type": "module",
-  "main": "index.ts",
   "private": true,
   "workspaces": [
     "adapters/omp"
   ],
   "scripts": {
-    "test": "bun run test:core && bun run test:python && bun run test:substrate && bun run test:rust && bun run test:omp",
-    "test:core": "bun test tests/*.test.ts",
-    "test:api": "bun test tests/api-contract.test.ts",
-    "test:python": "python -m unittest discover -s src -p \"test_*.py\"",
-    "test:substrate": "cd substrate && python -m pytest",
+    "test": "bun run test:rust && bun run test:omp",
     "test:rust": "cargo test --workspace",
     "test:omp": "cd adapters/omp && bun run test",
     "build:substrate": "cargo build --release -p athanor-substrate",
     "build:godot": "cargo build -p athanor-godot --target-dir clients/godot/target",
-    "build:native": "pwsh -File installer/build-native-release.ps1 -Version 1.0.0-rc.3 -OutDir dist/native"
+    "build:native": "pwsh -File installer/build-native-release.ps1 -Version 0.9.3 -OutDir dist/native"
   }
 }

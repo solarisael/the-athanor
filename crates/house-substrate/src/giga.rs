@@ -1,28 +1,30 @@
 use crate::{
     AppError,
     config::Config,
-    giga_worker::{giga_classifier_enabled, giga_classifier_health},
+    giga_worker::{giga_classifier_enabled, giga_classifier_health, verify_promotion_sources},
     remember::{
         prepare_memory_write, write_coding_lesson_tx, write_memory_tx, write_project_lesson_tx,
     },
 };
 use chrono::{DateTime, Duration, Utc};
 use house_core::{
-    GIGA_MAX_EVENT_ATTEMPTS, GigaAuthority, GigaCandidate, GigaCandidateKind, GigaEvent,
-    GigaEventClaimReceipt, GigaEventClaimRequest, GigaEventFinishOutcome, GigaEventFinishReceipt,
-    GigaEventFinishRequest, GigaEventReplayReceipt, GigaEventReplayRequest, GigaEventType,
-    GigaLifecycle, GigaPromotionAuthority, GigaPromotionKind, GigaPromotionPayload,
-    GigaPromotionReceipt, GigaPromotionRequest, GigaQueueMaintenanceOperation,
-    GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope, GigaQueueState, GigaResonance,
-    GigaReviewAction, GigaReviewState, GigaRisk, GigaScope, GigaSourceRange, GigaSourceRef,
-    GigaSourceType, GigaVisibility, RoomKey,
+    GIGA_MAX_EVENT_ATTEMPTS, GigaAuthority, GigaCandidate, GigaCandidateKind,
+    GigaCodingLessonPromotionPayload, GigaEvent, GigaEventClaimReceipt, GigaEventClaimRequest,
+    GigaEventFinishOutcome, GigaEventFinishReceipt, GigaEventFinishRequest, GigaEventReplayReceipt,
+    GigaEventReplayRequest, GigaEventType, GigaLifecycle, GigaMemoryPromotionPayload,
+    GigaProjectLessonPromotionPayload, GigaPromotionAuthority, GigaPromotionKind,
+    GigaPromotionPayload, GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
+    GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
+    GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
+    GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RoomKey,
 };
 use house_protocol::{
     GigaCandidateListRequest, GigaCandidateListResult, GigaCandidateParams,
-    GigaCandidateStoreResult, GigaClassifierParams, GigaEventIngestResult, GigaHealthCount,
-    GigaHealthRequest, GigaHealthResult, GigaQueueMaintenanceResult, GigaQueueStateCount,
-    GigaResonanceParams, GigaReviewResult, GigaScopeParams, GigaSourceRangeParams,
-    GigaSourceRefParams, RequiredNullable,
+    GigaCandidateStoreResult, GigaClassifierParams, GigaConversationIngestParams,
+    GigaEventIngestResult, GigaHealthCount, GigaHealthRequest, GigaHealthResult,
+    GigaQueueMaintenanceResult, GigaQueueStateCount, GigaResonanceParams, GigaReviewResult,
+    GigaScopeParams, GigaSourceRangeParams, GigaSourceRefParams, GigaToolPromoteParams,
+    GigaToolPromotionTargetParams, GigaToolReviewParams, RequiredNullable,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -185,6 +187,85 @@ pub async fn giga_event_ingest(
         accepted: true,
         duplicate: false,
     })
+}
+pub async fn giga_conversation_ingest(
+    pool: &PgPool,
+    request: GigaConversationIngestParams,
+) -> Result<GigaEventIngestResult, AppError> {
+    if request.turns.is_empty() || request.turns.len() > house_core::GIGA_MAX_PROCESS_SOURCES {
+        return Err(AppError::Invalid(
+            "GIGA conversation window must contain between one and eight turns".into(),
+        ));
+    }
+    if request.project_keys.len() > 1 {
+        return Err(AppError::Invalid(
+            "GIGA conversation window accepts at most one project key".into(),
+        ));
+    }
+    let room = RoomKey::new(request.room).map_err(domain_error)?;
+    let session_id = request.turns[0].session_id.clone();
+    let project = request.project_keys.first().cloned();
+    let mut seen = HashSet::with_capacity(request.turns.len());
+    let mut source_refs = Vec::with_capacity(request.turns.len());
+    for turn in &request.turns {
+        if !turn.has_stable_id
+            || turn.session_id != session_id
+            || !seen.insert(turn.source_id.as_str())
+            || !matches!(turn.role.as_str(), "user" | "assistant")
+        {
+            return Err(AppError::Invalid(
+                "GIGA conversation turns require stable unique identities, one session, and user/assistant roles".into(),
+            ));
+        }
+        let scope = GigaScope::new(
+            Some(room.to_string()),
+            project.clone(),
+            GigaVisibility::Private,
+            true,
+        )
+        .map_err(domain_error)?;
+        source_refs.push(
+            GigaSourceRef::new(
+                GigaSourceType::Turn,
+                turn.source_id.clone(),
+                turn.role.clone(),
+                turn.timestamp.clone(),
+                turn.content_hash.to_ascii_lowercase(),
+                scope,
+                None,
+            )
+            .map_err(domain_error)?,
+        );
+    }
+    let identity = serde_json::to_string(&(
+        1_u8,
+        room.as_str(),
+        &session_id,
+        request
+            .turns
+            .iter()
+            .map(|turn| (&turn.source_id, turn.content_hash.to_ascii_lowercase()))
+            .collect::<Vec<_>>(),
+    ))
+    .map_err(|error| AppError::Invalid(error.to_string()))?;
+    let event_id = format!("{:x}", Sha256::digest(identity.as_bytes()));
+    let created_at = request
+        .turns
+        .last()
+        .map(|turn| turn.timestamp.clone())
+        .expect("non-empty turns");
+    let event = GigaEvent::new(
+        event_id,
+        GigaEventType::ConversationWindow,
+        room,
+        session_id,
+        request.project_keys,
+        source_refs,
+        GigaLifecycle::conversation_window(),
+        created_at,
+    )
+    .map_err(domain_error)?;
+    giga_event_ingest(pool, event).await
 }
 
 async fn verify_parent_event(
@@ -552,6 +633,56 @@ async fn verify_resonance(
         verify_event_source(tx, resonance.event_id(), source).await?;
     }
     Ok(())
+}
+pub async fn giga_tool_review(
+    pool: &PgPool,
+    request: GigaToolReviewParams,
+) -> Result<GigaReviewResult, AppError> {
+    let mut tx = pool.begin().await?;
+    let candidate = sqlx::query(
+        "SELECT c.room,c.review_state
+         FROM giga_candidates c JOIN giga_events e ON e.event_id=c.event_id
+         WHERE c.candidate_id=$1 AND c.room=$2 AND e.room=$2
+         FOR UPDATE OF c",
+    )
+    .bind(&request.candidate_id)
+    .bind(&request.room)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Invalid("GIGA candidate does not exist in the trusted room".into()))?;
+    let previous_state = GigaReviewState::parse(&candidate.try_get::<String, _>("review_state")?)
+        .map_err(domain_error)?;
+    let new_state = GigaReviewState::parse(&request.new_state).map_err(domain_error)?;
+    if matches!(
+        new_state,
+        GigaReviewState::Promoted
+            | GigaReviewState::Merged
+            | GigaReviewState::Corrected
+            | GigaReviewState::Superseded
+    ) {
+        return Err(AppError::Invalid(
+            "GIGA review tool cannot commit an authority transition".into(),
+        ));
+    }
+    let source_refs = fresh_candidate_sources(&mut tx, &request.candidate_id).await?;
+    let reviewed_at: DateTime<Utc> = database_now(&mut tx).await?;
+    tx.commit().await?;
+    let review = GigaReviewAction::new(
+        request.candidate_id,
+        request.reviewer_id,
+        previous_state,
+        new_state,
+        request.reason,
+        request.authorization_basis,
+        source_refs,
+        None,
+        None,
+        Vec::new(),
+        None,
+        reviewed_at.to_rfc3339(),
+    )
+    .map_err(domain_error)?;
+    giga_review(pool, review).await
 }
 
 pub async fn giga_review(
@@ -1818,6 +1949,141 @@ async fn fresh_candidate_sources(
         ));
     }
     rows.iter().map(source_from_row).collect()
+}
+pub async fn giga_tool_promote(
+    pool: &PgPool,
+    cfg: &Config,
+    request: GigaToolPromoteParams,
+) -> Result<GigaPromotionReceipt, AppError> {
+    let mut tx = pool.begin().await?;
+    let candidate = sqlx::query(
+        "SELECT c.*,e.room AS event_room
+         FROM giga_candidates c JOIN giga_events e ON e.event_id=c.event_id
+         WHERE c.candidate_id=$1 AND c.room=$2 AND e.room=$2
+         FOR UPDATE OF c",
+    )
+    .bind(&request.candidate_id)
+    .bind(&request.room)
+    .fetch_optional(&mut *tx)
+    .await?
+    .ok_or_else(|| AppError::Invalid("GIGA candidate does not exist in the trusted room".into()))?;
+    let kind =
+        GigaCandidateKind::parse(&candidate.try_get::<String, _>("kind")?).map_err(domain_error)?;
+    let review_state = GigaReviewState::parse(&candidate.try_get::<String, _>("review_state")?)
+        .map_err(domain_error)?;
+    if review_state != GigaReviewState::InReview {
+        return Err(AppError::Invalid(
+            "GIGA promotion requires an in_review candidate".into(),
+        ));
+    }
+    let project_keys: Vec<String> = candidate.try_get("project_keys")?;
+    let thread_keys: Vec<String> = candidate.try_get("thread_keys")?;
+    let source_refs = fresh_candidate_sources(&mut tx, &request.candidate_id).await?;
+    let event_id: String = candidate.try_get("event_id")?;
+    let event = event_from_store(&mut tx, &event_id).await?;
+    verify_promotion_sources(cfg, &event).await?;
+    let reviewed_at: DateTime<Utc> = database_now(&mut tx).await?;
+    let (payload, publication_consent) = match request.target {
+        GigaToolPromotionTargetParams::Memory {
+            title,
+            body,
+            threads,
+        } => {
+            if kind != GigaCandidateKind::Memory {
+                return Err(AppError::Invalid(
+                    "memory promotion tool requires a memory candidate".into(),
+                ));
+            }
+            (
+                GigaPromotionPayload::Memory(
+                    GigaMemoryPromotionPayload::new(title, body, threads).map_err(domain_error)?,
+                ),
+                None,
+            )
+        }
+        GigaToolPromotionTargetParams::CodingLesson {
+            title,
+            body,
+            shape,
+            proof_pattern,
+            trigger_context,
+            language_keys,
+            technology_keys,
+            tags,
+        } => {
+            if kind != GigaCandidateKind::CodingLesson || !project_keys.is_empty() {
+                return Err(AppError::Invalid(
+                    "coding lesson promotion requires a global coding lesson candidate".into(),
+                ));
+            }
+            (
+                GigaPromotionPayload::CodingLesson(
+                    GigaCodingLessonPromotionPayload::new(
+                        title,
+                        body,
+                        shape,
+                        proof_pattern.unwrap_or_default(),
+                        trigger_context.unwrap_or_default(),
+                        language_keys,
+                        technology_keys,
+                        thread_keys,
+                        tags,
+                    )
+                    .map_err(domain_error)?,
+                ),
+                None,
+            )
+        }
+        GigaToolPromotionTargetParams::ProjectLesson {
+            title,
+            body,
+            proof_pattern,
+            trigger_context,
+            language_keys,
+            technology_keys,
+            tags,
+            publication_approved,
+        } => {
+            if kind != GigaCandidateKind::ProjectLesson || project_keys.len() != 1 {
+                return Err(AppError::Invalid(
+                    "project lesson promotion requires one stored candidate project".into(),
+                ));
+            }
+            let consent = GigaPublicationConsent::new(publication_approved, publication_approved)
+                .map_err(domain_error)?;
+            (
+                GigaPromotionPayload::ProjectLesson(
+                    GigaProjectLessonPromotionPayload::new(
+                        title,
+                        body,
+                        project_keys[0].clone(),
+                        proof_pattern.unwrap_or_default(),
+                        trigger_context.unwrap_or_default(),
+                        language_keys,
+                        technology_keys,
+                        thread_keys,
+                        tags,
+                    )
+                    .map_err(domain_error)?,
+                ),
+                Some(consent),
+            )
+        }
+    };
+    tx.commit().await?;
+    let promotion = GigaPromotionRequest::new(
+        request.candidate_id,
+        RoomKey::new(request.room).map_err(domain_error)?,
+        request.reviewer_id,
+        request.operator_identity,
+        request.authorization_basis,
+        source_refs,
+        payload,
+        publication_consent,
+        reviewed_at.to_rfc3339(),
+    )
+    .map_err(domain_error)?;
+    giga_promote(pool, cfg, promotion).await
 }
 
 fn typed_promotion_receipt(

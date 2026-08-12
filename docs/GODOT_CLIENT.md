@@ -1,7 +1,7 @@
 # Godot Client and Spatial Presentation Architecture
 
-Status: Functional 2D client ships in `1.0.0-rc.3`; spatial presentation remains target architecture
-Last updated: 2026-08-10
+Status: First functional 2D screens ship in the `0.9.3` late beta; the operator client and spatial presentation remain incomplete
+Last updated: 2026-08-11
 
 This document defines how the thin Godot client inherits Solarisael's visual
 system, remains a replaceable presentation body, and grows from functional 2D
@@ -9,12 +9,13 @@ controls into an in-world spatial interface and GPU-particle constellation.
 
 ## 1. Current boundary
 
-The native candidate ships a Godot 4.7.1 client, Rust GDExtension, authenticated
+The current late beta ships a Godot 4.7.1 client, Rust GDExtension, authenticated
 Host WebSocket link, live Recall Policy screen, and sanitized Paper Boat receipt
 screen. It applies real Host snapshots, typed deltas, resync, restart replay, and
 degraded/refused states.
 
-Conversation composition, source inspection, GIGA review, the spatial renderer,
+Conversation and inter-agent message inspection, source and authority views,
+GIGA review, agent/subagent activity, operational metrics, the spatial renderer,
 companion bodies, generated cross-platform token pipeline, and maximal
 alchemical environment profiles remain planned.
 

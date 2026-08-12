@@ -930,6 +930,15 @@ async fn resolve_sources_from_ledger(
         })
         .collect()
 }
+pub(crate) async fn verify_promotion_sources(
+    config: &Config,
+    event: &GigaEvent,
+) -> Result<(), AppError> {
+    resolve_sources_from_ledger(config, event)
+        .await
+        .map(|_| ())
+        .map_err(|failure| AppError::Invalid(failure.class.into()))
+}
 
 async fn classify_event(
     event: &GigaEvent,

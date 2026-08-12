@@ -106,79 +106,6 @@ describe("Rust recall routing", () => {
     expect(observed.options.settleDefinitively).toBeUndefined();
   });
 
-  test("accepts the exact candidate shape consumed by the compactor", async () => {
-    RustJsonlTransport.prototype.request = async function () {
-      return {
-        ...result("alpha"),
-        retrievalCandidates: [{
-          source_path: "memory/alpha.md",
-          title: "Alpha",
-          heading_path: "Notes",
-          excerpt: "alpha excerpt",
-          sources: ["semantic"],
-          score: 0.8,
-          term_coverage: 1,
-          matched_terms: ["alpha"],
-          missing_terms: [],
-          reasons: ["semantic search"],
-        }],
-      };
-    };
-    await expect(recallWithRouting("room-dir", "example", "alpha")).resolves.toMatchObject({ ok: true });
-  });
-
-  test("reports invalid result validation with a safe observed shape", async () => {
-    RustJsonlTransport.prototype.request = async function () {
-      return { ok: true, query: "alpha", found: true, source: "rust-postgres", private_payload: "do-not-leak" };
-    };
-    const routed = await recallWithRouting("room-dir", "example", "alpha");
-    expect(routed.ok).toBe(false);
-    expect(routed.result.error).toContain("result.retrievalCandidates must be an array");
-    expect(routed.result).toMatchObject({
-      code: "invalid_rust_result",
-      retryable: true,
-      details: {
-        owner: { symbol: "validRustRecallResult" },
-        observed: { type: "object", fields: { private_payload: "string" } },
-        execution: { request_dispatched: true, write_outcome: "not_started", retry: "safe_now" },
-      },
-    });
-    expect(JSON.stringify(routed.result.details)).not.toContain("do-not-leak");
-  });
-
-  test("rejects warnings unless every entry is a string", async () => {
-    RustJsonlTransport.prototype.request = async function () {
-      return {
-        ...result("alpha"),
-        warnings: ["semantic retrieval disabled", { code: "embedding_unavailable" }],
-      };
-    };
-    const routed = await recallWithRouting("room-dir", "example", "alpha");
-    expect(routed.ok).toBe(false);
-    expect(routed.result.error).toContain("result.warnings must be an array of strings");
-  });
-
-  test("rejects missing taxonomy", async () => {
-    RustJsonlTransport.prototype.request = async function () {
-      return { ...result("alpha"), taxonomy: null };
-    };
-    const routed = await recallWithRouting("room-dir", "example", "alpha");
-    expect(routed.ok).toBe(false);
-    expect(routed.result.error).toContain("result.taxonomy must be an object");
-  });
-
-  test("rejects malformed candidate and date elements", async () => {
-    RustJsonlTransport.prototype.request = async function () {
-      return {
-        ...result("alpha"),
-        retrievalCandidates: [{ matched_terms: ["alpha"], missing_terms: "beta" }],
-        dateMatches: [{ body_excerpt: 42 }],
-      };
-    };
-    const routed = await recallWithRouting("room-dir", "example", "alpha");
-    expect(routed.ok).toBe(false);
-    expect(routed.result.error).toContain("exact compactor candidate fields");
-  });
 
   test("reports a transport crash with a retry-safe diagnostic and respawns the next request", async () => {
     let calls = 0;
@@ -194,13 +121,10 @@ describe("Rust recall routing", () => {
     expect(crash).toMatchObject({
       ok: false,
       result: {
+        ok: false,
+        query: "alpha",
         code: "rust_transport_failure",
         retryable: true,
-        details: {
-          category: "transport",
-          observed: { error_type: "Error" },
-          execution: { request_dispatched: true, write_outcome: "not_started", retry: "safe_now" },
-        },
       },
     });
     await expect(recallWithRouting("room-dir", "example", "alpha")).resolves.toEqual({ ok: true, result: result("alpha") });
@@ -232,40 +156,18 @@ describe("Rust recall routing", () => {
         error: "database down",
         code: "postgres_unavailable",
         retryable: false,
+        stderr: "postgres password=[redacted] unavailable",
         details: {
+          category: "operation",
           expected: { database: "reachable" },
           observed: { connection: "refused" },
           targets: ["postgres://local"],
           next_checks: [{ action: "start", target: "postgres" }],
-          execution: { retry: "after_change" },
-          evidence: [{ kind: "postgres", state: "down" }, { kind: "stderr", text: "postgres password=[redacted] unavailable" }],
+          execution: { request_dispatched: true, write_outcome: "not_started", retry: "after_change" },
         },
       },
     });
-  });
-  test("preserves valid cluster telemetry while stripping malformed advisory fields", async () => {
-    RustJsonlTransport.prototype.request = async function () {
-      return {
-        ...result("alpha"),
-        clusterStaleness: { built_at: "2026-07-01T00:00:00Z", chunks_since_build: 4, fraction_unseen: 0.2 },
-        clusterResonance: {
-          profile: [{ cluster_id: 1, label: "alpha", member_count: 3, activation: 0.8 }],
-          hot: [{ cluster_id: 1, label: "alpha", chunks: [{ source_path: "memory/a.md", heading_path: null, sim: 0.7 }] }],
-        },
-      };
-    };
-    const valid = await recallWithRouting("room-dir", "example", "alpha");
-    expect(valid).toMatchObject({ ok: true, result: { clusterStaleness: { fraction_unseen: 0.2 }, clusterResonance: { profile: [{ label: "alpha" }] } } });
-
-    RustJsonlTransport.prototype.request = async function () {
-      return {
-        ...result("alpha"),
-        clusterStaleness: { built_at: "not-a-date", chunks_since_build: -1, fraction_unseen: 4 },
-        clusterResonance: { profile: [{ label: "bad", member_count: "3", activation: NaN }], hot: [{ cluster_id: 1, label: "bad", chunks: [{ source_path: "memory/a.md", heading_path: 42, sim: 0.7 }] }] },
-      };
-    };
-    const malformed = await recallWithRouting("room-dir", "example", "alpha");
-    expect(malformed).toEqual({ ok: true, result: result("alpha") });
+    expect((routed.result as any).details.evidence[0]).toEqual({ kind: "postgres", state: "down" });
   });
 
 });

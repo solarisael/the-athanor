@@ -6,9 +6,10 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Out = if ([IO.Path]::IsPathRooted($OutDir)) { [IO.Path]::GetFullPath($OutDir) } else { [IO.Path]::GetFullPath((Join-Path $Root $OutDir)) }
-$Work = Join-Path $env:RUNNER_TEMP "athanor-native-$Version"
+$TempRoot = if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { [IO.Path]::GetTempPath() } else { $env:RUNNER_TEMP }
+$Work = Join-Path $TempRoot "athanor-native-$Version"
+if (Test-Path $Work) { Remove-Item $Work -Recurse -Force }
 $Stage = Join-Path $Work "payload"
-Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item $Stage -ItemType Directory -Force | Out-Null
 
 $Dependencies = Get-Content (Join-Path $PSScriptRoot "dependencies.json") -Raw | ConvertFrom-Json
@@ -23,7 +24,7 @@ function Fetch-Verified([string]$Url, [string]$Sha256, [string]$Destination) {
   if ($Actual -ne $Sha256.ToLowerInvariant()) { throw "checksum mismatch for $Url; expected $Sha256, got $Actual" }
 }
 
-$Downloads = Join-Path $env:RUNNER_TEMP "athanor-native-downloads"
+$Downloads = Join-Path $TempRoot "athanor-native-downloads"
 New-Item $Downloads -ItemType Directory -Force | Out-Null
 $PostgresZip = Join-Path $Downloads "postgresql.zip"
 $PgvectorZip = Join-Path $Downloads "pgvector.zip"
@@ -111,20 +112,6 @@ New-Item $AdapterTarget -ItemType Directory -Force | Out-Null
 }
 Copy-Item (Join-Path $AdapterSource "solarisael-house-proof") (Join-Path $AdapterTarget "solarisael-house-proof") -Recurse
 Copy-Item (Join-Path $AdapterSource "starter-room") (Join-Path $AdapterTarget "starter-room") -Recurse
-$CoreTarget = Join-Path $Stage "src"
-New-Item $CoreTarget -ItemType Directory -Force | Out-Null
-Copy-Item (Join-Path $Root "index.ts") (Join-Path $Stage "index.ts")
-Get-ChildItem (Join-Path $Root "src") -Filter "*.ts" -File | ForEach-Object {
-  Copy-Item $_.FullName $CoreTarget
-}
-$PreviousAthanorRoot = $env:ATHANOR_ROOT
-$env:ATHANOR_ROOT = $Stage
-$env:ATHANOR_CORE_SMOKE = Join-Path $AdapterTarget "solarisael-house-proof/core.ts"
-& bun --eval 'const { pathToFileURL } = await import("node:url"); const bridge = await import(pathToFileURL(process.env.ATHANOR_CORE_SMOKE).href); const core = await bridge.loadHouseCore(); if (core.CORE_API_VERSION !== 1) throw new Error("installed core API mismatch");'
-$CoreSmokeExitCode = $LASTEXITCODE
-$env:ATHANOR_ROOT = $PreviousAthanorRoot
-Remove-Item Env:ATHANOR_CORE_SMOKE
-if ($CoreSmokeExitCode -ne 0) { throw "installed OMP core import smoke failed" }
 Copy-Item (Join-Path $Root "installer/dependencies.json") (Join-Path $Stage "compatibility.json")
 
 $Artifacts = @()

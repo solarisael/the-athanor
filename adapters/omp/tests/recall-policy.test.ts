@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
-  compactAutomaticRecallPayload,
-  normalizePersistedRecallPolicy,
   RecallPolicyHostClient,
   RecallPolicyHostUnavailable,
 } from "../solarisael-house-proof/recall-policy.ts";
@@ -26,36 +24,21 @@ afterEach(() => {
 
 function hostState() {
   return {
-    requested_mode: "auto",
-    resolved_mode: "work",
-    active_project: "the-athanor",
-    resolution_reason: "technical-project",
-    last_refresh_reason: null,
-    last_refresh_at: null,
-    working_set_entries: 0,
-    recovery_pending: false,
-    recovery_terms: [],
+    requestedMode: "auto",
+    resolvedMode: "work",
+    activeProject: "the-athanor",
+    resolutionReason: "technical-project",
+    lastRefreshReason: null,
+    lastRefreshAt: null,
+    workingSetEntries: 0,
+    recoveryPending: false,
+    recoveryTerms: [],
     degraded: null,
-    updated_at: "2026-08-10T00:00:00.000Z",
+    updatedAt: "2026-08-10T00:00:00.000Z",
   };
 }
 
 describe("Recall Policy Host adapter", () => {
-  test("normalizes the authenticated Host projection for existing GUI/tool contracts", () => {
-    expect(normalizePersistedRecallPolicy(hostState())).toEqual({
-      requestedMode: "auto",
-      resolvedMode: "work",
-      activeProject: "the-athanor",
-      resolutionReason: "technical-project",
-      lastRefreshReason: null,
-      lastRefreshAt: null,
-      workingSetEntries: 0,
-      recoveryPending: false,
-      recoveryTerms: [],
-      degraded: null,
-      updatedAt: "2026-08-10T00:00:00.000Z",
-    });
-  });
 
   test("sends facts to Host and consumes its decision without evaluating policy locally", async () => {
     process.env.ATHANOR_HOST_TOKEN = "test-token";
@@ -95,13 +78,13 @@ describe("Recall Policy Host adapter", () => {
             version: 9,
             state: hostState(),
             decision: {
-              should_recall: true,
-              clear_working_set: false,
+              shouldRecall: true,
+              clearWorkingSet: false,
               query: "athanor recall policy",
-              query_terms: ["athanor", "recall", "policy"],
-              refresh_reason: "empty-working-set",
+              queryTerms: ["athanor", "recall", "policy"],
+              refreshReason: "empty-working-set",
               intent: "technical_project",
-              resolved_mode: "work",
+              resolvedMode: "work",
             },
           }),
         }));
@@ -149,6 +132,7 @@ describe("Recall Policy Host adapter", () => {
     expect(result.snapshot).toMatchObject({ version: 9, sequence: 12, stateHash: "hash-12" });
   });
 
+
   test("reports degraded Host instead of creating a fallback policy owner", async () => {
     delete process.env.ATHANOR_HOST_TOKEN;
     process.env.ATHANOR_HOST_HOUSE_ID = "solarisael";
@@ -172,21 +156,7 @@ describe("Recall Policy Host adapter", () => {
       spirit: "Kintsu",
       session: "session-1",
     });
-    await expect(client.inspect()).rejects.toThrow("no installed Recall Policy Host endpoint exists for room kintsu");
+    await expect(client.inspect()).rejects.toThrow("no installed Athanor Host endpoint exists for room kintsu");
   });
 
-  test("automatic context remains compact presentation data", () => {
-    const compact = compactAutomaticRecallPayload({
-      warnings: ["w".repeat(400), "second", "third"],
-      retrievalCandidates: [
-        { title: "first", excerpt: "x".repeat(800), matched_terms: [1, 2, 3, 4, 5], reasons: [1, 2, 3, 4] },
-        { title: "second", excerpt: "ok" },
-        { title: "third", excerpt: "drop" },
-      ],
-    });
-    expect(compact.retrievalCandidates).toHaveLength(2);
-    expect(compact.retrievalCandidates[0].excerpt).toHaveLength(480);
-    expect(compact.warnings).toHaveLength(2);
-    expect(compact.warnings[0]).toHaveLength(240);
-  });
 });

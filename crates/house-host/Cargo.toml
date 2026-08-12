@@ -19,6 +19,7 @@ axum.workspace = true
 chrono.workspace = true
 futures-util.workspace = true
 hex.workspace = true
+house-core = { path = "../house-core" }
 house-protocol = { path = "../house-protocol" }
 serde.workspace = true
 serde_json.workspace = true

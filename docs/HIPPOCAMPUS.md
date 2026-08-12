@@ -1,7 +1,7 @@
 # GIGA and Hippocampus Specification
 
 Status: Stage 1 operational in the reference House; evaluation and remaining policy work continue
-Target: Operational in the installed `1.0.0-rc.3` candidate; broader evaluation continues
+Target: Operational in the current `0.9.3` late beta; broader evaluation continues
 Contract version: 0.1
 
 ## 1. Purpose

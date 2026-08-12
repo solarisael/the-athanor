@@ -5,6 +5,7 @@ use crate::store::{
     DurableReceipt, HostDurableStore, ProjectionCursor, RoomStateStore, body_hash, state_hash,
     timestamp,
 };
+use crate::viewport::{ViewportSession, apply_viewport};
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -12,15 +13,29 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
+use house_core::context::analyze_context;
+use house_core::conversation::{
+    ConversationTurn, conversation_turns, is_fresh_conversation, logged_turn,
+    transcript_debug_path, transcript_entry, transcript_path, turn_key, turn_label, turn_marker,
+};
+use house_core::lineage::{QuestLifecycle, normalize_lifecycle_memory, normalize_quest_memories};
+use house_core::routing::{
+    DispatchRequest, LoadedSpellbook, SpellbookRead, familiar_status, house_dispatch, lane_status,
+    load_spellbook,
+};
+use house_core::triggers::{process_lesson_plan, process_lesson_reminder};
 use house_protocol::{
-    BOAT_RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT, ClientCommand, CommandMeta,
-    CommandOutcomeEvent, DeltaEvent, EventMeta, HOST_SCHEMA_VERSION,
+    BOAT_RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT, CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID,
+    CONTEXT_VIEWPORTED, ClientCommand, CommandMeta, CommandOutcomeEvent, ContextAnalysisEvent,
+    ContextViewportEvent, ConversationLogRequest, DeltaEvent, EventMeta, HOST_SCHEMA_VERSION,
+    LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
     PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
     PaperBoatReceiptEvent, PaperBoatReceiptState, RECALL_POLICY_COMMAND_ACCEPTED,
     RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA,
     RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE,
-    RecallPolicyDecision, RecallPolicyMutation, RecallPolicyState, SnapshotEvent,
-    parse_client_command,
+    ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallPolicyDecision, RecallPolicyMutation,
+    RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT, ShellResultEvent,
+    SnapshotEvent, parse_client_command,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -36,6 +51,7 @@ use uuid::Uuid;
 struct RuntimeState {
     projection: RecallPolicyState,
     sessions: HashMap<String, RecallPolicySession>,
+    viewport_sessions: HashMap<String, ViewportSession>,
     cursor: ProjectionCursor,
     durable: HostDurableStore,
 }
@@ -82,6 +98,7 @@ impl Host {
                 runtime: Arc::new(Mutex::new(RuntimeState {
                     projection,
                     sessions,
+                    viewport_sessions: HashMap::new(),
                     cursor,
                     durable,
                 })),
@@ -282,6 +299,26 @@ fn contains_event(events: &[String], event_type: &str) -> bool {
     })
 }
 
+fn semantic_command_hash(raw: &Value) -> Result<String, String> {
+    let mut semantic = raw.clone();
+    let object = semantic
+        .as_object_mut()
+        .ok_or_else(|| "command envelope must be a JSON object".to_string())?;
+    for field in [
+        "message_id",
+        "correlation_id",
+        "causation_id",
+        "reply_target",
+        "idempotency_key",
+        "created_at",
+        "expires_at",
+        "max_hops",
+    ] {
+        object.remove(field);
+    }
+    body_hash(&semantic)
+}
+
 struct Responses {
     direct: Vec<String>,
     delta: Option<String>,
@@ -299,7 +336,7 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             };
         }
     };
-    let command_hash = match body_hash(&raw) {
+    let command_hash = match semantic_command_hash(&raw) {
         Ok(hash) => hash,
         Err(reason) => {
             return Responses {
@@ -469,13 +506,338 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
                 .cloned()
                 .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
             session.invalidate_after_compaction(&summary);
+            runtime.viewport_sessions.remove(&meta.sender_session);
             let next = session.projection(timestamp());
             runtime
                 .sessions
                 .insert(meta.sender_session.clone(), session);
             commit_change(state, &mut runtime, &meta, command_hash, next, None)
         }
+        ClientCommand::AnalyzeContext { meta, request } => {
+            let mut runtime = state.runtime.lock().await;
+            let last_nudge_band = runtime
+                .viewport_sessions
+                .get(&meta.sender_session)
+                .map(ViewportSession::last_nudge_band)
+                .unwrap_or_default();
+            let analysis = match analyze_context(&meta.sender_room, request, last_nudge_band) {
+                Ok(analysis) => analysis,
+                Err(error) => {
+                    let failed = outcome_with_runtime(
+                        state,
+                        &meta,
+                        RECALL_POLICY_COMMAND_FAILED,
+                        Some(error.to_string()),
+                        &runtime,
+                        None,
+                    );
+                    return Responses {
+                        direct: vec![serialize(&failed)],
+                        delta: None,
+                    };
+                }
+            };
+            if let Some(nudge) = &analysis.nudge {
+                runtime
+                    .viewport_sessions
+                    .entry(meta.sender_session.clone())
+                    .or_default()
+                    .set_last_nudge_band(nudge.band);
+            }
+            let event = ContextAnalysisEvent {
+                meta: event_meta_for_projection(
+                    state,
+                    Some(&meta),
+                    &meta.message_id,
+                    &meta.idempotency_key,
+                    CONTEXT_ANALYZED,
+                    CONTEXT_PROJECTION_ID,
+                    runtime.cursor.sequence,
+                    body_hash(
+                        &serde_json::to_value(&analysis).expect("context analysis serializes"),
+                    )
+                    .expect("context analysis hashes"),
+                    new_id(),
+                ),
+                analysis,
+            };
+            Responses {
+                direct: vec![serialize(&event)],
+                delta: None,
+            }
+        }
+        ClientCommand::ApplyRecallViewport { meta, result, mode } => {
+            let mut runtime = state.runtime.lock().await;
+            let viewport = apply_viewport(
+                result,
+                runtime
+                    .viewport_sessions
+                    .entry(meta.sender_session.clone())
+                    .or_default(),
+                mode,
+            );
+            let event = ContextViewportEvent {
+                meta: event_meta_for_projection(
+                    state,
+                    Some(&meta),
+                    &meta.message_id,
+                    &meta.idempotency_key,
+                    CONTEXT_VIEWPORTED,
+                    CONTEXT_PROJECTION_ID,
+                    runtime.cursor.sequence,
+                    body_hash(
+                        &serde_json::to_value(&viewport).expect("viewport result serializes"),
+                    )
+                    .expect("viewport result hashes"),
+                    new_id(),
+                ),
+                result: viewport,
+            };
+            Responses {
+                direct: vec![serialize(&event)],
+                delta: None,
+            }
+        }
+        ClientCommand::RoutingStatus { meta } => {
+            routing_response(
+                state,
+                meta,
+                serde_json::to_value(lane_status()).expect("lane status serializes"),
+            )
+            .await
+        }
+        ClientCommand::RoutingDispatch {
+            meta,
+            room_dir,
+            request,
+        } => {
+            let result = match serde_json::from_value::<DispatchRequest>(request) {
+                Ok(request) => serde_json::to_value(house_dispatch(request, || {
+                    read_room_spellbook(room_dir.as_deref().unwrap_or_default())
+                }))
+                .expect("dispatch receipt serializes"),
+                Err(error) => invalid_routing_request("routing", error),
+            };
+            routing_response(state, meta, result).await
+        }
+        ClientCommand::FamiliarStatus { meta, room_dir } => {
+            let result = serde_json::to_value(familiar_status(read_room_spellbook(&room_dir)))
+                .expect("familiar status serializes");
+            routing_response(state, meta, result).await
+        }
+        ClientCommand::NormalizeLineage { meta, request } => {
+            let memories = normalize_quest_memories(request);
+            lineage_response(state, meta, true, memories).await
+        }
+        ClientCommand::SettleLineage { meta, lifecycle } => {
+            let settled = lifecycle.is_terminal();
+            let report = read_quest_report(&lifecycle);
+            let memories = normalize_lifecycle_memory(lifecycle, &report)
+                .into_iter()
+                .collect();
+            lineage_response(state, meta, settled, memories).await
+        }
+        ClientCommand::LogConversation { meta, request } => {
+            let result = log_conversation(&meta, request);
+            shell_response(state, meta, result).await
+        }
+        ClientCommand::PlanTriggerLessons { meta, request } => {
+            let plan = process_lesson_plan(request.trigger.as_deref());
+            shell_response(state, meta, json!({ "plan": plan })).await
+        }
+        ClientCommand::BraidTriggerLessons { meta, request } => {
+            let reminder = process_lesson_reminder(request.trigger.as_deref(), &request.lessons);
+            shell_response(state, meta, json!({ "reminder": reminder })).await
+        }
     }
+}
+
+async fn routing_response(state: &AppState, meta: CommandMeta, result: Value) -> Responses {
+    let runtime = state.runtime.lock().await;
+    let event_id = new_id();
+    let event = RoutingResultEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(&meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            ROUTING_RESULT,
+            ROUTING_PROJECTION_ID,
+            runtime.cursor.sequence,
+            body_hash(&result).expect("routing result hashes"),
+            event_id,
+        ),
+        result,
+    };
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
+    }
+}
+
+async fn lineage_response(
+    state: &AppState,
+    meta: CommandMeta,
+    settled: bool,
+    memories: Vec<house_core::lineage::QuestMemory>,
+) -> Responses {
+    let runtime = state.runtime.lock().await;
+    let result = serde_json::to_value(&memories).expect("lineage memories serialize");
+    let event = LineageResultEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(&meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            LINEAGE_NORMALIZED,
+            LINEAGE_PROJECTION_ID,
+            runtime.cursor.sequence,
+            body_hash(&result).expect("lineage memories hash"),
+            new_id(),
+        ),
+        settled,
+        memories,
+    };
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
+    }
+}
+
+async fn shell_response(state: &AppState, meta: CommandMeta, result: Value) -> Responses {
+    let runtime = state.runtime.lock().await;
+    let event = ShellResultEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(&meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            SHELL_RESULT,
+            SHELL_PROJECTION_ID,
+            runtime.cursor.sequence,
+            body_hash(&result).expect("shell result hashes"),
+            new_id(),
+        ),
+        result,
+    };
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
+    }
+}
+
+/// The Host owns the filesystem for room-local House files; `house_core` owns
+/// which files those are and what they must contain.
+fn read_room_spellbook(room_dir: &str) -> LoadedSpellbook {
+    load_spellbook(room_dir, |candidate| {
+        match std::fs::read_to_string(candidate) {
+            Ok(text) => match serde_json::from_str(&text) {
+                Ok(spellbook) => SpellbookRead::Parsed(spellbook),
+                Err(error) => SpellbookRead::Malformed(error.to_string()),
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => SpellbookRead::Missing,
+            Err(error) => SpellbookRead::Unreadable(error.to_string()),
+        }
+    })
+}
+
+fn read_quest_report(lifecycle: &QuestLifecycle) -> String {
+    lifecycle
+        .report_path()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .unwrap_or_default()
+}
+
+fn append_line(path: &str, content: &str) -> Result<(), String> {
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    std::io::Write::write_all(&mut file, content.as_bytes()).map_err(|error| error.to_string())
+}
+
+/// Capture the visible conversation: identity, freshness, dedupe marker, and
+/// transcript shape all come from `house_core::conversation`.
+fn log_conversation(meta: &CommandMeta, request: ConversationLogRequest) -> Value {
+    let now = chrono::Local::now();
+    let captured_at = now
+        .with_timezone(&chrono::Utc)
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let date_stamp = now.format("%Y-%m-%d").to_string();
+    let clock = now.format("%H:%M").to_string();
+    let turns: Vec<ConversationTurn> = conversation_turns(&request.messages, &captured_at);
+    let fresh = is_fresh_conversation(&turns);
+
+    let mut appended = 0_u64;
+    let mut skipped = 0_u64;
+    let mut errors = Vec::new();
+    let mut logged = Vec::new();
+
+    if request.persist {
+        let path = transcript_path(&request.room_dir, &date_stamp);
+        let mut existing = std::fs::read_to_string(&path).unwrap_or_default();
+        for turn in &turns {
+            let key = turn_key(&request.session_id, turn);
+            let marker = turn_marker(&key);
+            let label = turn_label(&turn.role, &request.operator, &request.spirit);
+            let Some(entry) =
+                transcript_entry(&existing, &marker, &date_stamp, &clock, label, &turn.text)
+            else {
+                skipped += 1;
+                continue;
+            };
+            match append_line(&path, &entry) {
+                Ok(()) => {
+                    existing.push_str(&entry);
+                    appended += 1;
+                    logged.push(logged_turn(turn, &request.session_id));
+                }
+                Err(error) => errors.push(json!({
+                    "key": key,
+                    "surface": "transcript",
+                    "error": error,
+                })),
+            }
+        }
+
+        let debug = json!({
+            "timestamp": captured_at,
+            "room": &meta.sender_room,
+            "source": &request.source,
+            "turns": turns.len(),
+            "appended": appended,
+            "skipped": skipped,
+            "errors": errors.clone(),
+        });
+        // Debug provenance must never block capture.
+        let _ = append_line(
+            &transcript_debug_path(&request.room_dir),
+            &format!("{debug}\n"),
+        );
+    }
+
+    json!({
+        "turns": turns.len(),
+        "fresh": fresh,
+        "appended": appended,
+        "skipped": skipped,
+        "errors": errors,
+        "loggedTurns": logged,
+    })
+}
+
+fn invalid_routing_request(kind: &str, error: serde_json::Error) -> Value {
+    json!({
+        "ok": false,
+        "status": "rejected",
+        "errors": [format!("Invalid {kind} request: {error}")],
+        "warnings": [],
+        "spawnPacket": Value::Null,
+    })
 }
 
 async fn set_requested_mode(
@@ -915,6 +1277,30 @@ fn event_meta(
     state_hash: String,
     event_id: String,
 ) -> EventMeta {
+    event_meta_for_projection(
+        state,
+        command,
+        correlation_id,
+        idempotency_key,
+        kind,
+        RECALL_POLICY_PROJECTION_ID,
+        sequence,
+        state_hash,
+        event_id,
+    )
+}
+
+fn event_meta_for_projection(
+    state: &AppState,
+    command: Option<&CommandMeta>,
+    correlation_id: &str,
+    idempotency_key: &str,
+    kind: &str,
+    projection_id: &str,
+    sequence: u64,
+    state_hash: String,
+    event_id: String,
+) -> EventMeta {
     let sender_session = command
         .map(|meta| meta.sender_session.trim())
         .filter(|session| !session.is_empty())
@@ -940,7 +1326,7 @@ fn event_meta(
         created_at: timestamp(),
         expires_at: None,
         max_hops: 1,
-        projection_id: RECALL_POLICY_PROJECTION_ID.into(),
+        projection_id: projection_id.into(),
         sequence,
         state_hash,
     }

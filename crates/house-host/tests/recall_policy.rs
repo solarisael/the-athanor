@@ -3,10 +3,11 @@ use chrono::{Duration, SecondsFormat, Utc};
 use futures_util::{SinkExt, StreamExt};
 use house_host::{Host, HostConfig};
 use house_protocol::{
-    BOAT_RECEIPT_SCHEMA_VERSION, BOAT_RECEIPT_SUBJECT, BoatReceiptProjection,
-    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
-    RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_COMPLETE_REFRESH,
-    RECALL_POLICY_DELTA, RECALL_POLICY_EVALUATE, RECALL_POLICY_INVALIDATE_AFTER_COMPACTION,
+    BOAT_RECEIPT_SCHEMA_VERSION, BOAT_RECEIPT_SUBJECT, BoatReceiptProjection, CONTEXT_ANALYZE,
+    CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID, PAPER_BOAT_RECEIPT_PROJECTION_ID,
+    PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE, RECALL_POLICY_COMMAND_ACCEPTED,
+    RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_COMPLETE_REFRESH, RECALL_POLICY_DELTA,
+    RECALL_POLICY_EVALUATE, RECALL_POLICY_FAIL_REFRESH, RECALL_POLICY_INVALIDATE_AFTER_COMPACTION,
     RECALL_POLICY_RESYNC, RECALL_POLICY_SET_REQUESTED_MODE, RECALL_POLICY_SNAPSHOT,
     RECALL_POLICY_SUBSCRIBE,
 };
@@ -186,6 +187,20 @@ fn receipt_subscribe_command(message_id: &str) -> Value {
     value
 }
 
+fn context_command(message_id: &str, prompt: &str) -> Value {
+    let mut value = command(CONTEXT_ANALYZE, message_id, message_id, true);
+    value["projection_id"] = json!(CONTEXT_PROJECTION_ID);
+    value["context_request"] = json!({
+        "prompt": prompt,
+        "recognizedEntities": [],
+        "contextCharacters": 160_000,
+        "activeSpirit": "Kintsu",
+        "operator": "Sol",
+        "routingModeEnabled": true
+    });
+    value
+}
+
 fn set_command(message_id: &str, key: &str, base_version: u64, mode: &str) -> Value {
     let mut value = command(RECALL_POLICY_SET_REQUESTED_MODE, message_id, key, true);
     let object = value.as_object_mut().expect("command object");
@@ -246,6 +261,31 @@ fn complete_command(message_id: &str, key: &str, session: &str, query_terms: &[&
     value
 }
 
+fn fail_command(message_id: &str, key: &str, session: &str, reason: &str) -> Value {
+    let mut value = command(RECALL_POLICY_FAIL_REFRESH, message_id, key, true);
+    let object = value.as_object_mut().expect("command object");
+    object.insert("sender_session".into(), json!(session));
+    object.insert("reply_target".into(), json!(session));
+    object.insert("failure_reason".into(), json!(reason));
+    value
+}
+
+fn regenerate_envelope(mut value: Value, message_id: &str) -> Value {
+    let object = value.as_object_mut().expect("command object");
+    object.insert("message_id".into(), json!(message_id));
+    object.insert("correlation_id".into(), json!(message_id));
+    object.insert("causation_id".into(), json!("retry-attempt"));
+    object.insert(
+        "created_at".into(),
+        json!(Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)),
+    );
+    object.insert(
+        "expires_at".into(),
+        json!((Utc::now() + Duration::minutes(2)).to_rfc3339_opts(SecondsFormat::Millis, true)),
+    );
+    value
+}
+
 fn invalidate_command(message_id: &str, key: &str, session: &str, summary: &str) -> Value {
     let mut value = command(
         RECALL_POLICY_INVALIDATE_AFTER_COMPACTION,
@@ -258,6 +298,145 @@ fn invalidate_command(message_id: &str, key: &str, session: &str, summary: &str)
     object.insert("reply_target".into(), json!(session));
     object.insert("compaction_summary".into(), json!(summary));
     value
+}
+
+async fn assert_semantic_retry(
+    host: &RunningHost,
+    authored: Value,
+    conflicting: Value,
+    retry_message_id: &str,
+) {
+    let mut socket = connect(host).await;
+    send(&mut socket, &authored).await;
+    let accepted = receive(&mut socket).await;
+    assert_eq!(
+        accepted["command_or_event_type"],
+        RECALL_POLICY_COMMAND_ACCEPTED
+    );
+
+    let retry = regenerate_envelope(authored, retry_message_id);
+    send(&mut socket, &retry).await;
+    assert_eq!(receive(&mut socket).await, accepted);
+
+    send(&mut socket, &conflicting).await;
+    let refusal = receive(&mut socket).await;
+    assert_eq!(
+        refusal["command_or_event_type"],
+        RECALL_POLICY_COMMAND_REFUSED
+    );
+    assert!(
+        refusal["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("different command body"))
+    );
+}
+
+#[tokio::test]
+async fn regenerated_envelopes_replay_only_semantically_identical_recall_commands() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut snapshot_socket = connect(&host).await;
+    send(
+        &mut snapshot_socket,
+        &command(
+            RECALL_POLICY_SUBSCRIBE,
+            "semantic-sub",
+            "semantic-sub-key",
+            false,
+        ),
+    )
+    .await;
+    let base_version = receive(&mut snapshot_socket).await["version"]
+        .as_u64()
+        .expect("snapshot version");
+    drop(snapshot_socket);
+
+    assert_semantic_retry(
+        &host,
+        set_command("set-authored", "set-semantic-key", base_version, "quiet"),
+        set_command("set-conflict", "set-semantic-key", base_version, "work"),
+        "set-retry",
+    )
+    .await;
+    assert_semantic_retry(
+        &host,
+        evaluate_command(
+            "evaluate-authored",
+            "evaluate-semantic-key",
+            "semantic-session",
+            "technical_project",
+            &["athanor"],
+            Some("the-athanor"),
+            100,
+            false,
+        ),
+        evaluate_command(
+            "evaluate-conflict",
+            "evaluate-semantic-key",
+            "semantic-session",
+            "technical_project",
+            &["athanor"],
+            Some("the-athanor"),
+            101,
+            false,
+        ),
+        "evaluate-retry",
+    )
+    .await;
+    assert_semantic_retry(
+        &host,
+        complete_command(
+            "complete-authored",
+            "complete-semantic-key",
+            "semantic-session",
+            &["athanor"],
+        ),
+        complete_command(
+            "complete-conflict",
+            "complete-semantic-key",
+            "semantic-session",
+            &["different"],
+        ),
+        "complete-retry",
+    )
+    .await;
+    assert_semantic_retry(
+        &host,
+        fail_command(
+            "fail-authored",
+            "fail-semantic-key",
+            "semantic-session",
+            "retrieval unavailable",
+        ),
+        fail_command(
+            "fail-conflict",
+            "fail-semantic-key",
+            "semantic-session",
+            "different failure",
+        ),
+        "fail-retry",
+    )
+    .await;
+    assert_semantic_retry(
+        &host,
+        invalidate_command(
+            "compact-authored",
+            "compact-semantic-key",
+            "semantic-session",
+            "summary",
+        ),
+        invalidate_command(
+            "compact-conflict",
+            "compact-semantic-key",
+            "semantic-session",
+            "different summary",
+        ),
+        "compact-retry",
+    )
+    .await;
+
+    host.stop().await;
 }
 
 #[tokio::test]
@@ -293,8 +472,8 @@ async fn auth_health_and_snapshot_are_explicit() {
     .await;
     let snapshot = receive(&mut socket).await;
     assert_eq!(snapshot["command_or_event_type"], RECALL_POLICY_SNAPSHOT);
-    assert_eq!(snapshot["state"]["requested_mode"], "auto");
-    assert_eq!(snapshot["state"]["resolved_mode"], "conversation");
+    assert_eq!(snapshot["state"]["requestedMode"], "auto");
+    assert_eq!(snapshot["state"]["resolvedMode"], "conversation");
     assert!(
         snapshot["state_hash"]
             .as_str()
@@ -302,6 +481,32 @@ async fn auth_health_and_snapshot_are_explicit() {
     );
     assert_eq!(snapshot["sender_session"], "operator-session");
     assert_eq!(snapshot["reply_target"], "house-host");
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn context_analysis_is_owned_by_host_and_returns_typed_policy() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut socket = connect(&host).await;
+    send(
+        &mut socket,
+        &context_command(
+            "context-1",
+            "ultraverify the database retrieval architecture before bun run dev",
+        ),
+    )
+    .await;
+    let response = receive_for(&mut socket, "context-1", CONTEXT_ANALYZED).await;
+    assert_eq!(response["projection_id"], CONTEXT_PROJECTION_ID);
+    assert_eq!(response["analysis"]["route"]["intent"], "technical_project");
+    assert_eq!(
+        response["analysis"]["keywordDirectives"][0]["keyword"],
+        "ultraverify"
+    );
+    assert_eq!(response["analysis"]["processTrigger"], "package-script-dev");
+    assert_eq!(response["analysis"]["nudge"]["band"], 1);
     host.stop().await;
 }
 
@@ -624,7 +829,7 @@ async fn set_retry_conflict_refusals_and_resync_preserve_authority() {
     .await;
     let snapshot = receive(&mut socket).await;
     assert_eq!(snapshot["command_or_event_type"], RECALL_POLICY_SNAPSHOT);
-    assert_eq!(snapshot["state"]["requested_mode"], "quiet");
+    assert_eq!(snapshot["state"]["requestedMode"], "quiet");
     assert_eq!(snapshot["version"], base_version + 1);
 
     let persisted: Value = serde_json::from_slice(
@@ -680,9 +885,13 @@ async fn cursor_and_idempotency_receipt_survive_restart() {
     assert_eq!(snapshot["version"], delta["next_version"]);
     assert_eq!(snapshot["sequence"], delta["sequence"]);
     assert_eq!(snapshot["state_hash"], delta["state_hash"]);
-    assert_eq!(snapshot["state"]["requested_mode"], "work");
+    assert_eq!(snapshot["state"]["requestedMode"], "work");
 
-    send(&mut socket, &authored).await;
+    send(
+        &mut socket,
+        &regenerate_envelope(authored, "restart-set-retry"),
+    )
+    .await;
     assert_eq!(receive(&mut socket).await, accepted);
     assert!(
         timeout(TokioDuration::from_millis(100), socket.next())
@@ -738,9 +947,9 @@ async fn resync_reloads_external_room_state_and_makes_old_versions_stale() {
     let snapshot = receive(&mut socket).await;
     assert_eq!(snapshot["command_or_event_type"], RECALL_POLICY_SNAPSHOT);
     assert_eq!(snapshot["version"], old_version + 1);
-    assert_eq!(snapshot["state"]["requested_mode"], "work");
+    assert_eq!(snapshot["state"]["requestedMode"], "work");
     assert_eq!(
-        snapshot["state"]["resolution_reason"],
+        snapshot["state"]["resolutionReason"],
         "external-authority-change"
     );
 
@@ -800,8 +1009,8 @@ async fn host_resolves_modes_hysteresis_and_quiet_without_adapter_policy() {
     );
     send(&mut socket, &work).await;
     let work = receive_for(&mut socket, "mode-work", RECALL_POLICY_COMMAND_ACCEPTED).await;
-    assert_eq!(work["decision"]["refresh_reason"], "active-project-change");
-    assert_eq!(work["decision"]["should_recall"], true);
+    assert_eq!(work["decision"]["refreshReason"], "active-project-change");
+    assert_eq!(work["decision"]["shouldRecall"], true);
 
     let complete = complete_command(
         "mode-complete",
@@ -811,7 +1020,7 @@ async fn host_resolves_modes_hysteresis_and_quiet_without_adapter_policy() {
     );
     send(&mut socket, &complete).await;
     let complete = receive_for(&mut socket, "mode-complete", RECALL_POLICY_COMMAND_ACCEPTED).await;
-    assert_eq!(complete["state"]["working_set_entries"], 2);
+    assert_eq!(complete["state"]["workingSetEntries"], 2);
 
     let first_contact = evaluate_command(
         "mode-contact-1",
@@ -830,7 +1039,7 @@ async fn host_resolves_modes_hysteresis_and_quiet_without_adapter_policy() {
         RECALL_POLICY_COMMAND_ACCEPTED,
     )
     .await;
-    assert_eq!(first_contact["decision"]["resolved_mode"], "mixed");
+    assert_eq!(first_contact["decision"]["resolvedMode"], "mixed");
 
     let second_contact = evaluate_command(
         "mode-contact-2",
@@ -849,9 +1058,9 @@ async fn host_resolves_modes_hysteresis_and_quiet_without_adapter_policy() {
         RECALL_POLICY_COMMAND_ACCEPTED,
     )
     .await;
-    assert_eq!(second_contact["decision"]["resolved_mode"], "conversation");
+    assert_eq!(second_contact["decision"]["resolvedMode"], "conversation");
     assert_eq!(
-        second_contact["state"]["resolution_reason"],
+        second_contact["state"]["resolutionReason"],
         "conversation-hysteresis-complete"
     );
 
@@ -881,9 +1090,9 @@ async fn host_resolves_modes_hysteresis_and_quiet_without_adapter_policy() {
         RECALL_POLICY_COMMAND_ACCEPTED,
     )
     .await;
-    assert_eq!(quiet_lookup["decision"]["resolved_mode"], "quiet");
-    assert_eq!(quiet_lookup["decision"]["should_recall"], false);
-    assert_eq!(quiet_lookup["decision"]["clear_working_set"], true);
+    assert_eq!(quiet_lookup["decision"]["resolvedMode"], "quiet");
+    assert_eq!(quiet_lookup["decision"]["shouldRecall"], false);
+    assert_eq!(quiet_lookup["decision"]["clearWorkingSet"], true);
     let conversation = set_command(
         "mode-conversation",
         "mode-conversation-key",
@@ -915,10 +1124,10 @@ async fn host_resolves_modes_hysteresis_and_quiet_without_adapter_policy() {
     )
     .await;
     assert_eq!(
-        conversation_lookup["decision"]["resolved_mode"],
+        conversation_lookup["decision"]["resolvedMode"],
         "conversation"
     );
-    assert_eq!(conversation_lookup["decision"]["should_recall"], true);
+    assert_eq!(conversation_lookup["decision"]["shouldRecall"], true);
     host.stop().await;
 }
 
@@ -941,9 +1150,9 @@ async fn compaction_recovery_and_session_working_set_survive_host_restart() {
         RECALL_POLICY_COMMAND_ACCEPTED,
     )
     .await;
-    assert_eq!(invalidated["state"]["recovery_pending"], true);
+    assert_eq!(invalidated["state"]["recoveryPending"], true);
     assert_eq!(
-        invalidated["state"]["last_refresh_reason"],
+        invalidated["state"]["lastRefreshReason"],
         "compaction-invalidated"
     );
     host.stop().await;
@@ -968,10 +1177,10 @@ async fn compaction_recovery_and_session_working_set_survive_host_restart() {
     )
     .await;
     assert_eq!(
-        recover["decision"]["refresh_reason"],
+        recover["decision"]["refreshReason"],
         "post-compaction-recovery"
     );
-    assert_eq!(recover["decision"]["should_recall"], true);
+    assert_eq!(recover["decision"]["shouldRecall"], true);
     assert!(
         recover["decision"]["query"]
             .as_str()
@@ -992,8 +1201,8 @@ async fn compaction_recovery_and_session_working_set_survive_host_restart() {
         RECALL_POLICY_COMMAND_ACCEPTED,
     )
     .await;
-    assert_eq!(complete["state"]["recovery_pending"], false);
-    assert_eq!(complete["state"]["recovery_terms"], json!([]));
+    assert_eq!(complete["state"]["recoveryPending"], false);
+    assert_eq!(complete["state"]["recoveryTerms"], json!([]));
     restarted.stop().await;
 }
 
@@ -1038,8 +1247,8 @@ async fn concurrent_authenticated_clients_keep_session_state_isolated() {
     let beta = receive_for(&mut beta, "beta-evaluate", RECALL_POLICY_COMMAND_ACCEPTED).await;
     assert_eq!(alpha["sender_session"], "alpha-session");
     assert_eq!(beta["sender_session"], "beta-session");
-    assert_eq!(alpha["decision"]["resolved_mode"], "work");
-    assert_eq!(beta["decision"]["resolved_mode"], "work");
+    assert_eq!(alpha["decision"]["resolvedMode"], "work");
+    assert_eq!(beta["decision"]["resolvedMode"], "work");
     assert_ne!(alpha["version"], beta["version"]);
     assert!(
         alpha["state_hash"]

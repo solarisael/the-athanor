@@ -236,24 +236,4 @@ describe("House tool feedback", () => {
     expect(renderResult(result, { expanded: true }, { fg: (_color, text) => text }).render(120).join("\n")).toBe(result.content[0].text);
   });
 
-  test("normalizes a registered validation failure instead of returning a plain-text error", async () => {
-    const remember = registerTools().find((tool) => tool.name === "remember");
-    const updates: unknown[] = [];
-    const result = await remember!.execute(
-      "validation-failure",
-      { title: "Test", body: "Body", kind: "memory", shape: "process" },
-      undefined,
-      (update: unknown) => updates.push(update),
-      { cwd: process.cwd() },
-    ) as { isError: boolean; content: Array<{ text: string }>; details: unknown };
-    const output = parsed(result);
-    expect(updates).toHaveLength(1);
-    expect(result.isError).toBe(true);
-    expect(result.details).toEqual(output);
-    expect(output).toMatchObject({
-      status: "error",
-      code: "tool_failure",
-      details: { category: "input", stage: "validation", operation: "remember" },
-    });
-  });
 });

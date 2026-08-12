@@ -834,6 +834,11 @@ dependencies = [
 [[package]]
 name = "house-core"
 version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "sha2",
+]
 
 [[package]]
 name = "house-host"
@@ -846,6 +851,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "hex",
+ "house-core",
  "house-protocol",
  "reqwest",
  "serde",

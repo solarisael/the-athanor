@@ -63,10 +63,9 @@ surface is already shipped.
 
 ## Release path and history
 
-- [`CHANGELOG.md`](../CHANGELOG.md) — notable changes through the `1.0.0-rc.3`
-  installed release candidate
-- [`roadmap.md`](./roadmap.md) — implemented 1.0 dependency path and remaining
-  final-release evidence gates
+- [`CHANGELOG.md`](../CHANGELOG.md) — active `0.9.3` work and retained RC build history
+- [`roadmap.md`](./roadmap.md) — implemented runtime dependency path and remaining
+  1.0 operator-product and release gates
 - [`../HOUSE.md`](../HOUSE.md) — project history, philosophy, and design reasons
 - [`history/`](./history/) — dated plans, progress snapshots, and development
   history that no longer represents current release state

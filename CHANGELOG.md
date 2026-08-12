@@ -24,6 +24,29 @@ the exact implementation record.
 
 - Established the Chargebook as a canonical House practice and shipped the OMP starter room with an always-loaded default covering positive credits, zero-cost presence, behavioral charges, and operation costs.
 
+### Changed
+
+- Corrected the active product version from the premature `1.0.0-rc.3` label to
+  `0.9.3`. The proven RC1-RC3 build identities remain below as historical
+  artifact evidence; they do not claim that the operator product reached 1.0.
+- Restored the 1.0 gate around a usable operator control surface, healthy
+  continuity organs, clean installation and upgrade/rollback proof, signing,
+  and public release evidence.
+- Completed the first clean Rust ownership cut for the OMP runtime: prompt
+  classification, keyword/process triggers, context-pressure nudges, Recall
+  viewport selection and saturation, worker/familiar dispatch construction,
+  spellbook validation, and subagent lineage normalization now execute in typed
+  Rust behind Athanor Host commands.
+- Deleted the root TypeScript behavioral core and stopped packaging `src/*.ts`.
+  The OMP extension now retains harness registration, event normalization,
+  transport, room-local file access, and bounded presentation rather than a
+  second policy implementation.
+- Reduced OMP hygiene to two harness-local guards: scratch-shaped writes in
+  tracked trees and post-exec nudges for bulk staging or forceful deletion.
+- Made the native release builder use the operating-system temporary directory
+  when CI-only `RUNNER_TEMP` is absent, allowing local release builds from a
+  standard PowerShell session.
+
 ## [1.0.0-rc.3] - 2026-08-11
 
 ### Fixed

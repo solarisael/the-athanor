@@ -1,9 +1,7 @@
 // Tool registration for the OMP adapter.
 // Silhouette: expose room/substrate tools; keep hook wiring out of tool bodies.
-import { createHash } from "node:crypto";
- 
 
-import { compactRecall, recallWithRouting } from "./recall.ts";
+import { recallWithRouting } from "./recall.ts";
 import {
   loadRoomState,
   normalizeSpiritName,
@@ -13,20 +11,17 @@ import {
   writeActiveSpiritSnapshot,
 } from "./room.ts";
 import { RecallPolicyHostClient } from "./recall-policy.ts";
+import { applyRecallViewport } from "./context.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./anamnesis.ts";
 import {
   catchBoat,
-  memorySourcePath,
   sleepBoat,
   substrateHealth,
 } from "./substrate.ts";
 import { RustJsonlTransport, RustTransportError, RustTransportOutcomeUnknownError } from "../rust-transport.ts";
 import { discoverRustExecutable } from "../discovery.ts";
-import { laneStatus } from "./routing.ts";
-import { familiarStatus } from "./familiars.ts";
-import { dispatchHouse } from "./dispatch.ts";
-import { REMEMBER_STORES, validateStoreFields } from "./stores.ts";
+import { dispatchHouse, familiarStatus, laneStatus } from "./routing.ts";
 import { WRITE_TIMEOUT_MS } from "./constants.ts";
 import {
   createToolRenderers,
@@ -43,10 +38,7 @@ import {
   requestGigaQueueMaintenance,
   requestGigaPromote,
   requestGigaReview,
-  resolveGigaSourceRefsFromLedger,
-  type GigaCandidate,
   type GigaPromotionTarget,
-  type GigaPromotionRequest,
   type GigaSafeReviewState,
 } from "../giga.ts";
 
@@ -54,21 +46,18 @@ const rustRememberTransports = new Map<string, RustJsonlTransport>();
 const LANE_STATUS_HEALTH_TIMEOUT_MS = 3_000;
 const DESIGN_DOCUMENT_TYPES = new Set(["token", "component", "contract", "guideline"]);
 
-const defaultGigaPromotionOperations = Object.freeze({
-  requestGigaCandidateList,
-  resolveGigaSourceRefsFromLedger,
-  requestGigaPromote,
-});
-let gigaPromotionOperations = { ...defaultGigaPromotionOperations };
+function hostBinding(ctx: any) {
+  const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+  return {
+    binding: {
+      room,
+      spirit,
+      session: String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir),
+    },
+    effectiveRoomDir,
+  };
+}
 
-export const __gigaPromotionTest = Object.freeze({
-  setOperations(overrides: Partial<typeof defaultGigaPromotionOperations>) {
-    gigaPromotionOperations = { ...defaultGigaPromotionOperations, ...overrides };
-  },
-  resetOperations() {
-    gigaPromotionOperations = { ...defaultGigaPromotionOperations };
-  },
-});
 
 
 function rustRememberTransport(): RustJsonlTransport | null {
@@ -93,17 +82,6 @@ function evictRustRememberTransport(executable: string, transport: RustJsonlTran
   void transport.close().catch(() => {});
 }
 
-function sourcePathKey(value: unknown): string {
-  return String(value ?? "").replace(/\\/g, "/").replace(/^house\//i, "").toLowerCase();
-}
-
-function deterministicMemorySourcePath(room: string, title: string, body: string, threads: unknown[], continues: unknown[], supersedes: unknown[]): string {
-  const canonical = JSON.stringify({ room, title, body, threads, continues, supersedes });
-  const digest = createHash("sha256").update(canonical).digest("hex").slice(0, 24);
-
-  const baseline = memorySourcePath(title, new Date(0));
-  return baseline.replace(/^memory\/omp_[^_]+_/, `memory/omp_${digest}_`);
-}
 
 function rustFailureReceipt(error: RustTransportError): Record<string, unknown> {
   const upstreamDetails = error.details && typeof error.details === "object" && !Array.isArray(error.details)
@@ -126,62 +104,18 @@ function rustFailureReceipt(error: RustTransportError): Record<string, unknown> 
     details: { ...upstreamDetails, evidence },
   };
 }
-
 function unknownOutcomeDetails(error: unknown): Record<string, unknown> {
-  const source = error && typeof error === "object" ? error as { details?: unknown; cause?: unknown } : {};
-  const details = source.details && typeof source.details === "object" && !Array.isArray(source.details)
+  const source = error && typeof error === "object" ? error as { details?: unknown } : {};
+  return source.details && typeof source.details === "object" && !Array.isArray(source.details)
     ? source.details as Record<string, unknown>
-    : source.details === undefined ? {} : { upstream_details: source.details };
-  if (!(source.cause instanceof Error)) return details;
-  return {
-    ...details,
-    cause: { name: source.cause.name, message: source.cause.message },
-  };
+    : {};
 }
+
 function isOutcomeUnknownError(error: unknown): boolean {
   return error instanceof RustTransportOutcomeUnknownError;
 }
 
-async function reconcileRustMemory(room: string, sourcePath: string, signal?: AbortSignal) {
-  try {
-    const recalled = await recallWithRouting("", room, sourcePath, { signal, temporalDecay: false });
-    if (!recalled.ok) return { reconciled: false, committed: null };
-    const result = recalled.result as Record<string, unknown>;
-    const collections = ["retrievalCandidates", "semanticChunks", "contentChunks", "dateMatches"];
-    const committed = collections.some((name) => (
-      Array.isArray(result[name])
-      && result[name].some((entry) => sourcePathKey((entry as Record<string, unknown>)?.source_path) === sourcePathKey(sourcePath))
-    ));
-    return { reconciled: true, committed };
-  } catch {
-    return { reconciled: false, committed: null };
-  }
-}
 
-function unknownWriteReceipt(error: unknown, sourcePath: string, reconciliation: { reconciled: boolean; committed: boolean | null }) {
-  return {
-    ok: false,
-    error: "Rust remember write outcome is unknown after dispatch",
-    code: "outcome_unknown",
-    outcome: "unknown",
-    retryable: true,
-    sourcePath,
-    committed: reconciliation.committed,
-    reconciled: reconciliation.reconciled,
-    details: unknownOutcomeDetails(error),
-  };
-}
-
-function unknownLessonReceipt(error?: unknown): Record<string, unknown> {
-  return {
-    ok: false,
-    error: "Rust lesson write outcome is unknown after dispatch",
-    code: "outcome_unknown",
-    outcome: "unknown",
-    retryable: true,
-    details: unknownOutcomeDetails(error),
-  };
-}
 
 export async function writeRustCanon({ room, name, kind, summary, aliases, searchBoost, weighty, pointerFiles, summaryAsOf, supersedes, attribution, signal }) {
   const executable = discoverRustExecutable();
@@ -251,124 +185,61 @@ export async function readRustCanon({ room, id, name, includeHistory, signal }) 
 }
 
 export async function writeRustMemory({ room, title, body, threads, continues, supersedes, signal }) {
-  const executable = discoverRustExecutable();
   const transport = rustRememberTransport();
   if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
-  const normalizeIdentityValues = (values: unknown) => [
-    ...new Set(
-      (Array.isArray(values) ? values : [])
-        .map(String)
-        .map((value) => value.trim())
-        .filter(Boolean),
-    ),
-  ].sort();
-
-  const normalizedThreads = normalizeIdentityValues(threads);
-  const normalizedContinues = (Array.isArray(continues) ? continues : [])
-    .map((continuation) => ({
-      thread: String(continuation.thread).trim(),
-      previousMemoryId: String(continuation.previousMemoryId),
-    }))
-    .sort((left, right) => left.thread.localeCompare(right.thread));
-  const normalizedSupersedes = normalizeIdentityValues(supersedes);
-
-  const sourcePath = deterministicMemorySourcePath(
-    room,
-    title,
-    body,
-    normalizedThreads,
-    normalizedContinues,
-    normalizedSupersedes,
-  );
-  const params: Record<string, unknown> = {
-    room,
-    kind: "memory",
-    title,
-    body,
-    source_path: sourcePath,
-    threads: normalizedThreads,
-    continues: normalizedContinues,
-    supersedes: normalizedSupersedes,
-    backup: false,
-  };
   try {
-    const receipt = await transport.request("remember", params, {
-      signal: signal || undefined, timeoutMs: WRITE_TIMEOUT_MS, settleDefinitively: true,
-    });
-    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
-      evictRustRememberTransport(executable, transport);
-      return unknownWriteReceipt(new RustTransportOutcomeUnknownError(), sourcePath, await reconcileRustMemory(room, sourcePath, signal));
-    }
-    const value = receipt as Record<string, unknown>;
-    if (typeof value.memory_id !== "number" || typeof value.room !== "string"
-      || typeof value.source_path !== "string" || value.durable !== true
-      || value.authority !== "postgres" || !Array.isArray(value.warnings)
-      || !value.warnings.every((warning) => typeof warning === "string")) {
-      evictRustRememberTransport(executable, transport);
-      return unknownWriteReceipt(new RustTransportOutcomeUnknownError(), sourcePath, await reconcileRustMemory(room, sourcePath, signal));
-    }
+    const value = await transport.request("remember", {
+      room,
+      kind: "memory",
+      title,
+      body,
+      threads,
+      continues,
+      supersedes,
+      backup: false,
+    }, {
+      signal: signal || undefined,
+      timeoutMs: WRITE_TIMEOUT_MS,
+      settleDefinitively: true,
+    }) as Record<string, unknown>;
     return { ok: true, ...value, id: value.memory_id, sourcePath: value.source_path };
   } catch (error) {
-    if (isOutcomeUnknownError(error)) {
-      evictRustRememberTransport(executable, transport);
-      return unknownWriteReceipt(error, sourcePath, await reconcileRustMemory(room, sourcePath, signal));
-    }
-    if (!transport.usable) evictRustRememberTransport(executable, transport);
-    if (error instanceof RustTransportError) {
-      return rustFailureReceipt(error);
-    }
+    if (error instanceof RustTransportError) return rustFailureReceipt(error);
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
 async function writeRustLesson({ room, kind, title, body, fields, backup, signal }) {
-  const executable = discoverRustExecutable();
   const transport = rustRememberTransport();
-  if (!transport || !executable) return { ok: false, error: "Rust substrate executable is unavailable" };
-  const params: Record<string, unknown> = {
-    room, kind, title, body, shape: fields.shape ?? null, voice: fields.voice ?? null,
-    register: Array.isArray(fields.register) ? fields.register : [],
-    scope: fields.scope ?? null, project: fields.project ?? null,
-    proofPattern: fields.proofPattern ?? null, triggerContext: fields.triggerContext ?? null,
-    exampleText: fields.exampleText ?? null,
-    sourceMemoryPath: fields.sourceMemoryPath ?? null,
-    languageKeys: Array.isArray(fields.languageKeys) ? fields.languageKeys : [],
-    technologyKeys: Array.isArray(fields.technologyKeys) ? fields.technologyKeys : [],
-    tags: Array.isArray(fields.tags) ? fields.tags : [], backup,
-    threadKeys: Array.isArray(fields.threadKeys) ? fields.threadKeys : [],
-  };
+  if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
   try {
-    const receipt = await transport.request("remember", params, {
-      signal: signal || undefined, timeoutMs: WRITE_TIMEOUT_MS, settleDefinitively: true,
-    });
-    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
-      evictRustRememberTransport(executable, transport);
-      return unknownLessonReceipt();
-    }
-    const value = receipt as Record<string, unknown>;
-    if (typeof value.lesson_id !== "number" || value.kind !== kind || value.durable !== true
-      || value.authority !== "postgres" || !Array.isArray(value.warnings)
-      || !value.warnings.every((warning) => typeof warning === "string")) {
-      evictRustRememberTransport(executable, transport);
-      return unknownLessonReceipt();
-    }
+    const value = await transport.request("remember", {
+      room,
+      kind,
+      title,
+      body,
+      shape: fields.shape,
+      voice: fields.voice,
+      register: fields.register,
+      scope: fields.scope,
+      project: fields.project,
+      proofPattern: fields.proofPattern,
+      triggerContext: fields.triggerContext,
+      exampleText: fields.exampleText,
+      sourceMemoryPath: fields.sourceMemoryPath,
+      languageKeys: fields.languageKeys,
+      technologyKeys: fields.technologyKeys,
+      tags: fields.tags,
+      threadKeys: fields.threadKeys,
+      backup,
+    }, {
+      signal: signal || undefined,
+      timeoutMs: WRITE_TIMEOUT_MS,
+      settleDefinitively: true,
+    }) as Record<string, unknown>;
     return { ok: true, ...value, id: value.lesson_id };
   } catch (error) {
-    if (isOutcomeUnknownError(error)) {
-      evictRustRememberTransport(executable, transport);
-      return {
-        ok: false,
-        error: "Rust lesson write outcome is unknown after dispatch",
-        code: "outcome_unknown",
-        outcome: "unknown",
-        retryable: true,
-        details: unknownOutcomeDetails(error),
-      };
-    }
-    if (!transport.usable) evictRustRememberTransport(executable, transport);
-    if (error instanceof RustTransportError) {
-      return rustFailureReceipt(error);
-    }
+    if (error instanceof RustTransportError) return rustFailureReceipt(error);
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
@@ -477,48 +348,6 @@ function gigaToolFailure(error) {
   };
 }
 
-function gigaCandidateRefusal(error, room, candidateId) {
-  const result = {
-    ok: false,
-    status: "error",
-    code: "giga_review_refused",
-    error,
-    message: error,
-    retryable: false,
-    details: { room, candidate_id: candidateId },
-  };
-  return {
-    isError: true,
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-    details: result,
-  };
-}
-
-function gigaPromotionRefusal(error, room, candidateId) {
-  const result = {
-    ok: false,
-    status: "error",
-    code: "giga_promotion_refused",
-    error,
-    message: error,
-    retryable: false,
-    details: { room, candidate_id: candidateId },
-  };
-  return {
-    isError: true,
-    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-    details: result,
-  };
-}
-
-function safeGigaTransition(previousState, newState) {
-  return (previousState === "unreviewed"
-      && (newState === "in_review" || newState === "dismissed" || newState === "expired"))
-    || (previousState === "in_review"
-      && (newState === "dismissed" || newState === "unresolved" || newState === "curio"))
-    || (previousState === "unresolved" && newState === "in_review")
-    || (previousState === "curio" && (newState === "dismissed" || newState === "expired"));
-}
 
 function registerHouseTool(pi, definition) {
   const execute = definition.execute;
@@ -554,9 +383,9 @@ export function registerSolarisaelTools(pi) {
       query: z.string().describe("Specific natural-language memory/canon query in the room's own vocabulary; name the person, project, event, date, or decision you are trying to recognize."),
     }),
     approval: "read",
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
-  
+    async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      const session = String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir);
       try {
         const recalled = await recallWithRouting(effectiveRoomDir, room, params.query, { signal: _signal, temporalDecay: false });
         if (!recalled.ok) {
@@ -566,7 +395,13 @@ export function registerSolarisaelTools(pi) {
             details: { room, ok: false },
           };
         }
-        const compact = compactRecall(recalled.result, { includeTaxonomy: true });
+        const viewport = await applyRecallViewport(
+          { room, spirit, session },
+          recalled.result,
+          "manual",
+          `${toolCallId}:manual-viewport`,
+        );
+        const compact = viewport.presentation;
         return {
           content: [{ type: "text", text: JSON.stringify(compact, null, 2) }],
           details: { room, ok: Boolean(compact.ok), found: Boolean(compact.found) },
@@ -597,21 +432,11 @@ export function registerSolarisaelTools(pi) {
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
-      const hasId = typeof params.id === "string" && params.id.length > 0;
-      const hasName = typeof params.name === "string" && params.name.trim().length > 0;
-      if (hasId === hasName) {
-        const result = { ok: false, error: "canon_read requires exactly one id or nonblank name" };
-        return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
-      }
-      if (hasId && BigInt(params.id) > 9223372036854775807n) {
-        const result = { ok: false, error: "canon_read id must fit a positive PostgreSQL BIGINT" };
-        return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
-      }
       const result = await readRustCanon({
         room: params.room === "house" ? "house" : room,
-        id: hasId ? params.id : undefined,
-        name: hasName ? params.name.trim() : undefined,
-        includeHistory: params.includeHistory === true,
+        id: params.id,
+        name: params.name,
+        includeHistory: params.includeHistory,
         signal,
       });
       return {
@@ -651,33 +476,17 @@ export function registerSolarisaelTools(pi) {
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { room, spirit, operator } = roomContext(ctx.cwd);
-      const oversized = (params.supersedes || []).find((id) => BigInt(id) > 9223372036854775807n);
-      if (oversized) {
-        const result = { ok: false, error: `canon_write supersedes ID is outside PostgreSQL BIGINT range: ${oversized}` };
-        return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
-      }
-      const malformedPointer = (params.pointerFiles || []).find((pointer) => (
-        !pointer.file.trim()
-        || (pointer.lines !== undefined
-          && (pointer.lines.length !== 2
-            || pointer.lines.some((line) => !Number.isSafeInteger(line) || line < 0)
-            || pointer.lines[0] > pointer.lines[1]))
-      ));
-      if (malformedPointer) {
-        const result = { ok: false, error: "canon_write pointerFiles require a nonblank file and optional nonnegative [start,end] lines" };
-        return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
-      }
       const result = await writeRustCanon({
         room: params.room === "house" ? "house" : room,
         name: params.name,
         kind: params.kind,
         summary: params.summary,
-        aliases: params.aliases || [],
+        aliases: params.aliases,
         searchBoost: params.searchBoost,
-        weighty: params.weighty === true,
-        pointerFiles: params.pointerFiles || [],
+        weighty: params.weighty,
+        pointerFiles: params.pointerFiles,
         summaryAsOf: params.summaryAsOf,
-        supersedes: [...new Set(params.supersedes || [])],
+        supersedes: params.supersedes,
         attribution: { actor: spirit, origin: `omp:${operator}:${toolCallId}` },
         signal,
       });
@@ -730,107 +539,44 @@ export function registerSolarisaelTools(pi) {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
       const kind = params.kind || "memory";
-      const refuse = (error) => {
-        const result = { ok: false, error };
-        return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
+      const result = kind === "memory"
+        ? await writeRustMemory({
+            room: params.room === "house" ? "house" : room,
+            title: params.title,
+            body: params.body,
+            threads: params.threads,
+            continues: params.continues,
+            supersedes: params.supersedes,
+            signal,
+          })
+        : await writeRustLesson({
+            room,
+            kind,
+            title: params.title,
+            body: params.body,
+            fields: {
+              shape: params.shape,
+              voice: params.voice,
+              register: params.register,
+              scope: params.scope,
+              project: params.project,
+              proofPattern: params.proofPattern,
+              triggerContext: params.triggerContext,
+              exampleText: params.exampleText,
+              languageKeys: params.languageKeys,
+              technologyKeys: params.technologyKeys,
+              threadKeys: params.threadKeys,
+              tags: params.tags,
+              sourceMemoryPath: params.sourceMemoryPath,
+            },
+            backup: undefined,
+            signal,
+          });
+      return {
+        isError: !result.ok,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
       };
-  
-      if (kind === "memory") {
-        const lessonOnly = ["shape", "voice", "register", "scope", "project", "proofPattern", "triggerContext", "exampleText", "languageKeys", "technologyKeys", "threadKeys", "tags", "sourceMemoryPath"].filter((key) => {
-          const value = params[key];
-          return Array.isArray(value) ? value.length > 0 : value !== undefined && value !== null && value !== "";
-        });
-        if (lessonOnly.length > 0) return refuse(`kind 'memory' does not accept: ${lessonOnly.join(", ")} — pick a lesson kind or drop the field(s)`);
-        const targetRoom = params.room === "house" ? "house" : room;
-        const threads = [];
-        const seenThreads = new Set();
-
-        for (const rawThread of params.threads || []) {
-          const thread = rawThread.trim();
-          if (!thread) return refuse("threads must be nonblank");
-
-          if (!seenThreads.has(thread)) {
-            seenThreads.add(thread);
-            threads.push(thread);
-          }
-        }
-
-        const continues = [];
-        const continuedThreads = new Set();
-
-        for (const continuation of params.continues || []) {
-          if (!/^[1-9]\d*$/.test(continuation.previousMemoryId)) {
-            return refuse("continues previousMemoryId must be a positive PostgreSQL BIGINT");
-          }
-          if (BigInt(continuation.previousMemoryId) > 9223372036854775807n) {
-            return refuse("continues previousMemoryId must fit a positive PostgreSQL BIGINT");
-          }
-
-          const thread = continuation.thread.trim();
-          if (!thread) return refuse("continues thread must be nonblank");
-          if (continuedThreads.has(thread)) {
-            return refuse(`continues must contain at most one entry per thread: ${thread}`);
-          }
-          if (!seenThreads.has(thread)) {
-            return refuse(`continues thread must also be present in threads: ${thread}`);
-          }
-
-          continuedThreads.add(thread);
-          continues.push({ thread, previousMemoryId: continuation.previousMemoryId });
-        }
-
-        const invalidSupersedes = (params.supersedes || [])
-          .filter((memoryId) => !/^[1-9]\d*$/.test(memoryId));
-        if (invalidSupersedes.length > 0) {
-          return refuse(`supersedes accepts positive numeric memory IDs; invalid: ${invalidSupersedes.join(", ")}`);
-        }
-
-        const result = await writeRustMemory({
-          room: targetRoom,
-          title: params.title,
-          body: params.body,
-          threads,
-          continues,
-          supersedes: [...new Set(params.supersedes || [])],
-          signal,
-        });
-        return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
-      }
-  
-      if (Array.isArray(params.threads) && params.threads.length > 0) return refuse("threads are memory-only; lesson stores do not take threads");
-      if (Array.isArray(params.supersedes) && params.supersedes.length > 0) return refuse("supersedes is memory-only; lesson stores do not supersede memory rows");
-      if (Array.isArray(params.continues) && params.continues.length > 0) return refuse("continues is memory-only; lesson stores do not link memory threads");
-      if (params.room) return refuse("room is memory-only; lesson stores route by scope/project, not room");
-      const store = REMEMBER_STORES[kind];
-      const fields = {
-        shape: params.shape,
-        voice: params.voice,
-        register: kind === "design-lesson" && (!Array.isArray(params.register) || params.register.length === 0)
-          ? ["general"]
-          : params.register,
-        scope: params.scope,
-        project: params.project,
-        proofPattern: params.proofPattern,
-        triggerContext: params.triggerContext,
-        exampleText: params.exampleText,
-        languageKeys: params.languageKeys,
-        technologyKeys: params.technologyKeys,
-        threadKeys: params.threadKeys,
-        tags: params.tags,
-        sourceMemoryPath: params.sourceMemoryPath,
-      };
-      const validation = validateStoreFields(kind, store, fields, { title: params.title, lesson: params.body });
-      if (!validation.ok) return refuse(validation.error);
-      const rustFields = {
-        ...fields,
-        scope: kind === "coding-lesson" ? (params.scope || "shared") : params.scope,
-        voice: kind === "writing-lesson" ? (params.voice || "general") : params.voice,
-      };
-      const result = await writeRustLesson({
-        room, kind, title: params.title, body: params.body, fields: rustFields,
-        backup: store.backup, signal,
-      });
-      return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });
 
@@ -895,37 +641,7 @@ export function registerSolarisaelTools(pi) {
     }),
     approval: "write",
     async execute(_toolCallId, params, signal) {
-      if (!/^[1-9]\d*$/.test(String(params.id || ""))) return refuseToolResult("id must be a positive numeric ID");
-      if (typeof params.expectedTitle !== "string" || params.expectedTitle.length === 0) {
-        return refuseToolResult("expectedTitle must be non-empty and match the current title exactly");
-      }
-      const patchFields = params.kind === "coding-lesson"
-        ? ["title", "body", "shape", "triggerContext", "tags", "threadKeys", "voice", "scope", "project", "proofPattern", "languageKeys", "technologyKeys", "negationOf", "clearNegationOf"]
-        : params.kind === "project-lesson"
-          ? ["title", "body", "shape", "triggerContext", "tags", "threadKeys", "project", "proofPattern", "languageKeys", "technologyKeys"]
-          : params.kind === "design-lesson"
-            ? ["title", "body", "shape", "triggerContext", "tags", "threadKeys", "voice", "register", "proofPattern", "exampleText"]
-            : ["title", "body", "shape", "triggerContext", "tags", "threadKeys", "voice", "register", "exampleText", "writers", "negationOf", "clearNegationOf"];
-      const allowedFields = new Set(["kind", "id", "expectedTitle", ...patchFields]);
-      const invalidField = Object.keys(params).find((key) =>
-        params[key] !== undefined && !allowedFields.has(key)
-      );
-      if (invalidField) return refuseToolResult(`field not allowed for ${params.kind}: ${invalidField}`);
-      const patch = Object.fromEntries(patchFields
-        .filter((key) => Object.prototype.hasOwnProperty.call(params, key) && params[key] !== undefined)
-        .map((key) => [key, params[key]]));
-      if (patch.clearNegationOf === true) {
-        if (patch.negationOf !== undefined) return refuseToolResult("negationOf and clearNegationOf are mutually exclusive");
-        patch.negationOf = null;
-      }
-      delete patch.clearNegationOf;
-      if (Object.keys(patch).length === 0) return refuseToolResult("at least one update field is required");
-      const result = await requestRustDomain("lesson_update", {
-        kind: params.kind,
-        id: params.id,
-        expectedTitle: params.expectedTitle,
-        patch,
-      }, signal, true);
+      const result = await requestRustDomain("lesson_update", params, signal, true);
       return {
         isError: !(result.ok === true && result.updated === true),
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -1144,7 +860,8 @@ export function registerSolarisaelTools(pi) {
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const result = await laneStatus();
+      const { binding } = hostBinding(ctx);
+      const result = await laneStatus(binding);
       const substrate = await substrateHealth(LANE_STATUS_HEALTH_TIMEOUT_MS);
       const status = { ...result, substrate };
       return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }], details: status };
@@ -1161,8 +878,8 @@ export function registerSolarisaelTools(pi) {
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const { effectiveRoomDir } = roomContext(ctx.cwd);
-      const result = await familiarStatus(effectiveRoomDir);
+      const { binding, effectiveRoomDir } = hostBinding(ctx);
+      const result = await familiarStatus(binding, effectiveRoomDir);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -1194,8 +911,8 @@ export function registerSolarisaelTools(pi) {
     }),
     approval: "read",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { effectiveRoomDir } = roomContext(ctx.cwd);
-      const result = await dispatchHouse(effectiveRoomDir, params);
+      const { binding, effectiveRoomDir } = hostBinding(ctx);
+      const result = await dispatchHouse(binding, effectiveRoomDir, params);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -1229,8 +946,8 @@ export function registerSolarisaelTools(pi) {
     }),
     approval: "read",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { effectiveRoomDir } = roomContext(ctx.cwd);
-      const result = await dispatchHouse(effectiveRoomDir, params);
+      const { binding, effectiveRoomDir } = hostBinding(ctx);
+      const result = await dispatchHouse(binding, effectiveRoomDir, params);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -1581,58 +1298,14 @@ export function registerSolarisaelTools(pi) {
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { room, spirit } = roomContext(ctx.cwd);
-      const candidateId = params.candidate_id;
-      const reason = params.reason.trim();
-      if (candidateId !== candidateId.trim() || !reason) {
-        return gigaCandidateRefusal("candidate_id must be exact and reason must be non-empty", room, candidateId);
-      }
-
-      let candidate: GigaCandidate | undefined;
-      try {
-        const listed = await requestGigaCandidateList(room, { limit: 200, signal: _signal });
-        candidate = listed.candidates.find((item) => item.candidate_id === candidateId);
-      } catch (error) {
-        return gigaToolFailure(error);
-      }
-      if (!candidate) {
-        return gigaCandidateRefusal("candidate was not found in the current room", room, candidateId);
-      }
-      if (candidate.room !== room) {
-        return gigaCandidateRefusal("cross-room candidate review is forbidden", room, candidateId);
-      }
-      if (
-        candidate.review_state === "promoted"
-        || candidate.review_state === "merged"
-        || candidate.review_state === "corrected"
-        || candidate.review_state === "superseded"
-      ) {
-        return gigaCandidateRefusal("authority-state candidates cannot be changed through this tool", room, candidateId);
-      }
-      if (!safeGigaTransition(candidate.review_state, params.new_state)) {
-        return gigaCandidateRefusal(
-          `transition from ${candidate.review_state} to ${params.new_state} is not available through this tool`,
-          room,
-          candidateId,
-        );
-      }
-      if (!Array.isArray(candidate.source_refs) || candidate.source_refs.length === 0) {
-        return gigaCandidateRefusal("candidate does not retain exact source references", room, candidateId);
-      }
-
       try {
         const result = await requestGigaReview({
-          candidate_id: candidate.candidate_id,
+          candidate_id: params.candidate_id,
+          room,
           reviewer_id: spirit,
-          previous_state: candidate.review_state,
           new_state: params.new_state as GigaSafeReviewState,
-          reason,
+          reason: params.reason,
           authorization_basis: GIGA_OMP_ROOM_BINDING,
-          source_refs: candidate.source_refs,
-          promotion_target: null,
-          merge_target: null,
-          merge_source_candidates: [],
-          resonance: null,
-          reviewed_at: new Date().toISOString(),
         }, { signal: _signal });
         const output = { ok: true, room, ...result };
         return {
@@ -1652,129 +1325,45 @@ export function registerSolarisaelTools(pi) {
     ctx: any,
   ) {
     const { room, spirit, operator } = roomContext(ctx.cwd);
-    const candidateId = params.candidate_id;
-    if (candidateId !== candidateId.trim() || !candidateId) {
-      return gigaPromotionRefusal("candidate_id must be exact and non-empty", room, candidateId);
-    }
-    if (!params.title.trim() || !params.body.trim()) {
-      return gigaPromotionRefusal("explicit edited title and body must be non-empty", room, candidateId);
-    }
-    let candidate: GigaCandidate | undefined;
-    try {
-      const listed = await gigaPromotionOperations.requestGigaCandidateList(room, {
-        reviewState: "in_review",
-        limit: 200,
-        signal,
-      });
-      candidate = listed.candidates.find((item) => item.candidate_id === candidateId);
-    } catch (error) {
-      return gigaToolFailure(error);
-    }
-    if (!candidate) {
-      return gigaPromotionRefusal("candidate was not found in review in the current room", room, candidateId);
-    }
-    if (candidate.kind !== expectedKind) {
-      return gigaPromotionRefusal("promotion tool kind must match the stored candidate kind", room, candidateId);
-    }
-    if (candidate.room !== room || candidate.review_state !== "in_review") {
-      return gigaPromotionRefusal("candidate is not an in-review current-room record", room, candidateId);
-    }
-    if (
-      typeof candidate.session_id !== "string"
-      || !candidate.session_id.trim()
-      || !Array.isArray(candidate.project_keys)
-      || candidate.project_keys.length > 1
-      || !Array.isArray(candidate.source_refs)
-      || candidate.source_refs.length === 0
-    ) {
-      return gigaPromotionRefusal("candidate does not retain valid runtime scope and source identity", room, candidateId);
-    }
-    const candidateProject = candidate.project_keys[0] ?? null;
-    const candidateScope = candidate.scope;
-    if (
-      !candidateScope
-      || typeof candidateScope !== "object"
-      || Array.isArray(candidateScope)
-      || Object.keys(candidateScope).sort().join(",") !== "project,publication_review_required,room,visibility"
-      || candidateScope.room !== room
-      || candidateScope.project !== candidateProject
-      || candidateScope.visibility !== "private"
-      || candidateScope.publication_review_required !== true
-    ) {
-      return gigaPromotionRefusal("candidate scope does not match trusted room and project authority", room, candidateId);
-    }
-
-    let target: GigaPromotionTarget;
-    if (expectedKind === "memory") {
-      target = {
-        kind: "memory",
-        payload: { title: params.title, body: params.body, threads: params.threads ?? [] },
-      };
-    } else if (expectedKind === "coding_lesson") {
-      if (candidate.project_keys.length !== 0) {
-        return gigaPromotionRefusal("coding lesson promotion cannot widen project scope", room, candidateId);
-      }
-      target = {
-        kind: "coding_lesson",
-        payload: {
+    const target: GigaPromotionTarget = expectedKind === "memory"
+      ? {
+          kind: "memory",
           title: params.title,
           body: params.body,
-          shape: params.shape ?? null,
-          proof_pattern: params.proof_pattern ?? null,
-          thread_keys: Array.isArray(candidate.thread_keys) ? candidate.thread_keys : [],
-          trigger_context: params.trigger_context ?? null,
-          language_keys: params.language_keys ?? [],
-          technology_keys: params.technology_keys ?? [],
-          tags: params.tags ?? [],
-        },
-      };
-    } else {
-      const project = candidate.project_keys[0];
-      if (
-        candidate.project_keys.length !== 1
-        || typeof project !== "string"
-        || !project.trim()
-        || params.publication_approved !== true
-      ) {
-        return gigaPromotionRefusal("project lesson promotion requires one stored project key and explicit publication approval", room, candidateId);
-      }
-      target = {
-        kind: "project_lesson",
-        payload: {
-          title: params.title,
-          body: params.body,
-          project,
-          proof_pattern: params.proof_pattern ?? null,
-          thread_keys: Array.isArray(candidate.thread_keys) ? candidate.thread_keys : [],
-          trigger_context: params.trigger_context ?? null,
-          language_keys: params.language_keys ?? [],
-          technology_keys: params.technology_keys ?? [],
-          tags: params.tags ?? [],
-        },
-      };
-    }
-
+          threads: params.threads ?? [],
+        }
+      : expectedKind === "coding_lesson"
+        ? {
+            kind: "coding_lesson",
+            title: params.title,
+            body: params.body,
+            shape: params.shape,
+            proof_pattern: params.proof_pattern,
+            trigger_context: params.trigger_context,
+            language_keys: params.language_keys ?? [],
+            technology_keys: params.technology_keys ?? [],
+            tags: params.tags ?? [],
+          }
+        : {
+            kind: "project_lesson",
+            title: params.title,
+            body: params.body,
+            proof_pattern: params.proof_pattern,
+            trigger_context: params.trigger_context,
+            language_keys: params.language_keys ?? [],
+            technology_keys: params.technology_keys ?? [],
+            tags: params.tags ?? [],
+            publication_approved: params.publication_approved,
+          };
     try {
-      const sourceRefs = await gigaPromotionOperations.resolveGigaSourceRefsFromLedger(
-        ctx,
-        room,
-        candidate.session_id,
-        candidate.source_refs,
-        candidate.project_keys,
-      );
-      const authority = {
-        candidate_id: candidate.candidate_id,
+      const result = await requestGigaPromote({
+        candidate_id: params.candidate_id,
         room,
         reviewer_id: spirit,
         operator_identity: operator,
         authorization_basis: GIGA_OMP_ROOM_BINDING,
-        source_refs: sourceRefs,
-        reviewed_at: new Date().toISOString(),
-      };
-      const promotionRequest: GigaPromotionRequest = target.kind === "project_lesson"
-        ? { ...authority, target, publication_consent: { operator_approved: true, reviewer_approved: true } }
-        : { ...authority, target, publication_consent: null };
-      const result = await gigaPromotionOperations.requestGigaPromote(promotionRequest, { signal });
+        target,
+      }, { signal });
       const output = { ok: true, ...result };
       return {
         content: [{ type: "text", text: JSON.stringify(output, null, 2) }],

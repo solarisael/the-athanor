@@ -17,8 +17,8 @@ if (-not $IsWindows) {
 
 $substrateRoot = [IO.Path]::GetFullPath($PSScriptRoot)
 $athanorRoot = [IO.Path]::GetFullPath((Join-Path $substrateRoot ".."))
-# Mutable state lives outside the immutable product tree. Mirrors
-# state_paths.py, state_paths.sh, and crates/house-substrate/src/state.rs:
+# Mutable state lives outside the immutable product tree. This mirrors
+# state_paths.sh and crates/house-substrate/src/state.rs:
 # ATHANOR_STATE_DIR wins and must be absolute, then an existing
 # <install-root>/state, then a development checkout. Never a guess.
 $configuredStateRoot = [string]$env:ATHANOR_STATE_DIR

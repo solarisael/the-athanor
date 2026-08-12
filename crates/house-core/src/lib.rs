@@ -1,5 +1,11 @@
 //! Domain types and invariants for the House remember vertical slice.
 
+pub mod context;
+pub mod conversation;
+pub mod lineage;
+pub mod routing;
+pub mod triggers;
+
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

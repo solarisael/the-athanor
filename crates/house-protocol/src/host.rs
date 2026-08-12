@@ -1,3 +1,7 @@
+use house_core::context::{ContextAnalysis, ContextAnalysisRequest};
+use house_core::conversation::VisibleMessage;
+use house_core::lineage::{QuestBatch, QuestLifecycle, QuestMemory};
+use house_core::triggers::ProcessLesson;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -10,6 +14,25 @@ pub const BOAT_RECEIPT_SUBJECT: &str = "athanor.boat.receipt.v1";
 pub const PAPER_BOAT_RECEIPT_PROJECTION_ID: &str = "paper_boat_receipt";
 pub const PAPER_BOAT_RECEIPT_SUBSCRIBE: &str = "athanor.paper_boat_receipt.subscribe";
 pub const PAPER_BOAT_RECEIPT_SNAPSHOT: &str = "athanor.paper_boat_receipt.snapshot";
+pub const CONTEXT_PROJECTION_ID: &str = "context";
+pub const CONTEXT_ANALYZE: &str = "athanor.context.analyze";
+pub const CONTEXT_ANALYZED: &str = "athanor.context.analyzed";
+pub const CONTEXT_VIEWPORT: &str = "athanor.context.viewport";
+pub const CONTEXT_VIEWPORTED: &str = "athanor.context.viewported";
+pub const ROUTING_PROJECTION_ID: &str = "routing";
+pub const ROUTING_STATUS: &str = "athanor.routing.status";
+pub const ROUTING_DISPATCH: &str = "athanor.routing.dispatch";
+pub const FAMILIAR_STATUS: &str = "athanor.familiar.status";
+pub const ROUTING_RESULT: &str = "athanor.routing.result";
+pub const LINEAGE_PROJECTION_ID: &str = "lineage";
+pub const LINEAGE_NORMALIZE: &str = "athanor.lineage.normalize";
+pub const LINEAGE_LIFECYCLE: &str = "athanor.lineage.lifecycle";
+pub const LINEAGE_NORMALIZED: &str = "athanor.lineage.normalized";
+pub const SHELL_PROJECTION_ID: &str = "shell";
+pub const SHELL_CONVERSATION_LOG: &str = "athanor.shell.conversation_log";
+pub const SHELL_LESSON_PLAN: &str = "athanor.shell.lesson_plan";
+pub const SHELL_PROCESS_LESSONS: &str = "athanor.shell.process_lessons";
+pub const SHELL_RESULT: &str = "athanor.shell.result";
 pub const RECALL_POLICY_PROJECTION_ID: &str = "recall_policy";
 pub const RECALL_POLICY_SUBSCRIBE: &str = "athanor.recall_policy.subscribe";
 pub const RECALL_POLICY_RESYNC: &str = "athanor.recall_policy.resync";
@@ -57,7 +80,7 @@ pub enum RecallResolvedMode {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RecallPolicyState {
     pub requested_mode: RecallRequestedMode,
     pub resolved_mode: RecallResolvedMode,
@@ -109,7 +132,7 @@ pub struct RecallRefreshCompletion {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RecallPolicyDecision {
     pub should_recall: bool,
     pub clear_working_set: bool,
@@ -166,6 +189,57 @@ struct RawClientCommand {
     failure_reason: Option<String>,
     #[serde(default)]
     compaction_summary: Option<String>,
+    #[serde(default)]
+    context_request: Option<ContextAnalysisRequest>,
+    #[serde(default)]
+    context_viewport_mode: Option<crate::RecallViewportMode>,
+    #[serde(default)]
+    routing_request: Option<Value>,
+    #[serde(default)]
+    room_dir: Option<String>,
+    #[serde(default)]
+    lineage_request: Option<QuestBatch>,
+    #[serde(default)]
+    lineage_lifecycle: Option<QuestLifecycle>,
+    #[serde(default)]
+    conversation_request: Option<ConversationLogRequest>,
+    #[serde(default)]
+    trigger_request: Option<ProcessTriggerRequest>,
+    #[serde(default)]
+    recall_result: Option<crate::RecallResultInput>,
+}
+
+/// One conversation-capture request: the visible window as the harness renders
+/// it, plus who the room attributes each side to. Every rule about identity,
+/// freshness, dedupe, and transcript shape lives in `house_core::conversation`.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ConversationLogRequest {
+    pub room_dir: String,
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub operator: String,
+    #[serde(default)]
+    pub spirit: String,
+    #[serde(default)]
+    pub source: String,
+    /// Replayed sessions observe turns without making them durable.
+    #[serde(default)]
+    pub persist: bool,
+    #[serde(default)]
+    pub messages: Vec<VisibleMessage>,
+}
+
+/// A matched process trigger, optionally carrying the lesson rows the adapter
+/// fetched for the plan this Host issued.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ProcessTriggerRequest {
+    #[serde(default)]
+    pub trigger: Option<String>,
+    #[serde(default)]
+    pub lessons: Vec<ProcessLesson>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -227,6 +301,12 @@ impl RawClientCommand {
         }
         let expected_projection = match self.command_or_event_type.as_str() {
             PAPER_BOAT_RECEIPT_SUBSCRIBE => PAPER_BOAT_RECEIPT_PROJECTION_ID,
+            CONTEXT_ANALYZE | CONTEXT_VIEWPORT => CONTEXT_PROJECTION_ID,
+            ROUTING_STATUS | ROUTING_DISPATCH | FAMILIAR_STATUS => ROUTING_PROJECTION_ID,
+            LINEAGE_NORMALIZE | LINEAGE_LIFECYCLE => LINEAGE_PROJECTION_ID,
+            SHELL_CONVERSATION_LOG | SHELL_LESSON_PLAN | SHELL_PROCESS_LESSONS => {
+                SHELL_PROJECTION_ID
+            }
             _ => RECALL_POLICY_PROJECTION_ID,
         };
         if self.projection_id != expected_projection {
@@ -268,6 +348,15 @@ impl RawClientCommand {
             || self.refresh.is_some()
             || self.failure_reason.is_some()
             || self.compaction_summary.is_some()
+            || self.routing_request.is_some()
+            || self.room_dir.is_some()
+            || self.context_request.is_some()
+            || self.context_viewport_mode.is_some()
+            || self.lineage_request.is_some()
+            || self.lineage_lifecycle.is_some()
+            || self.conversation_request.is_some()
+            || self.trigger_request.is_some()
+            || self.recall_result.is_some()
         {
             return Err(CommandParseError::from_meta(
                 meta,
@@ -278,7 +367,7 @@ impl RawClientCommand {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ClientCommand {
     Subscribe {
         meta: CommandMeta,
@@ -315,6 +404,49 @@ pub enum ClientCommand {
         version: u64,
         sequence: u64,
     },
+    AnalyzeContext {
+        meta: CommandMeta,
+        request: ContextAnalysisRequest,
+    },
+    RoutingStatus {
+        meta: CommandMeta,
+    },
+    /// One dispatch selector — a lane or a familiar — resolved by the House.
+    /// `room_dir` lets the Host read the room spellbook a familiar needs.
+    RoutingDispatch {
+        meta: CommandMeta,
+        room_dir: Option<String>,
+        request: Value,
+    },
+    FamiliarStatus {
+        meta: CommandMeta,
+        room_dir: String,
+    },
+    NormalizeLineage {
+        meta: CommandMeta,
+        request: QuestBatch,
+    },
+    SettleLineage {
+        meta: CommandMeta,
+        lifecycle: QuestLifecycle,
+    },
+    LogConversation {
+        meta: CommandMeta,
+        request: ConversationLogRequest,
+    },
+    PlanTriggerLessons {
+        meta: CommandMeta,
+        request: ProcessTriggerRequest,
+    },
+    BraidTriggerLessons {
+        meta: CommandMeta,
+        request: ProcessTriggerRequest,
+    },
+    ApplyRecallViewport {
+        meta: CommandMeta,
+        result: crate::RecallResultInput,
+        mode: crate::RecallViewportMode,
+    },
 }
 
 impl ClientCommand {
@@ -328,6 +460,16 @@ impl ClientCommand {
             | Self::CompleteRefresh { meta, .. }
             | Self::FailRefresh { meta, .. }
             | Self::InvalidateAfterCompaction { meta, .. }
+            | Self::AnalyzeContext { meta, .. }
+            | Self::RoutingStatus { meta }
+            | Self::RoutingDispatch { meta, .. }
+            | Self::FamiliarStatus { meta, .. }
+            | Self::NormalizeLineage { meta, .. }
+            | Self::SettleLineage { meta, .. }
+            | Self::LogConversation { meta, .. }
+            | Self::PlanTriggerLessons { meta, .. }
+            | Self::BraidTriggerLessons { meta, .. }
+            | Self::ApplyRecallViewport { meta, .. }
             | Self::Acknowledge { meta, .. } => meta,
         }
     }
@@ -539,6 +681,120 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
                 sequence,
             })
         }
+        CONTEXT_ANALYZE => {
+            if raw.base_version.is_some()
+                || raw.mutations.is_some()
+                || raw.version.is_some()
+                || raw.sequence.is_some()
+                || raw.facts.is_some()
+                || raw.refresh.is_some()
+                || raw.failure_reason.is_some()
+                || raw.compaction_summary.is_some()
+                || raw.context_viewport_mode.is_some()
+                || raw.recall_result.is_some()
+            {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "context analyze carries fields not allowed for its type",
+                ));
+            }
+            let request = raw.context_request.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "context analyze requires context_request")
+            })?;
+            request
+                .validate(&meta.sender_room)
+                .map_err(|error| CommandParseError::from_meta(&meta, error.to_string()))?;
+            Ok(ClientCommand::AnalyzeContext { meta, request })
+        }
+        ROUTING_STATUS => {
+            raw.no_command_payload(&meta)?;
+            Ok(ClientCommand::RoutingStatus { meta })
+        }
+        ROUTING_DISPATCH => {
+            let request = raw.routing_request.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "routing dispatch requires routing_request")
+            })?;
+            Ok(ClientCommand::RoutingDispatch {
+                meta,
+                room_dir: raw.room_dir.filter(|value| !value.trim().is_empty()),
+                request,
+            })
+        }
+        FAMILIAR_STATUS => {
+            let room_dir = raw
+                .room_dir
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    CommandParseError::from_meta(&meta, "familiar status requires room_dir")
+                })?;
+            Ok(ClientCommand::FamiliarStatus { meta, room_dir })
+        }
+        LINEAGE_NORMALIZE => {
+            let request = raw.lineage_request.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "lineage normalize requires lineage_request")
+            })?;
+            Ok(ClientCommand::NormalizeLineage { meta, request })
+        }
+        LINEAGE_LIFECYCLE => {
+            let lifecycle = raw.lineage_lifecycle.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "lineage lifecycle requires lineage_lifecycle")
+            })?;
+            Ok(ClientCommand::SettleLineage { meta, lifecycle })
+        }
+        SHELL_CONVERSATION_LOG => {
+            let request = raw.conversation_request.ok_or_else(|| {
+                CommandParseError::from_meta(
+                    &meta,
+                    "conversation log requires conversation_request",
+                )
+            })?;
+            if request.room_dir.trim().is_empty() {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "conversation log requires room_dir",
+                ));
+            }
+            Ok(ClientCommand::LogConversation { meta, request })
+        }
+        SHELL_LESSON_PLAN => {
+            let request = raw.trigger_request.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "lesson plan requires trigger_request")
+            })?;
+            Ok(ClientCommand::PlanTriggerLessons { meta, request })
+        }
+        SHELL_PROCESS_LESSONS => {
+            let request = raw.trigger_request.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "process lessons requires trigger_request")
+            })?;
+            Ok(ClientCommand::BraidTriggerLessons { meta, request })
+        }
+        CONTEXT_VIEWPORT => {
+            if raw.context_request.is_some()
+                || raw.base_version.is_some()
+                || raw.mutations.is_some()
+                || raw.version.is_some()
+                || raw.sequence.is_some()
+                || raw.facts.is_some()
+                || raw.refresh.is_some()
+                || raw.failure_reason.is_some()
+                || raw.compaction_summary.is_some()
+            {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "context viewport carries fields not allowed for its type",
+                ));
+            }
+            let result = raw.recall_result.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "context viewport requires recall_result")
+            })?;
+            Ok(ClientCommand::ApplyRecallViewport {
+                meta,
+                result,
+                mode: raw
+                    .context_viewport_mode
+                    .unwrap_or(crate::RecallViewportMode::Automatic),
+            })
+        }
         unknown => Err(CommandParseError::from_meta(
             &meta,
             format!("unknown command_or_event_type {unknown}"),
@@ -546,6 +802,46 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ContextAnalysisEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub analysis: ContextAnalysis,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ContextViewportEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub result: crate::RecallViewportResult,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RoutingResultEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub result: Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LineageResultEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    /// Whether the quest this event answers has reached a terminal state. The
+    /// adapter releases its join bookkeeping on this, never on its own reading
+    /// of a status string.
+    pub settled: bool,
+    pub memories: Vec<QuestMemory>,
+}
+
+/// Bounded result of one OMP-shell decision: conversation capture, a lesson
+/// plan, or a process-lesson braid.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ShellResultEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub result: Value,
+}
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct EventMeta {
     pub schema_version: u8,

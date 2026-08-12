@@ -4,8 +4,10 @@ This document records current support boundaries and non-goals. The product READ
 
 ## Supported installation path
 
-Windows 11 x64 with OMP is the only supported release target.
-`1.0.0-rc.3` is the current native candidate.
+Windows 11 x64 with OMP is the only supported late-beta target.
+`0.9.3` is the current source version. The reference workstation still runs the
+immutable, locally proven artifact labeled `1.0.0-rc.3`; that premature build
+label is retained only for installed-artifact and evidence identity.
 
 The ordinary managed install requires:
 
@@ -27,7 +29,7 @@ first-install backup, starts no PostgreSQL child in that mode, and still require
 schema 16 plus `vector`, `pg_trgm`, and `pgcrypto`.
 
 Local semantic embeddings still require a compatible configured embedding
-endpoint. No GPU or embedding model is bundled in the 1.0 candidate.
+endpoint. No GPU or embedding model is bundled in the current late beta.
 
 One repository and one release own every installed component. Read
 [the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
@@ -36,8 +38,8 @@ One repository and one release own every installed component. Read
 
 | Host | Current state |
 |---|---|
-| Windows 11 x64 + OMP | Supported release-candidate target |
-| Windows 10 x64 | Installer target but not locally re-proved for this candidate |
+| Windows 11 x64 + OMP | Supported late-beta target |
+| Windows 10 x64 | Installer target but not locally re-proved for the current source |
 | Native Linux | Rust components are portable in principle; installer, service, Godot package, and OMP integration require host-specific engineering and verification |
 | OpenCode | Historical adapter line; unsupported |
 | macOS | Unsupported |
@@ -54,8 +56,23 @@ needs a working OMP installation and its provider authentication before the AI
 can use the adapter. Read [`../INSTALL.md`](../INSTALL.md) for managed/external
 database modes, readiness, rollback, uninstall, and explicit purge.
 
-The installer is locally built and payload-verified. A clean-machine elevated
-installation remains a public evidence gap, not a completed claim.
+The installer is locally built and payload-verified. A clean generic
+managed-database installation remains a public evidence gap, not a completed
+claim.
+
+## Known late-beta blockers
+
+The reference House has reproduced two live continuity-path defects that must
+be repaired before 1.0:
+
+- `remember` rejects a valid `continues` edge with a bogus `params.room`
+  validation error;
+- the live `sleep` tool path is not healthy, despite the implemented and tested
+  Rust Paper Boat transaction architecture.
+
+The operator GUI also remains incomplete. It does not yet provide the House,
+agent, message, Recall, authority, work, health, and failure views required for
+ordinary operation without terminal archaeology.
 
 ## Retrieval boundary
 

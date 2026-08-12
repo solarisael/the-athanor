@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Where mutable substrate state lives. Mirrors state_paths.py and
+# Where mutable substrate state lives. Mirrors
 # crates/house-substrate/src/state.rs.
 #
 # Product code is immutable once installed, so nothing written at runtime may

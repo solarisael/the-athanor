@@ -225,34 +225,6 @@ describe("OMP adapter registration", () => {
       giga_promote_project_lesson: { approval: "write" },
     });
   });
-  test("canon tools refuse ambiguous selectors and malformed typed pointers before dispatch", async () => {
-    const tools = toolMap(registerAdapter().tools);
-    const context = { cwd: process.cwd() };
-    const ambiguous = await tools.canon_read.execute?.(
-      "canon-read-1",
-      { id: "7", name: "The Athanor" },
-      undefined,
-      undefined,
-      context,
-    ) as { isError?: boolean; content?: Array<{ text: string }> };
-    expect(ambiguous.isError).toBe(true);
-    expect(ambiguous.content?.[0]?.text).toContain("exactly one");
-
-    const malformed = await tools.canon_write.execute?.(
-      "canon-write-1",
-      {
-        name: "The Athanor",
-        kind: "project",
-        summary: "Current authority",
-        pointerFiles: [{ file: "canon.md", lines: [8, 2] }],
-      },
-      undefined,
-      undefined,
-      context,
-    ) as { isError?: boolean; content?: Array<{ text: string }> };
-    expect(malformed.isError).toBe(true);
-    expect(malformed.content?.[0]?.text).toContain("[start,end]");
-  });
 
 
   test("teaches the humane continuity register at every memory boundary", () => {
@@ -629,27 +601,4 @@ describe("OMP adapter registration", () => {
     });
   });
 
-  test("lesson writes reach store validation instead of an undefined registry", async () => {
-    const remember = toolMap(registerAdapter().tools).remember;
-    expect(remember.execute).toBeFunction();
-
-    const result = await remember.execute!(
-      "remember-regression",
-      { title: "Regression", body: "Regression", kind: "project-lesson" },
-      undefined,
-      undefined,
-      { cwd: process.cwd() },
-    );
-
-    const output = JSON.parse(result.content![0]!.text);
-    expect(result.details).toEqual(output);
-    expect(output.message).toBe("kind 'project-lesson' requires field 'project'");
-    expect(output.details.operation).toBe("remember");
-    expect(output.details.stage).toBe("validation");
-    expect(output.details.execution).toEqual({
-      request_dispatched: false,
-      write_outcome: "not_started",
-      retry: "after_change",
-    });
-  });
 });

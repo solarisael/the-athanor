@@ -207,12 +207,15 @@ fn is_write_operation(operation: &str) -> bool {
             | "anamnesis_write"
             | "cluster_maintenance"
             | "giga_event_ingest"
+            | "giga_conversation_ingest"
             | "giga_event_claim"
             | "giga_event_finish"
             | "giga_event_replay"
             | "giga_queue_maintenance"
             | "giga_promote"
+            | "giga_tool_promote"
             | "giga_review"
+            | "giga_tool_review"
     )
 }
 
@@ -228,13 +231,16 @@ fn validation_owner(operation: &str) -> (&'static str, &'static str) {
         "anamnesis_write" => ("src/anamnesis.rs", "anamnesis_write"),
         "cluster_maintenance" => ("src/cluster.rs", "cluster_maintenance"),
         "giga_event_ingest" => ("src/giga.rs", "giga_event_ingest"),
+        "giga_conversation_ingest" => ("src/giga.rs", "giga_conversation_ingest"),
         "giga_event_claim" => ("src/giga.rs", "giga_event_claim"),
         "giga_event_finish" => ("src/giga.rs", "giga_event_finish"),
         "giga_event_replay" => ("src/giga.rs", "giga_event_replay"),
         "giga_queue_maintenance" => ("src/giga.rs", "giga_queue_maintenance"),
         "giga_promote" => ("src/giga.rs", "giga_promote"),
+        "giga_tool_promote" => ("src/giga.rs", "giga_tool_promote"),
         "giga_candidate_list" => ("src/giga.rs", "giga_candidate_list"),
         "giga_review" => ("src/giga.rs", "giga_review"),
+        "giga_tool_review" => ("src/giga.rs", "giga_tool_review"),
         "giga_health" => ("src/giga.rs", "giga_health"),
         _ => ("src/main.rs", "decode_line"),
     }
@@ -270,13 +276,16 @@ fn database_owner(operation: &str) -> (&'static str, &'static str) {
         "anamnesis_write" => ("src/anamnesis.rs", "anamnesis_write"),
         "cluster_maintenance" => ("src/cluster.rs", "cluster_maintenance"),
         "giga_event_ingest" => ("src/giga.rs", "giga_event_ingest"),
+        "giga_conversation_ingest" => ("src/giga.rs", "giga_conversation_ingest"),
         "giga_event_claim" => ("src/giga.rs", "giga_event_claim"),
         "giga_event_finish" => ("src/giga.rs", "giga_event_finish"),
         "giga_event_replay" => ("src/giga.rs", "giga_event_replay"),
         "giga_queue_maintenance" => ("src/giga.rs", "giga_queue_maintenance"),
         "giga_promote" => ("src/giga.rs", "giga_promote"),
+        "giga_tool_promote" => ("src/giga.rs", "giga_tool_promote"),
         "giga_candidate_list" => ("src/giga.rs", "giga_candidate_list"),
         "giga_review" => ("src/giga.rs", "giga_review"),
+        "giga_tool_review" => ("src/giga.rs", "giga_tool_review"),
         "giga_health" => ("src/giga.rs", "giga_health"),
         _ => ("src/config.rs", "Config::pool"),
     }

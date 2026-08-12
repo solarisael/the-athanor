@@ -3,6 +3,7 @@ mod policy;
 mod receipt;
 mod server;
 mod store;
+mod viewport;
 
 pub use config::{DEFAULT_BIND, DEFAULT_WS_PATH, HostConfig};
 pub use server::Host;

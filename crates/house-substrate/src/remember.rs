@@ -6,13 +6,13 @@ use chrono::{Local, NaiveDate};
 use reqwest::Client;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
-use serde_json::Value;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Transaction};
 use std::{
     collections::{BTreeSet, HashSet},
     time::Duration,
 };
-use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct ThreadContinuation {
@@ -268,9 +268,23 @@ impl RememberRequest {
         Ok(())
     }
     pub(crate) fn source_path(&self) -> String {
-        self.source_path
-            .clone()
-            .unwrap_or_else(|| format!("db-only/{}/{}", self.room, Uuid::new_v4()))
+        self.source_path.clone().unwrap_or_else(|| {
+            let identity = json!({
+                "room": self.room,
+                "title": self.title,
+                "body": self.body,
+                "threads": normalize_threads(&self.threads),
+                "continues": self.continues.iter().map(|item| {
+                    (&item.thread, item.previous_memory_id)
+                }).collect::<Vec<_>>(),
+                "supersedes": self.supersedes,
+            });
+            format!(
+                "db-only/{}/{:x}",
+                self.room,
+                Sha256::digest(identity.to_string())
+            )
+        })
     }
     fn lesson_body(&self) -> &str {
         self.lesson.as_deref().unwrap_or(&self.body)

@@ -100,6 +100,11 @@ end-to-end task improvement.
 
 ### Local 1.0 release-candidate proof — 2026-08-10
 
+The `1.0.0-rc.*` strings in this section are retained immutable build identities.
+The product version was subsequently corrected to `0.9.3`; these local proofs
+establish the named runtime and installer behavior, not complete 1.0 product
+maturity.
+
 The converged `1.0.0-rc.1` candidate was exercised on Windows 11 x64 with
 Rust/Cargo 1.95.0, Bun 1.3.14, Python 3.12.10, Godot 4.7.1, PostgreSQL 18, and a
 test-owned NATS 2.14.4 JetStream endpoint.
@@ -177,6 +182,10 @@ RC3 stages the root entry plus 13 runtime TypeScript modules. The native builder
 now executes `loadHouseCore()` through the packaged adapter bridge and refuses
 the release when `CORE_API_VERSION !== 1` or any transitive module is absent.
 
+This was valid evidence for the immutable RC3 artifact. The `0.9.3` Rust
+ownership cut below removes that bridge and its packaged root TypeScript core;
+the historical result remains here rather than being rewritten.
+
 The RC2 → RC3 elevated upgrade succeeded against the real external PostgreSQL
 authority. The service returned to `RUNNING`; native doctor verified 20,659
 artifact hashes and reported installed version `1.0.0-rc.3`. An independent
@@ -193,6 +202,34 @@ installed-loader reproduction returned:
 The proven RC3 installer is
 `The-Athanor-1.0.0-rc.3-windows-x64.exe`, SHA-256
 `5ad56051b05a8d27f32ecf1ded876b1f8f68f565ab1a6763911056b576da488f`.
+
+### Installed 0.9.3 thin-adapter proof — 2026-08-12
+
+The source version correction became an installed native update from
+`1.0.0-rc.3` to `0.9.3`. The installer preserved RC3 as the rollback version,
+registered OMP, returned the Windows service to `RUNNING`, and pointed
+`current.json` at `0.9.3`.
+
+The installed payload contains the OMP adapter and its presentation/transport
+modules but no root `index.ts` or `src/*.ts` behavioral core. Typed Rust now
+owns context classification, keyword/process triggers, context pressure, Recall
+viewport policy, routing/familiar receipts, spellbook validation, and subagent
+lineage normalization.
+
+Focused proof:
+
+- Rust core/protocol/Host: 88 passed, 2 ignored integration gates;
+- OMP adapter: 168 passed, 1 skipped integration gate;
+- local substrate deployment: 74 core/protocol, 85 substrate, migration 16,
+  fresh PostgreSQL backup, Nemotron dimension 2048, Full-mode health;
+- installed Host context command: 35 ms;
+- installed loader registration: 5 ms, 30 tools, one context hook;
+- installed casual context handler: 341 ms;
+- installed work/Recall context handler: 1,951 ms and one bounded Recall tray.
+
+The work-handler smoke exercised the installed loader, Rust context analysis,
+Recall Policy Host, Rust retrieval transport, Rust Host viewport, and bounded
+OMP presentation. It completed far below OMP's 30-second handler ceiling.
 
 ## Next public evidence
 

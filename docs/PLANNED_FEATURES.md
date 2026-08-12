@@ -34,9 +34,10 @@ Self-hosting remains available. Managed services must support complete export.
 
 ## What works now
 
-The `1.0.0-rc.3` native Windows x64 candidate is installed and live on the
-Solarisael workstation. OMP is the supported harness and Solarisael House
-remains the working reference House.
+The current source version is `0.9.3`, a native Windows x64 late beta. The
+reference Solarisael workstation runs the locally proven artifact historically
+labeled `1.0.0-rc.3`. OMP is the supported harness and Solarisael House remains
+the working reference House.
 
 The canonical, current capability map — surfaces, owners, and authority — lives
 in [`ARCHITECTURE.md`](./ARCHITECTURE.md). This page does not copy it; it maps
@@ -51,12 +52,12 @@ honest to sit against. Measured results are separated from planned claims in
 | GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current |
 | Curios | Keep selected hunches until later context makes them meaningful | Current |
 | GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Current — coding/project slice |
-| Native Godot operator client | Show live Recall Policy and sanitized Paper Boat delivery receipts without becoming a second authority | Current — 1.0 candidate |
-| Athanor Host | Give clients one authenticated snapshot/delta/resync surface with restart-safe cursors and idempotency | Current — 1.0 candidate |
+| Native Godot operator client | Show live House, agent, message, Recall, authority, work, and health state without becoming a second authority | Current — first two 0.9.3 screens |
+| Athanor Host | Give clients one authenticated snapshot/delta/resync surface with restart-safe cursors and idempotency | Current — 0.9.3 |
 | Session Recall Policy | Make proactive retrieval visible and mode-aware without requiring ordinary users to understand retrieval engineering | Current — Rust Host + OMP + Godot |
 | GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Specified |
 | PostgreSQL outbox and NATS delivery | Deliver bounded opaque pointers with explicit duplicate windows and durable PostgreSQL idempotency | Current — `boat.ready` lane |
-| Paper Boat sleep, wake, and delivery receipt | Commit the Boat and outbox together, wake from PostgreSQL authority, and show only sanitized receipt metadata | Current — 1.0 candidate |
+| Paper Boat sleep, wake, and delivery receipt | Commit the Boat and outbox together, wake from PostgreSQL authority, and show only sanitized receipt metadata | Current architecture — live organ repair remains |
 | Dynamic model and room execution | Choose local or hosted model bodies independently from cold workers, familiars, reflections, and live room dialogue | Specified |
 | Incremental Prolog/Datalog derivations | Index code changes in the background, update only affected facts, and answer common queries from precomputed authorized relations | Planned |
 | Lean-backed lesson obligations | Check selected production-bound invariants inside an aggressively resource-limited wrapper | Planned |

@@ -1,6 +1,6 @@
 # Runtime Evolution Architecture
 
-Status: 1.0 runtime spine implemented; later sections retain accepted post-1.0 contracts  
+Status: 1.0 runtime spine implemented in the 0.9.3 late beta; operator product and release gates remain
 Last updated: 2026-08-10
 
 This document defines the implemented Host, Godot, Recall Policy, Paper Boat,
@@ -15,7 +15,7 @@ and contracts created by earlier layers. The public release order lives in
 
 ## 1. Current boundary
 
-The `1.0.0-rc.3` candidate has:
+The current `0.9.3` source has:
 
 - one Rust domain/protocol workspace;
 - file-authoritative Vault and PostgreSQL-authoritative AKASHA;

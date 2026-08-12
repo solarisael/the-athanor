@@ -4,21 +4,17 @@ import os from "node:os";
 import path from "node:path";
 
 import { ADAPTER_API_VERSION } from "../index.ts";
-import {
-  loadHouseCore,
-  loadHouseLedger,
-} from "../solarisael-house-proof/core.ts";
+import { analyzeContext } from "../solarisael-house-proof/context.ts";
+import { dispatchHouse, familiarStatus, laneStatus } from "../solarisael-house-proof/routing.ts";
 import { roomContext, supportedRoom } from "../solarisael-house-proof/room.ts";
 
 describe("OMP adapter contract", () => {
-  test("exports adapter API version and consumes the sibling core root contract", async () => {
+  test("exports a thin adapter API without loading a sibling TypeScript core", () => {
     expect(ADAPTER_API_VERSION).toBe(1);
-    const core = await loadHouseCore();
-    expect(core.CORE_API_VERSION).toBe(1);
-    expect(typeof core.runAnamnesisQuery).toBe("function");
-    expect(typeof core.logUserTurn).toBe("function");
-    expect(typeof core.logAssistantTurn).toBe("function");
-    expect(typeof (await loadHouseLedger()).logUserTurn).toBe("function");
+    expect(typeof analyzeContext).toBe("function");
+    expect(typeof laneStatus).toBe("function");
+    expect(typeof familiarStatus).toBe("function");
+    expect(typeof dispatchHouse).toBe("function");
   });
 
   test("uses neutral defaults for an unmarked directory", async () => {

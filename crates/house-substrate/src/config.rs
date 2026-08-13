@@ -1,3 +1,4 @@
+use house_core::conversation::source_ledger_directory_path;
 use house_protocol::{
     DiagnosticCategory, DiagnosticDetails, DiagnosticEvidence, DiagnosticExecution,
     DiagnosticNextCheck, DiagnosticOwner, DiagnosticRetry, DiagnosticStage, DiagnosticTarget,
@@ -779,7 +780,12 @@ impl Config {
             test_embedding_disabled,
             embed_url,
             giga_source_ledger_dir: configured_value("SOLARISAEL_GIGA_SOURCE_LEDGER_DIR", &dotenv)
-                .map(PathBuf::from),
+                .map(PathBuf::from)
+                .or_else(|| {
+                    env::current_dir()
+                        .ok()
+                        .map(|room| source_ledger_directory_path(&room))
+                }),
             giga_source_room: configured_value("SOLARISAEL_GIGA_SOURCE_ROOM", &dotenv),
         })
     }

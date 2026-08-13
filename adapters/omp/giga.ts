@@ -1,5 +1,3 @@
-import { homedir } from "node:os";
-import path from "node:path";
 import { existsSync } from "node:fs";
 
 import { discoverRustExecutable } from "./discovery.ts";
@@ -72,24 +70,19 @@ type LoggedTurn = {
 type GigaTurnBuffer = { ctx: any; cwd: string; turns: LoggedTurn[] };
 const gigaTurnBuffers = new Map<string, GigaTurnBuffer>();
 
-function ledgerConversationDirectory(spirit: string): string {
-  return path.resolve(homedir(), ".local", "operators", "vessel", "state", spirit, "conversations");
-}
 
 function gigaTransport(cwd: string = process.cwd()): RustJsonlTransport | null {
   if (process.env.SOLARISAEL_GIGA_ENABLED !== "1") return null;
   const executable = discoverRustExecutable();
   if (!executable) return null;
   const trusted = roomContext(cwd);
-  const ledgerDirectory = ledgerConversationDirectory(trusted.spirit);
-  const key = `${executable}\0${trusted.room}\0${ledgerDirectory}`;
+  const key = `${executable}\0${trusted.room}\0${trusted.effectiveRoomDir}`;
   let transport = gigaTransports.get(key);
   if (!transport) {
     transport = new RustJsonlTransport({
       executable,
       cwd: trusted.effectiveRoomDir,
       env: {
-        SOLARISAEL_GIGA_SOURCE_LEDGER_DIR: ledgerDirectory,
         SOLARISAEL_GIGA_SOURCE_ROOM: trusted.room,
         SOLARISAEL_GIGA_CLAIM_OWNER: "1",
       },

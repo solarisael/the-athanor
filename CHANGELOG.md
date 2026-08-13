@@ -47,6 +47,14 @@ the exact implementation record.
   when CI-only `RUNNER_TEMP` is absent, allowing local release builds from a
   standard PowerShell session.
 
+### Fixed
+
+- Made Rust Host conversation capture persist the exact private JSONL source
+  ledger before GIGA queues an event. GIGA workers now resolve source pointers
+  from the room-local runtime instead of the retired legacy home-directory
+  ledger, preventing fresh `GigaSourceMissingError` failures after the Rust
+  ownership cut.
+
 ## [1.0.0-rc.3] - 2026-08-11
 
 ### Fixed

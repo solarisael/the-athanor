@@ -28,6 +28,7 @@ export type ConversationCapture = {
   skipped: number;
   errors: Array<Record<string, unknown>>;
   loggedTurns: LoggedTurn[];
+  sourceLedgerDirectory: string;
 };
 
 function harnessTimestamp(message: any): string | undefined {

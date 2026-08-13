@@ -6,11 +6,13 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 
 pub const TRANSCRIPT_DEBUG_LOG: &str = "solarisael-house-transcript-debug.jsonl";
 pub const TRANSCRIPT_LOG_DIRECTORY: &str = "logs";
 pub const TURN_MARKER_PREFIX: &str = "solarisael-turn-key";
 
+pub const GIGA_SOURCE_LEDGER_DIRECTORY: &str = "giga-sources";
 /// One visible harness message, already reduced to text by the adapter that
 /// knows OMP's message shapes.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -199,8 +201,8 @@ pub fn transcript_entry(
 }
 
 /// The record GIGA ingests for one durable turn.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct LoggedTurn {
     pub role: String,
     pub text: String,
@@ -224,6 +226,75 @@ pub fn logged_turn(turn: &ConversationTurn, session_id: &str) -> LoggedTurn {
         source_timestamp: turn.source_timestamp.clone(),
         has_stable_id: true,
     }
+}
+
+/// Private, append-only source records used to verify GIGA event pointers.
+/// The directory is room-local so Host capture and substrate workers share one
+/// authority without a legacy home-directory topology.
+pub fn source_ledger_directory_path(room_dir: &Path) -> PathBuf {
+    room_dir
+        .join(".omp")
+        .join("runtime")
+        .join(GIGA_SOURCE_LEDGER_DIRECTORY)
+}
+
+pub fn source_ledger_directory(room_dir: &str) -> String {
+    source_ledger_directory_path(Path::new(room_dir))
+        .to_string_lossy()
+        .into_owned()
+}
+
+pub fn source_ledger_path(room_dir: &str, date_stamp: &str) -> String {
+    source_ledger_directory_path(Path::new(room_dir))
+        .join(format!("{date_stamp}.jsonl"))
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[derive(Deserialize, Serialize)]
+struct SourceLedgerRecord {
+    #[serde(rename = "sessionID")]
+    session_id: String,
+    #[serde(rename = "messageID")]
+    message_id: String,
+    role: String,
+    text: String,
+}
+
+impl From<&LoggedTurn> for SourceLedgerRecord {
+    fn from(turn: &LoggedTurn) -> Self {
+        Self {
+            session_id: turn.session_id.clone(),
+            message_id: turn.source_id.clone(),
+            role: turn.role.clone(),
+            text: turn.text.clone(),
+        }
+    }
+}
+
+/// Return one JSONL record when the source is absent. An existing exact record
+/// is idempotent; reusing the same session/message identity for different
+/// content is refused rather than creating an ambiguous GIGA source.
+pub fn source_ledger_entry(existing: &str, turn: &LoggedTurn) -> Result<Option<String>, String> {
+    let wanted = SourceLedgerRecord::from(turn);
+    for line in existing.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(record) = serde_json::from_str::<SourceLedgerRecord>(line) else {
+            continue;
+        };
+        if record.session_id == wanted.session_id && record.message_id == wanted.message_id {
+            return if record.role == wanted.role && record.text == wanted.text {
+                Ok(None)
+            } else {
+                Err(format!(
+                    "source identity conflict for session {} message {}",
+                    wanted.session_id, wanted.message_id
+                ))
+            };
+        }
+    }
+    serde_json::to_string(&wanted)
+        .map(|record| Some(format!("{record}\n")))
+        .map_err(|error| format!("source ledger serialization failed: {error}"))
 }
 
 #[cfg(test)]
@@ -278,6 +349,33 @@ mod tests {
         assert!(first.starts_with("# Conversation log — 2026-08-12"));
         assert!(
             transcript_entry(&first, &marker, "2026-08-12", "09:41", "Sol", "Hello.").is_none()
+        );
+    }
+
+    #[test]
+    fn source_ledger_is_room_local_idempotent_and_conflict_safe() {
+        let turn = logged_turn(
+            &conversation_turns(
+                &[message("user", "Exact source.")],
+                "2026-08-12T00:00:00.000Z",
+            )[0],
+            "session-1",
+        );
+        let entry = source_ledger_entry("", &turn)
+            .unwrap()
+            .expect("new source appends");
+        assert!(
+            source_ledger_path("C:\\room", "2026-08-12")
+                .ends_with(".omp\\runtime\\giga-sources\\2026-08-12.jsonl")
+        );
+        assert_eq!(source_ledger_entry(&entry, &turn).unwrap(), None);
+
+        let mut changed = turn.clone();
+        changed.text = "Changed source.".into();
+        assert!(
+            source_ledger_entry(&entry, &changed)
+                .unwrap_err()
+                .contains("source identity conflict")
         );
     }
 }

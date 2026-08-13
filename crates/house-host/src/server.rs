@@ -16,7 +16,8 @@ use futures_util::{SinkExt, StreamExt};
 use house_core::context::analyze_context;
 use house_core::conversation::{
     ConversationTurn, conversation_turns, is_fresh_conversation, logged_turn,
-    transcript_debug_path, transcript_entry, transcript_path, turn_key, turn_label, turn_marker,
+    source_ledger_directory, source_ledger_entry, source_ledger_path, transcript_debug_path,
+    transcript_entry, transcript_path, turn_key, turn_label, turn_marker,
 };
 use house_core::lineage::{QuestLifecycle, normalize_lifecycle_memory, normalize_quest_memories};
 use house_core::routing::{
@@ -771,6 +772,7 @@ fn log_conversation(meta: &CommandMeta, request: ConversationLogRequest) -> Valu
     let clock = now.format("%H:%M").to_string();
     let turns: Vec<ConversationTurn> = conversation_turns(&request.messages, &captured_at);
     let fresh = is_fresh_conversation(&turns);
+    let ledger_directory = source_ledger_directory(&request.room_dir);
 
     let mut appended = 0_u64;
     let mut skipped = 0_u64;
@@ -778,29 +780,64 @@ fn log_conversation(meta: &CommandMeta, request: ConversationLogRequest) -> Valu
     let mut logged = Vec::new();
 
     if request.persist {
-        let path = transcript_path(&request.room_dir, &date_stamp);
-        let mut existing = std::fs::read_to_string(&path).unwrap_or_default();
+        let transcript = transcript_path(&request.room_dir, &date_stamp);
+        let ledger = source_ledger_path(&request.room_dir, &date_stamp);
+        let mut existing_transcript = std::fs::read_to_string(&transcript).unwrap_or_default();
+        let mut existing_ledger = std::fs::read_to_string(&ledger).unwrap_or_default();
         for turn in &turns {
             let key = turn_key(&request.session_id, turn);
             let marker = turn_marker(&key);
             let label = turn_label(&turn.role, &request.operator, &request.spirit);
-            let Some(entry) =
-                transcript_entry(&existing, &marker, &date_stamp, &clock, label, &turn.text)
-            else {
-                skipped += 1;
-                continue;
-            };
-            match append_line(&path, &entry) {
-                Ok(()) => {
-                    existing.push_str(&entry);
-                    appended += 1;
-                    logged.push(logged_turn(turn, &request.session_id));
+            match transcript_entry(
+                &existing_transcript,
+                &marker,
+                &date_stamp,
+                &clock,
+                label,
+                &turn.text,
+            ) {
+                Some(entry) => match append_line(&transcript, &entry) {
+                    Ok(()) => {
+                        existing_transcript.push_str(&entry);
+                        appended += 1;
+                    }
+                    Err(error) => errors.push(json!({
+                        "key": key,
+                        "surface": "transcript",
+                        "error": error,
+                    })),
+                },
+                None => skipped += 1,
+            }
+
+            let source = logged_turn(turn, &request.session_id);
+            let ledger_ready = match source_ledger_entry(&existing_ledger, &source) {
+                Ok(Some(entry)) => match append_line(&ledger, &entry) {
+                    Ok(()) => {
+                        existing_ledger.push_str(&entry);
+                        true
+                    }
+                    Err(error) => {
+                        errors.push(json!({
+                            "key": key,
+                            "surface": "giga_source_ledger",
+                            "error": error,
+                        }));
+                        false
+                    }
+                },
+                Ok(None) => true,
+                Err(error) => {
+                    errors.push(json!({
+                        "key": key,
+                        "surface": "giga_source_ledger",
+                        "error": error,
+                    }));
+                    false
                 }
-                Err(error) => errors.push(json!({
-                    "key": key,
-                    "surface": "transcript",
-                    "error": error,
-                })),
+            };
+            if ledger_ready {
+                logged.push(source);
             }
         }
 
@@ -812,6 +849,7 @@ fn log_conversation(meta: &CommandMeta, request: ConversationLogRequest) -> Valu
             "appended": appended,
             "skipped": skipped,
             "errors": errors.clone(),
+            "sourceLedgerDirectory": &ledger_directory,
         });
         // Debug provenance must never block capture.
         let _ = append_line(
@@ -827,6 +865,7 @@ fn log_conversation(meta: &CommandMeta, request: ConversationLogRequest) -> Valu
         "skipped": skipped,
         "errors": errors,
         "loggedTurns": logged,
+        "sourceLedgerDirectory": ledger_directory,
     })
 }
 

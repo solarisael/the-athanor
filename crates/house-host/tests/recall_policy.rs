@@ -9,7 +9,7 @@ use house_protocol::{
     RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_COMPLETE_REFRESH, RECALL_POLICY_DELTA,
     RECALL_POLICY_EVALUATE, RECALL_POLICY_FAIL_REFRESH, RECALL_POLICY_INVALIDATE_AFTER_COMPACTION,
     RECALL_POLICY_RESYNC, RECALL_POLICY_SET_REQUESTED_MODE, RECALL_POLICY_SNAPSHOT,
-    RECALL_POLICY_SUBSCRIBE,
+    RECALL_POLICY_SUBSCRIBE, SHELL_CONVERSATION_LOG, SHELL_PROJECTION_ID, SHELL_RESULT,
 };
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -197,6 +197,31 @@ fn context_command(message_id: &str, prompt: &str) -> Value {
         "activeSpirit": "Kintsu",
         "operator": "Sol",
         "routingModeEnabled": true
+    });
+    value
+}
+
+fn conversation_command(root: &Path) -> Value {
+    let mut value = command(
+        SHELL_CONVERSATION_LOG,
+        "conversation-1",
+        "conversation-key-1",
+        true,
+    );
+    value["projection_id"] = json!(SHELL_PROJECTION_ID);
+    value["conversation_request"] = json!({
+        "roomDir": root.join("room"),
+        "sessionId": "session-1",
+        "operator": "Sol",
+        "spirit": "Kintsu",
+        "source": "context",
+        "persist": true,
+        "messages": [{
+            "role": "user",
+            "id": "turn-1",
+            "text": "Exact durable source.",
+            "timestamp": "2026-08-12T23:30:00.000Z"
+        }]
     });
     value
 }
@@ -507,6 +532,36 @@ async fn context_analysis_is_owned_by_host_and_returns_typed_policy() {
     );
     assert_eq!(response["analysis"]["processTrigger"], "package-script-dev");
     assert_eq!(response["analysis"]["nudge"]["band"], 1);
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn conversation_capture_persists_the_exact_giga_source_before_ingest() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut socket = connect(&host).await;
+    send(&mut socket, &conversation_command(root.path())).await;
+    let response = receive_for(&mut socket, "conversation-1", SHELL_RESULT).await;
+    assert_eq!(
+        response["result"]["loggedTurns"][0]["sourceID"], "turn-1",
+        "{response}"
+    );
+
+    let ledger_directory = response["result"]["sourceLedgerDirectory"]
+        .as_str()
+        .expect("source ledger directory");
+    let ledger_path = std::fs::read_dir(ledger_directory)
+        .expect("source ledger directory exists")
+        .next()
+        .expect("one dated source ledger")
+        .expect("source ledger entry")
+        .path();
+    let records = std::fs::read_to_string(ledger_path).expect("source ledger contents");
+    let record: Value = serde_json::from_str(records.trim()).expect("source ledger JSONL record");
+    assert_eq!(record["sessionID"], "session-1");
+    assert_eq!(record["messageID"], "turn-1");
+    assert_eq!(record["text"], "Exact durable source.");
     host.stop().await;
 }
 

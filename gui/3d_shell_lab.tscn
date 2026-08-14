@@ -18,14 +18,28 @@ size = Vector2(1.92, 1.08)
 [sub_resource type="GDScript" id="Boot_shell"]
 script/source = "extends Node3D
 
+@onready var shell_viewport: SubViewport = $ShellViewport
+
 func _ready() -> void:
-    var viewport: SubViewport = $ShellViewport
     var surface: MeshInstance3D = $ShellSurface
     var material := StandardMaterial3D.new()
-    material.albedo_texture = viewport.get_texture()
+    material.albedo_texture = shell_viewport.get_texture()
     material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
     material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
     surface.set_surface_override_material(0, material)
+
+func _input(event: InputEvent) -> void:
+    # Ortho 1:1 frontal surface: window pixels map linearly onto shell texels.
+    var window_size := get_viewport().get_visible_rect().size
+    if window_size.x <= 0.0 or window_size.y <= 0.0:
+        return
+    var scale := Vector2(shell_viewport.size) / window_size
+    var forwarded := event.duplicate()
+    if forwarded is InputEventMouse:
+        forwarded.position = forwarded.position * scale
+        if forwarded is InputEventMouseMotion:
+            forwarded.relative = forwarded.relative * scale
+    shell_viewport.push_input(forwarded)
 "
 
 [node name="ShellLab3D" type="Node3D"]

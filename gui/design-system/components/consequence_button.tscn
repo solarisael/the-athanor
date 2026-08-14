@@ -1,0 +1,40 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://design-system/components/consequence_button.gd" id="1_script"]
+[ext_resource type="StyleBoxFlat" path="res://design-system/components/consequence_button_destructive_inner.tres" id="2_inner"]
+
+[node name="ConsequenceButton" type="Button"]
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 3
+focus_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "Continue"
+script = ExtResource("1_script")
+
+[node name="InnerBorder" type="Panel" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = -3.0
+offset_bottom = -23.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = ExtResource("2_inner")
+
+[node name="DisabledReason" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 34.0
+offset_bottom = 52.0
+grow_horizontal = 2
+mouse_filter = 2
+theme_type_variation = &"AthanorCaption"
+horizontal_alignment = 1
+visible = false

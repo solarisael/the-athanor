@@ -1,0 +1,15 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://design-system/components/text_action.gd" id="1_script"]
+[ext_resource type="StyleBoxFlat" path="res://design-system/components/consequence_button_cancel.tres" id="2_cancel"]
+
+[node name="TextAction" type="Button"]
+custom_minimum_size = Vector2(0, 28)
+layout_mode = 3
+focus_mode = 2
+theme_type_variation = &"AthanorTextAction"
+theme_override_styles/normal = ExtResource("2_cancel")
+theme_override_styles/hover = ExtResource("2_cancel")
+theme_override_styles/pressed = ExtResource("2_cancel")
+text = "Cancel"
+script = ExtResource("1_script")

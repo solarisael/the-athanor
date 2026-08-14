@@ -1,0 +1,30 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://design-system/components/page_header.gd" id="1_script"]
+[ext_resource type="PackedScene" path="res://design-system/ornament_rule.tscn" id="2_rule"]
+
+[node name="PageHeader" type="VBoxContainer"]
+layout_mode = 2
+theme_type_variation = &"AthanorHeader"
+script = ExtResource("1_script")
+
+[node name="Kicker" type="Label" parent="."]
+layout_mode = 2
+theme_type_variation = &"AthanorPageKicker"
+text = ""
+autowrap_mode = 2
+
+[node name="Title" type="Label" parent="."]
+layout_mode = 2
+theme_type_variation = &"AthanorPageTitle"
+text = ""
+autowrap_mode = 2
+
+[node name="Lead" type="Label" parent="."]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = ""
+autowrap_mode = 2
+
+[node name="OrnamentRule" parent="." instance=ExtResource("2_rule")]
+layout_mode = 2

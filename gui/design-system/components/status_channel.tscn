@@ -1,0 +1,38 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://design-system/components/status_channel.gd" id="1_script"]
+
+[node name="StatusChannel" type="HBoxContainer"]
+custom_minimum_size = Vector2(0, 16)
+layout_mode = 2
+theme_type_variation = &"AthanorStatusRow"
+script = ExtResource("1_script")
+
+[node name="Name" type="Label" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorStatusLabel"
+text = "CHANNEL"
+
+[node name="Mark" type="ColorRect" parent="."]
+custom_minimum_size = Vector2(16, 16)
+layout_mode = 2
+mouse_filter = 2
+color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+
+[node name="Symbol" type="Label" parent="Mark"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "—"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="State" type="Label" parent="."]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "—"

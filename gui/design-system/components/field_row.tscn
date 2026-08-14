@@ -1,0 +1,28 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://design-system/components/field_row.gd" id="1_script"]
+
+[node name="FieldRow" type="VBoxContainer"]
+layout_mode = 3
+theme_override_constants/separation = 4
+script = ExtResource("1_script")
+
+[node name="Label" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "Label"
+
+[node name="Field" type="LineEdit" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 32)
+layout_mode = 2
+focus_mode = 2
+theme_type_variation = &"AthanorField"
+placeholder_text = ""
+
+[node name="ReadOnlyReason" type="Label" parent="."]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorCaption"
+visible = false

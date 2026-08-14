@@ -1,0 +1,47 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://design-system/components/ritual_surface.tscn" id="1_surface"]
+[ext_resource type="Script" path="res://design-system/components/evidence_card.gd" id="2_script"]
+
+[node name="EvidenceCard" type="Control"]
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("2_script")
+
+[node name="Surface" parent="." instance=ExtResource("1_surface")]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+variant = 1
+
+[node name="Column" type="VBoxContainer" parent="Surface/Content"]
+layout_mode = 2
+theme_type_variation = &"AthanorCardContent"
+
+[node name="Title" type="Label" parent="Surface/Content/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "Evidence"
+autowrap_mode = 2
+
+[node name="Meta" type="Label" parent="Surface/Content/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "—"
+autowrap_mode = 2
+
+[node name="Excerpt" type="Label" parent="Surface/Content/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = ""
+autowrap_mode = 2
+
+[node name="SourcePath" type="Label" parent="Surface/Content/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "—"
+autowrap_mode = 2

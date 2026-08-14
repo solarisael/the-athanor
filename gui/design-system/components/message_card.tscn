@@ -1,0 +1,55 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://design-system/components/message_card.gd" id="1_message_card"]
+[ext_resource type="PackedScene" path="res://design-system/components/ritual_surface.tscn" id="2_surface"]
+
+[node name="MessageCard" type="VBoxContainer"]
+theme_type_variation = &"AthanorShell"
+script = ExtResource("1_message_card")
+
+[node name="Surface" parent="." instance=ExtResource("2_surface")]
+layout_mode = 2
+variant = 1
+
+[node name="Head" type="HBoxContainer" parent="Surface/Content"]
+layout_mode = 2
+theme_type_variation = &"AthanorBarRow"
+
+[node name="Author" type="Label" parent="Surface/Content/Head"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorStatusValue"
+
+[node name="Timestamp" type="Label" parent="Surface/Content/Head"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 8
+theme_type_variation = &"AthanorMeta"
+
+[node name="Body" type="RichTextLabel" parent="Surface/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorMessageBody"
+bbcode_enabled = false
+fit_content = true
+scroll_active = false
+selection_enabled = true
+
+[node name="ToolCall" parent="Surface/Content" instance=ExtResource("2_surface")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+variant = 2
+
+[node name="ToolCallLabel" type="Label" parent="Surface/Content/ToolCall/Content"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "TOOL CALL"
+
+[node name="ToolCallBody" type="Label" parent="Surface/Content/ToolCall/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+autowrap_mode = 2

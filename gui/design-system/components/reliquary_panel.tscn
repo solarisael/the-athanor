@@ -1,0 +1,25 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://design-system/components/reliquary_panel.gd" id="1_script"]
+
+[node name="ReliquaryPanel" type="VBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorSection"
+script = ExtResource("1_script")
+
+[node name="SectionHeader" type="Label" parent="."]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = ""
+
+[node name="Separator" type="Panel" parent="."]
+custom_minimum_size = Vector2(0, 1)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorSeam"
+
+[node name="Content" type="VBoxContainer" parent="."]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorCardContent"

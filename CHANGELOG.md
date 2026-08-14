@@ -44,6 +44,15 @@ the exact implementation record.
   `clients/godot` project no longer exist.
 - Disabled VSync for every Godot game window. Frame rate remains uncapped unless
   an explicit measurement or operator-selected limiter is applied.
+- Replaced the flat global screen strips with reusable nested reliquary
+  navigation. Back restores trigger focus, Escape returns one pane before
+  closing drawers, inactive panes are hidden, and settings uses the same stack.
+- Restored the desktop right context column, collapsed the bottom dock to a
+  42 px status rail, added functional four-corner ornament and ritual seams,
+  and made context/navigation exclusive overlay drawers below their docked
+  breakpoints. The missing fourteen-screen map remains explicit rather than
+  fabricated.
+- Included the new `gui/navigation` runtime resources in native release staging.
 
 ### Fixed
 

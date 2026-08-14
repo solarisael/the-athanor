@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Theme" path="res://theme/athanor_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://navigation/reliquary_navigator.gd" id="2_reliquary"]
 
 [node name="AthanorProbe" type="AthanorProbe"]
 layout_mode = 3
@@ -10,31 +11,29 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 theme = ExtResource("1_theme")
-resume_screen_button = NodePath("ApplicationShell/Navigation/Margin/Column/ScreenStrip/Resume")
-recall_policy_screen_button = NodePath("ApplicationShell/Navigation/Margin/Column/ScreenStrip/RecallPolicy")
-routing_screen_button = NodePath("ApplicationShell/Navigation/Margin/Column/ScreenStrip/Routing")
 resume_page = NodePath("ApplicationShell/ContentViewport/Page")
 recall_policy_page = NodePath("ApplicationShell/ContentViewport/RecallPolicyPage")
 routing_page = NodePath("ApplicationShell/ContentViewport/RoutingPage")
-body = NodePath("ApplicationShell/Body")
-left_sidebar = NodePath("ApplicationShell/Body/LeftSidebar")
-right_sidebar = NodePath("ApplicationShell/Body/RightInspector")
-center_scroll = NodePath("ApplicationShell/Body/CenterScroll")
+left_navigator = NodePath("ApplicationShell/Workspace/LeftReliquary")
+right_navigator = NodePath("ApplicationShell/Workspace/RightReliquary")
+center_frame = NodePath("ApplicationShell/Workspace/CenterFrame")
+center_scroll = NodePath("ApplicationShell/Workspace/CenterFrame/CenterScroll")
 content_viewport = NodePath("ApplicationShell/ContentViewport")
+drawer_scrim = NodePath("ApplicationShell/Workspace/DrawerScrim")
+menu_toggle = NodePath("ApplicationShell/TopBar/Margin/Row/MenuToggle")
+context_toggle = NodePath("ApplicationShell/TopBar/Margin/Row/ContextToggle")
+status_context_button = NodePath("ApplicationShell/StatusRail/Margin/Row/Context")
+status_settings_button = NodePath("ApplicationShell/StatusRail/Margin/Row/Settings")
+status_identity = NodePath("ApplicationShell/StatusRail/Margin/Row/Identity")
+right_route_label = NodePath("ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root/Route")
 prototype_disclosure = NodePath("ApplicationShell/TopBar/Margin/Row/PrototypeDisclosure")
 system_states = NodePath("ApplicationShell/TopBar/Margin/Row/SystemStates")
-view_controls = NodePath("ApplicationShell/ViewControls")
-navigation = NodePath("ApplicationShell/Navigation")
-group_strip = NodePath("ApplicationShell/Navigation/Margin/Column/GroupStrip")
-screen_context = NodePath("ApplicationShell/Navigation/Margin/Column/ScreenStrip/Context")
 recall_columns = NodePath("ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns")
 recall_state_grid = NodePath("ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid")
-status_dock = NodePath("ApplicationShell/StatusDock")
-status_grid = NodePath("ApplicationShell/StatusDock/Margin/Column/IdentityGrid")
-
 
 [node name="HostSession" type="AthanorHostSession" parent="."]
 host_url = "ws://127.0.0.1:8787/athanor/v1/ws"
+
 [node name="Ground" type="Panel" parent="."]
 layout_mode = 1
 anchors_preset = 15
@@ -55,7 +54,7 @@ grow_vertical = 2
 theme_type_variation = &"AthanorShell"
 
 [node name="TopBar" type="PanelContainer" parent="ApplicationShell"]
-custom_minimum_size = Vector2(0, 52)
+custom_minimum_size = Vector2(0, 48)
 layout_mode = 2
 theme_type_variation = &"AthanorTopBar"
 
@@ -67,10 +66,18 @@ theme_type_variation = &"AthanorChromeMargin"
 layout_mode = 2
 theme_type_variation = &"AthanorBarRow"
 
+[node name="MenuToggle" type="Button" parent="ApplicationShell/TopBar/Margin/Row"]
+visible = false
+custom_minimum_size = Vector2(34, 28)
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "☰"
+tooltip_text = "Open navigation reliquary"
+
 [node name="Mark" type="Label" parent="ApplicationShell/TopBar/Margin/Row"]
 layout_mode = 2
-theme_type_variation = &"AthanorKicker"
-text = "◆"
+theme_type_variation = &"AthanorPageKicker"
+text = "◇"
 vertical_alignment = 1
 
 [node name="Brand" type="Label" parent="ApplicationShell/TopBar/Margin/Row"]
@@ -82,7 +89,7 @@ vertical_alignment = 1
 [node name="PrototypeDisclosure" type="Label" parent="ApplicationShell/TopBar/Margin/Row"]
 layout_mode = 2
 theme_type_variation = &"AthanorMeta"
-text = "PROTOTYPE · S01 SYNTHETIC · S02/S03 REAL HOST DATA ONLY"
+text = "OPERATOR CLIENT · NO SHELL AUTHORITY"
 vertical_alignment = 1
 
 [node name="Spacer" type="Control" parent="ApplicationShell/TopBar/Margin/Row"]
@@ -94,215 +101,634 @@ mouse_filter = 2
 layout_mode = 2
 theme_type_variation = &"AthanorBarRow"
 
-[node name="Nominal" type="Button" parent="ApplicationShell/TopBar/Margin/Row/SystemStates"]
-layout_mode = 2
-theme_type_variation = &"AthanorTabActive"
-text = "nominal"
-
-[node name="Akasha" type="Button" parent="ApplicationShell/TopBar/Margin/Row/SystemStates"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "akasha degraded"
-
-[node name="GigaBacklog" type="Button" parent="ApplicationShell/TopBar/Margin/Row/SystemStates"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "giga backlog"
-
-[node name="Classifier" type="Button" parent="ApplicationShell/TopBar/Margin/Row/SystemStates"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "classifier offline"
-
-[node name="ViewControls" type="PanelContainer" parent="ApplicationShell"]
-custom_minimum_size = Vector2(0, 44)
-layout_mode = 2
-theme_type_variation = &"AthanorChromeBar"
-
-[node name="Margin" type="MarginContainer" parent="ApplicationShell/ViewControls"]
-layout_mode = 2
-theme_type_variation = &"AthanorChromeMargin"
-
-[node name="Row" type="HBoxContainer" parent="ApplicationShell/ViewControls/Margin"]
-layout_mode = 2
-theme_type_variation = &"AthanorBarRow"
-
-[node name="Label" type="Label" parent="ApplicationShell/ViewControls/Margin/Row"]
+[node name="Host" type="Label" parent="ApplicationShell/TopBar/Margin/Row/SystemStates"]
 layout_mode = 2
 theme_type_variation = &"AthanorMeta"
-text = "LAYOUT"
+text = "HOST ◇ UNBOUND"
 vertical_alignment = 1
 
-[node name="Auto" type="Button" parent="ApplicationShell/ViewControls/Margin/Row"]
-layout_mode = 2
-theme_type_variation = &"AthanorTabActive"
-text = "AUTO"
-
-[node name="Desktop" type="Button" parent="ApplicationShell/ViewControls/Margin/Row"]
+[node name="ContextToggle" type="Button" parent="ApplicationShell/TopBar/Margin/Row"]
+visible = false
+custom_minimum_size = Vector2(34, 28)
 layout_mode = 2
 theme_type_variation = &"AthanorTab"
-text = "DESKTOP"
+text = "◇"
+tooltip_text = "Open context reliquary"
 
-[node name="Narrow" type="Button" parent="ApplicationShell/ViewControls/Margin/Row"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "NARROW"
-
-[node name="ReducedMotion" type="Button" parent="ApplicationShell/ViewControls/Margin/Row"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "REDUCED MOTION"
-
-[node name="Navigation" type="PanelContainer" parent="ApplicationShell"]
-custom_minimum_size = Vector2(0, 84)
-layout_mode = 2
-theme_type_variation = &"AthanorChromeBar"
-
-[node name="Margin" type="MarginContainer" parent="ApplicationShell/Navigation"]
-layout_mode = 2
-theme_type_variation = &"AthanorChromeMargin"
-
-[node name="Column" type="VBoxContainer" parent="ApplicationShell/Navigation/Margin"]
-layout_mode = 2
-theme_type_variation = &"AthanorNavigationColumn"
-
-[node name="GroupStrip" type="HBoxContainer" parent="ApplicationShell/Navigation/Margin/Column"]
-layout_mode = 2
-theme_type_variation = &"AthanorNavigationRow"
-
-[node name="Conversation" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorTabActive"
-text = "CONVERSATION"
-
-[node name="Memory" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "MEMORY"
-
-[node name="Giga" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "GIGA"
-[node name="Familiars" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "FAMILIARS"
-
-[node name="Sources" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "SOURCES"
-
-[node name="System" type="Button" parent="ApplicationShell/Navigation/Margin/Column/GroupStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "SYSTEM"
-
-[node name="ScreenStrip" type="HFlowContainer" parent="ApplicationShell/Navigation/Margin/Column"]
-layout_mode = 2
-theme_type_variation = &"AthanorNavigationRow"
-
-[node name="Label" type="Label" parent="ApplicationShell/Navigation/Margin/Column/ScreenStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorMeta"
-text = "SCREEN"
-vertical_alignment = 1
-
-[node name="Resume" type="Button" parent="ApplicationShell/Navigation/Margin/Column/ScreenStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorTabActive"
-text = "S01  RESUME"
-
-[node name="RecallPolicy" type="Button" parent="ApplicationShell/Navigation/Margin/Column/ScreenStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "S02  RECALL POLICY"
-
-[node name="Routing" type="Button" parent="ApplicationShell/Navigation/Margin/Column/ScreenStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorTab"
-text = "S03  WORKER LANES"
-
-[node name="Context" type="Label" parent="ApplicationShell/Navigation/Margin/Column/ScreenStrip"]
-layout_mode = 2
-theme_type_variation = &"AthanorMeta"
-text = "ROOM WORK · SPIRIT CINZA · OPERATOR-LOCAL PROFILE"
-vertical_alignment = 1
-
-[node name="Body" type="BoxContainer" parent="ApplicationShell"]
+[node name="Workspace" type="Control" parent="ApplicationShell"]
 layout_mode = 2
 size_flags_vertical = 3
-vertical = false
-theme_type_variation = &"AthanorInstrumentRow"
+clip_contents = true
 
-[node name="LeftSidebar" type="PanelContainer" parent="ApplicationShell/Body"]
-custom_minimum_size = Vector2(220, 0)
-layout_mode = 2
-theme_type_variation = &"AthanorVessel"
+[node name="CenterFrame" type="MarginContainer" parent="ApplicationShell/Workspace"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 252
+theme_override_constants/margin_right = 316
 
-[node name="Margin" type="MarginContainer" parent="ApplicationShell/Body/LeftSidebar"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusMargin"
-
-[node name="Column" type="VBoxContainer" parent="ApplicationShell/Body/LeftSidebar/Margin"]
-layout_mode = 2
-theme_type_variation = &"AthanorInstrumentColumn"
-
-[node name="Kicker" type="Label" parent="ApplicationShell/Body/LeftSidebar/Margin/Column"]
-layout_mode = 2
-theme_type_variation = &"AthanorKicker"
-text = "NAVIGATION"
-
-[node name="Current" type="Label" parent="ApplicationShell/Body/LeftSidebar/Margin/Column"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusValue"
-text = "CURRENT CONVERSATION · HOST INDEX PENDING"
-autowrap_mode = 2
-
-[node name="Boundary" type="Label" parent="ApplicationShell/Body/LeftSidebar/Margin/Column"]
-layout_mode = 2
-theme_type_variation = &"AthanorMeta"
-text = "NAVIGATION PLACEHOLDER · NO ROOM OR SESSION INDEX CONTRACT EXISTS YET"
-autowrap_mode = 2
-
-[node name="CenterScroll" type="ScrollContainer" parent="ApplicationShell/Body"]
+[node name="CenterScroll" type="ScrollContainer" parent="ApplicationShell/Workspace/CenterFrame"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
 vertical_scroll_mode = 1
-follow_focus = true
 
-[node name="RightInspector" type="PanelContainer" parent="ApplicationShell/Body"]
-custom_minimum_size = Vector2(280, 0)
-layout_mode = 2
-theme_type_variation = &"AthanorVessel"
+[node name="DrawerScrim" type="Button" parent="ApplicationShell/Workspace"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+focus_mode = 0
+theme_type_variation = &"AthanorDrawerScrim"
 
-[node name="Margin" type="MarginContainer" parent="ApplicationShell/Body/RightInspector"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusMargin"
+[node name="LeftReliquary" type="PanelContainer" parent="ApplicationShell/Workspace"]
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_right = 244.0
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquary"
+script = ExtResource("2_reliquary")
+pane_host_path = NodePath("Margin/Column/PaneHost")
+title_label_path = NodePath("Margin/Column/Header/Title")
+breadcrumb_label_path = NodePath("Margin/Column/Breadcrumb")
+back_button_path = NodePath("Margin/Column/Header/Back")
+close_button_path = NodePath("Margin/Column/Header/Close")
 
-[node name="Column" type="VBoxContainer" parent="ApplicationShell/Body/RightInspector/Margin"]
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/Workspace/LeftReliquary"]
 layout_mode = 2
-theme_type_variation = &"AthanorInstrumentColumn"
+theme_type_variation = &"AthanorReliquaryMargin"
 
-[node name="Kicker" type="Label" parent="ApplicationShell/Body/RightInspector/Margin/Column"]
+[node name="Column" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin"]
 layout_mode = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+
+[node name="OrnamentTop" type="HBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column"]
+layout_mode = 2
+
+[node name="Left" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentTop"]
+layout_mode = 2
+theme_type_variation = &"AthanorOrnamentText"
+text = "┌──◇"
+
+[node name="Spacer" type="Control" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentTop"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Right" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentTop"]
+layout_mode = 2
+theme_type_variation = &"AthanorOrnamentText"
+text = "◇──┐"
+
+[node name="Header" type="HBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorBarRow"
+
+[node name="Back" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/Header"]
+visible = false
+custom_minimum_size = Vector2(30, 28)
+layout_mode = 2
+theme_type_variation = &"AthanorTextAction"
+text = "←"
+tooltip_text = "Back one reliquary level"
+
+[node name="Title" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_type_variation = &"AthanorKicker"
-text = "CONTEXT INSPECTOR"
+text = "NAVIGATION"
+vertical_alignment = 1
 
-[node name="Purpose" type="Label" parent="ApplicationShell/Body/RightInspector/Margin/Column"]
+[node name="Close" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/Header"]
+visible = false
+custom_minimum_size = Vector2(30, 28)
 layout_mode = 2
-theme_type_variation = &"AthanorBody"
-text = "Recall sources, authority, provenance, active work, agent state, and selected-message detail belong here."
-autowrap_mode = 2
+theme_type_variation = &"AthanorTextAction"
+text = "×"
+tooltip_text = "Close navigation reliquary"
 
-[node name="Boundary" type="Label" parent="ApplicationShell/Body/RightInspector/Margin/Column"]
+[node name="Breadcrumb" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column"]
 layout_mode = 2
 theme_type_variation = &"AthanorMeta"
-text = "INSPECTOR PLACEHOLDER · NO CONTEXT PROJECTION IS INVENTED"
+text = "ROOT"
+
+[node name="Separator" type="Panel" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column"]
+custom_minimum_size = Vector2(0, 1)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"AthanorSeam"
+
+[node name="PaneHost" type="Control" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Root" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "NAVIGATION"
+
+[node name="Kicker" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageKicker"
+text = "INSTRUMENT FAMILIES"
+
+[node name="Conversation" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "◇  CONVERSATION  →"
+metadata/pane_target = &"Conversation"
+
+[node name="Memory" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "◇  MEMORY  →"
+metadata/pane_target = &"Memory"
+
+[node name="House" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "◇  HOUSE  →"
+metadata/pane_target = &"House"
+
+[node name="Familiars" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "◇  FAMILIARS  →"
+metadata/pane_target = &"Familiars"
+
+[node name="Sources" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "◇  SOURCES  →"
+metadata/pane_target = &"Sources"
+
+[node name="System" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "◇  SYSTEM  →"
+metadata/pane_target = &"System"
+
+[node name="Boundary" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorMeta"
+text = "THE FOURTEEN-SCREEN MAP IS NOT RECOVERED. ONLY AUTHENTICATED OR IMPLEMENTED ROUTES APPEAR."
 autowrap_mode = 2
+vertical_alignment = 2
+
+[node name="Conversation" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "CONVERSATION"
+
+[node name="Resume" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Conversation"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "S01  RESUME"
+metadata/action_id = &"screen:resume"
+
+[node name="Copy" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Conversation"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "ACTIVE CONVERSATION CENTER · HOST CHAT CONTRACT NOT YET WIRED"
+autowrap_mode = 2
+
+[node name="Memory" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "MEMORY"
+
+[node name="RecallPolicy" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Memory"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "S02  RECALL POLICY"
+metadata/action_id = &"screen:recall-policy"
+
+[node name="Copy" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Memory"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "REAL HOST SNAPSHOT ONLY · THIS CLIENT IS NOT MEMORY AUTHORITY"
+autowrap_mode = 2
+
+[node name="House" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "HOUSE"
+
+[node name="Routing" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/House"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "S03  WORKER LANES"
+metadata/action_id = &"screen:routing"
+
+[node name="Copy" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/House"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "READ-ONLY HOST ROUTING PROJECTION · NO DISPATCH"
+autowrap_mode = 2
+
+[node name="Familiars" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "FAMILIARS"
+
+[node name="Unavailable" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Familiars"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "NOT WIRED
+
+No familiar index projection exists in the Godot client. Nothing is synthesized from the room or working directory."
+autowrap_mode = 2
+
+[node name="Sources" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "SOURCES"
+
+[node name="Unavailable" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Sources"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "NOT WIRED
+
+No source-browser projection exists. Authority, relevance, and chronology remain separate Host concerns."
+autowrap_mode = 2
+
+[node name="System" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "SYSTEM"
+
+[node name="Settings" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "SETTINGS RELIQUARY  →"
+metadata/action_id = &"open:settings"
+
+[node name="Copy" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "PRESENTATION SETTINGS ARE LOCAL · HOST POLICY IS NEVER CHANGED HERE"
+autowrap_mode = 2
+
+[node name="OrnamentBottom" type="HBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column"]
+layout_mode = 2
+
+[node name="Left" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentBottom"]
+layout_mode = 2
+theme_type_variation = &"AthanorOrnamentText"
+text = "└──◇"
+
+[node name="Spacer" type="Control" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentBottom"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Right" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentBottom"]
+layout_mode = 2
+theme_type_variation = &"AthanorOrnamentText"
+text = "◇──┘"
+
+[node name="RightReliquary" type="PanelContainer" parent="ApplicationShell/Workspace"]
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -308.0
+grow_horizontal = 0
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquary"
+script = ExtResource("2_reliquary")
+pane_host_path = NodePath("Margin/Column/PaneHost")
+title_label_path = NodePath("Margin/Column/Header/Title")
+breadcrumb_label_path = NodePath("Margin/Column/Breadcrumb")
+back_button_path = NodePath("Margin/Column/Header/Back")
+close_button_path = NodePath("Margin/Column/Header/Close")
+
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/Workspace/RightReliquary"]
+layout_mode = 2
+theme_type_variation = &"AthanorReliquaryMargin"
+
+[node name="Column" type="VBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+
+[node name="OrnamentTop" type="HBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column"]
+layout_mode = 2
+
+[node name="Left" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentTop"]
+layout_mode = 2
+theme_type_variation = &"AthanorOrnamentText"
+text = "┌──◇"
+
+[node name="Spacer" type="Control" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentTop"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Right" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentTop"]
+layout_mode = 2
+theme_type_variation = &"AthanorOrnamentText"
+text = "◇──┐"
+
+[node name="Header" type="HBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorBarRow"
+
+[node name="Back" type="Button" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/Header"]
+visible = false
+custom_minimum_size = Vector2(30, 28)
+layout_mode = 2
+theme_type_variation = &"AthanorTextAction"
+text = "←"
+tooltip_text = "Back one reliquary level"
+
+[node name="Title" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorKicker"
+text = "CONTEXT"
+vertical_alignment = 1
+
+[node name="Close" type="Button" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/Header"]
+visible = false
+custom_minimum_size = Vector2(30, 28)
+layout_mode = 2
+theme_type_variation = &"AthanorTextAction"
+text = "×"
+tooltip_text = "Close context reliquary"
+
+[node name="Breadcrumb" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "ROOT"
+
+[node name="Separator" type="Panel" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column"]
+custom_minimum_size = Vector2(0, 1)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"AthanorSeam"
+
+[node name="PaneHost" type="Control" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Root" type="VBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "CONTEXT"
+
+[node name="Kicker" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageKicker"
+text = "ACTIVE ROUTE"
+
+[node name="Route" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "S01 · CONVERSATION / RESUME"
+autowrap_mode = 2
+
+[node name="RouteSeam" type="Panel" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
+custom_minimum_size = Vector2(0, 1)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"AthanorSeam"
+
+[node name="Authority" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "AUTHORITY"
+
+[node name="AuthorityValue" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "NO SHELL AUTHORITY
+Host projections remain the only source of runtime state."
+autowrap_mode = 2
+
+[node name="Selection" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "SELECTION"
+
+[node name="SelectionValue" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "Nothing selected. No message, source, or worker detail is invented."
+autowrap_mode = 2
+
+[node name="Spacer" type="Control" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="Settings" type="Button" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "SETTINGS  →"
+metadata/pane_target = &"Settings"
+
+[node name="Settings" type="VBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "SETTINGS"
+
+[node name="Disclosure" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Settings"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "LOCAL PRESENTATION ONLY · NEVER HOST POLICY"
+autowrap_mode = 2
+
+[node name="Appearance" type="Button" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Settings"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "APPEARANCE  →"
+metadata/pane_target = &"Appearance"
+
+[node name="Accessibility" type="Button" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Settings"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "ACCESSIBILITY  →"
+metadata/pane_target = &"Accessibility"
+
+[node name="Connection" type="Button" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Settings"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "CONNECTION  →"
+metadata/pane_target = &"Connection"
+
+[node name="Appearance" type="VBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "APPEARANCE"
+
+[node name="Label" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Appearance"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "LAYOUT CONTRACT"
+
+[node name="Auto" type="Button" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Appearance"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "AUTO · FOLLOW VIEWPORT"
+metadata/action_id = &"layout:auto"
+
+[node name="Desktop" type="Button" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Appearance"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "DESKTOP · FOUR REGIONS"
+metadata/action_id = &"layout:desktop"
+
+[node name="Narrow" type="Button" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Appearance"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "NARROW · CENTER + DRAWERS"
+metadata/action_id = &"layout:narrow"
+
+[node name="Vsync" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Appearance"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "VSYNC DISABLED · FRAME RATE UNBOUND"
+autowrap_mode = 2
+
+[node name="Accessibility" type="VBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "ACCESSIBILITY"
+
+[node name="State" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Accessibility"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "STATIC COMPLETE
+
+The shell currently authors no navigation motion. Nothing depends on animation or hue alone."
+autowrap_mode = 2
+
+[node name="Reason" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Accessibility"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "REDUCED-MOTION CONTROL WILL APPEAR ONLY WHEN A MOTION CONTRACT EXISTS."
+autowrap_mode = 2
+
+[node name="Connection" type="VBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_type_variation = &"AthanorReliquaryColumn"
+metadata/pane_title = "CONNECTION"
+
+[node name="EndpointLabel" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Connection"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "LOCAL HOST ENDPOINT"
+
+[node name="Endpoint" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Connection"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "ws://127.0.0.1:8787/athanor/v1/ws"
+autowrap_mode = 2
+
+[node name="State" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Connection"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "HOST UNBOUND
+No token or snapshot is rendered by the shell."
+autowrap_mode = 2
+
+[node name="OrnamentBottom" type="HBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column"]
+layout_mode = 2
+
+[node name="Left" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentBottom"]
+layout_mode = 2
+theme_type_variation = &"AthanorOrnamentText"
+text = "└──◇"
+
+[node name="Spacer" type="Control" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentBottom"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Right" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentBottom"]
+layout_mode = 2
+theme_type_variation = &"AthanorOrnamentText"
+text = "◇──┘"
 
 [node name="ContentViewport" type="MarginContainer" parent="ApplicationShell"]
 layout_mode = 2
@@ -752,116 +1178,51 @@ theme_type_variation = &"AthanorTabActive"
 disabled = true
 text = "REFRESH STATUS"
 
-[node name="StatusDock" type="PanelContainer" parent="ApplicationShell"]
-custom_minimum_size = Vector2(0, 112)
+[node name="StatusRail" type="PanelContainer" parent="ApplicationShell"]
+custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
 theme_type_variation = &"AthanorStatusDock"
 
-[node name="Margin" type="MarginContainer" parent="ApplicationShell/StatusDock"]
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/StatusRail"]
 layout_mode = 2
-theme_type_variation = &"AthanorStatusMargin"
+theme_type_variation = &"AthanorRailMargin"
 
-[node name="Column" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin"]
+[node name="Row" type="HBoxContainer" parent="ApplicationShell/StatusRail/Margin"]
 layout_mode = 2
-theme_type_variation = &"AthanorStatusColumn"
+theme_type_variation = &"AthanorRailRow"
 
-[node name="IdentityGrid" type="GridContainer" parent="ApplicationShell/StatusDock/Margin/Column"]
+[node name="Mark" type="Label" parent="ApplicationShell/StatusRail/Margin/Row"]
 layout_mode = 2
-theme_type_variation = &"AthanorStatusGrid"
-columns = 5
-
-[node name="House" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/House"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusLabel"
-text = "HOUSE"
-
-[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/House"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusValue"
-text = "Demonstration House"
-
-[node name="Room" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Room"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusLabel"
-text = "ROOM"
-
-[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Room"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusValue"
-text = "work"
-
-[node name="Spirit" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Spirit"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusLabel"
-text = "SPIRIT"
-
-[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Spirit"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusValue"
-text = "Cinza"
-
-[node name="Profile" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Profile"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusLabel"
-text = "PROFILE"
-
-[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Profile"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusValue"
-text = "operator-local"
-
-[node name="Health" type="VBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="Label" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Health"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusLabel"
-text = "HEALTH"
-
-[node name="Value" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/IdentityGrid/Health"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusValue"
-text = "◆ Vault  ◆ AKASHA  ◆ GIGA 12"
-
-[node name="OperatorRow" type="HBoxContainer" parent="ApplicationShell/StatusDock/Margin/Column"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusRow"
-
-[node name="Focus" type="Label" parent="ApplicationShell/StatusDock/Margin/Column/OperatorRow"]
-layout_mode = 2
-theme_type_variation = &"AthanorMeta"
-text = "FOCUS CONVERSATION · NOMINAL SCENARIO · ↻ NORMAL MOTION"
+theme_type_variation = &"AthanorPageKicker"
+text = "◆"
 vertical_alignment = 1
 
-[node name="Spacer" type="Control" parent="ApplicationShell/StatusDock/Margin/Column/OperatorRow"]
+[node name="HostState" type="Label" parent="ApplicationShell/StatusRail/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "HOST UNBOUND"
+vertical_alignment = 1
+
+[node name="Identity" type="Label" parent="ApplicationShell/StatusRail/Margin/Row"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "HOUSE —  ·  ROOM —  ·  SPIRIT —  ·  NO SNAPSHOT"
+vertical_alignment = 1
+
+[node name="Spacer" type="Control" parent="ApplicationShell/StatusRail/Margin/Row"]
 layout_mode = 2
 size_flags_horizontal = 3
 mouse_filter = 2
 
-[node name="OpenTerminal" type="Button" parent="ApplicationShell/StatusDock/Margin/Column/OperatorRow"]
+[node name="Context" type="Button" parent="ApplicationShell/StatusRail/Margin/Row"]
 layout_mode = 2
 theme_type_variation = &"AthanorTextAction"
-text = "OPEN TERMINAL ↗"
+text = "CONTEXT"
+tooltip_text = "Open context reliquary"
 
-[node name="SolarControl" type="Button" parent="ApplicationShell/StatusDock/Margin/Column/OperatorRow"]
-custom_minimum_size = Vector2(34, 30)
+[node name="Settings" type="Button" parent="ApplicationShell/StatusRail/Margin/Row"]
+custom_minimum_size = Vector2(34, 28)
 layout_mode = 2
 theme_type_variation = &"AthanorTabActive"
-text = "☼"
+text = "⚙"
+tooltip_text = "Open nested settings"

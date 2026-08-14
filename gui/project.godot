@@ -21,8 +21,6 @@ window/size/viewport_width=1100
 window/size/viewport_height=760
 window/size/window_width_override=1100
 window/size/window_height_override=760
-window/stretch/mode="disabled"
-window/dpi/allow_hidpi=true
 window/vsync/vsync_mode=0
 
 [physics]

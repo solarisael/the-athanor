@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=24 format=3]
+[gd_resource type="Theme" load_steps=25 format=3]
 
 [ext_resource type="FontFile" path="res://assets/fonts/AtkinsonHyperlegibleNext-Variable.woff2" id="1_body"]
 [ext_resource type="FontFile" path="res://assets/fonts/CinzelDecorative-Bold.woff2" id="2_ritual"]
@@ -123,6 +123,9 @@ border_color = Color(0.47126942, 0.45411264, 0.42637103, 0.35)
 bg_color = Color(0.0189863, 0.01942671, 0.02301076, 1)
 border_width_top = 1
 border_color = Color(0.76193195, 0.64497094, 0.44939537, 0.65)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_drawer_scrim"]
+bg_color = Color(0.00149408, 0.00156714, 0.00227788, 0.72)
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_paper_boat"]
 bg_color = Color(0.03446452, 0.03512804, 0.04040454, 1)
@@ -390,3 +393,28 @@ AthanorInstrumentColumn/base_type = &"VBoxContainer"
 AthanorInstrumentColumn/constants/separation = 6
 AthanorInstrumentRow/base_type = &"HBoxContainer"
 AthanorInstrumentRow/constants/separation = 20
+AthanorReliquary/base_type = &"PanelContainer"
+AthanorReliquary/styles/panel = SubResource("StyleBox_ornament")
+AthanorReliquaryMargin/base_type = &"MarginContainer"
+AthanorReliquaryMargin/constants/margin_left = 14
+AthanorReliquaryMargin/constants/margin_top = 10
+AthanorReliquaryMargin/constants/margin_right = 14
+AthanorReliquaryMargin/constants/margin_bottom = 10
+AthanorReliquaryColumn/base_type = &"VBoxContainer"
+AthanorReliquaryColumn/constants/separation = 9
+AthanorOrnamentText/base_type = &"Label"
+AthanorOrnamentText/colors/font_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
+AthanorOrnamentText/fonts/font = ExtResource("3_mono")
+AthanorOrnamentText/font_sizes/font_size = 11
+AthanorDrawerScrim/base_type = &"Button"
+AthanorDrawerScrim/styles/normal = SubResource("StyleBox_drawer_scrim")
+AthanorDrawerScrim/styles/hover = SubResource("StyleBox_drawer_scrim")
+AthanorDrawerScrim/styles/pressed = SubResource("StyleBox_drawer_scrim")
+AthanorDrawerScrim/styles/focus = SubResource("StyleBox_drawer_scrim")
+AthanorRailMargin/base_type = &"MarginContainer"
+AthanorRailMargin/constants/margin_left = 14
+AthanorRailMargin/constants/margin_top = 5
+AthanorRailMargin/constants/margin_right = 14
+AthanorRailMargin/constants/margin_bottom = 5
+AthanorRailRow/base_type = &"HBoxContainer"
+AthanorRailRow/constants/separation = 12

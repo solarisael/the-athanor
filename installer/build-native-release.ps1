@@ -89,6 +89,7 @@ $GodotSource = Join-Path $Root "gui"
 }
 Copy-Item (Join-Path $GodotSource "assets") (Join-Path $GodotProject "assets") -Recurse
 Copy-Item (Join-Path $GodotSource "theme") (Join-Path $GodotProject "theme") -Recurse
+Copy-Item (Join-Path $GodotSource "navigation") (Join-Path $GodotProject "navigation") -Recurse
 Copy-Item (Join-Path $ReleaseBin "athanor_godot.dll") (Join-Path $GodotProject "target/debug/athanor_godot.dll")
 Copy-Item (Join-Path $ReleaseBin "athanor_godot.dll") (Join-Path $GodotProject "target/release/athanor_godot.dll")
 $GodotImportOutput = (& $GodotExe.FullName --headless --editor --path $GodotProject --quit 2>&1 | Out-String)

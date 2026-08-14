@@ -1,6 +1,6 @@
 # Agent rules for the-athanor
 
-## Version discipline (Sol's standing rule)
+## Version discipline (Sol's standing rule — HARDENED 2026-08-14)
 
 Do NOT change version numbers on every change. Ordinary fixes and features
 accumulate under `CHANGELOG.md` `[Unreleased]` with no version bump.
@@ -14,6 +14,10 @@ installer treats versions as opaque strings, so four-segment sub-patches are
 safe.
 
 Doc "current source version" claims track the release train, not each hotfix.
+
+**Agents do not change version strings. Ever.** Not in `package.json`, not in
+build scripts, not in docs. Sol bumps versions himself when *he* decides a
+release happens. An agent's job ends at `[Unreleased]`.
 
 ## Lessons map — query it every time you work here
 

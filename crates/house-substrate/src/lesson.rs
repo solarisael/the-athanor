@@ -911,6 +911,10 @@ pub struct LessonMutationReceipt {
     pub updated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deleted: Option<bool>,
+    #[serde(rename = "alwaysOn", skip_serializing_if = "Option::is_none")]
+    pub always_on: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -937,6 +941,8 @@ fn mutation_refusal(
         actual_title: actual,
         updated: update.then_some(false),
         deleted: (!update).then_some(false),
+        always_on: None,
+        project: None,
         error: Some(error.into()),
     }
 }
@@ -1006,6 +1012,8 @@ pub async fn lesson_delete(
         actual_title: None,
         updated: None,
         deleted: Some(true),
+        always_on: None,
+        project: None,
         error: None,
     })
 }
@@ -1068,6 +1076,32 @@ pub async fn lesson_update(
             true,
         ));
     }
+    if fields.contains_key("project") && fields.contains_key("clearProject") {
+        return Ok(mutation_refusal(
+            &delete,
+            "project and clearProject are mutually exclusive",
+            None,
+            true,
+        ));
+    }
+    if fields.contains_key("clearProject") && !matches!(key, "coding" | "project") {
+        return Ok(mutation_refusal(
+            &delete,
+            format!("clearProject is not allowed for {}", p.kind),
+            None,
+            true,
+        ));
+    }
+    if let Some(clear) = fields.get("clearProject")
+        && clear.as_bool() != Some(true)
+    {
+        return Ok(mutation_refusal(
+            &delete,
+            "clearProject must be true when provided",
+            None,
+            true,
+        ));
+    }
     let common = [
         "title",
         "body",
@@ -1085,8 +1119,16 @@ pub async fn lesson_update(
             "languageKeys",
             "technologyKeys",
             "negationOf",
+            "alwaysOn",
+            "clearProject",
         ],
-        "project" => &["project", "proofPattern", "languageKeys", "technologyKeys"],
+        "project" => &[
+            "project",
+            "clearProject",
+            "proofPattern",
+            "languageKeys",
+            "technologyKeys",
+        ],
         "writing" => &["voice", "register", "exampleText", "writers", "negationOf"],
         "design" => &["voice", "register", "proofPattern", "exampleText"],
         _ => &[],
@@ -1133,6 +1175,8 @@ pub async fn lesson_update(
             "technologyKeys" => "technology_keys",
             "exampleText" => "example_text",
             "negationOf" => "negation_of",
+            "alwaysOn" => "always_on",
+            "clearProject" => "project",
             value => value,
         };
         separated.push(format!("{column} = "));
@@ -1161,6 +1205,15 @@ pub async fn lesson_update(
                 };
                 separated.push_bind_unseparated(id);
             }
+            "alwaysOn" => {
+                let enabled = value
+                    .as_bool()
+                    .ok_or_else(|| AppError::Invalid("alwaysOn must be a boolean".into()))?;
+                separated.push_bind_unseparated(enabled);
+            }
+            "clearProject" => {
+                separated.push_bind_unseparated(Option::<String>::None);
+            }
             _ => {
                 let text = value
                     .as_str()
@@ -1175,8 +1228,21 @@ pub async fn lesson_update(
         .push_bind(key)
         .push(" AND id=")
         .push_bind(p.id)
-        .push(" RETURNING title");
-    let title: String = qb.build_query_scalar().fetch_one(&mut *tx).await?;
+        .push(" AND title=")
+        .push_bind(&p.expected_title)
+        .push(" RETURNING title, always_on, project");
+    let Some((title, always_on, project)) = qb
+        .build_query_as::<(String, bool, Option<String>)>()
+        .fetch_optional(&mut *tx)
+        .await?
+    else {
+        return Ok(mutation_refusal(
+            &delete,
+            "update affected an unexpected number of rows",
+            None,
+            true,
+        ));
+    };
     tx.commit().await?;
     Ok(LessonMutationReceipt {
         ok: true,
@@ -1186,6 +1252,8 @@ pub async fn lesson_update(
         actual_title: None,
         updated: Some(true),
         deleted: None,
+        always_on: Some(always_on),
+        project: Some(project),
         error: None,
     })
 }
@@ -1253,6 +1321,8 @@ mod tests {
             actual_title: None,
             updated: Some(true),
             deleted: None,
+            always_on: None,
+            project: None,
             error: None,
         };
         assert_eq!(

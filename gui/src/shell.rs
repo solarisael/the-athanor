@@ -5,14 +5,17 @@
 //! drawer state, screen routing, and local presentation preferences.
 
 use godot::classes::control::SizeFlags;
+use godot::classes::scroll_container::ScrollMode;
 use godot::classes::{
     BoxContainer, Button, Control, GridContainer, IControl, Input, Label, MarginContainer,
     ScrollContainer,
 };
 use godot::prelude::*;
 
+use crate::host_link::LinkPhase;
 use crate::host_session::AthanorHostSession;
-use crate::protocol::HostBinding;
+use crate::paper_boat_receipt::ReceiptFeed;
+use crate::protocol::{self, CommandIdentity, HostBinding};
 
 const INITIAL_SCREEN_ENV: &str = "ATHANOR_INITIAL_SCREEN";
 const WIDE_BREAKPOINT: f32 = 1_200.0;
@@ -20,6 +23,10 @@ const COMPACT_BREAKPOINT: f32 = 800.0;
 const WIDE_LEFT_MARGIN: i32 = 252;
 const WIDE_RIGHT_MARGIN: i32 = 316;
 const COMPACT_LEFT_MARGIN: i32 = 232;
+
+/// The S01 composer refuses to submit because no conversation contract exists.
+/// The shell says so instead of pretending a send happened.
+const NO_CONVERSATION_CONTRACT: &str = "The Host serves no conversation contract yet.";
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 enum Screen {
@@ -86,6 +93,8 @@ pub struct AthanorProbe {
     #[export]
     resume_page: NodePath,
     #[export]
+    chat_center: NodePath,
+    #[export]
     recall_policy_page: NodePath,
     #[export]
     routing_page: NodePath,
@@ -127,6 +136,7 @@ pub struct AthanorProbe {
     recall_state_grid: NodePath,
 
     session: Option<Gd<AthanorHostSession>>,
+    receipt: ReceiptFeed,
     shell: Option<Shell>,
     layout_class: Option<LayoutClass>,
     layout_override: Option<LayoutClass>,
@@ -139,6 +149,7 @@ pub struct AthanorProbe {
 
 struct Shell {
     resume_page: Gd<Control>,
+    chat_center: Gd<Control>,
     recall_policy_page: Gd<Control>,
     routing_page: Gd<Control>,
     familiars_page: Gd<Control>,
@@ -165,6 +176,7 @@ impl IControl for AthanorProbe {
     fn init(base: Base<Control>) -> Self {
         Self {
             resume_page: NodePath::default(),
+            chat_center: NodePath::default(),
             recall_policy_page: NodePath::default(),
             routing_page: NodePath::default(),
             familiars_page: NodePath::default(),
@@ -186,6 +198,7 @@ impl IControl for AthanorProbe {
             recall_columns: NodePath::default(),
             recall_state_grid: NodePath::default(),
             session: None,
+            receipt: ReceiptFeed::pending(),
             shell: None,
             layout_class: None,
             layout_override: None,
@@ -226,6 +239,17 @@ impl IControl for AthanorProbe {
             button.connect("pressed", &Callable::from_object_method(&this, method));
         }
 
+        // S01's center page owns the conversation surface. The shell only feeds
+        // it evidence and states, in the operator's own words, why Send refuses.
+        shell.chat_center.connect(
+            "message_submitted",
+            &Callable::from_object_method(&this, "on_chat_message_submitted"),
+        );
+        shell.chat_center.call(
+            "set_submit_enabled_reason",
+            &[NO_CONVERSATION_CONTRACT.to_variant()],
+        );
+
         // The bottom rail mirrors the shared session's real link and binding
         // state; it never invents identity and clears on close.
         if let Some(mut session) = self
@@ -236,6 +260,7 @@ impl IControl for AthanorProbe {
                 ("opened", "on_session_opened"),
                 ("closed", "on_session_closed"),
                 ("unavailable", "on_session_unavailable"),
+                ("malformed", "on_session_malformed"),
                 ("message", "on_session_message"),
             ] {
                 session.connect(signal, &Callable::from_object_method(&this, method));
@@ -243,6 +268,8 @@ impl IControl for AthanorProbe {
             self.session = Some(session);
         } else {
             godot_warn!("AthanorProbe: shared Host session not bound; status rail stays unbound");
+            self.receipt.degrade("shared Host session not found");
+            self.receipt.set_link_detail("Host link unavailable");
         }
 
         // Every instrument shares one vertical scroll owner. Reparenting does
@@ -264,6 +291,17 @@ impl IControl for AthanorProbe {
             &Callable::from_object_method(&this, "on_shell_resized"),
         );
         self.shell = Some(shell);
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.bind().phase() == LinkPhase::Open)
+        {
+            self.request_receipt();
+        } else if self.session.is_some() {
+            self.receipt
+                .set_link_detail("shared Host session bound; link not open");
+        }
+        self.push_receipt();
         self.active_screen = match std::env::var(INITIAL_SCREEN_ENV).ok().as_deref() {
             Some("recall-policy" | "s02") => Screen::RecallPolicy,
             Some("routing" | "worker-lanes") => Screen::Routing,
@@ -354,28 +392,60 @@ impl AthanorProbe {
         self.apply_layout(false);
     }
 
+    /// Nothing is sent. The composer keeps the draft and the shell repeats the
+    /// exact reason submission is refused, so a press never looks accepted.
+    #[func]
+    fn on_chat_message_submitted(&mut self, _text: GString) {
+        if let Some(shell) = self.shell.as_mut() {
+            shell.chat_center.call(
+                "set_submit_enabled_reason",
+                &[NO_CONVERSATION_CONTRACT.to_variant()],
+            );
+        }
+    }
+
     #[func]
     fn on_session_opened(&mut self) {
         self.render_rail("HOST LINK OPEN", None);
+        self.receipt
+            .set_link_detail("authenticated Host · requesting latest receipt");
+        self.request_receipt();
+        self.push_receipt();
     }
 
     #[func]
-    fn on_session_closed(&mut self, _detail: GString) {
+    fn on_session_closed(&mut self, detail: GString) {
         self.render_rail("HOST UNBOUND", None);
+        self.receipt
+            .degrade("Athanor Host disconnected; latest receipt was not changed");
+        self.receipt.set_link_detail(detail.to_string());
+        self.push_receipt();
     }
 
     #[func]
-    fn on_session_unavailable(&mut self, _detail: GString) {
+    fn on_session_unavailable(&mut self, detail: GString) {
         self.render_rail("HOST UNBOUND", None);
+        self.receipt.degrade(detail.to_string());
+        self.receipt.set_link_detail("Host link unavailable");
+        self.push_receipt();
     }
 
     #[func]
-    fn on_session_message(&mut self, _envelope: VarDictionary) {
+    fn on_session_malformed(&mut self, _detail: GString) {
+        self.receipt
+            .refuse("Host returned malformed JSON; nothing was displayed");
+        self.receipt.set_link_detail("protocol refused");
+        self.push_receipt();
+    }
+
+    #[func]
+    fn on_session_message(&mut self, envelope: VarDictionary) {
         let binding = self.session.as_ref().and_then(|s| s.bind().binding());
         match binding {
             Some(binding) => self.render_rail("HOST BOUND", Some(&binding)),
             None => self.render_rail("HOST LINK OPEN", None),
         }
+        self.apply_receipt_envelope(&envelope);
     }
 }
 
@@ -383,6 +453,7 @@ impl AthanorProbe {
     fn resolve_shell(&self) -> Option<Shell> {
         Some(Shell {
             resume_page: self.base().try_get_node_as(&self.resume_page)?,
+            chat_center: self.base().try_get_node_as(&self.chat_center)?,
             recall_policy_page: self.base().try_get_node_as(&self.recall_policy_page)?,
             routing_page: self.base().try_get_node_as(&self.routing_page)?,
             familiars_page: self.base().try_get_node_as(&self.familiars_page)?,
@@ -403,6 +474,57 @@ impl AthanorProbe {
             recall_columns: self.base().try_get_node_as(&self.recall_columns)?,
             recall_state_grid: self.base().try_get_node_as(&self.recall_state_grid)?,
         })
+    }
+
+    /// Ask the shared authenticated session for the latest Paper Boat receipt.
+    /// The shell never invents one and never reads a body.
+    fn request_receipt(&mut self) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let message_id = session.bind_mut().new_identifier();
+        let command = protocol::paper_boat_receipt_subscribe_command(&CommandIdentity {
+            idempotency_key: message_id.clone(),
+            message_id,
+            causation_id: String::new(),
+        });
+        if let Err(reason) = session.bind_mut().send(&command) {
+            self.receipt.degrade(reason.clone());
+            self.receipt.set_link_detail(reason);
+        }
+    }
+
+    fn apply_receipt_envelope(&mut self, envelope: &VarDictionary) {
+        if protocol::event_projection_id(envelope).ok().as_deref()
+            != Some(house_protocol::PAPER_BOAT_RECEIPT_PROJECTION_ID)
+        {
+            return;
+        }
+        match protocol::parse_paper_boat_receipt(envelope) {
+            Ok(snapshot) => match self.receipt.apply(snapshot) {
+                Ok(_) => self
+                    .receipt
+                    .set_link_detail("authenticated snapshot applied"),
+                Err(reason) => {
+                    self.receipt.refuse(reason);
+                    self.receipt.set_link_detail("Host order refused");
+                }
+            },
+            Err(reason) => {
+                self.receipt.refuse(reason);
+                self.receipt.set_link_detail("receipt protocol refused");
+            }
+        }
+        self.push_receipt();
+    }
+
+    fn push_receipt(&mut self) {
+        let fields = self.receipt.card_fields();
+        if let Some(shell) = self.shell.as_mut() {
+            shell
+                .chat_center
+                .call("set_receipt", &[fields.to_variant()]);
+        }
     }
 
     fn render_rail(&mut self, state: &str, binding: Option<&HostBinding>) {
@@ -448,6 +570,12 @@ impl AthanorProbe {
             &[StringName::from(active.action_id()).to_variant()],
         );
         shell.right_route_label.set_text(active.route_label());
+        // S01 scrolls its own transcript and docks the composer, so the shared
+        // outer scroll is neutralised for that page; two scrolls would fight.
+        shell.center_scroll.set_vertical_scroll_mode(match active {
+            Screen::Resume => ScrollMode::DISABLED,
+            _ => ScrollMode::AUTO,
+        });
         shell
             .center_scroll
             .set_deferred("scroll_vertical", &0_i64.to_variant());

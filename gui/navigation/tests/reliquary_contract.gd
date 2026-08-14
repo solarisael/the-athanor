@@ -40,20 +40,20 @@ func _run_contracts() -> void:
 	for screen_id: String in expected_screen_ids:
 		_check(mapped_screen_ids.has(screen_id), "operator screen map includes %s" % screen_id)
 	_check(mapped_screen_ids.size() == 6, "operator map contains exactly S01, S02, S07, S08, S09, and S14")
-	var worker_lanes := left.get_node("Margin/Column/PaneHost/Root/WorkerLanes") as Button
+	var worker_lanes := left.get_node("Margin/Column/PaneHost/Root/System/Content/WorkerLanes") as Button
 	_check(worker_lanes.get_meta("action_id") == &"screen:routing", "operator map includes Worker Lanes by action")
 	_check(shell.find_children("OrnamentTop", "*", true, false).is_empty(), "shell does not manufacture unreferenced corner ornament")
 	var header_rule := shell.find_child("HeaderRuleTop", true, false)
 	var flourish := header_rule.get_node("FlourishStart") as TextureRect
 	_check(flourish.texture.resource_path.ends_with("reliquary-divider-flourish.svg"), "screen header uses the exact archived OrnamentFrame flourish")
 
-	var s01_button := left.get_node("Margin/Column/PaneHost/Root/S01") as Button
+	var s01_button := left.get_node("Margin/Column/PaneHost/Root/Conversation/Content/S01") as Button
 	s01_button.pressed.emit()
 	await process_frame
-	var route_label := right.get_node("Margin/Column/PaneHost/Root/Route") as Label
+	var route_label := right.get_node("Margin/Column/PaneHost/Root/Content/ActiveRoute/Content/Route") as Label
 	_check(route_label.text == "S01 · CONVERSA / RETOMADA", "flat archive navigation routes S01 without adding a nested group layer")
 
-	var right_settings := right.get_node("Margin/Column/PaneHost/Root/Settings") as Button
+	var right_settings := right.get_node("Margin/Column/PaneHost/Root/Content/Preferences/Content/Settings") as Button
 	right_settings.pressed.emit()
 	await process_frame
 	var appearance_button := right.get_node("Margin/Column/PaneHost/Settings/Appearance") as Button

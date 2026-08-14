@@ -11,11 +11,15 @@ controls into an in-world spatial interface and GPU-particle constellation.
 
 The current late beta ships a Godot 4.7.1 client, Rust GDExtension, one
 authenticated root-owned Host WebSocket session, live Recall Policy screen,
-sanitized Paper Boat receipt panel, read-only worker-lane status screen, and a
-responsive chat-centered shell. The chat, sidebars, and inspector declare their
-missing Host contracts instead of displaying synthetic operational state. The
-three existing Host surfaces apply real snapshots, typed deltas, resync, restart
-replay, degraded/refused states, and direct typed routing results.
+read-only worker-lane status screen, and a responsive chat-centered shell whose
+center is the S01 conversation page built from the component scene library. The
+sanitized Paper Boat receipt now lives in that page's receipt card, collapsed to
+one line until the operator expands it. S01 holds no transcript: the composer
+refuses to submit and says why, because the Host serves no conversation
+contract yet. The sidebars and inspector likewise declare their missing Host
+contracts instead of displaying synthetic operational state. The existing Host
+surfaces apply real snapshots, typed deltas, resync, restart replay,
+degraded/refused states, and direct typed routing results.
 
 Conversation transport and composition, source and authority views, GIGA
 review, agent/subagent activity, operational metrics, the spatial renderer,
@@ -126,8 +130,10 @@ strings on every node. Typed exported properties may remain editor-visible.
 The current functional slice uses ordinary Godot `Control` nodes. Its persistent
 desktop anatomy is left room/session navigation, center active conversation, and
 right context inspection. Recall Policy and worker-lane status explicitly
-replace the center when selected. The conversation, sidebars, and inspector are
-honest placeholders until their Host contracts exist.
+replace the center when selected. The conversation page is real and composed
+from the component library, but it carries no messages and refuses to send;
+the sidebars and inspector stay honest placeholders until their Host contracts
+exist.
 
 The accepted presentation is nevertheless in-world:
 

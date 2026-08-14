@@ -1,10 +1,11 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://design-system/components/receipt_card.gd" id="1_script"]
 [ext_resource type="PackedScene" path="res://design-system/components/disclosure_banner.tscn" id="2_disclosure"]
+[ext_resource type="PackedScene" path="res://design-system/components/text_action.tscn" id="3_action"]
 
 [node name="ReceiptCard" type="PanelContainer"]
-custom_minimum_size = Vector2(0, 128)
+custom_minimum_size = Vector2(0, 0)
 layout_mode = 2
 theme_type_variation = &"AthanorPaperBoat"
 script = ExtResource("1_script")
@@ -12,6 +13,27 @@ script = ExtResource("1_script")
 [node name="Column" type="VBoxContainer" parent="."]
 layout_mode = 2
 theme_type_variation = &"AthanorPaperColumn"
+
+[node name="Summary" type="HBoxContainer" parent="Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorBarRow"
+
+[node name="Value" type="Label" parent="Column/Summary"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorStatusValue"
+text = "◆ PENDING · waiting for a verified receipt · — · —"
+autowrap_mode = 2
+
+[node name="Toggle" parent="Column/Summary" instance=ExtResource("3_action")]
+layout_mode = 2
+label_text = "expand"
+[node name="Disclosure" type="Label" parent="Column/Summary"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "NO AUTHORITY · THIS PANEL SHOWS ONLY THE SANITIZED ATHANOR HOST RECEIPT"
+clip_text = true
+
 
 [node name="Header" type="HBoxContainer" parent="Column"]
 layout_mode = 2
@@ -108,6 +130,10 @@ size_flags_horizontal = 3
 theme_type_variation = &"AthanorMeta"
 text = "—"
 autowrap_mode = 2
+
+[node name="FullToggle" parent="Column" instance=ExtResource("3_action")]
+layout_mode = 2
+label_text = "collapse"
 
 [node name="Disclosure" parent="Column" instance=ExtResource("2_disclosure")]
 layout_mode = 2

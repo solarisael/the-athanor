@@ -122,15 +122,15 @@ Lesson retrieval is a task boundary, not an every-turn ritual. Refresh when the 
 
 `update_lesson` revises one coding, project, writing, or design lesson in place.
 
-The guard requires:
+The request envelope is `{ kind, id, expectedTitle, patch }`. The guard requires:
 
-- the lesson's numeric ID;
-- the exact current title;
-- at least one explicit replacement field.
+- the exact lesson kind and numeric ID;
+- the exact current title in `expectedTitle`;
+- at least one explicit replacement field inside `patch`.
 
-Omitted fields remain unchanged, including formal negation links. The row ID remains stable. Use `clearNegationOf` only when deliberately removing a coding or writing lesson's negation relationship.
+Omitted patch fields remain unchanged, and the row ID remains stable. For coding lessons, `alwaysOn` changes eligibility without replacing the row. Coding and project lessons accept `project`; use `clearProject: true` instead to write SQL `NULL`. `project` and `clearProject` are mutually exclusive, and lesson kinds without a project field refuse `clearProject`.
 
-Update a lesson when its rule remains the same identity but wording, trigger, or typed metadata changes. Coding lessons accept voice, scope, project, proof pattern, and negation fields; project lessons accept project and proof-pattern fields; writing lessons accept voice, registers, example text, writers, and negation fields. Cross-store fields are refused rather than silently discarded.
+Update a lesson when its rule remains the same identity but wording, trigger, or typed metadata changes. Coding lessons also accept voice, scope, proof pattern, language and technology keys, and negation fields; project lessons accept proof-pattern and eligibility-key fields; writing lessons accept voice, registers, example text, writers, and negation fields. Cross-store fields are refused rather than silently discarded.
 
 ## Deleting lessons
 

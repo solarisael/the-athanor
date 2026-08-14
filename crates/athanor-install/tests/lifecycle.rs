@@ -159,7 +159,7 @@ fn release(version: &str, bytes: &[u8]) -> ReleaseManifest {
         product: "the-athanor".into(),
         version: version.into(),
         platform: "windows-x64".into(),
-        schema_version: 17,
+        schema_version: 18,
         compatibility: Compatibility {
             host_api: 1,
             substrate_api: 1,

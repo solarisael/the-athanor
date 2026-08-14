@@ -5,7 +5,7 @@ use std::path::{Component, Path};
 use thiserror::Error;
 
 pub const MANIFEST_FORMAT: u32 = 1;
-pub const REQUIRED_SCHEMA: u32 = 17;
+pub const REQUIRED_SCHEMA: u32 = 18;
 pub const SUPPORTED_PLATFORM: &str = "windows-x64";
 pub const POSTGRESQL_VERSION: &str = "18.4-2";
 pub const PGVECTOR_VERSION: &str = "0.8.6";
@@ -66,7 +66,7 @@ pub enum ManifestError {
     Version(String),
     #[error("unsupported platform {0:?}")]
     Platform(String),
-    #[error("schema {0} is incompatible; this installer requires 16")]
+    #[error("schema {0} is incompatible; this installer requires {REQUIRED_SCHEMA}")]
     Schema(u32),
     #[error("release compatibility metadata is unsupported: {0}")]
     Compatibility(String),

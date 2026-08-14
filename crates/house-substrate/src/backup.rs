@@ -17,9 +17,6 @@ use std::{
 };
 use uuid::Uuid;
 
-const CONSOLIDATED_MIGRATIONS: &[&str] = &[
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
-];
 const LEGACY_MIGRATIONS: &[&str] = &[
     "0001_create_memories",
     "0002_memory_threads_pivot",
@@ -50,16 +47,16 @@ const LEGACY_MIGRATIONS: &[&str] = &[
 ];
 
 fn known_migration_lineage(versions: &[String]) -> bool {
-    !versions.is_empty()
-        && [CONSOLIDATED_MIGRATIONS, LEGACY_MIGRATIONS]
-            .iter()
-            .any(|lineage| {
-                versions.len() <= lineage.len()
-                    && versions
-                        .iter()
-                        .zip(lineage.iter())
-                        .all(|(actual, expected)| actual == expected)
-            })
+    if versions.is_empty() {
+        return false;
+    }
+    let prefix_of = |lineage: &[String]| {
+        versions.len() <= lineage.len()
+            && versions.iter().zip(lineage).all(|(actual, expected)| actual == expected)
+    };
+    let consolidated = crate::migrations::consolidated_version_labels();
+    let legacy: Vec<String> = LEGACY_MIGRATIONS.iter().map(|s| (*s).to_owned()).collect();
+    prefix_of(&consolidated) || prefix_of(&legacy)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -516,10 +513,7 @@ pub fn backup(database_url: &str, output_dir: &Path, keep: usize) -> Result<Mani
         database_url,
         output_dir,
         keep,
-        CONSOLIDATED_MIGRATIONS
-            .iter()
-            .map(|x| x.to_string())
-            .collect(),
+        crate::migrations::consolidated_version_labels(),
     )
 }
 
@@ -733,9 +727,11 @@ mod tests {
                 .map(|version| (*version).to_owned())
                 .collect::<Vec<_>>()
         };
-        assert!(known_migration_lineage(&strings(CONSOLIDATED_MIGRATIONS)));
+        let consolidated = crate::migrations::consolidated_version_labels();
+        assert!(known_migration_lineage(&consolidated));
+        assert!(consolidated.contains(&"18".to_owned()), "allowlist must track the registry");
         assert!(known_migration_lineage(&strings(LEGACY_MIGRATIONS)));
-        let mut previous_consolidated = strings(CONSOLIDATED_MIGRATIONS);
+        let mut previous_consolidated = consolidated.clone();
         previous_consolidated.pop();
         assert!(known_migration_lineage(&previous_consolidated));
         assert!(!known_migration_lineage(&[]));
@@ -793,10 +789,7 @@ mod tests {
                 size: 0,
                 sha256: String::new(),
                 format: "custom".into(),
-                schema_migrations: CONSOLIDATED_MIGRATIONS
-                    .iter()
-                    .map(|value| (*value).into())
-                    .collect(),
+                schema_migrations: crate::migrations::consolidated_version_labels(),
                 pg_dump_version: "16".into(),
                 dump: "other.dump".into(),
             })

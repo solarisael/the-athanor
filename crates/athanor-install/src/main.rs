@@ -75,6 +75,10 @@ fn main() -> Result<()> {
     match command {
         "install" | "update" => {
             let staging = PathBuf::from(value(&arguments, "--staging")?);
+            // Lets the pre-upgrade backup run on the staged substrate, which
+            // knows at least the installed lineage (see NativeRuntimeControl).
+            // SAFETY: single-threaded at this point — set before any installer work spawns.
+            unsafe { std::env::set_var("ATHANOR_INSTALL_STAGING_BIN", staging.join("bin")) };
             let manifest_path = PathBuf::from(value(&arguments, "--manifest")?);
             let manifest: ReleaseManifest = serde_json::from_slice(
                 &fs::read(&manifest_path)

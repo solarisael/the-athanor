@@ -20,6 +20,8 @@ the exact implementation record.
 
 ## [Unreleased]
 
+## [0.9.6.2-rc1] - 2026-08-14
+
 ### Changed
 
 - Widened the Paper Boat delivery lane into the general Crane delivery system in

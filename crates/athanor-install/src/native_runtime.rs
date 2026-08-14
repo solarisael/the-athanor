@@ -28,6 +28,19 @@ impl NativeRuntimeControl {
         Ok(self.layout.version(&current.version))
     }
     fn substrate(&self) -> Result<PathBuf> {
+        // During install/update the pre-upgrade backup must run BEFORE the new
+        // version activates, but the currently installed substrate only knows
+        // migrations up to its own release. A database migrated ahead of the
+        // installed binaries (developer migration, live proof) would make the
+        // upgrade permanently impossible. main sets this process-local staging
+        // path for the install command only; the staged substrate always knows
+        // at least the current lineage, and pg_dump does the actual work.
+        if let Some(staged) = std::env::var_os("ATHANOR_INSTALL_STAGING_BIN") {
+            let candidate = PathBuf::from(staged).join("athanor-substrate.exe");
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
         Ok(self.current_root()?.join("bin/athanor-substrate.exe"))
     }
     fn secrets(&self) -> Result<Secrets> {

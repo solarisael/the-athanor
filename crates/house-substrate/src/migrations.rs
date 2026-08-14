@@ -103,6 +103,16 @@ const MIGRATIONS: &[Migration] = &[
     },
 ];
 
+/// The consolidated lineage as recorded in `schema_migrations`: every version
+/// this binary knows, in order. Derived from the registry so the backup
+/// allowlist can never drift behind a newly registered migration again.
+pub(crate) fn consolidated_version_labels() -> Vec<String> {
+    MIGRATIONS
+        .iter()
+        .map(|migration| migration.version.to_string())
+        .collect()
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MigrationState {

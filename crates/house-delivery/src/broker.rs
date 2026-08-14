@@ -10,9 +10,13 @@ use async_nats::{
 use std::time::Duration;
 use uuid::Uuid;
 
-pub const STREAM_NAME: &str = "ATHANOR_BOAT_READY";
-pub const SUBJECT: &str = "athanor.boat.ready";
-pub const CONSUMER_NAME: &str = "athanor-boat-ready-receipts-v1";
+pub const BOAT_READY_STREAM_NAME: &str = "ATHANOR_BOAT_READY";
+pub const BOAT_READY_SUBJECT: &str = "athanor.boat.ready";
+pub const BOAT_READY_CONSUMER_NAME: &str = "athanor-boat-ready-receipts-v1";
+pub const CRANE_STREAM_NAME: &str = "ATHANOR_CRANE";
+pub const CRANE_SUBJECT_PREFIX: &str = "athanor.crane.";
+pub const CRANE_SUBJECT_FILTER: &str = "athanor.crane.>";
+pub const CRANE_CONSUMER_NAME: &str = "athanor-crane-receipts-v1";
 pub use house_protocol::{
     BOAT_RECEIPT_STREAM_NAME as RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT as RECEIPT_SUBJECT,
 };
@@ -55,13 +59,31 @@ impl Broker {
             .context("drain NATS delivery connection")
     }
 
-    pub fn stream_config() -> jetstream::stream::Config {
+    pub fn boat_ready_stream_config() -> jetstream::stream::Config {
+        Self::lane_stream_config(
+            BOAT_READY_STREAM_NAME,
+            "Delivery-only stream for PostgreSQL-authoritative paper-boat pointers",
+            BOAT_READY_SUBJECT,
+        )
+    }
+
+    pub fn crane_stream_config() -> jetstream::stream::Config {
+        Self::lane_stream_config(
+            CRANE_STREAM_NAME,
+            "Delivery-only stream for PostgreSQL-authoritative addressed Crane pointers",
+            CRANE_SUBJECT_FILTER,
+        )
+    }
+
+    fn lane_stream_config(
+        name: &str,
+        description: &str,
+        subject: &str,
+    ) -> jetstream::stream::Config {
         jetstream::stream::Config {
-            name: STREAM_NAME.to_owned(),
-            description: Some(
-                "Delivery-only stream for PostgreSQL-authoritative paper-boat pointers".to_owned(),
-            ),
-            subjects: vec![SUBJECT.to_owned()],
+            name: name.to_owned(),
+            description: Some(description.to_owned()),
+            subjects: vec![subject.to_owned()],
             retention: RetentionPolicy::Limits,
             discard: DiscardPolicy::Old,
             storage: StorageType::File,
@@ -77,6 +99,7 @@ impl Broker {
             ..Default::default()
         }
     }
+
     pub fn receipt_stream_config() -> jetstream::stream::Config {
         jetstream::stream::Config {
             name: RECEIPT_STREAM_NAME.to_owned(),
@@ -101,17 +124,35 @@ impl Broker {
         }
     }
 
-    pub fn consumer_config() -> consumer::pull::Config {
+    pub fn boat_ready_consumer_config() -> consumer::pull::Config {
+        Self::lane_consumer_config(
+            BOAT_READY_CONSUMER_NAME,
+            "Durable PostgreSQL receipt writer for boat.ready pointer events",
+            BOAT_READY_SUBJECT,
+        )
+    }
+
+    pub fn crane_consumer_config() -> consumer::pull::Config {
+        Self::lane_consumer_config(
+            CRANE_CONSUMER_NAME,
+            "Durable PostgreSQL receipt writer for addressed Crane pointer events",
+            CRANE_SUBJECT_FILTER,
+        )
+    }
+
+    fn lane_consumer_config(
+        name: &str,
+        description: &str,
+        filter_subject: &str,
+    ) -> consumer::pull::Config {
         consumer::pull::Config {
-            durable_name: Some(CONSUMER_NAME.to_owned()),
-            name: Some(CONSUMER_NAME.to_owned()),
-            description: Some(
-                "Durable PostgreSQL receipt writer for boat.ready pointer events".to_owned(),
-            ),
+            durable_name: Some(name.to_owned()),
+            name: Some(name.to_owned()),
+            description: Some(description.to_owned()),
             ack_policy: AckPolicy::Explicit,
             ack_wait: ACK_WAIT,
             max_deliver: MAX_DELIVER,
-            filter_subject: SUBJECT.to_owned(),
+            filter_subject: filter_subject.to_owned(),
             max_ack_pending: MAX_ACK_PENDING,
             max_batch: 64,
             max_expires: Duration::from_secs(5),
@@ -122,14 +163,9 @@ impl Broker {
         }
     }
 
-    pub async fn configure(&self) -> Result<consumer::PullConsumer> {
-        let expected_stream = Self::stream_config();
-        let stream = self
-            .context
-            .get_or_create_stream(expected_stream.clone())
-            .await
-            .context("configure boat.ready JetStream stream")?;
-        verify_stream_config(&stream.cached_info().config, &expected_stream)?;
+    /// Creates or verifies both lane streams, the sanitized receipt stream and
+    /// both durable receipt writers, then returns the per-lane consumers.
+    pub async fn configure(&self) -> Result<LaneConsumers> {
         let expected_receipt_stream = Self::receipt_stream_config();
         let receipt_stream = self
             .context
@@ -140,30 +176,57 @@ impl Broker {
             &receipt_stream.cached_info().config,
             &expected_receipt_stream,
         )?;
+        Ok(LaneConsumers {
+            boat_ready: self
+                .lane_consumer(
+                    Self::boat_ready_stream_config(),
+                    Self::boat_ready_consumer_config(),
+                )
+                .await?,
+            crane: self
+                .lane_consumer(Self::crane_stream_config(), Self::crane_consumer_config())
+                .await?,
+        })
+    }
 
-        let expected_consumer = Self::consumer_config();
-        let consumer = stream
-            .get_or_create_consumer(CONSUMER_NAME, expected_consumer.clone())
+    async fn lane_consumer(
+        &self,
+        expected_stream: jetstream::stream::Config,
+        expected_consumer: consumer::pull::Config,
+    ) -> Result<consumer::PullConsumer> {
+        let stream = self
+            .context
+            .get_or_create_stream(expected_stream.clone())
             .await
-            .context("configure durable boat.ready pull consumer")?;
+            .with_context(|| format!("configure {} JetStream stream", expected_stream.name))?;
+        verify_stream_config(&stream.cached_info().config, &expected_stream)?;
+        let durable_name = expected_consumer
+            .durable_name
+            .clone()
+            .expect("every lane consumer is durable");
+        let consumer = stream
+            .get_or_create_consumer(&durable_name, expected_consumer.clone())
+            .await
+            .with_context(|| format!("configure durable pull consumer {durable_name}"))?;
         verify_consumer_config(&consumer.cached_info().config, &expected_consumer)?;
         Ok(consumer)
     }
 
-    pub async fn consumer(&self) -> Result<consumer::PullConsumer> {
+    pub async fn consumers(&self) -> Result<LaneConsumers> {
         self.configure().await
     }
 
-    pub async fn publish(&self, event_id: Uuid, payload: Vec<u8>) -> Result<u64> {
+    /// Publishes an event onto the subject its lane owns.
+    pub async fn publish(&self, subject: String, event_id: Uuid, payload: Vec<u8>) -> Result<u64> {
         let mut headers = HeaderMap::new();
         headers.insert("Nats-Msg-Id", event_id.to_string());
         let acknowledgement = self
             .context
-            .publish_with_headers(SUBJECT, headers, payload.into())
+            .publish_with_headers(subject.clone(), headers, payload.into())
             .await
-            .context("send boat.ready publish request")?
+            .with_context(|| format!("send {subject} publish request"))?
             .await
-            .context("receive boat.ready JetStream publish acknowledgement")?;
+            .with_context(|| format!("receive {subject} JetStream publish acknowledgement"))?;
         Ok(acknowledgement.sequence)
     }
     pub async fn publish_receipt(&self, event_id: Uuid, payload: Vec<u8>) -> Result<u64> {
@@ -180,31 +243,72 @@ impl Broker {
     }
 
     pub async fn health(&self) -> Result<BrokerHealth> {
-        let consumer = self.configure().await?;
-        let info = consumer.cached_info();
+        let consumers = self.configure().await?;
         Ok(BrokerHealth {
-            stream: STREAM_NAME,
-            subject: SUBJECT,
-            consumer: CONSUMER_NAME,
+            boat_ready: lane_health(
+                BOAT_READY_STREAM_NAME,
+                BOAT_READY_SUBJECT,
+                BOAT_READY_CONSUMER_NAME,
+                consumers.boat_ready.cached_info(),
+            ),
+            crane: lane_health(
+                CRANE_STREAM_NAME,
+                CRANE_SUBJECT_FILTER,
+                CRANE_CONSUMER_NAME,
+                consumers.crane.cached_info(),
+            ),
             receipt_stream: RECEIPT_STREAM_NAME,
             receipt_subject: RECEIPT_SUBJECT,
-            pending: info.num_pending,
-            ack_pending: info.num_ack_pending,
-            redelivered: info.num_redelivered,
         })
     }
 }
 
+/// The durable receipt writers, one per delivery lane.
+pub struct LaneConsumers {
+    pub boat_ready: consumer::PullConsumer,
+    pub crane: consumer::PullConsumer,
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct BrokerHealth {
+    pub boat_ready: LaneHealth,
+    pub crane: LaneHealth,
+    pub receipt_stream: &'static str,
+    pub receipt_subject: &'static str,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct LaneHealth {
     pub stream: &'static str,
     pub subject: &'static str,
     pub consumer: &'static str,
-    pub receipt_stream: &'static str,
-    pub receipt_subject: &'static str,
     pub pending: u64,
     pub ack_pending: usize,
     pub redelivered: usize,
+}
+
+fn lane_health(
+    stream: &'static str,
+    subject: &'static str,
+    consumer: &'static str,
+    info: &consumer::Info,
+) -> LaneHealth {
+    LaneHealth {
+        stream,
+        subject,
+        consumer,
+        pending: info.num_pending,
+        ack_pending: info.num_ack_pending,
+        redelivered: info.num_redelivered,
+    }
+}
+
+/// True when a subject belongs to a consumer's filter, for exact and `>` filters.
+pub fn subject_matches_filter(subject: &str, filter: &str) -> bool {
+    match filter.strip_suffix(".>") {
+        Some(prefix) => subject.len() > prefix.len() + 1 && subject.starts_with(prefix),
+        None => subject == filter,
+    }
 }
 
 fn verify_stream_config(
@@ -252,7 +356,8 @@ fn verify_consumer_config(
         || actual.backoff != expected.backoff
     {
         bail!(
-            "existing JetStream consumer {CONSUMER_NAME} does not match the compiled delivery contract"
+            "existing JetStream consumer {:?} does not match the compiled delivery contract",
+            expected.durable_name
         );
     }
     Ok(())
@@ -263,29 +368,72 @@ mod tests {
     use super::*;
 
     #[test]
-    fn broker_contract_is_bounded_and_durable() {
-        let stream = Broker::stream_config();
-        assert_eq!(stream.subjects, vec![SUBJECT.to_owned()]);
-        assert_eq!(stream.storage, StorageType::File);
-        assert_eq!(stream.retention, RetentionPolicy::Limits);
-        assert_eq!(stream.duplicate_window, DUPLICATE_WINDOW);
-        assert!(stream.max_messages > 0);
-        assert!(stream.max_bytes > 0);
-        assert!(stream.max_age > DUPLICATE_WINDOW);
+    fn both_lane_contracts_are_bounded_and_durable() {
+        for stream in [
+            Broker::boat_ready_stream_config(),
+            Broker::crane_stream_config(),
+        ] {
+            assert_eq!(stream.storage, StorageType::File);
+            assert_eq!(stream.retention, RetentionPolicy::Limits);
+            assert_eq!(stream.duplicate_window, DUPLICATE_WINDOW);
+            assert!(stream.max_messages > 0);
+            assert!(stream.max_bytes > 0);
+            assert!(stream.max_age > DUPLICATE_WINDOW);
+        }
+        let boat = Broker::boat_ready_stream_config();
+        let crane = Broker::crane_stream_config();
+        assert_eq!(boat.subjects, vec![BOAT_READY_SUBJECT.to_owned()]);
+        assert_eq!(crane.subjects, vec![CRANE_SUBJECT_FILTER.to_owned()]);
+        assert_ne!(boat.name, crane.name);
 
         let receipt_stream = Broker::receipt_stream_config();
         assert_eq!(receipt_stream.subjects, vec![RECEIPT_SUBJECT.to_owned()]);
-        assert_ne!(receipt_stream.name, stream.name);
+        assert_ne!(receipt_stream.name, boat.name);
         assert_eq!(receipt_stream.storage, StorageType::File);
         assert_eq!(receipt_stream.duplicate_window, DUPLICATE_WINDOW);
         assert_eq!(receipt_stream.max_message_size, 4096);
         assert_eq!(receipt_stream.max_consumers, 64);
 
-        let consumer = Broker::consumer_config();
-        assert_eq!(consumer.durable_name.as_deref(), Some(CONSUMER_NAME));
-        assert_eq!(consumer.ack_policy, AckPolicy::Explicit);
-        assert_eq!(consumer.filter_subject, SUBJECT);
-        assert_eq!(consumer.max_deliver, CONSUMER_BACKOFF.len() as i64);
-        assert_eq!(consumer.ack_wait, CONSUMER_BACKOFF[0]);
+        for consumer in [
+            Broker::boat_ready_consumer_config(),
+            Broker::crane_consumer_config(),
+        ] {
+            assert_eq!(consumer.ack_policy, AckPolicy::Explicit);
+            assert_eq!(consumer.max_deliver, CONSUMER_BACKOFF.len() as i64);
+            assert_eq!(consumer.ack_wait, CONSUMER_BACKOFF[0]);
+            assert_eq!(consumer.durable_name, consumer.name);
+        }
+        assert_eq!(
+            Broker::boat_ready_consumer_config().filter_subject,
+            BOAT_READY_SUBJECT
+        );
+        assert_eq!(
+            Broker::crane_consumer_config().filter_subject,
+            CRANE_SUBJECT_FILTER
+        );
+    }
+
+    #[test]
+    fn consumer_filters_own_exactly_their_lane() {
+        assert!(subject_matches_filter(
+            BOAT_READY_SUBJECT,
+            BOAT_READY_SUBJECT
+        ));
+        assert!(!subject_matches_filter(
+            "athanor.boat.readyish",
+            BOAT_READY_SUBJECT
+        ));
+        assert!(subject_matches_filter(
+            "athanor.crane.room.kodo",
+            CRANE_SUBJECT_FILTER
+        ));
+        assert!(!subject_matches_filter(
+            BOAT_READY_SUBJECT,
+            CRANE_SUBJECT_FILTER
+        ));
+        assert!(!subject_matches_filter(
+            "athanor.crane.",
+            CRANE_SUBJECT_FILTER
+        ));
     }
 }

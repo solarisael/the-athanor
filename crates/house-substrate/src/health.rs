@@ -21,9 +21,9 @@ const REQUIRED_TABLES: &[&str] = &[
     "anamnesis",
     "anamnesis_reps",
     "design_documents",
-    "boat_ready_outbox",
-    "boat_ready_receipts",
-    "boat_ready_dead_letters",
+    "crane_outbox",
+    "crane_receipts",
+    "crane_dead_letters",
 ];
 const REQUIRED_EXTENSIONS: &[&str] = &["pg_trgm", "pgcrypto", "vector"];
 
@@ -430,7 +430,7 @@ mod tests {
         ));
         assert!(!database_contract_complete(
             &complete,
-            &["boat_ready_outbox"],
+            &["crane_outbox"],
             &[],
             Some("vector(2048)")
         ));

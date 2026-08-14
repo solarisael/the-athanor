@@ -77,14 +77,14 @@ Missing per-component prompts remain missing evidence.
 - **Identity:** `typography-roles`; group `foundation`.
 - **Purpose:** Separate readable text from controlled ceremonial voices.
 - **Authority:** Catalogue #3 and #9; `src/styles/fonts.css`; `src/styles/typography.css`.
-- **Anatomy:** Body, heading, mono, literary, editorial, ritual, and artifact roles.
+- **Anatomy:** Body, heading, mono, literary, editorial, ritual, and artifact roles. Since 2026-08-14 (Sol's standing decision, project lesson 375) every role renders in one face: the OS system font (`SystemFont`, Segoe UI on the reference workstation). Roles remain semantic; hierarchy is carried by size and color above two floors — no size below 13px, no light-on-dark color below 0.7 brightness.
 - **Variants:** Public size names are display, large, main, mid, sub, body, fine, lead, kicker, and caption.
 - **Refusals:** Public components cannot expose structural `h1` through `h5` size names.
-- **Accessibility:** Body and heading use the hyperlegible face. Expressive faces stay on controlled upper steps.
+- **Accessibility:** Every role uses the system face with grayscale antialiasing, light hinting, and auto subpixel positioning. Bundled expressive faces are removed until Sol reintroduces them explicitly.
 - **Composition:** The role and size axes remain independent.
 - **Web mapping:** Font role tokens and `sol__text_*` classes own the public vocabulary.
-- **Godot mapping:** The root `.tres` Theme owns fonts and sizes. Type variations expose semantic names. Native desktop UI disables stretch scaling, opts into high-DPI rendering, and imports the bundled faces with LCD antialiasing, normal hinting, automatic subpixel positioning, and viewport-default oversampling. Small static UI text does not use MSDF.
-- **Proof:** Godot loaded and rendered Atkinson Hyperlegible Next, Cinzel Decorative, and JetBrains Mono from bundled WOFF2 assets. Native 1× Forward+ frames were inspected at 1440×900 and 640×760 on Sol's 1920×1080, 96-DPI RGB display.
+- **Godot mapping:** The root `.tres` Theme owns fonts and sizes. Type variations expose semantic names. Native desktop UI disables stretch scaling, opts into high-DPI rendering, and resolves the OS face through one `SystemFont` with grayscale antialiasing, light hinting, and automatic subpixel positioning. Small static UI text does not use MSDF.
+- **Proof:** Godot resolved and rendered the OS system font through a `SystemFont` theme `default_font` with zero per-style face overrides; Atkinson Hyperlegible Next, Cinzel Decorative, and JetBrains Mono are removed from theme and assets. Full hinting was measured (zoomed `PrintWindow` crops) to crush small glyphs and is refused; light hinting is the contract. Native 1× Forward+ frames were inspected on Sol's 1920×1080, 96-DPI RGB display.
 - **Open gaps:** Literary, editorial, and artifact roles remain unimported. Reader scaling and fallback behavior remain unproved. English is the only source language until a deliberate localization pipeline exists. Effect-bearing text is a separate lane: survey `RichTextLabel`/`RichTextEffect`, `Label3D`, `TextMesh`, built-in MSDF, and maintained Godot addons before authoring custom glyph geometry.
 
 ## Record: ritual surface

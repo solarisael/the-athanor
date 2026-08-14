@@ -91,6 +91,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0016_boat_ready_delivery.sql",
         sql: include_str!("../../../substrate/migrations/0016_boat_ready_delivery.sql"),
     },
+    Migration {
+        version: 17,
+        name: "0017_crane_delivery.sql",
+        sql: include_str!("../../../substrate/migrations/0017_crane_delivery.sql"),
+    },
 ];
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

@@ -31,6 +31,7 @@ const MIGRATIONS: &[&str] = &[
     migration!("0014_lesson_threads.sql"),
     migration!("0015_canon_authority.sql"),
     migration!("0016_boat_ready_delivery.sql"),
+    migration!("0017_crane_delivery.sql"),
 ];
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -119,7 +120,11 @@ async fn apply_migrations_and_run(pool: &sqlx::PgPool, url: &str) -> TestResult 
     for migration in MIGRATIONS {
         sqlx::raw_sql(migration).execute(pool).await?;
     }
-    sqlx::raw_sql(MIGRATIONS[15]).execute(pool).await?;
+    // Reapplication is proved in migration order: 0016 recreates the boat trio and
+    // 0017 folds it back into the crane trio, exactly as the runner would.
+    for index in [15, 16] {
+        sqlx::raw_sql(MIGRATIONS[index]).execute(pool).await?;
+    }
     run_contract(pool, url).await
 }
 
@@ -169,7 +174,7 @@ async fn run_contract(pool: &sqlx::PgPool, url: &str) -> TestResult {
             .fetch_one(pool)
             .await?;
     let outbox_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM boat_ready_outbox WHERE aggregate_id=$1 AND event_kind='boat.ready'",
+        "SELECT count(*) FROM crane_outbox WHERE aggregate_id=$1 AND event_kind='boat.ready'",
     )
     .bind(i64::try_from(first.memory_id())?)
     .fetch_one(pool)

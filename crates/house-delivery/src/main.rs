@@ -39,9 +39,18 @@ async fn main() -> Result<()> {
             "ok": true,
             "authority": "postgresql",
             "delivery": "nats-jetstream",
-            "stream": athanor_house_delivery::broker::STREAM_NAME,
-            "subject": athanor_house_delivery::broker::SUBJECT,
-            "consumer": athanor_house_delivery::broker::CONSUMER_NAME,
+            "lanes": [
+                {
+                    "stream": athanor_house_delivery::broker::BOAT_READY_STREAM_NAME,
+                    "subject": athanor_house_delivery::broker::BOAT_READY_SUBJECT,
+                    "consumer": athanor_house_delivery::broker::BOAT_READY_CONSUMER_NAME,
+                },
+                {
+                    "stream": athanor_house_delivery::broker::CRANE_STREAM_NAME,
+                    "subject": athanor_house_delivery::broker::CRANE_SUBJECT_FILTER,
+                    "consumer": athanor_house_delivery::broker::CRANE_CONSUMER_NAME,
+                },
+            ],
         }))?,
         "publish-once" => print_json(serde_json::to_value(service.publish_once().await?)?)?,
         "consume-once" => print_json(serde_json::to_value(
@@ -53,9 +62,9 @@ async fn main() -> Result<()> {
             let ready_file = publish_ready_file()?;
             tracing::info!(
                 instance_id = %lease_owner,
-                stream = athanor_house_delivery::broker::STREAM_NAME,
-                subject = athanor_house_delivery::broker::SUBJECT,
-                "starting PostgreSQL-authoritative boat.ready delivery"
+                boat_ready_subject = athanor_house_delivery::broker::BOAT_READY_SUBJECT,
+                crane_subject = athanor_house_delivery::broker::CRANE_SUBJECT_FILTER,
+                "starting PostgreSQL-authoritative Crane delivery"
             );
             tokio::select! {
                 result = service.run() => result?,

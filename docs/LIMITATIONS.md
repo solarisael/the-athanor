@@ -26,7 +26,7 @@ Vault remains a database-free runtime profile. AKASHA uses managed PostgreSQL by
 default. Existing Houses must use explicit external-database mode when their
 authoritative PostgreSQL endpoint already owns the configured port. RC2 takes a
 first-install backup, starts no PostgreSQL child in that mode, and still requires
-schema 16 plus `vector`, `pg_trgm`, and `pgcrypto`.
+schema 17 plus `vector`, `pg_trgm`, and `pgcrypto`.
 
 Local semantic embeddings still require a compatible configured embedding
 endpoint. No GPU or embedding model is bundled in the current late beta.

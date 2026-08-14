@@ -53,7 +53,7 @@ pub async fn paper_boat_sleep(
     )
     .await?;
     let outbox_event_id: String = sqlx::query_scalar(
-        "SELECT event_id::text FROM boat_ready_outbox
+        "SELECT event_id::text FROM crane_outbox
          WHERE aggregate_kind='memory' AND aggregate_id=$1 AND event_kind='boat.ready'",
     )
     .bind(memory_id)

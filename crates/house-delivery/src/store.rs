@@ -1,6 +1,6 @@
 use crate::{
-    broker::{CONSUMER_NAME, SUBJECT},
-    model::{BoatReadyEvent, EVENT_KIND, body_sha256},
+    broker::{BOAT_READY_CONSUMER_NAME, CRANE_CONSUMER_NAME},
+    model::{CraneEvent, Lane, RecipientKind, body_sha256},
 };
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
@@ -8,7 +8,7 @@ use serde_json::Value;
 use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions};
 use uuid::Uuid;
 
-pub const REQUIRED_SCHEMA_VERSION: i32 = 16;
+pub const REQUIRED_SCHEMA_VERSION: i32 = 17;
 pub const LEASE_SECONDS: i32 = 30;
 pub const MAX_PUBLISH_ATTEMPTS: i32 = 10;
 
@@ -26,6 +26,28 @@ pub struct ClaimedEvent {
     pub payload: Value,
     pub integrity_sha256: String,
     pub attempts: i32,
+    pub recipient_kind: Option<String>,
+    pub recipient_key: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+impl ClaimedEvent {
+    /// The lane PostgreSQL says this row belongs to. `None` is unroutable, which the
+    /// `crane_outbox` recipient constraints forbid but the relay still refuses safely.
+    pub fn lane(&self) -> Option<Lane> {
+        match (&self.recipient_kind, &self.recipient_key) {
+            (None, None) => Some(Lane::BoatReady),
+            (Some(kind), Some(key)) => Some(Lane::Addressed {
+                recipient_kind: kind.parse::<RecipientKind>().ok()?,
+                recipient_key: key.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    pub fn subject(&self) -> Option<String> {
+        Some(self.lane()?.subject())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -94,17 +116,14 @@ impl Store {
         let claimed = sqlx::query(
             "WITH candidate AS (
                SELECT event_id
-               FROM boat_ready_outbox
-               WHERE event_kind = 'boat.ready'
-                 AND (
-                   (state = 'pending' AND available_at <= NOW())
-                   OR (state = 'leased' AND lease_expires_at <= NOW())
-                 )
+               FROM crane_outbox
+               WHERE (state = 'pending' AND available_at <= NOW())
+                  OR (state = 'leased' AND lease_expires_at <= NOW())
                ORDER BY available_at, created_at, event_id
                FOR UPDATE SKIP LOCKED
                LIMIT 1
              )
-             UPDATE boat_ready_outbox event
+             UPDATE crane_outbox event
              SET state = 'leased',
                  attempts = event.attempts + 1,
                  lease_owner = $1,
@@ -114,13 +133,14 @@ impl Store {
              FROM candidate
              WHERE event.event_id = candidate.event_id
              RETURNING event.event_id, event.event_kind, event.aggregate_id, event.room,
-                       event.payload, event.integrity_sha256, event.attempts",
+                       event.payload, event.integrity_sha256, event.attempts,
+                       event.recipient_kind, event.recipient_key, event.expires_at",
         )
         .bind(lease_owner)
         .bind(LEASE_SECONDS)
         .fetch_optional(&mut *transaction)
         .await
-        .context("claim boat.ready outbox event")?;
+        .context("claim pending crane outbox event")?;
         let claimed = claimed
             .map(|row| -> std::result::Result<ClaimedEvent, sqlx::Error> {
                 Ok(ClaimedEvent {
@@ -131,6 +151,9 @@ impl Store {
                     payload: row.try_get("payload")?,
                     integrity_sha256: row.try_get("integrity_sha256")?,
                     attempts: row.try_get("attempts")?,
+                    recipient_kind: row.try_get("recipient_kind")?,
+                    recipient_key: row.try_get("recipient_key")?,
+                    expires_at: row.try_get("expires_at")?,
                 })
             })
             .transpose()?;
@@ -145,7 +168,7 @@ impl Store {
         stream_sequence: u64,
     ) -> Result<()> {
         let updated = sqlx::query(
-            "UPDATE boat_ready_outbox
+            "UPDATE crane_outbox
              SET state = 'published', published_at = NOW(), lease_owner = NULL,
                  lease_expires_at = NULL, last_error = NULL, updated_at = NOW()
              WHERE event_id = $1 AND state = 'leased' AND lease_owner = $2",
@@ -174,7 +197,7 @@ impl Store {
         let exhausted = claimed.attempts >= MAX_PUBLISH_ATTEMPTS;
         let updated = if exhausted {
             sqlx::query(
-                "UPDATE boat_ready_outbox
+                "UPDATE crane_outbox
                  SET state = 'dead_letter', dead_lettered_at = NOW(), lease_owner = NULL,
                      lease_expires_at = NULL, last_error = $3, updated_at = NOW()
                  WHERE event_id = $1 AND state = 'leased' AND lease_owner = $2",
@@ -187,7 +210,7 @@ impl Store {
         } else {
             let delay = publish_retry_seconds(claimed.attempts);
             sqlx::query(
-                "UPDATE boat_ready_outbox
+                "UPDATE crane_outbox
                  SET state = 'pending', available_at = NOW() + make_interval(secs => $3),
                      lease_owner = NULL, lease_expires_at = NULL, last_error = $4, updated_at = NOW()
                  WHERE event_id = $1 AND state = 'leased' AND lease_owner = $2",
@@ -210,6 +233,7 @@ impl Store {
                 &mut transaction,
                 Some(claimed.event_id),
                 "publisher",
+                claimed.subject().as_deref(),
                 "publish_exhausted",
                 &safe_error,
                 serde_json::to_vec(&claimed.payload)?.as_slice(),
@@ -231,7 +255,7 @@ impl Store {
         let payload = serde_json::to_vec(&claimed.payload)?;
         let mut transaction = self.pool.begin().await?;
         let updated = sqlx::query(
-            "UPDATE boat_ready_outbox
+            "UPDATE crane_outbox
              SET state = 'dead_letter', dead_lettered_at = NOW(), lease_owner = NULL,
                  lease_expires_at = NULL, last_error = $3, updated_at = NOW()
              WHERE event_id = $1 AND state = 'leased' AND lease_owner = $2",
@@ -248,6 +272,7 @@ impl Store {
             &mut transaction,
             Some(claimed.event_id),
             "publisher",
+            claimed.subject().as_deref(),
             reason_code,
             reason,
             &payload,
@@ -258,20 +283,24 @@ impl Store {
         Ok(())
     }
 
+    /// The shared receipt ledger. Every lane walks this one transaction: lock the
+    /// existing receipt, verify the pointed record, insert exactly once.
     pub async fn record_receipt(
         &self,
-        event: &BoatReadyEvent,
+        event: &CraneEvent,
         stream_sequence: u64,
         delivery_count: i64,
     ) -> Result<RecordedReceipt> {
+        let lane = event.lane();
+        let consumer_name = lane_consumer_name(&lane);
         let mut transaction = self.pool.begin().await?;
         let existing = sqlx::query(
             "SELECT integrity_sha256, aggregate_id, room, processed_at, stream_sequence
-             FROM boat_ready_receipts
+             FROM crane_receipts
              WHERE consumer_name = $1 AND event_id = $2
              FOR UPDATE",
         )
-        .bind(CONSUMER_NAME)
+        .bind(consumer_name)
         .bind(event.event_id)
         .fetch_optional(&mut *transaction)
         .await?;
@@ -311,23 +340,34 @@ impl Store {
         let room: String = memory.try_get("room")?;
         let memory_type: String = memory.try_get("type")?;
         let body: String = memory.try_get("body")?;
-        if memory_type != "paper-boat" || room != event.room {
-            bail!("record_mismatch: pointer does not identify the declared paper-boat room");
-        }
-        if body_sha256(&body) != event.integrity_sha256 {
-            bail!("integrity_mismatch: pointed paper-boat body digest differs");
+        match lane {
+            Lane::BoatReady => {
+                if memory_type != "paper-boat" || room != event.room {
+                    bail!(
+                        "record_mismatch: pointer does not identify the declared paper-boat room"
+                    );
+                }
+                if body_sha256(&body) != event.integrity_sha256 {
+                    bail!("integrity_mismatch: pointed paper-boat body digest differs");
+                }
+            }
+            Lane::Addressed { .. } => {
+                if room != event.room {
+                    bail!("record_mismatch: pointer does not identify the declared room");
+                }
+            }
         }
 
         let inserted = sqlx::query(
-            "INSERT INTO boat_ready_receipts (
+            "INSERT INTO crane_receipts (
                consumer_name, event_id, event_kind, aggregate_id, room,
                integrity_sha256, stream_sequence, first_delivery_count
              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING processed_at",
         )
-        .bind(CONSUMER_NAME)
+        .bind(consumer_name)
         .bind(event.event_id)
-        .bind(EVENT_KIND)
+        .bind(&event.event_kind)
         .bind(event.record_id_i64())
         .bind(&event.room)
         .bind(&event.integrity_sha256)
@@ -351,6 +391,7 @@ impl Store {
     pub async fn insert_consumer_dead_letter(
         &self,
         event_id: Option<Uuid>,
+        subject: &str,
         reason_code: &str,
         reason: &str,
         payload: &[u8],
@@ -361,6 +402,7 @@ impl Store {
             &mut transaction,
             event_id,
             "consumer",
+            Some(subject),
             reason_code,
             reason,
             payload,
@@ -371,29 +413,33 @@ impl Store {
         Ok(())
     }
 
+    /// `subject` is the NATS subject the failure was observed on, and is absent when
+    /// an outbox row was refused before it could ever be routed to a lane.
+    #[allow(clippy::too_many_arguments)]
     async fn insert_dead_letter_tx(
         &self,
         transaction: &mut Transaction<'_, Postgres>,
         event_id: Option<Uuid>,
         source: &str,
+        subject: Option<&str>,
         reason_code: &str,
         reason: &str,
         payload: &[u8],
         delivery_count: Option<i64>,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO boat_ready_dead_letters (
+            "INSERT INTO crane_dead_letters (
                event_id, source, subject, reason_code, reason,
                payload_sha256, payload_bytes, delivery_count
              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (source, event_id, payload_sha256, reason_code)
              DO UPDATE SET observed_at = NOW(), delivery_count = GREATEST(
-               boat_ready_dead_letters.delivery_count, EXCLUDED.delivery_count
+               crane_dead_letters.delivery_count, EXCLUDED.delivery_count
              )",
         )
         .bind(event_id)
         .bind(source)
-        .bind(SUBJECT)
+        .bind(subject)
         .bind(reason_code)
         .bind(bounded_reason(reason))
         .bind(crate::model::payload_sha256(payload))
@@ -412,9 +458,9 @@ impl Store {
                count(*) FILTER (WHERE state = 'pending') AS pending,
                count(*) FILTER (WHERE state = 'leased') AS leased,
                count(*) FILTER (WHERE state = 'published') AS published,
-               (SELECT count(*) FROM boat_ready_dead_letters) AS dead_letters,
-               (SELECT count(*) FROM boat_ready_receipts) AS receipts
-             FROM boat_ready_outbox",
+               (SELECT count(*) FROM crane_dead_letters) AS dead_letters,
+               (SELECT count(*) FROM crane_receipts) AS receipts
+             FROM crane_outbox",
         )
         .fetch_one(&self.pool)
         .await?;
@@ -426,6 +472,15 @@ impl Store {
             dead_letters: row.try_get("dead_letters")?,
             receipts: row.try_get("receipts")?,
         })
+    }
+}
+
+/// Each lane keeps its own durable receipt writer identity, so the boat.ready
+/// receipts committed before the Crane generalization stay addressable.
+fn lane_consumer_name(lane: &Lane) -> &'static str {
+    match lane {
+        Lane::BoatReady => BOAT_READY_CONSUMER_NAME,
+        Lane::Addressed { .. } => CRANE_CONSUMER_NAME,
     }
 }
 
@@ -463,5 +518,45 @@ mod tests {
     #[test]
     fn durable_error_text_is_bounded() {
         assert_eq!(bounded_reason(&"x".repeat(700)).len(), 512);
+    }
+
+    #[test]
+    fn claimed_columns_name_the_lane_postgresql_recorded() {
+        let mut claimed = ClaimedEvent {
+            event_id: Uuid::nil(),
+            event_kind: "boat.ready".into(),
+            aggregate_id: 42,
+            room: "kintsu".into(),
+            payload: Value::Null,
+            integrity_sha256: "a".repeat(64),
+            attempts: 1,
+            recipient_kind: None,
+            recipient_key: None,
+            expires_at: None,
+        };
+        assert_eq!(claimed.lane(), Some(Lane::BoatReady));
+        assert_eq!(claimed.subject().as_deref(), Some("athanor.boat.ready"));
+        assert_eq!(
+            lane_consumer_name(&claimed.lane().unwrap()),
+            BOAT_READY_CONSUMER_NAME
+        );
+
+        claimed.event_kind = "crane.letter".into();
+        claimed.recipient_kind = Some("room".into());
+        claimed.recipient_key = Some("kodo".into());
+        assert_eq!(
+            claimed.subject().as_deref(),
+            Some("athanor.crane.room.kodo")
+        );
+        assert_eq!(
+            lane_consumer_name(&claimed.lane().unwrap()),
+            CRANE_CONSUMER_NAME
+        );
+
+        claimed.recipient_key = None;
+        assert_eq!(claimed.lane(), None, "half addressing is unroutable");
+        claimed.recipient_kind = Some("ghost".into());
+        claimed.recipient_key = Some("kodo".into());
+        assert_eq!(claimed.lane(), None, "unknown recipient kind is unroutable");
     }
 }

@@ -5,7 +5,7 @@ use std::path::{Component, Path};
 use thiserror::Error;
 
 pub const MANIFEST_FORMAT: u32 = 1;
-pub const REQUIRED_SCHEMA: u32 = 16;
+pub const REQUIRED_SCHEMA: u32 = 17;
 pub const SUPPORTED_PLATFORM: &str = "windows-x64";
 pub const POSTGRESQL_VERSION: &str = "18.4-2";
 pub const PGVECTOR_VERSION: &str = "0.8.6";

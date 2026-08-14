@@ -59,11 +59,14 @@ in the same transaction as the domain event. NATS JetStream may deliver opaque
 record IDs and wake consumers, but it never becomes memory, review state, or a
 second conversation ledger.
 
-Paper Boat sleep commits its continuity row and `boat.ready` outbox event in one
-PostgreSQL transaction. NATS carries only bounded pointer and sanitized receipt
-projections; wake reloads the complete Boat from PostgreSQL authority. Cranes,
-general Origami folds, and Pawprints beyond this implemented lane remain
-specified extensions of the same envelope rather than current release claims.
+Paper Boat sleep commits its continuity row and `boat.ready` Crane outbox event in
+one PostgreSQL transaction. NATS carries only bounded pointer and sanitized receipt
+projections; wake reloads the complete Boat from PostgreSQL authority. That lane is
+the first lane of one general Crane delivery system: a shared outbox, receipt, and
+dead-letter trio, subjects routed per lane, and optional crease, recipient, expiry,
+and lineage fields on the envelope. Origami folds, Pawprints, and room wake
+behavior on the addressed lanes remain specified extensions of the same envelope
+rather than current release claims.
 
 The complete accepted target, including dynamic model and room execution,
 Prolog/Datalog derivations, Cingulate enforcement, and optional Lean-backed

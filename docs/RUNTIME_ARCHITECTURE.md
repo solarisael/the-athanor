@@ -23,7 +23,11 @@ The current `0.9.6` source has:
 - authenticated Host WebSocket snapshots, typed deltas, resync, persistence,
   idempotency, and restart recovery;
 - Host-owned Recall Policy shared by OMP and Godot;
-- transaction-coupled Paper Boat sleep/wake and `boat.ready` outbox rows;
+- transaction-coupled Paper Boat sleep/wake and `boat.ready` Crane outbox rows;
+- a general Crane delivery system whose first lane is `boat.ready`: one
+  `crane_outbox`/`crane_receipts`/`crane_dead_letters` trio, lane-routed subjects,
+  per-lane consumer dispatch, optional crease/recipient/expiry/lineage envelope
+  fields, and consume-time expiry refusal;
 - bounded NATS JetStream pointer delivery and sanitized receipt replay;
 - functional Godot Recall Policy and Paper Boat receipt screens;
 - native Windows lifecycle and installer.
@@ -38,7 +42,8 @@ The following surfaces described later remain specified or planned, not current:
 - proof-guided repair or offline training-data production;
 - companion-authored models and marketplace artifacts;
 - the in-world Godot renderer and GPU-particle constellation;
-- Origami/NATS delivery lanes beyond the single Paper Boat path.
+- Origami folds, Pawprints, lifecycle states, and room wake behavior on the Crane
+  lanes beyond `boat.ready` pointer delivery and its receipt ledger.
 
 The current GIGA queue and all durable receipts remain PostgreSQL-owned. NATS is
 delivery-only; Godot is presentation-only. Neither may be described as memory or

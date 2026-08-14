@@ -20,6 +20,42 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Changed
+
+- Widened the Paper Boat delivery lane into the general Crane delivery system in
+  place (schema 17). `boat_ready_outbox`, `boat_ready_receipts`, and
+  `boat_ready_dead_letters` are renamed to `crane_outbox`, `crane_receipts`, and
+  `crane_dead_letters` with their rows, receipts, and dead letters preserved;
+  migration `0017_crane_delivery.sql` renames rather than recreates. `boat.ready`
+  is now the first lane of that system and is unchanged where it counts: same
+  event IDs, same `boat.ready:memory:<id>` idempotency keys, same seven-key
+  pointer envelope, same `athanor.boat.ready` subject, same receipt projection to
+  the Host. Existing boat rows are creased `boat.ready.v1`.
+- Generalized the relay and consumer: the outbox claim no longer filters on one
+  event kind, publication routes by lane (`boat.ready` keeps
+  `athanor.boat.ready`; addressed Cranes use
+  `athanor.crane.<recipient_kind>.<recipient_key>`), and the consumer dispatches
+  by exact subject to a per-lane parser before the shared PostgreSQL receipt
+  ledger. PostgreSQL stays authoritative and NATS stays delivery-only.
+- Unified client typography under one face resolved from the operating system
+  (`SystemFont`, Segoe UI on the reference workstation) with grayscale
+  antialiasing, light hinting, and an embolden compensation for un-gamma'd
+  dark-theme blending. Removed the bundled Atkinson Hyperlegible Next, Cinzel
+  Decorative, and JetBrains Mono faces. Enforced two floors: no text below
+  14px and no light-on-dark text color below 0.7 brightness; lifted the muted
+  chrome tier to 0.78. Standing rule in project lesson 375 and `AGENTS.md`.
+
+### Added
+
+- Added optional Crane envelope fields — `crease_pattern`, `recipient_kind`,
+  `recipient_key`, `expires_at`, `parent_intent_id`, `correlation_id` — enforced
+  in both PostgreSQL and the strict `CraneEvent` parser, with column and payload
+  agreement required. The `boat.ready` lane still refuses every one of them.
+- Added consume-time expiry: a Crane whose `expires_at` has passed is
+  dead-lettered as `expired` before the receipt ledger, so it is never applied. A
+  Crane delivered on another recipient's subject is dead-lettered as
+  `recipient_mismatch`.
+
 ## [0.9.6.1] - 2026-08-14
 
 ### Fixed

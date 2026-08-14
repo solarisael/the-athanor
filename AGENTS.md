@@ -50,11 +50,16 @@ Record new lessons into the matching scope with the `remember` organ
 
 ## Typography (standing, 2026-08-14 — project lesson 375)
 
-One face: the **system font** (Godot `SystemFont`, `["Segoe UI", "sans-serif"]`)
-for everything. The theme's `default_font` is the single source; no per-style
-`fonts/font` overrides; no bundled faces without Sol's explicit say-so.
-Rendering: grayscale antialiasing, **light** hinting (full hinting produces
-crushed small glyphs), auto subpixel positioning.
-Two floors are law: no `font_size` below **13px**; no light-on-dark
-`font_color` below **0.7** brightness (dark-on-light chip text is exempt).
-Hierarchy comes from size and color above the floors, never face-switching.
+One face: **Atkinson Hyperlegible Next as an MSDF FontFile**
+(`multichannel_signed_distance_field=true`, `hinting=0`) wrapped in a
+`FontVariation` with `variation_embolden = 0.35` — the embolden compensates
+Godot's un-gamma'd dark-theme blending and was the decisive lever. The theme's
+`default_font` is the single source; no per-style `fonts/font` overrides; no
+additional faces without Sol's explicit say-so.
+Two floors are law: no `font_size` below **14px**; no light-on-dark
+`font_color` below **0.7** brightness (muted tier is 0.78; dark-on-light chip
+text exempt). Hierarchy comes from size and color, never face-switching.
+Rendering law: any surface showing the UI (including viewport-textured 3D
+quads) must map **1:1 texels to pixels at rest** — orthographic camera sized
+to the quad, nearest filtering. Depth and focus belong to motion, never to a
+resting frame.

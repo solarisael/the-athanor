@@ -1,0 +1,64 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="FontFile" path="res://assets/fonts/AtkinsonHyperlegibleNext-Variable.woff2" id="1_msdf"]
+
+[sub_resource type="FontVariation" id="Font_3d"]
+base_font = ExtResource("1_msdf")
+variation_embolden = 0.35
+
+[sub_resource type="Environment" id="Env_dark"]
+background_mode = 1
+background_color = Color(0.0073513, 0.00770492, 0.01112268, 1)
+ambient_light_source = 2
+ambient_light_color = Color(1, 1, 1, 1)
+ambient_light_energy = 1.0
+
+[node name="TextLab3D" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env_dark")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1.6)
+current = true
+fov = 50.0
+
+[node name="Title" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.42, 0)
+text = "Onde paramos"
+font = SubResource("Font_3d")
+font_size = 76
+pixel_size = 0.0025
+modulate = Color(0.87692922, 0.85448235, 0.81821482, 1)
+
+[node name="Body" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.22, 0)
+text = "Room, spirit e perfil efetivo ficam visíveis sem abrir configurações."
+font = SubResource("Font_3d")
+font_size = 36
+pixel_size = 0.0025
+modulate = Color(0.78, 0.7625, 0.735, 1)
+
+[node name="Chrome" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+text = "NO AUTHORITY · THIS PANEL SHOWS ONLY THE SANITIZED ATHANOR HOST RECEIPT"
+font = SubResource("Font_3d")
+font_size = 28
+pixel_size = 0.0025
+modulate = Color(0.78, 0.7625, 0.735, 1)
+
+[node name="Hash" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.12, 0)
+text = "SHA256 b181f485c6bbabd2ff07ca12e8f4a600efea0ad76756762b5c3831f9e376c93a"
+font = SubResource("Font_3d")
+font_size = 28
+pixel_size = 0.0025
+modulate = Color(0.70042545, 0.67890535, 0.64412206, 1)
+
+[node name="Tilted" type="Label3D" parent="."]
+transform = Transform3D(0.96, 0, -0.28, 0.05, 0.98, 0.17, 0.27, -0.18, 0.94, 0, -0.32, 0)
+text = "texto vivo em profundidade — o Athanor respira em três dimensões"
+font = SubResource("Font_3d")
+font_size = 40
+pixel_size = 0.0025
+modulate = Color(0.76193195, 0.64497094, 0.44939537, 1)

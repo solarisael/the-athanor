@@ -4,7 +4,7 @@
 // durability all belong to Rust.
 
 import { OMP_SESSION_ID } from "./constants.ts";
-import { hostCommand, sendHostCommand, type HostBinding } from "./host.ts";
+import { hostCommand, hostSessionIdentity, sendHostCommand, type HostBinding } from "./host.ts";
 import { conversationText } from "./text.ts";
 
 const CONVERSATION_LOG = "athanor.shell.conversation_log";
@@ -54,7 +54,7 @@ function visibleMessages(messages: unknown) {
 }
 
 function conversationSessionId(ctx: any): string {
-  return String(ctx?.sessionID || ctx?.sessionId || OMP_SESSION_ID);
+  return hostSessionIdentity(ctx, OMP_SESSION_ID);
 }
 
 export async function logConversationWindow(

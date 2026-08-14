@@ -580,7 +580,7 @@ export default function solarisaelHouseProof(pi) {
         timestamp,
       });
     }
-    const wakeKey = `${room}:${ctx.sessionID || ctx.cwd || effectiveRoomDir}`;
+    const wakeKey = `${room}:${hostSession}`;
     const freshWake = conversation?.fresh === true && !wokenSessions.has(wakeKey);
     if (freshWake) wokenSessions.add(wakeKey);
     if (freshWake && !existingTypes.has("solarisael-wake-context")) {
@@ -661,7 +661,7 @@ export default function solarisaelHouseProof(pi) {
       } catch (error) {
         await recordAutomaticContextTelemetry({
           effectiveRoomDir,
-          sessionId: ctx?.sessionID || ctx?.sessionId,
+          sessionId: hostSession,
           room,
           prompt,
           route: null,
@@ -769,7 +769,7 @@ export default function solarisaelHouseProof(pi) {
             if (recallMessage) additions.push(recallMessage);
             await recordRecallTelemetry({
               effectiveRoomDir,
-              sessionId: ctx?.sessionID || ctx?.sessionId,
+              sessionId: hostSession,
               room,
               prompt,
               route: queryRoute,
@@ -791,7 +791,7 @@ export default function solarisaelHouseProof(pi) {
             )).recallPolicy;
             await recordAutomaticContextTelemetry({
               effectiveRoomDir,
-              sessionId: ctx?.sessionID || ctx?.sessionId,
+              sessionId: hostSession,
               room,
               prompt,
               route: queryRoute,
@@ -810,7 +810,7 @@ export default function solarisaelHouseProof(pi) {
         } else {
           await recordRecallTelemetry({
             effectiveRoomDir,
-            sessionId: ctx?.sessionID || ctx?.sessionId,
+            sessionId: hostSession,
             room,
             prompt,
             route: queryRoute,
@@ -828,7 +828,7 @@ export default function solarisaelHouseProof(pi) {
         console.warn(`[athanor] Recall Policy Host degraded: ${error instanceof Error ? error.message : String(error)}`);
         await recordAutomaticContextTelemetry({
           effectiveRoomDir,
-          sessionId: ctx?.sessionID || ctx?.sessionId,
+          sessionId: hostSession,
           room,
           prompt,
           route: queryRoute,
@@ -869,7 +869,7 @@ export default function solarisaelHouseProof(pi) {
 
   pi.on("session_compact", async (event, ctx) => {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-    const hostSession = String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir);
+    const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
     const memoSessionKey = `${room}:${hostSession}`;
     const turnMemo = turnAdditionMemo(memoSessionKey, effectiveRoomDir);
     removeMemoCustomType(turnMemo, "solarisael-recall-context");
@@ -895,7 +895,7 @@ export default function solarisaelHouseProof(pi) {
     const binding = {
       room,
       spirit,
-      session: String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir),
+      session: hostSessionIdentity(ctx, effectiveRoomDir),
     };
     cacheKittenTaskRoom(room, toolCallId, event.input, binding);
     const records = await normalizeQuestMemories(
@@ -924,7 +924,7 @@ export default function solarisaelHouseProof(pi) {
     const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx?.cwd || process.cwd());
     try {
       const capture = await logConversationWindow(
-        { room, spirit, session: String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir) },
+        { room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) },
         effectiveRoomDir,
         ctx,
         event?.messages || [],

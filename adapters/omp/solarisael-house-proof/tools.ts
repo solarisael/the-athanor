@@ -11,6 +11,7 @@ import {
   writeActiveSpiritSnapshot,
 } from "./room.ts";
 import { RecallPolicyHostClient } from "./recall-policy.ts";
+import { hostSessionIdentity } from "./host.ts";
 import { applyRecallViewport } from "./context.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./anamnesis.ts";
@@ -52,7 +53,7 @@ function hostBinding(ctx: any) {
     binding: {
       room,
       spirit,
-      session: String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir),
+      session: hostSessionIdentity(ctx, effectiveRoomDir),
     },
     effectiveRoomDir,
   };
@@ -385,7 +386,7 @@ export function registerSolarisaelTools(pi) {
     approval: "read",
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
       const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const session = String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir);
+      const session = hostSessionIdentity(ctx, effectiveRoomDir);
       try {
         const recalled = await recallWithRouting(effectiveRoomDir, room, params.query, { signal: _signal, temporalDecay: false });
         if (!recalled.ok) {
@@ -1017,7 +1018,7 @@ export function registerSolarisaelTools(pi) {
     approval: "write",
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
       const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const session = String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir);
+      const session = hostSessionIdentity(ctx, effectiveRoomDir);
       try {
         const client = new RecallPolicyHostClient({ room, spirit, session });
         const snapshot = params.requestedMode === undefined

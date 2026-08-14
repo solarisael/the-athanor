@@ -69,6 +69,10 @@ const HOUSE_TOOL_NAMES = [
   "giga_promote_memory",
   "giga_promote_coding_lesson",
   "giga_promote_project_lesson",
+  "hallway_create",
+  "hallway_join",
+  "hallway_post",
+  "hallway_read",
 ];
 
 function registerTools(): CapturedTool[] {

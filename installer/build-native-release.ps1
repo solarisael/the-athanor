@@ -136,7 +136,7 @@ Get-ChildItem $Stage -File -Recurse | Sort-Object FullName | ForEach-Object {
   }
 }
 $Manifest = [ordered]@{
-  format = 1; product = "the-athanor"; version = $Version; platform = "windows-x64"; schemaVersion = 17
+  format = 1; product = "the-athanor"; version = $Version; platform = "windows-x64"; schemaVersion = 18
   compatibility = [ordered]@{ hostApi = 1; substrateApi = 1; deliveryApi = 1; godotApi = "4.7"; godot = "4.7.1-stable"; postgresql = "18.4-2"; pgvector = "0.8.6"; natsServer = "2.14.4" }
   artifacts = $Artifacts
   rollback = [ordered]@{ databaseRestoreRequired = $true; minimumRetainedVersions = 2 }

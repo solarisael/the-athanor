@@ -1431,4 +1431,111 @@ export function registerSolarisaelTools(pi) {
       return executeGigaPromotion("project_lesson", params, signal, ctx);
     },
   });
+
+  registerHouseTool(pi, {
+    name: "hallway_create",
+    label: "Athanor Hallway Create",
+    description: "Create an operator-visible shared Hallway with explicit room access. The current authenticated room, spirit, and session become the first presence. Hallway messages never auto-wake a spirit.",
+    parameters: z.object({
+      hallway: z.string().describe("Lowercase kebab-case Hallway key."),
+      allowed_rooms: z.array(z.string()).describe("One to 32 rooms allowed to join. The current room is added automatically."),
+      idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
+    }),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      const allowedRooms = [...new Set([binding.room, ...params.allowed_rooms])].sort();
+      const result = await requestRustDomain("hallway_create", {
+        hallway: params.hallway,
+        ...binding,
+        allowedRooms,
+        idempotencyKey: params.idempotency_key || String(toolCallId),
+      }, signal, true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "hallway_join",
+    label: "Athanor Hallway Join",
+    description: "Join the current authenticated room, spirit, and session to an allowed Hallway. Sessions are independent presences; multiple sessions may embody the same spirit.",
+    parameters: z.object({
+      hallway: z.string().describe("Hallway key."),
+      idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
+    }),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      const result = await requestRustDomain("hallway_join", {
+        hallway: params.hallway,
+        ...binding,
+        idempotencyKey: params.idempotency_key || String(toolCallId),
+      }, signal, true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "hallway_post",
+    label: "Athanor Hallway Post",
+    description: "Append one visible message from the current authenticated presence to a Hallway. Peer messages are requests, not commands, and do not auto-wake recipients.",
+    parameters: z.object({
+      hallway: z.string().describe("Hallway key."),
+      body: z.string().describe("Non-empty substantive message, at most 32768 UTF-8 bytes."),
+      reply_to: z.number().optional().describe("Positive message id being answered."),
+      idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
+    }),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      const result = await requestRustDomain("hallway_post", {
+        hallway: params.hallway,
+        ...binding,
+        body: params.body,
+        replyTo: params.reply_to,
+        idempotencyKey: params.idempotency_key || String(toolCallId),
+      }, signal, true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "hallway_read",
+    label: "Athanor Hallway Read",
+    description: "Read ordered Hallway messages for the current authenticated presence. Uses that session's own cursor unless after is supplied; another instance of the same spirit keeps an independent cursor.",
+    parameters: z.object({
+      hallway: z.string().describe("Hallway key."),
+      after: z.number().optional().describe("Non-negative message id; reads after it instead of the presence cursor."),
+      limit: z.number().optional().describe("Maximum messages to return, 1-200; default 50."),
+      advance_cursor: z.boolean().optional().describe("Advance this presence's cursor through returned messages."),
+    }),
+    approval: "read",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      const result = await requestRustDomain("hallway_read", {
+        hallway: params.hallway,
+        ...binding,
+        after: params.after,
+        limit: params.limit ?? 50,
+        advanceCursor: params.advance_cursor ?? false,
+      }, signal, params.advance_cursor === true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
 }

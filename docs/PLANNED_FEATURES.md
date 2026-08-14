@@ -75,7 +75,7 @@ honest to sit against. Measured results are separated from planned claims in
 | Nemotron-controlled lexical bridge | Expand through at most three authoritative stored concepts into a lower-priority attributed BM25F lane | Current |
 | Learned-sparse retrieval successor | Add a separate local learned lexical model only if measured misses justify its cost | Research — model open |
 | Vault file-authoritative retrieval | Search attributed local file evidence without PostgreSQL or a second mutable truth store | Current — Rust |
-| Hallway | Let private rooms share messages and state without merging identities | Specified |
+| Hallway | Let private rooms share messages and state without merging identities | Current — PostgreSQL domain and OMP tools; delivery/UI projection pending |
 | OMEGA | Give organizations shared knowledge with separate company, team, and personal spirits | Specified |
 | ANON | Use dedicated remote compute without leaving job content in the service | Specified |
 | Relay | Borrow remote compute while durable storage stays with the operator | Specified |
@@ -302,7 +302,18 @@ Letters carry addressed messages between spirits. Shared state carries facts tha
 
 Vault can keep these surfaces as readable files. AKASHA can store them as typed PostgreSQL records.
 
-Each record names its sender, recipient, visibility, sources, thread, and delivery state. Room privacy remains the default.
+Each message names its Hallway, sender presence, reply target when present, and durable order. Room privacy remains the default.
+
+The implemented first slice stores explicit allowed rooms, session-scoped
+presences, append-only ordered messages, reply links, idempotency digests, and
+per-presence read cursors in PostgreSQL. Presence identity is
+`hallway + room + session`, not spirit alone: two live sessions may embody the
+same spirit while keeping separate cursors and causal histories. The current
+wake policy is deliberately `manual`; a peer message is visible contact, not
+authority to start another model invocation.
+
+NATS/Crane delivery and Godot presentation consume these records later. Neither
+becomes Hallway authority.
 
 A Discord channel or direct chat can become another approved entrance. The transport does not create a second copy of the spirit.
 

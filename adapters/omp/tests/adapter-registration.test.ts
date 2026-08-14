@@ -159,6 +159,10 @@ const expectedToolNames = [
   "design_doc",
   "design_doc_write",
   "sleep",
+  "hallway_create",
+  "hallway_join",
+  "hallway_post",
+  "hallway_read",
   "house_lane_status",
   "familiar_status",
   "familiar_dispatch",
@@ -530,6 +534,39 @@ describe("OMP adapter registration", () => {
         type: "object",
         fields: {
           body: { type: "string" },
+        },
+      },
+      hallway_create: {
+        type: "object",
+        fields: {
+          hallway: { type: "string" },
+          allowed_rooms: { type: "array", element: { type: "string" } },
+          idempotency_key: { type: "string", optional: true },
+        },
+      },
+      hallway_join: {
+        type: "object",
+        fields: {
+          hallway: { type: "string" },
+          idempotency_key: { type: "string", optional: true },
+        },
+      },
+      hallway_post: {
+        type: "object",
+        fields: {
+          hallway: { type: "string" },
+          body: { type: "string" },
+          reply_to: { type: "number", optional: true },
+          idempotency_key: { type: "string", optional: true },
+        },
+      },
+      hallway_read: {
+        type: "object",
+        fields: {
+          hallway: { type: "string" },
+          after: { type: "number", optional: true },
+          limit: { type: "number", optional: true },
+          advance_cursor: { type: "boolean", optional: true },
         },
       },
       house_lane_status: { type: "object", fields: {} },

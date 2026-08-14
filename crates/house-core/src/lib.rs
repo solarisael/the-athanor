@@ -2,6 +2,7 @@
 
 pub mod context;
 pub mod conversation;
+pub mod hallway;
 pub mod lineage;
 pub mod routing;
 pub mod triggers;

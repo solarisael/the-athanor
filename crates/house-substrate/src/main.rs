@@ -8,9 +8,10 @@ use athanor_substrate::{
     canon_write, cluster_maintenance, design_document_query, design_document_write, entity_resolve,
     giga_candidate_list, giga_conversation_ingest, giga_event_claim, giga_event_finish,
     giga_event_ingest, giga_event_replay, giga_health, giga_promote, giga_queue_maintenance,
-    giga_review, giga_tool_promote, giga_tool_review, lesson_context, lesson_delete, lesson_query,
-    lesson_update, paper_boat_sleep, paper_boat_wake, recall, refresh_semantic_vocabulary,
-    remember, spawn_giga_worker, substrate_health, substrate_health_with_config,
+    giga_review, giga_tool_promote, giga_tool_review, hallway_create, hallway_join, hallway_post,
+    hallway_read, lesson_context, lesson_delete, lesson_query, lesson_update, paper_boat_sleep,
+    paper_boat_wake, recall, refresh_semantic_vocabulary, remember, spawn_giga_worker,
+    substrate_health, substrate_health_with_config,
 };
 use chrono::NaiveDate;
 use house_core::{
@@ -21,6 +22,7 @@ use house_core::{
     GigaEventFinishRequest, GigaEventReplayRequest, GigaPromotionRequest,
     GigaQueueMaintenanceRequest, GigaReviewAction, PaperBoatSleepRequest, PaperBoatWakeRequest,
     RecallRequest as DomainRecallRequest, RememberRequest as DomainRememberRequest,
+    hallway::{HallwayCreateRequest, HallwayJoinRequest, HallwayPostRequest, HallwayReadRequest},
 };
 use house_protocol::{
     GigaCandidateListRequest, GigaConversationIngestParams, GigaEventClaimResult,
@@ -46,6 +48,10 @@ enum ProtocolRequest {
     Remember(RememberRequest),
     PaperBoatSleep(PaperBoatSleepRequest),
     PaperBoatWake(PaperBoatWakeRequest),
+    HallwayCreate(HallwayCreateRequest),
+    HallwayJoin(HallwayJoinRequest),
+    HallwayPost(HallwayPostRequest),
+    HallwayRead(HallwayReadRequest),
     Recall(RecallParams),
     VaultRecall(VaultRecallParams),
     Anamnesis(AnamnesisParams),
@@ -273,6 +279,18 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
         "paper_boat_wake" => envelope
             .paper_boat_wake_request()
             .map(ProtocolRequest::PaperBoatWake),
+        "hallway_create" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::HallwayCreate)
+            .map_err(|error| invalid_params(error.to_string())),
+        "hallway_join" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::HallwayJoin)
+            .map_err(|error| invalid_params(error.to_string())),
+        "hallway_post" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::HallwayPost)
+            .map_err(|error| invalid_params(error.to_string())),
+        "hallway_read" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::HallwayRead)
+            .map_err(|error| invalid_params(error.to_string())),
         "recall" => envelope
             .recall_request()
             .map(recall_service_request)
@@ -626,6 +644,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::Remember(_) => "remember",
                     ProtocolRequest::PaperBoatSleep(_) => "paper_boat_sleep",
                     ProtocolRequest::PaperBoatWake(_) => "paper_boat_wake",
+                    ProtocolRequest::HallwayCreate(_) => "hallway_create",
+                    ProtocolRequest::HallwayJoin(_) => "hallway_join",
+                    ProtocolRequest::HallwayPost(_) => "hallway_post",
+                    ProtocolRequest::HallwayRead(_) => "hallway_read",
                     ProtocolRequest::Recall(_) => "recall",
                     ProtocolRequest::VaultRecall(_) => "vault_recall",
                     ProtocolRequest::Anamnesis(_) => "anamnesis",
@@ -658,6 +680,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::Remember(request) => request.validate(),
                     ProtocolRequest::PaperBoatSleep(_) | ProtocolRequest::PaperBoatWake(_) => {
                         Ok(())
+                    }
+                    ProtocolRequest::HallwayCreate(request) => {
+                        request.validate().map_err(AppError::Invalid)
+                    }
+                    ProtocolRequest::HallwayJoin(request) => {
+                        request.validate().map_err(AppError::Invalid)
+                    }
+                    ProtocolRequest::HallwayPost(request) => {
+                        request.validate().map_err(AppError::Invalid)
+                    }
+                    ProtocolRequest::HallwayRead(request) => {
+                        request.validate().map_err(AppError::Invalid)
                     }
                     ProtocolRequest::Recall(request) => request.validate(),
                     ProtocolRequest::VaultRecall(_) => Ok(()),
@@ -783,6 +817,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 id,
                                                 PaperBoatWakeResult::from(receipt),
                                             )?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::HallwayCreate(request) => {
+                                        match hallway_create(pool, request).await {
+                                            Ok(receipt) => success_json(id, receipt)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::HallwayJoin(request) => {
+                                        match hallway_join(pool, request).await {
+                                            Ok(receipt) => success_json(id, receipt)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::HallwayPost(request) => {
+                                        match hallway_post(pool, request).await {
+                                            Ok(receipt) => success_json(id, receipt)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::HallwayRead(request) => {
+                                        match hallway_read(pool, request).await {
+                                            Ok(receipt) => success_json(id, receipt)?,
                                             Err(error) => app_error(id, operation, error),
                                         }
                                     }
@@ -1059,6 +1117,29 @@ mod tests {
             r#"{"protocol":1,"id":"r2","method":"recall","params":{"room":"room","query":"needle"}}"#,
         );
         assert!(matches!(valid.unwrap(), ProtocolRequest::Recall(_)));
+    }
+
+    #[test]
+    fn hallway_protocol_keeps_session_identity_explicit_and_non_singleton() {
+        let (_, first) = decode_line(
+            r#"{"protocol":1,"id":"h1","method":"hallway_join","params":{"hallway":"shared-hallway","room":"kintsu","spirit":"Kintsu","session":"session-one","idempotencyKey":"join-one"}}"#,
+        );
+        let (_, second) = decode_line(
+            r#"{"protocol":1,"id":"h2","method":"hallway_join","params":{"hallway":"shared-hallway","room":"kintsu","spirit":"Kintsu","session":"session-two","idempotencyKey":"join-two"}}"#,
+        );
+        let ProtocolRequest::HallwayJoin(first) = first.unwrap() else {
+            panic!("expected first Hallway join");
+        };
+        let ProtocolRequest::HallwayJoin(second) = second.unwrap() else {
+            panic!("expected second Hallway join");
+        };
+        assert_eq!(first.spirit, second.spirit);
+        assert_ne!(first.session, second.session);
+
+        let (_, invalid) = decode_line(
+            r#"{"protocol":1,"id":"h3","method":"hallway_read","params":{"hallway":"shared-hallway","room":"kintsu","spirit":"Kintsu","session":"session-one","unexpected":true}}"#,
+        );
+        assert!(matches!(invalid, Err(ProtocolError::InvalidParams(_))));
     }
 
     #[test]

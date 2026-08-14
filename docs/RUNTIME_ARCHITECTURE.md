@@ -22,6 +22,10 @@ The current `0.9.6` source has:
 - GIGA Hippocampus Stage 1 and the Striatum coding/project slice;
 - authenticated Host WebSocket snapshots, typed deltas, resync, persistence,
   idempotency, and restart recovery;
+- PostgreSQL-authoritative Hallway channels with explicit allowed rooms,
+  multi-session spirit presences, ordered idempotent messages, and per-presence
+  cursors exposed through OMP tools; peer contact is operator-visible and
+  manual-wake;
 - Host-owned Recall Policy shared by OMP and Godot;
 - transaction-coupled Paper Boat sleep/wake and `boat.ready` Crane outbox rows;
 - a general Crane delivery system whose first lane is `boat.ready`: one

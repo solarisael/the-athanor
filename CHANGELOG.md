@@ -55,6 +55,11 @@ the exact implementation record.
   dead-lettered as `expired` before the receipt ledger, so it is never applied. A
   Crane delivered on another recipient's subject is dead-lettered as
   `recipient_mismatch`.
+- Added the PostgreSQL-authoritative Hallway domain and OMP tools for creating
+  explicitly scoped shared channels, joining authenticated session presences,
+  appending idempotent ordered messages, and reading with per-session cursors.
+  Multiple sessions may embody the same spirit without sharing a singleton
+  session or cursor. Hallway contact remains operator-visible and manual-wake.
 
 ## [0.9.6.1] - 2026-08-14
 

@@ -44,12 +44,14 @@ the exact implementation record.
   `clients/godot` project no longer exist.
 - Disabled VSync for every Godot game window. Frame rate remains uncapped unless
   an explicit measurement or operator-selected limiter is applied.
-- Replaced the flat global screen strips with reusable nested reliquary
-  navigation. Back restores trigger focus, Escape returns one pane before
-  closing drawers, inactive panes are hidden, and settings uses the same stack.
-- Restored the desktop right context column, collapsed the bottom dock to a
-  42 px status rail, and made context/navigation exclusive overlay drawers
-  below their docked breakpoints.
+- Restored the archive’s flat grouped S01–S14 navigation rail instead of adding
+  another hierarchy. Reusable nested pane technology remains where the reference
+  calls for it: Preferences and its Appearance, Accessibility, and Connection
+  subpanes, with focus restoration and Escape grammar.
+- Matched the standalone archive shell geometry: 15.25 rem left rail, 20 rem
+  right contextual panel, center instrument, identity/room stack in the left
+  rail, contextual evidence cards on the right, and the compact bottom bar.
+  Context/navigation become exclusive drawers only below their docked widths.
 - Recovered the exact S01–S14/R01 inventory from `The Athanor Design Restart.zip`.
   Screen headers now use only the archive’s enabled `OrnamentFrame` rule:
   `corners={false}`, `sigils={false}`, exact divider flourish, bar, and mirror.

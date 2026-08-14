@@ -19,9 +19,9 @@ func _run_contracts() -> void:
 	var scrim := shell.get_node("ApplicationShell/Workspace/DrawerScrim") as Button
 	var center := shell.get_node("ApplicationShell/Workspace/CenterFrame") as MarginContainer
 	var status := shell.get_node("ApplicationShell/StatusRail") as PanelContainer
-	var menu_toggle := shell.get_node("ApplicationShell/TopBar/Margin/Row/MenuToggle") as Button
+	var menu_toggle := shell.get_node("ApplicationShell/StatusRail/Margin/Row/Menu") as Button
 	var status_settings := shell.get_node("ApplicationShell/StatusRail/Margin/Row/Settings") as Button
-	var context_toggle := shell.get_node("ApplicationShell/TopBar/Margin/Row/ContextToggle") as Button
+	var context_toggle := shell.get_node("ApplicationShell/StatusRail/Margin/Row/Context") as Button
 
 	_check(left.current_pane() == &"Root", "left reliquary starts at root")
 	_check(right.current_pane() == &"Root", "right reliquary starts at context root")
@@ -48,27 +48,25 @@ func _run_contracts() -> void:
 	var flourish := header_rule.get_node("FlourishStart") as TextureRect
 	_check(flourish.texture.resource_path.ends_with("reliquary-divider-flourish.svg"), "screen header uses the exact archived OrnamentFrame flourish")
 
-	var conversation_button := left.get_node("Margin/Column/PaneHost/Root/Conversation") as Button
-	conversation_button.grab_focus()
-	conversation_button.pressed.emit()
+	var s01_button := left.get_node("Margin/Column/PaneHost/Root/S01") as Button
+	s01_button.pressed.emit()
 	await process_frame
-	_check(left.current_pane() == &"Conversation", "pane-target buttons enter nested panes")
-	var conversation_pane := left.get_node("Margin/Column/PaneHost/Conversation") as Control
-	var memory_pane := left.get_node("Margin/Column/PaneHost/Memory") as Control
-	_check(conversation_pane.visible and not memory_pane.visible, "inactive panes are hidden and inert")
-	(left.get_node("Margin/Column/Header/Back") as Button).pressed.emit()
-	await process_frame
-	await process_frame
-	_check(left.current_pane() == &"Root", "Back returns one reliquary level")
-	_check(root.gui_get_focus_owner() == conversation_button, "Back restores focus to the pane trigger")
+	var route_label := right.get_node("Margin/Column/PaneHost/Root/Route") as Label
+	_check(route_label.text == "S01 · CONVERSA / RETOMADA", "flat archive navigation routes S01 without adding a nested group layer")
 
 	var right_settings := right.get_node("Margin/Column/PaneHost/Root/Settings") as Button
 	right_settings.pressed.emit()
-	(right.get_node("Margin/Column/PaneHost/Settings/Appearance") as Button).pressed.emit()
 	await process_frame
-	_check(right.current_pane() == &"Appearance", "settings uses the same reusable nested stack")
+	var appearance_button := right.get_node("Margin/Column/PaneHost/Settings/Appearance") as Button
+	appearance_button.grab_focus()
+	appearance_button.pressed.emit()
+	await process_frame
+	_check(right.current_pane() == &"Appearance", "preferences uses the reusable nested stack")
 	_check(right.handle_escape(), "first Escape operation consumes one nested level")
+	await process_frame
+	await process_frame
 	_check(right.current_pane() == &"Settings", "Escape returns Appearance to Settings")
+	_check(root.gui_get_focus_owner() == appearance_button, "Back restores focus to the nested-pane trigger")
 	_check(right.handle_escape(), "second nested Escape returns Settings to Context")
 	_check(right.current_pane() == &"Root", "settings stack returns to context root")
 	_check(not right.handle_escape(), "root Escape is offered to the shell drawer owner")

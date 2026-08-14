@@ -1,4 +1,4 @@
-[gd_resource type="Theme" load_steps=25 format=3]
+[gd_resource type="Theme" load_steps=27 format=3]
 
 [ext_resource type="FontFile" path="res://assets/fonts/AtkinsonHyperlegibleNext-Variable.woff2" id="1_body"]
 [ext_resource type="FontFile" path="res://assets/fonts/CinzelDecorative-Bold.woff2" id="2_ritual"]
@@ -126,6 +126,16 @@ border_color = Color(0.76193195, 0.64497094, 0.44939537, 0.65)
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_drawer_scrim"]
 bg_color = Color(0.00149408, 0.00156714, 0.00227788, 0.72)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_left_rail"]
+bg_color = Color(0.00149408, 0.00156714, 0.00227788, 1)
+border_width_right = 1
+border_color = Color(0.76193195, 0.64497094, 0.44939537, 0.65)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_right_rail"]
+bg_color = Color(0.00149408, 0.00156714, 0.00227788, 1)
+border_width_left = 1
+border_color = Color(0.76193195, 0.64497094, 0.44939537, 0.65)
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_paper_boat"]
 bg_color = Color(0.03446452, 0.03512804, 0.04040454, 1)
@@ -412,3 +422,11 @@ AthanorRailMargin/constants/margin_right = 14
 AthanorRailMargin/constants/margin_bottom = 5
 AthanorRailRow/base_type = &"HBoxContainer"
 AthanorRailRow/constants/separation = 12
+AthanorLeftRail/base_type = &"PanelContainer"
+AthanorLeftRail/styles/panel = SubResource("StyleBox_left_rail")
+AthanorRightRail/base_type = &"PanelContainer"
+AthanorRightRail/styles/panel = SubResource("StyleBox_right_rail")
+AthanorArchiveBrand/base_type = &"Label"
+AthanorArchiveBrand/colors/font_color = Color(0.91309863, 0.89488941, 0.85149544, 1)
+AthanorArchiveBrand/fonts/font = ExtResource("1_body")
+AthanorArchiveBrand/font_sizes/font_size = 16

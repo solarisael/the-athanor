@@ -92,8 +92,6 @@ pub struct AthanorProbe {
     #[export]
     menu_toggle: NodePath,
     #[export]
-    context_toggle: NodePath,
-    #[export]
     status_context_button: NodePath,
     #[export]
     status_settings_button: NodePath,
@@ -101,10 +99,6 @@ pub struct AthanorProbe {
     status_identity: NodePath,
     #[export]
     right_route_label: NodePath,
-    #[export]
-    prototype_disclosure: NodePath,
-    #[export]
-    system_states: NodePath,
     #[export]
     recall_columns: NodePath,
     #[export]
@@ -131,13 +125,10 @@ struct Shell {
     content_viewport: Gd<Control>,
     drawer_scrim: Gd<Button>,
     menu_toggle: Gd<Button>,
-    context_toggle: Gd<Button>,
     status_context_button: Gd<Button>,
     status_settings_button: Gd<Button>,
     status_identity: Gd<Control>,
     right_route_label: Gd<Label>,
-    prototype_disclosure: Gd<Control>,
-    system_states: Gd<Control>,
     recall_columns: Gd<BoxContainer>,
     recall_state_grid: Gd<GridContainer>,
 }
@@ -156,13 +147,10 @@ impl IControl for AthanorProbe {
             content_viewport: NodePath::default(),
             drawer_scrim: NodePath::default(),
             menu_toggle: NodePath::default(),
-            context_toggle: NodePath::default(),
             status_context_button: NodePath::default(),
             status_settings_button: NodePath::default(),
             status_identity: NodePath::default(),
             right_route_label: NodePath::default(),
-            prototype_disclosure: NodePath::default(),
-            system_states: NodePath::default(),
             recall_columns: NodePath::default(),
             recall_state_grid: NodePath::default(),
             shell: None,
@@ -195,7 +183,6 @@ impl IControl for AthanorProbe {
         }
         for (button, method) in [
             (&mut shell.menu_toggle, "on_menu_toggle_pressed"),
-            (&mut shell.context_toggle, "on_context_toggle_pressed"),
             (
                 &mut shell.status_context_button,
                 "on_context_toggle_pressed",
@@ -323,13 +310,10 @@ impl AthanorProbe {
             content_viewport: self.base().try_get_node_as(&self.content_viewport)?,
             drawer_scrim: self.base().try_get_node_as(&self.drawer_scrim)?,
             menu_toggle: self.base().try_get_node_as(&self.menu_toggle)?,
-            context_toggle: self.base().try_get_node_as(&self.context_toggle)?,
             status_context_button: self.base().try_get_node_as(&self.status_context_button)?,
             status_settings_button: self.base().try_get_node_as(&self.status_settings_button)?,
             status_identity: self.base().try_get_node_as(&self.status_identity)?,
             right_route_label: self.base().try_get_node_as(&self.right_route_label)?,
-            prototype_disclosure: self.base().try_get_node_as(&self.prototype_disclosure)?,
-            system_states: self.base().try_get_node_as(&self.system_states)?,
             recall_columns: self.base().try_get_node_as(&self.recall_columns)?,
             recall_state_grid: self.base().try_get_node_as(&self.recall_state_grid)?,
         })
@@ -458,11 +442,6 @@ impl AthanorProbe {
             .call("set_close_visible", &[right_overlay.to_variant()]);
 
         shell.menu_toggle.set_visible(class == LayoutClass::Narrow);
-        shell.context_toggle.set_visible(class != LayoutClass::Wide);
-        shell
-            .prototype_disclosure
-            .set_visible(class == LayoutClass::Wide);
-        shell.system_states.set_visible(class == LayoutClass::Wide);
         shell
             .status_identity
             .set_visible(class != LayoutClass::Narrow);

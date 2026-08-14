@@ -846,19 +846,6 @@ export default function solarisaelHouseProof(pi) {
       }
     }
 
-    const nudge = contextAnalysis?.nudge;
-    if (nudge && !existingTypes.has("solarisael-context-nudge")) {
-      additions.push({
-        role: "custom",
-        customType: "solarisael-context-nudge",
-        content: ["<system-reminder>", nudge.text, "</system-reminder>"].join("\n"),
-        display: false,
-        details: { pct: nudge.pct, tokens: nudge.tokens },
-        attribution: "agent",
-        timestamp,
-      });
-    }
-
     if (currentTurnKey) {
       mergeTurnAdditions(turnMemo, currentTurnKey, additions);
       persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);

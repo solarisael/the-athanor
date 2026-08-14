@@ -40,8 +40,8 @@ the exact implementation record.
   hinting, automatic subpixel placement, and native/default oversampling for
   small desktop UI text.
 - Consolidated the complete Git repository under `C:\Projects\the-athanor` and
-  promoted the Godot client to the repository root. The obsolete Obsidian copy
-  and nested `clients/godot` project no longer exist.
+  placed the Godot client under `gui/`. The obsolete Obsidian copy and nested
+  `clients/godot` project no longer exist.
 - Disabled VSync for every Godot game window. Frame rate remains uncapped unless
   an explicit measurement or operator-selected limiter is applied.
 

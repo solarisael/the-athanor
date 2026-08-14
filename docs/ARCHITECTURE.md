@@ -85,7 +85,7 @@ documents link to it instead of repeating it.
 | `crates/house-host` | Authenticated snapshots, typed deltas, resync, Recall Policy, and receipt projection |
 | `crates/house-delivery` | Transactional outbox publication and bounded JetStream consumption |
 | `crates/athanor-install`, `installer/` | Native service lifecycle, immutable staging, rollback, doctor, and Windows installer |
-| Repository root (`project.godot`, `main.tscn`, `src/`) | Thin Godot operator client |
+| `gui/` | Thin Godot operator client |
 | `adapters/omp/` | OMP entrypoint, room integration, named tools, and Rust transport |
 | `.github/workflows/` | Continuous integration and native release assembly |
 | `docs/`, root Markdown | Canonical documentation |

@@ -238,7 +238,7 @@ purge contracts.
 | `crates/house-vault`, `crates/house-substrate` | File-authoritative Vault and PostgreSQL-authoritative AKASHA behavior |
 | `crates/house-host`, `crates/house-delivery` | Authenticated client projection and narrow JetStream delivery |
 | `crates/athanor-install`, `installer/` | Native lifecycle, immutable release staging, and Windows installer |
-| Repository root (`project.godot`, `main.tscn`, `src/`) | Thin Godot operator client; no direct database or broker authority |
+| `gui/` | Thin Godot operator client; no direct database or broker authority |
 | `adapters/omp/` | OMP lifecycle hooks and named tool surface delegated to Rust |
 
 All three live in [`solarisael/the-athanor`](https://github.com/solarisael/the-athanor)

@@ -15,7 +15,7 @@
     "test:rust": "cargo test --workspace",
     "test:omp": "cd adapters/omp && bun run test",
     "build:substrate": "cargo build --release -p athanor-substrate",
-    "build:godot": "cargo build -p athanor-godot",
+    "build:godot": "cargo build -p athanor-godot --target-dir gui/target",
     "build:native": "pwsh -File installer/build-native-release.ps1 -Version 0.9.5 -OutDir dist/native"
   }
 }

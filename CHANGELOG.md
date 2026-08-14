@@ -52,6 +52,8 @@ the exact implementation record.
   right contextual panel, center instrument, identity/room stack in the left
   rail, contextual evidence cards on the right, and the compact bottom bar.
   Context/navigation become exclusive drawers only below their docked widths.
+- Changed the default window to the archive comparison viewport, 1440×900, so
+  launch opens directly in the complete three-column desktop composition.
 - Recovered the exact S01–S14/R01 inventory from `The Athanor Design Restart.zip`.
   Screen headers now use only the archive’s enabled `OrnamentFrame` rule:
   `corners={false}`, `sigils={false}`, exact divider flourish, bar, and mirror.

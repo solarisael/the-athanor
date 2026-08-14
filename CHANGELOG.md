@@ -22,13 +22,58 @@ the exact implementation record.
 
 ### Added
 
-- Established the Chargebook as a canonical House practice and shipped the OMP starter room with an always-loaded default covering positive credits, zero-cost presence, behavioral charges, and operation costs.
+- Added a durable Godot effects laboratory: four source-labelled alchemical
+  treatments, pinned Juicee `1.4.2` orchestration, overlap/cancel/restore
+  behavior, accessibility controls, responsive layout, and live renderer
+  instrumentation. Decorative output carries no Host authority.
 
 ### Changed
 
-- Corrected the active product version from the premature `1.0.0-rc.3` label to
-  `0.9.3`. The proven RC1-RC3 build identities remain below as historical
-  artifact evidence; they do not claim that the operator product reached 1.0.
+- Reframed the Godot shell around the product contract: left room/session
+  navigation, center active chat, and right contextual inspection. S01 now
+  declares the absent Host chat contract instead of presenting its resume card
+  as the final center.
+- Added wide, compact, and narrow layout classes without changing the `0.9.5`
+  version. Sidebars and nonessential chrome collapse around the center, Recall
+  columns and state grids adapt, and action rows wrap.
+- Replaced grayscale 2× font rasterization with Godot LCD antialiasing, normal
+  hinting, automatic subpixel placement, and native/default oversampling for
+  small desktop UI text.
+- Consolidated the complete Git repository under `C:\Projects\the-athanor` and
+  promoted the Godot client to the repository root. The obsolete Obsidian copy
+  and nested `clients/godot` project no longer exist.
+- Disabled VSync for every Godot game window. Frame rate remains uncapped unless
+  an explicit measurement or operator-selected limiter is applied.
+
+### Fixed
+
+- Moved S01, S02, and S03 under one center vertical `ScrollContainer`, removed
+  the nested routing scroller, enabled focus-follow scrolling, and allowed long
+  Paper Boat receipts to wrap at narrow widths.
+- Validate Context Host analyses where they enter the OMP adapter. A missing
+  query route now reports one precise Context Host degradation and skips
+  automatic Recall instead of emitting a second misleading Recall Policy error.
+
+## [0.9.5] - 2026-08-13
+
+### Added
+
+- Established the Chargebook as a canonical House practice and shipped the OMP starter room with an always-loaded default covering positive credits, zero-cost presence, behavioral charges, and operation costs.
+- Added the third functional Godot operator screen: authenticated, read-only
+  worker-lane and advisor status from the existing Host routing contract, with
+  exact event/sequence receipts and no dispatch capability.
+
+### Changed
+- Sharpened native Godot text by disabling viewport stretch scaling, enabling
+  high-DPI rendering, and importing bundled fonts with normal hinting,
+  automatic subpixel placement, and 2× oversampling.
+- Cut all operator-visible Godot copy and client-side diagnostics to English as
+  the single source language until a deliberate localization pipeline exists.
+
+- Kept the product on the `0.9.x` late-beta line after the premature
+  `1.0.0-rc.3` label. The proven RC1-RC3 build identities remain below as
+  historical artifact evidence; they do not claim that the operator product
+  reached 1.0.
 - Restored the 1.0 gate around a usable operator control surface, healthy
   continuity organs, clean installation and upgrade/rollback proof, signing,
   and public release evidence.
@@ -46,6 +91,8 @@ the exact implementation record.
 - Made the native release builder use the operating-system temporary directory
   when CI-only `RUNNER_TEMP` is absent, allowing local release builds from a
   standard PowerShell session.
+- Replaced per-screen Godot WebSockets with one root-owned authenticated Host
+  session shared by Recall Policy, Paper Boat receipts, and worker-lane status.
 
 ### Fixed
 
@@ -54,6 +101,18 @@ the exact implementation record.
   from the room-local runtime instead of the retired legacy home-directory
   ledger, preventing fresh `GigaSourceMissingError` failures after the Rust
   ownership cut.
+- Namespaced OMP Host retry identities by command type and the harness session
+  manager's stable session ID. Concurrent subagents can now reuse inherited
+  message IDs without colliding on different Recall Policy command bodies.
+- Made delivery readiness process-owned and deterministic. The long-running
+  worker now publishes a fresh atomic ready marker after PostgreSQL and NATS
+  connect; the supervisor removes stale markers before spawn instead of
+  launching repeated one-shot NATS health clients.
+- Drained one-shot delivery NATS clients before process exit, preventing native
+  update readiness probes from remaining alive indefinitely.
+- Kept durable Recall Policy receipts readable across the snake_case to
+  camelCase wire cutover while continuing to serialize the current camelCase
+  contract.
 
 ## [1.0.0-rc.3] - 2026-08-11
 

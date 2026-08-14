@@ -33,6 +33,7 @@ pub const CONSUMER_BACKOFF: [Duration; 5] = [
 
 #[derive(Clone)]
 pub struct Broker {
+    client: async_nats::Client,
     context: jetstream::Context,
 }
 
@@ -42,8 +43,16 @@ impl Broker {
             .await
             .with_context(|| format!("connect to NATS delivery endpoint {url}"))?;
         Ok(Self {
-            context: jetstream::new(client),
+            context: jetstream::new(client.clone()),
+            client,
         })
+    }
+
+    pub async fn drain(&self) -> Result<()> {
+        self.client
+            .drain()
+            .await
+            .context("drain NATS delivery connection")
     }
 
     pub fn stream_config() -> jetstream::stream::Config {

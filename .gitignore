@@ -10,6 +10,8 @@ __pycache__/
 dist/
 .venv/
 .pytest_cache/
+/.godot/
+/android/
 # Mutable substrate state never belongs in the product tree; development
 # checkouts fall back here when ATHANOR_STATE_DIR is unset.
 /state/

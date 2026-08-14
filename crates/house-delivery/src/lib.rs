@@ -84,6 +84,10 @@ impl DeliveryService {
         &self.broker
     }
 
+    pub async fn drain(&self) -> Result<()> {
+        self.broker.drain().await
+    }
+
     pub async fn publish_once(&self) -> Result<PublishOutcome> {
         let Some(claimed) = self.store.claim_next(self.lease_owner).await? else {
             return Ok(PublishOutcome::Idle);

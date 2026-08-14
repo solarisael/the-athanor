@@ -1,0 +1,39 @@
+[gd_resource type="Resource" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://addons/juicee/core/juicee_sequence.gd" id="1_sequence"]
+[ext_resource type="Script" path="res://addons/juicee/effects/modulate_effect.gd" id="2_modulate"]
+[ext_resource type="Script" path="res://addons/juicee/effects/scale_effect.gd" id="3_scale"]
+[ext_resource type="Script" path="res://addons/juicee/effects/chromatic_effect.gd" id="4_chromatic"]
+[ext_resource type="Script" path="res://addons/juicee/effects/flash_effect.gd" id="5_flash"]
+
+[sub_resource type="Resource" id="Resource_modulate"]
+script = ExtResource("2_modulate")
+target_color = Color(1.18, 1.08, 0.86, 1)
+duration = 0.72
+return_to_original = true
+
+[sub_resource type="Resource" id="Resource_scale"]
+script = ExtResource("3_scale")
+target_scale = Vector2(1.035, 1.035)
+duration = 0.16
+return_to_original = true
+return_duration = 0.42
+relative = true
+
+[sub_resource type="Resource" id="Resource_chromatic"]
+script = ExtResource("4_chromatic")
+intensity = 2.25
+duration = 0.44
+
+[sub_resource type="Resource" id="Resource_flash"]
+script = ExtResource("5_flash")
+flash_color = Color(1, 0.84, 0.57, 1)
+duration = 0.24
+flash_count = 1
+boost = 1.08
+
+[resource]
+script = ExtResource("1_sequence")
+effects = [SubResource("Resource_modulate"), SubResource("Resource_scale"), SubResource("Resource_chromatic"), SubResource("Resource_flash")]
+parallel = true
+stagger_delay = 0.06

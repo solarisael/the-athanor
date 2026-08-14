@@ -12,9 +12,9 @@ or a separately installed PostgreSQL or NATS server. PowerShell, MSVC, Cargo,
 and Inno Setup are build-time tools only.
 
 The command examples below name `1.0.0-rc.3` because it is the last immutable
-installer artifact proven on the reference workstation. The active source
-version is `0.9.3`; no public `0.9.3` installer is claimed until a new artifact
-is built and verified.
+public installer artifact proven on the reference workstation. The active
+source version is `0.9.5`; locally installed native versions may be newer than
+the last publicly published checksum-paired installer.
 
 ## Verify and install
 

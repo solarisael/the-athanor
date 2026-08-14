@@ -82,16 +82,26 @@ pub enum RecallResolvedMode {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RecallPolicyState {
+    #[serde(alias = "requested_mode")]
     pub requested_mode: RecallRequestedMode,
+    #[serde(alias = "resolved_mode")]
     pub resolved_mode: RecallResolvedMode,
+    #[serde(alias = "active_project")]
     pub active_project: Option<String>,
+    #[serde(alias = "resolution_reason")]
     pub resolution_reason: String,
+    #[serde(alias = "last_refresh_reason")]
     pub last_refresh_reason: Option<String>,
+    #[serde(alias = "last_refresh_at")]
     pub last_refresh_at: Option<String>,
+    #[serde(alias = "working_set_entries")]
     pub working_set_entries: u64,
+    #[serde(alias = "recovery_pending")]
     pub recovery_pending: bool,
+    #[serde(alias = "recovery_terms")]
     pub recovery_terms: Vec<String>,
     pub degraded: Option<String>,
+    #[serde(alias = "updated_at")]
     pub updated_at: Option<String>,
 }
 
@@ -134,12 +144,17 @@ pub struct RecallRefreshCompletion {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RecallPolicyDecision {
+    #[serde(alias = "should_recall")]
     pub should_recall: bool,
+    #[serde(alias = "clear_working_set")]
     pub clear_working_set: bool,
     pub query: String,
+    #[serde(alias = "query_terms")]
     pub query_terms: Vec<String>,
+    #[serde(alias = "refresh_reason")]
     pub refresh_reason: Option<String>,
     pub intent: String,
+    #[serde(alias = "resolved_mode")]
     pub resolved_mode: RecallResolvedMode,
 }
 
@@ -1025,6 +1040,44 @@ mod receipt_tests {
         }
     }
 
+    #[test]
+    fn recall_policy_state_reads_legacy_snake_case_receipts_but_writes_camel_case() {
+        let legacy = json!({
+            "requested_mode": "auto",
+            "resolved_mode": "conversation",
+            "active_project": null,
+            "resolution_reason": "explicit-lookup",
+            "last_refresh_reason": "empty-working-set",
+            "last_refresh_at": "2026-08-12T22:44:47.061Z",
+            "working_set_entries": 0,
+            "recovery_pending": false,
+            "recovery_terms": [],
+            "degraded": null,
+            "updated_at": "2026-08-12T22:44:49.981Z"
+        });
+        let state: RecallPolicyState = serde_json::from_value(legacy).unwrap();
+        let current = serde_json::to_value(state).unwrap();
+        assert_eq!(current["requestedMode"], "auto");
+        assert!(current.get("requested_mode").is_none());
+    }
+
+    #[test]
+    fn recall_policy_decision_reads_legacy_snake_case_but_writes_camel_case() {
+        let legacy = json!({
+            "should_recall": true,
+            "clear_working_set": false,
+            "query": "exact evidence",
+            "query_terms": ["exact", "evidence"],
+            "refresh_reason": "explicit-lookup",
+            "intent": "work",
+            "resolved_mode": "conversation"
+        });
+        let decision: RecallPolicyDecision = serde_json::from_value(legacy).unwrap();
+        let current = serde_json::to_value(decision).unwrap();
+        assert_eq!(current["shouldRecall"], true);
+        assert_eq!(current["resolvedMode"], "conversation");
+        assert!(current.get("should_recall").is_none());
+    }
     #[test]
     fn paper_boat_subscription_uses_its_own_projection() {
         let command = json!({

@@ -3,6 +3,7 @@ import {
   RecallPolicyHostClient,
   RecallPolicyHostUnavailable,
 } from "../solarisael-house-proof/recall-policy.ts";
+import { hostCommand, hostSessionIdentity } from "../solarisael-house-proof/host.ts";
 
 const originalWebSocket = globalThis.WebSocket;
 const originalToken = process.env.ATHANOR_HOST_TOKEN;
@@ -39,6 +40,34 @@ function hostState() {
 }
 
 describe("Recall Policy Host adapter", () => {
+  test("namespaces caller idempotency by Host binding while preserving exact retries", () => {
+    process.env.ATHANOR_HOST_HOUSE_ID = "solarisael";
+    const parent = { room: "kodo", spirit: "Kodo", session: "shared-parent" };
+    const child = { room: "kodo", spirit: "Kodo", session: "child-session" };
+    const commandType = "athanor.recall_policy.evaluate";
+    const requestedKey = "id:shared-user-message:evaluate";
+
+    const first = hostCommand(parent, commandType, "recall_policy", { facts: { working: false } }, requestedKey);
+    const retry = hostCommand(parent, commandType, "recall_policy", { facts: { working: false } }, requestedKey);
+    const changedBody = hostCommand(parent, commandType, "recall_policy", { facts: { working: true } }, requestedKey);
+    const subagent = hostCommand(child, commandType, "recall_policy", { facts: { working: true } }, requestedKey);
+
+    expect(retry.idempotency_key).toBe(first.idempotency_key);
+    expect(changedBody.idempotency_key).toBe(first.idempotency_key);
+    expect(subagent.idempotency_key).not.toBe(first.idempotency_key);
+  });
+
+  test("uses the harness session manager before the shared working directory fallback", () => {
+    expect(hostSessionIdentity({
+      sessionManager: { getSessionId: () => "subagent-session-7" },
+      cwd: "C:\\Solarisael\\Obsidian\\obsidian\\kodo",
+    }, "fallback")).toBe("subagent-session-7");
+    expect(hostSessionIdentity({
+      sessionManager: { getSessionId: () => "" },
+      cwd: "C:\\Solarisael\\Obsidian\\obsidian\\kodo",
+    }, "fallback")).toBe("C:\\Solarisael\\Obsidian\\obsidian\\kodo");
+  });
+
 
   test("sends facts to Host and consumes its decision without evaluating policy locally", async () => {
     process.env.ATHANOR_HOST_TOKEN = "test-token";

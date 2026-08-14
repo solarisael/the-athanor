@@ -1,4 +1,4 @@
-import { hostCommand, sendHostCommand, type HostBinding } from "./host.ts";
+import { HostUnavailable, hostCommand, sendHostCommand, type HostBinding, type HostResponse } from "./host.ts";
 
 const CONTEXT_ANALYZE = "athanor.context.analyze";
 const CONTEXT_ANALYZED = "athanor.context.analyzed";
@@ -39,6 +39,18 @@ export type RecallViewport = {
   presentation: Record<string, any>;
 };
 
+export function parseContextAnalysisResponse(response: HostResponse): ContextAnalysis {
+  const analysis = response.analysis;
+  if (!analysis || typeof analysis !== "object" || Array.isArray(analysis)) {
+    throw new HostUnavailable("Context Host response omitted analysis");
+  }
+  const route = (analysis as Record<string, unknown>).route;
+  if (!route || typeof route !== "object" || Array.isArray(route)) {
+    throw new HostUnavailable("Context Host analysis omitted the query route");
+  }
+  return analysis as ContextAnalysis;
+}
+
 export async function analyzeContext(
   binding: HostBinding,
   request: {
@@ -55,7 +67,7 @@ export async function analyzeContext(
     hostCommand(binding, CONTEXT_ANALYZE, "context", { context_request: request }, idempotencyKey),
     new Set([CONTEXT_ANALYZED]),
   );
-  return response.analysis as ContextAnalysis;
+  return parseContextAnalysisResponse(response);
 }
 
 export async function applyRecallViewport(

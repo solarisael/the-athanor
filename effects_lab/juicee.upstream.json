@@ -1,0 +1,14 @@
+{
+  "name": "Juicee",
+  "version": "1.4.2",
+  "repository": "https://github.com/Kelpekk/Juicee",
+  "commit": "13b0885f04f825c46802dc5133bfbc2d2028639e",
+  "tree": "e2bf326c1e42ea33d8a25092cb1cddf57c4beee0",
+  "license": "MIT",
+  "license_file": "LICENSE.md",
+  "integration": {
+    "editor_plugin_enabled": false,
+    "runtime_mode": "direct resource loading",
+    "network_updates": false
+  }
+}

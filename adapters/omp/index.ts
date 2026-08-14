@@ -17,7 +17,7 @@ import {
   settleQuestLifecycle,
   type QuestMemory,
 } from "./solarisael-house-proof/lineage.ts";
-import type { HostBinding } from "./solarisael-house-proof/host.ts";
+import { hostSessionIdentity, type HostBinding } from "./solarisael-house-proof/host.ts";
 
 import {
   logConversationWindow,
@@ -397,7 +397,7 @@ export default function solarisaelHouseProof(pi) {
     const binding = {
       room,
       spirit,
-      session: String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir),
+      session: hostSessionIdentity(ctx, effectiveRoomDir),
     };
     cacheKittenTaskRoom(room, event.toolCallId, event.input, binding);
   });
@@ -440,7 +440,7 @@ export default function solarisaelHouseProof(pi) {
       }
     }
 
-    const hostSession = String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir);
+    const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
     const shellBinding = { room, spirit, session: hostSession };
     let conversation: ConversationCapture | null = null;
     try {
@@ -607,16 +607,17 @@ export default function solarisaelHouseProof(pi) {
       }
     }
 
-    if (!existingTypes.has("solarisael-recall-context") && process.env.SOLARISAEL_DISABLE_AUTO_RECALL !== "1") {
+    if (
+      !existingTypes.has("solarisael-recall-context")
+      && process.env.SOLARISAEL_DISABLE_AUTO_RECALL !== "1"
+      && contextAnalysis?.route
+    ) {
       const policyClient = new RecallPolicyHostClient({ room, spirit, session: hostSession });
       let queryRoute: Record<string, any> | null = null;
       let decision: RecallPolicyDecision | null = null;
       let policyState: PersistedRecallPolicy | null = null;
       try {
-        let preliminaryRoute = contextAnalysis?.route;
-        if (!preliminaryRoute) {
-          throw new Error("Context Host did not return a query route");
-        }
+        const preliminaryRoute = contextAnalysis.route;
         const snapshot = await policyClient.inspect();
         policyState = snapshot.recallPolicy;
         const resolution = policyState.requestedMode !== "quiet"

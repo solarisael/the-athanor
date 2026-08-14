@@ -231,6 +231,32 @@ The work-handler smoke exercised the installed loader, Rust context analysis,
 Recall Policy Host, Rust retrieval transport, Rust Host viewport, and bounded
 OMP presentation. It completed far below OMP's 30-second handler ceiling.
 
+### Installed 0.9.5 operator-client proof — 2026-08-13
+
+The managed native updater activated `0.9.5` from `0.9.4`, retained `0.9.4` as
+the previous release, created a rollback backup, and returned
+`SolarisaelAthanor` to `RUNNING`. Native doctor verified the release manifest,
+all 20,642 packaged artifacts, the Windows service, and persistent data.
+
+The installed Godot 4.7.1 Forward+ client rendered two authenticated live
+screens at 1100×760 on the Radeon RX 9070 XT:
+
+- S02 applied Kintsu's Recall Policy snapshot with Host binding, version 881,
+  sequence 881, and the current state hash;
+- S03 applied the direct routing result with event ID, sequence 881, and the
+  four bounded worker lanes.
+
+The frames also proved the English-only pre-i18n copy and sharper native text
+contract: stretch scaling disabled, high-DPI enabled, normal hinting, automatic
+subpixel placement, and 2× glyph oversampling.
+
+Activation testing exposed and repaired three native lifecycle defects rather
+than bypassing them: one-shot delivery health processes did not drain NATS,
+delivery readiness had no process-owned stable signal, and durable pre-cutover
+Recall receipts used snake_case nested state and decision fields. Final focused
+proof passed 83 Rust protocol/Host/installer/delivery tests with three explicit
+integration ignores, plus the Godot receipt-state test.
+
 ## Next public evidence
 
 The post-1.0 public proof program expands the evidence surface in this order.

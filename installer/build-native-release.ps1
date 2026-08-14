@@ -83,7 +83,7 @@ Copy-Item (Join-Path $Root "adapters/omp/installed-loader.ts") (Join-Path $Bin "
 $GodotExe = Get-ChildItem $GodotExtract -Filter "Godot_v4.7.1-stable_win64.exe" -Recurse | Select-Object -First 1
 if (-not $GodotExe) { throw "Godot archive did not contain the pinned Windows x64 executable" }
 Copy-Item $GodotExe.FullName (Join-Path $Bin "athanor-gui.exe")
-$GodotSource = Join-Path $Root "clients/godot"
+$GodotSource = $Root
 @("project.godot", "main.tscn", "athanor.gdextension", "icon.svg") | ForEach-Object {
   Copy-Item (Join-Path $GodotSource $_) $GodotProject
 }

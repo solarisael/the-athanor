@@ -162,7 +162,7 @@ fn external_database_plan_may_omit_postgresql_but_not_other_children() -> Result
 }
 
 #[test]
-fn delivery_readiness_executes_the_real_health_contract() -> Result<()> {
+fn delivery_readiness_uses_a_fresh_process_owned_marker() -> Result<()> {
     let config = SupervisorConfig {
         database_mode: "managed".into(),
         database_host: "127.0.0.1".into(),
@@ -190,28 +190,27 @@ fn delivery_readiness_executes_the_real_health_contract() -> Result<()> {
         .iter()
         .find(|spec| spec.name == "delivery")
         .expect("delivery process");
-    match &delivery.readiness {
-        Readiness::Command {
-            executable,
-            arguments,
-            environment,
-        } => {
-            assert_eq!(
-                executable,
-                &PathBuf::from("release/bin/athanor-house-delivery.exe")
-            );
-            assert_eq!(arguments, &[std::ffi::OsString::from("health")]);
-            assert_eq!(
-                environment.get("DATABASE_URL").map(String::as_str),
-                Some("postgresql://test")
-            );
-            assert_eq!(
-                environment.get("SOLARISAEL_NATS_URL").map(String::as_str),
-                Some("nats://127.0.0.1:4222")
-            );
-        }
-        other => panic!("delivery readiness must be its real health command, got {other:?}"),
-    }
+    let ready_path = PathBuf::from("data").join("state/delivery.ready");
+    let ready_display = ready_path.display().to_string();
+    assert_eq!(delivery.readiness, Readiness::File(ready_path.clone()));
+    assert_eq!(
+        delivery
+            .environment
+            .get("ATHANOR_DELIVERY_READY_FILE")
+            .map(String::as_str),
+        Some(ready_display.as_str())
+    );
+    assert_eq!(
+        delivery.environment.get("DATABASE_URL").map(String::as_str),
+        Some("postgresql://test")
+    );
+    assert_eq!(
+        delivery
+            .environment
+            .get("SOLARISAEL_NATS_URL")
+            .map(String::as_str),
+        Some("nats://127.0.0.1:4222")
+    );
     Ok(())
 }
 

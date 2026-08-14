@@ -1,7 +1,7 @@
 # Godot Client and Spatial Presentation Architecture
 
-Status: First functional 2D screens ship in the `0.9.3` late beta; the operator client and spatial presentation remain incomplete
-Last updated: 2026-08-11
+Status: Three functional 2D screens ship in the late beta; the operator client and spatial presentation remain incomplete
+Last updated: 2026-08-13
 
 This document defines how the thin Godot client inherits Solarisael's visual
 system, remains a replaceable presentation body, and grows from functional 2D
@@ -9,13 +9,16 @@ controls into an in-world spatial interface and GPU-particle constellation.
 
 ## 1. Current boundary
 
-The current late beta ships a Godot 4.7.1 client, Rust GDExtension, authenticated
-Host WebSocket link, live Recall Policy screen, and sanitized Paper Boat receipt
-screen. It applies real Host snapshots, typed deltas, resync, restart replay, and
-degraded/refused states.
+The current late beta ships a Godot 4.7.1 client, Rust GDExtension, one
+authenticated root-owned Host WebSocket session, live Recall Policy screen,
+sanitized Paper Boat receipt panel, read-only worker-lane status screen, and a
+responsive chat-centered shell. The chat, sidebars, and inspector declare their
+missing Host contracts instead of displaying synthetic operational state. The
+three existing Host surfaces apply real snapshots, typed deltas, resync, restart
+replay, degraded/refused states, and direct typed routing results.
 
-Conversation and inter-agent message inspection, source and authority views,
-GIGA review, agent/subagent activity, operational metrics, the spatial renderer,
+Conversation transport and composition, source and authority views, GIGA
+review, agent/subagent activity, operational metrics, the spatial renderer,
 companion bodies, generated cross-platform token pipeline, and maximal
 alchemical environment profiles remain planned.
 
@@ -32,6 +35,11 @@ visual canon
 
 Godot does not invent a second Athanor theme and does not copy scattered CSS or
 current screenshots by hand.
+
+The website's WebGPU/WASM effects are visual provenance, not this client's
+renderer. The Athanor operator client remains Godot; ideas cross that boundary
+only after translation into Godot-native controls, meshes, materials, or
+shaders.
 
 ## 2. Runtime boundary
 
@@ -115,10 +123,11 @@ strings on every node. Typed exported properties may remain editor-visible.
 
 ## 5. Functional 2D first, presented in-world
 
-The shipped 1.0 slice uses ordinary Godot `Control` nodes for Recall Policy and
-Paper Boat delivery receipts. Later 2D slices may add conversation, source
-inspection, GIGA review, approvals, and other Host projections before spatial
-presentation.
+The current functional slice uses ordinary Godot `Control` nodes. Its persistent
+desktop anatomy is left room/session navigation, center active conversation, and
+right context inspection. Recall Policy and worker-lane status explicitly
+replace the center when selected. The conversation, sidebars, and inspector are
+honest placeholders until their Host contracts exist.
 
 The accepted presentation is nevertheless in-world:
 
@@ -142,6 +151,24 @@ Primary interaction must remain usable in focus mode with:
 - screen-reader-compatible semantic mirrors where supported;
 - reduced-motion and camera-cut alternatives;
 - no dependence on lighting or reflections for legibility.
+
+Responsive ownership is explicit:
+
+- wide (`>=1200 px`) shows both sidebars;
+- compact (`800–1199 px`) keeps left navigation and hides the inspector until a
+  drawer trigger exists;
+- narrow (`<800 px`) hides both sidebars and nonessential chrome so the center
+  remains primary;
+- one center `ScrollContainer` owns page scrolling and follows focused controls;
+  screens do not nest competing vertical scrollers.
+
+Small native UI text uses Godot's LCD antialiasing, normal hinting, automatic
+subpixel placement, and default oversampling at 1×. Effect-bearing text is a
+separate future lane. Before custom renderer code, inspect Godot's built-in
+`RichTextLabel`/`RichTextEffect`, `Label3D`, `TextMesh`, MSDF import, and
+maintained Asset Library/GDExtension options. The mesh-atlas and per-glyph-data
+designs in `bevy_rich_text3d` and `bevy_bitmap_text` are research references,
+not Bevy dependencies for this Godot client.
 
 SubViewport-projected panels may catch environmental light in the cinematic
 profile, but text contrast and input correctness outrank the effect.

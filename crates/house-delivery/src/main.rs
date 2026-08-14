@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use athanor_house_delivery::{CONFIGURATION_CONTRACT, DeliveryService};
 use serde_json::json;
-use std::{env, time::Duration};
+use std::{env, fs, path::PathBuf, time::Duration};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
@@ -50,6 +50,7 @@ async fn main() -> Result<()> {
         "once" => print_json(serde_json::to_value(service.once(ONCE_WAIT).await?)?)?,
         "health" => print_json(serde_json::to_value(service.health().await?)?)?,
         "run" => {
+            let ready_file = publish_ready_file()?;
             tracing::info!(
                 instance_id = %lease_owner,
                 stream = athanor_house_delivery::broker::STREAM_NAME,
@@ -60,13 +61,34 @@ async fn main() -> Result<()> {
                 result = service.run() => result?,
                 signal = tokio::signal::ctrl_c() => signal.context("listen for shutdown signal")?,
             }
+            if let Some(path) = ready_file {
+                let _ = fs::remove_file(path);
+            }
         }
         unknown => bail!("unknown command {unknown:?}. {CONFIGURATION_CONTRACT}"),
     }
+    service.drain().await?;
     Ok(())
 }
 
 fn print_json(value: serde_json::Value) -> Result<()> {
     println!("{}", serde_json::to_string(&value)?);
     Ok(())
+}
+
+fn publish_ready_file() -> Result<Option<PathBuf>> {
+    let Some(path) = env::var_os("ATHANOR_DELIVERY_READY_FILE").map(PathBuf::from) else {
+        return Ok(None);
+    };
+    let parent = path
+        .parent()
+        .context("ATHANOR_DELIVERY_READY_FILE has no parent directory")?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("create delivery readiness directory {}", parent.display()))?;
+    let staging = path.with_extension("tmp");
+    fs::write(&staging, b"ready\n")
+        .with_context(|| format!("write delivery readiness file {}", staging.display()))?;
+    fs::rename(&staging, &path)
+        .with_context(|| format!("activate delivery readiness file {}", path.display()))?;
+    Ok(Some(path))
 }

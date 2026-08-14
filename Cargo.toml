@@ -1,3 +1,12 @@
+[package]
+name = "athanor-godot"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+
+[lib]
+crate-type = ["cdylib"]
+
 [workspace]
 resolver = "2"
 members = [
@@ -8,7 +17,6 @@ members = [
     "crates/house-delivery",
     "crates/house-vault",
     "crates/athanor-install",
-    "clients/godot",
 ]
 
 [workspace.package]
@@ -34,3 +42,9 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["serde", "v4"] }
+
+[dependencies]
+chrono.workspace = true
+godot = { version = "=0.5.5", features = ["api-4-7"] }
+house-protocol = { path = "crates/house-protocol" }
+uuid.workspace = true

@@ -85,7 +85,7 @@ documents link to it instead of repeating it.
 | `crates/house-host` | Authenticated snapshots, typed deltas, resync, Recall Policy, and receipt projection |
 | `crates/house-delivery` | Transactional outbox publication and bounded JetStream consumption |
 | `crates/athanor-install`, `installer/` | Native service lifecycle, immutable staging, rollback, doctor, and Windows installer |
-| `clients/godot/` | Thin Godot operator client |
+| Repository root (`project.godot`, `main.tscn`, `src/`) | Thin Godot operator client |
 | `adapters/omp/` | OMP entrypoint, room integration, named tools, and Rust transport |
 | `.github/workflows/` | Continuous integration and native release assembly |
 | `docs/`, root Markdown | Canonical documentation |
@@ -129,7 +129,7 @@ overrides, but install removes duplicate source/version registration owners.
 
 ### Release and support target
 
-`0.9.3` is the current native Windows x64 late-beta source version. OMP is the
+`0.9.5` is the current native Windows x64 late-beta source version. OMP is the
 supported harness. The release artifact shape is one checksum-published installer:
 
 ```text

@@ -5,9 +5,9 @@ This document records current support boundaries and non-goals. The product READ
 ## Supported installation path
 
 Windows 11 x64 with OMP is the only supported late-beta target.
-`0.9.3` is the current source version. The reference workstation still runs the
-immutable, locally proven artifact labeled `1.0.0-rc.3`; that premature build
-label is retained only for installed-artifact and evidence identity.
+`0.9.5` is the current source version. The reference workstation runs a locally
+proven native `0.9.5` activation; historical RC artifact labels remain only as
+immutable build identities and evidence.
 
 The ordinary managed install requires:
 

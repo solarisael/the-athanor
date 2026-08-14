@@ -50,11 +50,7 @@ pub fn prepare_service_console() -> Result<()> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Readiness {
     Tcp(SocketAddr),
-    Command {
-        executable: PathBuf,
-        arguments: Vec<OsString>,
-        environment: BTreeMap<String, String>,
-    },
+    File(PathBuf),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,6 +76,17 @@ pub struct NativeProcesses {
 }
 impl Processes for NativeProcesses {
     fn spawn(&self, spec: &ProcessSpec) -> Result<u32> {
+        if let Readiness::File(path) = &spec.readiness {
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("remove stale readiness file {}", path.display())
+                    });
+                }
+            }
+        }
         let mut command = Command::new(&spec.executable);
         command
             .args(&spec.arguments)
@@ -119,18 +126,7 @@ impl Processes for NativeProcesses {
             Readiness::Tcp(address) => {
                 Ok(TcpStream::connect_timeout(address, Duration::from_millis(250)).is_ok())
             }
-            Readiness::Command {
-                executable,
-                arguments,
-                environment,
-            } => Ok(Command::new(executable)
-                .args(arguments)
-                .envs(environment)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())),
+            Readiness::File(path) => Ok(path.is_file()),
         }
     }
     fn request_stop(&self, name: &str) -> Result<()> {
@@ -371,16 +367,18 @@ pub fn runtime_plan(
         ),
     ]);
     let delivery_executable = version_root.join("bin/athanor-house-delivery.exe");
+    let delivery_ready = data_root.join("state/delivery.ready");
+    let mut delivery_environment = common.clone();
+    delivery_environment.insert(
+        "ATHANOR_DELIVERY_READY_FILE".into(),
+        delivery_ready.display().to_string(),
+    );
     specs.push(ProcessSpec {
         name: "delivery".into(),
-        executable: delivery_executable.clone(),
+        executable: delivery_executable,
         arguments: vec!["run".into()],
-        environment: common.clone(),
-        readiness: Readiness::Command {
-            executable: delivery_executable,
-            arguments: vec!["health".into()],
-            environment: common.clone(),
-        },
+        environment: delivery_environment,
+        readiness: Readiness::File(delivery_ready),
     });
     for room in &config.rooms {
         let mut host_env = common.clone();

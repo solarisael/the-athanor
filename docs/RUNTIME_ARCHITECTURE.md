@@ -1,7 +1,7 @@
 # Runtime Evolution Architecture
 
-Status: 1.0 runtime spine implemented in the 0.9.3 late beta; operator product and release gates remain
-Last updated: 2026-08-10
+Status: 1.0 runtime spine implemented in the 0.9.5 late beta; operator product and release gates remain
+Last updated: 2026-08-13
 
 This document defines the implemented Host, Godot, Recall Policy, Paper Boat,
 and narrow delivery spine together with accepted longer-range contracts for
@@ -15,7 +15,7 @@ and contracts created by earlier layers. The public release order lives in
 
 ## 1. Current boundary
 
-The current `0.9.3` source has:
+The current `0.9.5` source has:
 
 - one Rust domain/protocol workspace;
 - file-authoritative Vault and PostgreSQL-authoritative AKASHA;
@@ -318,8 +318,17 @@ scene reconstruction, or redraw of the complete projection.
 
 ## 5. Thin Godot control surface
 
-The first UI slice exists to expose the real system while the runtime evolves.
-It is not the final avatar, animation, voice, or marketplace surface.
+The current UI slice exposes real Recall Policy, Paper Boat delivery state, and
+worker-lane status through one root-owned authenticated Host session while the
+runtime evolves. It is not the final avatar, animation, voice, or marketplace
+surface.
+
+The product anatomy is fixed before chat transport lands: room/session
+navigation on the left, active conversation in the center, contextual
+inspection on the right. Auxiliary Host-backed tools replace or overlay the
+center explicitly. Wide, compact, and narrow layouts preserve center priority;
+one center scroller owns page movement. Placeholder sidebars and chat surfaces
+state that their Host projections are absent instead of synthesizing them.
 
 The first usable client must expose:
 
@@ -348,6 +357,10 @@ The UI should deepen after every backend phase. Finishing an ornamental client
 before the underlying contracts stabilize would freeze the wrong architecture.
 
 The Godot client maps each projection to a bounded view-model or scene subtree.
+One `AthanorHostSession` owns credentials and the WebSocket for the Control
+tree. Screens consume its typed events and keep projection-specific state; a
+new screen must not open a second socket merely because it needs another Host
+projection.
 Applied deltas emit signals only for affected nodes. Static panels do not poll
 through `_process()`. Custom drawing calls `queue_redraw()` only for the changed
 `CanvasItem`, and compatible mutations may be batched once at the next frame

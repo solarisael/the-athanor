@@ -32,6 +32,24 @@ function requiredEnvironment(name: string): string {
   if (!value) throw new HostUnavailable(`${name} is required for Athanor Host access`);
   return value;
 }
+export function hostSessionIdentity(context: {
+  sessionManager?: { getSessionId?: () => unknown };
+  sessionID?: unknown;
+  sessionId?: unknown;
+  cwd?: unknown;
+}, fallback: string): string {
+  try {
+    const managed = text(context?.sessionManager?.getSessionId?.());
+    if (managed) return managed;
+  } catch {
+    // A read-only harness identity is preferred, but Host calls remain fail-open.
+  }
+  return text(context?.sessionID)
+    || text(context?.sessionId)
+    || text(context?.cwd)
+    || text(fallback);
+}
+
 
 function hostUrlForRoom(room: string): string {
   const override = text(process.env.ATHANOR_HOST_WS_URL);
@@ -67,7 +85,9 @@ export function hostCommand(
 ): HostCommand {
   const requestedKey = text(idempotencyKey);
   const stableKey = requestedKey
-    ? `${projectionId}:${createHash("sha256").update(requestedKey).digest("hex")}`
+    ? `${projectionId}:${createHash("sha256")
+      .update([binding.room, binding.spirit, binding.session, commandType, requestedKey].join("\0"))
+      .digest("hex")}`
     : crypto.randomUUID();
   const now = new Date();
   return {

@@ -16,7 +16,7 @@ The previous long-form roadmap is preserved as
 
 ## Current late-beta state
 
-The repository now carries the `0.9.3` native Windows x64 late-beta source.
+The repository now carries the `0.9.5` native Windows x64 late-beta source.
 OMP is the supported harness. One Rust workspace owns the behavioral core,
 Vault, AKASHA, Host, delivery, native lifecycle, and Godot client. Read
 [the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
@@ -165,9 +165,9 @@ consumes authenticated Host commands, snapshots, deltas, replay, and
 resynchronization. It never connects directly to PostgreSQL, NATS, model
 providers, or harness internals.
 
-The implemented `0.9.3` slice proves that boundary with authenticated Recall
-Policy and sanitized Paper Boat receipt screens. Those two screens are the
-foundation, not the complete 1.0 client.
+The current slice proves that boundary with one shared authenticated Host
+session, Recall Policy, sanitized Paper Boat receipt, and read-only worker-lane
+status. Those three surfaces are the foundation, not the complete 1.0 client.
 
 The 1.0 operator gate must make the state of a House legible:
 
@@ -189,8 +189,9 @@ inspectable attributed records. The GUI must not infer a second truth from
 renderer state, expose private message bodies across unauthorized scopes, or
 make raw telemetry the only explanation.
 
-Conversation composition, source inspection, GIGA review, House and agent
-observability, and operational metrics therefore remain before `1.0.0`.
+Conversation composition, source inspection, GIGA review, dispatch and quest
+lineage, House and agent observability, and operational metrics therefore
+remain before `1.0.0`.
 Companion bodies, spatial Hallway presentation, and the memory constellation
 remain later work and do not block 1.0.
 

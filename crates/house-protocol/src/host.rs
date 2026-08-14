@@ -435,7 +435,7 @@ pub enum ClientCommand {
     },
     FamiliarStatus {
         meta: CommandMeta,
-        room_dir: String,
+        room_dir: Option<String>,
     },
     NormalizeLineage {
         meta: CommandMeta,
@@ -735,15 +735,10 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
                 request,
             })
         }
-        FAMILIAR_STATUS => {
-            let room_dir = raw
-                .room_dir
-                .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    CommandParseError::from_meta(&meta, "familiar status requires room_dir")
-                })?;
-            Ok(ClientCommand::FamiliarStatus { meta, room_dir })
-        }
+        FAMILIAR_STATUS => Ok(ClientCommand::FamiliarStatus {
+            meta,
+            room_dir: raw.room_dir.filter(|value| !value.trim().is_empty()),
+        }),
         LINEAGE_NORMALIZE => {
             let request = raw.lineage_request.ok_or_else(|| {
                 CommandParseError::from_meta(&meta, "lineage normalize requires lineage_request")

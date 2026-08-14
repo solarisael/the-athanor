@@ -241,6 +241,10 @@ pub struct ClusterMaintenanceParams {
 #[serde(deny_unknown_fields)]
 pub struct ClusterStalenessTelemetry {
     pub built_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clusters: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunks_total: Option<u64>,
     pub chunks_since_build: u64,
     #[serde(deserialize_with = "deserialize_unit_fraction")]
     pub fraction_unseen: f64,
@@ -256,6 +260,8 @@ pub struct ClusterResonanceTelemetry {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ClusterProfileEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster_id: Option<i64>,
     pub label: String,
     #[serde(deserialize_with = "deserialize_unit_fraction")]
     pub activation: f64,
@@ -4690,8 +4696,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(telemetry.built_at, None);
+        let live_staleness: ClusterStalenessTelemetry = serde_json::from_value(serde_json::json!({"built_at":"2026-08-14T12:00:00Z","clusters":3,"chunks_total":4200,"chunks_since_build":250,"fraction_unseen":0.05})).unwrap();
+        assert_eq!(live_staleness.chunks_total, Some(4200));
         let resonance: ClusterResonanceTelemetry = serde_json::from_value(serde_json::json!({"profile":[{"label":"x","activation":0.9,"member_count":2}],"hot":["chunk"]})).unwrap();
         assert_eq!(resonance.profile[0].member_count, 2);
+        let live: ClusterResonanceTelemetry = serde_json::from_value(serde_json::json!({"profile":[{"cluster_id":7,"label":"x","activation":0.9,"member_count":2}],"hot":["chunk"]})).unwrap();
+        assert_eq!(live.profile[0].cluster_id, Some(7));
+        assert!(live.serialize(serde_json::value::Serializer).is_ok_and(|v| v["profile"][0]["cluster_id"] == 7));
+        assert!(serde_json::from_value::<ClusterResonanceTelemetry>(serde_json::json!({"profile":[{"label":"x","activation":0.9,"member_count":2,"rogue":1}],"hot":[]})).is_err());
         assert!(serde_json::from_value::<ClusterStalenessTelemetry>(serde_json::json!({"built_at":null,"chunks_since_build":1,"fraction_unseen":0.1,"bad":true})).is_err());
     }
 

@@ -1346,7 +1346,7 @@ pub async fn recall(
         let aliases: Vec<String> = row.try_get("aliases")?;
         let weighty: bool = row.try_get("weighty")?;
         let files: serde_json::Value = row.try_get("pointer_files")?;
-        canon_matches.push(serde_json::json!({"termKey":name,"entry":{"type":kind,"summary":bounded_excerpt(&summary),"aliases":aliases,"weighty":weighty,"files":files}}));
+        canon_matches.push(serde_json::json!({"termKey":name,"entry":{"type":kind,"summary":bounded_excerpt(&summary),"aliases":aliases,"weighty":weighty,"files":protocol_pointer_files(&files)}}));
         named_entities.push(name);
     }
     let memory_types: Vec<String> = sqlx::query_scalar(
@@ -1410,11 +1410,49 @@ pub async fn recall(
     })
 }
 
+/// PostgreSQL `pointer_files` is store-shaped JSON with legacy variants: plain
+/// string paths and objects carrying extra keys such as `note`. The recall wire
+/// contract is exactly `{file, lines}` (house-protocol `RecallCanonFile`,
+/// deny_unknown_fields), so one legacy key would refuse the whole recall
+/// envelope downstream. Normalize here; the database row keeps its full shape.
+fn protocol_pointer_files(stored: &serde_json::Value) -> serde_json::Value {
+    let Some(entries) = stored.as_array() else {
+        return serde_json::Value::Array(Vec::new());
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        if let Some(file) = entry.as_str() {
+            if !file.trim().is_empty() {
+                files.push(serde_json::json!({ "file": file }));
+            }
+            continue;
+        }
+        let Some(file) = entry
+            .get("file")
+            .and_then(serde_json::Value::as_str)
+            .filter(|file| !file.trim().is_empty())
+        else {
+            continue;
+        };
+        let lines: Vec<u64> = entry
+            .get("lines")
+            .and_then(serde_json::Value::as_array)
+            .map(|values| values.iter().filter_map(serde_json::Value::as_u64).collect())
+            .unwrap_or_default();
+        if lines.is_empty() {
+            files.push(serde_json::json!({ "file": file }));
+        } else {
+            files.push(serde_json::json!({ "file": file, "lines": lines }));
+        }
+    }
+    serde_json::Value::Array(files)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         SEMANTIC_VOCABULARY_MAX_TERMS, SEMANTIC_VOCABULARY_TOP_K, giga_temporal_factor,
-        semantic_vocabulary_terms,
+        protocol_pointer_files, semantic_vocabulary_terms,
     };
     use chrono::{Duration, TimeZone, Utc};
     use serde_json::{Value, json};
@@ -1428,6 +1466,28 @@ mod tests {
                 "decay_anchor_at": anchor,
             },
         })
+    }
+
+    #[test]
+    fn pointer_files_normalize_to_the_recall_wire_contract() {
+        let stored = json!([
+            "memory/2026-05-01_plain_path.md",
+            { "file": "canon/source.md", "lines": [4, 9], "note": "legacy annotation" },
+            { "file": "canon/no_lines.md" },
+            { "file": "   " },
+            { "lines": [1, 2] },
+            42,
+        ]);
+        let normalized = protocol_pointer_files(&stored);
+        assert_eq!(
+            normalized,
+            json!([
+                { "file": "memory/2026-05-01_plain_path.md" },
+                { "file": "canon/source.md", "lines": [4, 9] },
+                { "file": "canon/no_lines.md" },
+            ])
+        );
+        assert_eq!(protocol_pointer_files(&json!("junk")), json!([]));
     }
 
     #[test]

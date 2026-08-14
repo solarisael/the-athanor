@@ -8,7 +8,7 @@ its source attached. Corrected knowledge can replace stale guidance without
 erasing history. The model or provider carrying the work can change without
 making the project start from zero again.
 
-**Status:** `0.9.5`, native Windows x64 late beta. OMP is the supported harness.
+**Status:** `0.9.6`, native Windows x64 late beta. OMP is the supported harness.
 One Rust workspace owns the behavioral core, Vault retrieval, AKASHA PostgreSQL
 authority, Athanor Host, NATS delivery, native lifecycle, and Godot client.
 Vault remains database-free; AKASHA adds durable typed memory, lessons, canon,
@@ -155,7 +155,7 @@ contracts and [Hippocampus](./docs/HIPPOCAMPUS.md) for candidate authority.
 
 ## What exists now
 
-The current `0.9.5` source, including behavior proven in the installed native
+The current `0.9.6` source, including behavior proven in the installed native
 artifact, includes:
 
 - one shared Rust contract layer and Rust-owned Vault/AKASHA behavior;
@@ -277,7 +277,7 @@ harness already has a supported adapter.
 
 ### Follow accepted direction
 
-- [Changelog](./CHANGELOG.md) — active `0.9.5` work and retained RC build history
+- [Changelog](./CHANGELOG.md) — active `0.9.6` work and retained RC build history
 - [Planned Features](./docs/PLANNED_FEATURES.md) — canonical status map
 - [Runtime Architecture](./docs/RUNTIME_ARCHITECTURE.md)
 - [Godot Client](./docs/GODOT_CLIENT.md)

@@ -123,17 +123,17 @@ workflow begins on S02 under the Recall Policy instrument record below.
 - **Identity:** `operator-shell`; group `composition`.
 - **Meaning:** Keep navigation, the active conversation, contextual inspection, and live system state legible without making the client a second authority.
 - **Refusal:** Do not merge authority, ranking, chronology, proposal state, dispatch state, subsystem health, or placeholder presentation with real Host data.
-- **Fixed copy:** Per-screen data-origin disclosures remain visible until the Host supplies real contracts. The archived S01–S14 labels remain present; unimplemented routes say `NOT WIRED` in the control itself.
-- **Anatomy:** Archive geometry exactly: 15.25 rem left rail with Athanor identity, effective-profile slot, rooms slot, flat grouped navigation, and domains; one center instrument viewport; 20 rem right contextual evidence panel with nested local preferences; one-row status rail. Responsive drawers apply only below desktop width.
+- **Fixed copy:** Per-screen data-origin disclosures remain visible until the Host supplies real contracts. The operator inventory is S01, S02, S07, S08, S09, S14, and Worker Lanes; dead archived routes were deleted by operator decision on 2026-08-14, with newest intent prevailing over archive fidelity.
+- **Anatomy:** 15.25 rem left rail with Athanor identity, effective-profile slot, rooms slot, grouped navigation for S01, S02, S07, S08, S09, S14, and Worker Lanes, and domains; one center instrument viewport; 20 rem right contextual evidence panel with nested local preferences; one-row status rail. Responsive drawers apply only below desktop width.
 - **Variants:** Wide at 1200 px and above docks both side columns. Compact from 800–1199 px keeps navigation docked and opens context/settings over the center with a scrim. Narrow below 800 px keeps the center primary and opens either side as an exclusive drawer.
 - **States:** Active screen, responsive class, optional local layout override, open drawer, and an independent pane stack for each side. These are local presentation states owned by `AthanorProbe` and `AthanorReliquaryNavigator`, never Host state.
 - **Accessibility:** Every destination is a real Button. Back pops exactly one pane and restores focus to its trigger. First Escape returns a nested pane toward its root; the next closes an overlay drawer. Inactive panes are hidden and inert. One center `ScrollContainer` owns vertical wheel and focus-follow scrolling.
 - **Composition:** The active screen owns the center. The right column holds contextual evidence/settings instead of becoming generic decoration. The bottom rail exposes only Host binding and compact identity; detail belongs in the right panel.
-- **Archive authority:** `C:\Users\Administrador\Desktop\The Athanor Design Restart.zip` is the exact Athanor composition reference. `The Athanor.dc.html` supplies the S01–S14/R01 inventory and uses `SolarisaelUI.OrnamentFrame` with `corners={false}` and `sigils={false}` around screen headers.
+- **Archive authority:** `C:\Users\Administrador\Desktop\The Athanor Design Restart.zip` remains composition evidence only. Its S01–S14/R01 inventory is superseded by the operator's 2026-08-14 decision: retain only S01, S02, S07, S08, S09, S14, and Worker Lanes; delete dead routes. `The Athanor.dc.html` still supplies `SolarisaelUI.OrnamentFrame` with `corners={false}` and `sigils={false}` around screen headers.
 - **Ornament mapping:** `design-system/ornament_rule.tscn` ports only that enabled rule: the archived `reliquary-divider-flourish` SVG at 42×14, a 1 px bar, and the same flourish mirrored on the right with the archived −10 px overlap. No corner glyph or inferred frame treatment is allowed.
-- **Godot mapping:** `navigation/reliquary_navigator.gd` is reusable pane-stack technology driven by `pane_target` and `action_id` metadata. `AthanorProbe` owns screen routing, viewport classes, center margins, exclusive drawers, local layout overrides, and Escape delegation. Worker Lanes remains an additional implemented Host instrument and does not impersonate archived S03 Remember.
-- **Proof:** `navigation/tests/reliquary_contract.gd` proves the exact S01–S14 inventory plus R01, absence of invented corner ornament, use of the archived flourish asset, nested panes, focus restoration, Escape grammar, wide geometry, compact context overlay, narrow drawers, and the 42 px status rail.
-- **Open gaps:** Only S01 Retomada, S02 Recall, S14 Preferências, and the additional Worker Lanes Host instrument have client behavior. S03–S13 product routes remain explicit unwired states. Motion is not authored, so reduced-motion control remains absent rather than decorative.
+- **Godot mapping:** `navigation/reliquary_navigator.gd` is reusable pane-stack technology driven by `pane_target` and `action_id` metadata. `AthanorProbe` owns screen routing, viewport classes, center margins, exclusive drawers, local layout overrides, and Escape delegation. Worker Lanes remains an additional implemented Host instrument.
+- **Proof:** `navigation/tests/reliquary_contract.gd` proves the exact S01, S02, S07, S08, S09, and S14 inventory, absence of invented corner ornament, use of the archived flourish asset, nested panes, focus restoration, Escape grammar, wide geometry, compact context overlay, narrow drawers, and the 42 px status rail.
+- **Open gaps:** S01 remains an honest active-conversation placeholder until its Host contract exists. S02, S07, S08, S09, S14, and the additional Worker Lanes Host instrument are the living operator inventory; dead archived routes are deleted. Motion is not authored, so reduced-motion control remains absent rather than decorative.
 
 ## Record: recall policy instrument
 
@@ -181,7 +181,52 @@ delta mutation fields remain the `house-protocol` snake_case field vocabulary.
 - **Composition:** S03 consumes the root `AthanorHostSession`; it does not open a socket or hold credentials.
 - **Godot mapping:** `AthanorRoutingStatus` parses the typed routing result into a bounded view and renders exact lane name, model role, OMP agent, tools, context modes, edit/intent/acceptance permissions, and the non-dispatchable advisor.
 - **Proof:** A live isolated Host returned four lanes through `athanor.routing.status`; the 1100×760 Forward+ frame rendered the authenticated result with event ID and sequence 1. The visible first lane was `smol-scout · pi/smol · scout · LEITURA`.
-- **Open gaps:** Familiar spellbook status, actual dispatch receipts, quest lineage, and live worker lifecycle remain separate future screens/contracts.
+- **Open gaps:** Quest lineage and live worker lifecycle remain separate future screens/contracts.
+
+## Record: familiar status instrument
+
+- **Identity:** `familiar-status-instrument`; group `product`.
+- **Purpose:** Disclose the Host-resolved room spellbook, its source and aliases, and each familiar's worker lane without letting the client read paths, infer room identity, or dispatch.
+- **Authority:** `house-core::routing::familiar_status`, `FamiliarStatusReceipt`, `FAMILIAR_STATUS`, `ROUTING_RESULT`, and `ROUTING_PROJECTION_ID`.
+- **Anatomy:** Fixed read-only disclosure, connection/query state, source and source-alias receipt, collective aliases, familiar identity/aliases/lane/description, event/sequence receipt, explicit refresh, and visible unavailable reason.
+- **States:** Host unavailable, waiting for an authenticated binding, query pending, status ready, status refused, or exact protocol refusal.
+- **Refusals:** The client sends no `room_dir`, reads no spellbook file, accepts no unknown envelope/result/spellbook/familiar field, and applies no result whose correlation ID differs from the pending request.
+- **Fixed copy:** The screen states that it is read-only and cannot infer a room, dispatch, spawn, or execute an agent.
+- **Accessibility:** Status is mark plus word; familiar capabilities and aliases are text; the focused refresh Button carries both a visible disabled reason and the same reason in its tooltip.
+- **Composition:** S07 consumes the root `AthanorHostSession`; it opens no transport and owns no credentials or filesystem path.
+- **Godot mapping:** `AthanorFamiliarStatus` sends `athanor.familiar.status` through the shared session, parses `FamiliarStatusReceipt`, and binds every exported NodePath in `main.tscn`.
+- **Proof:** On 2026-08-14, an isolated token-authenticated Host at `127.0.0.1:18787` served `C:/Projects/athanor-isolated/room/example`. A live 1440×900 Forward+ drive pressed every operator control and captured frames per screen. `athanor.familiar.status` returned `REFUSED` with the honest error naming the Host-configured room path and `spellbook.json`/`litters.json` candidates. The client rendered the event ID and sequence. The final DLL passed a headless probe that repeated connect and familiar refresh.
+- **Open gaps:** Familiar status is request/receipt state, not live agent lifecycle.
+
+## Record: dispatch builder instrument
+
+- **Identity:** `dispatch-builder-instrument`; group `product`.
+- **Purpose:** Author one bounded lane-or-familiar request and render the Host-built OMP packet without spawning or executing an agent.
+- **Authority:** `house-core::routing::DispatchRequest`, `HouseDispatchReceipt`, `RiskLevel`, `ROUTING_DISPATCH`, `ROUTING_RESULT`, and `ROUTING_PROJECTION_ID`.
+- **Anatomy:** Unremovable build-only disclosure, lane and familiar selectors, required task, optional target, line-delimited acceptance, exact low/medium/high risk selector, request lifecycle, receipt identity, errors, warnings, dispatcher execution/reason, and selectable read-only packet text.
+- **States:** Host unavailable, task absent, builder ready, packet pending, ready receipt, rejected receipt, or exact protocol refusal.
+- **Refusals:** No task means no request; unknown risk, envelope, receipt, selector, familiar, spellbook, dispatcher, packet, args, or task field refuses locally; an unmatched correlation ID is ignored; the client never calls the OMP task tool.
+- **Fixed copy:** The screen states before the form that it builds a bounded packet and never spawns or executes an agent.
+- **Accessibility:** Status and consequence are written as marks plus words; every input and action is focusable; the build Button keeps its label and renders a visible disabled reason mirrored in its tooltip.
+- **Composition:** S08 consumes the root `AthanorHostSession`; request fields remain UI-only until one explicit build action sends the exact Host command.
+- **Godot mapping:** `AthanorDispatch` sends outer `routing_request` with camelCase `DispatchRequest` fields, parses the full `HouseDispatchReceipt`, and binds every exported NodePath in `main.tscn`.
+- **Proof:** On 2026-08-14, an isolated token-authenticated Host at `127.0.0.1:18787` served `C:/Projects/athanor-isolated/room/example`. A live 1440×900 Forward+ drive pressed every operator control and captured frames per screen. `athanor.routing.dispatch` returned `READY` for lane `smol-scout` with model role `pi/smol` and OMP agent `scout`. The receipt rendered dispatcher `executed:no` with its reason and a selectable spawn packet. Fixed build-only copy remained visible. The final DLL passed a headless probe that repeated connect and dispatch build.
+- **Open gaps:** Spawning remains an explicit harness action outside this screen by design.
+
+## Record: system health instrument
+
+- **Identity:** `system-health-instrument`; group `product`.
+- **Purpose:** Keep transport, Host binding identity, Recall Policy health, Paper Boat delivery, and protocol refusal legible as separate real-event channels without inventing an aggregate verdict.
+- **Authority:** authenticated `EventMeta`, Recall Policy snapshot/delta contracts, `PaperBoatReceiptSnapshot`, the three accepted routing result shapes, and the shared `AthanorHostSession`.
+- **Anatomy:** Fixed observation-only disclosure, transport phase, House/room/spirit/session binding, Recall Policy version/sequence/degraded channel, Paper Boat status/integrity channel, last protocol refusal, refresh lifecycle, and visible unavailable reason.
+- **States:** Each data channel is absent until its own event arrives; transport independently reports closed, connecting, or open; refresh is available, pending, or unavailable.
+- **Refusals:** No field is defaulted from shell context; unknown Recall Policy, Paper Boat, or routing result schema is recorded as the last protocol refusal; the screen sends no new Host command and derives no cross-channel health verdict.
+- **Fixed copy:** The screen states that each channel reports its own Host event and that the channels are never collapsed into one verdict.
+- **Accessibility:** Every state uses words and marks rather than hue; absent data is `—`; refresh is focused and renders its disabled reason visibly and as a tooltip.
+- **Composition:** S09 observes the root `AthanorHostSession`; refresh reuses existing Recall Policy resync and Paper Boat subscription commands on that one socket.
+- **Godot mapping:** `AthanorHealth` applies the existing strict Recall Policy and Paper Boat parsers, validates every known routing receipt shape, and binds every exported NodePath in `main.tscn`.
+- **Proof:** On 2026-08-14, an isolated token-authenticated Host at `127.0.0.1:18787` served `C:/Projects/athanor-isolated/room/example`. A live 1440×900 Forward+ drive pressed every operator control and captured frames per screen. Separate channels rendered transport `OPEN`, binding `iso-house`/`iso-room`/`iso-spirit`/`iso-session`, Recall projection version and sequence, boat `PENDING`, and the last protocol refusal. The final DLL passed a headless probe that repeated connect and familiar refresh.
+- **Open gaps:** No aggregate House-health state exists; future subsystem channels must remain independently sourced and rendered.
 
 ## Record: effects laboratory
 

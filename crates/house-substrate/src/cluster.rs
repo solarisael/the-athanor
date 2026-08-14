@@ -289,7 +289,7 @@ pub(crate) async fn cluster_resonance(
     for (index, r) in rows.iter().enumerate() {
         let id: i64 = r.try_get("id")?;
         let label: Option<String> = r.try_get("label")?;
-        profile.push(serde_json::json!({"cluster_id":id,"label":label,"member_count":r.try_get::<i64,_>("member_count")?,"activation":r.try_get::<f64,_>("activation")?.clamp(-1.0,1.0)}));
+        profile.push(serde_json::json!({"cluster_id":id,"label":label.clone().unwrap_or_default(),"member_count":r.try_get::<i64,_>("member_count")?,"activation":r.try_get::<f64,_>("activation")?.clamp(0.0,1.0)}));
         if index < 3 {
             let chunks = sqlx::query(
                 "SELECT m.source_path,c.heading_path,

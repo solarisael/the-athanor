@@ -4,6 +4,9 @@ export const ADAPTER_API_VERSION = 1;
 //
 // This file stays where OMP config expects it. The implementation is split into
 // shaped modules under ./solarisael-house-proof/ so this door only wires hooks.
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
 import {
   kittenLineageDisabled,
   kittenLifecycleJoinKey,
@@ -122,18 +125,91 @@ async function recordKittenQuest(room: string, record: QuestMemory): Promise<boo
 // compute additions ONCE per user turn, memoize them byte-stable, and anchor
 // every turn's additions immediately after that turn's user message so the
 // rendered prefix never moves between requests. Static additions remain
-// singletons, dynamic working sets replace their prior copy only on refresh,
-// and replayed requests receive the same memoized additions byte-for-byte.
-const turnAdditionMemos = new Map<string, Map<string, Array<Record<string, any>>>>();
+// singletons; dynamic additions remain anchored to their original turns and
+// later turns append semantic successors without rewriting history.
+type TurnAddition = Record<string, any>;
+type TurnAdditionMemo = Map<string, TurnAddition[]>;
 
-function turnAdditionMemo(sessionKey: string) {
-  let memo = turnAdditionMemos.get(sessionKey);
-  if (!memo) {
-    memo = new Map();
-    turnAdditionMemos.set(sessionKey, memo);
-    if (turnAdditionMemos.size > 32) {
-      turnAdditionMemos.delete(turnAdditionMemos.keys().next().value);
+const turnAdditionMemos = new Map<string, TurnAdditionMemo>();
+let turnAdditionMemoWarningIssued = false;
+
+function turnAdditionMemoFile(effectiveRoomDir: string, sessionKey: string): string {
+  return path.join(
+    effectiveRoomDir,
+    ".omp",
+    "runtime",
+    "turn-additions",
+    `${Bun.hash(sessionKey).toString(36)}.json`,
+  );
+}
+
+function warnTurnAdditionMemo(error: unknown): void {
+  if (turnAdditionMemoWarningIssued) return;
+  turnAdditionMemoWarningIssued = true;
+  try {
+    console.warn(
+      `[athanor] Turn-addition memo durability degraded: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } catch {
+    // Logging must not turn best-effort durability into a failed provider turn.
+  }
+}
+
+function hydrateTurnAdditionMemo(effectiveRoomDir: string, sessionKey: string): TurnAdditionMemo {
+  const memo: TurnAdditionMemo = new Map();
+  try {
+    const persisted = JSON.parse(readFileSync(turnAdditionMemoFile(effectiveRoomDir, sessionKey), "utf8"));
+    if (
+      persisted?.version !== 1
+      || !persisted.turns
+      || typeof persisted.turns !== "object"
+      || Array.isArray(persisted.turns)
+    ) {
+      throw new Error("unsupported turn-addition memo");
     }
+    for (const [turnKey, additions] of Object.entries(persisted.turns)) {
+      if (!Array.isArray(additions)) throw new Error("invalid turn-addition memo");
+      memo.set(turnKey, additions as TurnAddition[]);
+    }
+  } catch (error) {
+    if ((error as { code?: unknown })?.code !== "ENOENT") warnTurnAdditionMemo(error);
+  }
+  return memo;
+}
+
+function persistTurnAdditionMemo(
+  effectiveRoomDir: string,
+  sessionKey: string,
+  memo: TurnAdditionMemo,
+): void {
+  try {
+    const memoFile = turnAdditionMemoFile(effectiveRoomDir, sessionKey);
+    mkdirSync(path.dirname(memoFile), { recursive: true });
+    const temporaryFile = `${memoFile}.${process.pid}.tmp`;
+    writeFileSync(temporaryFile, JSON.stringify({
+      version: 1,
+      turns: Object.fromEntries(memo),
+    }));
+    renameSync(temporaryFile, memoFile);
+  } catch (error) {
+    warnTurnAdditionMemo(error);
+  }
+}
+
+function turnAdditionMemo(sessionKey: string, effectiveRoomDir: string): TurnAdditionMemo {
+  const existing = turnAdditionMemos.get(sessionKey);
+  if (existing) {
+    // Map iteration order is the LRU order: every access moves a live session
+    // to the tail so sibling fanout cannot age out an actively used parent.
+    turnAdditionMemos.delete(sessionKey);
+    turnAdditionMemos.set(sessionKey, existing);
+    return existing;
+  }
+
+  const memo = hydrateTurnAdditionMemo(effectiveRoomDir, sessionKey);
+  turnAdditionMemos.set(sessionKey, memo);
+  if (turnAdditionMemos.size > 128) {
+    turnAdditionMemos.delete(turnAdditionMemos.keys().next().value);
   }
   return memo;
 }
@@ -178,11 +254,6 @@ const STABLE_CONTEXT_TYPES = new Set([
   "solarisael-wake-context",
   "solarisael-anamnesis-wake",
 ]);
-const REPLACEABLE_CONTEXT_TYPES = new Set([
-  "solarisael-striatum-lessons",
-  "solarisael-recall-context",
-  "solarisael-context-nudge",
-]);
 
 function pruneTurnAdditionMemo(memo: Map<string, Array<Record<string, any>>>, visibleKeys: Set<string>): void {
   for (const key of memo.keys()) {
@@ -212,7 +283,6 @@ function mergeTurnAdditions(
   for (const addition of additions) {
     const customType = String(addition.customType || "");
     if (STABLE_CONTEXT_TYPES.has(customType) && memoHasCustomType(memo, customType)) continue;
-    if (REPLACEABLE_CONTEXT_TYPES.has(customType)) removeMemoCustomType(memo, customType);
     current.push(addition);
   }
   memo.set(currentTurnKey, current);
@@ -461,8 +531,9 @@ export default function solarisaelHouseProof(pi) {
     const memoSessionKey = `${room}:${hostSession}`;
     const turnKeys = turnKeysByMessage(messages);
     const currentTurnKey = turnKeys.get(promptMessage);
-    const turnMemo = turnAdditionMemo(memoSessionKey);
+    const turnMemo = turnAdditionMemo(memoSessionKey, effectiveRoomDir);
     pruneTurnAdditionMemo(turnMemo, new Set(turnKeys.values()));
+    persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);
     if (currentTurnKey && turnMemo.has(currentTurnKey)) {
       // Later requests of the same turn replay identical bytes so the
       // Anthropic prefix cache can hit past the system block.
@@ -650,7 +721,6 @@ export default function solarisaelHouseProof(pi) {
         });
         decision = evaluation.decision;
         policyState = evaluation.snapshot.recallPolicy;
-        if (decision.clearWorkingSet) removeMemoCustomType(turnMemo, "solarisael-recall-context");
 
         if (decision.shouldRecall && decision.refreshReason) {
           const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, { temporalDecay: true });
@@ -669,6 +739,7 @@ export default function solarisaelHouseProof(pi) {
                 content: [
                   "<system-reminder>",
                   `Room-local Athanor Recall working set (${decision.resolvedMode}; ${decision.refreshReason}).`,
+                  "This working set supersedes every earlier Athanor Recall working set in this conversation; use this copy as current.",
                   JSON.stringify(automaticCompact, null, 2),
                   "</system-reminder>",
                 ].join("\n"),
@@ -695,7 +766,6 @@ export default function solarisaelHouseProof(pi) {
               idempotencyKey: currentTurnKey ? `${currentTurnKey}:complete` : undefined,
             });
             policyState = completed.recallPolicy;
-            removeMemoCustomType(turnMemo, "solarisael-recall-context");
             if (recallMessage) additions.push(recallMessage);
             await recordRecallTelemetry({
               effectiveRoomDir,
@@ -789,7 +859,10 @@ export default function solarisaelHouseProof(pi) {
       });
     }
 
-    if (currentTurnKey) mergeTurnAdditions(turnMemo, currentTurnKey, additions);
+    if (currentTurnKey) {
+      mergeTurnAdditions(turnMemo, currentTurnKey, additions);
+      persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);
+    }
     return anchorTurnAdditions(messages, turnKeys, turnMemo);
   });
 
@@ -798,7 +871,9 @@ export default function solarisaelHouseProof(pi) {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
     const hostSession = String(ctx?.sessionID || ctx?.sessionId || ctx?.cwd || effectiveRoomDir);
     const memoSessionKey = `${room}:${hostSession}`;
-    removeMemoCustomType(turnAdditionMemo(memoSessionKey), "solarisael-recall-context");
+    const turnMemo = turnAdditionMemo(memoSessionKey, effectiveRoomDir);
+    removeMemoCustomType(turnMemo, "solarisael-recall-context");
+    persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);
     const summary = event?.compactionEntry?.summary ?? event?.summary;
     try {
       await new RecallPolicyHostClient({

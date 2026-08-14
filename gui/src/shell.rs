@@ -11,6 +11,9 @@ use godot::classes::{
 };
 use godot::prelude::*;
 
+use crate::host_session::AthanorHostSession;
+use crate::protocol::HostBinding;
+
 const INITIAL_SCREEN_ENV: &str = "ATHANOR_INITIAL_SCREEN";
 const WIDE_BREAKPOINT: f32 = 1_200.0;
 const COMPACT_BREAKPOINT: f32 = 800.0;
@@ -23,6 +26,9 @@ enum Screen {
     Resume,
     RecallPolicy,
     Routing,
+    Familiars,
+    Dispatch,
+    Health,
 }
 
 impl Screen {
@@ -31,6 +37,9 @@ impl Screen {
             Self::Resume => "screen:resume",
             Self::RecallPolicy => "screen:recall-policy",
             Self::Routing => "screen:routing",
+            Self::Familiars => "screen:familiars",
+            Self::Dispatch => "screen:dispatch",
+            Self::Health => "screen:health",
         }
     }
 
@@ -39,6 +48,9 @@ impl Screen {
             Self::Resume => "S01 · CONVERSA / RETOMADA",
             Self::RecallPolicy => "S02 · MEMÓRIA / RECALL",
             Self::Routing => "HOUSE / WORKER LANES · HOST STATUS",
+            Self::Familiars => "S07 · FAMILIARS / SPELLBOOK",
+            Self::Dispatch => "S08 · FAMILIARS / DISPATCH",
+            Self::Health => "S09 · SISTEMA / SAÚDE",
         }
     }
 }
@@ -78,6 +90,12 @@ pub struct AthanorProbe {
     #[export]
     routing_page: NodePath,
     #[export]
+    familiars_page: NodePath,
+    #[export]
+    dispatch_page: NodePath,
+    #[export]
+    health_page: NodePath,
+    #[export]
     left_navigator: NodePath,
     #[export]
     right_navigator: NodePath,
@@ -98,12 +116,17 @@ pub struct AthanorProbe {
     #[export]
     status_identity: NodePath,
     #[export]
+    status_host_state: NodePath,
+    #[export]
+    host_session: NodePath,
+    #[export]
     right_route_label: NodePath,
     #[export]
     recall_columns: NodePath,
     #[export]
     recall_state_grid: NodePath,
 
+    session: Option<Gd<AthanorHostSession>>,
     shell: Option<Shell>,
     layout_class: Option<LayoutClass>,
     layout_override: Option<LayoutClass>,
@@ -118,6 +141,9 @@ struct Shell {
     resume_page: Gd<Control>,
     recall_policy_page: Gd<Control>,
     routing_page: Gd<Control>,
+    familiars_page: Gd<Control>,
+    dispatch_page: Gd<Control>,
+    health_page: Gd<Control>,
     left_navigator: Gd<Control>,
     right_navigator: Gd<Control>,
     center_frame: Gd<MarginContainer>,
@@ -127,7 +153,8 @@ struct Shell {
     menu_toggle: Gd<Button>,
     status_context_button: Gd<Button>,
     status_settings_button: Gd<Button>,
-    status_identity: Gd<Control>,
+    status_identity: Gd<Label>,
+    status_host_state: Gd<Label>,
     right_route_label: Gd<Label>,
     recall_columns: Gd<BoxContainer>,
     recall_state_grid: Gd<GridContainer>,
@@ -140,6 +167,9 @@ impl IControl for AthanorProbe {
             resume_page: NodePath::default(),
             recall_policy_page: NodePath::default(),
             routing_page: NodePath::default(),
+            familiars_page: NodePath::default(),
+            dispatch_page: NodePath::default(),
+            health_page: NodePath::default(),
             left_navigator: NodePath::default(),
             right_navigator: NodePath::default(),
             center_frame: NodePath::default(),
@@ -150,9 +180,12 @@ impl IControl for AthanorProbe {
             status_context_button: NodePath::default(),
             status_settings_button: NodePath::default(),
             status_identity: NodePath::default(),
+            status_host_state: NodePath::default(),
+            host_session: NodePath::default(),
             right_route_label: NodePath::default(),
             recall_columns: NodePath::default(),
             recall_state_grid: NodePath::default(),
+            session: None,
             shell: None,
             layout_class: None,
             layout_override: None,
@@ -193,6 +226,25 @@ impl IControl for AthanorProbe {
             button.connect("pressed", &Callable::from_object_method(&this, method));
         }
 
+        // The bottom rail mirrors the shared session's real link and binding
+        // state; it never invents identity and clears on close.
+        if let Some(mut session) = self
+            .base()
+            .try_get_node_as::<AthanorHostSession>(&self.host_session)
+        {
+            for (signal, method) in [
+                ("opened", "on_session_opened"),
+                ("closed", "on_session_closed"),
+                ("unavailable", "on_session_unavailable"),
+                ("message", "on_session_message"),
+            ] {
+                session.connect(signal, &Callable::from_object_method(&this, method));
+            }
+            self.session = Some(session);
+        } else {
+            godot_warn!("AthanorProbe: shared Host session not bound; status rail stays unbound");
+        }
+
         // Every instrument shares one vertical scroll owner. Reparenting does
         // not alter any child projection binding or create another transport.
         let center_node = shell.center_scroll.clone().upcast::<godot::classes::Node>();
@@ -215,6 +267,9 @@ impl IControl for AthanorProbe {
         self.active_screen = match std::env::var(INITIAL_SCREEN_ENV).ok().as_deref() {
             Some("recall-policy" | "s02") => Screen::RecallPolicy,
             Some("routing" | "worker-lanes") => Screen::Routing,
+            Some("familiars" | "spellbook" | "s07") => Screen::Familiars,
+            Some("dispatch" | "s08") => Screen::Dispatch,
+            Some("health" | "saude" | "saúde" | "s09") => Screen::Health,
             Some("resume" | "conversation" | "chat" | "s01") | None => Screen::Resume,
             Some(other) => {
                 godot_warn!("unknown {INITIAL_SCREEN_ENV} ({other}); using S01");
@@ -254,6 +309,9 @@ impl AthanorProbe {
             "screen:resume" => self.select_screen(Screen::Resume),
             "screen:recall-policy" => self.select_screen(Screen::RecallPolicy),
             "screen:routing" => self.select_screen(Screen::Routing),
+            "screen:familiars" => self.select_screen(Screen::Familiars),
+            "screen:dispatch" => self.select_screen(Screen::Dispatch),
+            "screen:health" => self.select_screen(Screen::Health),
             "open:settings" => self.open_right_pane("Settings"),
             "open:context" => self.open_right_pane("Root"),
             "layout:auto" => self.set_layout_override(None, "layout:auto"),
@@ -295,6 +353,30 @@ impl AthanorProbe {
     fn on_shell_resized(&mut self) {
         self.apply_layout(false);
     }
+
+    #[func]
+    fn on_session_opened(&mut self) {
+        self.render_rail("HOST LINK OPEN", None);
+    }
+
+    #[func]
+    fn on_session_closed(&mut self, _detail: GString) {
+        self.render_rail("HOST UNBOUND", None);
+    }
+
+    #[func]
+    fn on_session_unavailable(&mut self, _detail: GString) {
+        self.render_rail("HOST UNBOUND", None);
+    }
+
+    #[func]
+    fn on_session_message(&mut self, _envelope: VarDictionary) {
+        let binding = self.session.as_ref().and_then(|s| s.bind().binding());
+        match binding {
+            Some(binding) => self.render_rail("HOST BOUND", Some(&binding)),
+            None => self.render_rail("HOST LINK OPEN", None),
+        }
+    }
 }
 
 impl AthanorProbe {
@@ -303,6 +385,9 @@ impl AthanorProbe {
             resume_page: self.base().try_get_node_as(&self.resume_page)?,
             recall_policy_page: self.base().try_get_node_as(&self.recall_policy_page)?,
             routing_page: self.base().try_get_node_as(&self.routing_page)?,
+            familiars_page: self.base().try_get_node_as(&self.familiars_page)?,
+            dispatch_page: self.base().try_get_node_as(&self.dispatch_page)?,
+            health_page: self.base().try_get_node_as(&self.health_page)?,
             left_navigator: self.base().try_get_node_as(&self.left_navigator)?,
             right_navigator: self.base().try_get_node_as(&self.right_navigator)?,
             center_frame: self.base().try_get_node_as(&self.center_frame)?,
@@ -313,10 +398,27 @@ impl AthanorProbe {
             status_context_button: self.base().try_get_node_as(&self.status_context_button)?,
             status_settings_button: self.base().try_get_node_as(&self.status_settings_button)?,
             status_identity: self.base().try_get_node_as(&self.status_identity)?,
+            status_host_state: self.base().try_get_node_as(&self.status_host_state)?,
             right_route_label: self.base().try_get_node_as(&self.right_route_label)?,
             recall_columns: self.base().try_get_node_as(&self.recall_columns)?,
             recall_state_grid: self.base().try_get_node_as(&self.recall_state_grid)?,
         })
+    }
+
+    fn render_rail(&mut self, state: &str, binding: Option<&HostBinding>) {
+        let Some(shell) = self.shell.as_mut() else {
+            return;
+        };
+        shell.status_host_state.set_text(state);
+        match binding {
+            Some(binding) => shell.status_identity.set_text(&format!(
+                "HOUSE {}  ·  ROOM {}  ·  SPIRIT {}  ·  SESSION {}",
+                binding.house_id, binding.room, binding.spirit, binding.session
+            )),
+            None => shell
+                .status_identity
+                .set_text("HOUSE —  ·  ROOM —  ·  SPIRIT —  ·  NO SNAPSHOT"),
+        }
     }
 
     fn select_screen(&mut self, screen: Screen) {
@@ -335,6 +437,9 @@ impl AthanorProbe {
             (Screen::Resume, &mut shell.resume_page),
             (Screen::RecallPolicy, &mut shell.recall_policy_page),
             (Screen::Routing, &mut shell.routing_page),
+            (Screen::Familiars, &mut shell.familiars_page),
+            (Screen::Dispatch, &mut shell.dispatch_page),
+            (Screen::Health, &mut shell.health_page),
         ] {
             page.set_visible(screen == active);
         }

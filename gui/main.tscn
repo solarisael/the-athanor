@@ -16,6 +16,9 @@ theme = ExtResource("1_theme")
 resume_page = NodePath("ApplicationShell/ContentViewport/Page")
 recall_policy_page = NodePath("ApplicationShell/ContentViewport/RecallPolicyPage")
 routing_page = NodePath("ApplicationShell/ContentViewport/RoutingPage")
+familiars_page = NodePath("ApplicationShell/ContentViewport/FamiliarsPage")
+dispatch_page = NodePath("ApplicationShell/ContentViewport/DispatchPage")
+health_page = NodePath("ApplicationShell/ContentViewport/HealthPage")
 left_navigator = NodePath("ApplicationShell/Workspace/LeftReliquary")
 right_navigator = NodePath("ApplicationShell/Workspace/RightReliquary")
 center_frame = NodePath("ApplicationShell/Workspace/CenterFrame")
@@ -26,6 +29,8 @@ menu_toggle = NodePath("ApplicationShell/StatusRail/Margin/Row/Menu")
 status_context_button = NodePath("ApplicationShell/StatusRail/Margin/Row/Context")
 status_settings_button = NodePath("ApplicationShell/StatusRail/Margin/Row/Settings")
 status_identity = NodePath("ApplicationShell/StatusRail/Margin/Row/Identity")
+status_host_state = NodePath("ApplicationShell/StatusRail/Margin/Row/HostState")
+host_session = NodePath("HostSession")
 right_route_label = NodePath("ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root/Route")
 recall_columns = NodePath("ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns")
 recall_state_grid = NodePath("ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid")
@@ -254,50 +259,6 @@ text = "S02  recall"
 metadata/action_id = &"screen:recall-policy"
 metadata/screen_id = &"S02"
 
-[node name="S03" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-clip_text = true
-theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S03  remember · not wired"
-metadata/screen_id = &"S03"
-
-[node name="S04" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-clip_text = true
-theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S04  detalhe · not wired"
-metadata/screen_id = &"S04"
-
-[node name="S12" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-clip_text = true
-theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S12  anamnesis · not wired"
-metadata/screen_id = &"S12"
-
-[node name="GigaLabel" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusLabel"
-text = "GIGA"
-
-[node name="S05" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-clip_text = true
-theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S05  inbox · not wired"
-metadata/screen_id = &"S05"
-
-[node name="S06" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-clip_text = true
-theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S06  promoção · not wired"
-metadata/screen_id = &"S06"
 
 [node name="FamiliarsLabel" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
@@ -308,30 +269,18 @@ text = "FAMILIARS"
 layout_mode = 2
 clip_text = true
 theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S07  spellbook · not wired"
+text = "S07  spellbook"
+metadata/action_id = &"screen:familiars"
 metadata/screen_id = &"S07"
 
 [node name="S08" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 clip_text = true
 theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S08  dispatch · not wired"
+text = "S08  dispatch"
+metadata/action_id = &"screen:dispatch"
 metadata/screen_id = &"S08"
 
-[node name="SourcesLabel" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-theme_type_variation = &"AthanorStatusLabel"
-text = "SOURCES"
-
-[node name="S11" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-clip_text = true
-theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S11  importar e mapear · not wired"
-metadata/screen_id = &"S11"
 
 [node name="SystemLabel" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
@@ -342,25 +291,10 @@ text = "SISTEMA"
 layout_mode = 2
 clip_text = true
 theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S09  saúde · not wired"
+text = "S09  saúde"
+metadata/action_id = &"screen:health"
 metadata/screen_id = &"S09"
 
-[node name="S10" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-clip_text = true
-theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S10  diagnóstico · not wired"
-metadata/screen_id = &"S10"
-
-[node name="S13" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-clip_text = true
-theme_type_variation = &"AthanorTab"
-disabled = true
-text = "S13  administração · not wired"
-metadata/screen_id = &"S13"
 
 [node name="S14" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
@@ -370,13 +304,6 @@ text = "S14  preferências"
 metadata/action_id = &"open:settings"
 metadata/screen_id = &"S14"
 
-[node name="R01" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
-layout_mode = 2
-clip_text = true
-theme_type_variation = &"AthanorTab"
-disabled = true
-text = "R01  relatório · not wired"
-metadata/screen_id = &"R01"
 
 [node name="WorkerLanes" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
@@ -735,9 +662,7 @@ layout_mode = 2
 
 
 [node name="ChatBoundary" type="PanelContainer" parent="ApplicationShell/ContentViewport/Page"]
-custom_minimum_size = Vector2(0, 180)
 layout_mode = 2
-size_flags_vertical = 3
 theme_type_variation = &"AthanorVessel"
 
 [node name="Margin" type="MarginContainer" parent="ApplicationShell/ContentViewport/Page/ChatBoundary"]
@@ -763,7 +688,7 @@ disclosure_label = NodePath("Column/RecoveredContext")
 layout_mode = 2
 theme_type_variation = &"AthanorPaperColumn"
 
-[node name="Header" type="HFlowContainer" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column"]
+[node name="Header" type="HBoxContainer" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column"]
 layout_mode = 2
 theme_type_variation = &"AthanorBarRow"
 
@@ -771,14 +696,12 @@ theme_type_variation = &"AthanorBarRow"
 layout_mode = 2
 theme_type_variation = &"AthanorStatusValue"
 text = "Latest Paper Boat"
-
-[node name="Spacer" type="Control" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column/Header"]
-layout_mode = 2
 size_flags_horizontal = 3
-mouse_filter = 2
 
 [node name="Timestamp" type="Label" parent="ApplicationShell/ContentViewport/Page/LastPaperBoat/Column/Header"]
 layout_mode = 2
+size_flags_horizontal = 2
+clip_text = true
 theme_type_variation = &"AthanorMeta"
 autowrap_mode = 2
 text = "— · ROOM —"
@@ -923,7 +846,7 @@ autowrap_mode = 2
 layout_mode = 2
 theme_type_variation = &"AthanorMeta"
 text = "PROJECTION recall_policy · SCHEMA 1 · NO VERSION APPLIED"
-autowrap_mode = 2
+autowrap_mode = 3
 
 [node name="Binding" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/LinkColumn"]
 layout_mode = 2
@@ -1057,7 +980,7 @@ text = "◇ QUIET"
 layout_mode = 2
 theme_type_variation = &"AthanorMeta"
 text = "PROPOSED SELECTION: NONE"
-[node name="CommitRow" type="HFlowContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
+[node name="CommitRow" type="HBoxContainer" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
 layout_mode = 2
 theme_type_variation = &"AthanorStatusRow"
 
@@ -1069,9 +992,11 @@ text = "APPLY REQUESTED MODE"
 
 [node name="CommandState" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/CommitRow"]
 layout_mode = 2
+size_flags_horizontal = 3
 theme_type_variation = &"AthanorStatusValue"
 text = "NO COMMAND SENT"
 vertical_alignment = 1
+autowrap_mode = 2
 
 [node name="Unavailable" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn"]
 layout_mode = 2
@@ -1174,6 +1099,420 @@ layout_mode = 2
 theme_type_variation = &"AthanorTabActive"
 disabled = true
 text = "REFRESH STATUS"
+
+[node name="FamiliarsPage" type="VBoxContainer" parent="ApplicationShell/ContentViewport"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="HeaderRuleTop" parent="ApplicationShell/ContentViewport/FamiliarsPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
+[node name="Kicker" type="Label" parent="ApplicationShell/ContentViewport/FamiliarsPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageKicker"
+text = "S07 · FAMILIARS / SPELLBOOK"
+
+[node name="Title" type="Label" parent="ApplicationShell/ContentViewport/FamiliarsPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageTitle"
+text = "Familiars da sala"
+
+[node name="Lead" type="Label" parent="ApplicationShell/ContentViewport/FamiliarsPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "O Host revela o spellbook efetivo, seus aliases e a lane de cada familiar. O cliente não lê caminhos nem deduz a sala."
+autowrap_mode = 2
+
+[node name="HeaderRuleBottom" parent="ApplicationShell/ContentViewport/FamiliarsPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
+[node name="Instrument" type="AthanorFamiliarStatus" parent="ApplicationShell/ContentViewport/FamiliarsPage"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorVessel"
+session_path = NodePath("../../../../HostSession")
+disclosure_label = NodePath("Margin/Column/Disclosure")
+state_label = NodePath("Margin/Column/State")
+source_label = NodePath("Margin/Column/Source")
+familiars_label = NodePath("Margin/Column/Familiars")
+detail_label = NodePath("Margin/Column/Detail")
+unavailable_label = NodePath("Margin/Column/Actions/Unavailable")
+refresh_button = NodePath("Margin/Column/Actions/Refresh")
+
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument"]
+layout_mode = 2
+
+[node name="Column" type="VBoxContainer" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="Disclosure" type="Label" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorKicker"
+text = "READ ONLY · FAMILIAR STATUS COMES FROM THE AUTHENTICATED ATHANOR HOST · THE CLIENT DOES NOT READ A SPELLBOOK PATH, INFER A ROOM, DISPATCH, SPAWN, OR EXECUTE AN AGENT"
+autowrap_mode = 2
+
+[node name="State" type="Label" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "◇ HOST UNAVAILABLE"
+
+[node name="Source" type="Label" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "SOURCE —"
+autowrap_mode = 2
+
+[node name="Familiars" type="Label" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument/Margin/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorBody"
+text = "FAMILIARS\n—"
+autowrap_mode = 2
+
+[node name="Detail" type="Label" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "waiting for the shared Host session"
+autowrap_mode = 2
+
+[node name="Actions" type="HFlowContainer" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusRow"
+
+[node name="Refresh" type="Button" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument/Margin/Column/Actions"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+disabled = true
+text = "REFRESH FAMILIARS"
+
+[node name="Unavailable" type="Label" parent="ApplicationShell/ContentViewport/FamiliarsPage/Instrument/Margin/Column/Actions"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "ACTION UNAVAILABLE: NO HOST CONNECTION"
+
+[node name="DispatchPage" type="VBoxContainer" parent="ApplicationShell/ContentViewport"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="HeaderRuleTop" parent="ApplicationShell/ContentViewport/DispatchPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
+[node name="Kicker" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageKicker"
+text = "S08 · FAMILIARS / DISPATCH"
+
+[node name="Title" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageTitle"
+text = "Construtor de packet"
+
+[node name="Lead" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "Constrói um packet limitado para uma lane ou familiar. O resultado permanece texto selecionável até uma pessoa despachá-lo explicitamente."
+autowrap_mode = 2
+
+[node name="HeaderRuleBottom" parent="ApplicationShell/ContentViewport/DispatchPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
+[node name="Instrument" type="AthanorDispatch" parent="ApplicationShell/ContentViewport/DispatchPage"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorVessel"
+session_path = NodePath("../../../../HostSession")
+disclosure_label = NodePath("Margin/Column/Disclosure")
+lane_field = NodePath("Margin/Column/Form/LaneRow/Lane")
+familiar_field = NodePath("Margin/Column/Form/FamiliarRow/Familiar")
+task_field = NodePath("Margin/Column/Form/Task")
+target_field = NodePath("Margin/Column/Form/TargetRow/Target")
+acceptance_field = NodePath("Margin/Column/Form/Acceptance")
+risk_field = NodePath("Margin/Column/Form/RiskRow/Risk")
+send_button = NodePath("Margin/Column/Actions/Build")
+state_label = NodePath("Margin/Column/State")
+receipt_label = NodePath("Margin/Column/Receipt")
+diagnostics_label = NodePath("Margin/Column/Diagnostics")
+dispatcher_label = NodePath("Margin/Column/Dispatcher")
+packet_field = NodePath("Margin/Column/Packet")
+detail_label = NodePath("Margin/Column/Detail")
+unavailable_label = NodePath("Margin/Column/Actions/Unavailable")
+
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument"]
+layout_mode = 2
+
+[node name="Column" type="VBoxContainer" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="Disclosure" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorKicker"
+text = "BUILD ONLY · THIS SCREEN BUILDS A BOUNDED OMP TASK PACKET · IT NEVER SPAWNS OR EXECUTES AN AGENT · THE AUTHENTICATED HOST VALIDATES THE REQUEST AND RETURNS A READY OR REJECTED PACKET"
+autowrap_mode = 2
+
+[node name="State" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "◇ HOST UNAVAILABLE"
+
+[node name="Form" type="VBoxContainer" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="LaneRow" type="HBoxContainer" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentRow"
+
+[node name="Label" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form/LaneRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "LANE"
+
+[node name="Lane" type="LineEdit" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form/LaneRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorField"
+placeholder_text = "lane OR familiar below"
+
+[node name="FamiliarRow" type="HBoxContainer" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentRow"
+
+[node name="Label" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form/FamiliarRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "FAMILIAR"
+
+[node name="Familiar" type="LineEdit" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form/FamiliarRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorField"
+placeholder_text = "familiar OR lane above"
+
+[node name="TaskLabel" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "TASK · REQUIRED"
+
+[node name="Task" type="TextEdit" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form"]
+custom_minimum_size = Vector2(0, 88)
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorField"
+placeholder_text = "Bounded task for the selected lane or familiar"
+wrap_mode = 1
+
+[node name="TargetRow" type="HBoxContainer" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentRow"
+
+[node name="Label" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form/TargetRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "TARGET · OPTIONAL"
+
+[node name="Target" type="LineEdit" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form/TargetRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorField"
+
+[node name="AcceptanceLabel" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "ACCEPTANCE · ONE PER LINE"
+
+[node name="Acceptance" type="TextEdit" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form"]
+custom_minimum_size = Vector2(0, 64)
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorField"
+wrap_mode = 1
+
+[node name="RiskRow" type="HBoxContainer" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentRow"
+
+[node name="Label" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form/RiskRow"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "RISK"
+
+[node name="Risk" type="OptionButton" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Form/RiskRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorField"
+
+[node name="Actions" type="HFlowContainer" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusRow"
+
+[node name="Build" type="Button" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Actions"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+disabled = true
+text = "BUILD BOUNDED PACKET"
+
+[node name="Unavailable" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column/Actions"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "ACTION UNAVAILABLE: NO HOST CONNECTION"
+
+[node name="Receipt" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "STATUS — · LANE — · MODEL ROLE — · OMP AGENT —"
+autowrap_mode = 2
+
+[node name="Diagnostics" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "ERRORS\n—\n\nWARNINGS\n—"
+autowrap_mode = 2
+
+[node name="Dispatcher" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "DISPATCHER EXECUTED: — · REASON: —"
+autowrap_mode = 2
+
+[node name="PacketLabel" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "SELECTABLE SPAWN PACKET"
+
+[node name="Packet" type="TextEdit" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorField"
+editable = false
+text = "—"
+wrap_mode = 1
+
+[node name="Detail" type="Label" parent="ApplicationShell/ContentViewport/DispatchPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "waiting for the shared Host session"
+autowrap_mode = 2
+
+[node name="HealthPage" type="VBoxContainer" parent="ApplicationShell/ContentViewport"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="HeaderRuleTop" parent="ApplicationShell/ContentViewport/HealthPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
+[node name="Kicker" type="Label" parent="ApplicationShell/ContentViewport/HealthPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageKicker"
+text = "S09 · SISTEMA / SAÚDE"
+
+[node name="Title" type="Label" parent="ApplicationShell/ContentViewport/HealthPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorPageTitle"
+text = "Saúde por canal"
+
+[node name="Lead" type="Label" parent="ApplicationShell/ContentViewport/HealthPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "Transporte, identidade, recall, entrega e recusas permanecem fatos separados. Nenhum indicador geral é inventado."
+autowrap_mode = 2
+
+[node name="HeaderRuleBottom" parent="ApplicationShell/ContentViewport/HealthPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
+[node name="Instrument" type="AthanorHealth" parent="ApplicationShell/ContentViewport/HealthPage"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorVessel"
+session_path = NodePath("../../../../HostSession")
+disclosure_label = NodePath("Margin/Column/Disclosure")
+transport_label = NodePath("Margin/Column/Grid/Transport")
+binding_label = NodePath("Margin/Column/Grid/Binding")
+recall_label = NodePath("Margin/Column/Grid/Recall")
+boat_label = NodePath("Margin/Column/Grid/Boat")
+refusal_label = NodePath("Margin/Column/Refusal")
+detail_label = NodePath("Margin/Column/Detail")
+unavailable_label = NodePath("Margin/Column/Actions/Unavailable")
+refresh_button = NodePath("Margin/Column/Actions/Refresh")
+
+[node name="Margin" type="MarginContainer" parent="ApplicationShell/ContentViewport/HealthPage/Instrument"]
+layout_mode = 2
+
+[node name="Column" type="VBoxContainer" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="Disclosure" type="Label" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorKicker"
+text = "OBSERVATION ONLY · EACH CHANNEL REPORTS ITS OWN REAL HOST EVENT · TRANSPORT, BINDING, RECALL HEALTH, PAPER BOAT DELIVERY, AND PROTOCOL REFUSAL ARE NEVER COLLAPSED INTO ONE VERDICT"
+autowrap_mode = 2
+
+[node name="Grid" type="GridContainer" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorStatusGrid"
+columns = 2
+
+[node name="Transport" type="Label" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column/Grid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorStatusValue"
+text = "◇ TRANSPORT · —"
+autowrap_mode = 2
+
+[node name="Binding" type="Label" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column/Grid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorStatusValue"
+text = "HOST BINDING\nHOUSE —\nROOM —\nSPIRIT —\nSESSION —"
+autowrap_mode = 2
+
+[node name="Recall" type="Label" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column/Grid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorStatusValue"
+text = "RECALL POLICY · VERSION — · SEQUENCE —\nDEGRADED —"
+autowrap_mode = 2
+
+[node name="Boat" type="Label" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column/Grid"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"AthanorStatusValue"
+text = "PAPER BOAT · —\nINTEGRITY SHA256 —"
+autowrap_mode = 2
+
+[node name="Refusal" type="Label" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "LAST PROTOCOL REFUSAL\n—"
+autowrap_mode = 2
+
+[node name="Detail" type="Label" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "waiting for the shared Host session"
+autowrap_mode = 2
+
+[node name="Actions" type="HFlowContainer" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusRow"
+
+[node name="Refresh" type="Button" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column/Actions"]
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+disabled = true
+text = "REQUEST SNAPSHOTS"
+
+[node name="Unavailable" type="Label" parent="ApplicationShell/ContentViewport/HealthPage/Instrument/Margin/Column/Actions"]
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = "ACTION UNAVAILABLE: NO HOST CONNECTION"
 
 [node name="StatusRail" type="PanelContainer" parent="ApplicationShell"]
 custom_minimum_size = Vector2(0, 42)

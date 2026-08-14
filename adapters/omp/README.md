@@ -64,7 +64,7 @@ environment:
 
 ```powershell
 pwsh -File installer/build-native-release.ps1 `
-  -Version 0.9.3 `
+  -Version 0.9.6.1 `
   -OutDir dist/native
 ```
 

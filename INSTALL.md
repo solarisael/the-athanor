@@ -13,7 +13,7 @@ and Inno Setup are build-time tools only.
 
 The command examples below name `1.0.0-rc.3` because it is the last immutable
 public installer artifact proven on the reference workstation. The active
-source version is `0.9.5`; locally installed native versions may be newer than
+source version is `0.9.6`; locally installed native versions may be newer than
 the last publicly published checksum-paired installer.
 
 ## Verify and install

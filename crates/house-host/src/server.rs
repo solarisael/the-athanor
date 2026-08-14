@@ -40,6 +40,7 @@ use house_protocol::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -612,9 +613,10 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             room_dir,
             request,
         } => {
+            let room_dir = resolve_room_dir(room_dir.as_deref(), &state.config);
             let result = match serde_json::from_value::<DispatchRequest>(request) {
                 Ok(request) => serde_json::to_value(house_dispatch(request, || {
-                    read_room_spellbook(room_dir.as_deref().unwrap_or_default())
+                    read_room_spellbook(room_dir.as_ref())
                 }))
                 .expect("dispatch receipt serializes"),
                 Err(error) => invalid_routing_request("routing", error),
@@ -622,8 +624,10 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             routing_response(state, meta, result).await
         }
         ClientCommand::FamiliarStatus { meta, room_dir } => {
-            let result = serde_json::to_value(familiar_status(read_room_spellbook(&room_dir)))
-                .expect("familiar status serializes");
+            let room_dir = resolve_room_dir(room_dir.as_deref(), &state.config);
+            let result =
+                serde_json::to_value(familiar_status(read_room_spellbook(room_dir.as_ref())))
+                    .expect("familiar status serializes");
             routing_response(state, meta, result).await
         }
         ClientCommand::NormalizeLineage { meta, request } => {
@@ -724,6 +728,16 @@ async fn shell_response(state: &AppState, meta: CommandMeta, result: Value) -> R
     Responses {
         direct: vec![serialize(&event)],
         delta: None,
+    }
+}
+
+fn resolve_room_dir<'a>(
+    requested: Option<&'a str>,
+    config: &'a HostConfig,
+) -> Cow<'a, str> {
+    match requested.filter(|room_dir| !room_dir.trim().is_empty()) {
+        Some(room_dir) => Cow::Borrowed(room_dir),
+        None => config.room_dir.to_string_lossy(),
     }
 }
 
@@ -1619,4 +1633,33 @@ fn serialize(value: &impl serde::Serialize) -> String {
 
 fn new_id() -> String {
     Uuid::new_v4().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_room_dir;
+    use crate::config::HostConfig;
+
+    #[test]
+    fn familiar_status_defaults_to_configured_room_dir() {
+        let config = HostConfig {
+            bind: "127.0.0.1:0".parse().expect("test bind"),
+            ws_path: "/athanor/v1/ws".into(),
+            bearer_token: "test-token".into(),
+            room_dir: std::path::PathBuf::from("configured-room"),
+            state_dir: std::path::PathBuf::from("host-state"),
+            house_id: "solarisael".into(),
+            room: "kodo".into(),
+            spirit: "Kodo".into(),
+            session: "test-session".into(),
+            recipient: "house-host".into(),
+            akasha_enabled: false,
+            nats_url: None,
+        };
+
+        assert_eq!(
+            resolve_room_dir(None, &config).as_ref(),
+            "configured-room"
+        );
+    }
 }

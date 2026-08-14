@@ -129,7 +129,7 @@ overrides, but install removes duplicate source/version registration owners.
 
 ### Release and support target
 
-`0.9.5` is the current native Windows x64 late-beta source version. OMP is the
+`0.9.6` is the current native Windows x64 late-beta source version. OMP is the
 supported harness. The release artifact shape is one checksum-published installer:
 
 ```text

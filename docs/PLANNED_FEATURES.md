@@ -34,7 +34,7 @@ Self-hosting remains available. Managed services must support complete export.
 
 ## What works now
 
-The current source version is `0.9.5`, a native Windows x64 late beta. The
+The current source version is `0.9.6`, a native Windows x64 late beta. The
 reference Solarisael workstation runs the locally proven native activation.
 OMP is the supported harness and Solarisael House remains the working reference
 House.

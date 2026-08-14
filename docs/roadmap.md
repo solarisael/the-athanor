@@ -16,7 +16,7 @@ The previous long-form roadmap is preserved as
 
 ## Current late-beta state
 
-The repository now carries the `0.9.5` native Windows x64 late-beta source.
+The repository now carries the `0.9.6` native Windows x64 late-beta source.
 OMP is the supported harness. One Rust workspace owns the behavioral core,
 Vault, AKASHA, Host, delivery, native lifecycle, and Godot client. Read
 [the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).

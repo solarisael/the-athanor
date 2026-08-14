@@ -20,6 +20,19 @@ the exact implementation record.
 
 ## [Unreleased]
 
+## [0.9.6.1] - 2026-08-14
+
+### Fixed
+
+- Accepted the substrate's `clusters` and `chunks_total` in cluster staleness
+  telemetry. Recall no longer refuses with `unknown field chunks_total` once
+  clusters exist.
+- Normalized cluster resonance at the substrate boundary: activation is clamped
+  to the wire's `[0, 1]` unit-fraction contract instead of `[-1, 1]`, and a null
+  cluster label serializes as an empty string instead of refusing the result.
+
+## [0.9.6] - 2026-08-14
+
 ### Added
 
 - Added a durable Godot effects laboratory: four source-labelled alchemical
@@ -28,6 +41,10 @@ the exact implementation record.
   instrumentation. Decorative output carries no Host authority.
 
 ### Changed
+
+- Wired the remaining Godot shell actions (S07, S08, S09) to live Host commands
+  and removed their dead placeholder routes. Every visible GUI action now
+  performs its real operation or states its absent contract.
 
 - Reframed the Godot shell around the product contract: left room/session
   navigation, center active chat, and right contextual inspection. S01 now
@@ -60,6 +77,20 @@ the exact implementation record.
 - Included the new `gui/navigation` runtime resources in native release staging.
 
 ### Fixed
+
+- Stopped the OMP adapter from deleting injected replaceable context (Recall
+  working set, Striatum lessons, nudges) out of historical turns on refresh.
+  Replaceable additions now anchor only at the current turn, the turn-addition
+  memo is an access-touched LRU of 128 sessions, and a durable per-room shelf
+  (`.omp/runtime/turn-additions/<hash>.json`) replays byte-identical context
+  across adapter restarts. Ordinary turns and restarts now keep their prompt
+  cache instead of missing on every message.
+- Restored the `recall` organ against legacy stored `pointer_files` shapes. The
+  substrate now normalizes them at its boundary instead of refusing the entire
+  recall with `unknown field note`.
+- Accepted the substrate's `cluster_id` in cluster resonance profile entries.
+  Recall no longer refuses with `unknown field cluster_id` once memory clusters
+  exist; unknown fields elsewhere remain refused.
 - Removed invented box-drawing corners and the inferred four-corner side-panel
   treatment. The GUI no longer fills gaps in the extracted design with new
   ornament vocabulary.
@@ -110,6 +141,7 @@ the exact implementation record.
   standard PowerShell session.
 - Replaced per-screen Godot WebSockets with one root-owned authenticated Host
   session shared by Recall Policy, Paper Boat receipts, and worker-lane status.
+- Wired S07 Familiars, S08 Dispatch builder, and S09 Saúde instruments to existing Host commands. Deleted dead S03–S06, S10–S13, and R01 navigation routes. The status rail now mirrors the authenticated Host binding. The Host defaults an absent `room_dir` to its configured room for `familiar.status` and `routing.dispatch`. Recall command-state and hash labels wrap inside their columns. Dispatch form fields now have usable heights. The navigation contract test now uses the operator map.
 
 ### Fixed
 

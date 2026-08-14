@@ -11,12 +11,13 @@
 use godot::classes::Time;
 use godot::prelude::*;
 use house_protocol::{
-    DEFAULT_HOST_WS_URL, HOST_SCHEMA_VERSION, PAPER_BOAT_RECEIPT_PROJECTION_ID,
+    DEFAULT_HOST_WS_URL, FAMILIAR_STATUS, HOST_SCHEMA_VERSION, PAPER_BOAT_RECEIPT_PROJECTION_ID,
     PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE, RECALL_POLICY_ACKNOWLEDGE,
     RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED,
     RECALL_POLICY_DELTA, RECALL_POLICY_FIELD_UPDATE, RECALL_POLICY_PROJECTION_ID,
     RECALL_POLICY_RESYNC, RECALL_POLICY_SET_REQUESTED_MODE, RECALL_POLICY_SNAPSHOT,
-    RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT, ROUTING_STATUS,
+    RECALL_POLICY_SUBSCRIBE, ROUTING_DISPATCH, ROUTING_PROJECTION_ID, ROUTING_RESULT,
+    ROUTING_STATUS,
 };
 
 /// Explicit schema version negotiated with the Host. A mismatch is refused,
@@ -946,6 +947,316 @@ pub fn parse_routing_status(envelope: &VarDictionary) -> Result<RoutingStatusPro
 }
 
 // ---------------------------------------------------------------------------
+// Familiar status and bounded dispatch: exact routing result shapes
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub struct FamiliarView {
+    pub id: String,
+    pub name: String,
+    pub aliases: Vec<String>,
+    pub lane: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct FamiliarStatusProjection {
+    pub event_id: String,
+    pub sequence: i64,
+    pub ok: bool,
+    pub errors: Vec<String>,
+    pub source: Option<String>,
+    pub source_alias: bool,
+    pub collective: Option<String>,
+    pub collective_aliases: Vec<String>,
+    pub spellbook_aliases: Vec<String>,
+    pub familiars: Vec<FamiliarView>,
+}
+
+fn nullable_dictionary(source: &VarDictionary, key: &str) -> Result<Option<VarDictionary>, String> {
+    let value = source
+        .get(key)
+        .ok_or_else(|| format!("required field missing: {key}"))?;
+    if value.is_nil() {
+        return Ok(None);
+    }
+    value
+        .try_to::<VarDictionary>()
+        .map(Some)
+        .map_err(|_| format!("required field is not a dictionary or null: {key}"))
+}
+
+fn familiar_view(value: &Variant) -> Result<FamiliarView, String> {
+    let familiar = value
+        .try_to::<VarDictionary>()
+        .map_err(|_| "familiar is not a dictionary".to_string())?;
+    reject_unknown_fields(
+        &familiar,
+        &[
+            "id",
+            "name",
+            "aliases",
+            "lane",
+            "description",
+            "temperament",
+            "appearance",
+        ],
+    )?;
+    nullable_text(&familiar, "temperament")?;
+    nullable_text(&familiar, "appearance")?;
+    Ok(FamiliarView {
+        id: required_text(&familiar, "id")?,
+        name: required_text(&familiar, "name")?,
+        aliases: required_text_list(&familiar, "aliases")?,
+        lane: required_text(&familiar, "lane")?,
+        description: required_text(&familiar, "description")?,
+    })
+}
+
+fn routing_result(envelope: &VarDictionary) -> Result<VarDictionary, String> {
+    if required_int(envelope, "schema_version")? != SCHEMA_VERSION {
+        return Err("routing schema_version is not accepted".into());
+    }
+    if required_text(envelope, "command_or_event_type")? != ROUTING_RESULT {
+        return Err("event is not a routing result".into());
+    }
+    require_event_meta(envelope)?;
+    if event_projection_id(envelope)? != ROUTING_PROJECTION_ID {
+        return Err("routing projection_id is foreign".into());
+    }
+    reject_unknown_event_fields(envelope, &["result"])?;
+    envelope
+        .get("result")
+        .ok_or_else(|| "routing result is missing".to_string())?
+        .try_to::<VarDictionary>()
+        .map_err(|_| "routing result is not a dictionary".to_string())
+}
+
+pub fn parse_familiar_status(
+    envelope: &VarDictionary,
+) -> Result<FamiliarStatusProjection, String> {
+    let result = routing_result(envelope)?;
+    reject_unknown_fields(
+        &result,
+        &["ok", "errors", "spellbook", "source", "sourceAlias"],
+    )?;
+    let ok = required_bool(&result, "ok")?;
+    let errors = required_text_list(&result, "errors")?;
+    let source = nullable_text(&result, "source")?;
+    let source_alias = required_bool(&result, "sourceAlias")?;
+
+    let (collective, collective_aliases, spellbook_aliases, familiars) =
+        match nullable_dictionary(&result, "spellbook")? {
+            Some(spellbook) => {
+                reject_unknown_fields(
+                    &spellbook,
+                    &[
+                        "version",
+                        "collective",
+                        "collectiveAliases",
+                        "spellbookAliases",
+                        "familiars",
+                    ],
+                )?;
+                if required_int(&spellbook, "version")? != 1 {
+                    return Err("familiar spellbook version is not accepted".into());
+                }
+                let raw_familiars = spellbook
+                    .get("familiars")
+                    .ok_or_else(|| "required field missing: familiars".to_string())?
+                    .try_to::<VarArray>()
+                    .map_err(|_| "familiars is not a list".to_string())?;
+                let familiars = raw_familiars
+                    .iter_shared()
+                    .map(|value| familiar_view(&value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                (
+                    Some(required_text(&spellbook, "collective")?),
+                    required_text_list(&spellbook, "collectiveAliases")?,
+                    required_text_list(&spellbook, "spellbookAliases")?,
+                    familiars,
+                )
+            }
+            None => (None, Vec::new(), Vec::new(), Vec::new()),
+        };
+    if ok && collective.is_none() {
+        return Err("successful familiar status has no spellbook".into());
+    }
+    if !ok && errors.is_empty() {
+        return Err("refused familiar status has no errors".into());
+    }
+
+    Ok(FamiliarStatusProjection {
+        event_id: required_text(envelope, "event_id")?,
+        sequence: required_int(envelope, "sequence")?,
+        ok,
+        errors,
+        source,
+        source_alias,
+        collective,
+        collective_aliases,
+        spellbook_aliases,
+        familiars,
+    })
+}
+
+#[derive(Clone, Debug)]
+pub struct SpawnTaskView {
+    pub name: String,
+    pub agent: Option<String>,
+    pub task: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct SpawnPacketView {
+    pub tool: String,
+    pub context: String,
+    pub tasks: Vec<SpawnTaskView>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DispatchProjection {
+    pub event_id: String,
+    pub sequence: i64,
+    pub ok: bool,
+    pub status: String,
+    pub lane: Option<String>,
+    pub model_role: Option<String>,
+    pub omp_agent: Option<String>,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub dispatcher_executed: bool,
+    pub dispatcher_reason: String,
+    pub spawn_packet: Option<SpawnPacketView>,
+}
+
+fn spawn_packet(value: VarDictionary) -> Result<SpawnPacketView, String> {
+    reject_unknown_fields(&value, &["tool", "args"])?;
+    let args = value
+        .get("args")
+        .ok_or_else(|| "required field missing: args".to_string())?
+        .try_to::<VarDictionary>()
+        .map_err(|_| "spawnPacket args is not a dictionary".to_string())?;
+    reject_unknown_fields(&args, &["context", "tasks"])?;
+    let raw_tasks = args
+        .get("tasks")
+        .ok_or_else(|| "required field missing: tasks".to_string())?
+        .try_to::<VarArray>()
+        .map_err(|_| "spawnPacket tasks is not a list".to_string())?;
+    let tasks = raw_tasks
+        .iter_shared()
+        .map(|value| {
+            let task = value
+                .try_to::<VarDictionary>()
+                .map_err(|_| "spawnPacket task is not a dictionary".to_string())?;
+            reject_unknown_fields(&task, &["name", "agent", "task"])?;
+            let agent = match task.get("agent") {
+                Some(value) => Some(
+                    optional_text(&value)
+                        .ok_or_else(|| "spawnPacket agent is empty or not text".to_string())?,
+                ),
+                None => None,
+            };
+            Ok(SpawnTaskView {
+                name: required_text(&task, "name")?,
+                agent,
+                task: required_text(&task, "task")?,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(SpawnPacketView {
+        tool: required_text(&value, "tool")?,
+        context: required_text(&args, "context")?,
+        tasks,
+    })
+}
+
+pub fn parse_dispatch_result(envelope: &VarDictionary) -> Result<DispatchProjection, String> {
+    let result = routing_result(envelope)?;
+    reject_unknown_fields(
+        &result,
+        &[
+            "ok",
+            "status",
+            "lane",
+            "modelRole",
+            "ompAgent",
+            "errors",
+            "warnings",
+            "dispatcher",
+            "spawnPacket",
+            "selector",
+            "familiar",
+            "source",
+            "sourceAlias",
+            "spellbook",
+        ],
+    )?;
+    let status = required_text(&result, "status")?;
+    if status != "ready" && status != "rejected" {
+        return Err(format!("unknown dispatch status: {status}"));
+    }
+    let dispatcher = result
+        .get("dispatcher")
+        .ok_or_else(|| "required field missing: dispatcher".to_string())?
+        .try_to::<VarDictionary>()
+        .map_err(|_| "dispatcher is not a dictionary".to_string())?;
+    reject_unknown_fields(&dispatcher, &["executed", "reason"])?;
+
+    let packet = nullable_dictionary(&result, "spawnPacket")?
+        .map(spawn_packet)
+        .transpose()?;
+    if let Some(selector) = nullable_dictionary(&result, "selector")? {
+        reject_unknown_fields(&selector, &["kind", "value"])?;
+        let kind = required_text(&selector, "kind")?;
+        if kind != "lane" && kind != "familiar" {
+            return Err(format!("unknown dispatch selector kind: {kind}"));
+        }
+        required_text(&selector, "value")?;
+    }
+    match nullable_dictionary(&result, "familiar")? {
+        Some(familiar) => {
+            familiar_view(&familiar.to_variant())?;
+        }
+        None => {}
+    }
+    nullable_text(&result, "source")?;
+    required_bool(&result, "sourceAlias")?;
+    if let Some(spellbook) = nullable_dictionary(&result, "spellbook")? {
+        reject_unknown_fields(
+            &spellbook,
+            &["collective", "collectiveAliases", "spellbookAliases"],
+        )?;
+        required_text(&spellbook, "collective")?;
+        required_text_list(&spellbook, "collectiveAliases")?;
+        required_text_list(&spellbook, "spellbookAliases")?;
+    }
+
+    let ok = required_bool(&result, "ok")?;
+    if ok != (status == "ready") {
+        return Err("dispatch ok/status disagree".into());
+    }
+    if ok && packet.is_none() {
+        return Err("ready dispatch has no spawnPacket".into());
+    }
+
+    Ok(DispatchProjection {
+        event_id: required_text(envelope, "event_id")?,
+        sequence: required_int(envelope, "sequence")?,
+        ok,
+        status,
+        lane: nullable_text(&result, "lane")?,
+        model_role: nullable_text(&result, "modelRole")?,
+        omp_agent: nullable_text(&result, "ompAgent")?,
+        errors: required_text_list(&result, "errors")?,
+        warnings: required_text_list(&result, "warnings")?,
+        dispatcher_executed: required_bool(&dispatcher, "executed")?,
+        dispatcher_reason: required_text(&dispatcher, "reason")?,
+        spawn_packet: packet,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Outbound envelope construction
 // ---------------------------------------------------------------------------
 
@@ -1009,6 +1320,48 @@ pub fn paper_boat_receipt_subscribe_command(identity: &CommandIdentity) -> VarDi
 pub fn routing_status_command(binding: &HostBinding, identity: &CommandIdentity) -> VarDictionary {
     let mut envelope = base_envelope(Some(binding), ROUTING_STATUS, identity);
     envelope.set("projection_id", ROUTING_PROJECTION_ID);
+    envelope
+}
+
+pub fn familiar_status_command(
+    binding: &HostBinding,
+    identity: &CommandIdentity,
+) -> VarDictionary {
+    let mut envelope = base_envelope(Some(binding), FAMILIAR_STATUS, identity);
+    envelope.set("projection_id", ROUTING_PROJECTION_ID);
+    envelope
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn routing_dispatch_command(
+    binding: &HostBinding,
+    identity: &CommandIdentity,
+    lane: &str,
+    familiar: &str,
+    task: &str,
+    target: Option<&str>,
+    acceptance: &[String],
+    risk: &str,
+) -> VarDictionary {
+    let mut request = VarDictionary::new();
+    request.set("lane", lane);
+    request.set("familiar", familiar);
+    request.set("task", task);
+    if let Some(target) = target {
+        request.set("target", target);
+    }
+    request.set("context", &VarArray::new().to_variant());
+    let mut acceptance_values = VarArray::new();
+    for line in acceptance {
+        acceptance_values.push(&line.to_variant());
+    }
+    request.set("acceptance", &acceptance_values.to_variant());
+    request.set("risk", risk);
+    request.set("lessonBodies", &VarArray::new().to_variant());
+
+    let mut envelope = base_envelope(Some(binding), ROUTING_DISPATCH, identity);
+    envelope.set("projection_id", ROUTING_PROJECTION_ID);
+    envelope.set("routing_request", &request.to_variant());
     envelope
 }
 

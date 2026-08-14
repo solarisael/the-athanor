@@ -29,6 +29,24 @@ func _run_contracts() -> void:
 	_check(center.get_theme_constant("margin_left") == 252, "wide center reserves the left reliquary")
 	_check(center.get_theme_constant("margin_right") == 316, "wide center reserves the right reliquary")
 	_check(status.custom_minimum_size.y <= 42.0, "bottom status remains a one-row rail")
+	var expected_screen_ids := PackedStringArray([
+		"S01", "S02", "S03", "S04", "S05", "S06", "S07",
+		"S08", "S09", "S10", "S11", "S12", "S13", "S14",
+	])
+	var mapped_screen_ids: Dictionary = {}
+	var report_found := false
+	for node: Node in left.find_children("*", "Button", true, false):
+		if node.has_meta("screen_id"):
+			var screen_id := String(node.get_meta("screen_id"))
+			mapped_screen_ids[screen_id] = true
+			report_found = report_found or screen_id == "R01"
+	for screen_id: String in expected_screen_ids:
+		_check(mapped_screen_ids.has(screen_id), "archive screen map includes %s" % screen_id)
+	_check(mapped_screen_ids.size() == 15 and report_found, "archive map contains exactly S01–S14 plus reference report R01")
+	_check(shell.find_children("OrnamentTop", "*", true, false).is_empty(), "shell does not manufacture unreferenced corner ornament")
+	var header_rule := shell.find_child("HeaderRuleTop", true, false)
+	var flourish := header_rule.get_node("FlourishStart") as TextureRect
+	_check(flourish.texture.resource_path.ends_with("reliquary-divider-flourish.svg"), "screen header uses the exact archived OrnamentFrame flourish")
 
 	var conversation_button := left.get_node("Margin/Column/PaneHost/Root/Conversation") as Button
 	conversation_button.grab_focus()
@@ -91,7 +109,7 @@ func _run_contracts() -> void:
 	shell.queue_free()
 	await process_frame
 	if _failures.is_empty():
-		print("RELIQUARY_CONTRACT: PASS · nested panes, focus, escape, four-region layout, status rail, drawers")
+		print("RELIQUARY_CONTRACT: PASS · archive map, exact ornament rule, nested panes, focus, escape, layout, rail, drawers")
 		quit(0)
 	else:
 		for failure in _failures:

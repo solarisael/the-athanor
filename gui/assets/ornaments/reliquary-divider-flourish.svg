@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 14" fill="none" aria-hidden="true">
+  <!-- Exact geometry from The Athanor Design Restart.zip / SolarisaelUI OrnamentFrame. -->
+  <g id="reliquary-divider-flourish" stroke="#c8a96b" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 7c4 0 6-2 8-5"/>
+    <path d="M2 7c4 0 6 2 8 5"/>
+    <path d="M10 7c4 0 6-2.5 8-5"/>
+    <path d="M10 7c4 0 6 2.5 8 5"/>
+    <path d="M18 7c4 0 6-2 7-4"/>
+    <path d="M18 7c4 0 6 2 7 4"/>
+    <path d="M30 4l3 3-3 3"/>
+    <path d="M26 7h8"/>
+  </g>
+</svg>

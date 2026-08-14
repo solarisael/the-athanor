@@ -36,9 +36,9 @@ impl Screen {
 
     fn route_label(self) -> &'static str {
         match self {
-            Self::Resume => "S01 · CONVERSATION / RESUME",
-            Self::RecallPolicy => "S02 · MEMORY / RECALL POLICY",
-            Self::Routing => "S03 · HOUSE / WORKER LANES",
+            Self::Resume => "S01 · CONVERSA / RETOMADA",
+            Self::RecallPolicy => "S02 · MEMÓRIA / RECALL",
+            Self::Routing => "HOUSE / WORKER LANES · HOST STATUS",
         }
     }
 }
@@ -227,7 +227,7 @@ impl IControl for AthanorProbe {
         self.shell = Some(shell);
         self.active_screen = match std::env::var(INITIAL_SCREEN_ENV).ok().as_deref() {
             Some("recall-policy" | "s02") => Screen::RecallPolicy,
-            Some("routing" | "familiars" | "s03") => Screen::Routing,
+            Some("routing" | "worker-lanes") => Screen::Routing,
             Some("resume" | "conversation" | "chat" | "s01") | None => Screen::Resume,
             Some(other) => {
                 godot_warn!("unknown {INITIAL_SCREEN_ENV} ({other}); using S01");

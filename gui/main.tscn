@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Theme" path="res://theme/athanor_theme.tres" id="1_theme"]
 [ext_resource type="Script" path="res://navigation/reliquary_navigator.gd" id="2_reliquary"]
+[ext_resource type="PackedScene" path="res://design-system/ornament_rule.tscn" id="3_ornament_rule"]
 
 [node name="AthanorProbe" type="AthanorProbe"]
 layout_mode = 3
@@ -154,7 +155,7 @@ anchors_preset = 9
 anchor_bottom = 1.0
 offset_right = 244.0
 grow_vertical = 2
-theme_type_variation = &"AthanorReliquary"
+theme_type_variation = &"AthanorVessel"
 script = ExtResource("2_reliquary")
 pane_host_path = NodePath("Margin/Column/PaneHost")
 title_label_path = NodePath("Margin/Column/Header/Title")
@@ -170,23 +171,6 @@ theme_type_variation = &"AthanorReliquaryMargin"
 layout_mode = 2
 theme_type_variation = &"AthanorReliquaryColumn"
 
-[node name="OrnamentTop" type="HBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column"]
-layout_mode = 2
-
-[node name="Left" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentTop"]
-layout_mode = 2
-theme_type_variation = &"AthanorOrnamentText"
-text = "┌──◇"
-
-[node name="Spacer" type="Control" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentTop"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="Right" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentTop"]
-layout_mode = 2
-theme_type_variation = &"AthanorOrnamentText"
-text = "◇──┐"
 
 [node name="Header" type="HBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column"]
 layout_mode = 2
@@ -238,54 +222,54 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"AthanorReliquaryColumn"
-metadata/pane_title = "NAVIGATION"
+metadata/pane_title = "NAVEGAÇÃO"
 
 [node name="Kicker" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 theme_type_variation = &"AthanorPageKicker"
-text = "INSTRUMENT FAMILIES"
+text = "THE ATHANOR DESIGN RESTART"
 
 [node name="Conversation" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 theme_type_variation = &"AthanorTabActive"
-text = "◇  CONVERSATION  →"
+text = "CONVERSA  →"
 metadata/pane_target = &"Conversation"
 
 [node name="Memory" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 theme_type_variation = &"AthanorTab"
-text = "◇  MEMORY  →"
+text = "MEMÓRIA  →"
 metadata/pane_target = &"Memory"
 
-[node name="House" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
+[node name="Giga" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 theme_type_variation = &"AthanorTab"
-text = "◇  HOUSE  →"
-metadata/pane_target = &"House"
+text = "GIGA  →"
+metadata/pane_target = &"Giga"
 
 [node name="Familiars" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 theme_type_variation = &"AthanorTab"
-text = "◇  FAMILIARS  →"
+text = "FAMILIARS  →"
 metadata/pane_target = &"Familiars"
 
 [node name="Sources" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 theme_type_variation = &"AthanorTab"
-text = "◇  SOURCES  →"
+text = "SOURCES  →"
 metadata/pane_target = &"Sources"
 
 [node name="System" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 theme_type_variation = &"AthanorTab"
-text = "◇  SYSTEM  →"
+text = "SISTEMA  →"
 metadata/pane_target = &"System"
 
 [node name="Boundary" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 size_flags_vertical = 3
 theme_type_variation = &"AthanorMeta"
-text = "THE FOURTEEN-SCREEN MAP IS NOT RECOVERED. ONLY AUTHENTICATED OR IMPLEMENTED ROUTES APPEAR."
+text = "MAPA EXATO: THE ATHANOR DESIGN RESTART.ZIP · ROTAS SEM CONTRATO PERMANECEM VISÍVEIS COMO NOT WIRED."
 autowrap_mode = 2
 vertical_alignment = 2
 
@@ -298,19 +282,14 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"AthanorReliquaryColumn"
-metadata/pane_title = "CONVERSATION"
+metadata/pane_title = "CONVERSA"
 
-[node name="Resume" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Conversation"]
+[node name="S01" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Conversation"]
 layout_mode = 2
 theme_type_variation = &"AthanorTabActive"
-text = "S01  RESUME"
+text = "S01  RETOMADA"
 metadata/action_id = &"screen:resume"
-
-[node name="Copy" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Conversation"]
-layout_mode = 2
-theme_type_variation = &"AthanorMeta"
-text = "ACTIVE CONVERSATION CENTER · HOST CHAT CONTRACT NOT YET WIRED"
-autowrap_mode = 2
+metadata/screen_id = &"S01"
 
 [node name="Memory" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
 visible = false
@@ -321,21 +300,40 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"AthanorReliquaryColumn"
-metadata/pane_title = "MEMORY"
+metadata/pane_title = "MEMÓRIA"
 
-[node name="RecallPolicy" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Memory"]
+[node name="S02" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Memory"]
 layout_mode = 2
 theme_type_variation = &"AthanorTab"
-text = "S02  RECALL POLICY"
+text = "S02  RECALL"
 metadata/action_id = &"screen:recall-policy"
+metadata/screen_id = &"S02"
 
-[node name="Copy" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Memory"]
+[node name="S03" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Memory"]
 layout_mode = 2
-theme_type_variation = &"AthanorMeta"
-text = "REAL HOST SNAPSHOT ONLY · THIS CLIENT IS NOT MEMORY AUTHORITY"
-autowrap_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "S03  REMEMBER · NOT WIRED"
+tooltip_text = "No Remember projection exists in the Godot client."
+metadata/screen_id = &"S03"
 
-[node name="House" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
+[node name="S04" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Memory"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "S04  DETALHE · NOT WIRED"
+tooltip_text = "No memory-detail projection exists in the Godot client."
+metadata/screen_id = &"S04"
+
+[node name="S12" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Memory"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "S12  ANAMNESIS · NOT WIRED"
+tooltip_text = "No Anamnesis projection exists in the Godot client."
+metadata/screen_id = &"S12"
+
+[node name="Giga" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
 visible = false
 layout_mode = 1
 anchors_preset = 15
@@ -344,19 +342,23 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"AthanorReliquaryColumn"
-metadata/pane_title = "HOUSE"
+metadata/pane_title = "GIGA"
 
-[node name="Routing" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/House"]
+[node name="S05" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Giga"]
 layout_mode = 2
 theme_type_variation = &"AthanorTab"
-text = "S03  WORKER LANES"
-metadata/action_id = &"screen:routing"
+disabled = true
+text = "S05  INBOX · NOT WIRED"
+tooltip_text = "No GIGA candidate inbox projection exists in the Godot client."
+metadata/screen_id = &"S05"
 
-[node name="Copy" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/House"]
+[node name="S06" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Giga"]
 layout_mode = 2
-theme_type_variation = &"AthanorMeta"
-text = "READ-ONLY HOST ROUTING PROJECTION · NO DISPATCH"
-autowrap_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "S06  PROMOÇÃO · NOT WIRED"
+tooltip_text = "No GIGA promotion projection exists in the Godot client."
+metadata/screen_id = &"S06"
 
 [node name="Familiars" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
 visible = false
@@ -369,13 +371,21 @@ grow_vertical = 2
 theme_type_variation = &"AthanorReliquaryColumn"
 metadata/pane_title = "FAMILIARS"
 
-[node name="Unavailable" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Familiars"]
+[node name="S07" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Familiars"]
 layout_mode = 2
-theme_type_variation = &"AthanorBody"
-text = "NOT WIRED
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "S07  SPELLBOOK · NOT WIRED"
+tooltip_text = "No familiar spellbook projection exists in the Godot client."
+metadata/screen_id = &"S07"
 
-No familiar index projection exists in the Godot client. Nothing is synthesized from the room or working directory."
-autowrap_mode = 2
+[node name="S08" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Familiars"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "S08  DISPATCH · NOT WIRED"
+tooltip_text = "No familiar dispatch flow exists in the Godot client."
+metadata/screen_id = &"S08"
 
 [node name="Sources" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
 visible = false
@@ -388,13 +398,13 @@ grow_vertical = 2
 theme_type_variation = &"AthanorReliquaryColumn"
 metadata/pane_title = "SOURCES"
 
-[node name="Unavailable" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Sources"]
+[node name="S11" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Sources"]
 layout_mode = 2
-theme_type_variation = &"AthanorBody"
-text = "NOT WIRED
-
-No source-browser projection exists. Authority, relevance, and chronology remain separate Host concerns."
-autowrap_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "S11  IMPORTAR E MAPEAR · NOT WIRED"
+tooltip_text = "No source-import mapping flow exists in the Godot client."
+metadata/screen_id = &"S11"
 
 [node name="System" type="VBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost"]
 visible = false
@@ -405,37 +415,58 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_type_variation = &"AthanorReliquaryColumn"
-metadata/pane_title = "SYSTEM"
+metadata/pane_title = "SISTEMA"
 
-[node name="Settings" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
+[node name="S09" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
 layout_mode = 2
 theme_type_variation = &"AthanorTab"
-text = "SETTINGS RELIQUARY  →"
-metadata/action_id = &"open:settings"
+disabled = true
+text = "S09  SAÚDE · NOT WIRED"
+tooltip_text = "No three-domain health screen exists in the Godot client."
+metadata/screen_id = &"S09"
 
-[node name="Copy" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
+[node name="S10" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "S10  DIAGNÓSTICO · NOT WIRED"
+tooltip_text = "No diagnostic and reconciliation screen exists in the Godot client."
+metadata/screen_id = &"S10"
+
+[node name="S13" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "S13  ADMINISTRAÇÃO · NOT WIRED"
+tooltip_text = "No isolated administration screen exists in the Godot client."
+metadata/screen_id = &"S13"
+
+[node name="S14" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "S14  PREFERÊNCIAS"
+metadata/action_id = &"open:settings"
+metadata/screen_id = &"S14"
+
+[node name="R01" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+disabled = true
+text = "R01  RELATÓRIO · NOT WIRED"
+tooltip_text = "The prototype report is reference evidence, not a product route."
+metadata/screen_id = &"R01"
+
+[node name="WorkerLanes" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "WORKER LANES · HOST STATUS"
+metadata/action_id = &"screen:routing"
+
+[node name="Boundary" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/System"]
 layout_mode = 2
 theme_type_variation = &"AthanorMeta"
-text = "PRESENTATION SETTINGS ARE LOCAL · HOST POLICY IS NEVER CHANGED HERE"
+text = "WORKER LANES IS AN IMPLEMENTED HOST INSTRUMENT OUTSIDE THE ARCHIVED S01–S14 MAP."
 autowrap_mode = 2
-
-[node name="OrnamentBottom" type="HBoxContainer" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column"]
-layout_mode = 2
-
-[node name="Left" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentBottom"]
-layout_mode = 2
-theme_type_variation = &"AthanorOrnamentText"
-text = "└──◇"
-
-[node name="Spacer" type="Control" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentBottom"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="Right" type="Label" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/OrnamentBottom"]
-layout_mode = 2
-theme_type_variation = &"AthanorOrnamentText"
-text = "◇──┘"
 
 [node name="RightReliquary" type="PanelContainer" parent="ApplicationShell/Workspace"]
 layout_mode = 1
@@ -446,7 +477,7 @@ anchor_bottom = 1.0
 offset_left = -308.0
 grow_horizontal = 0
 grow_vertical = 2
-theme_type_variation = &"AthanorReliquary"
+theme_type_variation = &"AthanorVessel"
 script = ExtResource("2_reliquary")
 pane_host_path = NodePath("Margin/Column/PaneHost")
 title_label_path = NodePath("Margin/Column/Header/Title")
@@ -462,23 +493,6 @@ theme_type_variation = &"AthanorReliquaryMargin"
 layout_mode = 2
 theme_type_variation = &"AthanorReliquaryColumn"
 
-[node name="OrnamentTop" type="HBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column"]
-layout_mode = 2
-
-[node name="Left" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentTop"]
-layout_mode = 2
-theme_type_variation = &"AthanorOrnamentText"
-text = "┌──◇"
-
-[node name="Spacer" type="Control" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentTop"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="Right" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentTop"]
-layout_mode = 2
-theme_type_variation = &"AthanorOrnamentText"
-text = "◇──┐"
 
 [node name="Header" type="HBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column"]
 layout_mode = 2
@@ -540,7 +554,7 @@ text = "ACTIVE ROUTE"
 [node name="Route" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
 layout_mode = 2
 theme_type_variation = &"AthanorStatusValue"
-text = "S01 · CONVERSATION / RESUME"
+text = "S01 · CONVERSA / RETOMADA"
 autowrap_mode = 2
 
 [node name="RouteSeam" type="Panel" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/PaneHost/Root"]
@@ -712,23 +726,6 @@ text = "HOST UNBOUND
 No token or snapshot is rendered by the shell."
 autowrap_mode = 2
 
-[node name="OrnamentBottom" type="HBoxContainer" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column"]
-layout_mode = 2
-
-[node name="Left" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentBottom"]
-layout_mode = 2
-theme_type_variation = &"AthanorOrnamentText"
-text = "└──◇"
-
-[node name="Spacer" type="Control" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentBottom"]
-layout_mode = 2
-size_flags_horizontal = 3
-mouse_filter = 2
-
-[node name="Right" type="Label" parent="ApplicationShell/Workspace/RightReliquary/Margin/Column/OrnamentBottom"]
-layout_mode = 2
-theme_type_variation = &"AthanorOrnamentText"
-text = "◇──┘"
 
 [node name="ContentViewport" type="MarginContainer" parent="ApplicationShell"]
 layout_mode = 2
@@ -739,21 +736,27 @@ theme_type_variation = &"AthanorContentMargin"
 layout_mode = 2
 theme_type_variation = &"AthanorContentColumn"
 
+[node name="HeaderRuleTop" parent="ApplicationShell/ContentViewport/Page" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
 [node name="Kicker" type="Label" parent="ApplicationShell/ContentViewport/Page"]
 layout_mode = 2
 theme_type_variation = &"AthanorPageKicker"
-text = "S01 · ACTIVE CONVERSATION CENTER"
+text = "S01 · CONVERSA E RETOMADA"
 
 [node name="Title" type="Label" parent="ApplicationShell/ContentViewport/Page"]
 layout_mode = 2
 theme_type_variation = &"AthanorPageTitle"
-text = "Chat belongs here"
+text = "Onde paramos"
 
 [node name="Lead" type="Label" parent="ApplicationShell/ContentViewport/Page"]
 layout_mode = 2
 theme_type_variation = &"AthanorBody"
-text = "The center is reserved for the active conversation, message history, composer, streaming state, and tool receipts. The Host chat contract is not implemented yet; this scaffold does not invent one."
+text = "Room, spirit e perfil efetivo ficam visíveis sem abrir configurações. O último paper boat e o contexto recuperado abrem a sessão."
 autowrap_mode = 2
+[node name="HeaderRuleBottom" parent="ApplicationShell/ContentViewport/Page" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
 
 [node name="ChatBoundary" type="PanelContainer" parent="ApplicationShell/ContentViewport/Page"]
 custom_minimum_size = Vector2(0, 180)
@@ -821,15 +824,27 @@ visible = false
 layout_mode = 2
 theme_type_variation = &"AthanorContentColumn"
 
+[node name="HeaderRuleTop" parent="ApplicationShell/ContentViewport/RecallPolicyPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
 [node name="Kicker" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage"]
 layout_mode = 2
 theme_type_variation = &"AthanorPageKicker"
-text = "S02 · RECALL POLICY · ATHANOR HOST INSTRUMENT"
+text = "S02 · RECALL"
 
 [node name="Title" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage"]
 layout_mode = 2
 theme_type_variation = &"AthanorPageTitle"
-text = "Recall Policy"
+text = "Evidência antes de confiança"
+[node name="Lead" type="Label" parent="ApplicationShell/ContentViewport/RecallPolicyPage"]
+layout_mode = 2
+theme_type_variation = &"AthanorBody"
+text = "O ranking ordena a lista. A autoridade é declarada por registro e nunca deduzida de um score."
+autowrap_mode = 2
+
+[node name="HeaderRuleBottom" parent="ApplicationShell/ContentViewport/RecallPolicyPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
 
 [node name="Instrument" type="AthanorRecallPolicy" parent="ApplicationShell/ContentViewport/RecallPolicyPage"]
 layout_mode = 2
@@ -1093,10 +1108,13 @@ visible = false
 layout_mode = 2
 theme_type_variation = &"AthanorContentColumn"
 
+[node name="HeaderRuleTop" parent="ApplicationShell/ContentViewport/RoutingPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
 [node name="Kicker" type="Label" parent="ApplicationShell/ContentViewport/RoutingPage"]
 layout_mode = 2
 theme_type_variation = &"AthanorPageKicker"
-text = "S03 · FAMILIARS · READ-ONLY ATHANOR HOST STATUS"
+text = "HOUSE · WORKER LANES · READ-ONLY ATHANOR HOST STATUS"
 
 [node name="Title" type="Label" parent="ApplicationShell/ContentViewport/RoutingPage"]
 layout_mode = 2
@@ -1108,6 +1126,9 @@ layout_mode = 2
 theme_type_variation = &"AthanorBody"
 text = "Which worker bodies exist, what each one can do, and where the advisor deliberately cannot be dispatched."
 autowrap_mode = 2
+[node name="HeaderRuleBottom" parent="ApplicationShell/ContentViewport/RoutingPage" instance=ExtResource("3_ornament_rule")]
+layout_mode = 2
+
 
 [node name="Instrument" type="AthanorRoutingStatus" parent="ApplicationShell/ContentViewport/RoutingPage"]
 layout_mode = 2

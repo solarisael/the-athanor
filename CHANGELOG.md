@@ -48,13 +48,17 @@ the exact implementation record.
   navigation. Back restores trigger focus, Escape returns one pane before
   closing drawers, inactive panes are hidden, and settings uses the same stack.
 - Restored the desktop right context column, collapsed the bottom dock to a
-  42 px status rail, added functional four-corner ornament and ritual seams,
-  and made context/navigation exclusive overlay drawers below their docked
-  breakpoints. The missing fourteen-screen map remains explicit rather than
-  fabricated.
+  42 px status rail, and made context/navigation exclusive overlay drawers
+  below their docked breakpoints.
+- Recovered the exact S01–S14/R01 inventory from `The Athanor Design Restart.zip`.
+  Screen headers now use only the archive’s enabled `OrnamentFrame` rule:
+  `corners={false}`, `sigils={false}`, exact divider flourish, bar, and mirror.
 - Included the new `gui/navigation` runtime resources in native release staging.
 
 ### Fixed
+- Removed invented box-drawing corners and the inferred four-corner side-panel
+  treatment. The GUI no longer fills gaps in the extracted design with new
+  ornament vocabulary.
 
 - Moved S01, S02, and S03 under one center vertical `ScrollContainer`, removed
   the nested routing scroller, enabled focus-follow scrolling, and allowed long

@@ -120,12 +120,23 @@ function editSurfaces(patch: string): LessonSurface[] {
   return surfaces;
 }
 
+/** Internal-URI writes carry organ arguments (memory bodies, hallway posts,
+ * lesson bodies), not code. Scanning them fires triggers on prose that merely
+ * MENTIONS a pattern — proven live by ledger row 6 (#334 blocking a memory
+ * write whose body named the pattern it documents). */
+const INTERNAL_URI = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+function internalUriPath(filePath: string): boolean {
+  return INTERNAL_URI.test(filePath) && !/^[A-Za-z]:[\\/]/.test(filePath);
+}
+
 export function extractToolSurfaces(toolName: string, input: unknown): LessonSurface[] {
   const args = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   if (toolName === "write") {
     const text = typeof args.content === "string" ? args.content : "";
     if (!text.trim()) return [];
     const filePath = String(args.path ?? "").trim();
+    if (internalUriPath(filePath)) return [];
     return [{ kind: "tool", tool: "write", ...(filePath ? { path: filePath } : {}), text }];
   }
   if (toolName === "edit") {

@@ -522,7 +522,7 @@ export function registerSolarisaelTools(pi) {
       continues: z.array(z.object({
         thread: z.string(),
         previousMemoryId: z.string().regex(/^[1-9]\d*$/),
-      })).optional().describe("memory only: predecessor edges, one per thread; thread must also appear in threads."),
+      })).optional().describe("memory only: predecessor edges, one per thread. The predecessor must belong to the target memory's room and the exact thread key must appear in both memories; cross-room conceptual provenance belongs in the body instead. Each thread must also appear in threads."),
       shape: z.string().optional().describe("lesson kinds: shape taxonomy value (e.g. process, naming, refusal)."),
       voice: z.string().optional().describe("coding, writing, or design lessons: voice (e.g. craft, room-style)."),
       register: z.array(z.string()).optional().describe("writing/design lessons: contexts where the rule applies (e.g. fiction, product-work)."),

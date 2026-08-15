@@ -79,12 +79,23 @@ foreach ($Artifact in $Manifest.artifacts) {
   $Artifacts[[string]$Artifact.path] = $Artifact
 }
 foreach ($Relative in $Sources.Keys) {
-  if (-not $Artifacts.ContainsKey($Relative)) {
-    throw "active release manifest has no adapter artifact: $Relative"
-  }
   $Source = $Sources[$Relative]
   if (-not (Test-Path $Source -PathType Leaf)) {
     throw "adapter source is missing: $Source"
+  }
+  if (-not $Artifacts.ContainsKey($Relative)) {
+    # A staged source absent from the manifest is a new adapter file: the
+    # Sources set above is already the deliberate allowlist, so register it.
+    $Entry = [pscustomobject]@{
+      component  = "omp-adapter"
+      path       = $Relative
+      sha256     = ""
+      size       = 0
+      executable = $false
+    }
+    $Manifest.artifacts += $Entry
+    $Artifacts[$Relative] = $Entry
+    Write-Host "==> registering new adapter artifact: $Relative"
   }
   $Staged = Join-Path $Stage $Relative
   New-Item (Split-Path $Staged -Parent) -ItemType Directory -Force | Out-Null

@@ -20,6 +20,17 @@ the exact implementation record.
 
 ## [Unreleased]
 
+## [0.9.6.2-rc2] - 2026-08-15
+
+### Fixed
+
+- Familiar dispatch can now bind a room familiar to an exact discovered OMP
+  agent and model-role alias through `ompAgent` and `modelRole` spellbook
+  fields. The task packet, receipt, and shared context carry that exact route
+  instead of relabelling `scout`, `sonic`, `task`, or `reviewer` after the
+  generic lane was chosen. Legacy spellbooks remain readable and emit an
+  explicit lane-fallback warning until their bindings are migrated.
+
 ## [0.9.6.2-rc1] - 2026-08-14
 
 ### Changed

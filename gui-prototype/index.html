@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Athanor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell" data-sidebar-open="false" data-inspector-open="true">
+    <aside class="sidebar" aria-label="Conversations and projects">
+      <header class="house-mark">
+        <div class="house-glyph" aria-hidden="true">✦</div>
+        <div>
+          <strong>The Athanor</strong>
+          <span>Solarisael House</span>
+        </div>
+      </header>
+
+      <div class="sidebar-drawer">
+        <div class="drawer-track">
+          <section class="drawer-pane" data-drawer-pane="root" data-drawer-position="active" aria-hidden="false">
+            <nav class="mode-switcher" aria-label="Views">
+              <button class="mode-button is-active" type="button" data-mode="direct" aria-pressed="true">Direct</button>
+              <button class="mode-button" type="button" data-mode="hallway" aria-pressed="false">Hallways</button>
+              <button class="mode-button" type="button" data-mode="project" aria-pressed="false">Projects</button>
+            </nav>
+
+            <section class="conversation-list" aria-label="Available conversations"></section>
+
+            <div class="sidebar-account">
+              <button class="account-button" type="button" data-open-drawer="account" aria-controls="account-pane" aria-expanded="false">
+                <span class="avatar avatar-user" aria-hidden="true">S</span>
+                <span class="account-copy"><strong>Sol</strong><small>Operator</small></span>
+                <span aria-hidden="true">›</span>
+              </button>
+            </div>
+          </section>
+
+          <section class="drawer-pane" id="account-pane" data-drawer-pane="account" data-drawer-position="after" aria-hidden="true" inert>
+            <header class="drawer-pane-header">
+              <button class="drawer-back" type="button" data-drawer-back data-drawer-focus aria-label="Back to conversations">←</button>
+              <div>
+                <span class="eyebrow">Operator</span>
+                <h2>Account</h2>
+              </div>
+            </header>
+            <div class="drawer-pane-content">
+              <section class="account-summary">
+                <span class="avatar avatar-lg" aria-hidden="true">S</span>
+                <div><strong>Sol</strong><span>House operator</span></div>
+              </section>
+              <nav class="drawer-menu" aria-label="Account">
+                <button type="button" data-open-drawer="settings" aria-controls="settings-pane" aria-expanded="false">
+                  <span><strong>Settings</strong><small>Profile, appearance, reading, and local behavior</small></span>
+                  <span aria-hidden="true">›</span>
+                </button>
+              </nav>
+            </div>
+            <div class="drawer-shortcut"><kbd>Esc</kbd><span>Messages</span></div>
+          </section>
+
+          <section class="drawer-pane" id="settings-pane" data-drawer-pane="settings" data-drawer-position="after" aria-hidden="true" inert>
+            <header class="drawer-pane-header">
+              <button class="drawer-back" type="button" data-drawer-back data-drawer-focus aria-label="Back to account">←</button>
+              <div>
+                <span class="eyebrow">Account</span>
+                <h2>Settings</h2>
+              </div>
+            </header>
+            <div class="drawer-pane-content settings-content">
+              <section class="settings-identity">
+                <span class="settings-avatar" aria-hidden="true">S</span>
+                <div><strong>Sol</strong><span>Local operator · this device</span></div>
+              </section>
+              <section class="settings-group">
+                <h3>Interface</h3>
+                <label>
+                  <span>Density</span>
+                  <select data-setting="density">
+                    <option value="comfortable">Comfortable</option>
+                    <option value="compact">Compact</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Text size</span>
+                  <select data-setting="text-scale">
+                    <option value="standard">Standard</option>
+                    <option value="large">Large</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Timeline width</span>
+                  <select data-setting="measure">
+                    <option value="focused">Focused</option>
+                    <option value="wide">Wide</option>
+                  </select>
+                </label>
+              </section>
+              <section class="settings-group">
+                <h3>Appearance</h3>
+                <label>
+                  <span>Contrast</span>
+                  <select data-setting="contrast">
+                    <option value="grayscale">Grayscale</option>
+                    <option value="high">High contrast</option>
+                  </select>
+                </label>
+                <label class="setting-row">
+                  <span><b>Reduced motion</b><small>Remove drawer and focus transitions</small></span>
+                  <input type="checkbox" data-setting="reduced-motion">
+                </label>
+              </section>
+              <section class="settings-group">
+                <h3>Conversation</h3>
+                <label class="setting-row">
+                  <span><b>Send with Enter</b><small>Shift+Enter always creates a new line</small></span>
+                  <input type="checkbox" data-setting="send-with-enter" checked>
+                </label>
+                <label class="setting-row">
+                  <span><b>Show timestamps</b><small>Keep message times visible in the timeline</small></span>
+                  <input type="checkbox" data-setting="timestamps" checked>
+                </label>
+              </section>
+              <section class="settings-group">
+                <h3>House chrome</h3>
+                <label class="setting-row">
+                  <span><b>Show background status</b><small>Host, Recall, body, kittens, and delivery</small></span>
+                  <input type="checkbox" data-setting="status-visible" checked>
+                </label>
+              </section>
+            </div>
+            <div class="drawer-shortcut"><kbd>Esc</kbd><span>Account</span></div>
+          </section>
+        </div>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <header class="workspace-tabs">
+        <button class="icon-button sidebar-toggle" type="button" aria-label="Toggle conversation list" aria-pressed="false">☰</button>
+        <div class="workspace-context">
+          <nav class="subject-views" aria-label="Selected subject views">
+            <button type="button" data-subject-view="conversation" aria-pressed="true"><kbd>1</kbd>Conversation</button>
+            <button type="button" data-subject-view="session" aria-pressed="false"><kbd>2</kbd>Session</button>
+            <button type="button" data-subject-view="history" aria-pressed="false"><kbd>3</kbd>History</button>
+            <button type="button" data-subject-view="actions" aria-pressed="false"><kbd>4</kbd>Actions</button>
+            <button type="button" data-subject-view="context" aria-pressed="false"><kbd>5</kbd>Context</button>
+            <button type="button" data-subject-view="substrate" aria-pressed="false"><kbd>6</kbd>Substrate</button>
+          </nav>
+        </div>
+        <button class="icon-button inspector-toggle" type="button" aria-label="Toggle members and context" aria-pressed="true">◫</button>
+      </header>
+
+      <section class="active-view" aria-live="polite">
+        <header class="conversation-header"></header>
+        <div class="message-timeline" tabindex="0" aria-label="Message timeline"></div>
+        <form class="composer">
+          <label class="sr-only" for="message-input">Message</label>
+          <textarea id="message-input" rows="1" placeholder="Write a message…"></textarea>
+          <div class="composer-actions">
+            <span class="composer-refusal" id="send-refusal" hidden></span>
+            <span class="composer-response-status" id="response-status" role="status" hidden></span>
+            <div class="composer-buttons">
+              <button class="composer-clear" type="button" hidden>Clear</button>
+              <button class="composer-stop" type="button" hidden>Stop</button>
+              <button type="submit" disabled>Send</button>
+            </div>
+          </div>
+        </form>
+      </section>
+    </section>
+
+    <aside class="inspector" aria-label="Context inspector">
+      <header>
+        <div>
+          <span class="eyebrow inspector-eyebrow">Selected context</span>
+          <strong class="inspector-title">Kintsu</strong>
+        </div>
+        <button class="icon-button inspector-close" type="button" aria-label="Close inspector">×</button>
+      </header>
+      <div class="inspector-content"></div>
+    </aside>
+    <aside class="member-dock" aria-label="Hallway members" hidden></aside>
+    <div class="profile-layer" hidden></div>
+
+    <footer class="status-bar" aria-label="House status">
+      <button type="button" data-status="host"><span class="status-dot"></span>Host offline</button>
+      <button type="button" data-status="recall">Recall unavailable</button>
+      <button type="button" data-status="body">No active body</button>
+      <button type="button" data-status="kittens">Kittens: 0</button>
+      <button type="button" data-status="delivery"><span class="status-dot"></span>Delivery offline</button>
+      <button type="button" data-status="about" aria-label="About this local surface">?</button>
+      <div class="status-popover" hidden></div>
+    </footer>
+  </main>
+
+
+  <script src="app.js"></script>
+</body>
+</html>

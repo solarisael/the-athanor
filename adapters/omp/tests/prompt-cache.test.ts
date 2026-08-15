@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 const evaluations: Array<{ session: string; workingSetPresent: boolean }> = [];
 const evaluationCount = new Map<string, number>();
 let effectiveRoomDir = "";
+let omitViewportWarnings = false;
+const completedRefreshWarnings: Array<string | undefined> = [];
 
 const recallPolicy = {
   requestedMode: "auto",
@@ -92,7 +94,7 @@ mock.module("../solarisael-house-proof/context.ts", () => ({
   applyRecallViewport: async (_binding: unknown, recalled: { query: string }) => ({
     presentation: {
       found: [{ id: recalled.query }],
-      warnings: [],
+      ...(omitViewportWarnings ? {} : { warnings: [] }),
       retrievalCandidates: [{ id: recalled.query }],
       canonMatches: [],
       dateMatches: [],
@@ -131,7 +133,8 @@ mock.module("../solarisael-house-proof/recall-policy.ts", () => ({
       };
     }
 
-    async completeRefresh() {
+    async completeRefresh(input: { warning?: string }) {
+      completedRefreshWarnings.push(input.warning);
       return { recallPolicy };
     }
 
@@ -194,6 +197,8 @@ function recallBlocks(messages: Array<Record<string, any>>) {
 
 beforeEach(async () => {
   effectiveRoomDir = await mkdtemp(path.join(os.tmpdir(), "athanor-turn-additions-"));
+  omitViewportWarnings = false;
+  completedRefreshWarnings.length = 0;
 });
 
 afterEach(async () => {
@@ -229,6 +234,19 @@ describe("OMP prompt-cache history", () => {
       { session: sessionID, workingSetPresent: false },
       { session: sessionID, workingSetPresent: true },
     ]);
+  });
+
+  test("treats an omitted warning list as empty for a found working set", async () => {
+    omitViewportWarnings = true;
+    const result = await contextHandler()({
+      messages: [user("warningless-turn", "warningless recall request")],
+    }, context("warningless-recall"));
+    if (!result) throw new Error("warningless context event returned no additions");
+
+    const blocks = recallBlocks(result.messages);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].details.warnings).toEqual([]);
+    expect(completedRefreshWarnings).toEqual([undefined]);
   });
 
   test("keeps the living main-session memo through forty sibling sessions", async () => {

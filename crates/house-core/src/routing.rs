@@ -430,14 +430,51 @@ fn validate_dispatch(
     (errors, warnings)
 }
 
+struct DispatchRoute<'a> {
+    display_name: &'a str,
+    task_name: String,
+    omp_agent: &'a str,
+    model_role: &'a str,
+    is_familiar: bool,
+}
+
+fn dispatch_route<'a>(lane: WorkerLane, familiar: Option<&'a Familiar>) -> DispatchRoute<'a> {
+    if let Some(familiar) = familiar {
+        return DispatchRoute {
+            display_name: &familiar.name,
+            task_name: familiar_task_name(&familiar.id),
+            omp_agent: if familiar.omp_agent.is_empty() {
+                lane.omp_agent
+            } else {
+                &familiar.omp_agent
+            },
+            model_role: if familiar.model_role.is_empty() {
+                lane.model_role
+            } else {
+                &familiar.model_role
+            },
+            is_familiar: true,
+        };
+    }
+
+    let name = kitten_name(lane.name);
+    DispatchRoute {
+        display_name: name,
+        task_name: name.into(),
+        omp_agent: lane.omp_agent,
+        model_role: lane.model_role,
+        is_familiar: false,
+    }
+}
+
 fn assignment(
     lane: WorkerLane,
+    worker_name: &str,
     task: &str,
     target: &str,
     acceptance: &[String],
     warnings: &mut Vec<String>,
 ) -> String {
-    let kitten = kitten_name(lane.name);
     let target_lines = target
         .lines()
         .map(str::trim)
@@ -462,7 +499,7 @@ fn assignment(
     let mut lines = vec![
         "# Target".into(),
         quest_target.into(),
-        format!("[Quest Received] [{kitten}] [TARGET: {frame_target}]"),
+        format!("[Quest Received] [{worker_name}] [TARGET: {frame_target}]"),
     ];
     if target_lines.len() > 1 {
         lines.push(String::new());
@@ -485,20 +522,31 @@ fn assignment(
     lines.join("\n")
 }
 
-fn shared_context(request: &DispatchRequest, lane: WorkerLane) -> String {
-    let kitten = kitten_name(lane.name);
+fn shared_context(
+    request: &DispatchRequest,
+    lane: WorkerLane,
+    route: &DispatchRoute<'_>,
+) -> String {
+    let peer_contract = if route.is_familiar {
+        "Treat this familiar as a capable peer. Authority remains bounded by the written quest."
+    } else {
+        "Treat this worker as a capable peer. Authority remains bounded by the written quest."
+    };
     [
         "# Goal".into(),
-        format!("Help {kitten} complete one exact quest whose result matters to the House."),
+        format!(
+            "Help {} complete one exact quest whose result matters to the House.",
+            route.display_name
+        ),
         "# Constraints".into(),
         format!("Lane: {}", lane.name.as_str()),
-        format!("Configured agent: {}", lane.omp_agent),
+        format!("Configured agent: {}", route.omp_agent),
         format!(
             "Model role: {}; the agent definition selects the runtime model.",
-            lane.model_role
+            route.model_role
         ),
         format!("Risk: {}", request.risk.as_str()),
-        "Treat this kitten as a capable peer. Warmth is unconditional; authority remains bounded.".into(),
+        peer_contract.into(),
         "Do not infer operator intent beyond the quest. A halt with evidence is a successful result.".into(),
         "# Contract".into(),
         format!("{}: {}", lane.name.as_str(), lane.description),
@@ -509,12 +557,15 @@ fn shared_context(request: &DispatchRequest, lane: WorkerLane) -> String {
         "[Codex — supplied lessons ride free and do not expand quest scope]".into(),
         format_lesson_bodies(&request.lesson_bodies),
         String::new(),
-        "Return evidence, uncertainties, and exact changed or checked artifacts. Praise-worthy care includes honest empty results.".into(),
+        "Return evidence, uncertainties, and exact changed or checked artifacts. An honest empty result is valid.".into(),
     ]
     .join("\n")
 }
 
-pub fn dispatch(request: DispatchRequest) -> DispatchReceipt {
+fn dispatch_with_familiar(
+    request: DispatchRequest,
+    familiar: Option<&Familiar>,
+) -> DispatchReceipt {
     let lane = worker_lane(&request.lane);
     let acceptance = acceptance_lines(&request.acceptance);
     let (errors, mut warnings) = validate_dispatch(&request, lane, &acceptance);
@@ -522,25 +573,39 @@ pub fn dispatch(request: DispatchRequest) -> DispatchReceipt {
     let Some(lane) = lane else {
         return rejected_receipt(None, errors, warnings);
     };
+    let route = dispatch_route(lane, familiar);
+    if let Some(familiar) = familiar {
+        if familiar.omp_agent.is_empty() || familiar.model_role.is_empty() {
+            warnings.push(format!(
+                "Familiar '{}' has no exact OMP agent and model-role binding; falling back to lane route '{}' / '{}'.",
+                familiar.name, lane.omp_agent, lane.model_role
+            ));
+        }
+    }
     if !errors.is_empty() {
-        return rejected_receipt(Some(lane), errors, warnings);
+        let mut receipt = rejected_receipt(Some(lane), errors, warnings);
+        receipt.model_role = Some(route.model_role.into());
+        receipt.omp_agent = Some(route.omp_agent.into());
+        return receipt;
     }
 
     let task = assignment(
         lane,
+        route.display_name,
         request.task.trim(),
         request.target.as_deref().unwrap_or("").trim(),
         &acceptance,
         &mut warnings,
     );
-    let agent = (lane.omp_agent != "task").then(|| lane.omp_agent.to_owned());
+    let agent =
+        (route.is_familiar || route.omp_agent != "task").then(|| route.omp_agent.to_owned());
 
     DispatchReceipt {
         ok: true,
         status: DispatchStatus::Ready,
         lane: Some(lane.name),
-        model_role: Some(lane.model_role.into()),
-        omp_agent: Some(lane.omp_agent.into()),
+        model_role: Some(route.model_role.into()),
+        omp_agent: Some(route.omp_agent.into()),
         errors,
         warnings,
         dispatcher: DispatcherReceipt {
@@ -550,15 +615,19 @@ pub fn dispatch(request: DispatchRequest) -> DispatchReceipt {
         spawn_packet: Some(SpawnPacket {
             tool: "task",
             args: SpawnArgs {
-                context: shared_context(&request, lane),
+                context: shared_context(&request, lane, &route),
                 tasks: vec![SpawnTask {
-                    name: kitten_name(lane.name).into(),
+                    name: route.task_name,
                     agent,
                     task,
                 }],
             },
         }),
     }
+}
+
+pub fn dispatch(request: DispatchRequest) -> DispatchReceipt {
+    dispatch_with_familiar(request, None)
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -569,6 +638,10 @@ pub struct Familiar {
     #[serde(default)]
     pub aliases: Vec<String>,
     pub lane: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub omp_agent: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model_role: String,
     pub description: String,
     #[serde(default)]
     pub temperament: Option<String>,
@@ -626,6 +699,8 @@ pub fn validate_spellbook(mut spellbook: Spellbook) -> FamiliarStatus {
         familiar.id = familiar.id.trim().into();
         familiar.name = familiar.name.trim().into();
         familiar.lane = familiar.lane.trim().into();
+        familiar.omp_agent = familiar.omp_agent.trim().into();
+        familiar.model_role = familiar.model_role.trim().into();
         familiar.description = familiar.description.trim().into();
         unique_nonempty(&mut familiar.aliases);
 
@@ -656,6 +731,24 @@ pub fn validate_spellbook(mut spellbook: Spellbook) -> FamiliarStatus {
                 } else {
                     &familiar.lane
                 }
+            ));
+        }
+        if familiar.omp_agent.is_empty() != familiar.model_role.is_empty() {
+            errors.push(format!(
+                "Familiar '{}' must provide ompAgent and modelRole together.",
+                familiar.id
+            ));
+        }
+        if !familiar.omp_agent.is_empty() && !valid_familiar_id(&familiar.omp_agent) {
+            errors.push(format!(
+                "Familiar '{}' OMP agent '{}' must use lowercase kebab-case.",
+                familiar.id, familiar.omp_agent
+            ));
+        }
+        if !familiar.model_role.is_empty() && !valid_model_role(&familiar.model_role) {
+            errors.push(format!(
+                "Familiar '{}' model role '{}' must use @lowercase_role syntax.",
+                familiar.id, familiar.model_role
             ));
         }
         if familiar.description.is_empty() {
@@ -696,6 +789,22 @@ fn valid_familiar_id(value: &str) -> bool {
             character.is_ascii_lowercase()
         } else {
             character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        }
+    })
+}
+
+fn valid_model_role(value: &str) -> bool {
+    let Some(role) = value.strip_prefix('@') else {
+        return false;
+    };
+    role.chars().enumerate().all(|(index, character)| {
+        if index == 0 {
+            character.is_ascii_lowercase()
+        } else {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || character == '-'
+                || character == '_'
         }
     })
 }
@@ -754,7 +863,7 @@ pub fn familiar_dispatch(
     };
 
     request.lane = familiar.lane.clone();
-    let mut receipt = dispatch(request);
+    let mut receipt = dispatch_with_familiar(request, Some(&familiar));
     if let Some(packet) = receipt.spawn_packet.as_mut() {
         packet.args.context.push_str(&format!(
             "\nFamiliar: {} ({}) — {}",
@@ -771,9 +880,6 @@ pub fn familiar_dispatch(
                 .args
                 .context
                 .push_str(&format!("\nAppearance: {appearance}"));
-        }
-        if let Some(task) = packet.args.tasks.first_mut() {
-            task.name = familiar_task_name(&familiar.id);
         }
     }
 
@@ -1115,6 +1221,8 @@ mod tests {
                 name: "Ferris".into(),
                 aliases: vec!["crab".into()],
                 lane: "smol-scout".into(),
+                omp_agent: "ferris-kitten".into(),
+                model_role: "@ferris".into(),
                 description: "Maps Rust terrain.".into(),
                 temperament: None,
                 appearance: None,
@@ -1132,10 +1240,87 @@ mod tests {
         );
 
         assert!(receipt.dispatch.ok);
-        assert_eq!(receipt.familiar.unwrap().name, "Ferris");
-        assert_eq!(
-            receipt.dispatch.spawn_packet.unwrap().args.tasks[0].name,
-            "RustKitten"
+        assert_eq!(receipt.dispatch.omp_agent.as_deref(), Some("ferris-kitten"));
+        assert_eq!(receipt.dispatch.model_role.as_deref(), Some("@ferris"));
+        let packet = receipt
+            .dispatch
+            .spawn_packet
+            .as_ref()
+            .expect("familiar dispatch builds a packet");
+        assert_eq!(packet.args.tasks[0].name, "RustKitten");
+        assert_eq!(packet.args.tasks[0].agent.as_deref(), Some("ferris-kitten"));
+        assert!(packet.args.context.contains("Help Ferris complete"));
+        assert!(!packet.args.context.contains("Help Quill complete"));
+        assert!(!packet.args.context.contains("Warmth is unconditional"));
+        assert_eq!(receipt.familiar.as_ref().unwrap().name, "Ferris");
+    }
+
+    #[test]
+    fn falls_back_explicitly_for_a_legacy_familiar_without_an_omp_route() {
+        let status = validate_spellbook(Spellbook {
+            version: 1,
+            collective: "Kittens".into(),
+            collective_aliases: vec![],
+            spellbook_aliases: vec![],
+            familiars: vec![Familiar {
+                id: "rust-kitten".into(),
+                name: "Ferris".into(),
+                aliases: vec![],
+                lane: "smol-scout".into(),
+                omp_agent: String::new(),
+                model_role: String::new(),
+                description: "Maps Rust terrain.".into(),
+                temperament: None,
+                appearance: None,
+            }],
+        });
+        let receipt = familiar_dispatch(
+            status,
+            "Ferris",
+            DispatchRequest {
+                task: "Map the module".into(),
+                target: Some("src".into()),
+                context: exact_context(),
+                ..DispatchRequest::default()
+            },
+        );
+
+        assert!(receipt.dispatch.ok);
+        assert_eq!(receipt.dispatch.omp_agent.as_deref(), Some("scout"));
+        assert_eq!(receipt.dispatch.model_role.as_deref(), Some("pi/smol"));
+        assert!(
+            receipt.dispatch.warnings.iter().any(|warning| {
+                warning.contains("falling back to lane route 'scout' / 'pi/smol'")
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_a_partial_familiar_route_binding() {
+        let status = validate_spellbook(Spellbook {
+            version: 1,
+            collective: "Kittens".into(),
+            collective_aliases: vec![],
+            spellbook_aliases: vec![],
+            familiars: vec![Familiar {
+                id: "rust-kitten".into(),
+                name: "Ferris".into(),
+                aliases: vec![],
+                lane: "smol-scout".into(),
+                omp_agent: "ferris-kitten".into(),
+                model_role: String::new(),
+                description: "Maps Rust terrain.".into(),
+                temperament: None,
+                appearance: None,
+            }],
+        });
+
+        assert!(!status.ok);
+        assert!(
+            status
+                .errors
+                .iter()
+                .any(|error| { error.contains("must provide ompAgent and modelRole together") })
         );
     }
 
@@ -1150,6 +1335,8 @@ mod tests {
                 name: "Ferris".into(),
                 aliases: vec!["crab".into()],
                 lane: "smol-scout".into(),
+                omp_agent: "ferris-kitten".into(),
+                model_role: "@ferris".into(),
                 description: "Maps Rust terrain.".into(),
                 temperament: None,
                 appearance: None,

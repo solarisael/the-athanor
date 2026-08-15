@@ -1,19 +1,6 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene format=3 uid="uid://bfq8lfwtx1b44"]
 
 [ext_resource type="PackedScene" path="res://main.tscn" id="1_shell"]
-
-[sub_resource type="Environment" id="Env_dark"]
-background_mode = 1
-background_color = Color(0.0035, 0.0037, 0.006, 1)
-ambient_light_source = 2
-ambient_light_color = Color(1, 1, 1, 1)
-ambient_light_energy = 1.0
-glow_enabled = true
-glow_intensity = 0.25
-glow_bloom = 0.05
-
-[sub_resource type="QuadMesh" id="Quad_shell"]
-size = Vector2(1.92, 1.08)
 
 [sub_resource type="GDScript" id="Boot_shell"]
 script/source = "extends Node3D
@@ -42,31 +29,42 @@ func _input(event: InputEvent) -> void:
     shell_viewport.push_input(forwarded)
 "
 
-[node name="ShellLab3D" type="Node3D"]
+[sub_resource type="Environment" id="Env_dark"]
+background_mode = 1
+background_color = Color(0.0035, 0.0037, 0.006, 1)
+ambient_light_source = 2
+ambient_light_color = Color(1, 1, 1, 1)
+glow_enabled = true
+glow_intensity = 0.25
+glow_bloom = 0.05
+
+[sub_resource type="QuadMesh" id="Quad_shell"]
+size = Vector2(1.92, 1.08)
+
+[node name="ShellLab3D" type="Node3D" unique_id=1582204375]
 script = SubResource("Boot_shell")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=735645913]
 environment = SubResource("Env_dark")
 
-[node name="ShellViewport" type="SubViewport" parent="."]
+[node name="ShellViewport" type="SubViewport" parent="." unique_id=2133090273]
 disable_3d = true
 size = Vector2i(1920, 1080)
 render_target_update_mode = 4
 
-[node name="Shell" parent="ShellViewport" instance=ExtResource("1_shell")]
+[node name="Shell" parent="ShellViewport" unique_id=926587312 instance=ExtResource("1_shell")]
 
-[node name="ShellSurface" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+[node name="ShellSurface" type="MeshInstance3D" parent="." unique_id=230396166]
 mesh = SubResource("Quad_shell")
 
-[node name="Camera3D" type="Camera3D" parent="."]
+[node name="Camera3D" type="Camera3D" parent="." unique_id=542270636]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1.04)
-current = true
 projection = 1
+current = true
 size = 1.08
 
-[node name="KeyLight" type="OmniLight3D" parent="."]
+[node name="KeyLight" type="OmniLight3D" parent="." unique_id=1520703544]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.8, 0.5, 0.9)
+light_color = Color(0.76193196, 0.64497095, 0.44939536, 1)
 light_energy = 0.35
-light_color = Color(0.76193195, 0.64497094, 0.44939537, 1)
 omni_range = 4.0

@@ -393,7 +393,7 @@ authority, or silently reuse conversational state.
 
 Familiars are room-owned identities bound to existing worker lanes; they do not add a second routing system. A room stores the canonical registry at `familiars/spellbook.json`. Adapters also accept `familiars/litters.json` as a filename alias.
 
-The spellbook keeps generic code vocabulary (`collective: "familiars"`) while exposing room language through `collectiveAliases`, such as `kittens`. Each familiar has a stable id, display name, aliases, description, and one lane. The core resolves that identity and delegates packet shaping to the same unified dispatch contract. Harness adapters still spawn explicitly.
+The spellbook keeps generic code vocabulary (`collective: "familiars"`) while exposing room language through `collectiveAliases`, such as `kittens`. Each familiar has a stable id, display name, aliases, description, and one lane. Optional `ompAgent` and `modelRole` bindings route that familiar to an exact discovered harness agent and its configured model alias instead of merely relabelling the lane's generic worker. Both bindings must be present together. Legacy entries without them remain readable and fall back to the lane route with an explicit receipt warning; this is transition behavior, not a named-familiar success condition. The core resolves the identity and delegates packet shaping to the same unified dispatch contract. Harness adapters still spawn explicitly.
 
 ## Extension direction
 

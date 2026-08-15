@@ -17,6 +17,7 @@ const REQUIRED_TABLES: &[&str] = &[
     "memory_chunks",
     "named_entities",
     "lessons",
+    "lesson_trigger_events",
     "semantic_vocabulary",
     "anamnesis",
     "anamnesis_reps",

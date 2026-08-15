@@ -189,7 +189,7 @@ describe("OMP adapter registration", () => {
     const { labels, hooks, eventChannels } = registerAdapter();
 
     expect(labels).toEqual(["The Athanor"]);
-    expect(hooks.map((hook) => hook.name)).toEqual(["tool_call", "context", "session_compact", "tool_result", "shutdown", "agent_end"]);
+    expect(hooks.map((hook) => hook.name)).toEqual(["tool_call", "tool_call", "context", "session_compact", "tool_result", "tool_result", "shutdown", "agent_end"]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
     expect(eventChannels).toEqual(["task:subagent:progress", "task:subagent:lifecycle"]);
   });

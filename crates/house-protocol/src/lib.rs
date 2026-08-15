@@ -20,6 +20,7 @@ use house_core::{
     PaperBoatSleepReceipt, PaperBoatSleepRequest, PaperBoatWakeReceipt, PaperBoatWakeRequest,
     RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberReceipt,
     RememberRequest, RoomKey, ThreadContinuation, UnboatedMemory,
+    lesson_triggers::LessonTriggerSpec,
 };
 use serde::{
     Deserialize, Deserializer, Serialize,
@@ -138,6 +139,16 @@ pub struct RememberParams {
     pub thread_keys: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub condition: Vec<String>,
+    #[serde(default, rename = "astCondition")]
+    pub ast_condition: Vec<String>,
+    #[serde(default, rename = "triggerScope")]
+    pub trigger_scope: Vec<String>,
+    #[serde(default, rename = "interruptMode")]
+    pub interrupt_mode: Option<String>,
+    #[serde(default, rename = "repeatCooldownSecs")]
+    pub repeat_cooldown_secs: Option<i32>,
     #[serde(default)]
     pub backup: Option<bool>,
 }
@@ -1419,7 +1430,12 @@ impl TryFrom<RememberParams> for RememberRequest {
                 || !params.language_keys.is_empty()
                 || !params.technology_keys.is_empty()
                 || !params.thread_keys.is_empty()
-                || !params.tags.is_empty())
+                || !params.tags.is_empty()
+                || !params.condition.is_empty()
+                || !params.ast_condition.is_empty()
+                || !params.trigger_scope.is_empty()
+                || params.interrupt_mode.is_some()
+                || params.repeat_cooldown_secs.is_some())
         {
             return Err(ProtocolError::InvalidParams(
                 "lesson-only fields are not valid for memory".into(),
@@ -1491,6 +1507,13 @@ impl TryFrom<RememberParams> for RememberRequest {
                     technology_keys: params.technology_keys,
                     thread_keys: params.thread_keys,
                     tags: params.tags,
+                    triggers: LessonTriggerSpec {
+                        condition: params.condition,
+                        ast_condition: params.ast_condition,
+                        trigger_scope: params.trigger_scope,
+                        interrupt_mode: params.interrupt_mode,
+                        repeat_cooldown_secs: params.repeat_cooldown_secs,
+                    },
                 },
             )
         } else {
@@ -4346,6 +4369,11 @@ mod tests {
             technology_keys: vec![],
             register: vec![],
             tags: vec![],
+            condition: vec![],
+            ast_condition: vec![],
+            trigger_scope: vec![],
+            interrupt_mode: None,
+            repeat_cooldown_secs: None,
             backup: Some(true),
         };
         assert_eq!(
@@ -4375,6 +4403,11 @@ mod tests {
             technology_keys: vec![],
             thread_keys: vec![],
             tags: vec![],
+            condition: vec![],
+            ast_condition: vec![],
+            trigger_scope: vec![],
+            interrupt_mode: None,
+            repeat_cooldown_secs: None,
             backup: Some(true),
         };
         assert_eq!(
@@ -4404,6 +4437,11 @@ mod tests {
                 technology_keys: vec![],
                 thread_keys: vec![],
                 tags: vec![],
+                condition: vec![],
+                ast_condition: vec![],
+                trigger_scope: vec![],
+                interrupt_mode: None,
+                repeat_cooldown_secs: None,
                 backup: Some(true),
             };
             assert!(matches!(

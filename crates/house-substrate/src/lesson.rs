@@ -1,11 +1,15 @@
 use crate::config::{AppError, ROOM_KEY_RE};
 use chrono::{DateTime, Utc};
+use house_core::lesson_triggers::{
+    CompiledTriggerSet, LessonTriggerSpec, Surface, SurfaceKind, TriggerRow, cached_set,
+    match_surfaces, store_set,
+};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
-const LESSON_SELECT: &str = "SELECT id,lesson_key,kind_path,scope,project,voice,register,shape,stage,title,lesson,trigger_context,proof_pattern,example_text,example_cmd,writers,tools,negation_of,language_keys,technology_keys,tags,thread_keys,always_on FROM lessons";
+const LESSON_SELECT: &str = "SELECT id,lesson_key,kind_path,scope,project,voice,register,shape,stage,title,lesson,trigger_context,proof_pattern,example_text,example_cmd,writers,tools,negation_of,language_keys,technology_keys,tags,thread_keys,always_on,condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs FROM lessons";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -107,6 +111,11 @@ pub struct LessonRecord {
     pub thread_keys: Vec<String>,
     pub tags: Vec<String>,
     pub always_on: bool,
+    pub condition: Vec<String>,
+    pub ast_condition: Vec<String>,
+    pub trigger_scope: Vec<String>,
+    pub interrupt_mode: Option<String>,
+    pub repeat_cooldown_secs: Option<i32>,
 }
 fn lesson_record(row: &sqlx::postgres::PgRow) -> Result<LessonRecord, sqlx::Error> {
     Ok(LessonRecord {
@@ -133,6 +142,11 @@ fn lesson_record(row: &sqlx::postgres::PgRow) -> Result<LessonRecord, sqlx::Erro
         thread_keys: row.try_get("thread_keys")?,
         tags: row.try_get("tags")?,
         always_on: row.try_get("always_on")?,
+        condition: row.try_get("condition")?,
+        ast_condition: row.try_get("ast_condition")?,
+        trigger_scope: row.try_get("trigger_scope")?,
+        interrupt_mode: row.try_get("interrupt_mode")?,
+        repeat_cooldown_secs: row.try_get("repeat_cooldown_secs")?,
     })
 }
 
@@ -321,6 +335,251 @@ pub async fn lesson_query(
         },
         lessons,
         taxonomy,
+    })
+}
+
+/// One payload the caller offers for matching.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct LessonTriggerSurface {
+    pub kind: String,
+    #[serde(default)]
+    pub tool: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct LessonTriggerMatchParams {
+    pub room: String,
+    pub session: String,
+    pub surfaces: Vec<LessonTriggerSurface>,
+}
+
+// enough: one turn offers at most this many surfaces — the edited file plus the
+// latest assistant turn, with headroom. Upgrade path: raise the ceiling once a
+// caller has a real reason to batch.
+const MAX_TRIGGER_SURFACES: usize = 16;
+
+impl LessonTriggerMatchParams {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if !ROOM_KEY_RE.is_match(&self.room) {
+            return Err(AppError::Invalid("room must be a lowercase slug".into()));
+        }
+        if self.session.trim().is_empty() {
+            return Err(AppError::Invalid("session must not be empty".into()));
+        }
+        if self.surfaces.is_empty() {
+            return Err(AppError::Invalid("surfaces must not be empty".into()));
+        }
+        if self.surfaces.len() > MAX_TRIGGER_SURFACES {
+            return Err(AppError::Invalid(format!(
+                "surfaces must contain at most {MAX_TRIGGER_SURFACES} entries"
+            )));
+        }
+        Ok(())
+    }
+    fn scopes(&self) -> Vec<String> {
+        if self.room == "house" {
+            vec!["house".into()]
+        } else {
+            vec!["house".into(), self.room.clone()]
+        }
+    }
+}
+
+/// A fired lesson keeps its typed store identity: family plus id, never a
+/// flattened row.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LessonTriggerFired {
+    pub family: String,
+    pub id: i64,
+    pub title: String,
+    pub lesson: String,
+    pub proof_pattern: Option<String>,
+    pub urgency: String,
+    pub surface: String,
+    pub path: Option<String>,
+    pub pattern_kind: String,
+    pub pattern: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LessonTriggerMatchResult {
+    pub ok: bool,
+    pub fired: Vec<LessonTriggerFired>,
+    /// Always serialized, never skipped when empty: an adapter that reads
+    /// warnings[0] must meet an array, not an absent field.
+    pub warnings: Vec<String>,
+}
+
+const TRIGGER_SELECT: &str = "SELECT id,lesson_key,title,lesson,proof_pattern,condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs,updated_at FROM lessons";
+
+/// The one visibility clause for trigger-bearing lessons. Named once here and
+/// pushed by every query that reads triggers, so the rule cannot drift.
+fn trigger_eligibility(qb: &mut QueryBuilder<'_, Postgres>, scopes: &[String]) {
+    qb.push(" WHERE (condition <> '{}' OR ast_condition <> '{}')")
+        // enough: v1 fires only project-agnostic lessons. The wire carries no
+        // project, and a project lesson firing inside a foreign project is a
+        // false block. Upgrade path: add `project` to LessonTriggerMatchParams
+        // and apply lesson_query's project filter here.
+        .push(" AND project IS NULL")
+        .push(" AND (lesson_key <> 'coding' OR scope = ANY(")
+        .push_bind(scopes.to_vec())
+        .push("))");
+}
+
+fn trigger_row(row: &sqlx::postgres::PgRow) -> Result<TriggerRow, sqlx::Error> {
+    Ok(TriggerRow {
+        family: row.try_get("lesson_key")?,
+        id: row.try_get("id")?,
+        title: row.try_get("title")?,
+        lesson: row.try_get("lesson")?,
+        proof_pattern: row.try_get("proof_pattern")?,
+        spec: LessonTriggerSpec {
+            condition: row.try_get("condition")?,
+            ast_condition: row.try_get("ast_condition")?,
+            trigger_scope: row.try_get("trigger_scope")?,
+            interrupt_mode: row.try_get("interrupt_mode")?,
+            repeat_cooldown_secs: row.try_get("repeat_cooldown_secs")?,
+        },
+    })
+}
+
+pub async fn lesson_trigger_match(
+    pool: &PgPool,
+    params: LessonTriggerMatchParams,
+) -> Result<LessonTriggerMatchResult, AppError> {
+    params.validate()?;
+    let mut surfaces = Vec::with_capacity(params.surfaces.len());
+    for surface in &params.surfaces {
+        surfaces.push(Surface {
+            kind: SurfaceKind::parse(&surface.kind).map_err(AppError::Invalid)?,
+            tool: surface.tool.as_deref(),
+            path: surface.path.as_deref(),
+            text: surface.text.as_str(),
+        });
+    }
+
+    let mut qb = QueryBuilder::<Postgres>::new(TRIGGER_SELECT);
+    trigger_eligibility(&mut qb, &params.scopes());
+    qb.push(" ORDER BY id");
+    let rows = qb.build().fetch_all(pool).await?;
+    let mut latest: Option<DateTime<Utc>> = None;
+    for row in &rows {
+        let updated: DateTime<Utc> = row.try_get("updated_at")?;
+        if latest.is_none_or(|current| updated > current) {
+            latest = Some(updated);
+        }
+    }
+    let fingerprint = format!(
+        "{}:{}",
+        rows.len(),
+        latest.map_or(0, |value| value.timestamp_micros())
+    );
+    let cached = cached_set(&params.room, &fingerprint);
+    let set = match cached {
+        Some(set) => set,
+        None => {
+            let compiled = rows
+                .iter()
+                .map(trigger_row)
+                .collect::<Result<Vec<_>, sqlx::Error>>()?;
+            store_set(
+                &params.room,
+                CompiledTriggerSet::compile(fingerprint, &compiled),
+            )
+        }
+    };
+
+    let outcome = match_surfaces(&set, &surfaces);
+    if outcome.hits.is_empty() {
+        return Ok(LessonTriggerMatchResult {
+            ok: true,
+            fired: Vec::new(),
+            warnings: outcome.warnings,
+        });
+    }
+
+    // The repeat policy is read from the ledger, never from process memory: a
+    // second substrate process must reach the same verdict.
+    let candidates = outcome
+        .hits
+        .iter()
+        .map(|hit| set.triggers()[hit.trigger].id)
+        .collect::<Vec<_>>();
+    let ages = sqlx::query(
+        "SELECT lesson_key,lesson_id,
+                EXTRACT(EPOCH FROM (NOW() - MAX(fired_at)))::BIGINT AS age
+         FROM lesson_trigger_events
+         WHERE room=$1 AND session_id=$2 AND lesson_id = ANY($3)
+         GROUP BY lesson_key,lesson_id",
+    )
+    .bind(&params.room)
+    .bind(&params.session)
+    .bind(&candidates)
+    .fetch_all(pool)
+    .await?
+    .iter()
+    .map(|row| -> Result<((String, i64), i64), sqlx::Error> {
+        Ok((
+            (
+                row.try_get::<String, _>("lesson_key")?,
+                row.try_get::<i64, _>("lesson_id")?,
+            ),
+            row.try_get::<Option<i64>, _>("age")?.unwrap_or(0),
+        ))
+    })
+    .collect::<Result<HashMap<_, _>, sqlx::Error>>()?;
+
+    let mut fired = Vec::new();
+    let mut tx = pool.begin().await?;
+    for hit in &outcome.hits {
+        let trigger = &set.triggers()[hit.trigger];
+        let age = ages.get(&(trigger.family.clone(), trigger.id)).copied();
+        if !trigger.cooldown.allows(age) {
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO lesson_trigger_events
+             (lesson_key,lesson_id,room,session_id,surface,tool_name,path,pattern_kind,
+              matched_pattern,urgency)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+        )
+        .bind(&trigger.family)
+        .bind(trigger.id)
+        .bind(&params.room)
+        .bind(&params.session)
+        .bind(hit.surface.as_str())
+        .bind(hit.tool.as_deref())
+        .bind(hit.path.as_deref())
+        .bind(hit.pattern_kind.as_str())
+        .bind(&hit.pattern)
+        .bind(trigger.urgency.as_str())
+        .execute(&mut *tx)
+        .await?;
+        fired.push(LessonTriggerFired {
+            family: trigger.family.clone(),
+            id: trigger.id,
+            title: trigger.title.clone(),
+            lesson: trigger.lesson.clone(),
+            proof_pattern: trigger.proof_pattern.clone(),
+            urgency: trigger.urgency.as_str().to_owned(),
+            surface: hit.surface.as_str().to_owned(),
+            path: hit.path.clone(),
+            pattern_kind: hit.pattern_kind.as_str().to_owned(),
+            pattern: hit.pattern.clone(),
+        });
+    }
+    tx.commit().await?;
+    Ok(LessonTriggerMatchResult {
+        ok: true,
+        fired,
+        warnings: outcome.warnings,
     })
 }
 
@@ -1027,6 +1286,54 @@ pub struct LessonUpdateParams {
     pub expected_title: String,
     pub patch: Value,
 }
+
+/// The trigger columns a patch names, typed for house-core. Shape errors are
+/// refusals here so the coercion below never has to guess.
+fn patch_trigger_spec(
+    fields: &serde_json::Map<String, Value>,
+) -> Result<LessonTriggerSpec, AppError> {
+    let strings = |field: &str| -> Result<Vec<String>, AppError> {
+        match fields.get(field) {
+            None => Ok(Vec::new()),
+            Some(value) => serde_json::from_value::<Vec<String>>(value.clone())
+                .map_err(|_| AppError::Invalid(format!("{field} must be an array of strings"))),
+        }
+    };
+    let interrupt_mode = match fields.get("interruptMode") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(mode)) => Some(mode.clone()),
+        Some(_) => {
+            return Err(AppError::Invalid(
+                "interruptMode must be a string or null".into(),
+            ));
+        }
+    };
+    let repeat_cooldown_secs = match fields.get("repeatCooldownSecs") {
+        None | Some(Value::Null) => None,
+        Some(Value::Number(number)) => Some(
+            number
+                .as_i64()
+                .and_then(|value| i32::try_from(value).ok())
+                .ok_or_else(|| {
+                    AppError::Invalid(
+                        "repeatCooldownSecs must be a 32-bit positive integer".into(),
+                    )
+                })?,
+        ),
+        Some(_) => {
+            return Err(AppError::Invalid(
+                "repeatCooldownSecs must be a number or null".into(),
+            ));
+        }
+    };
+    Ok(LessonTriggerSpec {
+        condition: strings("condition")?,
+        ast_condition: strings("astCondition")?,
+        trigger_scope: strings("triggerScope")?,
+        interrupt_mode,
+        repeat_cooldown_secs,
+    })
+}
 pub async fn lesson_update(
     pool: &PgPool,
     p: LessonUpdateParams,
@@ -1109,6 +1416,11 @@ pub async fn lesson_update(
         "triggerContext",
         "tags",
         "threadKeys",
+        "condition",
+        "astCondition",
+        "triggerScope",
+        "interruptMode",
+        "repeatCooldownSecs",
     ];
     let family: &[&str] = match key {
         "coding" => &[
@@ -1144,6 +1456,12 @@ pub async fn lesson_update(
             true,
         ));
     }
+    // Semantic trigger validation runs before a single row is locked: an
+    // uncompilable trigger is a refusal, never a stored pattern that can never
+    // fire. A patch is partial, so only the fields it names are judged.
+    patch_trigger_spec(fields)?
+        .validate_fields()
+        .map_err(AppError::Invalid)?;
     let mut tx = pool.begin().await?;
     let actual = sqlx::query_scalar::<_, String>(
         "SELECT title FROM lessons WHERE lesson_key=$1 AND id=$2 FOR UPDATE",
@@ -1177,11 +1495,16 @@ pub async fn lesson_update(
             "negationOf" => "negation_of",
             "alwaysOn" => "always_on",
             "clearProject" => "project",
+            "astCondition" => "ast_condition",
+            "triggerScope" => "trigger_scope",
+            "interruptMode" => "interrupt_mode",
+            "repeatCooldownSecs" => "repeat_cooldown_secs",
             value => value,
         };
         separated.push(format!("{column} = "));
         match field.as_str() {
-            "tags" | "threadKeys" | "languageKeys" | "technologyKeys" | "register" | "writers" => {
+            "tags" | "threadKeys" | "languageKeys" | "technologyKeys" | "register" | "writers"
+            | "condition" | "astCondition" | "triggerScope" => {
                 let values =
                     serde_json::from_value::<Vec<String>>(value.clone()).map_err(|_| {
                         AppError::Invalid(format!("{field} must be an array of strings"))
@@ -1204,6 +1527,39 @@ pub async fn lesson_update(
                     Some(parsed)
                 };
                 separated.push_bind_unseparated(id);
+            }
+            "interruptMode" => {
+                let mode = match value {
+                    Value::Null => None,
+                    Value::String(mode) => Some(mode.clone()),
+                    _ => {
+                        return Err(AppError::Invalid(
+                            "interruptMode must be a string or null".into(),
+                        ));
+                    }
+                };
+                separated.push_bind_unseparated(mode);
+            }
+            "repeatCooldownSecs" => {
+                let seconds = match value {
+                    Value::Null => None,
+                    Value::Number(number) => Some(
+                        number
+                            .as_i64()
+                            .and_then(|value| i32::try_from(value).ok())
+                            .ok_or_else(|| {
+                                AppError::Invalid(
+                                    "repeatCooldownSecs must be a 32-bit positive integer".into(),
+                                )
+                            })?,
+                    ),
+                    _ => {
+                        return Err(AppError::Invalid(
+                            "repeatCooldownSecs must be a number or null".into(),
+                        ));
+                    }
+                };
+                separated.push_bind_unseparated(seconds);
             }
             "alwaysOn" => {
                 let enabled = value
@@ -1261,6 +1617,84 @@ pub async fn lesson_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trigger_match_params_refuse_a_shapeless_request() {
+        let params: LessonTriggerMatchParams = serde_json::from_value(serde_json::json!({
+            "room": "kodo",
+            "session": "s-1",
+            "surfaces": [{"kind": "tool", "tool": "edit", "path": "a.rs", "text": "x"}]
+        }))
+        .unwrap();
+        assert!(params.validate().is_ok());
+        let empty: LessonTriggerMatchParams = serde_json::from_value(serde_json::json!({
+            "room": "kodo", "session": "s-1", "surfaces": []
+        }))
+        .unwrap();
+        assert!(empty.validate().is_err());
+        let blank_session: LessonTriggerMatchParams = serde_json::from_value(serde_json::json!({
+            "room": "kodo",
+            "session": "  ",
+            "surfaces": [{"kind": "prose", "text": "x"}]
+        }))
+        .unwrap();
+        assert!(blank_session.validate().is_err());
+        let shouting: LessonTriggerMatchParams = serde_json::from_value(serde_json::json!({
+            "room": "Kodo",
+            "session": "s-1",
+            "surfaces": [{"kind": "prose", "text": "x"}]
+        }))
+        .unwrap();
+        assert!(shouting.validate().is_err());
+    }
+
+    #[test]
+    fn a_trigger_patch_is_judged_before_any_row_is_locked() {
+        let spec = patch_trigger_spec(
+            serde_json::json!({"condition": ["\\bunwrap\\(\\)"], "interruptMode": "remind"})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(spec.condition, vec!["\\bunwrap\\(\\)".to_owned()]);
+        assert_eq!(spec.validate_fields(), Ok(()));
+
+        let broken = patch_trigger_spec(
+            serde_json::json!({"condition": ["unwrap("]})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(broken.validate_fields().is_err());
+
+        assert!(
+            patch_trigger_spec(
+                serde_json::json!({"condition": "unwrap"})
+                    .as_object()
+                    .unwrap()
+            )
+            .is_err(),
+            "a bare string is not a condition array"
+        );
+        assert!(
+            patch_trigger_spec(
+                serde_json::json!({"repeatCooldownSecs": "600"})
+                    .as_object()
+                    .unwrap()
+            )
+            .is_err()
+        );
+        // A patch that clears the policy columns is legal on its own: the
+        // stored patterns still carry the lesson.
+        let cleared = patch_trigger_spec(
+            serde_json::json!({"interruptMode": null, "repeatCooldownSecs": null})
+                .as_object()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(cleared.is_empty());
+        assert_eq!(cleared.validate_fields(), Ok(()));
+    }
 
     #[test]
     fn lesson_query_preserves_typed_filters_and_bounds() {

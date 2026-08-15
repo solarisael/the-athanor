@@ -17,6 +17,7 @@ use house_core::{
     GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
     GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
     GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RoomKey,
+    lesson_triggers::LessonTriggerSpec,
 };
 use house_protocol::{
     GigaCandidateListRequest, GigaCandidateListResult, GigaCandidateParams,
@@ -2402,6 +2403,9 @@ pub async fn giga_promote(
                 payload.thread_keys(),
                 &tags,
                 Some(source_path.as_str()),
+                // A promoted candidate carries no triggers: Stage 1 never
+                // proposes them, and a trigger is an explicit lesson edit.
+                &LessonTriggerSpec::default(),
                 metadata.clone(),
             )
             .await?;
@@ -2425,6 +2429,7 @@ pub async fn giga_promote(
                 payload.thread_keys(),
                 &tags,
                 Some(source_path.as_str()),
+                &LessonTriggerSpec::default(),
                 metadata.clone(),
             )
             .await?;

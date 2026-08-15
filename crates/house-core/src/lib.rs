@@ -3,11 +3,14 @@
 pub mod context;
 pub mod conversation;
 pub mod hallway;
+pub mod lesson_triggers;
 pub mod lineage;
 pub mod routing;
 pub mod triggers;
 
 use std::fmt;
+
+use lesson_triggers::LessonTriggerSpec;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HouseMode {
@@ -65,6 +68,7 @@ pub enum DomainError {
     GigaPointerOnly,
     UnknownGigaValue { field: String, value: String },
     InvalidPaperBoat { field: String, message: String },
+    InvalidLessonTrigger(String),
 }
 impl fmt::Display for DomainError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -137,6 +141,7 @@ impl fmt::Display for DomainError {
             Self::InvalidPaperBoat { field, message } => {
                 write!(f, "invalid paper boat {field}: {message}")
             }
+            Self::InvalidLessonTrigger(message) => write!(f, "invalid lesson trigger: {message}"),
         }
     }
 }
@@ -1429,6 +1434,9 @@ pub struct RememberLessonDetails {
     pub technology_keys: Vec<String>,
     pub thread_keys: Vec<String>,
     pub tags: Vec<String>,
+    /// The lesson's trigger columns. Empty means the lesson never fires on its
+    /// own; the write path still validates whatever is here.
+    pub triggers: LessonTriggerSpec,
 }
 
 enum RememberDetails {
@@ -1460,6 +1468,7 @@ pub struct RememberRequest {
     technology_keys: Vec<String>,
     thread_keys: Vec<String>,
     tags: Vec<String>,
+    triggers: LessonTriggerSpec,
 }
 
 impl RememberRequest {
@@ -1520,6 +1529,7 @@ impl RememberRequest {
             technology_keys,
             thread_keys,
             tags,
+            triggers,
         ) = match details {
             RememberDetails::Memory(details) => {
                 if kind.is_lesson() {
@@ -1547,6 +1557,7 @@ impl RememberRequest {
                     Vec::new(),
                     Vec::new(),
                     Vec::new(),
+                    LessonTriggerSpec::default(),
                 )
             }
             RememberDetails::Lesson(details) => {
@@ -1575,6 +1586,7 @@ impl RememberRequest {
                     details.technology_keys,
                     details.thread_keys,
                     details.tags,
+                    details.triggers,
                 )
             }
         };
@@ -1697,6 +1709,9 @@ impl RememberRequest {
                 unique_supersedes.push(id);
             }
         }
+        triggers
+            .validate()
+            .map_err(DomainError::InvalidLessonTrigger)?;
         Ok(Self {
             room,
             kind,
@@ -1720,6 +1735,7 @@ impl RememberRequest {
             technology_keys,
             thread_keys,
             tags,
+            triggers,
         })
     }
 
@@ -1788,6 +1804,9 @@ impl RememberRequest {
     }
     pub fn tags(&self) -> &[String] {
         &self.tags
+    }
+    pub fn triggers(&self) -> &LessonTriggerSpec {
+        &self.triggers
     }
 }
 
@@ -4876,6 +4895,7 @@ mod tests {
             technology_keys: vec![],
             thread_keys: vec![],
             tags: vec!["accessibility".into()],
+            triggers: LessonTriggerSpec::default(),
         };
         let request = RememberRequest::new_lesson(
             RoomKey::new("lab").unwrap(),
@@ -4925,6 +4945,7 @@ mod tests {
             technology_keys: vec!["postgresql".into()],
             thread_keys: vec!["subagent-dispatch".into()],
             tags: vec![],
+            triggers: LessonTriggerSpec::default(),
         };
         let request = RememberRequest::new_lesson(
             RoomKey::new("lab").unwrap(),
@@ -4953,6 +4974,7 @@ mod tests {
             technology_keys: vec![],
             thread_keys: vec![],
             tags: vec![],
+            triggers: LessonTriggerSpec::default(),
         };
         assert!(
             RememberRequest::new_lesson(

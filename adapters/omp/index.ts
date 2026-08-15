@@ -38,11 +38,18 @@ import {
   writeActiveSpiritSnapshot,
 } from "./solarisael-house-proof/room.ts";
 import { catchBoat, closePaperBoatTransports } from "./solarisael-house-proof/substrate.ts";
-import { messageText } from "./solarisael-house-proof/text.ts";
+import { conversationText, messageText } from "./solarisael-house-proof/text.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./solarisael-house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./solarisael-house-proof/tools.ts";
 import { processLessonsReminder } from "./solarisael-house-proof/triggers.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./solarisael-house-proof/context.ts";
+import {
+  closeLessonTriggerTransports,
+  lessonTriggerProseAddition,
+  lessonTriggerToolCall,
+  prependLessonReminder,
+  takeLessonReminder,
+} from "./solarisael-house-proof/lesson-triggers.ts";
 import {
   RecallPolicyHostClient,
   type PersistedRecallPolicy,
@@ -471,6 +478,10 @@ export default function solarisaelHouseProof(pi) {
     };
     cacheKittenTaskRoom(room, event.toolCallId, event.input, binding);
   });
+
+  // Mutate-tool lesson triggers. The tap owns nothing: extraction, transport,
+  // verdict rendering, and fail-open live in lesson-triggers.ts.
+  pi.on("tool_call", async (event, ctx) => lessonTriggerToolCall(event, ctx));
   pi.on("context", async (event, ctx) => {
     const messages = Array.isArray(event?.messages) ? event.messages : [];
     const promptMessage = [...messages].reverse().find((message) => message?.role === "user");
@@ -678,6 +689,20 @@ export default function solarisaelHouseProof(pi) {
       }
     }
 
+    if (!existingTypes.has("solarisael-lesson-trigger")) {
+      const lastAssistant = [...messages].reverse().find((message) => message?.role === "assistant");
+      const proseTriggers = await lessonTriggerProseAddition({
+        room,
+        roomDir: effectiveRoomDir,
+        session: hostSession,
+        text: conversationText(lastAssistant),
+        timestamp,
+      });
+      // Anchored at the current turn with every other addition below; no code
+      // path here touches an earlier turn's anchor.
+      if (proseTriggers) additions.push(proseTriggers);
+    }
+
     if (
       !existingTypes.has("solarisael-recall-context")
       && process.env.SOLARISAEL_DISABLE_AUTO_RECALL !== "1"
@@ -732,7 +757,8 @@ export default function solarisaelHouseProof(pi) {
               currentTurnKey ? `${currentTurnKey}:viewport` : undefined,
             );
             const automaticCompact = viewport.presentation;
-            const recallMessage = automaticCompact.found || automaticCompact.warnings.length
+            const warnings = Array.isArray(automaticCompact.warnings) ? automaticCompact.warnings : [];
+            const recallMessage = automaticCompact.found || warnings.length
               ? {
                 role: "custom",
                 customType: "solarisael-recall-context",
@@ -746,7 +772,7 @@ export default function solarisaelHouseProof(pi) {
                 display: false,
                 details: {
                   found: automaticCompact.found,
-                  warnings: automaticCompact.warnings,
+                  warnings,
                   mode: decision.resolvedMode,
                   refreshReason: decision.refreshReason,
                   viewport: viewport.diagnostics,
@@ -762,7 +788,7 @@ export default function solarisaelHouseProof(pi) {
                 + automaticCompact.canonMatches.length
                 + automaticCompact.dateMatches.length,
               hasWorkingSet: Boolean(recallMessage),
-              warning: automaticCompact.warnings[0],
+              warning: warnings[0],
               idempotencyKey: currentTurnKey ? `${currentTurnKey}:complete` : undefined,
             });
             policyState = completed.recallPolicy;
@@ -897,12 +923,20 @@ export default function solarisaelHouseProof(pi) {
     }
   });
 
+  pi.on("tool_result", async (event) => {
+    // Consumed unconditionally so a failed tool never leaks its stash entry.
+    const reminder = takeLessonReminder(event?.toolCallId);
+    if (!reminder || event?.isError) return;
+    return { content: prependLessonReminder(event.content, reminder) };
+  });
+
   pi.on("shutdown", async () => {
     closeRustRecallTransports();
     closeRustRememberTransports();
     closePaperBoatTransports();
     closeRustAnamnesisTransports();
     await closeGigaTransports();
+    closeLessonTriggerTransports();
     stopKittenProgress?.();
     stopKittenLifecycle?.();
   });

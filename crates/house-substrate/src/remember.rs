@@ -3,6 +3,7 @@ use crate::config::{
     AppError, Config, HTTP_CLIENT, PATH_DATE_RE, ROOM_KEY_RE, STITCHED_PATH_DATE_RE,
 };
 use chrono::{Local, NaiveDate};
+use house_core::lesson_triggers::LessonTriggerSpec;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize, Serializer};
@@ -64,6 +65,16 @@ pub struct RememberRequest {
     pub thread_keys: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub condition: Vec<String>,
+    #[serde(default, alias = "astCondition")]
+    pub ast_condition: Vec<String>,
+    #[serde(default, alias = "triggerScope")]
+    pub trigger_scope: Vec<String>,
+    #[serde(default, alias = "interruptMode")]
+    pub interrupt_mode: Option<String>,
+    #[serde(default, alias = "repeatCooldownSecs")]
+    pub repeat_cooldown_secs: Option<i32>,
     #[serde(default = "default_backup")]
     pub backup: bool,
 }
@@ -142,6 +153,7 @@ impl RememberRequest {
                 || !self.technology_keys.is_empty()
                 || !self.thread_keys.is_empty()
                 || !self.tags.is_empty()
+                || !self.trigger_spec().is_empty()
             {
                 return Err(AppError::Invalid(
                     "lesson-only fields are not valid for memory".into(),
@@ -262,6 +274,9 @@ impl RememberRequest {
                     "project is required for project lessons".into(),
                 ));
             }
+            self.trigger_spec()
+                .validate()
+                .map_err(AppError::Invalid)?;
         } else {
             return Err(AppError::Invalid("unsupported remember kind".into()));
         }
@@ -288,6 +303,18 @@ impl RememberRequest {
     }
     fn lesson_body(&self) -> &str {
         self.lesson.as_deref().unwrap_or(&self.body)
+    }
+    /// The lesson's trigger columns as house-core sees them. Owned rather than
+    /// borrowed: the spec is validated and then bound, never held across the
+    /// insert.
+    pub(crate) fn trigger_spec(&self) -> LessonTriggerSpec {
+        LessonTriggerSpec {
+            condition: self.condition.clone(),
+            ast_condition: self.ast_condition.clone(),
+            trigger_scope: self.trigger_scope.clone(),
+            interrupt_mode: self.interrupt_mode.clone(),
+            repeat_cooldown_secs: self.repeat_cooldown_secs,
+        }
     }
 }
 
@@ -642,20 +669,25 @@ pub(crate) async fn write_coding_lesson_tx(
     thread_keys: &[String],
     tags: &[String],
     source_memory_path: Option<&str>,
+    triggers: &LessonTriggerSpec,
     meta: Value,
 ) -> Result<i64, AppError> {
     sqlx::query_scalar(
         "INSERT INTO lessons
          (lesson_key,scope,project,voice,shape,title,lesson,trigger_context,proof_pattern,
-          language_keys,technology_keys,thread_keys,tags,source_memory_path,meta)
-         VALUES ('coding',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          language_keys,technology_keys,thread_keys,tags,source_memory_path,meta,
+          condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs)
+         VALUES ('coding',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
          ON CONFLICT (scope,project,title) WHERE lesson_key='coding' DO UPDATE
          SET project=EXCLUDED.project,voice=EXCLUDED.voice,shape=EXCLUDED.shape,
              lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,
              proof_pattern=EXCLUDED.proof_pattern,
              language_keys=EXCLUDED.language_keys,technology_keys=EXCLUDED.technology_keys,
              thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,
-             source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta
+             source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta,
+             condition=EXCLUDED.condition,ast_condition=EXCLUDED.ast_condition,
+             trigger_scope=EXCLUDED.trigger_scope,interrupt_mode=EXCLUDED.interrupt_mode,
+             repeat_cooldown_secs=EXCLUDED.repeat_cooldown_secs
          RETURNING id",
     )
     .bind(scope)
@@ -672,6 +704,11 @@ pub(crate) async fn write_coding_lesson_tx(
     .bind(tags)
     .bind(source_memory_path)
     .bind(meta)
+    .bind(triggers.condition.as_slice())
+    .bind(triggers.ast_condition.as_slice())
+    .bind(triggers.trigger_scope.as_slice())
+    .bind(triggers.interrupt_mode.as_deref())
+    .bind(triggers.repeat_cooldown_secs)
     .fetch_one(&mut **tx)
     .await
     .map_err(Into::into)
@@ -690,19 +727,24 @@ pub(crate) async fn write_project_lesson_tx(
     thread_keys: &[String],
     tags: &[String],
     source_memory_path: Option<&str>,
+    triggers: &LessonTriggerSpec,
     meta: Value,
 ) -> Result<i64, AppError> {
     sqlx::query_scalar(
         "INSERT INTO lessons
          (lesson_key,scope,project,title,lesson,trigger_context,proof_pattern,
-          language_keys,technology_keys,thread_keys,tags,source_memory_path,meta)
-         VALUES ('project','project',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+          language_keys,technology_keys,thread_keys,tags,source_memory_path,meta,
+          condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs)
+         VALUES ('project','project',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
          ON CONFLICT (project,title) WHERE lesson_key='project' DO UPDATE
          SET lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,
              proof_pattern=EXCLUDED.proof_pattern,
              language_keys=EXCLUDED.language_keys,technology_keys=EXCLUDED.technology_keys,
              thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,
-             source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta
+             source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta,
+             condition=EXCLUDED.condition,ast_condition=EXCLUDED.ast_condition,
+             trigger_scope=EXCLUDED.trigger_scope,interrupt_mode=EXCLUDED.interrupt_mode,
+             repeat_cooldown_secs=EXCLUDED.repeat_cooldown_secs
          RETURNING id",
     )
     .bind(project)
@@ -716,6 +758,11 @@ pub(crate) async fn write_project_lesson_tx(
     .bind(tags)
     .bind(source_memory_path)
     .bind(meta)
+    .bind(triggers.condition.as_slice())
+    .bind(triggers.ast_condition.as_slice())
+    .bind(triggers.trigger_scope.as_slice())
+    .bind(triggers.interrupt_mode.as_deref())
+    .bind(triggers.repeat_cooldown_secs)
     .fetch_one(&mut **tx)
     .await
     .map_err(Into::into)
@@ -747,6 +794,7 @@ async fn remember_lesson(
         "kind": req.kind,
         "recorded_at": chrono::Utc::now().to_rfc3339(),
     });
+    let triggers = req.trigger_spec();
     let mut tx = pool.begin().await?;
     let id = match req.kind.as_str() {
         "coding-lesson" => write_coding_lesson_tx(
@@ -764,6 +812,7 @@ async fn remember_lesson(
             &thread_keys,
             &tags,
             req.source_memory_path.as_deref(),
+            &triggers,
             meta,
         )
         .await?,
@@ -779,13 +828,14 @@ async fn remember_lesson(
             &thread_keys,
             &tags,
             req.source_memory_path.as_deref(),
+            &triggers,
             meta,
         )
         .await?,
-        "writing-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,voice,register,shape,title,lesson,trigger_context,thread_keys,tags,source_memory_path,meta) VALUES ('writing','house',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (voice,title) WHERE lesson_key='writing' DO UPDATE SET register=EXCLUDED.register,shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta RETURNING id").bind(req.voice.as_deref().unwrap_or("general")).bind(if register.is_empty() { &default_register } else { &register }).bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).fetch_one(&mut *tx).await?,
-        "design-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,voice,register,shape,title,lesson,trigger_context,proof_pattern,example_text,thread_keys,tags,source_memory_path,meta) VALUES ('design','house',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (voice,title) WHERE lesson_key='design' DO UPDATE SET register=EXCLUDED.register,shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,proof_pattern=EXCLUDED.proof_pattern,example_text=EXCLUDED.example_text,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta RETURNING id").bind(req.voice.as_deref().unwrap_or("general")).bind(if register.is_empty() { &default_register } else { &register }).bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&req.proof_pattern).bind(&req.example_text).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).fetch_one(&mut *tx).await?,
-        "audio-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,shape,title,lesson,trigger_context,thread_keys,tags,source_memory_path,meta) VALUES ('audio','house',$1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (title) WHERE lesson_key='audio' DO UPDATE SET shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta RETURNING id")
-            .bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).fetch_one(&mut *tx).await?,
+        "writing-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,voice,register,shape,title,lesson,trigger_context,thread_keys,tags,source_memory_path,meta,condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs) VALUES ('writing','house',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) ON CONFLICT (voice,title) WHERE lesson_key='writing' DO UPDATE SET register=EXCLUDED.register,shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta,condition=EXCLUDED.condition,ast_condition=EXCLUDED.ast_condition,trigger_scope=EXCLUDED.trigger_scope,interrupt_mode=EXCLUDED.interrupt_mode,repeat_cooldown_secs=EXCLUDED.repeat_cooldown_secs RETURNING id").bind(req.voice.as_deref().unwrap_or("general")).bind(if register.is_empty() { &default_register } else { &register }).bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).bind(triggers.condition.as_slice()).bind(triggers.ast_condition.as_slice()).bind(triggers.trigger_scope.as_slice()).bind(triggers.interrupt_mode.as_deref()).bind(triggers.repeat_cooldown_secs).fetch_one(&mut *tx).await?,
+        "design-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,voice,register,shape,title,lesson,trigger_context,proof_pattern,example_text,thread_keys,tags,source_memory_path,meta,condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs) VALUES ('design','house',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT (voice,title) WHERE lesson_key='design' DO UPDATE SET register=EXCLUDED.register,shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,proof_pattern=EXCLUDED.proof_pattern,example_text=EXCLUDED.example_text,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta,condition=EXCLUDED.condition,ast_condition=EXCLUDED.ast_condition,trigger_scope=EXCLUDED.trigger_scope,interrupt_mode=EXCLUDED.interrupt_mode,repeat_cooldown_secs=EXCLUDED.repeat_cooldown_secs RETURNING id").bind(req.voice.as_deref().unwrap_or("general")).bind(if register.is_empty() { &default_register } else { &register }).bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&req.proof_pattern).bind(&req.example_text).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).bind(triggers.condition.as_slice()).bind(triggers.ast_condition.as_slice()).bind(triggers.trigger_scope.as_slice()).bind(triggers.interrupt_mode.as_deref()).bind(triggers.repeat_cooldown_secs).fetch_one(&mut *tx).await?,
+        "audio-lesson" => sqlx::query_scalar::<_, i64>("INSERT INTO lessons (lesson_key,scope,shape,title,lesson,trigger_context,thread_keys,tags,source_memory_path,meta,condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs) VALUES ('audio','house',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (title) WHERE lesson_key='audio' DO UPDATE SET shape=EXCLUDED.shape,lesson=EXCLUDED.lesson,trigger_context=EXCLUDED.trigger_context,thread_keys=EXCLUDED.thread_keys,tags=EXCLUDED.tags,source_memory_path=EXCLUDED.source_memory_path,meta=EXCLUDED.meta,condition=EXCLUDED.condition,ast_condition=EXCLUDED.ast_condition,trigger_scope=EXCLUDED.trigger_scope,interrupt_mode=EXCLUDED.interrupt_mode,repeat_cooldown_secs=EXCLUDED.repeat_cooldown_secs RETURNING id")
+            .bind(&req.shape).bind(&req.title).bind(text).bind(&req.trigger_context).bind(&thread_keys).bind(&tags).bind(&req.source_memory_path).bind(meta).bind(triggers.condition.as_slice()).bind(triggers.ast_condition.as_slice()).bind(triggers.trigger_scope.as_slice()).bind(triggers.interrupt_mode.as_deref()).bind(triggers.repeat_cooldown_secs).fetch_one(&mut *tx).await?,
         _ => return Err(AppError::Invalid("unsupported remember kind".into())),
     };
     tx.commit().await?;

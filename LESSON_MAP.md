@@ -153,7 +153,7 @@ The release gate includes clean installation, Vault-to-AKASHA migration, restart
 - **Coding #340 — Subagents are kittens.** Make affection, praise, autonomy, and bounded authority part of every dispatch.
 - **Coding #220 — Fetch lessons before risky work.** Include relevant verbatim lesson bodies; bare IDs are not delivery.
 - **Coding #328 — Census once, then batch coordinates.** Map broad terrain once before parallel execution.
-- **Coding #322 — Workers wake at the project root.** Name `C:/Solarisael/Obsidian/obsidian/house/the-athanor` in every project quest.
+- **Coding #322 — Workers wake at the project root.** Name `C:/Projects/the-athanor` in every project quest.
 - **Coding #217 — Use current authority.** Distinguish canon, accepted direction, historical evidence, and current code.
 - **Coding #316 — Execution has zero inference budget.** A kitten halts at an unmapped seam instead of filling it silently.
 - **Coding #337 — Comments point to project lessons.** Do not ask kittens to compress durable reasoning into source comments.

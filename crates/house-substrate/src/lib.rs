@@ -43,9 +43,10 @@ pub use lesson::{
     DesignDocumentTaxonomy, DesignDocumentWriteParams, DesignDocumentWriteReceipt,
     LessonContextFilters, LessonContextMatch, LessonContextParams, LessonContextRecord,
     LessonContextResult, LessonDeleteParams, LessonFamily, LessonFilters, LessonMutationReceipt,
-    LessonQueryParams, LessonQueryResult, LessonRecord, LessonTaxonomy, LessonUpdateParams,
+    LessonQueryParams, LessonQueryResult, LessonRecord, LessonTaxonomy, LessonTriggerFired,
+    LessonTriggerMatchParams, LessonTriggerMatchResult, LessonTriggerSurface, LessonUpdateParams,
     design_document_query, design_document_write, lesson_context, lesson_delete, lesson_query,
-    lesson_update,
+    lesson_trigger_match, lesson_update,
 };
 pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
 pub use recall::{RecallParams, RecallResult, recall, refresh_semantic_vocabulary};
@@ -82,6 +83,11 @@ mod tests {
             technology_keys: vec![],
             thread_keys: vec![],
             tags: vec![],
+            condition: vec![],
+            ast_condition: vec![],
+            trigger_scope: vec![],
+            interrupt_mode: None,
+            repeat_cooldown_secs: None,
             backup: false,
         };
         assert!(r.validate().is_err());
@@ -111,6 +117,11 @@ mod tests {
             technology_keys: vec![],
             thread_keys: vec![],
             tags: vec![],
+            condition: vec![],
+            ast_condition: vec![],
+            trigger_scope: vec![],
+            interrupt_mode: None,
+            repeat_cooldown_secs: None,
             backup: false,
         };
         assert!(r.source_path().starts_with("db-only/"));
@@ -140,6 +151,11 @@ mod tests {
             technology_keys: vec![],
             thread_keys: vec![],
             tags: vec!["a".into()],
+            condition: vec![],
+            ast_condition: vec![],
+            trigger_scope: vec![],
+            interrupt_mode: None,
+            repeat_cooldown_secs: None,
             backup: false,
         };
         assert!(project.validate().is_err());
@@ -179,6 +195,11 @@ mod tests {
             technology_keys: vec![],
             thread_keys: vec![],
             tags: vec![],
+            condition: vec![],
+            ast_condition: vec![],
+            trigger_scope: vec![],
+            interrupt_mode: None,
+            repeat_cooldown_secs: None,
             backup: false,
         };
         design.voice = Some("house-design".into());

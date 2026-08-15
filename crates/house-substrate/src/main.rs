@@ -3,14 +3,16 @@ use athanor_substrate::migrations::{migration_pool, run_migrations};
 use athanor_substrate::{
     AnamnesisParams, AnamnesisSeed, AnamnesisWrite, AppError, Config, DesignDocumentQueryParams,
     DesignDocumentWriteParams, EntityResolveParams, LessonContextParams, LessonDeleteParams,
-    LessonQueryParams, LessonUpdateParams, RecallParams, RememberRequest, SubstrateHealthOptions,
+    LessonQueryParams, LessonTriggerMatchParams, LessonUpdateParams, RecallParams, RememberRequest,
+    SubstrateHealthOptions,
     ThreadContinuation as ServiceThreadContinuation, anamnesis, anamnesis_write, canon_read,
     canon_write, cluster_maintenance, design_document_query, design_document_write, entity_resolve,
     giga_candidate_list, giga_conversation_ingest, giga_event_claim, giga_event_finish,
     giga_event_ingest, giga_event_replay, giga_health, giga_promote, giga_queue_maintenance,
     giga_review, giga_tool_promote, giga_tool_review, hallway_create, hallway_join, hallway_post,
-    hallway_read, lesson_context, lesson_delete, lesson_query, lesson_update, paper_boat_sleep,
-    paper_boat_wake, recall, refresh_semantic_vocabulary, remember, spawn_giga_worker,
+    hallway_read, lesson_context, lesson_delete, lesson_query, lesson_trigger_match, lesson_update,
+    paper_boat_sleep, paper_boat_wake, recall, refresh_semantic_vocabulary, remember,
+    spawn_giga_worker,
     substrate_health, substrate_health_with_config,
 };
 use chrono::NaiveDate;
@@ -60,6 +62,7 @@ enum ProtocolRequest {
     LessonContext(LessonContextParams),
     LessonUpdate(LessonUpdateParams),
     LessonDelete(LessonDeleteParams),
+    LessonTriggerMatch(LessonTriggerMatchParams),
     DesignDocumentQuery(DesignDocumentQueryParams),
     DesignDocumentWrite(DesignDocumentWriteParams),
     EntityResolve(EntityResolveParams),
@@ -147,6 +150,11 @@ fn remember_service_request(
         technology_keys: request.technology_keys().to_vec(),
         thread_keys: request.thread_keys().to_vec(),
         tags: request.tags().to_vec(),
+        condition: request.triggers().condition.clone(),
+        ast_condition: request.triggers().ast_condition.clone(),
+        trigger_scope: request.triggers().trigger_scope.clone(),
+        interrupt_mode: request.triggers().interrupt_mode.clone(),
+        repeat_cooldown_secs: request.triggers().repeat_cooldown_secs,
         backup: request.backup(),
     })
 }
@@ -327,6 +335,9 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
             .map_err(|error| invalid_params(error.to_string())),
         "lesson_delete" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::LessonDelete)
+            .map_err(|error| invalid_params(error.to_string())),
+        "lesson_trigger_match" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::LessonTriggerMatch)
             .map_err(|error| invalid_params(error.to_string())),
         "design_document_query" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::DesignDocumentQuery)
@@ -656,6 +667,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::LessonContext(_) => "lesson_context",
                     ProtocolRequest::LessonUpdate(_) => "lesson_update",
                     ProtocolRequest::LessonDelete(_) => "lesson_delete",
+                    ProtocolRequest::LessonTriggerMatch(_) => "lesson_trigger_match",
                     ProtocolRequest::DesignDocumentQuery(_) => "design_document_query",
                     ProtocolRequest::DesignDocumentWrite(_) => "design_document_write",
                     ProtocolRequest::EntityResolve(_) => "entity_resolve",
@@ -701,6 +713,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     | ProtocolRequest::LessonContext(_)
                     | ProtocolRequest::LessonUpdate(_)
                     | ProtocolRequest::LessonDelete(_)
+                    | ProtocolRequest::LessonTriggerMatch(_)
                     | ProtocolRequest::DesignDocumentQuery(_)
                     | ProtocolRequest::DesignDocumentWrite(_)
                     | ProtocolRequest::EntityResolve(_)
@@ -882,6 +895,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     ProtocolRequest::LessonDelete(request) => {
                                         match lesson_delete(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::LessonTriggerMatch(request) => {
+                                        match lesson_trigger_match(pool, request).await {
                                             Ok(result) => success_json(id, result)?,
                                             Err(error) => app_error(id, operation, error),
                                         }
@@ -1213,6 +1232,30 @@ mod tests {
             r#"{"protocol":1,"id":"l2","method":"lesson_query","params":{"room":"kintsu","type":"coding","database_url":"forbidden"}}"#,
         );
         assert!(matches!(invalid, Err(ProtocolError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn lesson_trigger_match_protocol_is_strict_and_camel_cased() {
+        let (_, request) = decode_line(
+            r#"{"protocol":1,"id":"t1","method":"lesson_trigger_match","params":{"room":"kodo","session":"s-1","surfaces":[{"kind":"tool","tool":"edit","path":"src/lib.rs","text":"x.unwrap()"},{"kind":"prose","text":"I will just unwrap it"}]}}"#,
+        );
+        match request.unwrap() {
+            ProtocolRequest::LessonTriggerMatch(request) => {
+                assert_eq!(request.session, "s-1");
+                assert_eq!(request.surfaces.len(), 2);
+                assert_eq!(request.surfaces[0].tool.as_deref(), Some("edit"));
+                assert_eq!(request.surfaces[1].path, None);
+            }
+            _ => panic!("expected lesson trigger match"),
+        }
+        let (_, snake) = decode_line(
+            r#"{"protocol":1,"id":"t2","method":"lesson_trigger_match","params":{"room":"kodo","session":"s-1","surfaces":[{"kind":"tool","tool_name":"edit","text":"x"}]}}"#,
+        );
+        assert!(matches!(snake, Err(ProtocolError::InvalidParams(_))));
+        let (_, missing) = decode_line(
+            r#"{"protocol":1,"id":"t3","method":"lesson_trigger_match","params":{"room":"kodo","surfaces":[]}}"#,
+        );
+        assert!(matches!(missing, Err(ProtocolError::InvalidParams(_))));
     }
 
     #[test]

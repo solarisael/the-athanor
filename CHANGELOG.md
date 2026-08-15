@@ -20,6 +20,41 @@ the exact implementation record.
 
 ## [Unreleased]
 
+## [0.9.7.0] - 2026-08-15
+
+### Added
+
+- Lessons can now carry structured triggers: `condition` (regex), `ast_condition`
+  (ast-grep patterns), `trigger_scope`, `interrupt_mode`, and
+  `repeat_cooldown_secs` (migration `0019_lesson_triggers.sql`). PostgreSQL
+  remains the only trigger store; a lesson written mid-session is live at the
+  next match without a restart.
+- New substrate operation `lesson_trigger_match` matches tool and prose payloads
+  against trigger-bearing lessons in Rust: regex plus ast-grep with Rust,
+  TypeScript, JavaScript, and Python grammars, per-lesson repeat policy (once
+  per session, or a cooldown in seconds), and one row per fire in the new
+  `lesson_trigger_events` ledger. A healthy response always serializes an empty
+  `warnings` array.
+- The OMP adapter taps `tool_call`, `tool_result`, and `context`. A
+  `block`-urgency lesson stops a violating edit or write before it lands and
+  returns the lesson as the reason. A `remind` fire prepends an in-band reminder
+  to the tool result. Prose matches inject a current-turn reminder without
+  moving earlier anchors. Every tap fails open with a 300ms budget and honors
+  `SOLARISAEL_DISABLE_LESSON_TRIGGERS=1`.
+- Write paths refuse lesson triggers that can never fire: a regex that does not
+  compile, an ast pattern that does not parse cleanly for any supported grammar,
+  an unknown scope token, or an invalid interrupt mode. GIGA promotions never
+  propose triggers.
+- `lesson_trigger_events` joined the substrate health contract's required
+  tables.
+
+### Known v1 ceilings
+
+- `.sql` paths skip ast conditions with a warning (no SQL grammar in
+  ast-grep-language 0.45.1); regex conditions still cover them.
+- Project-scoped lessons do not fire yet; the wire carries no project field.
+- Taps cover the `edit` and `write` tools.
+
 ## [0.9.6.2-rc2] - 2026-08-15
 
 ### Fixed

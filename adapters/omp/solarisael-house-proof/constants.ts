@@ -8,6 +8,7 @@ export const OBSIDIAN_ROOT = process.env.SOLARISAEL_VAULT_ROOT
   ? path.resolve(process.env.SOLARISAEL_VAULT_ROOT)
   : path.join(os.homedir(), "Solarisael");
 export const DIAGNOSTIC_TIMEOUT_MS = 8000;
+export const AUTOMATIC_CONTEXT_IO_TIMEOUT_MS = 2_000;
 export const WRITE_TIMEOUT_MS = 90000;
 export const OMP_SESSION_ID = "omp";
 export const TRANSCRIPT_DEBUG_LOG = "solarisael-house-transcript-debug.jsonl";

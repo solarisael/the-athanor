@@ -15,9 +15,11 @@ import { discoverRustExecutable } from "../discovery.ts";
 import { RustJsonlTransport } from "../rust-transport.ts";
 import { hostSessionIdentity } from "./host.ts";
 import { roomContext } from "./room.ts";
+import { conversationText } from "./text.ts";
 
 const TRIGGER_TIMEOUT_MS = 300;
 const REMIND_STASH_LIMIT = 256;
+const PROSE_STREAM_SCAN_STEP = 48;
 
 export type LessonSurface = {
   kind: "tool" | "prose";
@@ -37,7 +39,43 @@ type FiredLesson = {
   path: string | null;
   patternKind: "regex" | "ast";
   pattern: string;
+  /** Ledger fires for this lesson in this room, including this one. Optional
+   * because a skewed furnace build may omit it; absence just drops the ×N. */
+  fires?: number;
 };
+
+export type LessonTriggerProseDecision = {
+  block: boolean;
+  content: string;
+  reminder: string;
+  details: Record<string, unknown>;
+};
+
+type ProseStreamState = {
+  room: string;
+  roomDir: string;
+  session: string;
+  latestText: string;
+  checkedText: string;
+  forceScan: boolean;
+  blocked: boolean;
+  running: Promise<void> | null;
+  ctx: any;
+  pi: any;
+};
+
+const proseStreamBySession = new Map<string, ProseStreamState>();
+const interruptedProseSessions = new Map<string, number>();
+
+function proseStreamKey(room: string, session: string): string {
+  return `${room}\0${session}`;
+}
+
+function trimOldest<K, V>(map: Map<K, V>): void {
+  if (map.size <= REMIND_STASH_LIMIT) return;
+  const oldest = map.keys().next();
+  if (!oldest.done) map.delete(oldest.value);
+}
 
 export function lessonTriggersDisabled(): boolean {
   return process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS === "1";
@@ -65,6 +103,8 @@ function triggerTransport(roomDir: string): RustJsonlTransport | null {
 export function closeLessonTriggerTransports(): void {
   for (const transport of transports.values()) void transport.close().catch(() => {});
   transports.clear();
+  proseStreamBySession.clear();
+  interruptedProseSessions.clear();
 }
 
 async function matchSurfaces(
@@ -180,27 +220,104 @@ export function renderReminder(fired: FiredLesson[]): string {
     .join("\n\n");
 }
 
+export class LessonTriggerFeedback {
+  constructor(private readonly lines: string[]) {}
+
+  render(_width: number): string[] {
+    return this.lines;
+  }
+}
+
+function lessonFeedbackRefs(details: unknown): string[] {
+  const source = details && typeof details === "object" && !Array.isArray(details)
+    ? details as Record<string, unknown>
+    : {};
+  const lessons = Array.isArray(source.lessons) ? source.lessons : [];
+  const refs = lessons.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const lesson = value as Record<string, unknown>;
+    const family = String(lesson.family ?? "").trim();
+    const id = Number(lesson.id);
+    if (!family || !Number.isInteger(id) || id <= 0) return [];
+    const fires = Number(lesson.fires);
+    const suffix = Number.isFinite(fires) && fires >= 2 ? ` ×${fires}` : "";
+    return [`${family}#${id}${suffix}`];
+  });
+  return [...new Set(refs)];
+}
+
+export function lessonTriggerMessageRenderer(message: any, options: any, theme: any): LessonTriggerFeedback {
+  const details = message?.details && typeof message.details === "object" && !Array.isArray(message.details)
+    ? message.details as Record<string, unknown>
+    : {};
+  const refs = lessonFeedbackRefs(details);
+  const interrupted = details.interrupted === true;
+  const blocked = details.blocked === true;
+  const source = typeof details.source === "string" ? details.source : "";
+  let action = "lesson reminder queued";
+  if (interrupted) action = "interrupted draft · correction queued";
+  else if (blocked) action = `blocked ${String(details.tool ?? "tool")} call`;
+  else if (source === "tool_result") action = "lesson reminder delivered";
+  const summary = ["Athanor", ...refs, action].join(" · ");
+  const color = interrupted || blocked ? "warning" : "accent";
+  const lines = [typeof theme?.fg === "function" ? theme.fg(color, summary) : summary];
+  const content = typeof message?.content === "string" ? message.content.trim() : "";
+  if (options?.expanded && content) {
+    lines.push(
+      "",
+      ...content.split(/\r?\n/).map((line) => typeof theme?.fg === "function" ? theme.fg("muted", line) : line),
+    );
+  }
+  return new LessonTriggerFeedback(lines);
+}
+
+export function processLessonsMessageRenderer(message: any, options: any, theme: any): LessonTriggerFeedback {
+  const details = message?.details && typeof message.details === "object" && !Array.isArray(message.details)
+    ? message.details as Record<string, unknown>
+    : {};
+  const count = typeof details.lessons === "number"
+    ? details.lessons
+    : Array.isArray(details.lessons) ? details.lessons.length : 0;
+  const trigger = String(details.trigger ?? "").trim();
+  const summary = [
+    "Athanor",
+    `${count || "?"} lesson${count === 1 ? "" : "s"} warm`,
+    ...(trigger ? [trigger] : []),
+  ].join(" · ");
+  const lines = [typeof theme?.fg === "function" ? theme.fg("accent", summary) : summary];
+  const content = typeof message?.content === "string" ? message.content.trim() : "";
+  if (options?.expanded && content) {
+    lines.push(
+      "",
+      ...content.split(/\r?\n/).map((line) => typeof theme?.fg === "function" ? theme.fg("muted", line) : line),
+    );
+  }
+  return new LessonTriggerFeedback(lines);
+}
+
 // --- remind stash (tool_call -> tool_result) ---------------------------------
 
-const remindByToolCallId = new Map<string, string>();
+type StashedReminder = { reminder: string; lessons: FiredLesson[] };
 
-function stashReminder(toolCallId: unknown, reminder: string): void {
+const remindByToolCallId = new Map<string, StashedReminder>();
+
+function stashReminder(toolCallId: unknown, reminder: string, lessons: FiredLesson[]): void {
   const callId = String(toolCallId ?? "").trim();
   if (!callId || !reminder) return;
-  remindByToolCallId.set(callId, reminder);
+  remindByToolCallId.set(callId, { reminder, lessons });
   if (remindByToolCallId.size > REMIND_STASH_LIMIT) {
     const oldest = remindByToolCallId.keys().next();
     if (!oldest.done) remindByToolCallId.delete(oldest.value);
   }
 }
 
-export function takeLessonReminder(toolCallId: unknown): string | null {
+export function takeLessonReminder(toolCallId: unknown): StashedReminder | null {
   const callId = String(toolCallId ?? "").trim();
   if (!callId) return null;
-  const reminder = remindByToolCallId.get(callId);
-  if (reminder === undefined) return null;
+  const stashed = remindByToolCallId.get(callId);
+  if (stashed === undefined) return null;
   remindByToolCallId.delete(callId);
-  return reminder || null;
+  return stashed.reminder ? stashed : null;
 }
 
 export function prependLessonReminder(content: unknown, reminder: string): unknown[] {
@@ -208,12 +325,43 @@ export function prependLessonReminder(content: unknown, reminder: string): unkno
   return [{ type: "text", text: reminder }, ...existing];
 }
 
+/** Operator-visible card for a tool-lane verdict. The card's content is a
+ * one-line receipt, never the whisper: the reminder itself already reaches
+ * the model with the tool result, and a block's reason rides the refusal. */
+export function toolLessonCard(
+  lessons: FiredLesson[],
+  toolName: string,
+  kind: "remind" | "block",
+): { message: Record<string, unknown>; options: Record<string, unknown> } | null {
+  if (!lessons.length) return null;
+  const refs = lessons.map(lessonRef).join(", ");
+  const content = kind === "block"
+    ? `Athanor lesson ${refs} blocked the ${toolName} call; the reason was returned with the tool result.`
+    : `Athanor lesson reminder ${refs} was delivered with the ${toolName} result.`;
+  return {
+    message: {
+      customType: "solarisael-lesson-trigger",
+      content,
+      display: true,
+      attribution: "agent",
+      details: {
+        ...lessonDecisionDetails(lessons, []),
+        source: kind === "block" ? "tool_call" : "tool_result",
+        interrupted: false,
+        blocked: kind === "block",
+        tool: toolName,
+      },
+    },
+    options: { deliverAs: "nextTurn", triggerTurn: false },
+  };
+}
+
 // --- taps --------------------------------------------------------------------
 
 export async function lessonTriggerToolCall(
   event: any,
   ctx: any,
-): Promise<{ block: true; reason: string } | undefined> {
+): Promise<{ block: true; reason: string; lessons: FiredLesson[] } | undefined> {
   try {
     if (lessonTriggersDisabled()) return undefined;
     const toolName = String(event?.toolName ?? "");
@@ -227,15 +375,222 @@ export async function lessonTriggerToolCall(
     if (!fired.length) return undefined;
 
     const blocking = fired.filter((entry) => entry.urgency === "block");
-    if (blocking.length) return { block: true, reason: renderBlockReason(blocking) };
+    if (blocking.length) return { block: true, reason: renderBlockReason(blocking), lessons: blocking };
 
-    stashReminder(event?.toolCallId, renderReminder(fired));
+    stashReminder(event?.toolCallId, renderReminder(fired), fired);
     return undefined;
   } catch {
     // Fail-open: a thrown tool_call handler is a fail-CLOSED block in OMP, so an
     // unreachable furnace, a timeout, or a malformed response must pass through.
     return undefined;
   }
+}
+
+function lessonDecisionDetails(fired: FiredLesson[], warnings: string[]): Record<string, unknown> {
+  return {
+    lessons: fired.map((entry) => ({
+      family: entry.family,
+      id: entry.id,
+      urgency: entry.urgency,
+      patternKind: entry.patternKind,
+      fires: entry.fires,
+    })),
+    warnings,
+  };
+}
+
+export async function lessonTriggerProseDecision(args: {
+  room: string;
+  roomDir: string;
+  session: string;
+  text: string;
+}): Promise<LessonTriggerProseDecision | null> {
+  try {
+    if (lessonTriggersDisabled()) return null;
+    const text = String(args.text ?? "");
+    if (!text.trim()) return null;
+    const { fired, warnings } = await matchSurfaces(args.roomDir, args.room, args.session, [
+      { kind: "prose", text },
+    ]);
+    if (!fired.length) return null;
+
+    const blocking = fired.filter((entry) => entry.urgency === "block");
+    const advisory = fired.filter((entry) => entry.urgency !== "block");
+    const interruptParts = [
+      blocking.length ? renderBlockReason(blocking) : "",
+      advisory.length ? renderReminder(advisory) : "",
+    ].filter(Boolean);
+
+    return {
+      block: blocking.length > 0,
+      content: blocking.length ? interruptParts.join("\n\n") : renderReminder(fired),
+      reminder: renderReminder(fired),
+      details: lessonDecisionDetails(fired, warnings),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function proseStreamBinding(ctx: any): {
+  key: string;
+  room: string;
+  roomDir: string;
+  session: string;
+} {
+  const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
+  const session = hostSessionIdentity(ctx, effectiveRoomDir);
+  return {
+    key: proseStreamKey(room, session),
+    room,
+    roomDir: effectiveRoomDir,
+    session,
+  };
+}
+
+function newProseStreamState(ctx: any, pi: any): { key: string; state: ProseStreamState } {
+  const binding = proseStreamBinding(ctx);
+  const state: ProseStreamState = {
+    room: binding.room,
+    roomDir: binding.roomDir,
+    session: binding.session,
+    latestText: "",
+    checkedText: "",
+    forceScan: false,
+    blocked: false,
+    running: null,
+    ctx,
+    pi,
+  };
+  proseStreamBySession.set(binding.key, state);
+  trimOldest(proseStreamBySession);
+  return { key: binding.key, state };
+}
+
+export function resetLessonTriggerProseStream(event: any, ctx: any, pi: any): void {
+  if (event?.message?.role !== "assistant") return;
+  newProseStreamState(ctx, pi);
+}
+
+function queueProseContinuation(
+  key: string,
+  state: ProseStreamState,
+  decision: LessonTriggerProseDecision,
+): void {
+  if (typeof state.pi?.sendMessage !== "function") return;
+  const canInterrupt = decision.block && typeof state.ctx?.abort === "function";
+  const content = canInterrupt ? decision.content : decision.reminder;
+  state.pi.sendMessage(
+    {
+      customType: "solarisael-lesson-trigger",
+      content,
+      display: true,
+      attribution: "agent",
+      details: {
+        ...decision.details,
+        source: "message_update",
+        interrupted: canInterrupt,
+      },
+    },
+    { deliverAs: "nextTurn", triggerTurn: canInterrupt },
+  );
+
+  if (!canInterrupt) return;
+  state.blocked = true;
+  interruptedProseSessions.set(key, Date.now());
+  trimOldest(interruptedProseSessions);
+  try {
+    state.ctx.abort();
+  } catch {
+    state.blocked = false;
+    interruptedProseSessions.delete(key);
+  }
+}
+
+async function runProseStreamPump(key: string, state: ProseStreamState): Promise<void> {
+  try {
+    while (proseStreamBySession.get(key) === state && !state.blocked) {
+      const unchecked = state.latestText.length - state.checkedText.length;
+      if (!state.forceScan && unchecked < PROSE_STREAM_SCAN_STEP) return;
+      if (!state.latestText.trim() || state.latestText === state.checkedText) {
+        state.forceScan = false;
+        return;
+      }
+
+      const text = state.latestText;
+      state.checkedText = text;
+      state.forceScan = false;
+      const decision = await lessonTriggerProseDecision({
+        room: state.room,
+        roomDir: state.roomDir,
+        session: state.session,
+        text,
+      });
+      if (proseStreamBySession.get(key) !== state || state.blocked) return;
+      if (decision) {
+        queueProseContinuation(key, state, decision);
+        return;
+      }
+    }
+  } catch (error) {
+    console.warn(`[athanor] Lesson prose stream degraded: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    if (proseStreamBySession.get(key) !== state) return;
+    state.running = null;
+    const unchecked = state.latestText.length - state.checkedText.length;
+    const hasUncheckedText = state.latestText !== state.checkedText;
+    if (!state.blocked && hasUncheckedText && (state.forceScan || unchecked >= PROSE_STREAM_SCAN_STEP)) {
+      state.running = runProseStreamPump(key, state);
+    }
+  }
+}
+
+export function lessonTriggerProseStreamUpdate(event: any, ctx: any, pi: any): Promise<void> {
+  if (lessonTriggersDisabled()) return Promise.resolve();
+  if (event?.message?.role !== "assistant") return Promise.resolve();
+  const eventType = String(event?.assistantMessageEvent?.type ?? "");
+  if (eventType !== "text_delta" && eventType !== "text_end") return Promise.resolve();
+
+  const binding = proseStreamBinding(ctx);
+  let state = proseStreamBySession.get(binding.key);
+  const text = conversationText(event.message);
+  if (!state || (state.latestText && !text.startsWith(state.latestText))) {
+    state = newProseStreamState(ctx, pi).state;
+  }
+  if (state.blocked) return state.running ?? Promise.resolve();
+
+  state.ctx = ctx;
+  state.pi = pi;
+  state.latestText = text;
+  if (eventType === "text_end") state.forceScan = true;
+  const unchecked = state.latestText.length - state.checkedText.length;
+  if (!state.running && (state.forceScan || unchecked >= PROSE_STREAM_SCAN_STEP)) {
+    state.running = runProseStreamPump(binding.key, state);
+  }
+  return state.running ?? Promise.resolve();
+}
+
+export function filterInterruptedLessonProse(
+  messages: any[],
+  room: string,
+  session: string,
+): any[] {
+  const key = proseStreamKey(room, session);
+  if (!interruptedProseSessions.has(key)) return messages;
+  let interruptedIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message?.role === "assistant" && message?.stopReason === "aborted") {
+      interruptedIndex = index;
+      break;
+    }
+  }
+  if (interruptedIndex < 0) return messages;
+  interruptedProseSessions.delete(key);
+  return [
+    ...messages.slice(0, interruptedIndex),
+    ...messages.slice(interruptedIndex + 1),
+  ];
 }
 
 export async function lessonTriggerProseAddition(args: {
@@ -249,42 +604,24 @@ export async function lessonTriggerProseAddition(args: {
     role: "custom";
     customType: "solarisael-lesson-trigger";
     content: string;
-    display: false;
+    display: true;
     details: Record<string, unknown>;
     attribution: "agent";
     timestamp: number;
   }
   | null
 > {
-  try {
-    if (lessonTriggersDisabled()) return null;
-    const text = String(args.text ?? "");
-    if (!text.trim()) return null;
-    const { fired, warnings } = await matchSurfaces(args.roomDir, args.room, args.session, [
-      { kind: "prose", text },
-    ]);
-    if (!fired.length) return null;
-    // Prose fires never block: the generation already happened. They read as
-    // reminders on the next turn, anchored at the current turn only.
-    return {
-      role: "custom",
-      customType: "solarisael-lesson-trigger",
-      content: renderReminder(fired),
-      display: false,
-      details: {
-        lessons: fired.map((entry) => ({
-          family: entry.family,
-          id: entry.id,
-          urgency: entry.urgency,
-          patternKind: entry.patternKind,
-        })),
-        warnings,
-      },
-      attribution: "agent",
-      timestamp: args.timestamp,
-    };
-  } catch {
-    // Advisory only. A degraded furnace never perturbs context injection.
-    return null;
-  }
+  const decision = await lessonTriggerProseDecision(args);
+  if (!decision) return null;
+  // A completed generation can only advise the next turn. Live blocks use the
+  // message_update tap above and never reach this fallback when they interrupt.
+  return {
+    role: "custom",
+    customType: "solarisael-lesson-trigger",
+    content: decision.reminder,
+    display: true,
+    details: decision.details,
+    attribution: "agent",
+    timestamp: args.timestamp,
+  };
 }

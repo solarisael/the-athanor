@@ -538,7 +538,7 @@ export async function sleepBoat(room, body, { signal } = {}) {
   }
 }
 
-export async function catchBoat(room, { signal } = {}) {
+export async function catchBoat(room, { signal, timeoutMs = WRITE_TIMEOUT_MS } = {}) {
   const { executable, transport } = paperBoatTransport();
   if (!transport || !executable) {
     return { ok: false, error: "Rust substrate executable is unavailable; paper boat wake is unavailable" };
@@ -546,7 +546,7 @@ export async function catchBoat(room, { signal } = {}) {
   try {
     const result = await transport.request("paper_boat_wake", { room }, {
       signal: signal || undefined,
-      timeoutMs: WRITE_TIMEOUT_MS,
+      timeoutMs,
     });
     return result;
   } catch (error) {

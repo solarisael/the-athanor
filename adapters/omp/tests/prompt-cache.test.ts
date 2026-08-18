@@ -9,6 +9,12 @@ const evaluationCount = new Map<string, number>();
 let effectiveRoomDir = "";
 let omitViewportWarnings = false;
 const completedRefreshWarnings: Array<string | undefined> = [];
+let freshConversation = false;
+let entityResolutionSuggested = false;
+const automaticRecallOptions: unknown[] = [];
+const automaticWakeOptions: unknown[] = [];
+const automaticAnamnesisOptions: unknown[] = [];
+const automaticEntityInputs: unknown[] = [];
 
 const recallPolicy = {
   requestedMode: "auto",
@@ -36,7 +42,7 @@ mock.module("../solarisael-house-proof/room.ts", () => ({
 }));
 
 mock.module("../solarisael-house-proof/conversation-log.ts", () => ({
-  logConversationWindow: async () => ({ fresh: false, loggedTurns: [] }),
+  logConversationWindow: async () => ({ fresh: freshConversation, loggedTurns: [] }),
 }));
 
 mock.module("../giga.ts", () => ({
@@ -46,10 +52,13 @@ mock.module("../giga.ts", () => ({
 
 mock.module("../solarisael-house-proof/recall.ts", () => ({
   closeRustRecallTransports: () => undefined,
-  recallWithRouting: async (_roomDir: string, _room: string, query: string) => ({
-    ok: true,
-    result: { query },
-  }),
+  recallWithRouting: async (_roomDir: string, _room: string, query: string, options: unknown) => {
+    automaticRecallOptions.push(options);
+    return {
+      ok: true,
+      result: { query },
+    };
+  },
 }));
 
 mock.module("../solarisael-house-proof/tools.ts", () => ({
@@ -61,16 +70,25 @@ mock.module("../solarisael-house-proof/tools.ts", () => ({
 mock.module("../solarisael-house-proof/anamnesis.ts", () => ({
   closeRustAnamnesisTransports: () => undefined,
   formatAnamnesisContext: () => "",
-  queryAnamnesis: async () => ({ ok: true }),
+  queryAnamnesis: async (_roomDir: string, _room: string, options: unknown) => {
+    automaticAnamnesisOptions.push(options);
+    return { ok: true };
+  },
 }));
 
 mock.module("../solarisael-house-proof/substrate.ts", () => ({
-  catchBoat: async () => ({ ok: true, found: false }),
+  catchBoat: async (_room: string, options: unknown) => {
+    automaticWakeOptions.push(options);
+    return { ok: true, found: false };
+  },
   closePaperBoatTransports: () => undefined,
 }));
 
 mock.module("../solarisael-house-proof/entity-resolution.ts", () => ({
-  resolveEntities: async () => ({ ok: true, matches: [] }),
+  resolveEntities: async (input: unknown) => {
+    automaticEntityInputs.push(input);
+    return { ok: true, matches: [] };
+  },
 }));
 
 mock.module("../solarisael-house-proof/recall-telemetry.ts", () => ({
@@ -84,7 +102,7 @@ mock.module("../solarisael-house-proof/triggers.ts", () => ({
 mock.module("../solarisael-house-proof/context.ts", () => ({
   analyzeContext: async () => ({
     route: {
-      entityResolutionSuggested: false,
+      entityResolutionSuggested,
       intent: "technical_project",
       terms: ["cache"],
       requiredTerms: [],
@@ -199,6 +217,12 @@ beforeEach(async () => {
   effectiveRoomDir = await mkdtemp(path.join(os.tmpdir(), "athanor-turn-additions-"));
   omitViewportWarnings = false;
   completedRefreshWarnings.length = 0;
+  freshConversation = false;
+  entityResolutionSuggested = false;
+  automaticRecallOptions.length = 0;
+  automaticWakeOptions.length = 0;
+  automaticAnamnesisOptions.length = 0;
+  automaticEntityInputs.length = 0;
 });
 
 afterEach(async () => {
@@ -234,6 +258,28 @@ describe("OMP prompt-cache history", () => {
       { session: sessionID, workingSetPresent: false },
       { session: sessionID, workingSetPresent: true },
     ]);
+  });
+
+  test("bounds every Rust read performed automatically by the context hook", async () => {
+    freshConversation = true;
+    entityResolutionSuggested = true;
+
+    await contextHandler()({
+      messages: [user("bounded-turn", "recall this bounded technical thread")],
+    }, context("automatic-context-budget"));
+
+    expect(automaticWakeOptions).toEqual([{ timeoutMs: 2_000 }]);
+    expect(automaticAnamnesisOptions).toEqual([{ mode: "wake", timeoutMs: 2_000 }]);
+    expect(automaticEntityInputs).toEqual([{
+      room: "kodo",
+      roomDir: effectiveRoomDir,
+      query: "recall this bounded technical thread",
+      timeoutMs: 2_000,
+    }]);
+    expect(automaticRecallOptions).toEqual([{
+      temporalDecay: true,
+      timeoutMs: 2_000,
+    }]);
   });
 
   test("treats an omitted warning list as empty for a found working set", async () => {

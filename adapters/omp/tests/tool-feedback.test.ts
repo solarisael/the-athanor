@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 
-import { emitToolUpdate, createToolRenderers, normalizeToolResponse, toolThrown } from "../solarisael-house-proof/feedback.ts";
+import {
+  beginHouseToolFeedback,
+  completeHouseToolFeedback,
+  createToolRenderers,
+  emitToolUpdate,
+  normalizeToolResponse,
+  showHouseContextFeedback,
+  toolThrown,
+} from "../solarisael-house-proof/feedback.ts";
 import { registerSolarisaelTools } from "../solarisael-house-proof/tools.ts";
 
 type Schema = {
@@ -229,15 +237,199 @@ describe("House tool feedback", () => {
     }
   });
 
-  test("uses compact rendering by default and canonical JSON behind expansion", () => {
+  test("uses lifecycle symbols by default and canonical JSON behind expansion", () => {
     const { renderCall, renderResult } = createToolRenderers("Remember");
-    expect(renderCall({}, {}, { fg: (_color, text) => text }).render(120)).toEqual(["Athanor Remember"]);
+    const theme = {
+      fg: (_color: string, text: string) => text,
+      status: { pending: "P", running: "R", success: "S", error: "E" },
+    };
+    expect(renderCall({}, {}, theme).render(120)).toEqual(["P Athanor Remember"]);
     const result = normalizeToolResponse({
       isError: true,
       content: [{ type: "text", text: JSON.stringify({ ok: false, error: "missing project", code: "validation_error" }) }],
     }, "remember");
-    expect(renderResult(result, { expanded: false }, { fg: (_color, text) => text }).render(120)[0]).toContain("validation_error");
-    expect(renderResult(result, { expanded: true }, { fg: (_color, text) => text }).render(120).join("\n")).toBe(result.content[0].text);
+    expect(renderResult(result, { expanded: false }, theme).render(120)[0]).toContain("E Athanor Remember: validation_error");
+    expect(renderResult(result, { expanded: true }, theme).render(120).join("\n")).toBe(result.content[0].text);
+  });
+
+  test("renders Remember as a durable rich receipt with expandable evidence", () => {
+    const { renderCall, renderResult } = createToolRenderers("Athanor Remember", "remember");
+    const theme = {
+      fg: (_color: string, text: string) => text,
+      status: { pending: "P", running: "R", success: "S", error: "E", warning: "W" },
+    };
+    const args = {
+      title: "Sol saw the House gauges light up",
+      body: "The operator-visible consequence became real.\nThe House left a pawprint.",
+      room: "house",
+      threads: ["The Athanor / operator-visible feedback"],
+    };
+    expect(renderCall(args, {}, theme).render(120)[0]).toContain("Sol saw the House gauges light up");
+
+    const result = normalizeToolResponse({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          ok: true,
+          memory_id: 3650,
+          room: "house",
+          durable: true,
+          authority: "postgres",
+          source_path: "db-only/house/receipt",
+          warnings: [],
+        }),
+      }],
+    }, "remember");
+    const collapsed = renderResult(result, { expanded: false }, theme, args).render(120).join("\n");
+    expect(collapsed).toContain("╭─ S Athanor Remember · Memory #3650");
+    expect(collapsed).toContain("Sol saw the House gauges light up");
+    expect(collapsed).toContain("house · PostgreSQL authority · durable");
+    expect(collapsed).toContain("S committed · 1 thread");
+    expect(collapsed).toContain("⟨Ctrl+O: Expand⟩");
+
+    const expanded = renderResult(result, { expanded: true }, theme, args).render(120).join("\n");
+    expect(expanded).toContain("The operator-visible consequence became real.");
+    expect(expanded).toContain("source · db-only/house/receipt");
+    expect(expanded).toContain("expanded evidence");
+  });
+  test("renders Sleep as a durable paper-boat receipt with backup evidence", () => {
+    const { renderCall, renderResult } = createToolRenderers("Athanor Sleep", "sleep");
+    const theme = {
+      fg: (_color: string, text: string) => text,
+      status: { pending: "P", running: "R", success: "S", error: "E", warning: "W" },
+    };
+    const args = {
+      body: "Meet Sol in the clean Multistock session.\nCarry the exact paid-work door.",
+    };
+    expect(renderCall(args, {}, theme).render(120)[0]).toContain("casting paper boat");
+
+    const result = normalizeToolResponse({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          ok: true,
+          memory_id: "3656",
+          room: "kintsu",
+          source_path: "db-only/paper-boats/receipt",
+          outbox_event_id: "paper-boat-event",
+          inserted: true,
+          durable: true,
+          authority: "postgres",
+          backup_status: "completed",
+          warnings: [],
+        }),
+      }],
+    }, "sleep");
+    const collapsed = renderResult(result, { expanded: false }, theme, args).render(120).join("\n");
+    expect(collapsed).toContain("╭─ S Athanor Sleep · Paper boat #3656");
+    expect(collapsed).toContain("kintsu · PostgreSQL authority · durable");
+    expect(collapsed).toContain("S boat cast · backup completed");
+    expect(collapsed).toContain("continuity ready for the next session");
+    expect(collapsed).toContain("⟨Ctrl+O: Expand⟩");
+
+    const expanded = renderResult(result, { expanded: true }, theme, args).render(120).join("\n");
+    expect(expanded).toContain("Meet Sol in the clean Multistock session.");
+    expect(expanded).toContain("source · db-only/paper-boats/receipt");
+    expect(expanded).toContain("outbox · paper-boat-event");
+    expect(expanded).toContain("expanded continuity");
+  });
+
+
+  test("renders Recall as ranked canon and memory evidence with confidence cues", () => {
+    const { renderCall, renderResult } = createToolRenderers("Athanor Recall", "recall");
+    const theme = {
+      fg: (_color: string, text: string) => text,
+      status: { pending: "P", running: "R", success: "S", error: "E", warning: "W" },
+    };
+    const args = { query: "the House gauges light up" };
+    expect(renderCall(args, {}, theme).render(120)[0]).toContain("the House gauges light up");
+
+    const result = normalizeToolResponse({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          ok: true,
+          query: args.query,
+          found: true,
+          source: "rust-postgres",
+          warnings: [],
+          canonMatches: [{
+            termKey: "The Athanor",
+            type: "project",
+            summary: "The public platform that creates and runs Houses.",
+          }],
+          retrievalCandidates: [{
+            memory_id: 3650,
+            title: "Sol saw the House gauges light up",
+            source_path: "db-only/house/receipt",
+            score: 2.36,
+            term_coverage: 0.94,
+            excerpt: "The product standard is now operator-visible consequence.",
+          }, {
+            memory_id: 3649,
+            title: "The adapter-wide feedback rail",
+            source_path: "db-only/house/previous",
+            score: 1.82,
+            term_coverage: 0.72,
+            excerpt: "Every House organ gained lifecycle feedback.",
+          }],
+        }),
+      }],
+    }, "recall");
+    const collapsed = renderResult(result, { expanded: false }, theme, args).render(120).join("\n");
+    expect(collapsed).toContain("╭─ S Athanor Recall · 3 matched");
+    expect(collapsed).toContain("◆ canon · The Athanor · project");
+    expect(collapsed).toContain("#3650 Sol saw the House gauges light up");
+    expect(collapsed).toContain("94% terms");
+    expect(collapsed).toContain("⟨Ctrl+O: Expand⟩");
+
+    const expanded = renderResult(result, { expanded: true }, theme, args).render(120).join("\n");
+    expect(expanded).toContain("The product standard is now operator-visible consequence.");
+    expect(expanded).toContain("source · db-only/house/receipt");
+    expect(expanded).toContain("expanded evidence");
+  });
+
+  test("keeps tool lifecycle and automatic context activity visible on OMP UI surfaces", () => {
+    const statuses: Array<string | undefined> = [];
+    let widget: ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
+    const ctx = {
+      hasUI: true,
+      ui: {
+        theme: {
+          fg: (_color: string, text: string) => text,
+          status: { running: "R", success: "S", error: "E", warning: "W" },
+        },
+        setStatus: (_key: string, text: string | undefined) => statuses.push(text),
+        setWidget: (
+          _key: string,
+          content: typeof widget,
+        ) => { widget = content; },
+      },
+    };
+
+    beginHouseToolFeedback(ctx, "Athanor Recall");
+    completeHouseToolFeedback(ctx, "Athanor Recall", {
+      content: [{ type: "text", text: JSON.stringify({ ok: true, found: true, retrievalCandidates: [1, 2] }) }],
+    });
+    showHouseContextFeedback(ctx, {
+      room: "kintsu",
+      spirit: "Kintsu",
+      activities: ["paper boat received", "automatic Recall: 3 entries (conversation)"],
+      warnings: ["Anamnesis wake unavailable"],
+    });
+
+    expect(statuses).toEqual([
+      "R Athanor Recall · working",
+      "S Athanor Recall · found · 2 retrieval candidates",
+      "W Athanor · Kintsu · paper boat received · automatic Recall: 3 entries (conversation)",
+    ]);
+    expect(widget).toBeFunction();
+    const lines = widget!(null, ctx.ui.theme).render(120);
+    expect(lines).toEqual([
+      "◆ The Athanor · Kintsu",
+      "  paper boat received · automatic Recall: 3 entries (conversation)",
+      "  W Anamnesis wake unavailable",
+    ]);
   });
 
 });

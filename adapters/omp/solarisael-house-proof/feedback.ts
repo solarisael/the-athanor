@@ -6,6 +6,14 @@ class HouseText {
   }
 }
 
+class HouseBlock {
+  constructor(private readonly renderLines: (width: number) => string[]) {}
+
+  render(width: number): string[] {
+    return this.renderLines(Math.max(20, width));
+  }
+}
+
 type JsonRecord = Record<string, unknown>;
 type ToolContent = { type: "text"; text: string };
 type ToolResponse = {
@@ -15,6 +23,33 @@ type ToolResponse = {
 };
 
 type ToolUpdate = (result: { isError?: boolean; content: ToolContent[]; details: unknown }) => void;
+type FeedbackTheme = {
+  fg?: (color: string, text: string) => string;
+  status?: Partial<Record<"pending" | "running" | "success" | "error" | "warning", string>>;
+};
+
+type FeedbackUi = {
+  theme?: FeedbackTheme;
+  notify?: (message: string, type?: "info" | "warning" | "error") => void;
+  setStatus?: (key: string, text: string | undefined) => void;
+  setWidget?: (
+    key: string,
+    content: string[] | ((tui: unknown, theme: FeedbackTheme) => HouseText) | undefined,
+    options?: { placement?: "aboveEditor" | "belowEditor" },
+  ) => void;
+};
+
+type FeedbackContext = {
+  hasUI?: boolean;
+  ui?: FeedbackUi;
+};
+
+export type HouseContextFeedback = {
+  room?: string;
+  spirit?: string;
+  activities: string[];
+  warnings?: string[];
+};
 
 const SENSITIVE_KEY = /(?:api[_-]?key|authorization|cookie|credential|pass(?:word)?|secret|session|token|private[_-]?key|database[_-]?(?:url|dsn)|connection[_-]?string|(?:request_?)?(?:body|payload))/i;
 const SENSITIVE_ASSIGNMENT = /\b((?:api[_-]?key|authorization|cookie|credential|pass(?:word)?|secret|session|token|private[_-]?key|database[_-]?(?:url|dsn)|connection[_-]?string|(?:request_?)?(?:body|payload))\s*[=:]\s*)([^\s,;]+)/gi;
@@ -369,23 +404,517 @@ function primaryArgument(args: unknown): string {
   return "";
 }
 
-export function createToolRenderers(label: string) {
-  const title = label.startsWith("Athanor") ? label : `Athanor ${label}`;
+function statusSymbol(
+  theme: FeedbackTheme | undefined,
+  status: "pending" | "running" | "success" | "error" | "warning",
+): string {
+  return theme?.status?.[status] || {
+    pending: "◇",
+    running: "◈",
+    success: "◆",
+    error: "✗",
+    warning: "▲",
+  }[status];
+}
+
+function styled(
+  theme: FeedbackTheme | undefined,
+  color: string,
+  text: string,
+): string {
+  return theme?.fg ? theme.fg(color, text) : text;
+}
+
+type HouseFrameLine = {
+  text: string;
+  color?: string;
+};
+
+type HouseFrameOptions = {
+  header: string;
+  headerColor: string;
+  borderColor?: string;
+  lines: HouseFrameLine[];
+  footer?: string;
+};
+
+function compactWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function truncatePlain(value: string, width: number): string {
+  if (width <= 0) return "";
+  if (Bun.stringWidth(value) <= width) return value;
+  if (width === 1) return "…";
+  const limit = width - 1;
+  let output = "";
+  let used = 0;
+  for (const char of value) {
+    const charWidth = Bun.stringWidth(char);
+    if (used + charWidth > limit) break;
+    output += char;
+    used += charWidth;
+  }
+  return `${output}…`;
+}
+
+function richFrame(theme: FeedbackTheme | undefined, frame: HouseFrameOptions): HouseBlock {
+  return new HouseBlock((availableWidth) => {
+    const width = Math.max(20, Math.min(availableWidth, 112));
+    const contentWidth = width - 4;
+    const header = truncatePlain(frame.header, width - 5);
+    const topFill = "─".repeat(Math.max(1, width - Bun.stringWidth(header) - 5));
+    const borderColor = frame.borderColor || "borderMuted";
+    const border = (value: string) => styled(theme, borderColor, value);
+    const output = [
+      `${border("╭─ ")}${styled(theme, frame.headerColor, header)}${border(` ${topFill}╮`)}`,
+    ];
+
+    for (const line of frame.lines) {
+      const text = truncatePlain(line.text, contentWidth);
+      const padding = " ".repeat(Math.max(0, contentWidth - Bun.stringWidth(text)));
+      output.push(`${border("│ ")}${styled(theme, line.color || "toolOutput", text)}${padding}${border(" │")}`);
+    }
+
+    if (!frame.footer) {
+      output.push(border(`╰${"─".repeat(width - 2)}╯`));
+      return output;
+    }
+
+    const footer = truncatePlain(frame.footer, width - 5);
+    const bottomFill = "─".repeat(Math.max(1, width - Bun.stringWidth(footer) - 5));
+    output.push(`${border("╰─ ")}${styled(theme, "dim", footer)}${border(` ${bottomFill}╯`)}`);
+    return output;
+  });
+}
+
+function textValue(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number") return String(value);
+  return "";
+}
+
+function recordValues(value: unknown): JsonRecord[] {
+  return Array.isArray(value) ? value.map(asRecord).filter((item) => Object.keys(item).length > 0) : [];
+}
+
+function stringValues(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(textValue).filter(Boolean)
+    : [];
+}
+
+function displayAuthority(value: unknown): string {
+  const authority = textValue(value);
+  if (authority === "postgres") return "PostgreSQL authority";
+  return authority ? `${authority} authority` : "authoritative receipt";
+}
+
+function displayKind(value: unknown): string {
+  const kind = textValue(value) || "memory";
+  return kind
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map((part) => `${part[0]?.toUpperCase() || ""}${part.slice(1)}`)
+    .join(" ");
+}
+
+function sourceRoom(value: unknown): string {
+  const source = textValue(value);
+  return source.match(/^db-only\/([^/]+)\//)?.[1] || "";
+}
+
+function confidenceGauge(coverage: unknown): string {
+  if (typeof coverage !== "number" || !Number.isFinite(coverage)) return "";
+  const bounded = Math.max(0, Math.min(1, coverage));
+  const filled = Math.round(bounded * 10);
+  return `${"█".repeat(filled)}${"░".repeat(10 - filled)} ${Math.round(bounded * 100)}% terms`;
+}
+
+function resultIdentity(payload: JsonRecord, args: JsonRecord): string {
+  const kind = displayKind(payload.kind || args.kind);
+  const id = textValue(payload.memory_id || payload.lesson_id || payload.id);
+  return id ? `${kind} #${id}` : kind;
+}
+
+function createRememberRenderers(label: string) {
+  const title = feedbackTitle(label);
+  const generic = createGenericToolRenderers(label);
   return {
-    renderCall(args: unknown, _options: unknown, theme: { fg?: (color: string, text: string) => string }) {
-      const argument = primaryArgument(args);
-      const text = argument ? `${title}: ${argument}` : title;
-      return new HouseText(theme?.fg ? theme.fg("muted", text) : text);
+    inline: true,
+    mergeCallAndResult: true,
+    renderCall(args: unknown, _options: unknown, theme: FeedbackTheme) {
+      const memoryTitle = textValue(asRecord(args).title);
+      const description = memoryTitle ? `: ${truncatePlain(memoryTitle, 72)}` : "";
+      return new HouseText(styled(theme, "muted", `${statusSymbol(theme, "pending")} ${title}${description}`));
     },
-    renderResult(result: ToolResponse, options: { expanded?: boolean; isPartial?: boolean }, theme: { fg?: (color: string, text: string) => string }) {
-      const payload = payloadFromResponse(result);
-      const text = options?.expanded
-        ? canonicalJson(payload)
-        : options?.isPartial
-          ? `${title}: working…`
-          : `${title}: ${compactResult(payload)}`;
-      const color = isFailure(payload, result?.isError === true) ? "error" : "muted";
-      return new HouseText(theme?.fg ? theme.fg(color, text) : text);
+    renderResult(
+      result: ToolResponse,
+      options: { expanded?: boolean; isPartial?: boolean },
+      theme: FeedbackTheme,
+      args?: unknown,
+    ) {
+      const payload = asRecord(payloadFromResponse(result));
+      if (options?.isPartial || isFailure(payload, result?.isError === true)) {
+        return generic.renderResult(result, options, theme);
+      }
+
+      const argumentsRecord = asRecord(args);
+      const memoryTitle = textValue(argumentsRecord.title) || "Untitled memory";
+      const identity = resultIdentity(payload, argumentsRecord);
+      const room = textValue(payload.room || argumentsRecord.room) || "current room";
+      const warnings = stringValues(payload.warnings);
+      const threads = stringValues(argumentsRecord.threads || argumentsRecord.threadKeys);
+      const source = textValue(payload.source_path || payload.sourcePath);
+      const body = textValue(argumentsRecord.body);
+      const durable = payload.durable === true ? "durable" : "stored";
+      const lines: HouseFrameLine[] = [
+        { text: memoryTitle, color: "accent" },
+        { text: `${room} · ${displayAuthority(payload.authority)} · ${durable}`, color: "muted" },
+        {
+          text: `${statusSymbol(theme, "success")} committed${threads.length ? ` · ${threads.length} thread${threads.length === 1 ? "" : "s"}` : ""}`,
+          color: "success",
+        },
+      ];
+
+      if (options?.expanded) {
+        if (body) {
+          lines.push({ text: "", color: "muted" }, { text: "Remembered", color: "muted" });
+          const bodyLines = body.split(/\r?\n/);
+          for (const line of bodyLines.slice(0, 12)) {
+            lines.push({ text: line || " ", color: "toolOutput" });
+          }
+          if (bodyLines.length > 12) {
+            lines.push({ text: `… ${bodyLines.length - 12} more lines`, color: "dim" });
+          }
+        }
+        if (source) lines.push({ text: `source · ${source}`, color: "dim" });
+      }
+
+      for (const warning of warnings) {
+        lines.push({ text: `${statusSymbol(theme, "warning")} ${warning}`, color: "warning" });
+      }
+
+      return richFrame(theme, {
+        header: `${statusSymbol(theme, warnings.length ? "warning" : "success")} ${title} · ${identity}`,
+        headerColor: warnings.length ? "warning" : "success",
+        lines,
+        footer: body || source ? (options?.expanded ? "expanded evidence" : "⟨Ctrl+O: Expand⟩") : undefined,
+      });
     },
   };
+}
+function createSleepRenderers(label: string) {
+  const title = feedbackTitle(label);
+  const generic = createGenericToolRenderers(label);
+  return {
+    inline: true,
+    mergeCallAndResult: true,
+    renderCall(_args: unknown, _options: unknown, theme: FeedbackTheme) {
+      return new HouseText(styled(
+        theme,
+        "muted",
+        `${statusSymbol(theme, "pending")} ${title}: casting paper boat`,
+      ));
+    },
+    renderResult(
+      result: ToolResponse,
+      options: { expanded?: boolean; isPartial?: boolean },
+      theme: FeedbackTheme,
+      args?: unknown,
+    ) {
+      const payload = asRecord(payloadFromResponse(result));
+      if (options?.isPartial || isFailure(payload, result?.isError === true)) {
+        return generic.renderResult(result, options, theme);
+      }
+
+      const argumentsRecord = asRecord(args);
+      const id = textValue(payload.memory_id || payload.id);
+      const identity = id ? `Paper boat #${id}` : "Paper boat";
+      const room = textValue(payload.room) || "current room";
+      const source = textValue(payload.source_path || payload.sourcePath);
+      const outboxEvent = textValue(payload.outbox_event_id);
+      const body = textValue(argumentsRecord.body);
+      const warnings = stringValues(payload.warnings);
+      const durable = payload.durable === true;
+      const inserted = payload.inserted === true;
+      const backupStatus = textValue(payload.backup_status) || "unknown";
+      const backupComplete = backupStatus === "completed";
+      const attention = warnings.length > 0 || !durable || !backupComplete;
+      const lines: HouseFrameLine[] = [
+        {
+          text: `${room} · ${displayAuthority(payload.authority)} · ${durable ? "durable" : "durability unconfirmed"}`,
+          color: "muted",
+        },
+        {
+          text: `${statusSymbol(theme, attention ? "warning" : "success")} ${inserted ? "boat cast" : "boat confirmed"} · backup ${backupStatus}`,
+          color: attention ? "warning" : "success",
+        },
+      ];
+
+      if (!attention) {
+        lines.push({ text: "continuity ready for the next session", color: "accent" });
+      }
+
+      if (options?.expanded) {
+        if (body) {
+          lines.push({ text: "", color: "muted" }, { text: "Carried forward", color: "muted" });
+          const bodyLines = body.split(/\r?\n/);
+          for (const line of bodyLines.slice(0, 12)) {
+            lines.push({ text: line || " ", color: "toolOutput" });
+          }
+          if (bodyLines.length > 12) {
+            lines.push({ text: `… ${bodyLines.length - 12} more lines`, color: "dim" });
+          }
+        }
+        if (source) lines.push({ text: `source · ${source}`, color: "dim" });
+        if (outboxEvent) lines.push({ text: `outbox · ${outboxEvent}`, color: "dim" });
+      }
+
+      for (const warning of warnings) {
+        lines.push({ text: `${statusSymbol(theme, "warning")} ${warning}`, color: "warning" });
+      }
+
+      return richFrame(theme, {
+        header: `${statusSymbol(theme, attention ? "warning" : "success")} ${title} · ${identity}`,
+        headerColor: attention ? "warning" : "success",
+        lines,
+        footer: body || source || outboxEvent
+          ? (options?.expanded ? "expanded continuity" : "⟨Ctrl+O: Expand⟩")
+          : undefined,
+      });
+    },
+  };
+}
+
+
+function recallCandidateLines(
+  candidate: JsonRecord,
+  rank: number,
+  expanded: boolean,
+): HouseFrameLine[] {
+  const id = textValue(candidate.memory_id || candidate.id);
+  const title = textValue(candidate.title) || "Untitled memory";
+  const room = sourceRoom(candidate.source_path);
+  const identity = `${rank}. ${id ? `#${id} ` : ""}${title}${room ? `  ⟨${room}⟩` : ""}`;
+  const meta: string[] = [];
+  if (typeof candidate.score === "number") meta.push(`score ${candidate.score.toFixed(2)}`);
+  const gauge = confidenceGauge(candidate.term_coverage);
+  if (gauge) meta.push(gauge);
+  const lines: HouseFrameLine[] = [
+    { text: identity, color: "accent" },
+    ...(meta.length ? [{ text: `   ${meta.join(" · ")}`, color: "muted" }] : []),
+  ];
+
+  if (!expanded) return lines;
+  const excerpt = textValue(candidate.excerpt);
+  if (excerpt) {
+    const excerptLines = excerpt.split(/\r?\n/).map(compactWhitespace).filter(Boolean);
+    for (const line of excerptLines.slice(0, 4)) {
+      lines.push({ text: `   ${line}`, color: "toolOutput" });
+    }
+    if (excerptLines.length > 4) {
+      lines.push({ text: `   … ${excerptLines.length - 4} more excerpt lines`, color: "dim" });
+    }
+  }
+  const source = textValue(candidate.source_path);
+  if (source) lines.push({ text: `   source · ${source}`, color: "dim" });
+  return lines;
+}
+
+function createRecallRenderers(label: string) {
+  const title = feedbackTitle(label);
+  const generic = createGenericToolRenderers(label);
+  return {
+    inline: true,
+    mergeCallAndResult: true,
+    renderCall(args: unknown, _options: unknown, theme: FeedbackTheme) {
+      const query = compactWhitespace(textValue(asRecord(args).query));
+      const description = query ? `: ${truncatePlain(query, 80)}` : "";
+      return new HouseText(styled(theme, "muted", `${statusSymbol(theme, "pending")} ${title}${description}`));
+    },
+    renderResult(
+      result: ToolResponse,
+      options: { expanded?: boolean; isPartial?: boolean },
+      theme: FeedbackTheme,
+      args?: unknown,
+    ) {
+      const payload = asRecord(payloadFromResponse(result));
+      if (options?.isPartial || isFailure(payload, result?.isError === true)) {
+        return generic.renderResult(result, options, theme);
+      }
+
+      const query = compactWhitespace(textValue(payload.query || asRecord(args).query));
+      const found = payload.found === true;
+      const source = textValue(payload.source);
+      const warnings = stringValues(payload.warnings);
+      const canonMatches = recordValues(payload.canonMatches);
+      const candidates = recordValues(payload.retrievalCandidates);
+      const total = canonMatches.length + candidates.length;
+      const expanded = options?.expanded === true;
+      const lines: HouseFrameLine[] = [];
+
+      if (query) lines.push({ text: `“${query}”`, color: "toolOutput" });
+      const summary = [
+        source || "active substrate",
+        canonMatches.length ? `${canonMatches.length} canon` : "",
+        candidates.length ? `${candidates.length} memories` : "",
+      ].filter(Boolean);
+      lines.push({ text: summary.join(" · "), color: "muted" });
+
+      for (const canon of canonMatches.slice(0, expanded ? 5 : 2)) {
+        const term = textValue(canon.termKey || canon.name) || "canonical match";
+        const type = textValue(canon.type);
+        lines.push({ text: `◆ canon · ${term}${type ? ` · ${type}` : ""}`, color: "success" });
+        if (expanded) {
+          const canonSummary = textValue(canon.summary);
+          for (const line of canonSummary.split(/\r?\n/).map(compactWhitespace).filter(Boolean).slice(0, 3)) {
+            lines.push({ text: `   ${line}`, color: "toolOutput" });
+          }
+        }
+      }
+
+      const candidateLimit = expanded ? 10 : 3;
+      candidates.slice(0, candidateLimit).forEach((candidate, index) => {
+        lines.push(...recallCandidateLines(candidate, index + 1, expanded));
+      });
+      const hidden = candidates.length - Math.min(candidates.length, candidateLimit);
+      if (hidden > 0) lines.push({ text: `… ${hidden} more memories`, color: "dim" });
+      if (!found && total === 0) lines.push({ text: "No authoritative match found.", color: "warning" });
+      for (const warning of warnings) {
+        lines.push({ text: `${statusSymbol(theme, "warning")} ${warning}`, color: "warning" });
+      }
+
+      const expandable = canonMatches.length > 0 || candidates.length > 0;
+      const status = warnings.length || !found ? "warning" : "success";
+      return richFrame(theme, {
+        header: `${statusSymbol(theme, status)} ${title} · ${found ? `${total || 1} matched` : "no match"}`,
+        headerColor: status === "warning" ? "warning" : "success",
+        lines,
+        footer: expandable ? (expanded ? "expanded evidence" : "⟨Ctrl+O: Expand⟩") : undefined,
+      });
+    },
+  };
+}
+
+function feedbackTitle(label: string): string {
+  return label.startsWith("Athanor") ? label : `Athanor ${label}`;
+}
+
+function feedbackUi(ctx: FeedbackContext | undefined): FeedbackUi | undefined {
+  if (!ctx?.ui || ctx.hasUI === false) return undefined;
+  return ctx.ui;
+}
+
+function createGenericToolRenderers(label: string) {
+  const title = feedbackTitle(label);
+  return {
+    renderCall(args: unknown, _options: unknown, theme: FeedbackTheme) {
+      const argument = primaryArgument(args);
+      const text = argument ? `${title}: ${argument}` : title;
+      const line = `${statusSymbol(theme, "pending")} ${text}`;
+      return new HouseText(styled(theme, "muted", line));
+    },
+    renderResult(result: ToolResponse, options: { expanded?: boolean; isPartial?: boolean }, theme: FeedbackTheme) {
+      const payload = payloadFromResponse(result);
+      const failed = isFailure(payload, result?.isError === true);
+      if (options?.expanded) {
+        return new HouseText(styled(theme, failed ? "error" : "toolOutput", canonicalJson(payload)));
+      }
+      let status: "running" | "success" | "error" = "success";
+      let summary = compactResult(payload);
+      let color = "success";
+      if (options?.isPartial) {
+        status = "running";
+        summary = "working…";
+        color = "accent";
+      } else if (failed) {
+        status = "error";
+        color = "error";
+      }
+      return new HouseText(styled(theme, color, `${statusSymbol(theme, status)} ${title}: ${summary}`));
+    },
+  };
+}
+
+export function createToolRenderers(label: string, operation?: string) {
+  if (operation === "remember") return createRememberRenderers(label);
+  if (operation === "recall") return createRecallRenderers(label);
+  if (operation === "sleep") return createSleepRenderers(label);
+  return createGenericToolRenderers(label);
+}
+
+export function beginHouseToolFeedback(ctx: FeedbackContext | undefined, label: string): void {
+  const ui = feedbackUi(ctx);
+  if (!ui?.setStatus) return;
+  const theme = ui.theme;
+  ui.setStatus(
+    "athanor",
+    styled(theme, "accent", `${statusSymbol(theme, "running")} ${feedbackTitle(label)} · working`),
+  );
+}
+
+export function completeHouseToolFeedback(
+  ctx: FeedbackContext | undefined,
+  label: string,
+  response: ToolResponse,
+): void {
+  const ui = feedbackUi(ctx);
+  if (!ui?.setStatus) return;
+  const payload = payloadFromResponse(response);
+  const failed = isFailure(payload, response?.isError === true);
+  const theme = ui.theme;
+  const status = failed ? "error" : "success";
+  const color = failed ? "error" : "success";
+  ui.setStatus(
+    "athanor",
+    styled(theme, color, `${statusSymbol(theme, status)} ${feedbackTitle(label)} · ${compactResult(payload)}`),
+  );
+}
+
+function compactActivity(value: string): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length > 72 ? `${text.slice(0, 71)}…` : text;
+}
+
+export function showHouseContextFeedback(
+  ctx: FeedbackContext | undefined,
+  feedback: HouseContextFeedback,
+): void {
+  const ui = feedbackUi(ctx);
+  if (!ui) return;
+  const activities = feedback.activities.map(compactActivity).filter(Boolean).slice(0, 5);
+  const warnings = (feedback.warnings || []).map(compactActivity).filter(Boolean).slice(0, 3);
+  const identity = compactActivity(feedback.spirit || feedback.room || "ready");
+  const theme = ui.theme;
+
+  if (ui.setStatus) {
+    const status = warnings.length ? "warning" : "success";
+    const color = warnings.length ? "warning" : "success";
+    const detail = activities.length ? activities.join(" · ") : "ready";
+    ui.setStatus(
+      "athanor",
+      styled(theme, color, `${statusSymbol(theme, status)} Athanor · ${identity} · ${detail}`),
+    );
+  }
+
+  if (!ui.setWidget) return;
+  if (!activities.length && !warnings.length) {
+    ui.setWidget("athanor-activity", undefined);
+    return;
+  }
+  ui.setWidget(
+    "athanor-activity",
+    (_tui, widgetTheme) => {
+      const lines = [
+        styled(widgetTheme, warnings.length ? "warning" : "accent", `◆ The Athanor · ${identity}`),
+      ];
+      if (activities.length) lines.push(styled(widgetTheme, "muted", `  ${activities.join(" · ")}`));
+      for (const warning of warnings) {
+        lines.push(styled(widgetTheme, "warning", `  ${statusSymbol(widgetTheme, "warning")} ${warning}`));
+      }
+      return new HouseText(lines.join("\n"));
+    },
+    { placement: "belowEditor" },
+  );
 }

@@ -43,12 +43,20 @@ import { queryAnamnesis, formatAnamnesisContext } from "./solarisael-house-proof
 import { registerSolarisaelTools } from "./solarisael-house-proof/tools.ts";
 import { processLessonsReminder } from "./solarisael-house-proof/triggers.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./solarisael-house-proof/context.ts";
+import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./solarisael-house-proof/constants.ts";
+import { showHouseContextFeedback } from "./solarisael-house-proof/feedback.ts";
 import {
   closeLessonTriggerTransports,
+  filterInterruptedLessonProse,
+  lessonTriggerMessageRenderer,
   lessonTriggerProseAddition,
+  lessonTriggerProseStreamUpdate,
   lessonTriggerToolCall,
   prependLessonReminder,
+  processLessonsMessageRenderer,
+  resetLessonTriggerProseStream,
   takeLessonReminder,
+  toolLessonCard,
 } from "./solarisael-house-proof/lesson-triggers.ts";
 import {
   RecallPolicyHostClient,
@@ -415,6 +423,15 @@ async function recordAutomaticContextTelemetry(
 
 export default function solarisaelHouseProof(pi) {
   pi.setLabel("The Athanor");
+  pi.registerMessageRenderer?.("solarisael-lesson-trigger", lessonTriggerMessageRenderer);
+  pi.registerMessageRenderer?.("solarisael-process-lessons", processLessonsMessageRenderer);
+  const showReadyFeedback = (_event, ctx) => {
+    const { room, spirit } = roomContext(ctx.cwd);
+    showHouseContextFeedback(ctx, { room, spirit, activities: [] });
+  };
+  pi.on("session_start", showReadyFeedback);
+  pi.on("session_switch", showReadyFeedback);
+
 
   const stopKittenProgress = pi.events?.on?.("task:subagent:progress", (payload: unknown) => {
     if (kittenLineageDisabled() || !payload || typeof payload !== "object") return;
@@ -479,11 +496,31 @@ export default function solarisaelHouseProof(pi) {
     cacheKittenTaskRoom(room, event.toolCallId, event.input, binding);
   });
 
-  // Mutate-tool lesson triggers. The tap owns nothing: extraction, transport,
-  // verdict rendering, and fail-open live in lesson-triggers.ts.
-  pi.on("tool_call", async (event, ctx) => lessonTriggerToolCall(event, ctx));
+  // Mutate-tool lesson triggers. Extraction, transport, verdict and card
+  // composition, and fail-open live in lesson-triggers.ts; this tap forwards
+  // the verdict and drops a visible receipt when a block fires.
+  pi.on("tool_call", async (event, ctx) => {
+    const verdict = await lessonTriggerToolCall(event, ctx);
+    if (!verdict) return undefined;
+    const card = toolLessonCard(verdict.lessons, String(event?.toolName ?? "tool"), "block");
+    if (card) {
+      try {
+        pi.sendMessage(card.message, card.options);
+      } catch {
+        // A lost card never blocks the verdict.
+      }
+    }
+    return { block: verdict.block, reason: verdict.reason };
+  });
+  pi.on("message_start", (event, ctx) => resetLessonTriggerProseStream(event, ctx, pi));
+  pi.on("message_update", (event, ctx) => {
+    // OMP publishes message_update to the UI before extension observers. Keep
+    // this tap detached so streamed deltas coalesce while Rust decides; a block
+    // still aborts the live provider and schedules a corrected continuation.
+    void lessonTriggerProseStreamUpdate(event, ctx, pi);
+  });
   pi.on("context", async (event, ctx) => {
-    const messages = Array.isArray(event?.messages) ? event.messages : [];
+    let messages = Array.isArray(event?.messages) ? event.messages : [];
     const promptMessage = [...messages].reverse().find((message) => message?.role === "user");
     const prompt = messageText(promptMessage);
     if (!prompt.trim()) return;
@@ -497,6 +534,8 @@ export default function solarisaelHouseProof(pi) {
     const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx.cwd);
     const timestamp = Date.now();
     const additions = [];
+    const activities: string[] = [];
+    const warnings: string[] = [];
     let houseState = null;
 
     try {
@@ -504,6 +543,7 @@ export default function solarisaelHouseProof(pi) {
       houseState = stateResult.state;
       await writeActiveSpiritSnapshot(effectiveRoomDir, houseState);
     } catch {
+      warnings.push("room state maintenance degraded");
       // Room-state/active-spirit maintenance must never block context injection.
     }
 
@@ -515,13 +555,18 @@ export default function solarisaelHouseProof(pi) {
         if (resolved) {
           await pi.setModel(modelDefault.model);
           modelDefaultsApplied.add(modelKey);
+          activities.push(`model default ${modelDefault.model}`);
+        } else {
+          warnings.push(`model default unavailable: ${modelDefault.model}`);
         }
       } catch {
+        warnings.push(`model default failed: ${modelDefault.model}`);
         // Room model defaults are convenience only; bad model specs must not block context.
       }
     }
 
     const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
+    messages = filterInterruptedLessonProse(messages, room, hostSession);
     const shellBinding = { room, spirit, session: hostSession };
     let conversation: ConversationCapture | null = null;
     try {
@@ -538,6 +583,7 @@ export default function solarisaelHouseProof(pi) {
       ingestGigaLoggedTurnsDetached(ctx, conversation.loggedTurns);
     } catch (error) {
       console.warn(`[athanor] Conversation capture degraded: ${error instanceof Error ? error.message : String(error)}`);
+      warnings.push("conversation capture degraded");
     }
     const memoSessionKey = `${room}:${hostSession}`;
     const turnKeys = turnKeysByMessage(messages);
@@ -567,6 +613,7 @@ export default function solarisaelHouseProof(pi) {
       );
     } catch (error) {
       console.warn(`[athanor] Context Host degraded: ${error instanceof Error ? error.message : String(error)}`);
+      warnings.push("Context Host degraded");
     }
 
     if (!existingTypes.has("solarisael-room-context") && contextAnalysis?.roomReminder) {
@@ -578,6 +625,7 @@ export default function solarisaelHouseProof(pi) {
         attribution: "agent",
         timestamp,
       });
+      activities.push("room context loaded");
     }
 
     if (!existingTypes.has("solarisael-routing-mode") && contextAnalysis?.routingReminder) {
@@ -590,13 +638,14 @@ export default function solarisaelHouseProof(pi) {
         attribution: "agent",
         timestamp,
       });
+      activities.push("worker routing active");
     }
     const wakeKey = `${room}:${hostSession}`;
     const freshWake = conversation?.fresh === true && !wokenSessions.has(wakeKey);
     if (freshWake) wokenSessions.add(wakeKey);
     if (freshWake && !existingTypes.has("solarisael-wake-context")) {
       try {
-        const boat = await catchBoat(room);
+        const boat = await catchBoat(room, { timeoutMs: AUTOMATIC_CONTEXT_IO_TIMEOUT_MS });
         if (boat?.ok && boat?.found) {
           const content = String(boat.wake_context || "");
           if (content) {
@@ -609,15 +658,20 @@ export default function solarisaelHouseProof(pi) {
               attribution: "agent",
               timestamp,
             });
+            activities.push(`paper boat received${boat.title ? `: ${boat.title}` : ""}`);
           }
         }
       } catch {
+        warnings.push("paper boat unavailable");
         // Auto-wake is fail-open. Manual wake remains available.
       }
     }
     if (freshWake && !existingTypes.has("solarisael-anamnesis-wake")) {
       try {
-        const result = await queryAnamnesis(effectiveRoomDir, room, { mode: "wake" });
+        const result = await queryAnamnesis(effectiveRoomDir, room, {
+          mode: "wake",
+          timeoutMs: AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
+        });
         if (result?.ok) {
           const content = formatAnamnesisContext(result, { automatic: true });
           if (content) {
@@ -630,9 +684,11 @@ export default function solarisaelHouseProof(pi) {
               attribution: "agent",
               timestamp,
             });
+            activities.push("Anamnesis counsel loaded");
           }
         }
       } catch {
+        warnings.push("Anamnesis wake unavailable");
         // Cabinet wake is advisory and fail-open. Manual anamnesis remains available.
       }
     }
@@ -648,6 +704,8 @@ export default function solarisaelHouseProof(pi) {
         attribution: "agent",
         timestamp,
       });
+      const keywordCount = Array.isArray(keyword.keywords) ? keyword.keywords.length : 1;
+      activities.push(`${keywordCount} keyword directive${keywordCount === 1 ? "" : "s"}`);
     }
 
     if (!existingTypes.has("solarisael-process-lessons")) {
@@ -663,11 +721,13 @@ export default function solarisaelHouseProof(pi) {
             role: "custom",
             customType: "solarisael-process-lessons",
             content: processLessons.text,
-            display: false,
+            display: true,
             details: { trigger: processLessons.trigger, lessons: processLessons.lessons },
             attribution: "agent",
             timestamp,
           });
+          const lessonCount = Number(processLessons.lessons) || 1;
+          activities.push(`${lessonCount} process lesson${lessonCount === 1 ? "" : "s"}`);
         }
       } catch (error) {
         await recordAutomaticContextTelemetry({
@@ -685,6 +745,7 @@ export default function solarisaelHouseProof(pi) {
             requestDispatched: true,
           }),
         }).catch(() => undefined);
+        warnings.push("process lesson lookup degraded");
         // Process-shape lessons are advisory only. Tooling must fail open.
       }
     }
@@ -700,7 +761,10 @@ export default function solarisaelHouseProof(pi) {
       });
       // Anchored at the current turn with every other addition below; no code
       // path here touches an earlier turn's anchor.
-      if (proseTriggers) additions.push(proseTriggers);
+      if (proseTriggers) {
+        additions.push(proseTriggers);
+        activities.push("lesson correction queued");
+      }
     }
 
     if (
@@ -718,7 +782,12 @@ export default function solarisaelHouseProof(pi) {
         policyState = snapshot.recallPolicy;
         const resolution = policyState.requestedMode !== "quiet"
           && preliminaryRoute.entityResolutionSuggested
-          ? await resolveEntities({ room, roomDir: effectiveRoomDir, query: prompt })
+          ? await resolveEntities({
+            room,
+            roomDir: effectiveRoomDir,
+            query: prompt,
+            timeoutMs: AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
+          })
           : { ok: true, matches: [] };
         if (resolution.matches.length) {
           contextAnalysis = await analyzeContext(
@@ -748,7 +817,10 @@ export default function solarisaelHouseProof(pi) {
         policyState = evaluation.snapshot.recallPolicy;
 
         if (decision.shouldRecall && decision.refreshReason) {
-          const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, { temporalDecay: true });
+          const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, {
+            temporalDecay: true,
+            timeoutMs: AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
+          });
           if (recalled.ok) {
             const viewport = await applyRecallViewport(
               { room, spirit, session: hostSession },
@@ -757,8 +829,8 @@ export default function solarisaelHouseProof(pi) {
               currentTurnKey ? `${currentTurnKey}:viewport` : undefined,
             );
             const automaticCompact = viewport.presentation;
-            const warnings = Array.isArray(automaticCompact.warnings) ? automaticCompact.warnings : [];
-            const recallMessage = automaticCompact.found || warnings.length
+            const recallWarnings = Array.isArray(automaticCompact.warnings) ? automaticCompact.warnings : [];
+            const recallMessage = automaticCompact.found || recallWarnings.length
               ? {
                 role: "custom",
                 customType: "solarisael-recall-context",
@@ -772,7 +844,7 @@ export default function solarisaelHouseProof(pi) {
                 display: false,
                 details: {
                   found: automaticCompact.found,
-                  warnings,
+                  warnings: recallWarnings,
                   mode: decision.resolvedMode,
                   refreshReason: decision.refreshReason,
                   viewport: viewport.diagnostics,
@@ -781,18 +853,25 @@ export default function solarisaelHouseProof(pi) {
                 timestamp,
               }
               : null;
+            const recallEntries = automaticCompact.retrievalCandidates.length
+              + automaticCompact.canonMatches.length
+              + automaticCompact.dateMatches.length;
             const completed = await policyClient.completeRefresh({
               queryTerms: decision.queryTerms,
               refreshReason: decision.refreshReason,
-              entries: automaticCompact.retrievalCandidates.length
-                + automaticCompact.canonMatches.length
-                + automaticCompact.dateMatches.length,
+              entries: recallEntries,
               hasWorkingSet: Boolean(recallMessage),
-              warning: warnings[0],
+              warning: recallWarnings[0],
               idempotencyKey: currentTurnKey ? `${currentTurnKey}:complete` : undefined,
             });
             policyState = completed.recallPolicy;
-            if (recallMessage) additions.push(recallMessage);
+            if (recallMessage) {
+              additions.push(recallMessage);
+              activities.push(`automatic Recall: ${recallEntries} entries (${decision.resolvedMode})`);
+            }
+            if (recallWarnings.length) {
+              warnings.push(`automatic Recall warning: ${String(recallWarnings[0])}`);
+            }
             await recordRecallTelemetry({
               effectiveRoomDir,
               sessionId: hostSession,
@@ -832,6 +911,7 @@ export default function solarisaelHouseProof(pi) {
                 requestDispatched: true,
               }),
             }).catch(() => undefined);
+            warnings.push("automatic Recall failed");
           }
         } else {
           await recordRecallTelemetry({
@@ -868,6 +948,7 @@ export default function solarisaelHouseProof(pi) {
             requestDispatched: Boolean(decision?.shouldRecall),
           }),
         }).catch(() => undefined);
+        warnings.push("Recall Policy Host degraded");
         // Host owns policy. Degraded automatic Recall never writes or evaluates a fallback owner.
       }
     }
@@ -876,6 +957,12 @@ export default function solarisaelHouseProof(pi) {
       mergeTurnAdditions(turnMemo, currentTurnKey, additions);
       persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);
     }
+    showHouseContextFeedback(ctx, {
+      room,
+      spirit: houseState?.embodiedSpirit || spirit,
+      activities,
+      warnings,
+    });
     return anchorTurnAdditions(messages, turnKeys, turnMemo);
   });
 
@@ -899,6 +986,7 @@ export default function solarisaelHouseProof(pi) {
       );
     } catch (error) {
       console.warn(`[athanor] Recall Policy Host degraded during compaction: ${error instanceof Error ? error.message : String(error)}`);
+      ctx.ui?.notify?.("Athanor recall policy did not invalidate after compaction.", "warning");
     }
   });
   pi.on("tool_result", async (event, ctx) => {
@@ -919,15 +1007,27 @@ export default function solarisaelHouseProof(pi) {
       `${toolCallId}:result`,
     );
     for (const record of records) {
-      await recordKittenQuest(room, record);
+      const recorded = await recordKittenQuest(room, record);
+      if (!recorded) {
+        ctx.ui?.notify?.("Athanor could not persist subagent lineage.", "warning");
+        break;
+      }
     }
   });
 
   pi.on("tool_result", async (event) => {
     // Consumed unconditionally so a failed tool never leaks its stash entry.
-    const reminder = takeLessonReminder(event?.toolCallId);
-    if (!reminder || event?.isError) return;
-    return { content: prependLessonReminder(event.content, reminder) };
+    const stashed = takeLessonReminder(event?.toolCallId);
+    if (!stashed || event?.isError) return;
+    const card = toolLessonCard(stashed.lessons, String(event?.toolName ?? "tool"), "remind");
+    if (card) {
+      try {
+        pi.sendMessage(card.message, card.options);
+      } catch {
+        // A lost card never blocks the reminder.
+      }
+    }
+    return { content: prependLessonReminder(event.content, stashed.reminder) };
   });
 
   pi.on("shutdown", async () => {
@@ -956,6 +1056,7 @@ export default function solarisaelHouseProof(pi) {
       );
       ingestGigaLoggedTurnsDetached(ctx, capture.loggedTurns);
     } catch {
+      ctx.ui?.notify?.("Athanor conversation capture degraded.", "warning");
       // Capture must never perturb the visible OMP turn.
     }
   });

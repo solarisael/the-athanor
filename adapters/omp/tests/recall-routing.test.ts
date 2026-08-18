@@ -101,8 +101,11 @@ describe("Rust recall routing", () => {
       return result("alpha");
     };
     const controller = new AbortController();
-    await recallWithRouting("room-dir", "example", "alpha", { signal: controller.signal });
-    expect(observed.options).toMatchObject({ signal: controller.signal, timeoutMs: 120000 });
+    await recallWithRouting("room-dir", "example", "alpha", {
+      signal: controller.signal,
+      timeoutMs: 2_000,
+    });
+    expect(observed.options).toMatchObject({ signal: controller.signal, timeoutMs: 2_000 });
     expect(observed.options.settleDefinitively).toBeUndefined();
   });
 

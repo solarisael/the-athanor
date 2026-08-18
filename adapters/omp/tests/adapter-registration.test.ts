@@ -119,6 +119,7 @@ function registerAdapter() {
   const labels: string[] = [];
   const hooks: Array<{ name: string; handler: unknown }> = [];
   const eventChannels: string[] = [];
+  const messageRenderers: Array<{ customType: string; renderer: unknown }> = [];
   const tools: CapturedTool[] = [];
 
   const pi = {
@@ -135,12 +136,15 @@ function registerAdapter() {
         return () => {};
       },
     },
+    registerMessageRenderer(customType: string, renderer: unknown) {
+      messageRenderers.push({ customType, renderer });
+    },
     registerTool(tool: CapturedTool) {
       tools.push(tool);
     },
   };
   solarisaelHouseProof(pi);
-  return { labels, hooks, tools, eventChannels };
+  return { labels, hooks, tools, eventChannels, messageRenderers };
 }
 
 const expectedToolNames = [
@@ -186,12 +190,18 @@ function toolMap(tools: CapturedTool[]) {
 
 describe("OMP adapter registration", () => {
   test("registers the public adapter label and lifecycle hooks", () => {
-    const { labels, hooks, eventChannels } = registerAdapter();
+    const { labels, hooks, eventChannels, messageRenderers } = registerAdapter();
 
     expect(labels).toEqual(["The Athanor"]);
-    expect(hooks.map((hook) => hook.name)).toEqual(["tool_call", "tool_call", "context", "session_compact", "tool_result", "tool_result", "shutdown", "agent_end"]);
+    expect(hooks.map((hook) => hook.name)).toEqual(["session_start", "session_switch", "tool_call", "tool_call", "message_start", "message_update", "context", "session_compact", "tool_result", "tool_result", "shutdown", "agent_end"]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
     expect(eventChannels).toEqual(["task:subagent:progress", "task:subagent:lifecycle"]);
+    expect(messageRenderers).toHaveLength(2);
+    expect(messageRenderers.map((entry) => entry.customType)).toEqual([
+      "solarisael-lesson-trigger",
+      "solarisael-process-lessons",
+    ]);
+    expect(messageRenderers.every((entry) => typeof entry.renderer === "function")).toBe(true);
   });
 
   test("registers the Solarisael tool surface", () => {
@@ -333,6 +343,11 @@ describe("OMP adapter registration", () => {
           threadKeys: { type: "array", element: { type: "string" }, optional: true },
           tags: { type: "array", element: { type: "string" }, optional: true },
           sourceMemoryPath: { type: "string", optional: true },
+          condition: { type: "array", element: { type: "string" }, optional: true },
+          astCondition: { type: "array", element: { type: "string" }, optional: true },
+          triggerScope: { type: "array", element: { type: "string" }, optional: true },
+          interruptMode: { type: "enum", values: ["block", "remind"], optional: true },
+          repeatCooldownSecs: { type: "number", optional: true },
         },
       },
       delete_lesson: {
@@ -370,6 +385,11 @@ describe("OMP adapter registration", () => {
               exampleText: { type: "string", optional: true },
               writers: { type: "array", element: { type: "string" }, optional: true },
               negationOf: { type: "string", optional: true },
+              condition: { type: "array", element: { type: "string" }, optional: true },
+              astCondition: { type: "array", element: { type: "string" }, optional: true },
+              triggerScope: { type: "array", element: { type: "string" }, optional: true },
+              interruptMode: { type: "enum", values: ["block", "remind"], optional: true },
+              repeatCooldownSecs: { type: "number", optional: true },
             },
           },
         },

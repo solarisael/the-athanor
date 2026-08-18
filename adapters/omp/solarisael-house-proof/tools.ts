@@ -25,6 +25,8 @@ import { discoverRustExecutable } from "../discovery.ts";
 import { dispatchHouse, familiarStatus, laneStatus } from "./routing.ts";
 import { WRITE_TIMEOUT_MS } from "./constants.ts";
 import {
+  beginHouseToolFeedback,
+  completeHouseToolFeedback,
   createToolRenderers,
   emitToolUpdate,
   normalizeToolResponse,
@@ -185,7 +187,7 @@ export async function readRustCanon({ room, id, name, includeHistory, signal }) 
   }
 }
 
-export async function writeRustMemory({ room, title, body, threads, continues, supersedes, signal }) {
+export async function writeRustMemory({ room, title, body, threads, continues, supersedes, condition, astCondition, triggerScope, interruptMode, repeatCooldownSecs, signal }) {
   const transport = rustRememberTransport();
   if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
   try {
@@ -197,6 +199,11 @@ export async function writeRustMemory({ room, title, body, threads, continues, s
       threads,
       continues,
       supersedes,
+      condition,
+      astCondition,
+      triggerScope,
+      interruptMode,
+      repeatCooldownSecs,
       backup: false,
     }, {
       signal: signal || undefined,
@@ -232,6 +239,11 @@ async function writeRustLesson({ room, kind, title, body, fields, backup, signal
       technologyKeys: fields.technologyKeys,
       tags: fields.tags,
       threadKeys: fields.threadKeys,
+      condition: fields.condition,
+      astCondition: fields.astCondition,
+      triggerScope: fields.triggerScope,
+      interruptMode: fields.interruptMode,
+      repeatCooldownSecs: fields.repeatCooldownSecs,
       backup,
     }, {
       signal: signal || undefined,
@@ -352,16 +364,24 @@ function gigaToolFailure(error) {
 
 function registerHouseTool(pi, definition) {
   const execute = definition.execute;
-  const renderers = createToolRenderers(definition.label);
+  const renderers = createToolRenderers(definition.label, definition.name);
   pi.registerTool({
     ...definition,
     ...renderers,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       emitToolUpdate(onUpdate, definition.name);
+      beginHouseToolFeedback(ctx, definition.label);
       try {
-        return normalizeToolResponse(await execute(toolCallId, params, signal, onUpdate, ctx), definition.name);
+        const result = normalizeToolResponse(
+          await execute(toolCallId, params, signal, onUpdate, ctx),
+          definition.name,
+        );
+        completeHouseToolFeedback(ctx, definition.label, result);
+        return result;
       } catch (error) {
-        return toolThrown(error, definition.name);
+        const result = toolThrown(error, definition.name);
+        completeHouseToolFeedback(ctx, definition.label, result);
+        return result;
       }
     },
   });
@@ -535,6 +555,11 @@ export function registerSolarisaelTools(pi) {
       technologyKeys: z.array(z.string()).optional().describe("coding/project lessons: technology eligibility slugs; keyed lessons fire only when one matches the active technology context."),
       tags: z.array(z.string()).optional().describe("lesson kinds: tags."),
       sourceMemoryPath: z.string().optional().describe("Lesson kinds: provenance path of the source memory; the PostgreSQL lesson body remains authoritative."),
+      condition: z.array(z.string()).optional().describe("lesson kinds only: Rust-regex trigger patterns (no lookaround or backreferences); the substrate refuses these for memory."),
+      astCondition: z.array(z.string()).optional().describe("lesson kinds only: ast-grep patterns, each a single AST node in rust/typescript/tsx/javascript/jsx/python; the substrate refuses these for memory."),
+      triggerScope: z.array(z.string()).optional().describe("lesson kinds only: scope tokens (text | tool | tool:<name>); requires condition or astCondition."),
+      interruptMode: z.enum(["block", "remind"]).optional().describe("lesson kinds only: omit for the house default block; remind is the demoted mode."),
+      repeatCooldownSecs: z.number().optional().describe("lesson kinds only: positive seconds between fires; omit for once per session."),
     }),
     approval: "write",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -548,6 +573,11 @@ export function registerSolarisaelTools(pi) {
             threads: params.threads,
             continues: params.continues,
             supersedes: params.supersedes,
+            condition: params.condition,
+            astCondition: params.astCondition,
+            triggerScope: params.triggerScope,
+            interruptMode: params.interruptMode,
+            repeatCooldownSecs: params.repeatCooldownSecs,
             signal,
           })
         : await writeRustLesson({
@@ -569,6 +599,11 @@ export function registerSolarisaelTools(pi) {
               threadKeys: params.threadKeys,
               tags: params.tags,
               sourceMemoryPath: params.sourceMemoryPath,
+              condition: params.condition,
+              astCondition: params.astCondition,
+              triggerScope: params.triggerScope,
+              interruptMode: params.interruptMode,
+              repeatCooldownSecs: params.repeatCooldownSecs,
             },
             backup: undefined,
             signal,
@@ -641,6 +676,11 @@ export function registerSolarisaelTools(pi) {
         technologyKeys: z.array(z.string()).optional().describe("Replacement coding/project technology eligibility slugs."),
         writers: z.array(z.string()).optional().describe("Writers associated with this writing lesson."),
         negationOf: z.string().optional().describe("Coding or writing lesson ID this lesson negates; omit to preserve."),
+        condition: z.array(z.string()).optional().describe("Replacement Rust-regex trigger patterns (no lookaround or backreferences); omit to preserve, [] to disarm."),
+        astCondition: z.array(z.string()).optional().describe("Replacement ast-grep patterns, each a single AST node in a supported language; omit to preserve, [] to disarm."),
+        triggerScope: z.array(z.string()).optional().describe("Replacement scope tokens (text | tool | tool:<name>); omit to preserve, [] for every surface."),
+        interruptMode: z.enum(["block", "remind"]).optional().describe("Trigger interrupt mode; omit to preserve, block is the house default and remind is demoted."),
+        repeatCooldownSecs: z.number().optional().describe("Positive seconds between fires; omit to preserve."),
       }).describe("Typed replacement fields for the selected lesson kind."),
     }),
     approval: "write",

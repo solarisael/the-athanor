@@ -183,6 +183,7 @@ const EMPTY = { entries: [], warnings: [] };
 export async function queryAnamnesis(_effectiveRoomDir, room, options = {}) {
   const mode = options?.mode === "consult" ? "consult" : "wake";
   const query = String(options?.query || "").trim();
+  const timeoutMs = options?.timeoutMs === undefined ? ANAMNESIS_TIMEOUT_MS : Number(options.timeoutMs);
   if (mode === "consult" && !query) return { ok: false, mode, ...EMPTY, error: "consult requires a non-empty query" };
   const executable = discoverRustExecutable();
   const transport = rustAnamnesisTransport();
@@ -196,7 +197,7 @@ export async function queryAnamnesis(_effectiveRoomDir, room, options = {}) {
       limit,
     };
     try {
-      const result = await transport.request("anamnesis", params, { timeoutMs: ANAMNESIS_TIMEOUT_MS });
+      const result = await transport.request("anamnesis", params, { timeoutMs });
       const validationError = validRustAnamnesisResult(result, mode, room);
       if (validationError) {
         evictRustAnamnesisTransport(executable, transport);

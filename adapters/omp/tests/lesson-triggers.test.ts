@@ -84,8 +84,12 @@ mock.module("../solarisael-house-proof/recall-policy.ts", () => ({
 const {
   closeLessonTriggerTransports,
   extractToolSurfaces,
+  filterInterruptedLessonProse,
+  lessonTriggerMessageRenderer,
+  lessonTriggerProseStreamUpdate,
   lessonTriggerToolCall,
   prependLessonReminder,
+  resetLessonTriggerProseStream,
   takeLessonReminder,
 } = await import("../solarisael-house-proof/lesson-triggers.ts");
 
@@ -113,6 +117,12 @@ const fired = {
     proofPattern: null, urgency: "remind", surface: "prose",
     path: null, patternKind: "regex", pattern: "interop"
   }],
+  proseBlock: [{
+    family: "writing", id: 408, title: "Retire the canned antithesis",
+    lesson: "Rewrite the local sentence through a different structure.",
+    proofPattern: null, urgency: "block", surface: "prose",
+    path: null, patternKind: "regex", pattern: "negative hinge"
+  }],
   quiet: []
 };
 const rl = require("node:readline").createInterface({ input: process.stdin });
@@ -126,10 +136,15 @@ rl.on("line", (line) => {
     return;
   }
   const id = JSON.parse(line).id;
-  process.stdout.write(JSON.stringify({
+  const response = JSON.stringify({
     protocol: 1, id,
     result: { ok: true, fired: fired[mode] || [], warnings: [] }
-  }) + "\\n");
+  }) + "\\n";
+  if (mode === "slowQuiet") {
+    setTimeout(() => process.stdout.write(response), 25);
+    return;
+  }
+  process.stdout.write(response);
 });
 `;
 
@@ -306,9 +321,10 @@ describe("lesson trigger reminder flow", () => {
     );
     expect(verdict).toBeUndefined();
 
-    const reminder = takeLessonReminder("call-remind");
-    expect(reminder).toContain('<system-reminder reason="lesson" lesson="coding#240">');
-    expect(reminder).toContain("A fake must be dumb");
+    const stashed = takeLessonReminder("call-remind");
+    expect(stashed?.reminder).toContain('<system-reminder reason="lesson" lesson="coding#240">');
+    expect(stashed?.reminder).toContain("A fake must be dumb");
+    expect(stashed?.lessons.map((lesson) => `${lesson.family}#${lesson.id}`)).toEqual(["coding#240"]);
   });
 
   // Kills: the stash never cleared, so one remind repeats on every later tool
@@ -351,6 +367,212 @@ describe("lesson trigger reminder flow", () => {
     expect(prependLessonReminder("bare string", "R")).toEqual([{ type: "text", text: "R" }, "bare string"]);
     expect(prependLessonReminder(undefined, "R")).toEqual([{ type: "text", text: "R" }]);
     expect(prependLessonReminder(null, "R")).toEqual([{ type: "text", text: "R" }]);
+  });
+});
+
+describe("lesson trigger live prose tap", () => {
+  function assistantEvent(text: string, type = "text_end") {
+    return {
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text }],
+      },
+      assistantMessageEvent: { type, contentIndex: 0 },
+    };
+  }
+
+  function streamHarness(sessionID: string) {
+    const sent: Array<{ message: Record<string, any>; options: Record<string, any> }> = [];
+    let aborts = 0;
+    const ctx = {
+      cwd: effectiveRoomDir,
+      sessionID,
+      abort() {
+        aborts++;
+      },
+    };
+    const pi = {
+      sendMessage(message: Record<string, any>, options: Record<string, any>) {
+        sent.push({ message, options });
+      },
+    };
+    return { ctx, pi, sent, aborts: () => aborts };
+  }
+
+  // Kills: a prose block downgraded into next-turn advice, operator feedback
+  // hidden, or generation left running after the Rust verdict.
+  // red-proof: force `canInterrupt = false` or `display = false` in queueProseContinuation.
+  test("queues a hidden correction and aborts a live prose block", async () => {
+    await installPipe("proseBlock");
+    const harness = streamHarness("stream-block");
+    const text = "A sufficiently long streamed assistant sentence reaches the Rust matcher and violates the lesson.";
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, harness.ctx, harness.pi);
+
+    await lessonTriggerProseStreamUpdate(assistantEvent(text), harness.ctx, harness.pi);
+
+    expect(harness.aborts()).toBe(1);
+    expect(harness.sent).toHaveLength(1);
+    expect(harness.sent[0].options).toEqual({ deliverAs: "nextTurn", triggerTurn: true });
+    expect(harness.sent[0].message).toMatchObject({
+      customType: "solarisael-lesson-trigger",
+      display: true,
+      attribution: "agent",
+      details: {
+        source: "message_update",
+        interrupted: true,
+      },
+    });
+    expect(harness.sent[0].message.content).toContain('reason="lesson_violation"');
+    expect(harness.sent[0].message.content).toContain('lesson="writing#408"');
+    expect(observed).toEqual([{
+      method: "lesson_trigger_match",
+      params: {
+        room: "kodo",
+        session: "stream-block",
+        surfaces: [{ kind: "prose", text }],
+      },
+    }]);
+
+    const userMessage = { role: "user", content: "original request" };
+    const aborted = { role: "assistant", content: text, stopReason: "aborted" };
+    expect(filterInterruptedLessonProse(
+      [userMessage, aborted],
+      "kodo",
+      "stream-block",
+    )).toEqual([userMessage]);
+    expect(filterInterruptedLessonProse(
+      [userMessage, aborted],
+      "kodo",
+      "stream-block",
+    )).toEqual([userMessage, aborted]);
+  });
+
+  // Kills: display=true exposing the hidden system payload as the default card,
+  // or a generic notice that omits which lesson acted and what it did.
+  // red-proof: remove the registered renderer or render message.content collapsed.
+  test("renders a compact operator-visible intervention with expandable evidence", () => {
+    const message = {
+      content: '<system-interrupt reason="lesson_violation" lesson="writing#408">\nRewrite the sentence.\n</system-interrupt>',
+      details: {
+        lessons: [{ family: "writing", id: 408, urgency: "block", patternKind: "regex" }],
+        source: "message_update",
+        interrupted: true,
+      },
+    };
+    const theme = { fg: (color: string, text: string) => `${color}:${text}` };
+
+    const collapsed = lessonTriggerMessageRenderer(message, { expanded: false }, theme);
+    expect(collapsed.render(80)).toEqual([
+      "warning:Athanor · writing#408 · interrupted draft · correction queued",
+    ]);
+
+    const expanded = lessonTriggerMessageRenderer(message, { expanded: true }, theme);
+    expect(expanded.render(80)).toEqual([
+      "warning:Athanor · writing#408 · interrupted draft · correction queued",
+      "",
+      'muted:<system-interrupt reason="lesson_violation" lesson="writing#408">',
+      "muted:Rewrite the sentence.",
+      "muted:</system-interrupt>",
+    ]);
+
+    const reminder = lessonTriggerMessageRenderer({
+      details: {
+        lessons: [{ family: "coding", id: 19 }],
+        interrupted: false,
+      },
+    }, { expanded: false }, theme);
+    expect(reminder.render(80)).toEqual([
+      "accent:Athanor · coding#19 · lesson reminder queued",
+    ]);
+  });
+
+  // Kills: advisory prose accidentally aborting a turn, or disappearing after
+  // the stream tap consumes the Rust cooldown before the context fallback.
+  // red-proof: send every decision with `triggerTurn: true`.
+  test("queues a reminder without aborting advisory prose", async () => {
+    await installPipe("prose");
+    const harness = streamHarness("stream-remind");
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, harness.ctx, harness.pi);
+
+    await lessonTriggerProseStreamUpdate(
+      assistantEvent("A long advisory prose sample crosses the scan floor and reaches the matcher cleanly."),
+      harness.ctx,
+      harness.pi,
+    );
+
+    expect(harness.aborts()).toBe(0);
+    expect(harness.sent).toHaveLength(1);
+    expect(harness.sent[0].options).toEqual({ deliverAs: "nextTurn", triggerTurn: false });
+    expect(harness.sent[0].message.content).toContain('<system-reminder reason="lesson" lesson="coding#19">');
+    expect(harness.sent[0].message.details).toMatchObject({
+      source: "message_update",
+      interrupted: false,
+    });
+  });
+
+  // Kills: a duplicate text_end arriving while Rust is in flight leaving
+  // forceScan armed, then recursively starting pumps with no unchecked text.
+  // red-proof: reschedule on forceScan without requiring new text.
+  test("settles duplicate text_end events while the matcher is pending", async () => {
+    await installPipe("slowQuiet");
+    const harness = streamHarness("stream-duplicate-end");
+    const event = assistantEvent("A completed prose sample can emit duplicate terminal events while matching remains in flight.");
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, harness.ctx, harness.pi);
+
+    const first = lessonTriggerProseStreamUpdate(event, harness.ctx, harness.pi);
+    const duplicate = lessonTriggerProseStreamUpdate(event, harness.ctx, harness.pi);
+    await Promise.all([first, duplicate]);
+
+    expect(observed).toHaveLength(1);
+    expect(harness.sent).toHaveLength(0);
+    expect(harness.aborts()).toBe(0);
+  });
+
+  // Kills: thinking/tool deltas paying the Rust round trip, and a degraded
+  // matcher turning into an unhandled rejection from the detached index tap.
+  // red-proof: delete the assistant event-type gate or the decision try/catch.
+  test("passes through non-text updates and transport failure", async () => {
+    await installPipe("proseBlock");
+    const harness = streamHarness("stream-pass");
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, harness.ctx, harness.pi);
+    await lessonTriggerProseStreamUpdate(
+      assistantEvent("private thinking that must never enter the prose matcher", "thinking_delta"),
+      harness.ctx,
+      harness.pi,
+    );
+    expect(observed).toHaveLength(0);
+    expect(harness.sent).toHaveLength(0);
+    expect(harness.aborts()).toBe(0);
+
+    closeLessonTriggerTransports();
+    await pipe!.close().catch(() => undefined);
+    pipe = null;
+    await installPipe("silent");
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, harness.ctx, harness.pi);
+    await lessonTriggerProseStreamUpdate(
+      assistantEvent("A long prose sample reaches a silent matcher and must leave the live turn untouched."),
+      harness.ctx,
+      harness.pi,
+    );
+    expect(harness.sent).toHaveLength(0);
+    expect(harness.aborts()).toBe(0);
+  });
+
+  // Kills: source implementation present without the OMP event wiring that
+  // actually exposes it to live assistant deltas.
+  // red-proof: remove either message hook from index.ts.
+  test("registers assistant stream lifecycle hooks", async () => {
+    const { default: registerAdapter } = await import("../index.ts?lesson-trigger-stream-hooks");
+    const names: string[] = [];
+    registerAdapter({
+      setLabel() {},
+      events: { on: () => () => undefined },
+      on(name: string) {
+        names.push(name);
+      },
+    });
+    expect(names).toContain("message_start");
+    expect(names).toContain("message_update");
   });
 });
 

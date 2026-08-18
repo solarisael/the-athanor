@@ -72,7 +72,11 @@ export async function recallWithRouting(
   effectiveRoomDir: string,
   room: string,
   query: string,
-  { signal, temporalDecay = false }: { signal?: AbortSignal; temporalDecay?: boolean } = {},
+  { signal, temporalDecay = false, timeoutMs = RECALL_TIMEOUT_MS }: {
+    signal?: AbortSignal;
+    temporalDecay?: boolean;
+    timeoutMs?: number;
+  } = {},
 ) {
   const runtime = rustRecallTransport();
   if (!runtime) {
@@ -100,7 +104,7 @@ export async function recallWithRouting(
       content_min_similarity: RECALL_CONTENT_MIN_SIM,
     };
   const params = temporalDecay && !vaultProfile ? { ...baseParams, temporal_decay: true } : baseParams;
-  const requestOptions = { signal, timeoutMs: RECALL_TIMEOUT_MS };
+  const requestOptions = { signal, timeoutMs };
   try {
     let result;
     try {

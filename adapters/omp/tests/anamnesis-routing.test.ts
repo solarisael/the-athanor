@@ -87,4 +87,20 @@ describe("Rust anamnesis routing", () => {
     const routed = await queryAnamnesis("room-dir", "example", { mode: "consult", query: "thread" });
     expect(routed).toEqual({ ...counsel, entries: [...counsel.entries], pillars: [...counsel.entries], cycles: [] });
   });
+  test("forwards a caller-specific timeout without shrinking explicit tool defaults", async () => {
+    let observedOptions: unknown;
+    RustJsonlTransport.prototype.request = async function (_method, _params, options) {
+      observedOptions = options;
+      return counsel;
+    };
+
+    await queryAnamnesis("room-dir", "example", {
+      mode: "consult",
+      query: "thread",
+      timeoutMs: 2_000,
+    });
+
+    expect(observedOptions).toEqual({ timeoutMs: 2_000 });
+  });
+
 });

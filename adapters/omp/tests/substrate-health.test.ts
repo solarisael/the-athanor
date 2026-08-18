@@ -200,7 +200,7 @@ describe("Rust Paper Boat routing", () => {
         durable: true,
         backup_status: "completed",
       });
-      await expect(catchBoat("kintsu")).resolves.toMatchObject({
+      await expect(catchBoat("kintsu", { timeoutMs: 2_000 })).resolves.toMatchObject({
         ok: true,
         found: false,
         room: "kintsu",
@@ -211,6 +211,7 @@ describe("Rust Paper Boat routing", () => {
       ]);
       expect(calls[0].params).toEqual({ room: "kintsu", body: "letter", backup: true });
       expect(calls[0].options).toMatchObject({ settleDefinitively: true });
+      expect(calls[1].options).toMatchObject({ timeoutMs: 2_000 });
     } finally {
       RustJsonlTransport.prototype.request = originalRequest;
       closePaperBoatTransports();

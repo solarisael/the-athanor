@@ -3789,6 +3789,36 @@ input:focus-visible {
   .mechanics-row-body dl > div:nth-child(odd) {
     border-left: 0;
   }
+
+  .subject-header[data-kind="hallway"] {
+    align-items: start;
+    grid-template-columns: auto minmax(0, 1fr);
+
+
+    gap: 8px 10px;
+  }
+
+  .subject-header[data-kind="hallway"] .thread-header-meta {
+    grid-column: 1 / -1;
+  }
+
+  .subject-views .tab {
+    justify-content: center;
+    flex: 1 1 0;
+
+    min-width: 0;
+    gap: 4px;
+    padding-inline: 4px;
+
+    font-size: 12px;
+  }
+
+  .subject-views kbd {
+    min-width: 19px;
+    padding-inline: 4px;
+
+    font-size: 9px;
+  }
 }
 
 @media (max-width: 700px) {
@@ -3903,17 +3933,6 @@ input:focus-visible {
     padding: 12px 14px;
   }
 
-  .subject-header[data-kind="hallway"] {
-    align-items: start;
-    grid-template-columns: auto minmax(0, 1fr);
-
-
-    gap: 8px 10px;
-  }
-
-  .subject-header[data-kind="hallway"] .thread-header-meta {
-    grid-column: 1 / -1;
-  }
 
   .session-menu {
     right: 14px;

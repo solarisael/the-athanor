@@ -39,6 +39,9 @@ the exact implementation record.
   expose a full-width drawer over a dismissible scrim, and compact every status
   channel without clipping; generated concept diagrams also bind their visible
   prose to semantic `figcaption` elements.
+  Intermediate Hallway widths now move thread metadata below the title and
+  distribute all three subject tabs inside their owned strip, preventing title
+  fragments and Bell hit-target overlap.
 - The browser interaction prototype no longer renders full-width census or
   authority hint banners above Project, room memory, status, or Hallway record
   views. Authority stays attached to values, receipts, refusals, unavailable

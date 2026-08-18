@@ -4,6 +4,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot "native-build-cache.ps1")
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Out = if ([IO.Path]::IsPathRooted($OutDir)) { [IO.Path]::GetFullPath($OutDir) } else { [IO.Path]::GetFullPath((Join-Path $Root $OutDir)) }
 $TempRoot = if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { [IO.Path]::GetTempPath() } else { $env:RUNNER_TEMP }
@@ -35,26 +36,74 @@ Fetch-Verified $Dependencies.managed.pgvector.sourceUrl $Dependencies.managed.pg
 Fetch-Verified $Dependencies.managed.natsServer.url $Dependencies.managed.natsServer.sha256 $NatsZip
 Fetch-Verified $Dependencies.managed.godot.url $Dependencies.managed.godot.sha256 $GodotZip
 
-$PostgresExtract = Join-Path $Work "postgresql"
-$PgvectorExtract = Join-Path $Work "pgvector"
-$NatsExtract = Join-Path $Work "nats"
-$GodotExtract = Join-Path $Work "godot"
-Expand-Archive $PostgresZip $PostgresExtract
-Expand-Archive $PgvectorZip $PgvectorExtract
-Expand-Archive $NatsZip $NatsExtract
-Expand-Archive $GodotZip $GodotExtract
-$PgRoot = (Get-ChildItem $PostgresExtract -Directory | Select-Object -First 1).FullName
-$PgvectorRoot = (Get-ChildItem $PgvectorExtract -Directory | Select-Object -First 1).FullName
-$env:PGROOT = $PgRoot
-Push-Location $PgvectorRoot
-try {
-  & nmake /NOLOGO /F Makefile.win
-  if ($LASTEXITCODE -ne 0) { throw "pgvector build failed" }
-  & nmake /NOLOGO /F Makefile.win install
-  if ($LASTEXITCODE -ne 0) { throw "pgvector install failed" }
-} finally { Pop-Location }
+$DependencyCacheKey = Get-NativeBuildCacheKey @(
+  "native-dependencies-v1",
+  [string]$Dependencies.managed.postgresql.sha256,
+  [string]$Dependencies.managed.pgvector.sha256,
+  [string]$Dependencies.managed.natsServer.sha256,
+  [string]$Dependencies.managed.godot.sha256,
+  [string]$env:VCToolsVersion
+)
+$DependencyCacheRoot = Join-Path $Root "target/native-release-cache"
+$DependencyCache = Join-Path $DependencyCacheRoot $DependencyCacheKey
+$RequiredDependencyFiles = @(
+  "postgresql/bin/postgres.exe",
+  "postgresql/lib/vector.dll",
+  "nats/nats-server.exe",
+  "godot/athanor-gui.exe"
+)
+New-Item $DependencyCacheRoot -ItemType Directory -Force | Out-Null
+if (-not (Test-NativeBuildCache $DependencyCache $DependencyCacheKey $RequiredDependencyFiles)) {
+  if (Test-Path $DependencyCache) { Remove-Item $DependencyCache -Recurse -Force }
+  $DependencyCacheCandidate = "$DependencyCache.pending-$PID"
+  if (Test-Path $DependencyCacheCandidate) { Remove-Item $DependencyCacheCandidate -Recurse -Force }
+  try {
+    $PostgresExtract = Join-Path $Work "postgresql"
+    $PgvectorExtract = Join-Path $Work "pgvector"
+    $NatsExtract = Join-Path $Work "nats"
+    $GodotExtract = Join-Path $Work "godot"
+    Expand-Archive $PostgresZip $PostgresExtract
+    Expand-Archive $PgvectorZip $PgvectorExtract
+    Expand-Archive $NatsZip $NatsExtract
+    Expand-Archive $GodotZip $GodotExtract
+    $PreparedPostgres = (Get-ChildItem $PostgresExtract -Directory | Select-Object -First 1).FullName
+    $PgvectorRoot = (Get-ChildItem $PgvectorExtract -Directory | Select-Object -First 1).FullName
+    $PreviousPgRoot = [Environment]::GetEnvironmentVariable("PGROOT", "Process")
+    $env:PGROOT = $PreparedPostgres
+    Push-Location $PgvectorRoot
+    try {
+      & nmake /NOLOGO /F Makefile.win
+      if ($LASTEXITCODE -ne 0) { throw "pgvector build failed" }
+      & nmake /NOLOGO /F Makefile.win install
+      if ($LASTEXITCODE -ne 0) { throw "pgvector install failed" }
+    } finally {
+      Pop-Location
+      if ($null -eq $PreviousPgRoot) { Remove-Item Env:PGROOT -ErrorAction SilentlyContinue }
+      else { $env:PGROOT = $PreviousPgRoot }
+    }
+    $PreparedNats = Get-ChildItem $NatsExtract -Filter "nats-server.exe" -Recurse | Select-Object -First 1
+    if (-not $PreparedNats) { throw "NATS archive did not contain nats-server.exe" }
+    $PreparedGodot = Get-ChildItem $GodotExtract -Filter "Godot_v4.7.1-stable_win64.exe" -Recurse | Select-Object -First 1
+    if (-not $PreparedGodot) { throw "Godot archive did not contain the pinned Windows x64 executable" }
 
-$CargoTarget = Join-Path $Work "cargo-target"
+    New-Item (Join-Path $DependencyCacheCandidate "postgresql") -ItemType Directory -Force | Out-Null
+    New-Item (Join-Path $DependencyCacheCandidate "nats") -ItemType Directory -Force | Out-Null
+    New-Item (Join-Path $DependencyCacheCandidate "godot") -ItemType Directory -Force | Out-Null
+    Copy-Item (Join-Path $PreparedPostgres "*") (Join-Path $DependencyCacheCandidate "postgresql") -Recurse
+    Copy-Item $PreparedNats.FullName (Join-Path $DependencyCacheCandidate "nats/nats-server.exe")
+    Copy-Item $PreparedGodot.FullName (Join-Path $DependencyCacheCandidate "godot/athanor-gui.exe")
+    Complete-NativeBuildCache $DependencyCacheCandidate $DependencyCacheKey $RequiredDependencyFiles
+    Move-Item $DependencyCacheCandidate $DependencyCache
+  } catch {
+    Remove-Item $DependencyCacheCandidate -Recurse -Force -ErrorAction SilentlyContinue
+    throw
+  }
+}
+$PgRoot = Join-Path $DependencyCache "postgresql"
+$NatsExe = Get-Item (Join-Path $DependencyCache "nats/nats-server.exe")
+$GodotExe = Get-Item (Join-Path $DependencyCache "godot/athanor-gui.exe")
+
+$CargoTarget = Join-Path $Root "target"
 $PreviousCargoTarget = $env:CARGO_TARGET_DIR
 $env:CARGO_TARGET_DIR = $CargoTarget
 Push-Location $Root
@@ -80,8 +129,6 @@ Copy-Item (Join-Path $ReleaseBin "athanor-substrate.exe") $Bin
 Copy-Item (Join-Path $ReleaseBin "house-host.exe") $Bin
 Copy-Item (Join-Path $ReleaseBin "athanor-house-delivery.exe") $Bin
 Copy-Item (Join-Path $Root "adapters/omp/installed-loader.ts") (Join-Path $Bin "athanor-omp-loader.ts")
-$GodotExe = Get-ChildItem $GodotExtract -Filter "Godot_v4.7.1-stable_win64.exe" -Recurse | Select-Object -First 1
-if (-not $GodotExe) { throw "Godot archive did not contain the pinned Windows x64 executable" }
 Copy-Item $GodotExe.FullName (Join-Path $Bin "athanor-gui.exe")
 $GodotSource = Join-Path $Root "gui"
 @("project.godot", "main.tscn", "athanor.gdextension", "icon.svg") | ForEach-Object {
@@ -100,8 +147,6 @@ if ($GodotImportOutput -notmatch "Initialize godot-rust" -or $GodotImportOutput 
   throw "Godot runtime project import failed"
 }
 Copy-Item (Join-Path $PgRoot "*") (Join-Path $Runtime "postgresql") -Recurse
-$NatsExe = Get-ChildItem $NatsExtract -Filter "nats-server.exe" -Recurse | Select-Object -First 1
-if (-not $NatsExe) { throw "NATS archive did not contain nats-server.exe" }
 Copy-Item $NatsExe.FullName (Join-Path $Runtime "nats/nats-server.exe")
 $AdapterSource = Join-Path $Root "adapters/omp"
 $AdapterTarget = Join-Path $Stage "adapters/omp"
@@ -146,3 +191,4 @@ $Manifest | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Stage "release-man
 New-Item $Out -ItemType Directory -Force | Out-Null
 Remove-Item (Join-Path $Out "payload") -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item $Stage (Join-Path $Out "payload") -Recurse -Force
+Remove-Item $Work -Recurse -Force

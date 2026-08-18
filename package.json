@@ -11,9 +11,10 @@
     "adapters/omp"
   ],
   "scripts": {
-    "test": "bun run test:rust && bun run test:omp",
+    "test": "bun run test:rust && bun run test:omp && bun run test:installer",
     "test:rust": "cargo test --workspace",
     "test:omp": "cd adapters/omp && bun run test",
+    "test:installer": "pwsh -NoProfile -File installer/native-build-cache.test.ps1",
     "build:substrate": "cargo build --release -p athanor-substrate",
     "build:godot": "cargo build -p athanor-godot --target-dir gui/target",
     "build:native": "pwsh -File installer/build-native-release.ps1 -Version 0.9.6.2-rc2 -OutDir dist/native"

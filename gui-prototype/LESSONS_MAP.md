@@ -53,7 +53,7 @@ Every subject exposes exactly **three view slots**, positional keys `1`–`3`, o
 | slot | layer | direct | hallway | project | house |
 |---|---|---|---|---|---|
 | 1 | **live** — where you stand and speak | Session | Thread | Overview | Overview |
-| 2 | **state** — machinery underneath | Status | Status | Status | Settings & Status |
+| 2 | **state** — machinery underneath | Status | Status | Status | Mechanics |
 | 3 | **durable** — dated timeline, newest first | Memories | Record | Evidence | Memories & Lessons |
 
 The slots are a write-model, not just navigation: the live layer **sediments** into the durable one — `Record memory` writes a dated specimen; a thread seals or folds into a record entry; work proves out into evidence; boats and lessons land on the House shelves. Slot 3 renders as a dated timeline because that is what sediment looks like.
@@ -62,7 +62,7 @@ Consequences of the collapse:
 - The six-view strip dies. `Conversation`, `Session`, and `History` merge into the live slot: the header gains a **session toggle** beside the subject name (current session by default, `New session` on top, older sessions as dated rows — the picker's rows *are* the history). Event-level history lives inline in the timeline as collapsed action events.
 - `Context` and `Substrate` merge into the state slot.
 - The hallway `Actions` view dissolves: action events stay inline in the thread timeline.
-- House keeps its Settings view whole inside its state slot — House, spirit, hallway, and project state are different things even when they look similar (operator ruling; resemblance never merges authority).
+- House slot 2 owns the Mechanical observatory. Account Settings owns local interface controls and provides a stable direct door into House mechanics. House, spirit, hallway, and project state keep separate authority even when their rows resemble one another.
 - The durable slot is the landing surface for memory search: switcher results route to slot 3 of the owning subject.
 
 ## Composition
@@ -189,9 +189,28 @@ For exactly one active pane:
 - inactive panes are both `aria-hidden="true"` and `inert`;
 - opening records the trigger that should receive focus on return;
 - Back and Escape move exactly one state outward;
-- at the mobile root, Escape closes the sidebar and returns focus to its toggle.
+- at the mobile root, Escape closes the visible sidebar and returns focus to its toggle before a later Escape may leave House.
 
 Focus waits for the incoming pane's animation to settle, uses `preventScroll`, and is guarded by a generation token so stale work cannot steal focus after rapid navigation. The drawer and track use `overflow: clip`, not `overflow: hidden`: Chromium may scroll a hidden overflow container horizontally when focus enters a still-transformed pane and throw the drawer offscreen. House memories #3565 and #3566 carry the discovery and repair.
+
+### House mechanical observatory
+
+House slot 2 is the mechanical observatory. Account → Settings provides a stable direct door and routes through `navigateToSubjectView("house", "state")`; it does not create a fourth global mode or a second settings owner.
+
+The disconnected surface renders one local `HOUSE_MECHANICS_SNAPSHOT` from the current source census:
+
+- seven categories: Recall & Context; Memory, Lessons & Anamnesis; GIGA & Embeddings; Host, Delivery & Hallways; Rooms & Sessions; Backups; Advanced Guardrails;
+- every row carries effective value, default, scope, owner, mutability, secrecy, apply mode, health, and consequence;
+- category buttons filter locally and clear the search;
+- search always crosses every category and updates only the result/status containers, preserving input focus;
+- native `details` rows disclose typed metadata without adding another panel;
+- the status header and footer state `Host offline`, source-census revision, disconnected surface, and read-only authority;
+- PostgreSQL-backed rows may describe future `Host-writable` authority while exposing no mutation control in the disconnected surface;
+- secret-bearing configuration exposes presence or health only.
+
+When the Host connection lands, replace the local snapshot with the typed Host/substrate snapshot from project lesson #413 and delete duplicated client facts. Project lesson #412 owns the discoverability standard: a buried mechanical fact is absent from the operator's world.
+
+House Overview, Mechanics, and Memories & Lessons share one `1040px` outer canvas. Their internal content may choose a narrower reading measure when a long body needs it; the slot transition itself must not make the House frame jump.
 
 ### Responsive behavior
 
@@ -203,16 +222,19 @@ Focus waits for the incoming pane's animation to settle, uses `preventScroll`, a
 
 ### Hallway Bell and read attention
 
-The Bell is a global router into Hallway threads, not a fourth navigation mode and not a duplicate conversation surface. It lives in the mantle topbar because attention can arrive while the operator stands in Direct, Hallways, Projects, or House.
+The Bell is the global router into Hallway threads. It occupies no fourth navigation mode and owns no duplicate conversation surface. It lives in the mantle topbar because attention can arrive while the operator stands in Direct, Hallways, Projects, or House.
 
-The local specimen keeps two derived models separate:
+The local-only surface keeps two derived models separate:
 
-- ordinary unread belongs to a stable per-thread room read position;
-- explicit attention belongs to structured notification rows with stable `toRooms` recipients;
+- ordinary unread belongs to a stable per-thread room read position and renders as a round count;
+- explicit attention belongs to structured notification rows with stable `toRooms` recipients and renders as a squared, heavier count;
+- the monochrome bell icon is the entire visual label; ordinary and targeted counts overlay its upper-right and upper-left edges while the button's exact accessible label carries the full totals;
 - body-text parsing never creates recipient authority;
-- the Bell and Hallway rows display separate unread and targeted-attention badges;
-- selecting an inbox result forces Hallways slot 1, opens that exact thread, then clears only its unread count and Bell rows covered by the rendered messages;
+- selecting an inbox result forces Hallways slot 1, opens that exact thread, then clears only unread message indexes and Bell rows covered by the returned messages;
 - delivery alone never acknowledges attention.
+- Bell scope belongs to the authenticated room/spirit presence; selecting a Direct subject never impersonates that spirit;
+- Hallway and future Project notifications share one typed global inbox, while rows and tabs retain contextual badges;
+- an explicit embodied room/spirit identity switch may replace the Bell scope.
 
 The modal layer lives outside `.app-shell`; while open, the shell is `inert`, focus enters the first route and returns to the invoking control on close. The mobile sidebar follows the same rule at rest: when translated offscreen it is also `aria-hidden` and `inert`, so invisible navigation cannot remain in the keyboard or accessibility tree.
 
@@ -222,7 +244,7 @@ All inbox, read, and notification data here remain local fixtures. The footer an
 
 Status channels remain separate. Host transport, Recall mode, body, kittens, and delivery do not collapse into one green or red verdict. Expanding one channel explains that channel without becoming a dashboard modal.
 
-Local records remain simulated and non-authoritative. Status channels must report the disconnected surface truth instead of plausible live Host, Recall, body, or delivery state. The isolated About door states that displayed conversations and state are not durable records. Any published screenshot or handoff adds its disclosure outside the product anatomy rather than breeding implementation-stage labels through the shell.
+Local records remain simulated and non-authoritative. Status channels report the disconnected surface truth through the value, receipt, refusal, or unavailable action that owns it. The isolated About door carries the global experiment boundary. Published screenshots and handoffs add disclosure outside the product anatomy. Full-width hint and census banners have no interface owner and are deleted.
 
 ## HTML grammar
 
@@ -365,3 +387,20 @@ The proof receipt names the viewport, path exercised, and observed result. `It l
 - Chromium at `1440 × 1000`: Direct, Hallways, and Projects selection; three-slot preservation; Bell open and focus entry; exact Morning check routing; `3 unread / 1 attention` to `2 unread / 0 attention`; recipient marker; composer submission; sealed-thread refusal; Account → Settings → Back/Escape; three rapid drawer cycles; inspector close/open; House Switcher; reduced motion; zero horizontal document overflow; zero console or page errors.
 - Chromium at `390 × 844`: closed sidebar absent from the accessibility tree and `inert`; open/Escape restores the toggle; Bell focus wraps in both directions; mode and slot keyboard chords preserve the selected slot; Morning check routes to slot 1; the active view ends at the fixed member dock boundary (`278 px`); `To Kintsu room` remains visible; zero horizontal document overflow; zero console or page errors.
 - Shared screenshots retain the Hallway inbox footer’s local-only disclosure. No Host connection, PostgreSQL read cursor, durable Bell row, delivery, or persistence is claimed.
+
+### Proof receipt — 2026-08-18 mechanical observatory wave
+
+- Chromium at `1440 × 1000`: Account → Settings → Mechanical observatory routed to House slot 2; 43 mechanisms appeared under eight category buttons including All; the `timeout` query returned five exact rows across categories and retained input focus; Backups cleared the query and returned three rows; Backup retention disclosed default, scope, owner, apply mode, secrecy, and consequence; zero mutation controls, horizontal overflow, console errors, or page errors.
+- Chromium at `390 × 844`: the Account door routed and returned the sidebar to `aria-hidden` plus `inert`; the observatory occupied `364 px` inside a `390 px` viewport; `backup` returned three all-category results with focus retained; Rooms & Sessions returned six rows; the expanded OMP model-default row remained within `13–377 px` and exposed `Next session`; zero horizontal overflow, console errors, or page errors.
+- Screenshots show the source-census revision, `Host offline`, and the disconnected read-only footer. No Host snapshot, mutation command, PostgreSQL write, OMP connection, or secret value is claimed.
+
+### Proof receipt — 2026-08-18 GUI detail wave
+
+- Chromium at `1440 × 1000`: the topbar rendered an `18 × 18` two-path monochrome bell; initial local state was `4 unread / 2 attention`; the round unread count and squared two-pixel targeted count remained visually distinct; Morning check acknowledged only returned message index 5 and left index 6 pending as `3 / 1`; `@Kintsu` in body text produced no recipient marker while structured `toRooms: ["kintsu"]` rendered `To Kintsu room`; a sent local message rendered `Local-only · undelivered` with no Host/PostgreSQL receipt; mechanics rows exposed `Effective`; zero horizontal overflow, console errors, or page errors.
+- Chromium at `390 × 844`: the Bell icon remained visible while its text label hid; House plus an open sidebar required two Escapes—first closed and re-inerted the visible sidebar while retaining House and returning focus, second restored Kintsu Direct; mechanics rows stayed within `13–377 px`, their effective value ended at `371 px`, and the settled sidebar ended offscreen at `-5.8 px`; zero horizontal overflow, console errors, or page errors.
+- Product chrome now uses `Host offline`, `Source census`, `Local-only`, and `Disconnected surface` at their exact authority boundaries. Historical fixture/specimen terminology remains available in documentation and source-level class names only.
+
+### Proof receipt — 2026-08-18 Bell overlay and House width wave
+
+- Chromium at `1440 × 1000`: the Bell contained zero wording nodes; its button measured `44 × 43 px`; the `18 × 18 px` icon remained centered; targeted and unread counts sat at `y + 2 px` on opposite upper edges and ended above the icon bottom; House Overview, Mechanics, and Memories & Lessons each occupied the same available `700 px` canvas; zero horizontal overflow, console errors, or page errors.
+- Chromium at `390 × 844`: the icon-only Bell remained `44 × 43 px`; both counts stayed overlaid at `y + 2 px`; no document overflow appeared. The screenshot preserves the exact button geometry and accessible label while ordinary product chrome contains no `Bell` word.

@@ -1,6 +1,6 @@
 # GUI Prototype Navigation Map
 
-How the prototype is walked, grouped by destination panel, ordered by access. Companion to `LESSONS_MAP.md` (which owns taste and rules; this file owns terrain). Sourced from `index.html` and `app.js` on 2026-08-18 (Hallway Bell wave) — function names are the stable handles; line numbers drift with edits.
+How the prototype is walked, grouped by destination panel, ordered by access. Companion to `LESSONS_MAP.md` (which owns taste and rules; this file owns terrain). Sourced from `index.html` and `app.js` on 2026-08-18 (mechanical observatory wave) — function names are the stable handles; line numbers drift with edits.
 
 Reading rule for the graphs: **every box is a place you can stand; every arrow is something you do** — except the second graph, where every arrow is sedimentation. One edge meaning per graph, never mixed.
 
@@ -14,8 +14,8 @@ subgraph WALK["The walk — one downward pass"]
   door["APP DOOR"]
   start["STARTING PLACE<br>Direct · Kintsu · Session"]
   panel["SELECTED PANEL<br><b>Direct</b> — Kintsu · Kodo · Tuner<br><b>Hallways</b> — dated gatherings, recent-first · date · hallway · people<br><b>Projects</b> — The Athanor · Multistock"]
-  view["SELECTED SLOT · KEYS 1–3<br><b>1 live</b> — Session / Thread / Overview<br><b>2 state</b> — Status (Settings & Status in House)<br><b>3 durable</b> — Memories / Record / Evidence / Memories & Lessons"]
-  deeper["PANEL-SPECIFIC PLACE<br><b>Direct · header toggle ▾</b> — sessions menu: New session · dated rows<br><b>Project · header toggle ▾</b> — linked sessions<br><b>Hallway · member column</b> — members only → presence profile<br><b>Hallway · header badge</b> — routes to Record (slot 3)<br><b>Bell</b> — global Hallway inbox → routed thread (slot 1)"]
+  view["SELECTED SLOT · KEYS 1–3<br><b>1 live</b> — Session / Thread / Overview<br><b>2 state</b> — Status / Mechanics<br><b>3 durable</b> — Memories / Record / Evidence / Memories & Lessons"]
+  deeper["PANEL-SPECIFIC PLACE<br><b>Direct · header toggle ▾</b> — sessions menu: New session · dated rows<br><b>Project · header toggle ▾</b> — linked sessions<br><b>Hallway · member column</b> — members only → presence profile<br><b>Hallway · header badge</b> — routes to Record (slot 3)<br><b>Account · Settings</b> — Mechanical observatory → House slot 2<br><b>Bell</b> — global Hallway inbox → routed thread (slot 1)"]
 
   door -->|"open the app"| start
   start -->|"choose a subject row · same slot<br>or a mode button · first subject, same slot"| panel
@@ -28,10 +28,10 @@ subgraph CARRY["Carried quietly — available from every place"]
   keys["Three slot tabs · keys 1–3<br>same layers everywhere, labels per panel<br>switching panels keeps your slot"]
   chords["Ctrl+↑/↓ · subjects, clamped<br>Ctrl+←/→ · modes, clamped"]
   switcher["Ctrl+Space — House Switcher<br>any panel · any slot · start session<br>settings · Recall (offline)"]
-  bell["Bell — Hallway inbox<br>ordinary unread · explicit attention<br>routes to thread, then acknowledges covered rows"]
-  drawer["Account › Settings drawer<br>Esc walks back one pane"]
+  bell["Bell icon — Hallway inbox<br>round ordinary unread · squared explicit attention<br>routes to thread, then acknowledges covered rows"]
+  drawer["Account › Settings drawer<br>local interface controls · Mechanical observatory door<br>Esc walks back one pane"]
   status["Status strip — five popovers<br>host · recall · body · kittens · delivery"]
-  esc["Esc — one step outward:<br>Bell → session menu → switcher → profile<br>→ drawer → leave House → mobile sidebar"]
+  esc["Esc — one step outward:<br>Bell → session menu → switcher → profile<br>→ drawer → visible mobile sidebar → leave House"]
 
   keys ~~~ chords ~~~ switcher ~~~ bell ~~~ drawer ~~~ status ~~~ esc
 end
@@ -67,7 +67,7 @@ subgraph STATE["2 · STATE — machinery underneath, no flow"]
   dState["DIRECT · Status<br>runtime · attention · context · substrate"]
   hState["HALLWAY · Status<br>live channels · embodied session · substrate"]
   pState["PROJECT · Status<br>work state · activity · involved rooms"]
-  houseState["HOUSE · Settings and Status<br>settings kept, whole · status channels · activity"]
+  houseState["HOUSE · Mechanics<br>seven categories · all-category search<br>typed source-census rows · Host offline"]
 end
 
 dState ~~~ hState ~~~ pState ~~~ houseState
@@ -88,7 +88,7 @@ Keys `1`–`3` are positional and semantic at once: slot 1 is always the live la
 | slot | layer | direct | hallway | project | house |
 |---|---|---|---|---|---|
 | 1 | live | Session | Thread | Overview | Overview |
-| 2 | state | Status | Status | Status | Settings & Status |
+| 2 | state | Status | Status | Status | Mechanics |
 | 3 | durable | Memories | Record | Evidence | Memories & Lessons |
 
 When a project has an active linked session, slot 1's label reads `Conversation` (`subjectViewLabels`).
@@ -113,6 +113,7 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 | durable views | `renderRoomMemories`, `renderHallwayRecordView`, `renderDurableEntry` |
 | switcher | `openSwitcher`, `closeSwitcher`, `executeSwitcherCommand`, `switcherCommandRegistry` |
 | Hallway Bell | `renderBellToggle`, `renderHallwayInbox`, `openBell`, `closeBell`, `routeHallwayInbox`, `acknowledgeHallwayThread` |
+| House mechanics | `openHouseMechanics`, `renderHouseMechanics`, `mechanicsEntries`, `renderMechanicsResults` |
 | composer | `updateComposerState`, `composerBlockReason`, `beginLocalResponse` |
 
 ## Keyboard doors
@@ -123,7 +124,7 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 | `Ctrl/Cmd+↑/↓` | previous / next subject in the visible list, clamped; inert in House | subject-chord listener |
 | `Ctrl/Cmd+←/→` | previous / next mode (Direct ↔ Hallways ↔ Projects), clamped; first subject, same slot | `openMode` via mode-chord listener |
 | `Ctrl/Cmd+Space` | toggle House Switcher | `openSwitcher` / `closeSwitcher` |
-| `Esc` | one step outward, in order: Bell → session menu → switcher → presence profile → drawer back → leave House → mobile sidebar | cascade listener |
+| `Esc` | one step outward, in order: Bell → session menu → switcher → presence profile → drawer back → visible mobile sidebar → leave House | cascade listener |
 | `Enter` / `Shift+Enter` | send / newline, per `sendWithEnter` setting | composer listeners |
 
 ## Asymmetries worth remembering
@@ -135,5 +136,5 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 - **The header's right slot belongs to the view's own verb.** One owner, `renderHeaderContext`: live gets the session control (or thread meta), and each other view gets a verb button only where an honest act exists — `Record memory` (direct durable, prepends a marked local draft), `Seal gathering` (open hallway durable, seals live), `Interface settings` (house state) — else its quietest fact as a non-focusable `.header-chip`. A button with nothing true to do is the deleted noun-pill disease.
 - **Doors open; they never summon.** Membership verbs live where membership lives — `Extend access` on the hallway record's membership card (invited rooms read `may see and enter · has not entered`; presence appears only when they join), `Involve room` on the project's involved-rooms card — and never in the member dock, because the dock shows presence, and presence is not permission. Collections own their create-doors: `New spirit` at the foot of the Direct list (`welcomeSpirit`), the session menu's `New session` on top. One verb species (`.header-verb`/`.card-verb`), placed by whoever owns the fact it mutates.
 - **Continuity actions are substance-gated.** Fold paper boat / Record memory appear only when the conversation holds ≥2 messages and accepts input — presence is state (`updateComposerState`).
-- **The Bell is a router, not a fourth mode.** Its inbox derives ordinary unread from per-thread read state and explicit attention from structured `toRooms` notifications. Opening an inbox result forces Hallways slot 1; only after that thread opens does the local specimen clear its unread count and covered Bell rows. The two badges remain visually and semantically separate.
+- **The Bell is the authenticated presence's global router.** Selecting Kodo, Tuner, a Hallway, or a Project changes the subject in view and leaves Kintsu's Bell scope intact. An explicit embodied room/spirit switch may replace that scope. Hallway attention feeds the Bell today; future Project assignments, failures, and mentions use typed rows in the same inbox while subject rows and tabs retain contextual badges. Opening a result routes through the owning subject and acknowledges only covered rows.
 - **Status channels stay separate.** Five buttons, five popovers, no combined verdict.

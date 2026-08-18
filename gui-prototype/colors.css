@@ -78,8 +78,7 @@
   --bg-project-room: #202020;
   --bg-project-durable: #e2e2e2;
 
-  /* bg: specimen cards, disclosure, and the context meter */
-  --bg-specimen-disclosure: #1d1d1d;
+  /* bg: specimen cards and the context meter */
   --bg-specimen-meter-track: #303030;
   --bg-specimen-meter-fill: #cccccc;
 
@@ -97,7 +96,6 @@
   --fg-project-note: #929292;
   --fg-project-room: #cccccc;
   --fg-specimen-body: #aaaaaa;
-  --fg-specimen-disclosure: #d0d0d0;
   --fg-session-empty: #a7a7a7;
   --fg-session-empty-head: #e1e1e1;
   --fg-session-note: #888888;
@@ -114,8 +112,7 @@
   --bd-project-selected-rail: #dddddd;
   --bd-project-durable: #777777;
 
-  /* bd: specimen, session, context, and library edges */
-  --bd-specimen-disclosure: #4a4a4a;
+  /* bd: session, context, and library edges */
   --bd-session-durable: #dddddd;
   --bd-context-card: #373737;
   --bd-library-id: #4b4b4b;

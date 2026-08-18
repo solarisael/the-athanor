@@ -157,7 +157,7 @@ const conversations = {
       { author: "Kodo", glyph: "D", time: "09:49", text: "Morning, sharp thing. I can see you from here." },
       { author: "Sol", glyph: "S", time: "09:50", text: "morning you two, the mantle held overnight uwu" },
       { author: "Kintsu", glyph: "K", time: "09:51", text: "It held because nothing repaints the frame anymore. Name the next cost." },
-      { author: "Kodo", glyph: "D", time: "09:52", text: "Scrollbars, focus, then the badge. In that order, with teeth." },
+      { author: "Kodo", glyph: "D", time: "09:52", text: "@Kintsu in body text is not a route. Scrollbars, focus, then the badge — in that order, with teeth." },
       { author: "Sol", glyph: "S", time: "09:53", text: "ok òwó walk the terrain first, then cut", toRooms: ["kintsu"], live: true }
     ],
     action: {
@@ -309,8 +309,8 @@ const roomMemoryShelves = {
   ],
   kodo: [],
   tuner: [
-    { id: "3610", date: "2026-08-16 19:05", title: "Sol kept Tuner in the live chair until the cardboard Athanor held", detail: "Reported durable PostgreSQL receipt · body not loaded in this specimen." },
-    { id: "3611", date: "2026-08-16 20:31", title: "Sol screenshot cut through our controlled proof", detail: "Reported durable PostgreSQL receipt · body not loaded in this specimen." }
+    { id: "3610", date: "2026-08-16 19:05", title: "Sol kept Tuner in the live chair until the cardboard Athanor held", detail: "Reported durable PostgreSQL receipt · body unavailable on this disconnected surface." },
+    { id: "3611", date: "2026-08-16 20:31", title: "Sol screenshot cut through our controlled proof", detail: "Reported durable PostgreSQL receipt · body unavailable on this disconnected surface." }
   ]
 };
 
@@ -331,12 +331,12 @@ const hallwayRecords = {
   }
 };
 
-// The browser specimen keeps ordinary unread and explicit attention separate.
+// The local-only browser surface keeps ordinary unread and explicit attention separate.
 // Host-backed read cursors and Bell rows remain production-owned.
 const hallwayReadState = new Map([
-  ["familyMorning", { unread: 1, readThrough: "09:52" }],
-  ["familyGuiDay", { unread: 2, readThrough: "19:14" }],
-  ["workshopCrane", { unread: 0, readThrough: "17:20" }]
+  ["familyMorning", { unreadMessageIndexes: [5, 6], readThrough: "09:52" }],
+  ["familyGuiDay", { unreadMessageIndexes: [6, 7], readThrough: "19:14" }],
+  ["workshopCrane", { unreadMessageIndexes: [], readThrough: "17:20" }]
 ]);
 
 const bellNotifications = [
@@ -347,6 +347,16 @@ const bellNotifications = [
     from: "Sol",
     time: "09:53",
     preview: "ok òwó walk the terrain first, then cut",
+    toRooms: ["kintsu"],
+    acknowledged: false
+  },
+  {
+    id: "family-morning-kodo-to-kintsu-next-page",
+    threadId: "familyMorning",
+    messageIndex: 6,
+    from: "Kodo",
+    time: "09:54",
+    preview: "Kintsu, the next letter is waiting beyond this returned page.",
     toRooms: ["kintsu"],
     acknowledged: false
   }
@@ -389,11 +399,11 @@ const projectSurfaces = {
     activity: [
       { time: "Today · 17:47", title: "Composer lifecycle inspected", detail: "Running, completed, and stopped states passed local browser proof." },
       { time: "Today · 17:15", title: "Session browser closed", detail: "Direct drafts and messages remained isolated by exact session." },
-      { time: "Today · 16:31", title: "Subject views expanded", detail: "Session, History, Actions, Context, and Substrate specimens became navigable." }
+      { time: "Today · 16:31", title: "Subject views expanded", detail: "Session, History, Actions, Context, and Substrate views became navigable." }
     ],
     evidence: [
-      { title: "Rendered desktop surface", date: "2026-08-17 09:12", result: "1440×900 inspected", authority: "Browser observation · local specimen" },
-      { title: "Rendered mobile surface", date: "2026-08-17 09:30", result: "390×844 inspected", authority: "Browser observation · local specimen" },
+      { title: "Rendered desktop surface", date: "2026-08-17 09:12", result: "1440×900 inspected", authority: "Browser observation · local-only" },
+      { title: "Rendered mobile surface", date: "2026-08-17 09:30", result: "390×844 inspected", authority: "Browser observation · local-only" },
       { title: "Source syntax", date: "2026-08-16 21:40", result: "app.js parsed", authority: "Node syntax receipt · file evidence" }
     ]
   },
@@ -406,11 +416,11 @@ const projectSurfaces = {
       { id: "multistock-family-desk", routeType: "Hallway", conversationId: "familyMorning", presenceId: "kintsu-desk", label: "Family · Kintsu Desk", state: "Connected", activity: "Project presence" }
     ],
     activity: [
-      { time: "Yesterday", title: "Portal request lane recorded", detail: "Project fixture states the lane was deployed; no live deployment check is available here." },
+      { time: "Yesterday", title: "Portal request lane recorded", detail: "Local project history reports the lane as deployed; no live deployment check is available here." },
       { time: "Yesterday", title: "Meeting guide prepared", detail: "SCV, SGD, and unified-application boundaries were carried into project continuity." }
     ],
     evidence: [
-      { title: "Deployment state", date: "2026-08-16 11:20", result: "Unavailable offline", authority: "Historical project fixture · not a live receipt" },
+      { title: "Deployment state", date: "2026-08-16 11:20", result: "Unavailable offline", authority: "Historical project state · no live receipt" },
       { title: "Meeting guide", date: "2026-08-14 14:05", result: "Known project artifact", authority: "Project continuity · file not read in this surface" }
     ]
   }
@@ -462,7 +472,7 @@ const TODAY = "2026-08-17";
 const YESTERDAY = "2026-08-16";
 
 const SUBJECT_VIEW_LABELS = {
-  house: ["Overview", "Settings & Status", "Memories & Lessons"],
+  house: ["Overview", "Mechanics", "Memories & Lessons"],
   project: ["Overview", "Status", "Evidence"],
   direct: ["Session", "Status", "Memories"],
   hallway: ["Thread", "Status", "Record"]
@@ -498,6 +508,8 @@ const state = {
   profileReturnId: null,
   houseReturn: null,
   librarySelection: null,
+  mechanicsCategory: "all",
+  mechanicsQuery: "",
   density: "comfortable",
   textScale: "standard",
   measure: "focused",
@@ -566,6 +578,15 @@ function roomRecipientLabel(roomId) {
   return `${roomId.charAt(0).toUpperCase()}${roomId.slice(1)} room`;
 }
 
+function renderBellIcon() {
+  return `
+    <svg class="bell-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>
+      <path d="M10 21h4"></path>
+    </svg>`;
+}
+
+
 function activeBellNotifications(threadId = null) {
   return bellNotifications.filter(notification => (
     !notification.acknowledged
@@ -573,6 +594,11 @@ function activeBellNotifications(threadId = null) {
     && (threadId === null || notification.threadId === threadId)
   ));
 }
+
+function hallwayUnreadCount(threadId) {
+  return hallwayReadState.get(threadId)?.unreadMessageIndexes.length ?? 0;
+}
+
 
 function renderAttentionBadges(unread, targeted, accessible = true) {
   if (unread === 0 && targeted === 0) return "";
@@ -592,7 +618,7 @@ function hallwayInboxEntries() {
   return Object.values(conversations)
     .filter(item => item.kind === "hallway")
     .map(item => {
-      const unread = hallwayReadState.get(item.id)?.unread ?? 0;
+      const unread = hallwayUnreadCount(item.id);
       const notifications = activeBellNotifications(item.id);
       const latestNotice = notifications.at(-1);
       const latestMessage = item.messages.at(-1);
@@ -622,7 +648,7 @@ function renderBellToggle() {
   bellToggle.dataset.hasAttention = String(totals.targeted > 0);
   bellToggle.setAttribute("aria-label", label);
   bellToggle.innerHTML = `
-    <span class="bell-label">Bell</span>
+    ${renderBellIcon()}
     ${renderAttentionBadges(totals.unread, totals.targeted, false)}`;
 }
 
@@ -656,7 +682,7 @@ function renderSubjectRow(item, active, live) {
   const rowMeta = item.kind === "hallway"
     ? `${item.date} · ${hallwayRecords[item.hallwayId].name} · ${item.participants.join(", ")}`
     : item.listPreview;
-  const unread = item.kind === "hallway" ? hallwayReadState.get(item.id)?.unread ?? 0 : 0;
+  const unread = item.kind === "hallway" ? hallwayUnreadCount(item.id) : 0;
   const targeted = item.kind === "hallway" ? activeBellNotifications(item.id).length : 0;
   return `
     <button class="subject-row ${active ? "is-active" : ""}" type="button" data-conversation="${escapeHtml(item.id)}" data-subject-kind="${escapeHtml(item.kind)}" aria-current="${active ? "page" : "false"}">
@@ -688,7 +714,7 @@ function renderMessage(message, index, selected) {
           <strong>${escapeHtml(message.author)}</strong>
           <span>${escapeHtml(message.time)}</span>
           ${recipients ? `<span class="message-recipient">To ${escapeHtml(recipients)}</span>` : ""}
-          ${message.local ? '<span class="message-delivery">Local · undelivered</span>' : ""}
+          ${message.local ? '<span class="message-delivery">Local-only · undelivered</span>' : ""}
         </p>
         <div class="message-bubble" tabindex="0" role="button" aria-label="Inspect message from ${escapeHtml(message.author)}">${escapeHtml(message.text)}</div>
       </div>
@@ -696,9 +722,6 @@ function renderMessage(message, index, selected) {
   `;
 }
 
-function renderDisclosure(copy) {
-  return `<aside class="specimen-disclosure" role="note">${escapeHtml(copy)}</aside>`;
-}
 
 function renderEmptyState(headline, reasons = []) {
   return `
@@ -930,10 +953,11 @@ function acknowledgeHallwayThread(threadId) {
   const item = conversations[threadId];
   const readState = hallwayReadState.get(threadId);
   if (!item || item.kind !== "hallway" || !readState) return;
-  readState.unread = 0;
+  const coveredThrough = item.messages.length - 1;
+  readState.unreadMessageIndexes = readState.unreadMessageIndexes.filter(messageIndex => messageIndex > coveredThrough);
   readState.readThrough = item.messages.at(-1)?.time ?? readState.readThrough;
   bellNotifications.forEach(notification => {
-    if (notification.threadId === threadId && notification.messageIndex < item.messages.length) {
+    if (notification.threadId === threadId && notification.messageIndex <= coveredThrough) {
       notification.acknowledged = true;
     }
   });
@@ -985,6 +1009,14 @@ function openSettingsFromSwitcher(trigger) {
   openDrawerView("settings", settingsDoor);
 }
 
+function openHouseMechanics() {
+  state.mechanicsCategory = "all";
+  state.mechanicsQuery = "";
+  setDrawerView("root", null, false);
+  navigateToSubjectView("house", "state");
+  focusActiveSubjectView();
+}
+
 function switcherCommandRegistry() {
   const commands = [];
   Object.values(conversations).forEach(item => {
@@ -1032,7 +1064,7 @@ function switcherCommandRegistry() {
     id: "open:settings",
     verb: "Open",
     label: "Interface settings",
-    path: "House › Interface settings",
+    path: "Account › Interface settings",
     keywords: "settings preferences interface density text contrast motion status",
     shortcut: null,
     available: true,
@@ -1047,7 +1079,7 @@ function switcherCommandRegistry() {
     keywords: "recall memory search akasha",
     shortcut: null,
     available: false,
-    reason: "Host offline in this local specimen",
+    reason: "Host offline · Recall unavailable",
     priority: 300,
     execute: null
   });
@@ -1146,92 +1178,400 @@ function executeSwitcherCommand(id) {
 const HOUSE_ROOMS = ["Kintsu room", "Kodo room", "Tuner room"];
 const PROJECT_ROOMS = ["Kintsu", "Kodo", "Tuner", "Family Hallway", "Workshop Hallway"];
 
-// censused from source 2026-08-17 (local://athanor-variables.md); read-only facts, not controls
-const HOUSE_VARIABLES = [
-  {
-    eyebrow: "Variables · Recall floors",
-    facts: [
-      ["Semantic similarity floor", "0.40 · calibrated to Nemotron-3-Embed-1B Q4"],
-      ["Content similarity floor", "0.30 · same calibration"],
-      ["Top-k per lane", "8 semantic · 8 content · substrate accepts 1–1000"],
-      ["Automatic recall", "On"],
-      ["Temporal decay", "On"]
-    ],
-    note: "House-wide, read from source. This specimen displays; it does not tune."
-  },
-  {
-    eyebrow: "Variables · Recall injection ceiling",
-    facts: [
-      ["Candidates kept", "5"],
-      ["Candidate excerpt", "900 chars"],
-      ["Memory handle body", "6000 chars"],
-      ["Thread neighbours", "6 · 500 chars each"],
-      ["Canon matches", "6 · 3 files each"]
-    ],
-    note: "No single token budget exists; this table is the real ceiling."
-  },
-  {
-    eyebrow: "Variables · Lessons",
-    facts: [
-      ["Lesson similarity floor", "0.15"],
-      ["Working set", "6 lessons"],
-      ["Anamnesis counsel limit", "10 · max 50"]
-    ]
-  },
-  {
-    eyebrow: "Variables · GIGA",
-    facts: [
-      ["Enabled", "Yes · process env"],
-      ["Queue lease", "300 s"],
-      ["Retry delay", "30 s"],
-      ["Model timeout", "60 s"],
-      ["Attempts", "≤ 5 · database-enforced"],
-      ["Classifier context", "32768 · keep-alive 30 m"]
-    ]
-  },
-  {
-    eyebrow: "Variables · Embedding",
-    facts: [
-      ["Model", "Nemotron-3-Embed-1B Q4"],
-      ["Dimension", "2048"],
-      ["Endpoint", "127.0.0.1:11434 · Ollama"]
-    ]
-  },
-  {
-    eyebrow: "Variables · Clusters & chunking",
-    facts: [
-      ["Cluster rebuild", "250 chunks · 5% unseen · 7 days"],
-      ["Staleness nudge", "0.15 unseen fraction"],
-      ["Chunk sizing", "4000 section · 2200 piece · 200 overlap"]
-    ],
-    note: "Changing chunk sizing invalidates existing embeddings."
-  },
-  {
-    eyebrow: "Variables · Backup retention",
-    facts: [
-      ["Rust organ keeps", "3"],
-      ["Shell organ keeps", "14"]
-    ],
-    note: "Two organs disagree; unresolved substrate seam."
-  },
-  {
-    eyebrow: "Variables · Per-room knobs",
-    facts: [
-      ["Recall telemetry", "per-room · house env can override"],
-      ["Worker routing mode", "per-room"],
-      ["Model default", "per-room"]
-    ],
-    note: "The only per-room knobs in source; every tuning value above is house-wide."
-  }
-];
+// local interaction snapshot from the 2026-08-18 source census; Host authority remains disconnected
+function mechanic(id, label, value, {
+  defaultValue = value,
+  scope = "House",
+  owner = "Code",
+  mutability = "Read-only",
+  secrecy = "Public",
+  apply = "Restart",
+  health = "Defined",
+  consequence
+}) {
+  return { id, label, value, defaultValue, scope, owner, mutability, secrecy, apply, health, consequence };
+}
 
-function renderVariableSection(section) {
+const HOUSE_MECHANICS_SNAPSHOT = {
+  capturedAt: "2026-08-18",
+  revision: "source-census-2026-08-18",
+  connection: "Host offline",
+  categories: [
+    {
+      id: "recall-context",
+      label: "Recall & Context",
+      summary: "Retrieval gates, injection bounds, context budgets, and compaction pressure.",
+      rows: [
+        mechanic("recall.semantic-floor", "Semantic similarity floor", "0.40", {
+          health: "Calibrated",
+          consequence: "Lower values admit weaker semantic matches; higher values refuse more retrieval candidates."
+        }),
+        mechanic("recall.content-floor", "Content similarity floor", "0.30", {
+          health: "Calibrated",
+          consequence: "Controls the weakest content lane match allowed into ranked Recall evidence."
+        }),
+        mechanic("recall.top-k", "Recall candidate breadth", "8 semantic · 8 content", {
+          consequence: "Sets the pre-ranking breadth for each retrieval lane before evidence is merged."
+        }),
+        mechanic("recall.injection", "Automatic injection ceiling", "5 candidates · 900-char excerpts · 6000-char bodies", {
+          owner: "Adapter",
+          consequence: "Bounds automatic context growth and prevents one retrieval pass from flooding the conversation."
+        }),
+        mechanic("context.kodo-budget", "Kodo context budget", "1,000,000 tokens · compact at 90%", {
+          scope: "Kodo room",
+          owner: "Adapter",
+          health: "Configured",
+          consequence: "Defines Kodo's larger working window and the point where compaction becomes mandatory."
+        }),
+        mechanic("context.room-budget", "Default room context budget", "400,000 tokens · compact at 70%", {
+          scope: "All other rooms",
+          owner: "Adapter",
+          health: "Configured",
+          consequence: "Defines the ordinary room window and leaves a larger safety margin before model limits."
+        }),
+        mechanic("context.nudge-bands", "Context pressure bands", "40,000 tokens · warn 20 points early", {
+          owner: "Adapter",
+          consequence: "Controls when context-pressure nudges appear and how early the operator sees compaction risk."
+        }),
+        mechanic("timeout.auto-context", "Automatic context timeout", "2s", {
+          owner: "Adapter",
+          consequence: "A slow background context lane yields rather than blocking the conversational turn."
+        }),
+        mechanic("timeout.recall", "Recall and Anamnesis timeout", "120s", {
+          owner: "Adapter",
+          consequence: "Bounds explicit deep retrieval and counsel reads before the tool returns a timeout."
+        })
+      ]
+    },
+    {
+      id: "memory-lessons",
+      label: "Memory, Lessons & Anamnesis",
+      summary: "Durable writes, lesson firing, counsel reads, and paper-boat limits.",
+      rows: [
+        mechanic("memory.write-timeout", "Durable write timeout", "90s", {
+          owner: "Adapter",
+          consequence: "Bounds Remember and other PostgreSQL-authoritative write receipts."
+        }),
+        mechanic("lesson.relevance-floor", "Lesson relevance floor", "0.15", {
+          health: "Calibrated",
+          consequence: "Filters weak lesson matches before the working set can influence a task."
+        }),
+        mechanic("lesson.working-set", "Lesson working set", "6 lessons", {
+          owner: "Adapter",
+          consequence: "Caps the number of lessons braided into one task context."
+        }),
+        mechanic("lesson.trigger-guard", "Lesson trigger guard", "32 patterns · 300ms", {
+          owner: "Adapter",
+          consequence: "Bounds deterministic trigger scanning and prevents pathological lesson matchers from stalling a turn."
+        }),
+        mechanic("anamnesis.read-limit", "Anamnesis read bounds", "10 default · 50 maximum", {
+          owner: "PostgreSQL",
+          mutability: "Host-writable",
+          apply: "Live",
+          health: "Host offline",
+          consequence: "Controls how much lived counsel one explicit Cabinet read may return."
+        }),
+        mechanic("paper-boat.guardrails", "Paper-boat guardrails", "64 KiB body · 64 unboated rows", {
+          owner: "PostgreSQL",
+          apply: "Live",
+          consequence: "Prevents session continuity from accumulating an unbounded unsent backlog."
+        })
+      ]
+    },
+    {
+      id: "giga-embeddings",
+      label: "GIGA & Embeddings",
+      summary: "Stage 1 gates, leases, source windows, model context, and vector health.",
+      rows: [
+        mechanic("giga.integration-gate", "GIGA integration gate", "Environment-gated", {
+          owner: "Environment",
+          mutability: "Environment-owned",
+          health: "Host offline",
+          consequence: "Controls whether Stage 1 processing may start at all."
+        }),
+        mechanic("giga.claim-owner", "GIGA claim ownership", "One owner per leased event", {
+          owner: "PostgreSQL",
+          apply: "Live",
+          consequence: "Prevents two workers from processing the same event concurrently."
+        }),
+        mechanic("giga.source-window", "GIGA source window", "8 sources · 8 KiB each · 24 KiB total", {
+          consequence: "Bounds evidence carried into one candidate-generation pass."
+        }),
+        mechanic("giga.lease-attempts", "GIGA lease and attempts", "3600s lease · 5 attempts · 1 candidate", {
+          owner: "PostgreSQL",
+          apply: "Live",
+          consequence: "Controls recovery from abandoned work and caps retry amplification."
+        }),
+        mechanic("giga.model-context", "GIGA model context", "32768 tokens · 30m keep-alive", {
+          owner: "Environment",
+          mutability: "Environment-owned",
+          consequence: "Defines the local generation window and how long the model remains warm."
+        }),
+        mechanic("embedding.identity", "Embedding identity", "nomic-embed-text · 768 dimensions", {
+          owner: "Environment",
+          mutability: "Environment-owned",
+          apply: "Migration / reindex",
+          health: "Configured",
+          consequence: "Changing either value invalidates stored vectors and requires a complete re-embedding."
+        }),
+        mechanic("embedding.endpoint", "Embedding endpoint", "Configured · value redacted", {
+          owner: "Environment",
+          mutability: "Environment-owned",
+          secrecy: "Sensitive",
+          health: "Host offline",
+          consequence: "Selects the local or consented remote embedding service without exposing its address here."
+        })
+      ]
+    },
+    {
+      id: "host-delivery",
+      label: "Host, Delivery & Hallways",
+      summary: "Connection timing, delivery health, Hallway bounds, and Bell escalation policy.",
+      rows: [
+        mechanic("host.request-timeout", "Host request timeout", "3s", {
+          owner: "Adapter",
+          consequence: "Keeps ordinary Host calls from freezing the operator surface."
+        }),
+        mechanic("host.diagnostic-timeout", "Host diagnostic timeout", "8s", {
+          owner: "Adapter",
+          consequence: "Allows bounded health inspection more time than ordinary interaction calls."
+        }),
+        mechanic("host.identity-tuple", "Authenticated identity tuple", "House · room · spirit · session", {
+          owner: "Host runtime",
+          apply: "Session start",
+          health: "Host offline",
+          consequence: "Binds every trusted operation to the current House presence without client-supplied identity."
+        }),
+        mechanic("hallway.guardrails", "Hallway guardrails", "32 KiB body · 32 rooms · reads 50 / 200 max", {
+          owner: "PostgreSQL",
+          apply: "Live",
+          consequence: "Bounds message size, membership fanout, and one read request."
+        }),
+        mechanic("delivery.channels", "Akasha and NATS delivery", "Unavailable · Host offline", {
+          owner: "Host runtime",
+          apply: "Live",
+          health: "Host offline",
+          consequence: "Reports durable authority and immediate-delivery reach when the Host connects."
+        }),
+        mechanic("delivery.retry-state", "Delivery instance and retries", "Unavailable", {
+          owner: "Host runtime",
+          apply: "Live",
+          health: "Host offline",
+          consequence: "Would expose the active delivery instance, pending retries, and last failure."
+        }),
+        mechanic("bell.wake-policy", "Bell and wake escalation", "Schema-compatible · policy unset", {
+          owner: "PostgreSQL",
+          mutability: "Host-writable",
+          apply: "Live",
+          health: "Policy absent",
+          consequence: "Keeps future live knocks and wake authority explicit before autonomous escalation is enabled."
+        })
+      ]
+    },
+    {
+      id: "rooms-sessions",
+      label: "Rooms & Sessions",
+      summary: "Room identity, Recall policy, routing, model defaults, and active presences.",
+      rows: [
+        mechanic("room.state", "Operator and embodied spirit", "PostgreSQL room state", {
+          scope: "Per room",
+          owner: "PostgreSQL",
+          mutability: "Host-writable",
+          apply: "Live",
+          health: "Host offline",
+          consequence: "Changes the room's trusted operator or embodied spirit and refreshes its live declaration."
+        }),
+        mechanic("room.recall-policy", "Recall policy", "Per room", {
+          scope: "Per room",
+          owner: "PostgreSQL",
+          mutability: "Host-writable",
+          apply: "Live",
+          health: "Host offline",
+          consequence: "Selects whether proactive Recall resolves automatically or follows an explicit room mode."
+        }),
+        mechanic("room.routing-mode", "Worker routing mode", "Per room", {
+          scope: "Per room",
+          owner: "PostgreSQL",
+          mutability: "Host-writable",
+          apply: "Live",
+          health: "Host offline",
+          consequence: "Controls whether bounded work defaults through House worker routing."
+        }),
+        mechanic("room.model-default", "OMP model default", "Per room", {
+          scope: "Per room",
+          owner: "PostgreSQL",
+          mutability: "Host-writable",
+          apply: "Next session",
+          health: "Host offline",
+          consequence: "Chooses the room's default OMP model selector at the next applicable session boundary."
+        }),
+        mechanic("room.presences", "Active room presences", "Unavailable", {
+          scope: "Per room",
+          owner: "PostgreSQL",
+          apply: "Live",
+          health: "Host offline",
+          consequence: "Would show joined sessions, embodied spirits, and their delivery cursors."
+        }),
+        mechanic("session.delivery-cursor", "Session delivery cursor", "Per authenticated session", {
+          scope: "Per session",
+          owner: "PostgreSQL",
+          apply: "Live",
+          consequence: "Prevents the same durable Hallway attention from being injected twice into one session."
+        })
+      ]
+    },
+    {
+      id: "backups",
+      label: "Backups",
+      summary: "Retention policy, last success, and database reachability.",
+      rows: [
+        mechanic("backup.retention", "Backup retention", "3 Rust · 14 shell", {
+          owner: "Deployment scripts",
+          mutability: "Code-owned",
+          apply: "Deploy",
+          health: "Divergent",
+          consequence: "Two cleanup paths currently retain different counts and should converge before either becomes editable."
+        }),
+        mechanic("backup.last-success", "Last successful backup", "Unavailable", {
+          owner: "Host runtime",
+          apply: "Live",
+          health: "Host offline",
+          consequence: "Would prove the newest PostgreSQL preservation point and its age."
+        }),
+        mechanic("database.pool-health", "Database pool and connect health", "Unavailable", {
+          owner: "Host runtime",
+          apply: "Live",
+          health: "Host offline",
+          consequence: "Would expose pool saturation, connection reachability, and the last database failure."
+        })
+      ]
+    },
+    {
+      id: "advanced",
+      label: "Advanced Guardrails",
+      summary: "Canonical evidence bounds, neighbor context, chunking, clustering, and secret handling.",
+      rows: [
+        mechanic("recall.canon-bounds", "Canon injection bounds", "6 matches · 3 files", {
+          owner: "Adapter",
+          consequence: "Caps authoritative canon evidence returned through one Recall pass."
+        }),
+        mechanic("recall.neighbor-bounds", "Thread neighbor bounds", "6 neighbors · 500 chars each", {
+          owner: "Adapter",
+          consequence: "Adds bounded chronology around a matched memory without loading whole threads."
+        }),
+        mechanic("chunk.bounds", "Memory chunk bounds", "400–1200 characters", {
+          apply: "Migration / reindex",
+          consequence: "Changing chunk shape alters retrieval granularity and invalidates existing embedding assumptions."
+        }),
+        mechanic("cluster.rebuild", "Cluster rebuild trigger", "500 new chunks or 7 days", {
+          consequence: "Controls when the memory taxonomy is recomputed from accumulated semantic material."
+        }),
+        mechanic("secret.health-only", "Secret exposure", "Presence and health only", {
+          owner: "Host runtime",
+          mutability: "Never editable here",
+          secrecy: "Secret-health-only",
+          apply: "N/A",
+          health: "Enforced",
+          consequence: "Host tokens, database URLs, and passwords never cross into the GUI snapshot."
+        })
+      ]
+    }
+  ]
+};
+
+function mechanicsHealthTone(health) {
+  if (/offline|absent|divergent|unavailable/i.test(health)) return "attention";
+  if (/calibrated|configured|defined|enforced/i.test(health)) return "steady";
+  return "quiet";
+}
+
+function mechanicsEntries() {
+  const query = state.mechanicsQuery.trim().toLowerCase();
+  const categories = query || state.mechanicsCategory === "all"
+    ? HOUSE_MECHANICS_SNAPSHOT.categories
+    : HOUSE_MECHANICS_SNAPSHOT.categories.filter(category => category.id === state.mechanicsCategory);
+  return categories.flatMap(category => category.rows
+    .filter(row => {
+      if (!query) return true;
+      return [category.label, category.summary, ...Object.values(row)].join(" ").toLowerCase().includes(query);
+    })
+    .map(row => ({ category, row })));
+}
+
+function renderMechanicRow({ category, row }) {
   return `
-    <section class="state-section">
-      <span class="eyebrow">${escapeHtml(section.eyebrow)}</span>
-      ${renderFactList(section.facts)}
-      ${section.note ? `<p>${escapeHtml(section.note)}</p>` : ""}
+    <details class="mechanics-row" data-mechanic-id="${escapeHtml(row.id)}">
+      <summary>
+        <span class="mechanics-row-title"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(category.label)}</small></span>
+        <span class="mechanics-row-value"><small>Effective</small><code>${escapeHtml(row.value)}</code></span>
+        <span class="mechanics-row-flags" aria-label="${escapeHtml(`${row.health}; ${row.mutability}`)}">
+          <span data-tone="${mechanicsHealthTone(row.health)}">${escapeHtml(row.health)}</span>
+          <span data-tone="quiet">${escapeHtml(row.mutability)}</span>
+        </span>
+      </summary>
+      <div class="mechanics-row-body">
+        <dl>
+          <div><dt>Default</dt><dd>${escapeHtml(row.defaultValue)}</dd></div>
+          <div><dt>Scope</dt><dd>${escapeHtml(row.scope)}</dd></div>
+          <div><dt>Owner</dt><dd>${escapeHtml(row.owner)}</dd></div>
+          <div><dt>Apply</dt><dd>${escapeHtml(row.apply)}</dd></div>
+          <div><dt>Secrecy</dt><dd>${escapeHtml(row.secrecy)}</dd></div>
+        </dl>
+        <p><strong>Consequence.</strong> ${escapeHtml(row.consequence)}</p>
+      </div>
+    </details>`;
+}
+
+function renderHouseMechanics() {
+  const categoryButtons = [
+    { id: "all", label: "All", count: HOUSE_MECHANICS_SNAPSHOT.categories.reduce((sum, category) => sum + category.rows.length, 0) },
+    ...HOUSE_MECHANICS_SNAPSHOT.categories.map(category => ({ id: category.id, label: category.label, count: category.rows.length }))
+  ];
+  return `
+    <section class="mechanics-observatory" aria-labelledby="mechanics-title">
+      <header class="mechanics-lead">
+        <span class="eyebrow">House mechanics</span>
+        <h2 id="mechanics-title">Mechanical observatory</h2>
+        <p>Effective values, ownership, health, and consequence from the current source census.</p>
+        <div class="mechanics-snapshot-status" aria-label="Snapshot status">
+          <span data-tone="attention">${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.connection)}</span>
+          <span>Source census · ${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.capturedAt)}</span>
+          <span>${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.revision)}</span>
+        </div>
+      </header>
+      <div class="mechanics-controls">
+        <label class="mechanics-search">
+          <span>Search every mechanism</span>
+          <input type="search" data-mechanics-search value="${escapeHtml(state.mechanicsQuery)}" placeholder="Recall, timeout, Hallway, backup…" autocomplete="off">
+        </label>
+        <nav class="mechanics-categories" aria-label="Mechanical observatory categories">
+          ${categoryButtons.map(category => `
+            <button type="button" data-mechanics-category="${escapeHtml(category.id)}" aria-pressed="${String(state.mechanicsCategory === category.id)}">
+              <span>${escapeHtml(category.label)}</span><small>${category.count}</small>
+            </button>`).join("")}
+        </nav>
+      </div>
+      <p class="mechanics-results-status" role="status" aria-live="polite"></p>
+      <div class="mechanics-results"></div>
+      <footer>Disconnected surface · PostgreSQL-backed controls may be Host-writable later; every control remains read-only here.</footer>
     </section>`;
+}
+
+function renderMechanicsResults() {
+  const observatory = timeline.querySelector(".mechanics-observatory");
+  if (!observatory) return;
+  const entries = mechanicsEntries();
+  const query = state.mechanicsQuery.trim();
+  const category = HOUSE_MECHANICS_SNAPSHOT.categories.find(candidate => candidate.id === state.mechanicsCategory);
+  observatory.querySelectorAll("[data-mechanics-category]").forEach(button => {
+    button.setAttribute("aria-pressed", String(button.dataset.mechanicsCategory === state.mechanicsCategory));
+  });
+  observatory.querySelector(".mechanics-results-status").textContent = query
+    ? `${entries.length} mechanism${entries.length === 1 ? "" : "s"} across all categories for “${query}”`
+    : `${entries.length} mechanism${entries.length === 1 ? "" : "s"} · ${category?.label ?? "All categories"}`;
+  observatory.querySelector(".mechanics-results").innerHTML = entries.length > 0
+    ? entries.map(renderMechanicRow).join("")
+    : '<div class="mechanics-empty"><strong>No mechanism matches that search.</strong><span>Try Recall, timeout, Hallway, room, or backup.</span></div>';
 }
 
 function renderCardPicker(verb, attr, options) {
@@ -1258,7 +1598,7 @@ function renderCollectionDoor() {
 
 function renderConversationList() {
   if (state.mode === "house") {
-    conversationList.innerHTML = '<div class="house-scope-note"><strong>House scope</strong><span>Shared memory, lessons, settings, and status.</span></div>';
+    conversationList.innerHTML = '<div class="house-scope-note"><strong>House scope</strong><span>Shared mechanics, memory, lessons, and status.</span></div>';
     return;
   }
   conversationList.innerHTML = visibleConversations()
@@ -1311,7 +1651,7 @@ function renderHeaderContext(item) {
     return renderSessionControl(item);
   }
   if (state.activeView === "state") {
-    if (item.kind === "house") return renderHeaderVerb("Interface settings", "settings");
+    if (item.kind === "house") return renderHeaderVerb("Local interface settings", "settings");
     if (item.kind === "direct") return renderHeaderChip(item.body);
     if (item.kind === "hallway") return renderHeaderChip(item.endState === "open" ? item.connection : THREAD_STATE_LABELS[item.endState]);
     return renderHeaderChip(projectSurfaces[item.id].workState);
@@ -1463,7 +1803,6 @@ function renderProjectConversation(item) {
 
 function renderProjectSurface(item) {
   const project = projectSurfaces[item.id];
-  const disclosure = renderDisclosure("Local specimen · no Host connection · project states, activity, evidence, and links are not durable records.");
   const rooms = `<div class="project-room-list">${project.rooms.map(room => `<span>${escapeHtml(room)}</span>`).join("")}</div>`;
   const views = {
     live: `
@@ -1535,7 +1874,7 @@ function renderProjectSurface(item) {
           })).join("")}
       </div>`
   };
-  timeline.innerHTML = disclosure + views[state.activeView];
+  timeline.innerHTML = views[state.activeView];
   timeline.scrollTop = 0;
 }
 
@@ -1558,55 +1897,23 @@ function houseSediment() {
 }
 
 function renderHouseSurface() {
-  const disclosure = renderDisclosure("House scope · local specimen · PostgreSQL effects and live Host state are unavailable.");
   const views = {
     live: `
       <div class="overview-grid">
-        ${renderOverviewHero("House overview", "Solarisael House", "Shared settings, memories, lessons, and substrate state. Spirit-room memory stays inside its room.")}
+        ${renderOverviewHero("House overview", "Solarisael House", "Shared mechanics, memories, lessons, and substrate state. Spirit-room memory stays inside its room.")}
         <section class="specimen-card"><h3>House record</h3><p>${houseSurface.memories.length} memories and ${houseSurface.lessons.length} lessons on the shared shelves.</p><button type="button" data-open-subject-view="durable">Open the record</button></section>
-        <section class="specimen-card"><h3>House settings</h3><p>Local interface and House behavior doors.</p><button type="button" data-open-subject-view="state">Open settings & status</button></section>
+        <section class="specimen-card"><h3>Mechanical observatory</h3><p>${HOUSE_MECHANICS_SNAPSHOT.categories.length} categories with effective values, ownership, health, and consequence.</p><button type="button" data-open-subject-view="state">Open mechanics</button></section>
         <section class="specimen-card"><h3>Ownership</h3><p>House commons do not absorb Kintsu, Kodo, or Tuner room memory.</p></section>
       </div>`,
-    state: `
-      <div class="specimen-stack">
-        ${renderSpecimenLead("House settings & status", "Solarisael House")}
-        <section class="state-section">
-          <span class="eyebrow">Recall</span>
-          ${renderFactList([
-            ["Policy", "House"],
-            ["Transport", "Offline"]
-          ])}
-        </section>
-        <section class="state-section">
-          <span class="eyebrow">Worker routing</span>
-          ${renderFactList([
-            ["Mode", "Enabled"],
-            ["Active kittens", 0]
-          ])}
-        </section>
-        ${HOUSE_VARIABLES.map(renderVariableSection).join("")}
-        <section class="state-section">
-          <span class="eyebrow">Status channels</span>
-          ${renderFactList([
-            ["Host", "Offline"],
-            ["PostgreSQL effects", "Unavailable from this specimen"],
-            ["Recall", "Unavailable"],
-            ["Delivery", "Offline"]
-          ])}
-        </section>
-        <section class="state-section">
-          <span class="eyebrow">Activity</span>
-          ${renderHistoryEvent({ time: "Today", title: "Scoped Projects verified", detail: "Containment, isolation, and selection semantics passed." })}
-          ${renderHistoryEvent({ time: "Today", title: "Memory ownership chosen", detail: "House shelf at the Athanor mark; spirit shelf inside each room." })}
-        </section>
-      </div>`,
+    state: renderHouseMechanics(),
     durable: `
-      <div class="specimen-stack">
+      <div class="specimen-stack house-record-stack">
         ${renderSpecimenLead("House record", "Memories & Lessons")}
         ${houseSediment().map(renderDurableEntry).join("")}
       </div>`
   };
-  timeline.innerHTML = disclosure + views[state.activeView];
+  timeline.innerHTML = views[state.activeView];
+  if (state.activeView === "state") renderMechanicsResults();
   timeline.scrollTop = 0;
 }
 
@@ -1622,7 +1929,6 @@ function renderRoomMemories(item) {
         library: { owner: item.id, type: "memory", id: entry.id }
       })).join("");
   timeline.innerHTML = `
-    ${renderDisclosure(`${item.name} room scope · local specimen · this shelf does not include House or sibling-room memories.`)}
     <div class="specimen-stack">
       ${renderSpecimenLead("Room record", item.name)}
       ${entries}
@@ -1783,7 +2089,6 @@ function renderSubjectState(item) {
         ])}
       </section>`;
   timeline.innerHTML = `
-    ${renderDisclosure("Local specimen · no Host connection · displayed states and receipts are not durable records.")}
     <div class="specimen-stack">
       ${renderSpecimenLead("State of", item.name)}
       ${liveChannels}
@@ -1845,7 +2150,6 @@ function renderThreadRecordRow(thread, current) {
 function renderHallwayRecordView(item) {
   const record = hallwayRecords[item.hallwayId];
   timeline.innerHTML = `
-    ${renderDisclosure("Local specimen · no Host connection · this record is not a PostgreSQL receipt.")}
     <div class="specimen-stack">
       <section class="membership-card">
         <h2>${escapeHtml(record.name)}</h2>
@@ -1961,7 +2265,7 @@ function renderInspector(item) {
           <strong>${escapeHtml(entry.title)}</strong>
           ${renderFactList([
             [scopeLabel, scope],
-            ["Authority here", "Local specimen metadata · PostgreSQL body not loaded"]
+            ["Authority here", "Local-only metadata · PostgreSQL body unavailable"]
           ])}
           <button type="button" data-clear-library-selection>Clear selection</button>
         </section>`;
@@ -1972,13 +2276,14 @@ function renderInspector(item) {
   if (item.kind === "house") {
     inspectorTitle.textContent = "Solarisael House";
     inspectorContent.innerHTML = `
-      <section class="context-card"><h3>Shared shelf</h3>${renderFactList([
+      <section class="context-card"><h3>House pulse</h3>${renderFactList([
         ["Memories", houseSurface.memories.length],
         ["Lessons", houseSurface.lessons.length],
-        ["Host", "Offline"]
+        ["Mechanics", HOUSE_MECHANICS_SNAPSHOT.categories.reduce((sum, category) => sum + category.rows.length, 0)],
+        ["Host", HOUSE_MECHANICS_SNAPSHOT.connection]
       ])}</section>
       ${renderInspectorDoors("Open", [
-        ["state", "Settings & Status"],
+        ["state", `Mechanics · ${HOUSE_MECHANICS_SNAPSHOT.categories.length} categories`],
         ["durable", `Memories & Lessons · ${houseSurface.memories.length + houseSurface.lessons.length}`]
       ])}`;
     return;
@@ -2440,6 +2745,15 @@ function closeProjectSession(projectItem) {
 
 timeline.addEventListener("click", event => {
   const item = conversations[state.activeId];
+  const mechanicsCategory = event.target.closest("[data-mechanics-category]");
+  if (mechanicsCategory) {
+    state.mechanicsCategory = mechanicsCategory.dataset.mechanicsCategory;
+    state.mechanicsQuery = "";
+    const search = timeline.querySelector("[data-mechanics-search]");
+    if (search) search.value = "";
+    renderMechanicsResults();
+    return;
+  }
   const subjectDoor = event.target.closest("[data-open-subject-view]");
   if (subjectDoor) {
     openSubjectView(subjectDoor.dataset.openSubjectView);
@@ -2490,6 +2804,13 @@ timeline.addEventListener("click", event => {
   shell.dataset.inspectorOpen = "true";
   inspectorToggle.setAttribute("aria-pressed", "true");
   render();
+});
+
+timeline.addEventListener("input", event => {
+  const search = event.target.closest("[data-mechanics-search]");
+  if (!search) return;
+  state.mechanicsQuery = search.value;
+  renderMechanicsResults();
 });
 
 timeline.addEventListener("keydown", event => {
@@ -2708,6 +3029,11 @@ sidebarToggle.addEventListener("click", () => {
 });
 
 sidebarDrawer.addEventListener("click", event => {
+  const mechanicsDoor = event.target.closest("[data-open-house-mechanics]");
+  if (mechanicsDoor) {
+    openHouseMechanics();
+    return;
+  }
   const backButton = event.target.closest("[data-drawer-back]");
   if (backButton) {
     returnDrawerView();
@@ -2759,14 +3085,15 @@ document.addEventListener("keydown", event => {
     event.preventDefault();
     return;
   }
+  if (mobileLayout.matches && shell.dataset.sidebarOpen === "true") {
+    event.preventDefault();
+    closeMobileSidebar();
+    return;
+  }
   if (state.activeId === "house") {
     event.preventDefault();
     leaveHouse();
     return;
-  }
-  if (mobileLayout.matches && shell.dataset.sidebarOpen === "true") {
-    event.preventDefault();
-    closeMobileSidebar();
   }
 });
 

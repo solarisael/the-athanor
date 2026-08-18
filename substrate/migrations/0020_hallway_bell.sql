@@ -6,6 +6,8 @@
 -- attention. Reading acknowledges and quiets the Bell. Ordinary unread is
 -- DERIVED (next_sequence - 1 - read_sequence), never stored per message.
 
+BEGIN;
+
 -- Daily threads: a persistent Hallway contains lightweight day tables.
 CREATE TABLE IF NOT EXISTS hallway_threads (
     id BIGSERIAL PRIMARY KEY,
@@ -115,3 +117,5 @@ SELECT
     ), 0)
 FROM hallway_allowed_rooms ar
 ON CONFLICT (hallway_id, room) DO NOTHING;
+
+COMMIT;

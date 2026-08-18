@@ -30,6 +30,8 @@ the exact implementation record.
   trusted injection, before the model can answer with a child Knock. Allowed
   Knocks claim active sessions as well as idle ones and interrupt the current
   turn only after that authoritative start settlement succeeds.
+  Knock Host commands use a 10-second bounded deadline, and failed claims back
+  off from 5 to 60 seconds instead of hammering the Host every poll interval.
 - The public Pages specimen now self-hosts a subsetted Inter variable font,
   renders repository documentation as local JavaScript-free pages with static
   SVG diagrams, and keeps its disconnected-record claim true by replacing

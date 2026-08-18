@@ -635,6 +635,8 @@ own `message_start` fails locally after 60 seconds; started/completed settlement
 retries stop and release the local doorman after 25 seconds. A claimed or
 started row beyond the root expiry becomes an explicit failure on the next room
 claim.
+Knock Host requests have a 10-second deadline. Failed claims retry with
+exponential 5–60 second backoff so one slow Host cannot create a poll storm.
 Trusted Bell and Knock notices
 contain counts or pointer identities only, never peer prose; claiming a Knock
 does not clear the Bell.

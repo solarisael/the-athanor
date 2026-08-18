@@ -78,6 +78,7 @@ export async function claimHallwayKnock(
     hostCommand(binding, HALLWAY_KNOCK_CLAIM, "hallway"),
     new Set([HALLWAY_KNOCK_CLAIMED]),
     signal,
+    10_000,
   ) as HostResponse & { result?: unknown };
   const result = object(response.result, "Hallway Host omitted the Knock claim result");
   return {
@@ -109,6 +110,7 @@ export async function settleHallwayKnock(
     ),
     new Set([HALLWAY_KNOCK_SETTLED]),
     signal,
+    10_000,
   ) as HostResponse & { result?: unknown };
   return object(response.result, "Hallway Host omitted the Knock settlement result");
 }
@@ -130,12 +132,16 @@ type KnockDoormanState = {
   lastWarningAt: number;
   interruptRequested: boolean;
   interruptSent: boolean;
+  claimFailures: number;
+  nextClaimAt: number;
 };
 
 const KNOCK_START_TIMEOUT_MS = 60_000;
 const KNOCK_SETTLEMENT_TIMEOUT_MS = 25_000;
 const KNOCK_POLL_MS = 2_000;
 const KNOCK_WARNING_COOLDOWN_MS = 60_000;
+const KNOCK_CLAIM_BACKOFF_BASE_MS = 5_000;
+const KNOCK_CLAIM_BACKOFF_MAX_MS = 60_000;
 const knockDoormen = new Map<string, KnockDoormanState>();
 
 function doormanKey(binding: HostBinding): string {
@@ -322,17 +328,27 @@ async function tickDoorman(state: KnockDoormanState): Promise<void> {
     }
     return;
   }
-  if (state.claiming) return;
+  const now = Date.now();
+  if (state.claiming || now < state.nextClaimAt) return;
   const idle = state.ctx?.isIdle?.() === true;
   if (!idle && typeof state.ctx?.abort !== "function") return;
   state.claiming = true;
   try {
     const claim = await claimHallwayKnock(state.binding);
+    state.claimFailures = 0;
+    state.nextClaimAt = 0;
     if (!claim.knock) return;
     clearActiveKnock(state);
     state.active = claim.knock;
     await deliverActiveKnock(state);
   } catch (error) {
+    state.claimFailures += 1;
+    const exponent = Math.min(6, state.claimFailures - 1);
+    const backoff = Math.min(
+      KNOCK_CLAIM_BACKOFF_MAX_MS,
+      KNOCK_CLAIM_BACKOFF_BASE_MS * (2 ** exponent),
+    );
+    state.nextClaimAt = Date.now() + backoff;
     warnDoorman(state, error);
   } finally {
     state.claiming = false;
@@ -375,6 +391,8 @@ export function startHallwayKnockDoorman(pi: any, ctx: any, binding: HostBinding
     lastWarningAt: 0,
     interruptRequested: false,
     interruptSent: false,
+    claimFailures: 0,
+    nextClaimAt: 0,
   };
   state.timer = ctx.setInterval(() => tickDoorman(state), KNOCK_POLL_MS);
   knockDoormen.set(key, state);

@@ -1,6 +1,7 @@
 import { expect, mock, test } from "bun:test";
 
 const commands: Array<Record<string, any>> = [];
+const hostTimeouts: number[] = [];
 const sent: Array<{ message: Record<string, any>; options: Record<string, any> }> = [];
 const timeouts: Array<() => unknown> = [];
 const intervals: Array<() => unknown> = [];
@@ -9,6 +10,7 @@ let claimReturned = false;
 let failFirstStart = true;
 let failEveryStart = false;
 let failEveryCompletion = false;
+let failEveryClaim = false;
 
 mock.module("../solarisael-house-proof/host.ts", () => ({
   HostUnavailable: class HostUnavailable extends Error {},
@@ -27,9 +29,16 @@ mock.module("../solarisael-house-proof/host.ts", () => ({
       message_id: idempotencyKey || `message-${commands.length + 1}`,
     };
   },
-  async sendHostCommand(command: Record<string, any>) {
+  async sendHostCommand(
+    command: Record<string, any>,
+    _acceptedTypes?: ReadonlySet<string>,
+    _signal?: AbortSignal,
+    timeoutMs?: number,
+  ) {
     commands.push(command);
+    hostTimeouts.push(timeoutMs ?? -1);
     if (command.command_or_event_type === "athanor.hallway.knock_claim") {
+      if (failEveryClaim) throw new Error("Athanor Host timed out after 10000ms");
       if (claimReturned) {
         return {
           command_or_event_type: "athanor.hallway.knock_claimed",
@@ -141,6 +150,7 @@ test("claims one pointer-only Knock and retries its bounded turn settlement", as
     .filter((command) => command.command_or_event_type === "athanor.hallway.knock_settle")
     .map((command) => command.hallway_knock_settle.outcome);
   expect(injectedSettlements).toEqual(["started"]);
+  expect(hostTimeouts.slice(0, 2)).toEqual([10_000, 10_000]);
 
   await noteHallwayKnockTurnStart(binding, "5af35bb5-e9a1-4e58-849b-b78b6614bc15");
   await noteHallwayKnockTurnEnd(binding);
@@ -227,4 +237,31 @@ test("claims one pointer-only Knock and retries its bounded turn settlement", as
   await noteHallwayKnockTurnEnd(activeBinding);
   expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("completed");
   await stopHallwayKnockDoorman(activeBinding);
+
+  const backoffOriginalNow = Date.now;
+  let backoffNow = 10_000;
+  Date.now = () => backoffNow;
+  const backoffBinding = { ...binding, session: "session-claim-backoff" };
+  try {
+    claimReturned = false;
+    failEveryClaim = true;
+    startHallwayKnockDoorman(pi, ctx, backoffBinding);
+    await timeouts[5]();
+    const claimsAfterFailure = commands.filter(
+      command => command.command_or_event_type === "athanor.hallway.knock_claim",
+    ).length;
+    await intervals[5]();
+    expect(commands.filter(
+      command => command.command_or_event_type === "athanor.hallway.knock_claim",
+    )).toHaveLength(claimsAfterFailure);
+    backoffNow += 5_001;
+    await intervals[5]();
+    expect(commands.filter(
+      command => command.command_or_event_type === "athanor.hallway.knock_claim",
+    )).toHaveLength(claimsAfterFailure + 1);
+  } finally {
+    Date.now = backoffOriginalNow;
+    failEveryClaim = false;
+    await stopHallwayKnockDoorman(backoffBinding);
+  }
 });

@@ -20,6 +20,10 @@ Hosts and one stable OMP loader. That premature label remains attached to the
 immutable installed artifact and its evidence; it is not the active product
 version or a claim that the product has reached 1.0.
 
+**See it:** [open the public interface specimen](https://solarisael.github.io/the-athanor/).
+It uses sanitized browser-only fixtures and makes no Host, database, delivery,
+or persistence claim.
+
 ## Choose your entrance
 
 The project has one architecture and three useful ways into it:

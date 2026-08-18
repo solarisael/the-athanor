@@ -4,18 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>The Athanor</title>
+  <link rel="stylesheet" href="colors.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <main class="app-shell" data-sidebar-open="false" data-inspector-open="true">
     <aside class="sidebar" aria-label="Conversations and projects">
-      <header class="house-mark">
-        <div class="house-glyph" aria-hidden="true">✦</div>
-        <div>
+      <button class="house-mark" type="button" data-house-door aria-pressed="false">
+        <span class="house-glyph" aria-hidden="true">✦</span>
+        <span>
           <strong>The Athanor</strong>
-          <span>Solarisael House</span>
-        </div>
-      </header>
+          <small>Solarisael House</small>
+        </span>
+      </button>
 
       <div class="sidebar-drawer">
         <div class="drawer-track">
@@ -26,7 +27,7 @@
               <button class="mode-button" type="button" data-mode="project" aria-pressed="false">Projects</button>
             </nav>
 
-            <section class="conversation-list" aria-label="Available conversations"></section>
+            <section class="subject-list" aria-label="Available subjects"></section>
 
             <div class="sidebar-account">
               <button class="account-button" type="button" data-open-drawer="account" aria-controls="account-pane" aria-expanded="false">
@@ -45,15 +46,21 @@
                 <h2>Account</h2>
               </div>
             </header>
-            <div class="drawer-pane-content">
+            <div class="drawer-pane-content account-content">
               <section class="account-summary">
-                <span class="avatar avatar-lg" aria-hidden="true">S</span>
-                <div><strong>Sol</strong><span>House operator</span></div>
+                <span class="account-avatar" aria-hidden="true">S</span>
+                <div><strong>Sol</strong><span>Local operator · this device</span></div>
+              </section>
+              <section class="account-state" aria-label="Account state">
+                <div><span>Surface</span><strong>Local only</strong></div>
+                <div><span>Host</span><strong>Offline</strong></div>
+                <div><span>Persistence</span><strong>Unavailable</strong></div>
               </section>
               <nav class="drawer-menu" aria-label="Account">
                 <button type="button" data-open-drawer="settings" aria-controls="settings-pane" aria-expanded="false">
-                  <span><strong>Settings</strong><small>Profile, appearance, reading, and local behavior</small></span>
-                  <span aria-hidden="true">›</span>
+                  <span class="drawer-menu-icon" aria-hidden="true">⌘</span>
+                  <span><strong>Settings</strong><small>Interface, appearance, conversation, and House chrome</small></span>
+                  <span class="drawer-menu-arrow" aria-hidden="true">›</span>
                 </button>
               </nav>
             </div>
@@ -136,31 +143,38 @@
       </div>
     </aside>
 
-    <section class="workspace">
-      <header class="workspace-tabs">
-        <button class="icon-button sidebar-toggle" type="button" aria-label="Toggle conversation list" aria-pressed="false">☰</button>
-        <div class="workspace-context">
+    <section class="mantle">
+      <header class="mantle-tabs">
+        <button class="icon-button sidebar-toggle" type="button" aria-label="Toggle subject list" aria-pressed="false">☰</button>
+        <div class="mantle-context">
           <nav class="subject-views" aria-label="Selected subject views">
-            <button type="button" data-subject-view="conversation" aria-pressed="true"><kbd>1</kbd>Conversation</button>
-            <button type="button" data-subject-view="session" aria-pressed="false"><kbd>2</kbd>Session</button>
-            <button type="button" data-subject-view="history" aria-pressed="false"><kbd>3</kbd>History</button>
-            <button type="button" data-subject-view="actions" aria-pressed="false"><kbd>4</kbd>Actions</button>
-            <button type="button" data-subject-view="context" aria-pressed="false"><kbd>5</kbd>Context</button>
-            <button type="button" data-subject-view="substrate" aria-pressed="false"><kbd>6</kbd>Substrate</button>
+            <button class="tab" type="button" data-subject-view="live" aria-pressed="true"><kbd>1</kbd><span data-view-label>Session</span></button>
+            <button class="tab" type="button" data-subject-view="state" aria-pressed="false"><kbd>2</kbd><span data-view-label>Status</span></button>
+            <button class="tab" type="button" data-subject-view="durable" aria-pressed="false"><kbd>3</kbd><span data-view-label>Memories</span></button>
           </nav>
         </div>
+        <button class="icon-button bell-toggle" type="button" aria-label="Hallway inbox" aria-expanded="false" aria-haspopup="dialog" aria-controls="bell-layer">
+          <span class="bell-label">Bell</span>
+        </button>
         <button class="icon-button inspector-toggle" type="button" aria-label="Toggle members and context" aria-pressed="true">◫</button>
       </header>
 
       <section class="active-view" aria-live="polite">
-        <header class="conversation-header"></header>
+        <header class="subject-header"></header>
         <div class="message-timeline" tabindex="0" aria-label="Message timeline"></div>
         <form class="composer">
           <label class="sr-only" for="message-input">Message</label>
           <textarea id="message-input" rows="1" placeholder="Write a message…"></textarea>
           <div class="composer-actions">
-            <span class="composer-refusal" id="send-refusal" hidden></span>
-            <span class="composer-response-status" id="response-status" role="status" hidden></span>
+            <div class="composer-continuity-group" hidden>
+              <button class="composer-continuity" type="button" data-chat-action="sleep">Fold paper boat</button>
+              <button class="composer-continuity" type="button" data-chat-action="memory">Record memory</button>
+            </div>
+            <div class="composer-feedback">
+              <span class="composer-refusal" id="send-refusal" hidden></span>
+              <span class="composer-response-status" id="response-status" role="status" hidden></span>
+              <span class="composer-continuity-status" id="continuity-status" role="status" hidden></span>
+            </div>
             <div class="composer-buttons">
               <button class="composer-clear" type="button" hidden>Clear</button>
               <button class="composer-stop" type="button" hidden>Stop</button>
@@ -194,6 +208,33 @@
       <div class="status-popover" hidden></div>
     </footer>
   </main>
+
+  <section class="bell-layer" id="bell-layer" aria-hidden="true" hidden>
+    <div class="hallway-inbox" role="dialog" aria-modal="true" aria-labelledby="hallway-inbox-title">
+      <header>
+        <div>
+          <span class="eyebrow">House attention</span>
+          <h2 id="hallway-inbox-title">Hallway inbox</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-bell aria-label="Close Hallway inbox">×</button>
+      </header>
+      <p class="hallway-inbox-summary" data-hallway-inbox-summary></p>
+      <div class="hallway-inbox-list" role="list" aria-label="Hallway threads needing attention"></div>
+      <footer>Local surface · opening a thread acknowledges only the messages shown here. Host and durable delivery remain offline.</footer>
+    </div>
+  </section>
+
+  <section class="switcher-layer" aria-hidden="true" hidden>
+    <div class="house-switcher" role="dialog" aria-modal="true" aria-label="House Switcher">
+      <label class="switcher-query">
+        <span aria-hidden="true">⌕</span>
+        <input type="search" aria-label="Go somewhere" aria-controls="switcher-results" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Go somewhere…">
+        <kbd>Ctrl Space</kbd>
+      </label>
+      <div class="switcher-results" id="switcher-results" role="listbox" aria-label="Destinations and actions"></div>
+      <footer class="switcher-footer">↑↓ Select · Enter Go · Esc Close</footer>
+    </div>
+  </section>
 
 
   <script src="app.js"></script>

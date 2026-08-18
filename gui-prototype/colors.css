@@ -1,0 +1,172 @@
+:root {
+  /* bg: regional and interaction backgrounds */
+  --bg-root: #0c0c0c;
+  --bg-shell: #111111;
+  --bg-nav: #141414;
+  --bg-mantle: #090909;
+  --bg-inspector: #181818;
+  --bg-status: #090909;
+  --bg-header: #141414;
+  --bg-compose: #181818;
+  --bg-hover: #222222;
+  --bg-active: #303030;
+  --bg-nav-note: #181818;
+  --bg-clear: transparent;
+  --bg-card: #171717;
+  --bg-row: #181818;
+  --bg-lead: #1c1c1c;
+
+  --bg-scrollbar-thumb: #262626;
+  --bg-scrollbar-thumb-hover: #333333;
+
+  /* bg: elevation paint for fixed shell panels */
+  --bg-nav-shadow: #000b;
+  --bg-inspector-shadow: #000a;
+  --bg-inspector-dock-shadow: #0008;
+
+  /* bg: identity, message, and composer surfaces */
+  --bg-avatar: #202020;
+  --bg-presence: #dadada;
+  --bg-tab-key: #202020;
+  --bg-message: #1c1c1c;
+  --bg-message-own: #292929;
+  --bg-composer-send: #e5e5e5;
+  --bg-composer-stop: #333333;
+  --bg-composer-disabled: #2a2a2a;
+
+  /* fg: text and icon intensity */
+  --fg-active: #ffffff;
+  --fg-main: #ededed;
+  --fg-soft: #bcbcbc;
+  --fg-dim: #9b9b9b;
+  --fg-ghost: #797979;
+  --fg-nav-note: #8f8f8f;
+  --fg-inv: #111111;
+
+  /* fg: conversation channels that must not follow the text ramp */
+  --fg-tab-key: #d7d7d7;
+  --fg-message-delivery: #aaaaaa;
+  --fg-composer-disabled: #888888;
+
+  /* bd: structural borders */
+  --bd-region: #353535;
+  --bd-section: #303030;
+  --bd-control: #444444;
+  --bd-active: #777777;
+  --bd-nav-note: #333333;
+  --bd-inspector-header: #343434;
+  --bd-status-dot: #aaaaaa;
+  --bd-focus: #aaaaaa;
+  --bd-clear: transparent;
+  --bd-card: #333333;
+  --bd-row: #393939;
+  --bd-lead: #4a4a4a;
+
+  /* bd: identity, message, and composer edges */
+  --bd-avatar: #777777;
+  --bd-presence: #aaaaaa;
+  --bd-subject-status: #4b4b4b;
+  --bd-tab-key-edge: #666666;
+  --bd-message: #393939;
+  --bd-composer-send: #aaaaaa;
+  --bd-composer-stop: #dddddd;
+
+  /* wave two — work and knowledge instruments */
+
+  /* bg: project overview surfaces and its durable control */
+  --bg-project-banner: #1b1b1b;
+  --bg-project-room: #202020;
+  --bg-project-durable: #e2e2e2;
+
+  /* bg: specimen cards, disclosure, and the context meter */
+  --bg-specimen-disclosure: #1d1d1d;
+  --bg-specimen-meter-track: #303030;
+  --bg-specimen-meter-fill: #cccccc;
+
+  /* bg: session browser, empty timeline, and its durable control */
+  --bg-session-empty: #151515;
+  --bg-session-durable: #e8e8e8;
+
+  /* bg: action ledger, inspector context surfaces, library rows */
+  --bg-action-event: #151515;
+  --bg-context-card: #1b1b1b;
+  --bg-context-door: #202020;
+
+  /* fg: instrument channels that must not follow the shell text ramp */
+  --fg-project-body: #aaaaaa;
+  --fg-project-note: #929292;
+  --fg-project-room: #cccccc;
+  --fg-specimen-body: #aaaaaa;
+  --fg-specimen-disclosure: #d0d0d0;
+  --fg-session-empty: #a7a7a7;
+  --fg-session-empty-head: #e1e1e1;
+  --fg-session-note: #888888;
+  --fg-action-target: #c6c6c6;
+  --fg-context-body: #aaaaaa;
+  --fg-context-door: #c5c5c5;
+  --fg-library-note: #929292;
+  --fg-library-id: #aaaaaa;
+
+  /* bd: project panel weight, selection rail, durable action edge */
+  --bd-project-room: #484848;
+  --bd-project-banner: #4a4a4a;
+  --bd-project-selected: #999999;
+  --bd-project-selected-rail: #dddddd;
+  --bd-project-durable: #777777;
+
+  /* bd: specimen, session, context, and library edges */
+  --bd-specimen-disclosure: #4a4a4a;
+  --bd-session-durable: #dddddd;
+  --bd-context-card: #373737;
+  --bd-library-id: #4b4b4b;
+
+  /* bg: drawer, account, and settings surfaces */
+  --bg-account-hover: #242424;
+  --bg-account-avatar: #262626;
+  --bg-drawer-card: #181818;
+  --bg-drawer-well: #161616;
+  --bg-drawer-row: #191919;
+  --bg-drawer-row-hover: #1d1d1d;
+  --bg-settings-control: #222222;
+  --bg-settings-control-hover: #252525;
+  --bg-setting-check: #d7d7d7;
+
+  /* bg: overlay surfaces and their elevation paint */
+  --bg-profile: #202020;
+  --bg-profile-glyph: #292929;
+  --bg-profile-shadow: #000a;
+  --bg-popover: #1c1c1c;
+  --bg-popover-shadow: #000b;
+  --bg-switcher: #1b1b1b;
+  --bg-switcher-scrim: #000a;
+  --bg-switcher-shadow: #000d;
+
+  /* fg: drawer, settings, and overlay text channels */
+  --fg-overlay-strong: #eeeeee;
+  --fg-overlay-meta: #aaaaaa;
+  --fg-overlay-faint: #888888;
+  --fg-account-avatar: #f0f0f0;
+  --fg-account-meta: #929292;
+  --fg-account-state-label: #8e8e8e;
+  --fg-account-state-value: #c8c8c8;
+  --fg-drawer-note: #8f8f8f;
+  --fg-drawer-icon: #bbbbbb;
+  --fg-settings-label: #c5c5c5;
+  --fg-setting-title: #d2d2d2;
+  --fg-setting-note: #898989;
+
+  /* bd: drawer, settings, and overlay edges */
+  --bd-drawer-card: #383838;
+  --bd-drawer-well: #333333;
+  --bd-drawer-divider: #292929;
+  --bd-drawer-row: #3a3a3a;
+  --bd-drawer-row-hover: #666666;
+  --bd-drawer-icon: #4b4b4b;
+  --bd-presence-row-active: #4b4b4b;
+  --bd-profile: #666666;
+  --bd-profile-glyph: #888888;
+  --bd-settings-control: #484848;
+  --bd-settings-control-focus: #888888;
+  --bd-popover: #515151;
+  --bd-switcher: #5e5e5e;
+}

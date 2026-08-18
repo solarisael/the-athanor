@@ -22,7 +22,7 @@ use crate::host_link::{HostLink, LinkPhase};
 use crate::host_session::AthanorHostSession;
 use crate::protocol::{
     self, CommandIdentity, HostBinding, Inbound, ProjectionCursor, RecallPolicyProjection,
-    RequestedMode,
+    RecoveryState, RequestedMode,
 };
 
 /// Fixed copy. Rendered before any Host content and never softened.
@@ -116,6 +116,61 @@ struct Bound {
     unavailable: Gd<Label>,
 }
 
+/// A control either accepts interaction with an explanatory tooltip, or refuses
+/// it with the reason that must be shown to the operator.
+#[derive(Clone)]
+enum ControlAvailability {
+    Enabled { tooltip: String },
+    Disabled { reason: String },
+}
+
+impl ControlAvailability {
+    fn enabled(tooltip: impl Into<String>) -> Self {
+        Self::Enabled {
+            tooltip: tooltip.into(),
+        }
+    }
+
+    fn disabled(reason: impl Into<String>) -> Self {
+        Self::Disabled {
+            reason: reason.into(),
+        }
+    }
+
+    fn is_enabled(&self) -> bool {
+        matches!(self, Self::Enabled { .. })
+    }
+
+    fn tooltip(&self) -> &str {
+        match self {
+            Self::Enabled { tooltip } => tooltip,
+            Self::Disabled { reason } => reason,
+        }
+    }
+}
+
+fn mode_controls(
+    selected_mode: Option<RequestedMode>,
+    modes_reason: Option<String>,
+    apply_reason: Option<String>,
+) -> (
+    Option<RequestedMode>,
+    ControlAvailability,
+    ControlAvailability,
+) {
+    let modes = match modes_reason {
+        Some(reason) => ControlAvailability::disabled(format!("UNAVAILABLE: {reason}")),
+        None => {
+            ControlAvailability::enabled("PROPOSE A REQUESTED MODE · APPLYING IS A SEPARATE STEP")
+        }
+    };
+    let apply = match apply_reason {
+        Some(reason) => ControlAvailability::disabled(format!("UNAVAILABLE: {reason}")),
+        None => ControlAvailability::enabled("SEND THE REQUESTED-MODE COMMAND TO THE HOST"),
+    };
+    (selected_mode, modes, apply)
+}
+
 /// Everything the next render needs, computed without touching nodes.
 struct View {
     link_state: String,
@@ -133,19 +188,13 @@ struct View {
     selection: String,
     command_state: String,
     unavailable: String,
-    selected_modes: [bool; 4],
-    url_editable: bool,
-    url_reason: String,
-    connect_enabled: bool,
-    connect_reason: String,
-    disconnect_enabled: bool,
-    disconnect_reason: String,
-    snapshot_enabled: bool,
-    snapshot_reason: String,
-    modes_enabled: bool,
-    modes_reason: String,
-    apply_enabled: bool,
-    apply_reason: String,
+    selected_mode: Option<RequestedMode>,
+    url: ControlAvailability,
+    connect: ControlAvailability,
+    disconnect: ControlAvailability,
+    snapshot: ControlAvailability,
+    modes: ControlAvailability,
+    apply: ControlAvailability,
 }
 
 // ---------------------------------------------------------------------------
@@ -839,20 +888,15 @@ impl AthanorRecallPolicy {
         };
 
         let recovery = match self.projection.as_ref() {
-            Some(projection) => {
-                if projection.recovery_pending {
-                    if projection.recovery_terms.is_empty() {
-                        "RECOVERY PENDING · NO TERMS SUPPLIED".to_string()
-                    } else {
-                        format!(
-                            "RECOVERY PENDING · TERMS: {}",
-                            projection.recovery_terms.join(", ")
-                        )
-                    }
-                } else {
-                    "NO RECOVERY PENDING".to_string()
+            Some(projection) => match &projection.recovery_state {
+                RecoveryState::Pending { terms } if terms.is_empty() => {
+                    "RECOVERY PENDING · NO TERMS SUPPLIED".to_string()
                 }
-            }
+                RecoveryState::Pending { terms } => {
+                    format!("RECOVERY PENDING · TERMS: {}", terms.join(", "))
+                }
+                RecoveryState::Idle => "NO RECOVERY PENDING".to_string(),
+            },
             None => format!("RECOVERY {ABSENT}"),
         };
 
@@ -893,24 +937,26 @@ impl AthanorRecallPolicy {
             }
         };
 
-        let apply_reason_text = self.write_unavailable();
-        let modes_reason_text = self.selection_unavailable();
-
-        let mut selected_modes = [false; 4];
-        if let Some(selected) = self.selection {
-            for (index, mode) in RequestedMode::ALL.into_iter().enumerate() {
-                selected_modes[index] = mode == selected;
+        let (selected_mode, modes, apply) = mode_controls(
+            self.selection,
+            self.selection_unavailable(),
+            self.write_unavailable(),
+        );
+        let unavailable = match (&apply, selected_mode) {
+            (ControlAvailability::Disabled { reason }, _) => {
+                format!(
+                    "ACTION UNAVAILABLE: {}",
+                    reason.strip_prefix("UNAVAILABLE: ").unwrap_or(reason)
+                )
             }
-        }
-
-        let unavailable = match (&apply_reason_text, self.selection) {
-            (Some(reason), _) => format!("ACTION UNAVAILABLE: {reason}"),
-            (None, Some(mode)) => format!(
+            (ControlAvailability::Enabled { .. }, Some(mode)) => format!(
                 "ACTION AVAILABLE: APPLY REQUESTED MODE {} (wire {})",
                 mode.display(),
                 mode.wire()
             ),
-            (None, None) => "ACTION UNAVAILABLE: SELECT A REQUESTED MODE".to_string(),
+            (ControlAvailability::Enabled { .. }, None) => {
+                "ACTION UNAVAILABLE: SELECT A REQUESTED MODE".to_string()
+            }
         };
 
         View {
@@ -929,43 +975,31 @@ impl AthanorRecallPolicy {
             selection,
             command_state,
             unavailable,
-            selected_modes,
-            url_editable: closed,
-            url_reason: if closed {
-                "LOCAL HOST WEBSOCKET ADDRESS".to_string()
+            selected_mode,
+            url: if closed {
+                ControlAvailability::enabled("LOCAL HOST WEBSOCKET ADDRESS")
             } else {
-                "DISCONNECT TO CHANGE THE HOST ADDRESS".to_string()
+                ControlAvailability::disabled("DISCONNECT TO CHANGE THE HOST ADDRESS")
             },
-            connect_enabled: closed && url_valid.is_ok(),
-            connect_reason: match (&url_valid, closed) {
-                (Err(reason), _) => format!("UNAVAILABLE: {reason}"),
-                (Ok(_), false) => {
-                    "UNAVAILABLE: A CONNECTION ALREADY EXISTS · DISCONNECT FIRST".to_string()
-                }
-                (Ok(_), true) => "OPEN THE HOST CONNECTION".to_string(),
+            connect: match (&url_valid, closed) {
+                (Err(reason), _) => ControlAvailability::disabled(format!("UNAVAILABLE: {reason}")),
+                (Ok(_), false) => ControlAvailability::disabled(
+                    "UNAVAILABLE: A CONNECTION ALREADY EXISTS · DISCONNECT FIRST",
+                ),
+                (Ok(_), true) => ControlAvailability::enabled("OPEN THE HOST CONNECTION"),
             },
-            disconnect_enabled: !closed,
-            disconnect_reason: if closed {
-                "UNAVAILABLE: NO CONNECTION TO CLOSE".to_string()
+            disconnect: if closed {
+                ControlAvailability::disabled("UNAVAILABLE: NO CONNECTION TO CLOSE")
             } else {
-                "CLOSE THE HOST CONNECTION".to_string()
+                ControlAvailability::enabled("CLOSE THE HOST CONNECTION")
             },
-            snapshot_enabled: phase == LinkPhase::Open,
-            snapshot_reason: if phase == LinkPhase::Open {
-                "REQUEST A FRESH SNAPSHOT AND RESYNCHRONIZE".to_string()
+            snapshot: if phase == LinkPhase::Open {
+                ControlAvailability::enabled("REQUEST A FRESH SNAPSHOT AND RESYNCHRONIZE")
             } else {
-                "UNAVAILABLE: THE HOST CONNECTION IS NOT OPEN".to_string()
+                ControlAvailability::disabled("UNAVAILABLE: THE HOST CONNECTION IS NOT OPEN")
             },
-            modes_enabled: modes_reason_text.is_none(),
-            modes_reason: match &modes_reason_text {
-                Some(reason) => format!("UNAVAILABLE: {reason}"),
-                None => "PROPOSE A REQUESTED MODE · APPLYING IS A SEPARATE STEP".to_string(),
-            },
-            apply_enabled: apply_reason_text.is_none(),
-            apply_reason: match &apply_reason_text {
-                Some(reason) => format!("UNAVAILABLE: {reason}"),
-                None => "SEND THE REQUESTED-MODE COMMAND TO THE HOST".to_string(),
-            },
+            modes,
+            apply,
         }
     }
 
@@ -1003,27 +1037,31 @@ impl AthanorRecallPolicy {
         bound.command_state.set_text(view.command_state.as_str());
         bound.unavailable.set_text(view.unavailable.as_str());
 
-        bound.url_field.set_editable(view.url_editable);
-        bound.url_field.set_tooltip_text(view.url_reason.as_str());
+        bound.url_field.set_editable(view.url.is_enabled());
+        bound.url_field.set_tooltip_text(view.url.tooltip());
 
-        bound.connect_button.set_disabled(!view.connect_enabled);
         bound
             .connect_button
-            .set_tooltip_text(view.connect_reason.as_str());
+            .set_disabled(!view.connect.is_enabled());
+        bound
+            .connect_button
+            .set_tooltip_text(view.connect.tooltip());
         bound
             .disconnect_button
-            .set_disabled(!view.disconnect_enabled);
+            .set_disabled(!view.disconnect.is_enabled());
         bound
             .disconnect_button
-            .set_tooltip_text(view.disconnect_reason.as_str());
-        bound.snapshot_button.set_disabled(!view.snapshot_enabled);
+            .set_tooltip_text(view.disconnect.tooltip());
         bound
             .snapshot_button
-            .set_tooltip_text(view.snapshot_reason.as_str());
+            .set_disabled(!view.snapshot.is_enabled());
+        bound
+            .snapshot_button
+            .set_tooltip_text(view.snapshot.tooltip());
 
         for (index, button) in bound.mode_buttons.iter_mut().enumerate() {
             let mode = RequestedMode::ALL[index];
-            let selected = view.selected_modes[index];
+            let selected = view.selected_mode == Some(mode);
             // Selection is carried by a mark and by the variation, never by hue
             // alone.
             let label = if selected {
@@ -1037,14 +1075,12 @@ impl AthanorRecallPolicy {
             } else {
                 "AthanorTab"
             });
-            button.set_disabled(!view.modes_enabled);
-            button.set_tooltip_text(view.modes_reason.as_str());
+            button.set_disabled(!view.modes.is_enabled());
+            button.set_tooltip_text(view.modes.tooltip());
         }
 
-        bound.apply_button.set_disabled(!view.apply_enabled);
-        bound
-            .apply_button
-            .set_tooltip_text(view.apply_reason.as_str());
+        bound.apply_button.set_disabled(!view.apply.is_enabled());
+        bound.apply_button.set_tooltip_text(view.apply.tooltip());
 
         self.dirty = false;
     }

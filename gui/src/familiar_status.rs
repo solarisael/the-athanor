@@ -100,15 +100,21 @@ impl AthanorFamiliarStatus {
 
     fn resolve_bindings(&mut self) {
         let mut missing = Vec::new();
-        let disclosure = self.resolve::<Label>(&self.disclosure_label, "disclosure_label", &mut missing);
+        let disclosure =
+            self.resolve::<Label>(&self.disclosure_label, "disclosure_label", &mut missing);
         let state = self.resolve::<Label>(&self.state_label, "state_label", &mut missing);
         let source = self.resolve::<Label>(&self.source_label, "source_label", &mut missing);
-        let familiars = self.resolve::<Label>(&self.familiars_label, "familiars_label", &mut missing);
+        let familiars =
+            self.resolve::<Label>(&self.familiars_label, "familiars_label", &mut missing);
         let detail = self.resolve::<Label>(&self.detail_label, "detail_label", &mut missing);
-        let reason = self.resolve::<Label>(&self.unavailable_label, "unavailable_label", &mut missing);
+        let reason =
+            self.resolve::<Label>(&self.unavailable_label, "unavailable_label", &mut missing);
         let refresh = self.resolve::<Button>(&self.refresh_button, "refresh_button", &mut missing);
         if !missing.is_empty() {
-            godot_error!("AthanorFamiliarStatus: missing scene bindings: {}", missing.join(", "));
+            godot_error!(
+                "AthanorFamiliarStatus: missing scene bindings: {}",
+                missing.join(", ")
+            );
             return;
         }
         self.bound = Some(Bound {
@@ -123,7 +129,10 @@ impl AthanorFamiliarStatus {
     }
 
     fn wire_session(&mut self) {
-        let Some(mut session) = self.base().try_get_node_as::<AthanorHostSession>(&self.session_path) else {
+        let Some(mut session) = self
+            .base()
+            .try_get_node_as::<AthanorHostSession>(&self.session_path)
+        else {
             self.detail = "shared Host session not found".into();
             return;
         };
@@ -142,9 +151,14 @@ impl AthanorFamiliarStatus {
 
     fn wire_controls(&mut self) {
         let this = self.to_gd();
-        let Some(bound) = &mut self.bound else { return; };
+        let Some(bound) = &mut self.bound else {
+            return;
+        };
         bound.refresh.set_focus_mode(FocusMode::ALL);
-        bound.refresh.connect("pressed", &Callable::from_object_method(&this, "on_refresh_pressed"));
+        bound.refresh.connect(
+            "pressed",
+            &Callable::from_object_method(&this, "on_refresh_pressed"),
+        );
     }
 
     fn request_status(&mut self) {
@@ -182,10 +196,18 @@ impl AthanorFamiliarStatus {
     }
 
     fn disabled_reason(&self) -> Option<&'static str> {
-        let connected = self.session.as_ref().is_some_and(|session| session.bind().phase() == LinkPhase::Open);
+        let connected = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.bind().phase() == LinkPhase::Open);
         if !connected {
             Some("NO HOST CONNECTION")
-        } else if self.session.as_ref().and_then(|session| session.bind().binding()).is_none() {
+        } else if self
+            .session
+            .as_ref()
+            .and_then(|session| session.bind().binding())
+            .is_none()
+        {
             Some("NO AUTHENTICATED HOST BINDING")
         } else if self.pending_correlation.is_some() {
             Some("QUERY ALREADY PENDING")
@@ -196,58 +218,112 @@ impl AthanorFamiliarStatus {
 
     fn render(&mut self) {
         let disabled_reason = self.disabled_reason();
-        let connected = self.session.as_ref().is_some_and(|session| session.bind().phase() == LinkPhase::Open);
-        let Some(bound) = &mut self.bound else { return; };
+        let connected = self
+            .session
+            .as_ref()
+            .is_some_and(|session| session.bind().phase() == LinkPhase::Open);
+        let Some(bound) = &mut self.bound else {
+            return;
+        };
         bound.disclosure.set_text(DISCLOSURE);
         bound.state.set_text(if connected {
-            if self.pending_correlation.is_some() { "◇ HOST CONNECTED · QUERY PENDING" } else { "◆ HOST CONNECTED · STATUS SETTLED" }
+            if self.pending_correlation.is_some() {
+                "◇ HOST CONNECTED · QUERY PENDING"
+            } else {
+                "◆ HOST CONNECTED · STATUS SETTLED"
+            }
         } else {
             "◇ HOST UNAVAILABLE"
         });
-        let source = self.projection.as_ref().and_then(|projection| projection.source.as_deref()).unwrap_or(ABSENT);
+        let source = self
+            .projection
+            .as_ref()
+            .and_then(|projection| projection.source.as_deref())
+            .unwrap_or(ABSENT);
         let source_alias = self
             .projection
             .as_ref()
-            .map(|projection| {
-                if projection.source_alias {
-                    "yes"
-                } else {
-                    "no"
-                }
-            })
+            .map(
+                |projection| {
+                    if projection.source_alias { "yes" } else { "no" }
+                },
+            )
             .unwrap_or(ABSENT);
         bound
             .source
             .set_text(&format!("SOURCE {source} · SOURCE ALIAS {source_alias}"));
-        let familiar_text = self.projection.as_ref().map(|projection| {
-            let heading = match &projection.collective {
-                Some(collective) => format!(
-                    "COLLECTIVE {collective}\nCOLLECTIVE ALIASES {}\nSPELLBOOK ALIASES {}",
-                    if projection.collective_aliases.is_empty() { ABSENT.into() } else { projection.collective_aliases.join(", ") },
-                    if projection.spellbook_aliases.is_empty() { ABSENT.into() } else { projection.spellbook_aliases.join(", ") },
-                ),
-                None => format!("COLLECTIVE {ABSENT}"),
-            };
-            let entries = projection.familiars.iter().map(|familiar| {
+        let familiar_text = self
+            .projection
+            .as_ref()
+            .map(|projection| {
+                let heading = match &projection.collective {
+                    Some(collective) => format!(
+                        "COLLECTIVE {collective}\nCOLLECTIVE ALIASES {}\nSPELLBOOK ALIASES {}",
+                        if projection.collective_aliases.is_empty() {
+                            ABSENT.into()
+                        } else {
+                            projection.collective_aliases.join(", ")
+                        },
+                        if projection.spellbook_aliases.is_empty() {
+                            ABSENT.into()
+                        } else {
+                            projection.spellbook_aliases.join(", ")
+                        },
+                    ),
+                    None => format!("COLLECTIVE {ABSENT}"),
+                };
+                let entries = projection
+                    .familiars
+                    .iter()
+                    .map(|familiar| {
+                        format!(
+                            "{} · {} · LANE {}\n  ALIASES {}\n  {}",
+                            familiar.name,
+                            familiar.id,
+                            familiar.lane,
+                            if familiar.aliases.is_empty() {
+                                ABSENT.into()
+                            } else {
+                                familiar.aliases.join(", ")
+                            },
+                            familiar.description,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                let errors = if projection.errors.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n\nERRORS\n{}", projection.errors.join("\n"))
+                };
                 format!(
-                    "{} · {} · LANE {}\n  ALIASES {}\n  {}",
-                    familiar.name,
-                    familiar.id,
-                    familiar.lane,
-                    if familiar.aliases.is_empty() { ABSENT.into() } else { familiar.aliases.join(", ") },
-                    familiar.description,
+                    "{}\n\n{}{}",
+                    heading,
+                    if entries.is_empty() { ABSENT } else { &entries },
+                    errors
                 )
-            }).collect::<Vec<_>>().join("\n\n");
-            let errors = if projection.errors.is_empty() { String::new() } else { format!("\n\nERRORS\n{}", projection.errors.join("\n")) };
-            format!("{}\n\n{}{}", heading, if entries.is_empty() { ABSENT } else { &entries }, errors)
-        }).unwrap_or_else(|| format!("FAMILIARS\n{ABSENT}"));
+            })
+            .unwrap_or_else(|| format!("FAMILIARS\n{ABSENT}"));
         bound.familiars.set_text(&familiar_text);
-        let receipt = self.projection.as_ref().map(|projection| {
-            format!(" · {} · EVENT {} · SEQ {}", if projection.ok { "READY" } else { "REFUSED" }, projection.event_id, projection.sequence)
-        }).unwrap_or_default();
-        bound.detail.set_text(&format!("{}{}", self.detail, receipt));
+        let receipt = self
+            .projection
+            .as_ref()
+            .map(|projection| {
+                format!(
+                    " · {} · EVENT {} · SEQ {}",
+                    if projection.ok { "READY" } else { "REFUSED" },
+                    projection.event_id,
+                    projection.sequence
+                )
+            })
+            .unwrap_or_default();
+        bound
+            .detail
+            .set_text(&format!("{}{}", self.detail, receipt));
         bound.refresh.set_disabled(disabled_reason.is_some());
-        let reason = disabled_reason.map(|reason| format!("ACTION UNAVAILABLE: {reason}")).unwrap_or_else(|| "ACTION AVAILABLE: REQUEST FRESH HOST STATUS".into());
+        let reason = disabled_reason
+            .map(|reason| format!("ACTION UNAVAILABLE: {reason}"))
+            .unwrap_or_else(|| "ACTION AVAILABLE: REQUEST FRESH HOST STATUS".into());
         bound.reason.set_text(&reason);
         bound.refresh.set_tooltip_text(&reason);
     }

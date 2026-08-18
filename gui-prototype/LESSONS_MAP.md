@@ -29,7 +29,7 @@ There is no framework, build step, Host connection, persistence, design-system c
 The primary modes are exactly:
 
 1. **Direct** — one collection of agent conversations. Agent identity, image or glyph, presence, latest message, and time belong to each row.
-2. **Hallways** — dated group conversations where agents meet without merging their rooms or identities.
+2. **Hallways** — a record of *gatherings*: dated group conversations where agents meet without merging their rooms or identities. Hallways mode lists threads (gatherings) recent-first; each thread row carries its date, its hallway badge, and its observed participants. Durable membership and the full thread history live on the hallway record, one click behind the thread — the hallway is a record surface, never a navigation floor. Threads end: an explicit **seal** is the honored act; an inactivity fold is the janitor, always visibly marked as automatic. Membership (who may enter, a hallway fact) and participation (who actually spoke, an observed thread fact) never merge.
 3. **Projects** — project conversations and instruments, currently including The Athanor and Multistock.
 
 Selecting an entity changes the center instrument. The compact workspace strip names only the active mode because the entity owns its own header.
@@ -41,8 +41,29 @@ Refusals:
 - No archive labels such as `S01–S14` or `R01` used as product ontology.
 - No giant screen taxonomy before ordinary navigation and selection feel right.
 - No second navigation concept that duplicates Direct, Hallways, or Projects under different names.
+- No hallway-as-container navigation: a hallway with threads nested inside would be a Project wearing a social costume (operator ruling 2026-08-17, memory #3639). Projects remain the only container mode.
+- No infinite-context default hallway: every hallway conversation is a dated thread with an end state.
 
-This is the current ruling from House memories #3555 and #3572. A later operator ruling may change it; an older mockup or archive may not.
+This is the current ruling from House memories #3555, #3572, and #3639 (threads-lead ontology, 2026-08-17). A later operator ruling may change it; an older mockup or archive may not.
+
+### The three-layer slot model (2026-08-17 ruling, second wave)
+
+Every subject exposes exactly **three view slots**, positional keys `1`–`3`, one semantic layer each:
+
+| slot | layer | direct | hallway | project | house |
+|---|---|---|---|---|---|
+| 1 | **live** — where you stand and speak | Session | Thread | Overview | Overview |
+| 2 | **state** — machinery underneath | Status | Status | Status | Settings & Status |
+| 3 | **durable** — dated timeline, newest first | Memories | Record | Evidence | Memories & Lessons |
+
+The slots are a write-model, not just navigation: the live layer **sediments** into the durable one — `Record memory` writes a dated specimen; a thread seals or folds into a record entry; work proves out into evidence; boats and lessons land on the House shelves. Slot 3 renders as a dated timeline because that is what sediment looks like.
+
+Consequences of the collapse:
+- The six-view strip dies. `Conversation`, `Session`, and `History` merge into the live slot: the header gains a **session toggle** beside the subject name (current session by default, `New session` on top, older sessions as dated rows — the picker's rows *are* the history). Event-level history lives inline in the timeline as collapsed action events.
+- `Context` and `Substrate` merge into the state slot.
+- The hallway `Actions` view dissolves: action events stay inline in the thread timeline.
+- House keeps its Settings view whole inside its state slot — House, spirit, hallway, and project state are different things even when they look similar (operator ruling; resemblance never merges authority).
+- The durable slot is the landing surface for memory search: switcher results route to slot 3 of the owning subject.
 
 ## Composition
 
@@ -117,16 +138,25 @@ Liveness uses words, not only dots: `connected`, `reconnecting`, `stale`, and `e
 
 Exact read receipts are an optional operational fact, not the default social surface. Prototype wording should prefer neutral facts such as `caught up through 09:52` or `cursor not current`; it must not imply why.
 
+### Thread view candidate (2026-08-17 ruling)
+
+The selected subject in Hallways mode is a thread, never a hallway. The thread view owns:
+
+- a header carrying the thread title, date, its hallway badge, and only the *live* channels (connection, delivery); constant facts (authority, access) move to the inspector — chrome that never changes is furniture, never header;
+- a full-height member column as the hallway thread's right region (the Discord shape), grouped by spirit with embodied-session sub-rows, liveness in words — members only; the record is not a dock face;
+- an end state: `open`, `sealed` (explicit act, honored), or `folded` (inactivity janitor, visibly marked automatic); a sealed or folded thread renders its closing line where the catch-up boundary would sit and its composer states why it refuses input;
+- the hallway record as the thread's **durable slot** (slot 3): membership card on top, then seals, folds, and durable artifacts as dated timeline entries, newest first — a record surface with no navigation ambitions; the header badge routes to it.
+
 ### Action ledger candidate
 
-An action ledger is not a thought transcript. Its collapsed row may show a sanitized verb, target, state, and time. Expansion may show declared intent, permission-filtered arguments, observable result, errors, produced artifacts, and evidence.
+An action ledger is not a thought transcript. Tool and recall events belong inline in every conversation timeline as collapsed rows — the Morning-check grammar (operator ruling 2026-08-17): sanitized verb, target, state, and time collapsed; expansion may show declared intent, permission-filtered arguments, observable result, errors, produced artifacts, and evidence, including the full recall card.
 
 Refusals:
 
 - no raw private reasoning;
 - no unsanitized tokens, secrets, private paths, user content, or credentials;
 - no tool result presented as authority beyond its actual receipt;
-- no technical ledger injected into the default intimate Direct timeline.
+- no auto-expanded technical noise: inline events arrive collapsed, one row per event, never a raw ledger dump drowning the conversation.
 
 ### Direct working-session candidate
 
@@ -170,6 +200,23 @@ Focus waits for the incoming pane's animation to settle, uses `preventScroll`, a
 - Mobile uses one readable center column with explicit collection and inspector doors.
 - No viewport may acquire horizontal document overflow.
 - Responsive behavior preserves identity and capability; it does not silently delete the only route to an operation.
+
+### Hallway Bell and read attention
+
+The Bell is a global router into Hallway threads, not a fourth navigation mode and not a duplicate conversation surface. It lives in the mantle topbar because attention can arrive while the operator stands in Direct, Hallways, Projects, or House.
+
+The local specimen keeps two derived models separate:
+
+- ordinary unread belongs to a stable per-thread room read position;
+- explicit attention belongs to structured notification rows with stable `toRooms` recipients;
+- body-text parsing never creates recipient authority;
+- the Bell and Hallway rows display separate unread and targeted-attention badges;
+- selecting an inbox result forces Hallways slot 1, opens that exact thread, then clears only its unread count and Bell rows covered by the rendered messages;
+- delivery alone never acknowledges attention.
+
+The modal layer lives outside `.app-shell`; while open, the shell is `inert`, focus enters the first route and returns to the invoking control on close. The mobile sidebar follows the same rule at rest: when translated offscreen it is also `aria-hidden` and `inert`, so invisible navigation cannot remain in the keyboard or accessibility tree.
+
+All inbox, read, and notification data here remain local fixtures. The footer and About surface preserve the Host-offline, non-authoritative boundary.
 
 ### Status strip
 
@@ -301,6 +348,8 @@ Exercise the actual browser surface, not only source or an HTTP response:
 - narrow/mobile geometry at approximately 390 px;
 - no horizontal document overflow;
 - mouse selection across Direct, Hallways, and Projects;
+- Bell open, separate unread/attention counts, exact thread routing, covered acknowledgment, and structured recipient marker;
+- narrow Hallway content ending before the fixed member dock, including recipient metadata;
 - keyboard activation and visible focus;
 - drawer root → Account → Settings → Back and Escape;
 - rapid repeated drawer cycles without stale focus or offscreen geometry;
@@ -310,3 +359,9 @@ Exercise the actual browser surface, not only source or an HTTP response:
 - shared screenshots carrying an honest experiment disclosure.
 
 The proof receipt names the viewport, path exercised, and observed result. `It loaded` is not a UX receipt.
+
+### Proof receipt — 2026-08-18 Hallway Bell wave
+
+- Chromium at `1440 × 1000`: Direct, Hallways, and Projects selection; three-slot preservation; Bell open and focus entry; exact Morning check routing; `3 unread / 1 attention` to `2 unread / 0 attention`; recipient marker; composer submission; sealed-thread refusal; Account → Settings → Back/Escape; three rapid drawer cycles; inspector close/open; House Switcher; reduced motion; zero horizontal document overflow; zero console or page errors.
+- Chromium at `390 × 844`: closed sidebar absent from the accessibility tree and `inert`; open/Escape restores the toggle; Bell focus wraps in both directions; mode and slot keyboard chords preserve the selected slot; Morning check routes to slot 1; the active view ends at the fixed member dock boundary (`278 px`); `To Kintsu room` remains visible; zero horizontal document overflow; zero console or page errors.
+- Shared screenshots retain the Hallway inbox footer’s local-only disclosure. No Host connection, PostgreSQL read cursor, durable Bell row, delivery, or persistence is claimed.

@@ -295,10 +295,15 @@ pub struct RecallPolicyProjection {
     pub last_refresh_reason: Option<String>,
     pub last_refresh_at: Option<String>,
     pub working_set_entries: i64,
-    pub recovery_pending: bool,
-    pub recovery_terms: Vec<String>,
+    pub recovery_state: RecoveryState,
     pub degraded: Option<String>,
     pub updated_at: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub enum RecoveryState {
+    Idle,
+    Pending { terms: Vec<String> },
 }
 
 impl RecallPolicyProjection {
@@ -329,6 +334,8 @@ impl RecallPolicyProjection {
         if working_set_entries < 0 {
             return Err("workingSetEntries is negative".to_string());
         }
+        let recovery_pending = required_bool(state, "recoveryPending")?;
+        let recovery_terms = required_text_list(state, "recoveryTerms")?;
         Ok(Self {
             requested_mode,
             resolved_mode,
@@ -337,8 +344,13 @@ impl RecallPolicyProjection {
             last_refresh_reason: nullable_text(state, "lastRefreshReason")?,
             last_refresh_at: nullable_text(state, "lastRefreshAt")?,
             working_set_entries,
-            recovery_pending: required_bool(state, "recoveryPending")?,
-            recovery_terms: required_text_list(state, "recoveryTerms")?,
+            recovery_state: if recovery_pending {
+                RecoveryState::Pending {
+                    terms: recovery_terms,
+                }
+            } else {
+                RecoveryState::Idle
+            },
             degraded: nullable_text(state, "degraded")?,
             updated_at: nullable_text(state, "updatedAt")?,
         })
@@ -375,9 +387,18 @@ impl RecallPolicyProjection {
                 self.working_set_entries = entries;
             }
             "recovery_pending" => {
-                self.recovery_pending = value
+                let pending = value
                     .try_to::<bool>()
                     .map_err(|_| "recovery_pending is not boolean in the delta".to_string())?;
+                self.recovery_state = if pending {
+                    let terms = match &self.recovery_state {
+                        RecoveryState::Idle => Vec::new(),
+                        RecoveryState::Pending { terms } => terms.clone(),
+                    };
+                    RecoveryState::Pending { terms }
+                } else {
+                    RecoveryState::Idle
+                };
             }
             "recovery_terms" => {
                 let array = value
@@ -390,7 +411,9 @@ impl RecallPolicyProjection {
                         None => return Err("recovery_terms contains an invalid item".to_string()),
                     }
                 }
-                self.recovery_terms = terms;
+                if matches!(self.recovery_state, RecoveryState::Pending { .. }) {
+                    self.recovery_state = RecoveryState::Pending { terms };
+                }
             }
             "degraded" => self.degraded = optional_text(value),
             "updated_at" => self.updated_at = optional_text(value),
@@ -1032,9 +1055,7 @@ fn routing_result(envelope: &VarDictionary) -> Result<VarDictionary, String> {
         .map_err(|_| "routing result is not a dictionary".to_string())
 }
 
-pub fn parse_familiar_status(
-    envelope: &VarDictionary,
-) -> Result<FamiliarStatusProjection, String> {
+pub fn parse_familiar_status(envelope: &VarDictionary) -> Result<FamiliarStatusProjection, String> {
     let result = routing_result(envelope)?;
     reject_unknown_fields(
         &result,
@@ -1323,10 +1344,7 @@ pub fn routing_status_command(binding: &HostBinding, identity: &CommandIdentity)
     envelope
 }
 
-pub fn familiar_status_command(
-    binding: &HostBinding,
-    identity: &CommandIdentity,
-) -> VarDictionary {
+pub fn familiar_status_command(binding: &HostBinding, identity: &CommandIdentity) -> VarDictionary {
     let mut envelope = base_envelope(Some(binding), FAMILIAR_STATUS, identity);
     envelope.set("projection_id", ROUTING_PROJECTION_ID);
     envelope

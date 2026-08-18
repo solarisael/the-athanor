@@ -43,6 +43,13 @@ pub(crate) static QUERY_DATE_RE: LazyLock<Regex> = LazyLock::new(|| {
 pub enum AppError {
     #[error("invalid request: {0}")]
     Invalid(String),
+    /// A domain refusal whose code and message are caller-facing truths.
+    /// Static text only: refusals name the rule, never interpolate state.
+    #[error("refused: {message}")]
+    Refusal {
+        code: &'static str,
+        message: &'static str,
+    },
     #[error("configuration error: {0}")]
     Config(String),
     #[error("database error: {0}")]
@@ -75,6 +82,9 @@ pub struct Config {
     pub embedding_mode: EmbeddingMode,
     pub giga_source_ledger_dir: Option<PathBuf>,
     pub giga_source_room: Option<String>,
+    /// House-local timezone for Hallway daily threads. Explicit runtime
+    /// authority per house memory #3676; the default is operator-confirmed.
+    pub house_tz: String,
 }
 
 const DOTENV_PATH_OVERRIDE: &str = "SOLARISAEL_SUBSTRATE_DOTENV_PATH";
@@ -248,6 +258,11 @@ fn validation_owner(operation: &str) -> (&'static str, &'static str) {
         "giga_candidate_list" => ("src/giga.rs", "giga_candidate_list"),
         "giga_review" => ("src/giga.rs", "giga_review"),
         "giga_tool_review" => ("src/giga.rs", "giga_tool_review"),
+        "hallway_create" => ("src/hallway.rs", "hallway_create"),
+        "hallway_join" => ("src/hallway.rs", "hallway_join"),
+        "hallway_post" => ("src/hallway.rs", "hallway_post"),
+        "hallway_read" => ("src/hallway.rs", "hallway_read"),
+        "hallway_inbox" => ("src/hallway.rs", "hallway_inbox"),
         "giga_health" => ("src/giga.rs", "giga_health"),
         _ => ("src/main.rs", "decode_line"),
     }
@@ -369,6 +384,31 @@ impl AppError {
                     .next_check(DiagnosticNextCheck::new("retry_request").expected(json!({
                         "after": "request validation succeeds",
                     })))
+                    .execution(DiagnosticExecution::new(
+                        false,
+                        DiagnosticWriteOutcome::NotStarted,
+                        DiagnosticRetry::Never,
+                    ))
+            }
+            Self::Refusal { code, message } => {
+                let (path, symbol) = validation_owner(operation);
+                DiagnosticDetails::new(DiagnosticCategory::Input, DiagnosticStage::Validation)
+                    .operation(operation)
+                    .owner(DiagnosticOwner::new(component).path(path).symbol(symbol))
+                    .expected(json!({
+                        "request": "must reference hallway state the caller may act on",
+                    }))
+                    .observed(json!({"refusal": code, "reason": message}))
+                    .evidence(
+                        DiagnosticEvidence::new("domain_refusal")
+                            .summary(*message)
+                            .data(json!({"refusal": code})),
+                    )
+                    .target(DiagnosticTarget::new(DiagnosticTargetKind::Symbol, symbol))
+                    .next_check(
+                        DiagnosticNextCheck::new("inspect_refusal_code")
+                            .expected(json!({"refusal": code})),
+                    )
                     .execution(DiagnosticExecution::new(
                         false,
                         DiagnosticWriteOutcome::NotStarted,
@@ -686,6 +726,7 @@ impl AppError {
     fn code(&self) -> &'static str {
         match self {
             Self::Invalid(_) => "invalid_params",
+            Self::Refusal { code, .. } => code,
             Self::Config(_) => "configuration",
             Self::Protocol(_) => "protocol",
             Self::Embedding(_) => "embedding",
@@ -708,6 +749,7 @@ impl AppError {
     fn safe_message(&self) -> &'static str {
         match self {
             Self::Invalid(_) => "invalid request parameters",
+            Self::Refusal { message, .. } => message,
             Self::Config(message) if message.contains("embedding dimension") => {
                 "configuration error: embedding dimension is incompatible"
             }
@@ -798,6 +840,8 @@ impl Config {
                         .map(|room| source_ledger_directory_path(&room))
                 }),
             giga_source_room: configured_value("SOLARISAEL_GIGA_SOURCE_ROOM", &dotenv),
+            house_tz: configured_value("SOLARISAEL_HOUSE_TZ", &dotenv)
+                .unwrap_or_else(|| "America/Sao_Paulo".into()),
         })
     }
 

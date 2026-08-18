@@ -81,6 +81,7 @@ const HOUSE_TOOL_NAMES = [
   "hallway_join",
   "hallway_post",
   "hallway_read",
+  "hallway_inbox",
 ];
 
 function registerTools(): CapturedTool[] {

@@ -38,6 +38,10 @@ pub struct HallwayPostRequest {
     pub body: String,
     #[serde(default)]
     pub reply_to: Option<i64>,
+    /// Structured recipients resolved by the composer: stable room keys,
+    /// never parsed from body text. Empty means no targeted attention.
+    #[serde(default)]
+    pub to_rooms: Vec<String>,
 }
 
 fn default_read_limit() -> u32 {
@@ -205,6 +209,10 @@ pub struct HallwayMessage {
     pub body: String,
     pub reply_to: Option<i64>,
     pub created_at: String,
+    #[serde(default)]
+    pub thread: String,
+    #[serde(default)]
+    pub to_rooms: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -271,7 +279,44 @@ pub struct HallwayReadReceipt {
     pub read_cursor: i64,
     pub messages: Vec<HallwayMessage>,
     pub has_more: bool,
+    #[serde(default)]
+    pub room_read_sequence: i64,
+    #[serde(default)]
+    pub acked_mentions: i64,
     pub wake_policy: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayInboxRequest {
+    pub room: String,
+    pub spirit: String,
+    pub session: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HallwayInboxEntry {
+    pub hallway: String,
+    /// Derived: next_sequence - 1 - room read_sequence. Never stored.
+    pub unread: i64,
+    /// Pending targeted notifications for this room.
+    pub mentions: i64,
+    pub notification_revision: i64,
+    pub latest_sequence: i64,
+    pub latest_room: Option<String>,
+    pub latest_spirit: Option<String>,
+    pub latest_excerpt: Option<String>,
+    pub latest_created_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HallwayInboxReceipt {
+    pub ok: bool,
+    pub room: String,
+    pub spirit: String,
+    pub hallways: Vec<HallwayInboxEntry>,
 }
 
 fn valid_slug(value: &str) -> bool {
@@ -371,6 +416,28 @@ impl HallwayPostRequest {
         if self.reply_to.is_some_and(|id| id <= 0) {
             return Err("replyTo must be a positive message id".into());
         }
+        if self.to_rooms.len() > HALLWAY_MAX_ALLOWED_ROOMS {
+            return Err(format!(
+                "toRooms must name at most {HALLWAY_MAX_ALLOWED_ROOMS} rooms"
+            ));
+        }
+        for room in &self.to_rooms {
+            if !valid_slug(room) {
+                return Err(
+                    "toRooms entries must be lowercase kebab-case keys of at most 160 bytes"
+                        .into(),
+                );
+            }
+        }
+        if self
+            .to_rooms
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != self.to_rooms.len()
+        {
+            return Err("toRooms must not contain duplicates".into());
+        }
         Ok(())
     }
 }
@@ -388,6 +455,12 @@ impl HallwayReadRequest {
             return Err(format!("limit must be 1-{HALLWAY_MAX_READ_LIMIT}"));
         }
         Ok(())
+    }
+}
+
+impl HallwayInboxRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_binding(&self.room, &self.spirit, &self.session)
     }
 }
 

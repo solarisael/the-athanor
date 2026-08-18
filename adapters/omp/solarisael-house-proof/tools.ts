@@ -387,6 +387,14 @@ function registerHouseTool(pi, definition) {
   });
 }
 
+/** Room-level Hallway inbox for automatic Bell projection. Read-only. */
+export async function readHallwayInbox(
+  binding: { room: string; spirit: string; session: string },
+  signal?: AbortSignal,
+) {
+  return await requestRustDomain("hallway_inbox", { ...binding }, signal, false);
+}
+
 export function registerSolarisaelTools(pi) {
   const z = pi.zod;
 
@@ -1535,6 +1543,7 @@ export function registerSolarisaelTools(pi) {
       hallway: z.string().describe("Hallway key."),
       body: z.string().describe("Non-empty substantive message, at most 32768 UTF-8 bytes."),
       reply_to: z.number().optional().describe("Positive message id being answered."),
+      to_rooms: z.array(z.string()).optional().describe("Structured recipient room keys. A listed room gets a durable Bell notification (targeted attention, not privacy). Never parsed from body text."),
       idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
     }),
     approval: "write",
@@ -1545,6 +1554,7 @@ export function registerSolarisaelTools(pi) {
         ...binding,
         body: params.body,
         replyTo: params.reply_to,
+        toRooms: params.to_rooms ?? [],
         idempotencyKey: params.idempotency_key || String(toolCallId),
       }, signal, true);
       return {
@@ -1575,6 +1585,23 @@ export function registerSolarisaelTools(pi) {
         limit: params.limit ?? 50,
         advanceCursor: params.advance_cursor ?? false,
       }, signal, params.advance_cursor === true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "hallway_inbox",
+    label: "Athanor Hallway Inbox",
+    description: "List every persistent Hallway this room may open: derived unread counts, pending targeted mentions, and latest-message metadata. Reading the inbox clears nothing; only hallway_read with advance_cursor acknowledges.",
+    parameters: z.object({}),
+    approval: "read",
+    async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      const result = await requestRustDomain("hallway_inbox", { ...binding }, signal, false);
       return {
         isError: result.ok !== true,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

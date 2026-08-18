@@ -1,7 +1,10 @@
-use athanor_substrate::{hallway_create, hallway_join, hallway_post, hallway_read};
+use athanor_substrate::{
+    AppError, Config, EmbeddingMode, hallway_create, hallway_inbox, hallway_join, hallway_post,
+    hallway_read,
+};
 use house_core::hallway::{
-    HallwayCreateDisposition, HallwayCreateRequest, HallwayJoinDisposition, HallwayJoinRequest,
-    HallwayPostDisposition, HallwayPostRequest, HallwayReadRequest,
+    HallwayCreateDisposition, HallwayCreateRequest, HallwayInboxRequest, HallwayJoinDisposition,
+    HallwayJoinRequest, HallwayPostDisposition, HallwayPostRequest, HallwayReadRequest,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
@@ -11,6 +14,23 @@ const HALLWAY_MIGRATION: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../substrate/migrations/0018_hallway_chatrooms.sql"
 ));
+const BELL_MIGRATION: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../substrate/migrations/0020_hallway_bell.sql"
+));
+
+fn bell_config() -> Config {
+    Config {
+        database_url: "postgres://unused-by-hallway".into(),
+        embed_url: None,
+        embed_model: "unused".into(),
+        embed_dimension: 2048,
+        embedding_mode: EmbeddingMode::Disabled,
+        giga_source_ledger_dir: None,
+        giga_source_room: None,
+        house_tz: "America/Sao_Paulo".into(),
+    }
+}
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -53,6 +73,7 @@ async fn hallway_temp_session_exchanges_messages_without_persistent_state() -> T
         .connect_with(options)
         .await?;
     sqlx::raw_sql(HALLWAY_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
     let result = run_contract(&pool).await;
     pool.close().await;
     result
@@ -87,8 +108,11 @@ async fn hallway_supports_multiple_spirit_instances_and_ordered_messages() -> Te
             })
             .connect_with(options)
             .await?;
+        // Double application pins idempotency for both migrations.
         sqlx::raw_sql(HALLWAY_MIGRATION).execute(&pool).await?;
+        sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(HALLWAY_MIGRATION).execute(&pool).await?;
+        sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
         run_contract(&pool).await?;
         pool.close().await;
         TestResult::Ok(())
@@ -111,6 +135,7 @@ async fn hallway_supports_multiple_spirit_instances_and_ordered_messages() -> Te
 }
 
 async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
+    let config = bell_config();
     let suffix = Uuid::new_v4().simple();
     let hallway = format!("hallway-{suffix}");
     let create = HallwayCreateRequest {
@@ -158,6 +183,7 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
 
     let first = hallway_post(
         pool,
+        &config,
         HallwayPostRequest {
             hallway: hallway.clone(),
             room: "kintsu".into(),
@@ -166,6 +192,7 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
             idempotency_key: "message-kintsu-one".into(),
             body: "Kodo, can you hear me in the Hallway?".into(),
             reply_to: None,
+            to_rooms: vec![],
         },
     )
     .await?;
@@ -177,17 +204,24 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
         idempotency_key: "message-kodo-one".into(),
         body: "I hear you. The Hallway is real.".into(),
         reply_to: Some(first.message.id),
+        to_rooms: vec![],
     };
-    let second = hallway_post(pool, second_request.clone()).await?;
+    let second = hallway_post(pool, &config, second_request.clone()).await?;
     assert_eq!(first.message.sequence, 1);
     assert_eq!(second.message.sequence, 2);
     assert_eq!(
-        hallway_post(pool, second_request).await?.disposition,
+        hallway_post(pool, &config, second_request).await?.disposition,
         HallwayPostDisposition::Duplicate
     );
 
+    // Daily threads: the first message named today's House-local table and
+    // the reply inherited it rather than deriving its own.
+    assert_eq!(first.message.thread.len(), 10);
+    assert_eq!(second.message.thread, first.message.thread);
+
     let third = hallway_post(
         pool,
+        &config,
         HallwayPostRequest {
             hallway: hallway.clone(),
             room: "kintsu".into(),
@@ -196,6 +230,7 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
             idempotency_key: "message-kintsu-two".into(),
             body: "Second Kintsu presence checking in.".into(),
             reply_to: Some(second.message.id),
+            to_rooms: vec![],
         },
     )
     .await?;
@@ -209,10 +244,11 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
         idempotency_key: "message-concurrent-retry".into(),
         body: "One session-scoped command, even when it arrives twice.".into(),
         reply_to: Some(third.message.id),
+        to_rooms: vec![],
     };
     let (left, right) = tokio::join!(
-        hallway_post(pool, concurrent_request.clone()),
-        hallway_post(pool, concurrent_request)
+        hallway_post(pool, &config, concurrent_request.clone()),
+        hallway_post(pool, &config, concurrent_request)
     );
     let left = left?;
     let right = right?;
@@ -250,17 +286,13 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
     );
     assert_eq!(read.messages[2].session, "kintsu-two");
     assert_eq!(read.read_cursor, final_message_id);
-    for message in &read.messages {
-        println!(
-            "[{}] {}@{}: {}",
-            message.sequence, message.spirit, message.session, message.body
-        );
-    }
+    // Contiguous coverage from zero advances the room-stable read state.
+    assert_eq!(read.room_read_sequence, 4);
 
     let unread = hallway_read(
         pool,
         HallwayReadRequest {
-            hallway,
+            hallway: hallway.clone(),
             room: "kodo".into(),
             spirit: "Kodo".into(),
             session: "kodo-one".into(),
@@ -271,5 +303,124 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
     )
     .await?;
     assert!(unread.messages.is_empty());
+
+    // Lazy presence: a fresh session in an allowed room posts without an
+    // explicit join, and its structured recipient rings kintsu's Bell.
+    let lazy = hallway_post(
+        pool,
+        &config,
+        HallwayPostRequest {
+            hallway: hallway.clone(),
+            room: "kodo".into(),
+            spirit: "Kodo".into(),
+            session: "kodo-lazy".into(),
+            idempotency_key: "message-kodo-lazy".into(),
+            body: "Kintsu — no join preceded this letter.".into(),
+            reply_to: None,
+            to_rooms: vec!["kintsu".into()],
+        },
+    )
+    .await?;
+    assert_eq!(lazy.disposition, HallwayPostDisposition::Posted);
+    assert_eq!(lazy.message.sequence, 5);
+    assert_eq!(lazy.message.to_rooms, vec!["kintsu".to_string()]);
+
+    // Truthful refusals carry stable codes, not a generic moustache.
+    let denied = hallway_post(
+        pool,
+        &config,
+        HallwayPostRequest {
+            hallway: hallway.clone(),
+            room: "tuner".into(),
+            spirit: "Tuner".into(),
+            session: "tuner-one".into(),
+            idempotency_key: "message-tuner-denied".into(),
+            body: "The chair tests the door.".into(),
+            reply_to: None,
+            to_rooms: vec![],
+        },
+    )
+    .await;
+    assert!(matches!(
+        denied,
+        Err(AppError::Refusal {
+            code: "room_not_allowed",
+            ..
+        })
+    ));
+    let missing = hallway_read(
+        pool,
+        HallwayReadRequest {
+            hallway: "no-such-hallway".into(),
+            room: "kodo".into(),
+            spirit: "Kodo".into(),
+            session: "kodo-one".into(),
+            after: None,
+            limit: 20,
+            advance_cursor: false,
+        },
+    )
+    .await;
+    assert!(matches!(
+        missing,
+        Err(AppError::Refusal {
+            code: "hallway_not_found",
+            ..
+        })
+    ));
+
+    // The Bell: inbox shows the pending mention and derived unread; a
+    // covering read acknowledges exactly what it returned; the Bell quiets.
+    let inbox = hallway_inbox(
+        pool,
+        HallwayInboxRequest {
+            room: "kintsu".into(),
+            spirit: "Kintsu".into(),
+            session: "kintsu-one".into(),
+        },
+    )
+    .await?;
+    let entry = inbox
+        .hallways
+        .iter()
+        .find(|entry| entry.hallway == hallway)
+        .expect("kintsu inbox lists the hallway");
+    assert_eq!(entry.mentions, 1);
+    assert_eq!(entry.latest_sequence, 5);
+    assert_eq!(entry.unread, 5);
+
+    let ack = hallway_read(
+        pool,
+        HallwayReadRequest {
+            hallway: hallway.clone(),
+            room: "kintsu".into(),
+            spirit: "Kintsu".into(),
+            session: "kintsu-one".into(),
+            after: Some(0),
+            limit: 20,
+            advance_cursor: true,
+        },
+    )
+    .await?;
+    assert_eq!(ack.messages.len(), 5);
+    assert_eq!(ack.acked_mentions, 1);
+    assert_eq!(ack.room_read_sequence, 5);
+
+    let quiet = hallway_inbox(
+        pool,
+        HallwayInboxRequest {
+            room: "kintsu".into(),
+            spirit: "Kintsu".into(),
+            session: "kintsu-one".into(),
+        },
+    )
+    .await?;
+    let entry = quiet
+        .hallways
+        .iter()
+        .find(|entry| entry.hallway == hallway)
+        .expect("kintsu inbox still lists the hallway");
+    assert_eq!(entry.mentions, 0);
+    assert_eq!(entry.unread, 0);
     Ok(())
 }

@@ -1553,6 +1553,7 @@ mod tests {
             embedding_mode: EmbeddingMode::DisabledForTest,
             giga_source_ledger_dir: Some(directory.to_owned()),
             giga_source_room: Some(room.into()),
+            house_tz: "America/Sao_Paulo".into(),
         }
     }
 
@@ -1784,6 +1785,7 @@ mod tests {
             embedding_mode: EmbeddingMode::DisabledForTest,
             giga_source_ledger_dir: None,
             giga_source_room: Some("lab".into()),
+            house_tz: "America/Sao_Paulo".into(),
         };
         let (_shutdown, receiver) = watch::channel(true);
         tokio::time::timeout(

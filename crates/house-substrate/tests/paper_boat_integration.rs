@@ -137,6 +137,7 @@ async fn run_contract(pool: &sqlx::PgPool, url: &str) -> TestResult {
         embedding_mode: EmbeddingMode::DisabledForTest,
         giga_source_ledger_dir: None,
         giga_source_room: None,
+        house_tz: "America/Sao_Paulo".into(),
     };
     let suffix = Uuid::new_v4().simple();
     let room = format!("boat-test-{suffix}");

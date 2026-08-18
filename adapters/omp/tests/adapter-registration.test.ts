@@ -167,6 +167,7 @@ const expectedToolNames = [
   "hallway_join",
   "hallway_post",
   "hallway_read",
+  "hallway_inbox",
   "house_lane_status",
   "familiar_status",
   "familiar_dispatch",
@@ -583,6 +584,7 @@ describe("OMP adapter registration", () => {
           hallway: { type: "string" },
           body: { type: "string" },
           reply_to: { type: "number", optional: true },
+          to_rooms: { type: "array", element: { type: "string" }, optional: true },
           idempotency_key: { type: "string", optional: true },
         },
       },
@@ -595,6 +597,7 @@ describe("OMP adapter registration", () => {
           advance_cursor: { type: "boolean", optional: true },
         },
       },
+      hallway_inbox: { type: "object", fields: {} },
       house_lane_status: { type: "object", fields: {} },
       familiar_status: { type: "object", fields: {} },
       familiar_dispatch: {

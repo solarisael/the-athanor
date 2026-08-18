@@ -1659,6 +1659,7 @@ async fn queue_and_atomic_promotion_contracts() {
         embedding_mode: EmbeddingMode::DisabledForTest,
         giga_source_ledger_dir: None,
         giga_source_room: None,
+        house_tz: "America/Sao_Paulo".into(),
     };
     let admin = PgPoolOptions::new()
         .max_connections(1)

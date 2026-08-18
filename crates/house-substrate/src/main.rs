@@ -9,7 +9,8 @@ use athanor_substrate::{
     design_document_write, entity_resolve, giga_candidate_list, giga_conversation_ingest,
     giga_event_claim, giga_event_finish, giga_event_ingest, giga_event_replay, giga_health,
     giga_promote, giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review,
-    hallway_create, hallway_join, hallway_post, hallway_read, lesson_context, lesson_delete,
+    hallway_create, hallway_inbox, hallway_join, hallway_post, hallway_read, lesson_context,
+    lesson_delete,
     lesson_query, lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake, recall,
     refresh_semantic_vocabulary, remember, spawn_giga_worker, substrate_health,
     substrate_health_with_config,
@@ -23,7 +24,10 @@ use house_core::{
     GigaEventFinishRequest, GigaEventReplayRequest, GigaPromotionRequest,
     GigaQueueMaintenanceRequest, GigaReviewAction, PaperBoatSleepRequest, PaperBoatWakeRequest,
     RecallRequest as DomainRecallRequest, RememberRequest as DomainRememberRequest,
-    hallway::{HallwayCreateRequest, HallwayJoinRequest, HallwayPostRequest, HallwayReadRequest},
+    hallway::{
+        HallwayCreateRequest, HallwayInboxRequest, HallwayJoinRequest, HallwayPostRequest,
+        HallwayReadRequest,
+    },
 };
 use house_protocol::{
     ClusterMaintenanceResultWire, GigaCandidateListRequest, GigaConversationIngestParams,
@@ -54,6 +58,7 @@ enum ProtocolRequest {
     HallwayJoin(HallwayJoinRequest),
     HallwayPost(HallwayPostRequest),
     HallwayRead(HallwayReadRequest),
+    HallwayInbox(HallwayInboxRequest),
     Recall(RecallParams),
     VaultRecall(VaultRecallParams),
     Anamnesis(AnamnesisParams),
@@ -298,6 +303,9 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
             .map_err(|error| invalid_params(error.to_string())),
         "hallway_read" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::HallwayRead)
+            .map_err(|error| invalid_params(error.to_string())),
+        "hallway_inbox" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::HallwayInbox)
             .map_err(|error| invalid_params(error.to_string())),
         "recall" => envelope
             .recall_request()
@@ -659,6 +667,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::HallwayJoin(_) => "hallway_join",
                     ProtocolRequest::HallwayPost(_) => "hallway_post",
                     ProtocolRequest::HallwayRead(_) => "hallway_read",
+                    ProtocolRequest::HallwayInbox(_) => "hallway_inbox",
                     ProtocolRequest::Recall(_) => "recall",
                     ProtocolRequest::VaultRecall(_) => "vault_recall",
                     ProtocolRequest::Anamnesis(_) => "anamnesis",
@@ -703,6 +712,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         request.validate().map_err(AppError::Invalid)
                     }
                     ProtocolRequest::HallwayRead(request) => {
+                        request.validate().map_err(AppError::Invalid)
+                    }
+                    ProtocolRequest::HallwayInbox(request) => {
                         request.validate().map_err(AppError::Invalid)
                     }
                     ProtocolRequest::Recall(request) => request.validate(),
@@ -846,13 +858,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                     }
                                     ProtocolRequest::HallwayPost(request) => {
-                                        match hallway_post(pool, request).await {
+                                        match hallway_post(pool, config, request).await {
                                             Ok(receipt) => success_json(id, receipt)?,
                                             Err(error) => app_error(id, operation, error),
                                         }
                                     }
                                     ProtocolRequest::HallwayRead(request) => {
                                         match hallway_read(pool, request).await {
+                                            Ok(receipt) => success_json(id, receipt)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::HallwayInbox(request) => {
+                                        match hallway_inbox(pool, request).await {
                                             Ok(receipt) => success_json(id, receipt)?,
                                             Err(error) => app_error(id, operation, error),
                                         }

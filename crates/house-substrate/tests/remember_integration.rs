@@ -118,6 +118,7 @@ async fn isolated_database_guard() {
         embedding_mode: EmbeddingMode::DisabledForTest,
         giga_source_ledger_dir: None,
         giga_source_room: None,
+        house_tz: "America/Sao_Paulo".into(),
     };
     let source_path = format!("isolated-test/{}", Uuid::new_v4());
     let body = "This mutation proves the dedicated PostgreSQL authority path.";
@@ -226,6 +227,7 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
         embedding_mode: EmbeddingMode::DisabledForTest,
         giga_source_ledger_dir: None,
         giga_source_room: None,
+        house_tz: "America/Sao_Paulo".into(),
     };
     let suffix = Uuid::new_v4();
     let root_source = format!("thread-integration/{suffix}/root");
@@ -431,6 +433,7 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     embedding_mode: EmbeddingMode::DisabledForTest,
                     giga_source_ledger_dir: None,
                     giga_source_room: None,
+                    house_tz: "America/Sao_Paulo".into(),
                 };
                 let params = RecallParams {
                     room: room.into(),

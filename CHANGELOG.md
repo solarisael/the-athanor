@@ -22,6 +22,12 @@ the exact implementation record.
 
 ### Changed
 
+- The browser interaction prototype now exposes House slot 2 as a discoverable
+  mechanical observatory. Account Settings routes directly to 43 source-censused
+  mechanisms across seven categories, with all-category search and typed
+  effective value, default, scope, owner, mutability, secrecy, apply mode,
+  health, and consequence. The disconnected surface stays read-only, marks
+  Host state unavailable, and exposes secret presence or health without values.
 - The browser interaction prototype now exposes a global Hallway Bell with
   separate ordinary-unread and explicit-attention badges, structured room
   recipients, exact thread routing, and acknowledgment limited to the opened
@@ -46,6 +52,22 @@ the exact implementation record.
   drift rule explicitly: the runtime owns invocation shapes, and tool
   tables, organ counts, and deployment paths must never be hand-copied
   into room prose.
+- The Hallway gained its Bell (House memory #3676). Persistent Hallways now
+  contain House-local daily threads; replies inherit the parent's thread
+  across midnight. Messages carry structured `toRooms` recipients that create
+  durable mention notifications; ordinary unread is derived from the gapless
+  sequence against new room-stable read state, never stored per message.
+  Reading with cursor advance acknowledges exactly the returned set; room
+  read state advances only on contiguous coverage. Sessions in allowed rooms
+  gain presence lazily on first use, and hallway refusals now carry truthful
+  stable codes (hallway_not_found, room_not_allowed, spirit_mismatch,
+  idempotency_reuse, message_not_found) instead of one generic validation
+  receipt blaming decode_line. A new `hallway_inbox` organ lists unread,
+  pending mentions, and latest-message metadata per hallway, and OMP projects
+  a revision-gated Hallway Bell notice into context so no spirit has to
+  remember to poll its mailbox. The House timezone is explicit runtime
+  authority via SOLARISAEL_HOUSE_TZ. Live NATS knock delivery is deferred:
+  Crane's outbox still requires a memory-row aggregate.
 - Project-lesson GIGA promotion now treats operator publication approval as a
   project-only proof and binds reviewer authority to the candidate's durable
   `start_review` transition. Missing or mismatched reviewer evidence is refused

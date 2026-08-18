@@ -137,6 +137,11 @@ test("claims one pointer-only Knock and retries its bounded turn settlement", as
     maxTurns: 4,
   });
 
+  const injectedSettlements = commands
+    .filter((command) => command.command_or_event_type === "athanor.hallway.knock_settle")
+    .map((command) => command.hallway_knock_settle.outcome);
+  expect(injectedSettlements).toEqual(["started"]);
+
   await noteHallwayKnockTurnStart(binding, "5af35bb5-e9a1-4e58-849b-b78b6614bc15");
   await noteHallwayKnockTurnEnd(binding);
 
@@ -158,7 +163,7 @@ test("claims one pointer-only Knock and retries its bounded turn settlement", as
     await timeouts[1]();
     expect(sent).toHaveLength(2);
 
-    now += 15_001;
+    now += 60_001;
     await intervals[1]();
     expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("failed");
     await stopHallwayKnockDoorman(timeoutBinding);
@@ -196,4 +201,30 @@ test("claims one pointer-only Knock and retries its bounded turn settlement", as
   } finally {
     Date.now = originalNow;
   }
+
+  claimReturned = false;
+  failFirstStart = false;
+  let activeTurn = true;
+  let aborts = 0;
+  const activeBinding = { ...binding, session: "session-active-turn" };
+  const activeCtx = {
+    ...ctx,
+    isIdle: () => !activeTurn,
+    abort: () => {
+      aborts += 1;
+      activeTurn = false;
+    },
+  };
+  startHallwayKnockDoorman(pi, activeCtx, activeBinding);
+  await timeouts[4]();
+  expect(sent).toHaveLength(5);
+  expect(aborts).toBe(1);
+  expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("started");
+  await noteHallwayKnockTurnStart(
+    activeBinding,
+    "5af35bb5-e9a1-4e58-849b-b78b6614bc15",
+  );
+  await noteHallwayKnockTurnEnd(activeBinding);
+  expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("completed");
+  await stopHallwayKnockDoorman(activeBinding);
 });

@@ -128,9 +128,11 @@ type KnockDoormanState = {
   turnEndedAt: number | null;
   settling: boolean;
   lastWarningAt: number;
+  interruptRequested: boolean;
+  interruptSent: boolean;
 };
 
-const KNOCK_START_TIMEOUT_MS = 15_000;
+const KNOCK_START_TIMEOUT_MS = 60_000;
 const KNOCK_SETTLEMENT_TIMEOUT_MS = 25_000;
 const KNOCK_POLL_MS = 2_000;
 const KNOCK_WARNING_COOLDOWN_MS = 60_000;
@@ -156,6 +158,8 @@ function clearActiveKnock(state: KnockDoormanState): void {
   state.startSettled = false;
   state.turnEnded = false;
   state.turnEndedAt = null;
+  state.interruptRequested = false;
+  state.interruptSent = false;
 }
 
 function knockMessage(knock: HallwayKnockPointer): Record<string, unknown> {
@@ -205,11 +209,38 @@ async function failActiveKnock(state: KnockDoormanState, reason: string): Promis
   }
 }
 
-async function deliverActiveKnock(state: KnockDoormanState): Promise<void> {
-  const active = state.active;
-  if (!active || state.delivered || !state.ctx?.isIdle?.() || state.ctx?.hasPendingMessages?.()) {
+async function interruptActiveTurn(state: KnockDoormanState): Promise<void> {
+  if (
+    !state.active
+    || !state.interruptRequested
+    || state.interruptSent
+    || !state.startSettled
+  ) {
     return;
   }
+  if (typeof state.ctx?.abort !== "function") {
+    await failActiveKnock(state, "recipient adapter cannot interrupt its active turn");
+    return;
+  }
+  state.interruptSent = true;
+  try {
+    state.ctx.abort();
+  } catch (error) {
+    state.interruptSent = false;
+    await failActiveKnock(
+      state,
+      `recipient adapter could not interrupt its active turn: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+async function deliverActiveKnock(state: KnockDoormanState): Promise<void> {
+  const active = state.active;
+  if (!active || state.delivered) return;
+  const idle = state.ctx?.isIdle?.() === true;
+  if (!idle && typeof state.ctx?.abort !== "function") return;
   try {
     state.pi.sendMessage(
       knockMessage(active),
@@ -220,6 +251,10 @@ async function deliverActiveKnock(state: KnockDoormanState): Promise<void> {
     state.turnStarted = false;
     state.startSettled = false;
     state.turnEnded = false;
+    state.interruptRequested = !idle;
+    state.interruptSent = false;
+    await settleObservedTurn(state);
+    await interruptActiveTurn(state);
   } catch (error) {
     await failActiveKnock(
       state,
@@ -232,14 +267,14 @@ async function deliverActiveKnock(state: KnockDoormanState): Promise<void> {
 
 async function settleObservedTurn(state: KnockDoormanState): Promise<void> {
   const active = state.active;
-  if (!active || !state.turnStarted || state.settling) return;
+  if (!active || state.settling) return;
   state.settling = true;
   try {
     if (!state.startSettled) {
       await settleHallwayKnock(state.binding, active.knockId, "started");
       state.startSettled = true;
     }
-    if (!state.turnEnded) return;
+    if (!state.turnStarted || !state.turnEnded) return;
     await settleHallwayKnock(state.binding, active.knockId, "completed");
     clearActiveKnock(state);
   } catch (error) {
@@ -255,6 +290,15 @@ async function tickDoorman(state: KnockDoormanState): Promise<void> {
     if (!state.delivered) {
       await deliverActiveKnock(state);
     } else if (
+      !state.startSettled
+      && state.deliveredAt !== null
+      && now - state.deliveredAt >= KNOCK_SETTLEMENT_TIMEOUT_MS
+    ) {
+      await failActiveKnock(
+        state,
+        `recipient turn start did not settle within ${KNOCK_SETTLEMENT_TIMEOUT_MS}ms`,
+      );
+    } else if (
       !state.turnStarted
       && state.deliveredAt !== null
       && now - state.deliveredAt >= KNOCK_START_TIMEOUT_MS
@@ -262,16 +306,6 @@ async function tickDoorman(state: KnockDoormanState): Promise<void> {
       await failActiveKnock(
         state,
         `recipient turn did not start within ${KNOCK_START_TIMEOUT_MS}ms`,
-      );
-    } else if (
-      state.turnStarted
-      && !state.startSettled
-      && state.deliveredAt !== null
-      && now - state.deliveredAt >= KNOCK_SETTLEMENT_TIMEOUT_MS
-    ) {
-      await failActiveKnock(
-        state,
-        `recipient turn start did not settle within ${KNOCK_SETTLEMENT_TIMEOUT_MS}ms`,
       );
     } else if (
       state.turnEnded
@@ -284,16 +318,13 @@ async function tickDoorman(state: KnockDoormanState): Promise<void> {
       );
     } else {
       await settleObservedTurn(state);
+      await interruptActiveTurn(state);
     }
     return;
   }
-  if (
-    state.claiming
-    || !state.ctx?.isIdle?.()
-    || state.ctx?.hasPendingMessages?.()
-  ) {
-    return;
-  }
+  if (state.claiming) return;
+  const idle = state.ctx?.isIdle?.() === true;
+  if (!idle && typeof state.ctx?.abort !== "function") return;
   state.claiming = true;
   try {
     const claim = await claimHallwayKnock(state.binding);
@@ -342,6 +373,8 @@ export function startHallwayKnockDoorman(pi: any, ctx: any, binding: HostBinding
     turnEndedAt: null,
     settling: false,
     lastWarningAt: 0,
+    interruptRequested: false,
+    interruptSent: false,
   };
   state.timer = ctx.setInterval(() => tickDoorman(state), KNOCK_POLL_MS);
   knockDoormen.set(key, state);

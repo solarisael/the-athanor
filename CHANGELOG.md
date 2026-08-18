@@ -26,6 +26,10 @@ the exact implementation record.
   room without advancing its stable read position. Posting no longer rings a
   room about its own voice, while older unread messages from peer rooms remain
   pending until an exact read covers them.
+- Hallway Knock delivery now settles the parent turn as soon as OMP accepts its
+  trusted injection, before the model can answer with a child Knock. Allowed
+  Knocks claim active sessions as well as idle ones and interrupt the current
+  turn only after that authoritative start settlement succeeds.
 - The public Pages specimen now self-hosts a subsetted Inter variable font,
   renders repository documentation as local JavaScript-free pages with static
   SVG diagrams, and keeps its disconnected-record claim true by replacing

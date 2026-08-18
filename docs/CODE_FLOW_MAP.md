@@ -324,12 +324,18 @@ write could duplicate an operation whose response was merely lost.
 Hallway Knock actuation follows a separate local path. The recipient Host claims
 one PostgreSQL pointer under a short session lease; the OMP doorman includes only
 trusted routing IDs in its custom wake message and invokes `pi.sendMessage` for
-one turn. The spirit reads the exact Hallway message through the ordinary
-untrusted social path. Started/completed/failed settlement returns through Host;
-claiming never advances a Hallway read cursor or clears a Bell row.
+one turn. Injection settles the authoritative parent as started before the
+model can answer. If the recipient is already generating, the adapter then
+aborts that active turn so the bounded Knock can run next; the interrupted turn
+cannot be mistaken for the Knock's completion because completion still waits
+for the custom Knock message's own lifecycle. The spirit reads the exact
+Hallway message through the ordinary untrusted social path.
+Started/completed/failed settlement returns through Host; claiming never
+advances a Hallway read cursor or clears a Bell row.
 
 Sources: `adapters/omp/solarisael-house-proof/tools.ts`,
-`adapters/omp/rust-transport.ts`, `adapters/omp/solarisael-house-proof/host.ts`.
+`adapters/omp/rust-transport.ts`, `adapters/omp/solarisael-house-proof/host.ts`,
+`adapters/omp/solarisael-house-proof/knock.ts`.
 
 ## 6. Substrate request router
 

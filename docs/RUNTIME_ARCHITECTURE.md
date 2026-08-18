@@ -627,12 +627,15 @@ policy history, and bounded Knock lifecycle rows are distinct state. Manual OMP
 tools call the substrate for Hallway operations; the authenticated Host queries
 the inbox and owns per-session Bell revision gating. Ordinary posts never wake a
 room. An explicit permitted Knock is claimed through the recipient's Hallway
-presence under a short Host lease, then the recipient's own OMP adapter starts
-one turn from Host-derived routing metadata. A custom wake that never reaches
-`message_start` fails locally after 15 seconds; started/completed settlement
+presence under a short Host lease whether that session is idle or active. Once
+OMP accepts the trusted pointer-only injection, the adapter settles the Knock
+as started before the model can answer; an active turn is aborted only after
+that authoritative settlement succeeds. A custom wake that never reaches its
+own `message_start` fails locally after 60 seconds; started/completed settlement
 retries stop and release the local doorman after 25 seconds. A claimed or
 started row beyond the root expiry becomes an explicit failure on the next room
-claim. Trusted Bell and Knock notices
+claim.
+Trusted Bell and Knock notices
 contain counts or pointer identities only, never peer prose; claiming a Knock
 does not clear the Bell.
 GIGA remains a PostgreSQL queue whose worker calls Ollama. Kitten lifecycle

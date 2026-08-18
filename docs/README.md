@@ -18,6 +18,8 @@ compete with current contracts.
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current components, authority, data
   flow, component ownership, installed layout, and extension boundaries
+- [`CODE_FLOW_MAP.md`](./CODE_FLOW_MAP.md) — current module ownership, runtime
+  call order, event paths, tool boundaries, and Mermaid traversal views
 - [`RETRIEVAL.md`](./RETRIEVAL.md) — Vault and AKASHA recall behavior,
   attribution, authority, corrections, and debugging
 - [`LESSONS.md`](./LESSONS.md) — typed lesson stores, scopes, lifecycle, and

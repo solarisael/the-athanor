@@ -20,6 +20,60 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Changed
+
+- The browser interaction prototype now exposes a global Hallway Bell with
+  separate ordinary-unread and explicit-attention badges, structured room
+  recipients, exact thread routing, and acknowledgment limited to the opened
+  thread. Offscreen mobile navigation is absent from the accessibility tree,
+  and the fixed member dock no longer obscures narrow Hallway content. The
+  prototype remains local-only and disconnected from Host authority.
+- Windows native release assembly now reuses Cargo's release artifacts and a
+  checksum-keyed cache of the pinned PostgreSQL/pgvector, NATS, and Godot
+  runtimes. Unchanged Rust dependencies no longer cold-compile on every package,
+  successful version workspaces are removed, and every emitted payload remains
+  freshly assembled and checksummed.
+- Rust domain state now uses typed commands, outcomes, availability, recovery,
+  health, disposition, embedding, and query-lane models instead of coordinated
+  boolean products. Existing protocol JSON, environment variables, persisted
+  Host state, and idempotency responses remain compatible; production-disabled
+  embedding is no longer reported as an isolated-test condition.
+- Lesson trigger matches now carry a room-wide fires ledger: each fired
+  lesson reports how many times it has bitten in this room, rendered as
+  `×N` on trigger cards. Repeat cooldown stays session-scoped and never
+  reads the ledger.
+- Project-lesson GIGA promotion now treats operator publication approval as a
+  project-only proof and binds reviewer authority to the candidate's durable
+  `start_review` transition. Missing or mismatched reviewer evidence is refused
+  before durable promotion writes.
+- OMP prose lesson triggers now inspect coalesced live assistant text updates.
+  Block verdicts queue hidden correction context, abort the active provider turn,
+  and remove the aborted assistant from the continuation's model context;
+  reminders queue without stopping generation. Duplicate terminal stream events
+  received while Rust matching is in flight now settle once instead of
+  recursively restarting an empty pump.
+  Every prose verdict also leaves a compact transcript card naming the lesson
+  and whether it interrupted or queued a reminder; expanding the card shows the
+  exact injected lesson context.
+  OMP exposes extension observers after
+  UI publication, so any prefix displayed before the Rust verdict remains
+  visible until OMP exposes native pre-commit TTSR actuation.
+- OMP now exposes a shared Athanor feedback rail instead of leaving automatic
+  House activity visible only to the model. The status line identifies the
+  active spirit and every House tool's running or final state; a compact widget
+  names automatic room, routing, wake, Anamnesis, process-lesson, Recall, model,
+  and correction activity. Automatic degradation surfaces as warnings. Tool
+  cards use OMP lifecycle symbols and success/error colors while preserving
+  canonical JSON behind expansion. Remember now renders a framed durable receipt
+  with memory or lesson identity, room, authority, threads, and expandable
+  content provenance. Recall renders ranked canon and memory evidence with
+  lexical-coverage gauges, scores, source rooms, excerpts, and expandable
+  provenance instead of a generic JSON summary.
+  Sleep now renders a framed paper-boat receipt with room, PostgreSQL authority,
+  durability, backup completion, continuity readiness, warnings, and expandable
+  carried body/source/outbox evidence.
+
+
 ## [0.9.7.0] - 2026-08-15
 
 ### Added

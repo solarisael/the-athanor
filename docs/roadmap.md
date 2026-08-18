@@ -1,6 +1,6 @@
 # The Athanor Roadmap
 
-_Last updated: 2026-08-10_
+_Last updated: 2026-08-17_
 
 This page is the current release path. It does not duplicate completed history or
 turn accepted architecture documents into one giant checklist.
@@ -25,10 +25,15 @@ Implemented in the candidate:
 
 - file-authoritative Rust Vault and PostgreSQL-authoritative Rust AKASHA;
 - typed canon, memory, lessons, GIGA, Recall Policy, and Paper Boat sleep/wake;
+- PostgreSQL-authoritative Hallway channels with explicit membership, ordered
+  posts, per-presence cursors, and manual wake through OMP tools;
 - authenticated Host snapshots, typed deltas, resync, persistence, and restart
   recovery;
 - transaction-coupled `boat.ready` outbox delivery through NATS JetStream;
 - retained sanitized receipt replay after Host restart;
+- a compiled addressed Crane subject/envelope and generic transport-receipt
+  path, with no production addressed producer or recipient application handler
+  yet;
 - live Godot Recall Policy and Paper Boat receipt screens;
 - native Windows service lifecycle, immutable versions, backup, rollback,
   doctor, uninstall, and explicit purge;
@@ -40,6 +45,11 @@ rendering, 20,659-artifact manifest verification, packaged-client smoke, Inno
 Setup compilation, and an elevated external-authority installation on the real
 Solarisael workstation. The installed service runs NATS, delivery, and separate
 Kintsu/Kodo Hosts while reusing the existing PostgreSQL authority.
+
+Current NATS traffic is narrower than the surrounding House surfaces. It does
+not carry Hallway posts, GIGA jobs, kitten lifecycle, project records, or live
+conversation. The current Paper Boat receipt proves transport validation; it
+does not prove room wake, model consumption, or human reading.
 
 The installed artifact still identifies as `1.0.0-rc.3`; that immutable label is
 retained as historical evidence, not current product maturity. Final `1.0.0`
@@ -158,6 +168,12 @@ Vault does not require NATS. The lane advances only if it replaces more bespoke
 queue, polling, supervision, and failure machinery than it adds. Do not widen
 the broker until this one lane passes its complete gate.
 
+For `1.0.0`, this proof remains bounded to the existing `boat.ready` production
+lane. The structural addressed subject does not count as recipient delivery.
+Generalized authority references, recipient application handlers, and private
+cross-room subjects belong to the post-1.0 communication spine. Broker
+credentials and subject ACLs are mandatory before that expansion.
+
 ### 6. Finish the usable thin Godot GUI
 
 The first GUI is an instrument built from ordinary Godot `Control` nodes. It
@@ -192,6 +208,11 @@ make raw telemetry the only explanation.
 Conversation composition, source inspection, GIGA review, dispatch and quest
 lineage, House and agent observability, and operational metrics therefore
 remain before `1.0.0`.
+
+The 1.0 conversation and observability surface may use the existing
+Host/harness/PostgreSQL paths. It does not require putting Hallway, project,
+kitten, or live-token traffic through NATS.
+
 Companion bodies, spatial Hallway presentation, and the memory constellation
 remain later work and do not block 1.0.
 
@@ -254,12 +275,44 @@ The release vocabulary remains:
 
 ## Deferred work after 1.0
 
-These accepted threads cannot interrupt the release path:
+These accepted threads cannot interrupt the release path.
+
+### House communication spine first
+
+Before broader Origami, independent workers, or dynamic model routing, implement
+the accepted contract in
+[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md#7-house-communication-spine-postgresql-crane-nats-and-host)
+in this dependency order:
+
+1. harden the current lane with service credentials and subject ACLs, complete
+   stream/consumer readiness, and truthful transport-receipt names;
+2. replace the memory-only Crane reference with a typed authority reference;
+3. add crease handlers and PostgreSQL application receipts distinct from
+   outbox, transport, and read state;
+4. prove recipient-specific consumers, dead-letter/replay operation, and NATS
+   reconstruction from PostgreSQL;
+5. pilot Hallway room delivery while preserving explicit membership,
+   per-presence cursors, and manual wake;
+6. create project identity, membership, subscriptions, and typed project records
+   before adding project notifications;
+7. add addressed kitten work only for a demonstrated independent/dormant-worker
+   need, with durable capability/workspace contracts and coalesced progress;
+8. announce committed conversation turns only to asynchronous subscribers while
+   keeping live commands and streaming on Host/WebSocket;
+9. add GIGA wake hints only if multiple dormant workers justify them; SQL remains
+   the claim authority.
+
+This is one communication spine, not one generic message table. PostgreSQL owns
+records, permissions, idempotency, and application receipts. NATS carries
+bounded pointers. Host authenticates, applies, and projects. Project is scope;
+Hallway is a social log; kitten is an actor; Crane is a delivery intent.
+
+### Later accepted threads
 
 1. strengthen GIGA beyond required 1.0 integrity with broader refinement
    transactions and additional workers;
-2. expand Origami, Cranes, room-scoped Pawprints, and Paper Boat delivery beyond
-   the single proved lane;
+2. expand Origami, room-scoped Pawprints, Paper Boat application, and Crane
+   delivery only through the proved communication spine;
 3. route model bodies into broader cold-worker, familiar, reflection, and live
    dialogue topologies;
 4. add bounded Prolog/Datalog derivation and complete Cingulate;

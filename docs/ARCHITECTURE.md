@@ -68,6 +68,12 @@ and lineage fields on the envelope. Origami folds, Pawprints, and room wake
 behavior on the addressed lanes remain specified extensions of the same envelope
 rather than current release claims.
 
+`boat.ready` is the only current production outbox producer. Addressed Crane
+subjects, envelopes, and generic receipt validation exist structurally and in
+tests, but no named worker, familiar, room, or reviewer currently consumes and
+applies them. A current Paper Boat receipt proves transport validation; it does
+not prove room wake, model consumption, or human reading.
+
 The complete accepted target, including dynamic model and room execution,
 Prolog/Datalog derivations, Cingulate enforcement, and optional Lean-backed
 lessons, lives in

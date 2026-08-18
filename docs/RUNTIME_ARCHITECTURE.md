@@ -1,7 +1,7 @@
 # Runtime Evolution Architecture
 
 Status: 1.0 runtime spine implemented in the 0.9.6 late beta; operator product and release gates remain
-Last updated: 2026-08-14
+Last updated: 2026-08-17
 
 This document defines the implemented Host, Godot, Recall Policy, Paper Boat,
 and narrow delivery spine together with accepted longer-range contracts for
@@ -28,11 +28,13 @@ The current `0.9.6` source has:
   manual-wake;
 - Host-owned Recall Policy shared by OMP and Godot;
 - transaction-coupled Paper Boat sleep/wake and `boat.ready` Crane outbox rows;
-- a general Crane delivery system whose first lane is `boat.ready`: one
-  `crane_outbox`/`crane_receipts`/`crane_dead_letters` trio, lane-routed subjects,
-  per-lane consumer dispatch, optional crease/recipient/expiry/lineage envelope
-  fields, and consume-time expiry refusal;
-- bounded NATS JetStream pointer delivery and sanitized receipt replay;
+- a Crane delivery substrate with one
+  `crane_outbox`/`crane_receipts`/`crane_dead_letters` trio, lane-routed
+  subjects, strict pointer envelopes, consumer backoff, expiry refusal, and
+  dead-letter handling; `boat.ready` is the only current production outbox
+  producer, while addressed Crane production and recipient application handlers
+  remain structural/test-only;
+- bounded NATS JetStream pointer delivery and sanitized transport-receipt replay;
 - functional Godot Recall Policy and Paper Boat receipt screens;
 - native Windows lifecycle and installer.
 
@@ -544,164 +546,335 @@ remain the machine boundary. Resident classifier constitutions may exceed the
 they remain concept-minimal and are evaluated against the prior prompt on the
 same blinded corpus.
 
-## 7. PostgreSQL outbox and NATS JetStream
+## 7. House communication spine: PostgreSQL, Crane, NATS, and Host
 
-NATS JetStream is the accepted candidate for delivery and wake-up, not for
-memory or authority.
+This section separates the current source from accepted expansion. The current
+lane is narrower than the target: NATS proves bounded Paper Boat pointer
+transport and receipt projection. It does not yet deliver Hallway posts, project
+records, kitten work, GIGA jobs, or live conversation turns.
 
-### 7.1 Transactional delivery flow
+### 7.1 Current NATS source census
 
-The safe path is:
+Only `house-delivery` and `house-host` depend on `async-nats`.
+`house-substrate`, GIGA, Hallway, the OMP adapter, kitten lineage, and the Godot
+Rust client do not connect to NATS.
 
-1. One PostgreSQL transaction writes the authoritative domain record and an
-   outbox row containing its stable ID and routing metadata.
-2. An outbox relay publishes that ID through JetStream with the same stable ID
-   as the publisher deduplication key.
-3. A consumer receives the delivery, authenticates its scope, and reloads the
-   authoritative payload from PostgreSQL.
-4. The consumer performs an idempotent transition and commits the result,
-   receipt, or inbox state in PostgreSQL.
-5. Only after that commit does the consumer acknowledge the JetStream message.
+The native service starts one loopback JetStream server with file storage, then
+delivery, then one Host per room. Delivery and every Host receive the same NATS
+URL. The managed server currently has no NATS accounts, users, credentials, or
+subject ACLs; binding to loopback is its containment boundary.
 
-Publisher deduplication and consumer acknowledgements reduce duplicate work;
-they do not create end-to-end exactly-once semantics. Stable database
-idempotency remains required.
+The compiled JetStream contract is:
 
-### 7.2 Message families
+| Stream | Subject or filter | Consumer | Current producer and effect |
+|---|---|---|---|
+| `ATHANOR_BOAT_READY` | `athanor.boat.ready` | durable pull consumer `athanor-boat-ready-receipts-v1` | `paper_boat_sleep` is the only production outbox producer; delivery validates the pointer and records a transport receipt |
+| `ATHANOR_CRANE` | `athanor.crane.>`; addressed form `athanor.crane.<recipient_kind>.<recipient_key>` | one durable pull consumer `athanor-crane-receipts-v1` | addressed inserts exist in tests; the generic consumer records receipt validation but does not deliver to or invoke the named recipient |
+| `ATHANOR_BOAT_RECEIPTS` | `athanor.boat.receipt.v1` | up to 64 ephemeral Host consumers with `DeliverPolicy::All` | delivery publishes sanitized Paper Boat receipt projections; Hosts replay, filter, and broadcast accepted state over WebSocket |
 
-Use distinct policies for:
+All three streams use `LimitsPolicy`, file storage, `DiscardOld`, one replica,
+seven-day retention, 100,000 messages, 512 MiB, 4 KiB maximum messages, and a
+24-hour duplicate window. The lane streams permit one consumer; the receipt
+stream permits 64. Delete and purge are denied.
 
-- **commands** — one authorized handler, explicit expiry, bounded retries, and a
-  dead-letter result;
-- **events** — immutable facts delivered to zero or more durable consumers;
-- **mailboxes** — addressed room/spirit delivery with durable unread state;
-- **telemetry** — disposable health or UI refresh signals that may use Core NATS
-  when loss is acceptable.
+Lane consumers use explicit acknowledgements, a 30-second `AckWait`,
+`MaxDeliver = 5`, 64 maximum pending acknowledgements, batches of 64, and
+30/60/120/300/600-second backoff. The PostgreSQL publisher lease is 30 seconds;
+its ten-attempt retry schedule is 1/5/15/30/60/120/300/600 seconds. Every
+publish sets `Nats-Msg-Id` to the immutable outbox event UUID. Existing
+stream/consumer policy drift is refused rather than silently rewritten.
 
-Origami does not replace these transport policies. It names an addressed
-command, event, or mailbox handoff a **Crane** and binds that message to one
-crease pattern and Pawprint. A Paper Boat remains a distinct living payload in
-PostgreSQL; its wake notification is a Crane.
+```mermaid
+flowchart LR
+  SLEEP["paper_boat_sleep"] -->|"one transaction"| PG[("PostgreSQL<br/>Boat + crane_outbox")]
+  PG -->|"claim pending row"| DELIVERY["house-delivery"]
+  DELIVERY -->|"publish pointer"| READY["JetStream<br/>athanor.boat.ready"]
+  READY -->|"pull first"| DELIVERY
+  DELIVERY -->|"commit transport receipt"| RECEIPTS[("PostgreSQL<br/>crane_receipts")]
+  DELIVERY -->|"sanitized projection"| RECEIPT_STREAM["JetStream<br/>athanor.boat.receipt.v1"]
+  RECEIPT_STREAM --> HOST["room Host<br/>ephemeral replay consumer"]
+  HOST -->|"WebSocket projection"| GODOT["Godot receipt UI"]
 
+  WAKE["explicit wake tool"] --> SUBSTRATE["house-substrate"]
+  SUBSTRATE -->|"reload complete Boat"| PG
 
-Example subject families:
-
-```text
-athanor.v1.house.<house>.room.<room>.inbox
-athanor.v1.house.<house>.room.<room>.boats.ready
-athanor.v1.house.<house>.giga.jobs
-athanor.v1.house.<house>.cingulate.proofs
-athanor.v1.house.<house>.runtime.models.events
-athanor.v1.house.<house>.ui.telemetry
+  HALLWAY["Hallway"] -.->|"PostgreSQL only"| PG
+  GIGA["GIGA queue"] -.->|"PostgreSQL only"| PG
+  KITTEN["OMP kitten lifecycle"] -.->|"Host + adapter lineage only"| HOST
 ```
 
-Subject permissions and NATS accounts must prevent one House or room from
-subscribing broadly and filtering private records after receipt.
+The ready file is currently written after database schema verification and a
+NATS connection, before the run loop lazily creates or verifies streams and
+consumers. That is connection readiness, not complete delivery readiness.
 
-### 7.3 Payload boundary
+The current `CraneEvent` v1 is memory-shaped: `record_id` is a positive decimal
+memory ID, and outbox/receipt `aggregate_id` columns reference memories. The
+strict envelope carries schema version, event ID and kind, memory record ID,
+room, creation time, integrity digest, and optional crease, typed recipient,
+expiry, parent intent, and correlation fields. Private body-shaped keys are
+refused.
 
-JetStream payloads carry opaque PostgreSQL record IDs plus bounded routing and
-integrity metadata. They do not carry raw private turns, memory bodies, lesson
-bodies, identity prose, or provider credentials.
+A current addressed Crane receipt proves that the generic delivery consumer
+validated a memory pointer after NATS delivery. It does **not** prove that the
+worker, familiar, room, or reviewer received, unfolded, accepted, or applied the
+record. Likewise, the present Paper Boat `Delivered` projection means transport
+receipt validation, not room wake, model consumption, or human reading.
 
-A transport outage leaves outbox rows pending. It must not erase the underlying
-event or force a second authority path. Local conversation remains available
-when its required local components are healthy; asynchronous cross-room work may
-remain visibly pending.
+Hallway posts remain ordered PostgreSQL transactions with per-presence cursors.
+GIGA remains a PostgreSQL queue whose worker calls Ollama. Kitten lifecycle
+events remain local OMP events normalized through Host and written by the
+adapter. Project support is currently project-scoped lessons, GIGA keys, and
+retrieval—not a project event stream or NATS lane. Live conversation remains in
+the harness and Host conversation log; Host still has no conversation-send
+command.
 
-### 7.4 First pilot
+### 7.2 Stable roles
 
-The first bus slice is one durable cross-room mailbox. It must prove:
+The communication spine keeps one job per component:
 
-- restart survival;
-- duplicate delivery safety;
-- sender, recipient, and subject permissions;
-- no private prose in broker payloads;
-- expiry, retry, and dead-letter behavior;
-- dormant-room wake behavior;
-- UI visibility from outbox through acknowledgement;
-- PostgreSQL recovery when NATS state is rebuilt.
+| Component or concept | Stable responsibility |
+|---|---|
+| PostgreSQL | authoritative domain records, order, permissions, idempotency, outbox state, application receipts, and user-visible cursors |
+| NATS JetStream | bounded pointer transport, redelivery, wake signals, and replayable projections; never record authority |
+| Athanor Host | authenticate commands, authorize subscriptions and reloads, apply crease handlers, and project canonical state to clients |
+| WebSocket | immediate local commands, streaming response deltas, and multi-session UI fanout |
+| Project | authority and visibility scope, not a mailbox |
+| Hallway | durable social log with explicit membership and manual wake |
+| Kitten or worker | bounded actor operating under a work and capability contract |
+| Crane | delivery intent for one typed authoritative record, not the record itself |
 
-Do not replace the current GIGA PostgreSQL queue merely to introduce a broker.
-Move a job family only when the pilot proves an actual delivery or wake-up need.
+One communication spine does not mean one generic message table. Hallway
+messages, project records, work items and results, conversation turns, Paper
+Boats, and GIGA events retain distinct authoritative schemas and lifecycle
+rules.
 
-### 7.5 Deduplication windows and the idempotency ledger
+### 7.3 Authority reference, Crane projection, and application receipt
 
-JetStream stream configuration must set an explicit duplicate window. The NATS
-default is two minutes; The Athanor must not inherit that default accidentally.
-The configured window must cover the expected relay retry horizon and be
-recorded with the stream policy.
-
-Every publish uses the immutable outbox ID as `Nats-Msg-Id`. This suppresses
-duplicate writes only inside the configured broker window. Correctness outside
-that window comes from the PostgreSQL consumer idempotency ledger.
-
-Keep these identifiers distinct:
+The next Crane schema must replace the v1 memory assumption with a typed
+authority reference:
 
 ```text
-event_id       immutable fact
-operation_id   one intended side effect
-delivery_id    one transport delivery attempt
+record_kind
+record_id
+record_version
+integrity_sha256
 ```
 
-Each consumer commits a uniqueness record keyed by consumer identity and
-`operation_id` in the same transaction as its result. The row records event,
-handler version, result digest, and completion state. An intentional replay or
-new handler migration creates a new operation linked to the original; it does
-not evade idempotency by changing the delivery ID.
-
-Idempotency records must survive at least the maximum stream retention,
-administrative replay horizon, and disaster-recovery replay horizon. A compacted
-record retains a tombstone key for any non-repeatable side effect.
-
-Durable consumers use explicit acknowledgement, bounded `AckWait`, `MaxDeliver`,
-and `Backoff`. Exhausted delivery becomes a durable dead-letter result. Double
-acknowledgements and publisher deduplication improve delivery guarantees but do
-not replace the database transaction.
-
-### 7.6 Paper Boat wake flow
-
-Paper Boats participate in JetStream delivery without moving their authoritative
-bodies into the broker:
-
-1. `sleep` commits the complete living Boat, room/session provenance, content
-   digest, and outbox row in one PostgreSQL transaction.
-2. The relay publishes a `boat.ready` Crane with the immutable outbox ID as
-   `Nats-Msg-Id`.
-3. The Host or wake consumer verifies the crease pattern, Pawprint, recipient,
-   expiry, and bounded routing fields.
-4. The consumer reloads the Boat by ID from PostgreSQL and verifies its room,
-   digest, authority state, and freshness.
-5. The consumer commits one idempotent inbox/wake transition before
-   acknowledging JetStream.
-6. The next model receives the ordinary standalone letter, not the broker
-   envelope or a hidden instruction stream.
-
-The broker payload is bounded to identifiers and routing/integrity metadata:
+The generic envelope adds only transport and causality:
 
 ```text
 schema_version
 event_id
-boat_id
-recipient_room
-source_session_id
-crease_pattern
+event_kind
+house_id
+sender identity
+typed recipient
+project and room scope
 created_at
 expires_at
+crease_pattern
+parent_intent_id
 correlation_id
 causation_id
-payload_digest
-pawprint
+authority reference
 ```
 
-Repeated delivery cannot inject the same Boat twice. A delayed older Crane
-cannot regress a room after a newer Boat was accepted. Wrong-room, missing,
-stale, superseded, malformed, digest-mismatched, or unknown-Pawprint deliveries
-fail closed and remain visible in delivery diagnostics.
+Domain bodies remain in their authoritative tables. A crease handler owns the
+exact record reload, scope authorization, integrity check, expiry rule, and
+idempotent effect. Unknown record kinds, crease patterns, recipients, versions,
+or extra private payload fields fail closed.
 
-The operational rule is: **the Paper Boat remains in the authoritative archive;
-a Crane flies through NATS to say the Boat is waiting.**
+Four states must remain distinct:
 
+1. **outbox/publish state** — the relay has or has not published the pointer;
+2. **landed transport validation** — delivery accepted the pointer and its
+   routing/integrity shape;
+3. **recipient application receipt** — the authorized recipient accepted,
+   applied, refused, expired, duplicated, or failed the intended operation;
+4. **user-visible state** — a Hallway presence or client has received/read the
+   projected record.
+
+Transport receipts never masquerade as application or read receipts. The
+recipient commits its application receipt or inbox transition in PostgreSQL
+before acknowledging JetStream.
+
+```mermaid
+sequenceDiagram
+  participant W as Domain writer
+  participant PG as PostgreSQL
+  participant R as Outbox relay
+  participant N as NATS JetStream
+  participant C as Authorized consumer
+  participant H as Host projection
+
+  W->>PG: BEGIN
+  W->>PG: write typed record + outbox intent
+  W->>PG: COMMIT
+  R->>PG: claim outbox row
+  R->>N: publish bounded pointer with Nats-Msg-Id
+  N-->>R: broker acknowledgement
+  R->>PG: mark outbox published
+  N-->>C: deliver or redeliver pointer
+  C->>PG: reload exact record and authorize scope
+  C->>PG: commit idempotent effect + application receipt
+  C->>N: acknowledge only after commit
+  C->>H: publish canonical projection
+```
+
+### 7.4 Communication-family mapping
+
+| Family | Authoritative state | Immediate path | NATS role |
+|---|---|---|---|
+| Live conversation | completed turn records when that authority lands | client -> Host -> conversation executor -> Host/WebSocket | announce committed turns only to asynchronous, offline, or project subscribers; never stream individual tokens |
+| Hallway | Hallway message sequence, membership, presence, and cursors | Host command plus WebSocket projection | room-targeted pointer delivery and unread projection while preserving manual wake |
+| Project | future project identity, membership, subscriptions, typed records, and decisions | Host commands and project projections | deliver committed project-record pointers to subscribed rooms; a project is not a NATS mailbox |
+| Kitten work | work item, capability/workspace contract, lineage, lifecycle, result, and settlement | retain the current in-process OMP path | introduce addressed delivery only for a real independent or dormant worker; coalesce progress instead of persisting every twitch |
+| Crane | PostgreSQL outbox and application receipts | none; it is a delivery projection | the common pointer envelope and routing lifecycle |
+| Paper Boat | PostgreSQL memory and continuity graph | explicit sleep/wake tools | current `boat.ready` pointer transport; future room application handler |
+| GIGA | PostgreSQL event queue, candidates, review, and promotion | SQL claim plus Ollama inference | optional wake hint only if multiple dormant workers later justify it; SQL remains the claim authority |
+
+Prose never silently becomes a command. A kitten may write a Hallway post, but
+that post cannot mutate project or work-item state merely because its language
+sounds imperative.
+
+### 7.5 First expansion pilot: Hallway delivery
+
+Hallway is the first useful expansion because its authority, membership,
+ordering, idempotent posts, and per-presence cursors already exist.
+
+```mermaid
+flowchart LR
+  POST["Hallway post command"] -->|"one transaction"| PG[("hallway_message<br/>parent intent<br/>recipient-room child intents")]
+  PG --> RELAY["outbox relay"]
+  RELAY --> NATS["recipient-scoped NATS subjects"]
+  NATS --> HOST["authorized room Host"]
+  HOST -->|"reload under Hallway ACL"| PG
+  HOST -->|"commit inbox/unread + application receipt"| PG
+  HOST -->|"multi-session fanout"| WS["room WebSocket clients"]
+  WS --> CURSOR["explicit presence read cursor"]
+  CURSOR --> PG
+```
+
+One Hallway post creates one parent intent and bounded child intents for
+recipient rooms in the same transaction. Each room Host consumes only its
+authorized subject, reloads the message under Hallway membership rules, and
+commits an inbox/unread projection plus an application receipt before broker
+acknowledgement. Tabs and sessions fan out inside Host/WebSocket; they do not
+create one NATS message per tab.
+
+Hallway delivery never auto-invokes a spirit from prose. Manual wake remains the
+default. A future explicit wake or work command uses its own typed crease and
+authorization.
+
+### 7.6 Broker and payload boundary
+
+Loopback without credentials is sufficient only for the current narrow local
+lane. Private cross-room, project, or worker traffic requires before expansion:
+
+- service identities with NATS accounts/users or equivalent credentials;
+- least-privilege publish/subscribe subject permissions for relay, delivery,
+  and each Host/worker role;
+- recipient-specific consumers rather than one broad addressed consumer;
+- stream and consumer creation/verification inside readiness;
+- fail-closed startup on policy drift.
+
+Application-side filtering after a broad private subscription is not
+authorization. A Host must never receive every room's private pointers merely
+to discard foreign records afterward.
+
+JetStream payloads carry authority references plus bounded routing, causality,
+expiry, schema, and integrity metadata. They do not carry private conversation
+turns, Hallway prose, memory or lesson bodies, work packets, identity prose,
+provider credentials, or exact GIGA source bodies.
+
+The current replayable pointer streams correctly use `LimitsPolicy`.
+`WorkQueuePolicy` deletes acknowledged messages and permits only one
+non-overlapping consumer per subject; it must not replace the shared stream
+without a lane whose semantics actually require a work queue. Recipient effects
+still require PostgreSQL idempotency under every retention policy.
+
+### 7.7 Idempotency, lifecycle, recovery, and proof
+
+Keep these identifiers distinct:
+
+```text
+event_id       immutable domain or delivery fact
+operation_id   one intended recipient effect
+delivery_id    one broker delivery attempt
+```
+
+`Nats-Msg-Id` suppresses duplicate publication only inside the configured
+duplicate window. Correctness outside that window comes from a PostgreSQL
+uniqueness ledger keyed by consumer identity and operation ID, committed with
+the represented effect.
+
+Durable consumers use explicit acknowledgement, bounded `AckWait`,
+`MaxDeliver`, and backoff. Poison, unauthorized, expired, and exhausted records
+produce typed dead-letter state. Transient failures nack; permanent failures
+terminate. Administrative replay creates a visible new operation or reuses the
+original idempotency key according to the crease contract—it never disguises a
+repeat by changing only the delivery ID.
+
+Expansion requires:
+
+- an operator-visible dead-letter and replay surface;
+- receipts that name transport versus application dispositions;
+- retention long enough for broker and disaster-recovery replay horizons;
+- a proof that NATS streams can be rebuilt from PostgreSQL without inventing or
+  repeating domain effects;
+- recovery tests across relay crash, broker acknowledgement loss, consumer
+  restart, database outage, Host restart, policy drift, and delayed stale
+  delivery.
+
+A transport outage leaves authoritative records and outbox rows intact. It may
+leave asynchronous work visibly pending, but must not block an otherwise
+healthy local conversation.
+
+### 7.8 Dependency-ordered expansion
+
+Do not add more subjects first. Expand in this order:
+
+1. harden the current lane with service credentials/subject ACLs, complete
+   readiness, and truthful transport-receipt naming;
+2. generalize authority references beyond memory IDs;
+3. add a crease-handler registry and separate application receipts;
+4. prove recipient-specific consumers, dead-letter/replay operation, and NATS
+   rebuild from PostgreSQL;
+5. pilot Hallway room delivery while preserving manual wake;
+6. establish project identity, membership, subscriptions, and typed records
+   before project notifications;
+7. add addressed kitten work only when an independent/dormant worker needs it;
+8. announce completed conversation turns only for asynchronous subscribers;
+9. add GIGA wake hints only if the SQL queue gains multiple dormant workers.
+
+This sequence belongs after the narrow 1.0 lane. It must not silently widen the
+1.0 release boundary.
+
+### 7.9 Paper Boat: current receipt versus future application
+
+Current production behavior is:
+
+1. `sleep` commits the complete Boat and a `boat.ready` outbox row in one
+   PostgreSQL transaction.
+2. Delivery publishes the pointer to JetStream.
+3. The same generic delivery process consumes and validates it, verifies the
+   pointed Boat's room and digest, and commits a transport receipt.
+4. Delivery republishes a sanitized receipt projection.
+5. Host replays and filters those receipt projections for Godot.
+6. An explicit `wake` call still reloads the complete Boat from PostgreSQL.
+
+No current NATS consumer wakes a room, invokes a model, or commits a recipient
+application state.
+
+The future room crease may reload and authorize the Boat, commit one inbox/wake
+application receipt, then acknowledge JetStream. Even then, automatic model
+wake remains an explicit policy rather than an implication of transport
+delivery. The next model receives the ordinary standalone letter from
+PostgreSQL—not the broker envelope or a hidden instruction stream.
+
+The operational rule is: **the Boat remains in the authoritative archive; the
+current Crane proves its pointer landed, and a future room handler may say the
+Boat is waiting.**
 
 ## 8. Dynamic model and living-room embodiment
 

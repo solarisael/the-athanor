@@ -2,7 +2,7 @@ use house_core::context::{ContextAnalysis, ContextAnalysisRequest};
 use house_core::conversation::VisibleMessage;
 use house_core::lineage::{QuestBatch, QuestLifecycle, QuestMemory};
 use house_core::triggers::ProcessLesson;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
 pub const HOST_SCHEMA_VERSION: u8 = 1;
@@ -79,30 +79,122 @@ pub enum RecallResolvedMode {
     Quiet,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecallPolicyState {
-    #[serde(alias = "requested_mode")]
     pub requested_mode: RecallRequestedMode,
-    #[serde(alias = "resolved_mode")]
     pub resolved_mode: RecallResolvedMode,
-    #[serde(alias = "active_project")]
     pub active_project: Option<String>,
-    #[serde(alias = "resolution_reason")]
     pub resolution_reason: String,
-    #[serde(alias = "last_refresh_reason")]
     pub last_refresh_reason: Option<String>,
-    #[serde(alias = "last_refresh_at")]
     pub last_refresh_at: Option<String>,
-    #[serde(alias = "working_set_entries")]
     pub working_set_entries: u64,
-    #[serde(alias = "recovery_pending")]
-    pub recovery_pending: bool,
-    #[serde(alias = "recovery_terms")]
-    pub recovery_terms: Vec<String>,
+    pub recovery_state: RecoveryState,
     pub degraded: Option<String>,
-    #[serde(alias = "updated_at")]
     pub updated_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RecoveryState {
+    Idle,
+    Pending { terms: Vec<String> },
+}
+
+impl RecoveryState {
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending { .. })
+    }
+
+    pub fn terms(&self) -> &[String] {
+        match self {
+            Self::Idle => &[],
+            Self::Pending { terms } => terms,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct LegacyRecallPolicyState {
+    #[serde(alias = "requested_mode")]
+    requested_mode: RecallRequestedMode,
+    #[serde(alias = "resolved_mode")]
+    resolved_mode: RecallResolvedMode,
+    #[serde(alias = "active_project")]
+    active_project: Option<String>,
+    #[serde(alias = "resolution_reason")]
+    resolution_reason: String,
+    #[serde(alias = "last_refresh_reason")]
+    last_refresh_reason: Option<String>,
+    #[serde(alias = "last_refresh_at")]
+    last_refresh_at: Option<String>,
+    #[serde(alias = "working_set_entries")]
+    working_set_entries: u64,
+    #[serde(alias = "recovery_pending")]
+    recovery_pending: bool,
+    #[serde(alias = "recovery_terms")]
+    recovery_terms: Vec<String>,
+    degraded: Option<String>,
+    #[serde(alias = "updated_at")]
+    updated_at: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for RecallPolicyState {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let legacy = LegacyRecallPolicyState::deserialize(deserializer)?;
+        let recovery_state = if legacy.recovery_pending {
+            RecoveryState::Pending {
+                terms: legacy.recovery_terms,
+            }
+        } else {
+            RecoveryState::Idle
+        };
+        Ok(Self {
+            requested_mode: legacy.requested_mode,
+            resolved_mode: legacy.resolved_mode,
+            active_project: legacy.active_project,
+            resolution_reason: legacy.resolution_reason,
+            last_refresh_reason: legacy.last_refresh_reason,
+            last_refresh_at: legacy.last_refresh_at,
+            working_set_entries: legacy.working_set_entries,
+            recovery_state,
+            degraded: legacy.degraded,
+            updated_at: legacy.updated_at,
+        })
+    }
+}
+
+impl Serialize for RecallPolicyState {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Legacy<'a> {
+            requested_mode: RecallRequestedMode,
+            resolved_mode: RecallResolvedMode,
+            active_project: &'a Option<String>,
+            resolution_reason: &'a String,
+            last_refresh_reason: &'a Option<String>,
+            last_refresh_at: &'a Option<String>,
+            working_set_entries: u64,
+            recovery_pending: bool,
+            recovery_terms: &'a [String],
+            degraded: &'a Option<String>,
+            updated_at: &'a Option<String>,
+        }
+        Legacy {
+            requested_mode: self.requested_mode,
+            resolved_mode: self.resolved_mode,
+            active_project: &self.active_project,
+            resolution_reason: &self.resolution_reason,
+            last_refresh_reason: &self.last_refresh_reason,
+            last_refresh_at: &self.last_refresh_at,
+            working_set_entries: self.working_set_entries,
+            recovery_pending: self.recovery_state.is_pending(),
+            recovery_terms: self.recovery_state.terms(),
+            degraded: &self.degraded,
+            updated_at: &self.updated_at,
+        }
+        .serialize(serializer)
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -141,23 +233,96 @@ pub struct RecallRefreshCompletion {
     pub warning: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecallPolicyDecision {
-    #[serde(alias = "should_recall")]
-    pub should_recall: bool,
-    #[serde(alias = "clear_working_set")]
-    pub clear_working_set: bool,
+    pub action: RecallAction,
     pub query: String,
-    #[serde(alias = "query_terms")]
     pub query_terms: Vec<String>,
-    #[serde(alias = "refresh_reason")]
     pub refresh_reason: Option<String>,
     pub intent: String,
-    #[serde(alias = "resolved_mode")]
     pub resolved_mode: RecallResolvedMode,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecallAction {
+    None,
+    Clear,
+    Refresh,
+    ClearThenRefresh,
+}
+
+impl RecallAction {
+    pub const fn clears_working_set(self) -> bool {
+        matches!(self, Self::Clear | Self::ClearThenRefresh)
+    }
+
+    pub const fn refreshes(self) -> bool {
+        matches!(self, Self::Refresh | Self::ClearThenRefresh)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct LegacyRecallPolicyDecision {
+    #[serde(alias = "should_recall")]
+    should_recall: bool,
+    #[serde(alias = "clear_working_set")]
+    clear_working_set: bool,
+    query: String,
+    #[serde(alias = "query_terms")]
+    query_terms: Vec<String>,
+    #[serde(alias = "refresh_reason")]
+    refresh_reason: Option<String>,
+    intent: String,
+    #[serde(alias = "resolved_mode")]
+    resolved_mode: RecallResolvedMode,
+}
+
+impl<'de> Deserialize<'de> for RecallPolicyDecision {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let legacy = LegacyRecallPolicyDecision::deserialize(deserializer)?;
+        let action = match (legacy.clear_working_set, legacy.should_recall) {
+            (false, false) => RecallAction::None,
+            (true, false) => RecallAction::Clear,
+            (false, true) => RecallAction::Refresh,
+            (true, true) => RecallAction::ClearThenRefresh,
+        };
+        Ok(Self {
+            action,
+            query: legacy.query,
+            query_terms: legacy.query_terms,
+            refresh_reason: legacy.refresh_reason,
+            intent: legacy.intent,
+            resolved_mode: legacy.resolved_mode,
+        })
+    }
+}
+
+impl Serialize for RecallPolicyDecision {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Legacy<'a> {
+            should_recall: bool,
+            clear_working_set: bool,
+            query: &'a String,
+            query_terms: &'a Vec<String>,
+            refresh_reason: &'a Option<String>,
+            intent: &'a String,
+            resolved_mode: RecallResolvedMode,
+        }
+        Legacy {
+            should_recall: self.action.refreshes(),
+            clear_working_set: self.action.clears_working_set(),
+            query: &self.query,
+            query_terms: &self.query_terms,
+            refresh_reason: &self.refresh_reason,
+            intent: &self.intent,
+            resolved_mode: self.resolved_mode,
+        }
+        .serialize(serializer)
+    }
+}
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SourceRecordRef {
@@ -871,8 +1036,6 @@ pub struct EventMeta {
     pub visibility: String,
     pub authority_class: String,
     pub created_at: String,
-    pub expires_at: Option<String>,
-    pub max_hops: u8,
     pub projection_id: String,
     pub sequence: u64,
     pub state_hash: String,
@@ -939,8 +1102,21 @@ impl RecallPolicyMutation {
         changed!(last_refresh_reason, LastRefreshReason);
         changed!(last_refresh_at, LastRefreshAt);
         changed!(working_set_entries, WorkingSetEntries);
-        changed!(recovery_pending, RecoveryPending);
-        changed!(recovery_terms, RecoveryTerms);
+        if previous.recovery_state.is_pending() != next.recovery_state.is_pending() {
+            mutations.push(Self {
+                mutation_type: RecallPolicyMutationType::FieldUpdate,
+                field: RecallPolicyField::RecoveryPending,
+                value: Value::Bool(next.recovery_state.is_pending()),
+            });
+        }
+        if previous.recovery_state.terms() != next.recovery_state.terms() {
+            mutations.push(Self {
+                mutation_type: RecallPolicyMutationType::FieldUpdate,
+                field: RecallPolicyField::RecoveryTerms,
+                value: serde_json::to_value(next.recovery_state.terms())
+                    .expect("Recall recovery terms are JSON serializable"),
+            });
+        }
         changed!(degraded, Degraded);
         changed!(updated_at, UpdatedAt);
         mutations
@@ -1051,6 +1227,7 @@ mod receipt_tests {
             "updated_at": "2026-08-12T22:44:49.981Z"
         });
         let state: RecallPolicyState = serde_json::from_value(legacy).unwrap();
+        assert_eq!(state.recovery_state, RecoveryState::Idle);
         let current = serde_json::to_value(state).unwrap();
         assert_eq!(current["requestedMode"], "auto");
         assert!(current.get("requested_mode").is_none());
@@ -1068,6 +1245,7 @@ mod receipt_tests {
             "resolved_mode": "conversation"
         });
         let decision: RecallPolicyDecision = serde_json::from_value(legacy).unwrap();
+        assert_eq!(decision.action, RecallAction::Refresh);
         let current = serde_json::to_value(decision).unwrap();
         assert_eq!(current["shouldRecall"], true);
         assert_eq!(current["resolvedMode"], "conversation");

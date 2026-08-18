@@ -59,14 +59,20 @@ pub enum AppError {
     Io(#[from] io::Error),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EmbeddingMode {
+    Required,
+    Disabled,
+    DisabledForTest,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub database_url: String,
     pub embed_url: Option<String>,
     pub embed_model: String,
     pub embed_dimension: usize,
-    pub embed_required: bool,
-    pub test_embedding_disabled: bool,
+    pub embedding_mode: EmbeddingMode,
     pub giga_source_ledger_dir: Option<PathBuf>,
     pub giga_source_room: Option<String>,
 }
@@ -767,17 +773,22 @@ impl Config {
                 "embedding dimension must be 2048 for migration 0002".into(),
             ));
         }
-        let test_embedding_disabled =
-            configured_value("SOLARISAEL_DISABLE_EMBEDDING", &dotenv).as_deref() == Some("1")
-                || configured_value("SOLARISAEL_TEST_DISABLE_EMBEDDING", &dotenv).as_deref()
-                    == Some("1");
+        let embedding_mode =
+            if configured_value("SOLARISAEL_DISABLE_EMBEDDING", &dotenv).as_deref() == Some("1") {
+                EmbeddingMode::Disabled
+            } else if configured_value("SOLARISAEL_TEST_DISABLE_EMBEDDING", &dotenv).as_deref()
+                == Some("1")
+            {
+                EmbeddingMode::DisabledForTest
+            } else {
+                EmbeddingMode::Required
+            };
         Ok(Self {
             database_url,
             embed_model: configured_value("SOLARISAEL_EMBED_MODEL", &dotenv)
                 .unwrap_or_else(|| DEFAULT_EMBED_MODEL.into()),
             embed_dimension,
-            embed_required: !test_embedding_disabled,
-            test_embedding_disabled,
+            embedding_mode,
             embed_url,
             giga_source_ledger_dir: configured_value("SOLARISAEL_GIGA_SOURCE_LEDGER_DIR", &dotenv)
                 .map(PathBuf::from)

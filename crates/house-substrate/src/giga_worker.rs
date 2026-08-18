@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::config::EmbeddingMode;
 use crate::{
     AppError, Config,
     config::HTTP_CLIENT,
@@ -144,14 +146,58 @@ static GIGA_WORKER_ID: LazyLock<String> =
     LazyLock::new(|| format!("rust-hippocampus:{}", Uuid::new_v4()));
 
 #[derive(Clone, Copy, Debug)]
+enum WorkerFailureKind {
+    ClassifierOutput,
+    Disabled,
+    OllamaConfiguration,
+    OllamaTransport,
+    OllamaResponse,
+    OllamaModelIdentity,
+    ClassifierRequest,
+    SourceVerification,
+    LedgerUnavailable,
+    SourceMissing,
+    SourceAmbiguous,
+    SourceHashMismatch,
+    SourceWindowTooLarge,
+}
+
+#[derive(Clone, Copy, Debug)]
 struct WorkerFailure {
-    class: &'static str,
-    retryable: bool,
+    kind: WorkerFailureKind,
 }
 
 impl WorkerFailure {
-    const fn new(class: &'static str, retryable: bool) -> Self {
-        Self { class, retryable }
+    const fn new(kind: WorkerFailureKind) -> Self {
+        Self { kind }
+    }
+
+    const fn class(self) -> &'static str {
+        match self.kind {
+            WorkerFailureKind::ClassifierOutput => "GigaClassifierOutputError",
+            WorkerFailureKind::Disabled => "GigaClassifierDisabled",
+            WorkerFailureKind::OllamaConfiguration => "GigaOllamaConfigurationError",
+            WorkerFailureKind::OllamaTransport => "GigaOllamaTransportError",
+            WorkerFailureKind::OllamaResponse => "GigaOllamaResponseError",
+            WorkerFailureKind::OllamaModelIdentity => "GigaOllamaModelIdentityError",
+            WorkerFailureKind::ClassifierRequest => "GigaClassifierRequestError",
+            WorkerFailureKind::SourceVerification => "GigaSourceVerificationError",
+            WorkerFailureKind::LedgerUnavailable => "GigaLedgerUnavailableError",
+            WorkerFailureKind::SourceMissing => "GigaSourceMissingError",
+            WorkerFailureKind::SourceAmbiguous => "GigaSourceAmbiguousError",
+            WorkerFailureKind::SourceHashMismatch => "GigaSourceHashMismatchError",
+            WorkerFailureKind::SourceWindowTooLarge => "GigaSourceWindowTooLargeError",
+        }
+    }
+
+    const fn retryable(self) -> bool {
+        matches!(
+            self.kind,
+            WorkerFailureKind::ClassifierOutput
+                | WorkerFailureKind::OllamaTransport
+                | WorkerFailureKind::OllamaResponse
+                | WorkerFailureKind::LedgerUnavailable
+        )
     }
 }
 
@@ -209,7 +255,7 @@ impl GateKind {
 
     fn candidate_kind(self) -> Result<GigaCandidateKind, WorkerFailure> {
         match self {
-            Self::None => Err(WorkerFailure::new("GigaClassifierOutputError", true)),
+            Self::None => Err(WorkerFailure::new(WorkerFailureKind::ClassifierOutput)),
             Self::Memory => Ok(GigaCandidateKind::Memory),
             Self::CodingLesson => Ok(GigaCandidateKind::CodingLesson),
             Self::ProjectLesson => Ok(GigaCandidateKind::ProjectLesson),
@@ -259,7 +305,7 @@ impl GigaWorkerHandle {
 }
 
 fn domain_failure() -> WorkerFailure {
-    WorkerFailure::new("GigaClassifierOutputError", true)
+    WorkerFailure::new(WorkerFailureKind::ClassifierOutput)
 }
 
 fn classifier_enabled() -> bool {
@@ -318,12 +364,12 @@ fn is_loopback(endpoint: &Url) -> bool {
 
 fn ollama_config() -> Result<OllamaConfig, WorkerFailure> {
     if !classifier_enabled() {
-        return Err(WorkerFailure::new("GigaClassifierDisabled", false));
+        return Err(WorkerFailure::new(WorkerFailureKind::Disabled));
     }
     let raw = env::var("SOLARISAEL_HIPPOCAMPUS_OLLAMA_ENDPOINT")
         .unwrap_or_else(|_| GIGA_DEFAULT_OLLAMA_ENDPOINT.into());
     let mut endpoint =
-        Url::parse(&raw).map_err(|_| WorkerFailure::new("GigaOllamaConfigurationError", false))?;
+        Url::parse(&raw).map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaConfiguration))?;
     if !matches!(endpoint.scheme(), "http" | "https")
         || !endpoint.username().is_empty()
         || endpoint.password().is_some()
@@ -336,7 +382,7 @@ fn ollama_config() -> Result<OllamaConfig, WorkerFailure> {
                 .as_deref()
                 != Some("1"))
     {
-        return Err(WorkerFailure::new("GigaOllamaConfigurationError", false));
+        return Err(WorkerFailure::new(WorkerFailureKind::OllamaConfiguration));
     }
     let normalized_path = endpoint.path().trim_end_matches('/').to_owned();
     endpoint.set_path(if normalized_path.is_empty() {
@@ -350,7 +396,7 @@ fn ollama_config() -> Result<OllamaConfig, WorkerFailure> {
 fn ollama_url(config: &OllamaConfig, suffix: &str) -> Result<Url, WorkerFailure> {
     let base = config.endpoint.as_str().trim_end_matches('/');
     Url::parse(&format!("{base}/{}", suffix.trim_start_matches('/')))
-        .map_err(|_| WorkerFailure::new("GigaOllamaConfigurationError", false))
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaConfiguration))
 }
 
 async fn bounded_response(request: RequestBuilder) -> Result<String, WorkerFailure> {
@@ -358,42 +404,42 @@ async fn bounded_response(request: RequestBuilder) -> Result<String, WorkerFailu
         .timeout(GIGA_MODEL_TIMEOUT)
         .send()
         .await
-        .map_err(|_| WorkerFailure::new("GigaOllamaTransportError", true))?;
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaTransport))?;
     if !response.status().is_success() {
-        return Err(WorkerFailure::new("GigaOllamaTransportError", true));
+        return Err(WorkerFailure::new(WorkerFailureKind::OllamaTransport));
     }
     if response
         .content_length()
         .is_some_and(|length| length > GIGA_MAX_OLLAMA_RESPONSE_BYTES as u64)
     {
-        return Err(WorkerFailure::new("GigaOllamaResponseError", true));
+        return Err(WorkerFailure::new(WorkerFailureKind::OllamaResponse));
     }
     let mut body = Vec::new();
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| WorkerFailure::new("GigaOllamaTransportError", true))?
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaTransport))?
     {
         if body.len().saturating_add(chunk.len()) > GIGA_MAX_OLLAMA_RESPONSE_BYTES {
-            return Err(WorkerFailure::new("GigaOllamaResponseError", true));
+            return Err(WorkerFailure::new(WorkerFailureKind::OllamaResponse));
         }
         body.extend_from_slice(&chunk);
     }
     if body.is_empty() {
-        return Err(WorkerFailure::new("GigaOllamaResponseError", true));
+        return Err(WorkerFailure::new(WorkerFailureKind::OllamaResponse));
     }
-    String::from_utf8(body).map_err(|_| WorkerFailure::new("GigaOllamaResponseError", true))
+    String::from_utf8(body).map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaResponse))
 }
 
 async fn verify_ollama_model(config: &OllamaConfig) -> Result<(), WorkerFailure> {
     let body = bounded_response(HTTP_CLIENT.get(ollama_url(config, "/api/tags")?)).await?;
     let value: Value = serde_json::from_str(&body)
-        .map_err(|_| WorkerFailure::new("GigaOllamaResponseError", true))?;
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaResponse))?;
     let models = value
         .as_object()
         .and_then(|object| object.get("models"))
         .and_then(Value::as_array)
-        .ok_or_else(|| WorkerFailure::new("GigaOllamaResponseError", true))?;
+        .ok_or_else(|| WorkerFailure::new(WorkerFailureKind::OllamaResponse))?;
     let matching = models
         .iter()
         .filter(|model| {
@@ -410,7 +456,7 @@ async fn verify_ollama_model(config: &OllamaConfig) -> Result<(), WorkerFailure>
             .and_then(Value::as_str)
             != Some(GIGA_MODEL_MANIFEST_DIGEST)
     {
-        return Err(WorkerFailure::new("GigaOllamaModelIdentityError", false));
+        return Err(WorkerFailure::new(WorkerFailureKind::OllamaModelIdentity));
     }
     Ok(())
 }
@@ -529,12 +575,12 @@ fn extraction_schema(source_ids: &[String], proof_required: bool) -> Result<Stri
             }),
         },
     })
-    .map_err(|_| WorkerFailure::new("GigaClassifierRequestError", false))
+    .map_err(|_| WorkerFailure::new(WorkerFailureKind::ClassifierRequest))
 }
 
 fn schema_json(value: Value) -> Result<String, WorkerFailure> {
     serde_json::to_string(&value)
-        .map_err(|_| WorkerFailure::new("GigaClassifierRequestError", false))
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::ClassifierRequest))
 }
 
 #[derive(Serialize)]
@@ -563,9 +609,9 @@ async fn request_ollama_structured<T: for<'de> Deserialize<'de>>(
     num_predict: u32,
 ) -> Result<T, WorkerFailure> {
     let user_content = serde_json::to_string(&user_payload)
-        .map_err(|_| WorkerFailure::new("GigaClassifierRequestError", false))?;
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::ClassifierRequest))?;
     let schema = RawValue::from_string(schema)
-        .map_err(|_| WorkerFailure::new("GigaClassifierRequestError", false))?;
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::ClassifierRequest))?;
     let request = OllamaRequest {
         model: GIGA_MODEL_TAG,
         messages: [
@@ -591,18 +637,18 @@ async fn request_ollama_structured<T: for<'de> Deserialize<'de>>(
     )
     .await?;
     let envelope: Value = serde_json::from_str(&body)
-        .map_err(|_| WorkerFailure::new("GigaOllamaResponseError", true))?;
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaResponse))?;
     let object = envelope
         .as_object()
-        .ok_or_else(|| WorkerFailure::new("GigaOllamaResponseError", true))?;
+        .ok_or_else(|| WorkerFailure::new(WorkerFailureKind::OllamaResponse))?;
     let message = object
         .get("message")
         .and_then(Value::as_object)
-        .ok_or_else(|| WorkerFailure::new("GigaOllamaResponseError", true))?;
+        .ok_or_else(|| WorkerFailure::new(WorkerFailureKind::OllamaResponse))?;
     let content = message
         .get("content")
         .and_then(Value::as_str)
-        .ok_or_else(|| WorkerFailure::new("GigaOllamaResponseError", true))?;
+        .ok_or_else(|| WorkerFailure::new(WorkerFailureKind::OllamaResponse))?;
     if object.get("done").and_then(Value::as_bool) != Some(true)
         || object.get("done_reason").and_then(Value::as_str) != Some("stop")
         || object.get("model").and_then(Value::as_str) != Some(GIGA_MODEL_TAG)
@@ -614,14 +660,14 @@ async fn request_ollama_structured<T: for<'de> Deserialize<'de>>(
             .and_then(Value::as_str)
             .is_some_and(|thinking| !thinking.is_empty())
     {
-        return Err(WorkerFailure::new("GigaOllamaResponseError", true));
+        return Err(WorkerFailure::new(WorkerFailureKind::OllamaResponse));
     }
     if let Ok(value) = serde_json::from_str(content) {
         return Ok(value);
     }
     salvage_json_slice(content)
         .and_then(|slice| serde_json::from_str(slice).ok())
-        .ok_or_else(|| WorkerFailure::new("GigaClassifierOutputError", true))
+        .ok_or_else(|| WorkerFailure::new(WorkerFailureKind::ClassifierOutput))
 }
 
 /// Agents-A1-4B sometimes emits a "Thinking Process:" prose preamble inside
@@ -746,7 +792,7 @@ fn sha256_bytes(bytes: &[u8]) -> String {
 fn sha256_json(value: &Value) -> Result<String, WorkerFailure> {
     serde_json::to_vec(value)
         .map(|bytes| sha256_bytes(&bytes))
-        .map_err(|_| WorkerFailure::new("GigaClassifierRequestError", false))
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::ClassifierRequest))
 }
 
 fn configuration_digest(config: &OllamaConfig) -> Result<String, WorkerFailure> {
@@ -789,7 +835,7 @@ fn verify_event_sources(event: &GigaEvent, trusted_room: &str) -> Result<(), Wor
         || event.source_refs().is_empty()
         || event.source_refs().len() > GIGA_MAX_PROCESS_SOURCES
     {
-        return Err(WorkerFailure::new("GigaSourceVerificationError", false));
+        return Err(WorkerFailure::new(WorkerFailureKind::SourceVerification));
     }
     let expected_project = event.project_keys().first().map(String::as_str);
     for (index, source) in event.source_refs().iter().enumerate() {
@@ -804,7 +850,7 @@ fn verify_event_sources(event: &GigaEvent, trusted_room: &str) -> Result<(), Wor
             || !source.scope().publication_review_required()
             || source.range().is_some()
         {
-            return Err(WorkerFailure::new("GigaSourceVerificationError", false));
+            return Err(WorkerFailure::new(WorkerFailureKind::SourceVerification));
         }
     }
     Ok(())
@@ -837,26 +883,26 @@ async fn resolve_sources_from_ledger(
     let trusted_room = config
         .giga_source_room
         .as_deref()
-        .ok_or_else(|| WorkerFailure::new("GigaLedgerUnavailableError", true))?;
+        .ok_or_else(|| WorkerFailure::new(WorkerFailureKind::LedgerUnavailable))?;
     verify_event_sources(event, trusted_room)?;
     let directory = config
         .giga_source_ledger_dir
         .as_deref()
         .filter(|path| path.is_absolute())
-        .ok_or_else(|| WorkerFailure::new("GigaLedgerUnavailableError", true))?;
+        .ok_or_else(|| WorkerFailure::new(WorkerFailureKind::LedgerUnavailable))?;
     let mut entries = fs::read_dir(directory)
         .await
-        .map_err(|_| WorkerFailure::new("GigaLedgerUnavailableError", true))?;
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::LedgerUnavailable))?;
     let mut paths = Vec::new();
     while let Some(entry) = entries
         .next_entry()
         .await
-        .map_err(|_| WorkerFailure::new("GigaLedgerUnavailableError", true))?
+        .map_err(|_| WorkerFailure::new(WorkerFailureKind::LedgerUnavailable))?
     {
         let file_type = entry
             .file_type()
             .await
-            .map_err(|_| WorkerFailure::new("GigaLedgerUnavailableError", true))?;
+            .map_err(|_| WorkerFailure::new(WorkerFailureKind::LedgerUnavailable))?;
         let name = entry.file_name();
         if file_type.is_file() && name.to_str().is_some_and(is_conversation_ledger) {
             paths.push(entry.path());
@@ -874,7 +920,7 @@ async fn resolve_sources_from_ledger(
     for path in paths {
         let contents = fs::read_to_string(path)
             .await
-            .map_err(|_| WorkerFailure::new("GigaLedgerUnavailableError", true))?;
+            .map_err(|_| WorkerFailure::new(WorkerFailureKind::LedgerUnavailable))?;
         for line in contents.lines().filter(|line| !line.is_empty()) {
             let Ok(record) = serde_json::from_str::<LedgerSourceRecord>(line) else {
                 continue;
@@ -898,30 +944,30 @@ async fn resolve_sources_from_ledger(
         .zip(matches)
         .map(|(source, mut records)| {
             if records.is_empty() {
-                return Err(WorkerFailure::new("GigaSourceMissingError", false));
+                return Err(WorkerFailure::new(WorkerFailureKind::SourceMissing));
             }
             if records.len() != 1 {
-                return Err(WorkerFailure::new("GigaSourceAmbiguousError", false));
+                return Err(WorkerFailure::new(WorkerFailureKind::SourceAmbiguous));
             }
             let record = records.pop().expect("one ledger record was checked");
             if record.role.as_deref() != Some(source.role()) {
-                return Err(WorkerFailure::new("GigaSourceVerificationError", false));
+                return Err(WorkerFailure::new(WorkerFailureKind::SourceVerification));
             }
             let text = record
                 .text
                 .map(|text| text.trim().to_owned())
                 .filter(|text| !text.is_empty())
-                .ok_or_else(|| WorkerFailure::new("GigaSourceVerificationError", false))?;
+                .ok_or_else(|| WorkerFailure::new(WorkerFailureKind::SourceVerification))?;
             if sha256_bytes(text.as_bytes()) != source.content_hash() {
-                return Err(WorkerFailure::new("GigaSourceHashMismatchError", false));
+                return Err(WorkerFailure::new(WorkerFailureKind::SourceHashMismatch));
             }
             total_bytes = total_bytes
                 .checked_add(text.len())
-                .ok_or_else(|| WorkerFailure::new("GigaSourceWindowTooLargeError", false))?;
+                .ok_or_else(|| WorkerFailure::new(WorkerFailureKind::SourceWindowTooLarge))?;
             if text.len() > GIGA_MAX_PROCESS_SOURCE_BYTES
                 || total_bytes > GIGA_MAX_PROCESS_WINDOW_BYTES
             {
-                return Err(WorkerFailure::new("GigaSourceWindowTooLargeError", false));
+                return Err(WorkerFailure::new(WorkerFailureKind::SourceWindowTooLarge));
             }
             Ok(ResolvedSource {
                 source: source.clone(),
@@ -937,7 +983,7 @@ pub(crate) async fn verify_promotion_sources(
     resolve_sources_from_ledger(config, event)
         .await
         .map(|_| ())
-        .map_err(|failure| AppError::Invalid(failure.class.into()))
+        .map_err(|failure| AppError::Invalid(failure.class().into()))
 }
 
 async fn classify_event(
@@ -1339,7 +1385,7 @@ pub async fn giga_process(
             Ok(result)
         }
         Err(failure) => {
-            let retry = failure.retryable && attempt_count < GIGA_MAX_EVENT_ATTEMPTS;
+            let retry = failure.retryable() && attempt_count < GIGA_MAX_EVENT_ATTEMPTS;
             let outcome = if retry {
                 GigaEventFinishOutcome::Retry
             } else {
@@ -1352,7 +1398,7 @@ pub async fn giga_process(
                 source_count = event.source_refs().len(),
                 candidate_count = 0,
                 outcome = outcome.as_str(),
-                error_class = failure.class,
+                error_class = failure.class(),
                 model = GIGA_MODEL_TAG,
                 model_digest = GIGA_MODEL_MANIFEST_DIGEST,
                 prompt_version = GIGA_PROMPT_VERSION,
@@ -1364,7 +1410,7 @@ pub async fn giga_process(
                 attempt_count,
                 outcome,
                 0,
-                Some(failure.class),
+                Some(failure.class()),
             )
             .await
         }
@@ -1504,8 +1550,7 @@ mod tests {
             embed_url: None,
             embed_model: "unused".into(),
             embed_dimension: 2_048,
-            embed_required: false,
-            test_embedding_disabled: true,
+            embedding_mode: EmbeddingMode::DisabledForTest,
             giga_source_ledger_dir: Some(directory.to_owned()),
             giga_source_room: Some(room.into()),
         }
@@ -1581,7 +1626,7 @@ mod tests {
         let missing = resolve_sources_from_ledger(&config, &event)
             .await
             .unwrap_err();
-        assert_eq!(missing.class, "GigaSourceMissingError");
+        assert_eq!(missing.class(), "GigaSourceMissingError");
 
         write_ledger(
             &directory,
@@ -1594,7 +1639,7 @@ mod tests {
         let mismatch = resolve_sources_from_ledger(&config, &event)
             .await
             .unwrap_err();
-        assert_eq!(mismatch.class, "GigaSourceHashMismatchError");
+        assert_eq!(mismatch.class(), "GigaSourceHashMismatchError");
 
         let oversized_text = "x".repeat(GIGA_MAX_PROCESS_SOURCE_BYTES + 1);
         let oversized_event =
@@ -1607,13 +1652,13 @@ mod tests {
         let oversized = resolve_sources_from_ledger(&config, &oversized_event)
             .await
             .unwrap_err();
-        assert_eq!(oversized.class, "GigaSourceWindowTooLargeError");
+        assert_eq!(oversized.class(), "GigaSourceWindowTooLargeError");
 
         let wrong_room = source_config(&directory, "other-room");
         let unverified = resolve_sources_from_ledger(&wrong_room, &event)
             .await
             .unwrap_err();
-        assert_eq!(unverified.class, "GigaSourceVerificationError");
+        assert_eq!(unverified.class(), "GigaSourceVerificationError");
 
         fs::remove_dir_all(directory).await.unwrap();
     }
@@ -1736,8 +1781,7 @@ mod tests {
             embed_url: None,
             embed_model: "unused".into(),
             embed_dimension: 1,
-            embed_required: false,
-            test_embedding_disabled: true,
+            embedding_mode: EmbeddingMode::DisabledForTest,
             giga_source_ledger_dir: None,
             giga_source_room: Some("lab".into()),
         };

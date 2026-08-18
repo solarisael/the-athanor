@@ -1,4 +1,4 @@
-use athanor_substrate::{Config, RecallParams, canon_read, canon_write, recall};
+use athanor_substrate::{Config, EmbeddingMode, RecallParams, canon_read, canon_write, recall};
 use house_core::{CanonAttribution, CanonPointer, CanonReadRequest, CanonWriteRequest};
 use sqlx::{
     PgPool, Row,
@@ -228,8 +228,7 @@ async fn canon_write_correction_history_and_active_recall_are_postgres_authorita
         embed_url: None,
         embed_model: "disabled".into(),
         embed_dimension: 2048,
-        embed_required: false,
-        test_embedding_disabled: true,
+        embedding_mode: EmbeddingMode::DisabledForTest,
         giga_source_ledger_dir: None,
         giga_source_room: None,
     };

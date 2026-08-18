@@ -4,16 +4,15 @@ use athanor_substrate::{
     AnamnesisParams, AnamnesisSeed, AnamnesisWrite, AppError, Config, DesignDocumentQueryParams,
     DesignDocumentWriteParams, EntityResolveParams, LessonContextParams, LessonDeleteParams,
     LessonQueryParams, LessonTriggerMatchParams, LessonUpdateParams, RecallParams, RememberRequest,
-    SubstrateHealthOptions,
-    ThreadContinuation as ServiceThreadContinuation, anamnesis, anamnesis_write, canon_read,
-    canon_write, cluster_maintenance, design_document_query, design_document_write, entity_resolve,
-    giga_candidate_list, giga_conversation_ingest, giga_event_claim, giga_event_finish,
-    giga_event_ingest, giga_event_replay, giga_health, giga_promote, giga_queue_maintenance,
-    giga_review, giga_tool_promote, giga_tool_review, hallway_create, hallway_join, hallway_post,
-    hallway_read, lesson_context, lesson_delete, lesson_query, lesson_trigger_match, lesson_update,
-    paper_boat_sleep, paper_boat_wake, recall, refresh_semantic_vocabulary, remember,
-    spawn_giga_worker,
-    substrate_health, substrate_health_with_config,
+    SubstrateHealthOptions, ThreadContinuation as ServiceThreadContinuation, anamnesis,
+    anamnesis_write, canon_read, canon_write, cluster_maintenance, design_document_query,
+    design_document_write, entity_resolve, giga_candidate_list, giga_conversation_ingest,
+    giga_event_claim, giga_event_finish, giga_event_ingest, giga_event_replay, giga_health,
+    giga_promote, giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review,
+    hallway_create, hallway_join, hallway_post, hallway_read, lesson_context, lesson_delete,
+    lesson_query, lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake, recall,
+    refresh_semantic_vocabulary, remember, spawn_giga_worker, substrate_health,
+    substrate_health_with_config,
 };
 use chrono::NaiveDate;
 use house_core::{
@@ -27,11 +26,12 @@ use house_core::{
     hallway::{HallwayCreateRequest, HallwayJoinRequest, HallwayPostRequest, HallwayReadRequest},
 };
 use house_protocol::{
-    GigaCandidateListRequest, GigaConversationIngestParams, GigaEventClaimResult,
-    GigaEventFinishResult, GigaEventReplayResult, GigaHealthRequest, GigaPromoteResult,
-    GigaToolPromoteParams, GigaToolReviewParams, PROTOCOL_VERSION, PaperBoatSleepResult,
-    PaperBoatWakeResult, ProtocolError, ProtocolErrorBody, RequestEnvelope, ResponseEnvelope,
-    ResponsePayload, SubstrateHealthParams, SubstrateMigrationsParams, VaultRecallParams, success,
+    ClusterMaintenanceResultWire, GigaCandidateListRequest, GigaConversationIngestParams,
+    GigaEventClaimResult, GigaEventFinishResult, GigaEventReplayResult, GigaHealthRequest,
+    GigaPromoteResult, GigaToolPromoteParams, GigaToolReviewParams, PROTOCOL_VERSION,
+    PaperBoatSleepResult, PaperBoatWakeResult, ProtocolError, ProtocolErrorBody, RequestEnvelope,
+    ResponseEnvelope, ResponsePayload, SubstrateHealthParams, SubstrateMigrationsParams,
+    VaultRecallParams, success,
 };
 use house_vault::{VaultRecallRequest, recall as vault_recall};
 use serde::Serialize;
@@ -923,18 +923,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             Err(error) => app_error(id, operation, error),
                                         }
                                     }
-                                    ProtocolRequest::Cluster(request) => match cluster_maintenance(
-                                        pool,
-                                        request.operation().as_str(),
-                                        request.dry_run(),
-                                        request.if_stale(),
-                                        request.k() as usize,
-                                    )
-                                    .await
-                                    {
-                                        Ok(result) => success_json(id, result)?,
-                                        Err(error) => app_error(id, operation, error),
-                                    },
+                                    ProtocolRequest::Cluster(request) => {
+                                        match cluster_maintenance(pool, request).await {
+                                            Ok(result) => success_json(
+                                                id,
+                                                ClusterMaintenanceResultWire::from(result),
+                                            )?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
                                     ProtocolRequest::GigaEvent(request) => {
                                         match giga_event_ingest(pool, request).await {
                                             Ok(result) => success_json(id, result)?,

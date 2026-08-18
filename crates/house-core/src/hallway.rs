@@ -1,4 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError, ser::SerializeStruct,
+};
 
 pub const HALLWAY_MAX_BODY_BYTES: usize = 32 * 1024;
 pub const HALLWAY_MAX_ALLOWED_ROOMS: usize = 32;
@@ -57,28 +59,138 @@ pub struct HallwayReadRequest {
     pub advance_cursor: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HallwayCreateDisposition {
+    Created,
+    Duplicate,
+}
+
+impl HallwayCreateDisposition {
+    pub const fn is_created(self) -> bool {
+        matches!(self, Self::Created)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HallwayReceipt {
     pub ok: bool,
     pub hallway: String,
-    pub created: bool,
-    pub duplicate: bool,
+    pub disposition: HallwayCreateDisposition,
     pub operator_visible: bool,
     pub wake_policy: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct HallwayReceiptWire {
+    ok: bool,
+    hallway: String,
+    created: bool,
+    duplicate: bool,
+    operator_visible: bool,
+    wake_policy: String,
+}
+
+impl Serialize for HallwayReceipt {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("HallwayReceipt", 6)?;
+        state.serialize_field("ok", &self.ok)?;
+        state.serialize_field("hallway", &self.hallway)?;
+        state.serialize_field("created", &self.disposition.is_created())?;
+        state.serialize_field("duplicate", &!self.disposition.is_created())?;
+        state.serialize_field("operatorVisible", &self.operator_visible)?;
+        state.serialize_field("wakePolicy", &self.wake_policy)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for HallwayReceipt {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = HallwayReceiptWire::deserialize(deserializer)?;
+        let disposition = match (wire.created, wire.duplicate) {
+            (true, false) => HallwayCreateDisposition::Created,
+            (false, true) => HallwayCreateDisposition::Duplicate,
+            _ => return Err(D::Error::custom("created and duplicate must be opposite")),
+        };
+        Ok(Self {
+            ok: wire.ok,
+            hallway: wire.hallway,
+            disposition,
+            operator_visible: wire.operator_visible,
+            wake_policy: wire.wake_policy,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HallwayJoinDisposition {
+    Joined,
+    Duplicate,
+}
+
+impl HallwayJoinDisposition {
+    pub const fn is_joined(self) -> bool {
+        matches!(self, Self::Joined)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HallwayPresenceReceipt {
     pub ok: bool,
     pub hallway: String,
     pub room: String,
     pub spirit: String,
     pub session: String,
-    pub joined: bool,
-    pub duplicate: bool,
+    pub disposition: HallwayJoinDisposition,
     pub read_cursor: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HallwayPresenceReceiptWire {
+    ok: bool,
+    hallway: String,
+    room: String,
+    spirit: String,
+    session: String,
+    joined: bool,
+    duplicate: bool,
+    read_cursor: i64,
+}
+
+impl Serialize for HallwayPresenceReceipt {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("HallwayPresenceReceipt", 8)?;
+        state.serialize_field("ok", &self.ok)?;
+        state.serialize_field("hallway", &self.hallway)?;
+        state.serialize_field("room", &self.room)?;
+        state.serialize_field("spirit", &self.spirit)?;
+        state.serialize_field("session", &self.session)?;
+        state.serialize_field("joined", &self.disposition.is_joined())?;
+        state.serialize_field("duplicate", &!self.disposition.is_joined())?;
+        state.serialize_field("readCursor", &self.read_cursor)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for HallwayPresenceReceipt {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = HallwayPresenceReceiptWire::deserialize(deserializer)?;
+        let disposition = match (wire.joined, wire.duplicate) {
+            (true, false) => HallwayJoinDisposition::Joined,
+            (false, true) => HallwayJoinDisposition::Duplicate,
+            _ => return Err(D::Error::custom("joined and duplicate must be opposite")),
+        };
+        Ok(Self {
+            ok: wire.ok,
+            hallway: wire.hallway,
+            room: wire.room,
+            spirit: wire.spirit,
+            session: wire.session,
+            disposition,
+            read_cursor: wire.read_cursor,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -95,12 +207,56 @@ pub struct HallwayMessage {
     pub created_at: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HallwayPostDisposition {
+    Posted,
+    Duplicate,
+}
+
+impl HallwayPostDisposition {
+    pub const fn is_duplicate(self) -> bool {
+        matches!(self, Self::Duplicate)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HallwayPostReceipt {
     pub ok: bool,
-    pub duplicate: bool,
+    pub disposition: HallwayPostDisposition,
     pub message: HallwayMessage,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HallwayPostReceiptWire {
+    ok: bool,
+    duplicate: bool,
+    message: HallwayMessage,
+}
+
+impl Serialize for HallwayPostReceipt {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("HallwayPostReceipt", 3)?;
+        state.serialize_field("ok", &self.ok)?;
+        state.serialize_field("duplicate", &self.disposition.is_duplicate())?;
+        state.serialize_field("message", &self.message)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for HallwayPostReceipt {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = HallwayPostReceiptWire::deserialize(deserializer)?;
+        Ok(Self {
+            ok: wire.ok,
+            disposition: if wire.duplicate {
+                HallwayPostDisposition::Duplicate
+            } else {
+                HallwayPostDisposition::Posted
+            },
+            message: wire.message,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

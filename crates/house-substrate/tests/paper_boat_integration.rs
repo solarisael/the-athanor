@@ -1,4 +1,4 @@
-use athanor_substrate::{Config, paper_boat_sleep, paper_boat_wake};
+use athanor_substrate::{Config, EmbeddingMode, paper_boat_sleep, paper_boat_wake};
 use house_core::{PaperBoatSleepRequest, PaperBoatWakeRequest};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
@@ -134,8 +134,7 @@ async fn run_contract(pool: &sqlx::PgPool, url: &str) -> TestResult {
         embed_url: None,
         embed_model: "disabled".into(),
         embed_dimension: 2048,
-        embed_required: false,
-        test_embedding_disabled: true,
+        embedding_mode: EmbeddingMode::DisabledForTest,
         giga_source_ledger_dir: None,
         giga_source_room: None,
     };

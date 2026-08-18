@@ -1,6 +1,7 @@
 use athanor_substrate::{hallway_create, hallway_join, hallway_post, hallway_read};
 use house_core::hallway::{
-    HallwayCreateRequest, HallwayJoinRequest, HallwayPostRequest, HallwayReadRequest,
+    HallwayCreateDisposition, HallwayCreateRequest, HallwayJoinDisposition, HallwayJoinRequest,
+    HallwayPostDisposition, HallwayPostRequest, HallwayReadRequest,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
@@ -121,9 +122,12 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
         idempotency_key: "create-one".into(),
     };
     let created = hallway_create(pool, create.clone()).await?;
-    assert!(created.created);
+    assert_eq!(created.disposition, HallwayCreateDisposition::Created);
     assert_eq!(created.wake_policy, "manual");
-    assert!(hallway_create(pool, create).await?.duplicate);
+    assert_eq!(
+        hallway_create(pool, create).await?.disposition,
+        HallwayCreateDisposition::Duplicate
+    );
 
     let kintsu_two = HallwayJoinRequest {
         hallway: hallway.clone(),
@@ -139,9 +143,18 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
         session: "kodo-one".into(),
         idempotency_key: "join-kodo-one".into(),
     };
-    assert!(hallway_join(pool, kintsu_two.clone()).await?.joined);
-    assert!(hallway_join(pool, kintsu_two.clone()).await?.duplicate);
-    assert!(hallway_join(pool, kodo.clone()).await?.joined);
+    assert_eq!(
+        hallway_join(pool, kintsu_two.clone()).await?.disposition,
+        HallwayJoinDisposition::Joined
+    );
+    assert_eq!(
+        hallway_join(pool, kintsu_two.clone()).await?.disposition,
+        HallwayJoinDisposition::Duplicate
+    );
+    assert_eq!(
+        hallway_join(pool, kodo.clone()).await?.disposition,
+        HallwayJoinDisposition::Joined
+    );
 
     let first = hallway_post(
         pool,
@@ -168,7 +181,10 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
     let second = hallway_post(pool, second_request.clone()).await?;
     assert_eq!(first.message.sequence, 1);
     assert_eq!(second.message.sequence, 2);
-    assert!(hallway_post(pool, second_request).await?.duplicate);
+    assert_eq!(
+        hallway_post(pool, second_request).await?.disposition,
+        HallwayPostDisposition::Duplicate
+    );
 
     let third = hallway_post(
         pool,
@@ -200,7 +216,16 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
     );
     let left = left?;
     let right = right?;
-    assert_ne!(left.duplicate, right.duplicate);
+    assert!(matches!(
+        (left.disposition, right.disposition),
+        (
+            HallwayPostDisposition::Posted,
+            HallwayPostDisposition::Duplicate
+        ) | (
+            HallwayPostDisposition::Duplicate,
+            HallwayPostDisposition::Posted
+        )
+    ));
     assert_eq!(left.message.id, right.message.id);
     assert_eq!(left.message.sequence, 4);
     let final_message_id = left.message.id;

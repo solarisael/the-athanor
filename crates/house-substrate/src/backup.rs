@@ -52,7 +52,10 @@ fn known_migration_lineage(versions: &[String]) -> bool {
     }
     let prefix_of = |lineage: &[String]| {
         versions.len() <= lineage.len()
-            && versions.iter().zip(lineage).all(|(actual, expected)| actual == expected)
+            && versions
+                .iter()
+                .zip(lineage)
+                .all(|(actual, expected)| actual == expected)
     };
     let consolidated = crate::migrations::consolidated_version_labels();
     let legacy: Vec<String> = LEGACY_MIGRATIONS.iter().map(|s| (*s).to_owned()).collect();
@@ -729,7 +732,10 @@ mod tests {
         };
         let consolidated = crate::migrations::consolidated_version_labels();
         assert!(known_migration_lineage(&consolidated));
-        assert!(consolidated.contains(&"18".to_owned()), "allowlist must track the registry");
+        assert!(
+            consolidated.contains(&"18".to_owned()),
+            "allowlist must track the registry"
+        );
         assert!(known_migration_lineage(&strings(LEGACY_MIGRATIONS)));
         let mut previous_consolidated = consolidated.clone();
         previous_consolidated.pop();

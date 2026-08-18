@@ -1,4 +1,6 @@
-use athanor_substrate::{LessonMutationReceipt, LessonUpdateParams, lesson_update};
+use athanor_substrate::{
+    LessonMutationKind, LessonMutationReceipt, LessonUpdateParams, lesson_update,
+};
 use serde_json::{Value, json};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{PgPool, Row};
@@ -74,13 +76,12 @@ async fn lesson_state(
     lesson_key: &str,
     id: i64,
 ) -> TestResult<(String, bool, Option<String>)> {
-    let row = sqlx::query(
-        "SELECT title, always_on, project FROM lessons WHERE lesson_key=$1 AND id=$2",
-    )
-    .bind(lesson_key)
-    .bind(id)
-    .fetch_one(pool)
-    .await?;
+    let row =
+        sqlx::query("SELECT title, always_on, project FROM lessons WHERE lesson_key=$1 AND id=$2")
+            .bind(lesson_key)
+            .bind(id)
+            .fetch_one(pool)
+            .await?;
     Ok((
         row.try_get("title")?,
         row.try_get("always_on")?,
@@ -108,14 +109,27 @@ async fn guarded_lesson_update_preserves_identity_and_refuses_without_mutation()
         json!({ "alwaysOn": false }),
     )
     .await?;
-    assert!(demoted.ok);
-    assert_eq!(demoted.id, 41);
-    assert_eq!(demoted.title.as_deref(), Some("Guarded coding lesson"));
-    assert_eq!(demoted.always_on, Some(false));
-    assert_eq!(demoted.project, Some(Some("the-athanor".into())));
+    let LessonMutationReceipt::Updated {
+        id,
+        title,
+        always_on,
+        project,
+        ..
+    } = &demoted
+    else {
+        panic!("successful update must return an updated receipt");
+    };
+    assert_eq!(*id, 41);
+    assert_eq!(title, "Guarded coding lesson");
+    assert!(!*always_on);
+    assert_eq!(project.as_deref(), Some("the-athanor"));
     assert_eq!(
         lesson_state(&pool, "coding", 41).await?,
-        ("Guarded coding lesson".into(), false, Some("the-athanor".into()))
+        (
+            "Guarded coding lesson".into(),
+            false,
+            Some("the-athanor".into())
+        )
     );
 
     let cleared = apply(
@@ -126,10 +140,18 @@ async fn guarded_lesson_update_preserves_identity_and_refuses_without_mutation()
         json!({ "clearProject": true }),
     )
     .await?;
-    assert!(cleared.ok);
-    assert_eq!(cleared.id, 41);
-    assert_eq!(cleared.always_on, Some(false));
-    assert_eq!(cleared.project, Some(None));
+    let LessonMutationReceipt::Updated {
+        id,
+        always_on,
+        project,
+        ..
+    } = &cleared
+    else {
+        panic!("successful update must return an updated receipt");
+    };
+    assert_eq!(*id, 41);
+    assert!(!*always_on);
+    assert!(project.is_none());
     let cleared_json = serde_json::to_value(&cleared)?;
     assert_eq!(cleared_json["alwaysOn"], json!(false));
     assert_eq!(cleared_json["project"], Value::Null);
@@ -147,12 +169,18 @@ async fn guarded_lesson_update_preserves_identity_and_refuses_without_mutation()
         json!({ "alwaysOn": true }),
     )
     .await?;
-    assert!(!wrong_title.ok);
-    assert_eq!(wrong_title.error.as_deref(), Some("title mismatch"));
-    assert_eq!(
-        wrong_title.actual_title.as_deref(),
-        Some("Guarded coding lesson")
-    );
+    let LessonMutationReceipt::Refused {
+        mutation,
+        error,
+        actual_title,
+        ..
+    } = &wrong_title
+    else {
+        panic!("stale expected title must refuse");
+    };
+    assert_eq!(*mutation, LessonMutationKind::Update);
+    assert_eq!(error, "title mismatch");
+    assert_eq!(actual_title.as_deref(), Some("Guarded coding lesson"));
     assert_eq!(lesson_state(&pool, "coding", 41).await?, stable_coding);
 
     let conflicting_project = apply(
@@ -163,11 +191,14 @@ async fn guarded_lesson_update_preserves_identity_and_refuses_without_mutation()
         json!({ "project": "replacement", "clearProject": true }),
     )
     .await?;
-    assert!(!conflicting_project.ok);
-    assert_eq!(
-        conflicting_project.error.as_deref(),
-        Some("project and clearProject are mutually exclusive")
-    );
+    let LessonMutationReceipt::Refused {
+        mutation, error, ..
+    } = &conflicting_project
+    else {
+        panic!("invalid patch must refuse");
+    };
+    assert_eq!(*mutation, LessonMutationKind::Update);
+    assert_eq!(error, "project and clearProject are mutually exclusive");
     assert_eq!(lesson_state(&pool, "coding", 41).await?, stable_coding);
 
     let stable_writing = lesson_state(&pool, "writing", 42).await?;
@@ -179,11 +210,14 @@ async fn guarded_lesson_update_preserves_identity_and_refuses_without_mutation()
         json!({ "clearProject": true }),
     )
     .await?;
-    assert!(!wrong_kind.ok);
-    assert_eq!(
-        wrong_kind.error.as_deref(),
-        Some("clearProject is not allowed for writing-lesson")
-    );
+    let LessonMutationReceipt::Refused {
+        mutation, error, ..
+    } = &wrong_kind
+    else {
+        panic!("invalid patch must refuse");
+    };
+    assert_eq!(*mutation, LessonMutationKind::Update);
+    assert_eq!(error, "clearProject is not allowed for writing-lesson");
     assert_eq!(lesson_state(&pool, "writing", 42).await?, stable_writing);
 
     let missing = apply(
@@ -194,8 +228,14 @@ async fn guarded_lesson_update_preserves_identity_and_refuses_without_mutation()
         json!({ "alwaysOn": true }),
     )
     .await?;
-    assert!(!missing.ok);
-    assert_eq!(missing.error.as_deref(), Some("lesson not found"));
+    let LessonMutationReceipt::Refused {
+        mutation, error, ..
+    } = &missing
+    else {
+        panic!("missing lesson must refuse");
+    };
+    assert_eq!(*mutation, LessonMutationKind::Update);
+    assert_eq!(error, "lesson not found");
     assert_eq!(lesson_state(&pool, "coding", 41).await?, stable_coding);
 
     pool.close().await;

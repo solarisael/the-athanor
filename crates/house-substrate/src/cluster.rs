@@ -1,20 +1,11 @@
 use crate::config::{AppError, EMBED_DIMENSION};
+use house_core::{
+    ClusterExecution, ClusterFreshnessPolicy, ClusterMaintenanceOutcome, ClusterMaintenanceRequest,
+    ClusterMaintenanceStatus as DomainClusterMaintenanceStatus,
+    ClusterStaleness as DomainClusterStaleness, ClusterSummary,
+};
 use serde::Serialize;
 use sqlx::{PgPool, Row};
-
-/// Cluster maintenance is deliberately owned by Rust.  The pure planner is kept
-/// separate from SQL so deterministic behavior can be tested without PostgreSQL.
-#[derive(Debug, Clone, Serialize)]
-pub struct ClusterMaintenanceResult {
-    pub ok: bool,
-    pub operation: String,
-    #[serde(rename = "dryRun")]
-    pub dry_run: bool,
-    pub stale: bool,
-    pub clusters: usize,
-    pub members: usize,
-    pub warnings: Vec<String>,
-}
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct ClusterStaleness {
@@ -170,92 +161,124 @@ pub async fn cluster_staleness(
     })
 }
 
+fn maintenance_status(
+    info: ClusterStaleness,
+    stale: bool,
+) -> Result<DomainClusterMaintenanceStatus, AppError> {
+    let reason = if info.built_at.is_none() {
+        "never_built"
+    } else if stale {
+        "stale"
+    } else {
+        "fresh"
+    };
+    Ok(DomainClusterMaintenanceStatus {
+        stale,
+        reason: reason.into(),
+        staleness: DomainClusterStaleness::new(
+            info.built_at.map(|value| value.to_rfc3339()),
+            info.clusters as u64,
+            info.chunks_total as u64,
+            info.chunks_since_build as u64,
+            info.fraction_unseen,
+        )
+        .map_err(|error| AppError::Invalid(error.to_string()))?,
+    })
+}
+
+async fn cluster_summaries(pool: &PgPool) -> Result<Vec<ClusterSummary>, AppError> {
+    let rows = sqlx::query(
+        "SELECT id,COALESCE(label, 'cluster') AS label,member_count,accepted FROM memory_clusters ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            ClusterSummary::new(
+                row.try_get("id")?,
+                row.try_get::<String, _>("label")?,
+                row.try_get::<i32, _>("member_count")? as u64,
+                row.try_get("accepted")?,
+            )
+            .map_err(|error| AppError::Invalid(error.to_string()))
+        })
+        .collect()
+}
+
 pub async fn cluster_maintenance(
     pool: &PgPool,
-    operation: &str,
-    dry_run: bool,
-    if_stale: bool,
-    k: usize,
-) -> Result<ClusterMaintenanceResult, AppError> {
-    if !matches!(operation, "check" | "rebuild") {
-        return Err(AppError::Invalid(
-            "operation must be check or rebuild".into(),
-        ));
-    }
+    command: ClusterMaintenanceRequest,
+) -> Result<ClusterMaintenanceOutcome, AppError> {
     let stale_info = cluster_staleness(pool, None).await?;
     let stale = cluster_is_stale(&stale_info, chrono::Utc::now());
-    if operation == "check" || (if_stale && !stale) {
-        return Ok(ClusterMaintenanceResult {
-            ok: true,
-            operation: operation.into(),
-            dry_run,
-            stale,
-            clusters: stale_info.clusters as usize,
-            members: 0,
-            warnings: Vec::new(),
-        });
-    }
-    if dry_run {
-        return Ok(ClusterMaintenanceResult {
-            ok: true,
-            operation: operation.into(),
-            dry_run: true,
-            stale,
-            clusters: 0,
-            members: 0,
-            warnings: Vec::new(),
-        });
-    }
-    let mut tx = pool.begin().await?;
-    sqlx::query(
-        "SELECT pg_advisory_xact_lock(hashtextextended('solarisael.cluster_maintenance', 42))",
-    )
-    .execute(&mut *tx)
-    .await?;
-    let rows = sqlx::query("SELECT c.id,c.body_embedding::text FROM memory_chunks c JOIN memories m ON m.id=c.memory_id WHERE c.body_embedding IS NOT NULL AND m.archived_at IS NULL AND m.superseded_by IS NULL ORDER BY c.id").fetch_all(&mut *tx).await?;
-    let mut points = Vec::new();
-    for row in rows {
-        let text: String = row.try_get("body_embedding")?;
-        let vec = text
-            .trim_matches(|c| c == '[' || c == ']')
-            .split(',')
-            .filter_map(|x| x.trim().parse::<f32>().ok())
-            .collect::<Vec<_>>();
-        if vec.len() != EMBED_DIMENSION {
-            return Err(AppError::Config(
-                "cluster embedding dimension is not vector(2048)".into(),
-            ));
+    let status = maintenance_status(stale_info, stale)?;
+
+    match command {
+        ClusterMaintenanceRequest::Check { .. } => Ok(ClusterMaintenanceOutcome::Checked {
+            status,
+            clusters: cluster_summaries(pool).await?,
+        }),
+        ClusterMaintenanceRequest::Rebuild {
+            execution: ClusterExecution::DryRun,
+            ..
+        } => Ok(ClusterMaintenanceOutcome::DryRun { status }),
+        ClusterMaintenanceRequest::Rebuild {
+            freshness: ClusterFreshnessPolicy::IfStale,
+            ..
+        } if !stale => Ok(ClusterMaintenanceOutcome::SkippedFresh {
+            status,
+            clusters: cluster_summaries(pool).await?,
+        }),
+        ClusterMaintenanceRequest::Rebuild { k, .. } => {
+            let mut tx = pool.begin().await?;
+            sqlx::query(
+                "SELECT pg_advisory_xact_lock(hashtextextended('solarisael.cluster_maintenance', 42))",
+            )
+            .execute(&mut *tx)
+            .await?;
+            let rows = sqlx::query("SELECT c.id,c.body_embedding::text FROM memory_chunks c JOIN memories m ON m.id=c.memory_id WHERE c.body_embedding IS NOT NULL AND m.archived_at IS NULL AND m.superseded_by IS NULL ORDER BY c.id").fetch_all(&mut *tx).await?;
+            let mut points = Vec::new();
+            for row in rows {
+                let text: String = row.try_get("body_embedding")?;
+                let vector = text
+                    .trim_matches(|character| character == '[' || character == ']')
+                    .split(',')
+                    .filter_map(|value| value.trim().parse::<f32>().ok())
+                    .collect::<Vec<_>>();
+                if vector.len() != EMBED_DIMENSION {
+                    return Err(AppError::Config(
+                        "cluster embedding dimension is not vector(2048)".into(),
+                    ));
+                }
+                points.push((row.try_get::<i64, _>("id")?, vector));
+            }
+            let groups = spherical_kmeans(&points, k as usize);
+            sqlx::query("DELETE FROM memory_clusters")
+                .execute(&mut *tx)
+                .await?;
+            let mut clusters = Vec::with_capacity(groups.len());
+            for (center, members) in &groups {
+                let center_text = format!(
+                    "[{}]",
+                    center
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+                let cluster_id: i64 = sqlx::query_scalar("INSERT INTO memory_clusters (label,centroid,member_count,accepted) VALUES ($1,$2::vector,$3,FALSE) RETURNING id").bind("cluster").bind(center_text).bind(members.len() as i32).fetch_one(&mut *tx).await?;
+                for (chunk_id, distance) in members {
+                    sqlx::query("INSERT INTO memory_cluster_members (cluster_id,chunk_id,distance_to_centroid) VALUES ($1,$2,$3)").bind(cluster_id).bind(chunk_id).bind(distance).execute(&mut *tx).await?;
+                }
+                clusters.push(
+                    ClusterSummary::new(cluster_id, "cluster", members.len() as u64, false)
+                        .map_err(|error| AppError::Invalid(error.to_string()))?,
+                );
+            }
+            tx.commit().await?;
+            Ok(ClusterMaintenanceOutcome::Rebuilt { status, clusters })
         }
-        points.push((row.try_get::<i64, _>("id")?, vec));
     }
-    let groups = spherical_kmeans(&points, k);
-    sqlx::query("DELETE FROM memory_clusters")
-        .execute(&mut *tx)
-        .await?;
-    for (center, members) in &groups {
-        let center_text = format!(
-            "[{}]",
-            center
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        let cid: i64 = sqlx::query_scalar("INSERT INTO memory_clusters (label,centroid,member_count,accepted) VALUES ($1,$2::vector,$3,FALSE) RETURNING id").bind("cluster").bind(center_text).bind(members.len() as i32).fetch_one(&mut *tx).await?;
-        for (id, distance) in members {
-            sqlx::query("INSERT INTO memory_cluster_members (cluster_id,chunk_id,distance_to_centroid) VALUES ($1,$2,$3)").bind(cid).bind(id).bind(distance).execute(&mut *tx).await?;
-        }
-    }
-    tx.commit().await?;
-    Ok(ClusterMaintenanceResult {
-        ok: true,
-        operation: operation.into(),
-        dry_run: false,
-        stale: true,
-        clusters: groups.len(),
-        members: points.len(),
-        warnings: Vec::new(),
-    })
 }
 
 pub(crate) async fn cluster_resonance(

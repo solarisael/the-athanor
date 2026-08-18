@@ -21,10 +21,11 @@ use house_core::{
 };
 use house_protocol::{
     GigaCandidateListRequest, GigaCandidateListResult, GigaCandidateParams,
-    GigaCandidateStoreResult, GigaClassifierParams, GigaConversationIngestParams,
-    GigaEventIngestResult, GigaHealthCount, GigaHealthRequest, GigaHealthResult,
-    GigaQueueMaintenanceResult, GigaQueueStateCount, GigaResonanceParams, GigaReviewResult,
-    GigaScopeParams, GigaSourceRangeParams, GigaSourceRefParams, GigaToolPromoteParams,
+    GigaCandidateStoreDisposition, GigaCandidateStoreResult, GigaClassifierParams,
+    GigaConversationIngestParams, GigaEventIngestDisposition, GigaEventIngestResult,
+    GigaHealthCount, GigaHealthRequest, GigaHealthResult, GigaQueueMaintenanceResult,
+    GigaQueueStateCount, GigaResonanceParams, GigaReviewResult, GigaScopeParams,
+    GigaSourceRangeParams, GigaSourceRefParams, GigaToolPromoteParams,
     GigaToolPromotionTargetParams, GigaToolReviewParams, RequiredNullable,
 };
 use serde_json::{Value, json};
@@ -175,8 +176,7 @@ pub async fn giga_event_ingest(
         tx.commit().await?;
         return Ok(GigaEventIngestResult {
             event_id: event.event_id().into(),
-            accepted: false,
-            duplicate: true,
+            disposition: GigaEventIngestDisposition::Duplicate,
         });
     }
     for (source_ordinal, source) in event.source_refs().iter().enumerate() {
@@ -185,8 +185,7 @@ pub async fn giga_event_ingest(
     tx.commit().await?;
     Ok(GigaEventIngestResult {
         event_id: event.event_id().into(),
-        accepted: true,
-        duplicate: false,
+        disposition: GigaEventIngestDisposition::Accepted,
     })
 }
 pub async fn giga_conversation_ingest(
@@ -344,8 +343,7 @@ async fn giga_candidate_store_tx(
     {
         return Ok(GigaCandidateStoreResult {
             candidate_id: candidate.candidate_id().into(),
-            stored: false,
-            duplicate: true,
+            disposition: GigaCandidateStoreDisposition::Duplicate,
         });
     }
     let scores = candidate.scores();
@@ -384,8 +382,7 @@ async fn giga_candidate_store_tx(
     if inserted.rows_affected() == 0 {
         return Ok(GigaCandidateStoreResult {
             candidate_id: candidate.candidate_id().into(),
-            stored: false,
-            duplicate: true,
+            disposition: GigaCandidateStoreDisposition::Duplicate,
         });
     }
     verify_parent_event(tx, candidate).await?;
@@ -409,8 +406,7 @@ async fn giga_candidate_store_tx(
     }
     Ok(GigaCandidateStoreResult {
         candidate_id: candidate.candidate_id().into(),
-        stored: true,
-        duplicate: false,
+        disposition: GigaCandidateStoreDisposition::Stored,
     })
 }
 
@@ -1848,7 +1844,7 @@ fn promotion_payload_json(payload: &GigaPromotionPayload) -> Value {
                 "tags": payload.tags(),
             },
         }),
-        GigaPromotionPayload::ProjectLesson(payload) => json!({
+        GigaPromotionPayload::ProjectLesson { payload, .. } => json!({
             "kind": "project_lesson",
             "payload": {
                 "title": payload.title(),
@@ -1856,19 +1852,23 @@ fn promotion_payload_json(payload: &GigaPromotionPayload) -> Value {
                 "project": payload.project(),
                 "proof_pattern": payload.proof_pattern(),
                 "trigger_context": payload.trigger_context(),
+                "language_keys": payload.language_keys(),
+                "technology_keys": payload.technology_keys(),
+                "thread_keys": payload.thread_keys(),
                 "tags": payload.tags(),
-            },
+            }
         }),
     }
 }
 
-fn publication_consent_json(request: &GigaPromotionRequest) -> Option<Value> {
-    request.publication_consent().map(|consent| {
-        json!({
-            "operator_approved": consent.operator_approved(),
-            "reviewer_approved": consent.reviewer_approved(),
-        })
-    })
+fn publication_consent_json(payload: &GigaPromotionPayload) -> Option<Value> {
+    match payload {
+        GigaPromotionPayload::ProjectLesson { .. } => Some(json!({
+            "operator_approved": true,
+            "reviewer_approved": true,
+        })),
+        GigaPromotionPayload::Memory(_) | GigaPromotionPayload::CodingLesson(_) => None,
+    }
 }
 
 fn promotion_digest(request: &GigaPromotionRequest) -> Result<String, AppError> {
@@ -1880,7 +1880,7 @@ fn promotion_digest(request: &GigaPromotionRequest) -> Result<String, AppError> 
         "authorization_basis": request.authorization_basis(),
         "source_refs": promotion_sources_json(request.source_refs()),
         "target": promotion_payload_json(request.payload()),
-        "publication_consent": publication_consent_json(request),
+        "publication_consent": publication_consent_json(request.payload()),
         "reviewed_at": request.reviewed_at(),
     });
     let bytes = serde_json::to_vec(&canonical)
@@ -1984,7 +1984,7 @@ pub async fn giga_tool_promote(
     let event = event_from_store(&mut tx, &event_id).await?;
     verify_promotion_sources(cfg, &event).await?;
     let reviewed_at: DateTime<Utc> = database_now(&mut tx).await?;
-    let (payload, publication_consent) = match request.target {
+    let payload = match request.target {
         GigaToolPromotionTargetParams::Memory {
             title,
             body,
@@ -1995,11 +1995,8 @@ pub async fn giga_tool_promote(
                     "memory promotion tool requires a memory candidate".into(),
                 ));
             }
-            (
-                GigaPromotionPayload::Memory(
-                    GigaMemoryPromotionPayload::new(title, body, threads).map_err(domain_error)?,
-                ),
-                None,
+            GigaPromotionPayload::Memory(
+                GigaMemoryPromotionPayload::new(title, body, threads).map_err(domain_error)?,
             )
         }
         GigaToolPromotionTargetParams::CodingLesson {
@@ -2017,22 +2014,19 @@ pub async fn giga_tool_promote(
                     "coding lesson promotion requires a global coding lesson candidate".into(),
                 ));
             }
-            (
-                GigaPromotionPayload::CodingLesson(
-                    GigaCodingLessonPromotionPayload::new(
-                        title,
-                        body,
-                        shape,
-                        proof_pattern.unwrap_or_default(),
-                        trigger_context.unwrap_or_default(),
-                        language_keys,
-                        technology_keys,
-                        thread_keys,
-                        tags,
-                    )
-                    .map_err(domain_error)?,
-                ),
-                None,
+            GigaPromotionPayload::CodingLesson(
+                GigaCodingLessonPromotionPayload::new(
+                    title,
+                    body,
+                    shape,
+                    proof_pattern.unwrap_or_default(),
+                    trigger_context.unwrap_or_default(),
+                    language_keys,
+                    technology_keys,
+                    thread_keys,
+                    tags,
+                )
+                .map_err(domain_error)?,
             )
         }
         GigaToolPromotionTargetParams::ProjectLesson {
@@ -2050,25 +2044,22 @@ pub async fn giga_tool_promote(
                     "project lesson promotion requires one stored candidate project".into(),
                 ));
             }
-            let consent = GigaPublicationConsent::new(publication_approved, publication_approved)
-                .map_err(domain_error)?;
-            (
-                GigaPromotionPayload::ProjectLesson(
-                    GigaProjectLessonPromotionPayload::new(
-                        title,
-                        body,
-                        project_keys[0].clone(),
-                        proof_pattern.unwrap_or_default(),
-                        trigger_context.unwrap_or_default(),
-                        language_keys,
-                        technology_keys,
-                        thread_keys,
-                        tags,
-                    )
+            GigaPromotionPayload::ProjectLesson {
+                payload: GigaProjectLessonPromotionPayload::new(
+                    title,
+                    body,
+                    project_keys[0].clone(),
+                    proof_pattern.unwrap_or_default(),
+                    trigger_context.unwrap_or_default(),
+                    language_keys,
+                    technology_keys,
+                    thread_keys,
+                    tags,
+                )
+                .map_err(domain_error)?,
+                publication_consent: GigaPublicationConsent::new(publication_approved)
                     .map_err(domain_error)?,
-                ),
-                Some(consent),
-            )
+            }
         }
     };
     tx.commit().await?;
@@ -2080,7 +2071,6 @@ pub async fn giga_tool_promote(
         request.authorization_basis,
         source_refs,
         payload,
-        publication_consent,
         reviewed_at.to_rfc3339(),
     )
     .map_err(domain_error)?;
@@ -2111,15 +2101,17 @@ fn typed_promotion_receipt(
             request.reviewed_at().into(),
             committed_at,
         ),
-        GigaPromotionPayload::ProjectLesson(payload) => GigaPromotionReceipt::project_lesson(
-            request.candidate_id().into(),
-            durable_id,
-            payload.project().into(),
-            request.reviewer_id().into(),
-            request.operator_identity().into(),
-            request.reviewed_at().into(),
-            committed_at,
-        ),
+        GigaPromotionPayload::ProjectLesson { payload, .. } => {
+            GigaPromotionReceipt::project_lesson(
+                request.candidate_id().into(),
+                durable_id,
+                payload.project().into(),
+                request.reviewer_id().into(),
+                request.operator_identity().into(),
+                request.reviewed_at().into(),
+                committed_at,
+            )
+        }
     };
     receipt.map_err(domain_error)
 }
@@ -2294,12 +2286,18 @@ pub async fn giga_promote(
             &scope,
         )
         .map_err(domain_error)?;
-    if let GigaPromotionPayload::ProjectLesson(payload) = request.payload() {
-        let consent = request
-            .publication_consent()
-            .ok_or_else(|| AppError::Invalid("project publication consent is required".into()))?;
-        if !consent.operator_approved()
-            || !consent.reviewer_approved()
+    if let GigaPromotionPayload::ProjectLesson { payload, .. } = request.payload() {
+        let reviewer_principal: Option<String> = sqlx::query_scalar(
+            "SELECT reviewer_principal
+             FROM giga_reviews
+             WHERE candidate_id=$1 AND action='start_review' AND new_state='in_review'
+             ORDER BY id DESC
+             LIMIT 1",
+        )
+        .bind(request.candidate_id())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if reviewer_principal.as_deref() != Some(request.reviewer_id())
             || scope.visibility() != GigaVisibility::Private
             || scope.room() != Some(request.room())
             || !scope.publication_review_required()
@@ -2331,7 +2329,7 @@ pub async fn giga_promote(
         "reviewer_id": request.reviewer_id(),
         "operator_identity": request.operator_identity(),
         "authorization_basis": request.authorization_basis(),
-        "publication_consent": publication_consent_json(&request),
+        "publication_consent": publication_consent_json(request.payload()),
         "scope": {
             "room": scope.room().map(ToString::to_string),
             "project": scope.project(),
@@ -2415,7 +2413,7 @@ pub async fn giga_promote(
                     .map_err(|_| AppError::Invalid("GIGA coding lesson ID is invalid".into()))?,
             )
         }
-        GigaPromotionPayload::ProjectLesson(payload) => {
+        GigaPromotionPayload::ProjectLesson { payload, .. } => {
             let tags = normalize_promotion_values(payload.tags());
             let lesson_id = write_project_lesson_tx(
                 &mut tx,
@@ -2463,7 +2461,7 @@ pub async fn giga_promote(
     .bind(Json(vec![target_ref.clone()]))
     .bind(reviewed_at)
     .bind(&request_digest)
-    .bind(publication_consent_json(&request))
+    .bind(publication_consent_json(request.payload()))
     .bind(committed_at)
     .execute(&mut *tx)
     .await?;

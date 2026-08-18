@@ -23,10 +23,10 @@ pub use anamnesis::{
 pub use backup::{backup, restore};
 pub use canon::{canon_read, canon_write};
 pub use cluster::{
-    ClusterGroup, ClusterMaintenanceResult, ClusterMembers, ClusterStaleness, cluster_is_stale,
-    cluster_maintenance, cluster_staleness, spherical_kmeans,
+    ClusterGroup, ClusterMembers, ClusterStaleness, cluster_is_stale, cluster_maintenance,
+    cluster_staleness, spherical_kmeans,
 };
-pub use config::{AppError, Config};
+pub use config::{AppError, Config, EmbeddingMode};
 pub use entity::{EntityMatch, EntityResolveParams, EntityResolveResult, entity_resolve};
 pub use giga::{
     giga_candidate_list, giga_candidate_store, giga_conversation_ingest, giga_event_claim,
@@ -42,11 +42,11 @@ pub use lesson::{
     DesignDocument, DesignDocumentFilters, DesignDocumentQueryParams, DesignDocumentQueryResult,
     DesignDocumentTaxonomy, DesignDocumentWriteParams, DesignDocumentWriteReceipt,
     LessonContextFilters, LessonContextMatch, LessonContextParams, LessonContextRecord,
-    LessonContextResult, LessonDeleteParams, LessonFamily, LessonFilters, LessonMutationReceipt,
-    LessonQueryParams, LessonQueryResult, LessonRecord, LessonTaxonomy, LessonTriggerFired,
-    LessonTriggerMatchParams, LessonTriggerMatchResult, LessonTriggerSurface, LessonUpdateParams,
-    design_document_query, design_document_write, lesson_context, lesson_delete, lesson_query,
-    lesson_trigger_match, lesson_update,
+    LessonContextResult, LessonDeleteParams, LessonFamily, LessonFilters, LessonMutationKind,
+    LessonMutationReceipt, LessonQueryParams, LessonQueryResult, LessonRecord, LessonTaxonomy,
+    LessonTriggerFired, LessonTriggerMatchParams, LessonTriggerMatchResult, LessonTriggerSurface,
+    LessonUpdateParams, design_document_query, design_document_write, lesson_context,
+    lesson_delete, lesson_query, lesson_trigger_match, lesson_update,
 };
 pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
 pub use recall::{RecallParams, RecallResult, recall, refresh_semantic_vocabulary};

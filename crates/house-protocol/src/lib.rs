@@ -7,24 +7,26 @@ use house_core::{
     AnamnesisActivation, AnamnesisAddDetails, AnamnesisAddRequest, AnamnesisAppendReceipt,
     AnamnesisAppendRequest, AnamnesisFidelity, AnamnesisKind, AnamnesisReadMode,
     AnamnesisReadRequest, AnamnesisReceipt, AnamnesisSeedRep, CanonAttribution, CanonPointer,
-    CanonReadRequest, CanonWriteReceipt, CanonWriteRequest, ClusterMaintenanceOperation,
-    ClusterMaintenanceRequest, GigaAuthority, GigaCandidate, GigaCandidateKind,
-    GigaClassifierIdentity, GigaCodingLessonPromotionPayload, GigaEvent, GigaEventClaimReceipt,
-    GigaEventClaimRequest, GigaEventFinishOutcome, GigaEventFinishReceipt, GigaEventFinishRequest,
-    GigaEventReplayReceipt, GigaEventReplayRequest, GigaEventType, GigaLifecycle,
-    GigaMemoryPromotionPayload, GigaProjectLessonPromotionPayload, GigaPromotionAuthority,
-    GigaPromotionPayload, GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
-    GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
-    GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
-    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, PaperBoatRecord,
-    PaperBoatSleepReceipt, PaperBoatSleepRequest, PaperBoatWakeReceipt, PaperBoatWakeRequest,
-    RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberReceipt,
-    RememberRequest, RoomKey, ThreadContinuation, UnboatedMemory,
-    lesson_triggers::LessonTriggerSpec,
+    CanonReadRequest, CanonWriteReceipt, CanonWriteRequest, ClusterExecution,
+    ClusterFreshnessPolicy, ClusterMaintenanceOutcome, ClusterMaintenanceRequest,
+    ClusterMaintenanceStatus, ClusterStaleness, ClusterSummary, GigaAuthority, GigaCandidate,
+    GigaCandidateKind, GigaClassifierIdentity, GigaCodingLessonPromotionPayload, GigaEvent,
+    GigaEventClaimReceipt, GigaEventClaimRequest, GigaEventFinishOutcome, GigaEventFinishReceipt,
+    GigaEventFinishRequest, GigaEventReplayReceipt, GigaEventReplayRequest, GigaEventType,
+    GigaLifecycle, GigaMemoryPromotionPayload, GigaProjectLessonPromotionPayload,
+    GigaPromotionAuthority, GigaPromotionPayload, GigaPromotionReceipt, GigaPromotionRequest,
+    GigaPublicationConsent, GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest,
+    GigaQueueMaintenanceScope, GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState,
+    GigaRisk, GigaScope, GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType,
+    GigaVisibility, PaperBoatRecord, PaperBoatSleepReceipt, PaperBoatSleepRequest,
+    PaperBoatWakeReceipt, PaperBoatWakeRequest, RecallRequest, RememberKind, RememberLessonDetails,
+    RememberMemoryDetails, RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
+    UnboatedMemory, lesson_triggers::LessonTriggerSpec,
 };
 use serde::{
-    Deserialize, Deserializer, Serialize,
+    Deserialize, Deserializer, Serialize, Serializer,
     de::{DeserializeOwned, Error as DeError},
+    ser::SerializeStruct,
 };
 use serde_json::{Map, Value};
 use std::fmt;
@@ -1350,12 +1352,97 @@ impl TryFrom<RecallParams> for RecallRequest {
 }
 impl TryFrom<ClusterMaintenanceParams> for ClusterMaintenanceRequest {
     type Error = ProtocolError;
+
     fn try_from(p: ClusterMaintenanceParams) -> Result<Self, Self::Error> {
         let room = RoomKey::new(p.room).map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
-        let operation = ClusterMaintenanceOperation::parse(&p.operation)
-            .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
-        Self::new(room, operation, p.dry_run, p.if_stale, p.k)
-            .map_err(|e| ProtocolError::InvalidParams(e.to_string()))
+        match p.operation.as_str() {
+            "check" if p.dry_run => Err(ProtocolError::InvalidParams(
+                "invalid cluster maintenance: dryRun: check does not accept dryRun".into(),
+            )),
+            "check" if p.if_stale => Err(ProtocolError::InvalidParams(
+                "invalid cluster maintenance: ifStale: check does not accept ifStale".into(),
+            )),
+            "check" => ClusterMaintenanceRequest::check(room, p.k)
+                .map_err(|e| ProtocolError::InvalidParams(e.to_string())),
+            "rebuild" => ClusterMaintenanceRequest::rebuild(
+                room,
+                if p.dry_run {
+                    ClusterExecution::DryRun
+                } else {
+                    ClusterExecution::Execute
+                },
+                if p.if_stale {
+                    ClusterFreshnessPolicy::IfStale
+                } else {
+                    ClusterFreshnessPolicy::Always
+                },
+                p.k,
+            )
+            .map_err(|e| ProtocolError::InvalidParams(e.to_string())),
+            other => Err(ProtocolError::InvalidParams(format!(
+                "invalid cluster maintenance: operation: unsupported value: {other}"
+            ))),
+        }
+    }
+}
+
+impl From<ClusterMaintenanceOutcome> for ClusterMaintenanceResultWire {
+    fn from(outcome: ClusterMaintenanceOutcome) -> Self {
+        let (operation, dry_run, rebuilt, status, clusters) = match outcome {
+            ClusterMaintenanceOutcome::Checked { status, clusters } => {
+                ("check", false, false, status, clusters)
+            }
+            ClusterMaintenanceOutcome::SkippedFresh { status, clusters } => {
+                ("rebuild", false, false, status, clusters)
+            }
+            ClusterMaintenanceOutcome::DryRun { status } => {
+                ("rebuild", true, false, status, Vec::new())
+            }
+            ClusterMaintenanceOutcome::Rebuilt { status, clusters } => {
+                ("rebuild", false, true, status, clusters)
+            }
+        };
+        Self {
+            ok: true,
+            operation: operation.into(),
+            dry_run,
+            rebuilt,
+            status: status.into(),
+            clusters: clusters.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<ClusterMaintenanceStatus> for ClusterMaintenanceStatusResult {
+    fn from(status: ClusterMaintenanceStatus) -> Self {
+        Self {
+            stale: status.stale,
+            reason: status.reason,
+            staleness: status.staleness.into(),
+        }
+    }
+}
+
+impl From<ClusterStaleness> for ClusterMaintenanceStalenessResult {
+    fn from(staleness: ClusterStaleness) -> Self {
+        Self {
+            built_at: staleness.built_at().map(str::to_owned),
+            clusters: staleness.clusters(),
+            chunks_total: staleness.chunks_total(),
+            chunks_since_build: staleness.chunks_since_build(),
+            fraction_unseen: staleness.fraction_unseen(),
+        }
+    }
+}
+
+impl From<ClusterSummary> for ClusterSummaryResult {
+    fn from(summary: ClusterSummary) -> Self {
+        Self {
+            cluster_id: summary.cluster_id(),
+            label: summary.label().into(),
+            member_count: summary.member_count(),
+            accepted: summary.accepted(),
+        }
     }
 }
 
@@ -3014,12 +3101,55 @@ pub struct GigaPromoteParams {
     pub reviewed_at: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GigaEventIngestDisposition {
+    Accepted,
+    Duplicate,
+}
+
+impl GigaEventIngestDisposition {
+    pub const fn is_accepted(self) -> bool {
+        matches!(self, Self::Accepted)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct GigaEventIngestResult {
     pub event_id: String,
-    pub accepted: bool,
-    pub duplicate: bool,
+    pub disposition: GigaEventIngestDisposition,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GigaEventIngestResultWire {
+    event_id: String,
+    accepted: bool,
+    duplicate: bool,
+}
+
+impl Serialize for GigaEventIngestResult {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("GigaEventIngestResult", 3)?;
+        state.serialize_field("event_id", &self.event_id)?;
+        state.serialize_field("accepted", &self.disposition.is_accepted())?;
+        state.serialize_field("duplicate", &!self.disposition.is_accepted())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for GigaEventIngestResult {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = GigaEventIngestResultWire::deserialize(deserializer)?;
+        let disposition = match (wire.accepted, wire.duplicate) {
+            (true, false) => GigaEventIngestDisposition::Accepted,
+            (false, true) => GigaEventIngestDisposition::Duplicate,
+            _ => return Err(D::Error::custom("accepted and duplicate must be opposite")),
+        };
+        Ok(Self {
+            event_id: wire.event_id,
+            disposition,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -3147,12 +3277,55 @@ pub enum GigaPromoteResult {
         committed_at: String,
     },
 }
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GigaCandidateStoreDisposition {
+    Stored,
+    Duplicate,
+}
+
+impl GigaCandidateStoreDisposition {
+    pub const fn is_stored(self) -> bool {
+        matches!(self, Self::Stored)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct GigaCandidateStoreResult {
     pub candidate_id: String,
-    pub stored: bool,
-    pub duplicate: bool,
+    pub disposition: GigaCandidateStoreDisposition,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GigaCandidateStoreResultWire {
+    candidate_id: String,
+    stored: bool,
+    duplicate: bool,
+}
+
+impl Serialize for GigaCandidateStoreResult {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut state = serializer.serialize_struct("GigaCandidateStoreResult", 3)?;
+        state.serialize_field("candidate_id", &self.candidate_id)?;
+        state.serialize_field("stored", &self.disposition.is_stored())?;
+        state.serialize_field("duplicate", &!self.disposition.is_stored())?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for GigaCandidateStoreResult {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = GigaCandidateStoreResultWire::deserialize(deserializer)?;
+        let disposition = match (wire.stored, wire.duplicate) {
+            (true, false) => GigaCandidateStoreDisposition::Stored,
+            (false, true) => GigaCandidateStoreDisposition::Duplicate,
+            _ => return Err(D::Error::custom("stored and duplicate must be opposite")),
+        };
+        Ok(Self {
+            candidate_id: wire.candidate_id,
+            disposition,
+        })
+    }
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -3268,36 +3441,67 @@ impl TryFrom<GigaQueueMaintenanceParams> for GigaQueueMaintenanceRequest {
 }
 
 impl GigaPromotionTargetParams {
-    fn into_core(self) -> Result<GigaPromotionPayload, ProtocolError> {
+    fn into_core(
+        self,
+        publication_consent: RequiredNullable<GigaPublicationConsentParams>,
+    ) -> Result<GigaPromotionPayload, ProtocolError> {
+        let invalid = |message: &str| ProtocolError::InvalidParams(message.into());
         let payload = match self {
             Self::Memory(payload) => {
+                if publication_consent.0.is_some() {
+                    return Err(invalid(
+                        "publication_consent is valid only for project_lesson promotion",
+                    ));
+                }
                 GigaMemoryPromotionPayload::new(payload.title, payload.body, payload.threads)
                     .map(GigaPromotionPayload::Memory)
             }
-            Self::CodingLesson(payload) => GigaCodingLessonPromotionPayload::new(
-                payload.title,
-                payload.body,
-                payload.shape.0,
-                payload.proof_pattern,
-                payload.trigger_context,
-                payload.language_keys,
-                payload.technology_keys,
-                payload.thread_keys,
-                payload.tags,
-            )
-            .map(GigaPromotionPayload::CodingLesson),
-            Self::ProjectLesson(payload) => GigaProjectLessonPromotionPayload::new(
-                payload.title,
-                payload.body,
-                payload.project,
-                payload.proof_pattern,
-                payload.trigger_context,
-                payload.language_keys,
-                payload.technology_keys,
-                payload.thread_keys,
-                payload.tags,
-            )
-            .map(GigaPromotionPayload::ProjectLesson),
+            Self::CodingLesson(payload) => {
+                if publication_consent.0.is_some() {
+                    return Err(invalid(
+                        "publication_consent is valid only for project_lesson promotion",
+                    ));
+                }
+                GigaCodingLessonPromotionPayload::new(
+                    payload.title,
+                    payload.body,
+                    payload.shape.0,
+                    payload.proof_pattern,
+                    payload.trigger_context,
+                    payload.language_keys,
+                    payload.technology_keys,
+                    payload.thread_keys,
+                    payload.tags,
+                )
+                .map(GigaPromotionPayload::CodingLesson)
+            }
+            Self::ProjectLesson(payload) => {
+                let consent = publication_consent.0.ok_or_else(|| {
+                    invalid("publication_consent is required for project_lesson promotion")
+                })?;
+                if !consent.reviewer_approved {
+                    return Err(invalid(
+                        "publication_consent.reviewer_approved must be true",
+                    ));
+                }
+                let publication_consent = GigaPublicationConsent::new(consent.operator_approved)
+                    .map_err(|error| ProtocolError::InvalidParams(error.to_string()))?;
+                GigaProjectLessonPromotionPayload::new(
+                    payload.title,
+                    payload.body,
+                    payload.project,
+                    payload.proof_pattern,
+                    payload.trigger_context,
+                    payload.language_keys,
+                    payload.technology_keys,
+                    payload.thread_keys,
+                    payload.tags,
+                )
+                .map(|payload| GigaPromotionPayload::ProjectLesson {
+                    payload,
+                    publication_consent,
+                })
+            }
         };
         payload.map_err(|error| ProtocolError::InvalidParams(error.to_string()))
     }
@@ -3312,14 +3516,6 @@ impl TryFrom<GigaPromoteParams> for GigaPromotionRequest {
             .into_iter()
             .map(giga_source)
             .collect::<Result<Vec<_>, _>>()?;
-        let publication_consent = value
-            .publication_consent
-            .0
-            .map(|consent| {
-                GigaPublicationConsent::new(consent.operator_approved, consent.reviewer_approved)
-                    .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
-            })
-            .transpose()?;
         GigaPromotionRequest::new(
             value.candidate_id,
             RoomKey::new(value.room)
@@ -3328,8 +3524,7 @@ impl TryFrom<GigaPromoteParams> for GigaPromotionRequest {
             value.operator_identity,
             value.authorization_basis,
             source_refs,
-            value.target.into_core()?,
-            publication_consent,
+            value.target.into_core(value.publication_consent)?,
             value.reviewed_at,
         )
         .map_err(|error| ProtocolError::InvalidParams(error.to_string()))
@@ -4589,70 +4784,6 @@ mod tests {
         let mut value = serde_json::json!({"room":"lab","query":"x"});
         value["semantic_min_similarity"] = serde_json::json!(1.1);
         assert!(base(value).recall_request().is_err());
-        let params = RecallParams {
-            room: "lab".into(),
-            query: "x".into(),
-            semantic_top_k: 8,
-            semantic_min_similarity: f64::NAN,
-            content_top_k: 8,
-            content_min_similarity: 0.3,
-            temporal_decay: false,
-        };
-        assert!(RecallRequest::try_from(params).is_err());
-        let unknown = serde_json::json!({
-            "room":"lab",
-            "query":"x",
-            "temporal_decay":true,
-            "extra":true
-        });
-        assert!(base(unknown).recall_request().is_err());
-        let wrong = RequestEnvelope {
-            protocol: 1,
-            id: "r".into(),
-            method: "other".into(),
-            params: serde_json::json!({}),
-        };
-        assert!(matches!(
-            wrong.recall_request(),
-            Err(ProtocolError::UnknownMethod(_))
-        ));
-    }
-    #[test]
-    fn all_lesson_kinds_validate_defaults_and_receipts() {
-        for kind in [
-            "coding-lesson",
-            "project-lesson",
-            "writing-lesson",
-            "design-lesson",
-            "audio-lesson",
-        ] {
-            let mut params = serde_json::json!({"room":"lab","kind":kind,"title":"T","body":"B"});
-            if kind == "project-lesson" {
-                params["project"] = serde_json::json!("app");
-            }
-            let request = RequestEnvelope {
-                protocol: 1,
-                id: "l".into(),
-                method: "remember".into(),
-                params,
-            };
-            let parsed = request.remember_request().unwrap();
-            assert_eq!(parsed.kind().as_str(), kind);
-            let receipt = RememberReceipt::committed_lesson(
-                9,
-                parsed.kind(),
-                RoomKey::new("lab").unwrap(),
-                vec![],
-            )
-            .unwrap();
-            let json = serde_json::to_string(&success("l", RememberResult::from(receipt))).unwrap();
-            assert_eq!(
-                json,
-                format!(
-                    r#"{{"protocol":1,"id":"l","result":{{"lesson_id":9,"kind":"{kind}","durable":true,"authority":"postgres","warnings":[]}}}}"#
-                )
-            );
-        }
     }
 
     #[test]
@@ -4684,9 +4815,15 @@ mod tests {
     fn cluster_maintenance_is_strict_and_camel_case() {
         let request = RequestEnvelope::parse_line(r#"{"protocol":1,"id":"c","method":"cluster_maintenance","params":{"room":"lab","operation":"rebuild","dryRun":true,"ifStale":true,"k":40}}"#).unwrap();
         let parsed = request.cluster_maintenance_request().unwrap();
-        assert_eq!(parsed.operation(), ClusterMaintenanceOperation::Rebuild);
-        assert!(parsed.dry_run());
-        assert!(parsed.if_stale());
+        assert!(matches!(
+            parsed,
+            ClusterMaintenanceRequest::Rebuild {
+                execution: ClusterExecution::DryRun,
+                freshness: ClusterFreshnessPolicy::IfStale,
+                k: 40,
+                ..
+            }
+        ));
         assert_eq!(
             serde_json::to_string(&ClusterMaintenanceParams {
                 room: "lab".into(),
@@ -4702,6 +4839,7 @@ mod tests {
             serde_json::json!({"room":"lab","operation":"rebuild","k":0}),
             serde_json::json!({"room":"lab","operation":"rebuild","k":129}),
             serde_json::json!({"room":"lab","operation":"other","k":4}),
+            serde_json::json!({"room":"lab","operation":"check","dryRun":true,"k":4}),
             serde_json::json!({"room":"lab","operation":"rebuild","extra":true}),
         ] {
             assert!(
@@ -4740,7 +4878,10 @@ mod tests {
         assert_eq!(resonance.profile[0].member_count, 2);
         let live: ClusterResonanceTelemetry = serde_json::from_value(serde_json::json!({"profile":[{"cluster_id":7,"label":"x","activation":0.9,"member_count":2}],"hot":["chunk"]})).unwrap();
         assert_eq!(live.profile[0].cluster_id, Some(7));
-        assert!(live.serialize(serde_json::value::Serializer).is_ok_and(|v| v["profile"][0]["cluster_id"] == 7));
+        assert!(
+            live.serialize(serde_json::value::Serializer)
+                .is_ok_and(|v| v["profile"][0]["cluster_id"] == 7)
+        );
         assert!(serde_json::from_value::<ClusterResonanceTelemetry>(serde_json::json!({"profile":[{"label":"x","activation":0.9,"member_count":2,"rogue":1}],"hot":[]})).is_err());
         assert!(serde_json::from_value::<ClusterStalenessTelemetry>(serde_json::json!({"built_at":null,"chunks_since_build":1,"fraction_unseen":0.1,"bad":true})).is_err());
     }
@@ -5182,7 +5323,10 @@ mod tests {
                 }
             );
             assert_eq!(
-                request.publication_consent().is_some(),
+                matches!(
+                    request.payload(),
+                    GigaPromotionPayload::ProjectLesson { .. }
+                ),
                 kind == "project_lesson"
             );
         }

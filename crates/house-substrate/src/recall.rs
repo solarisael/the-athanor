@@ -4,7 +4,9 @@ use crate::bm25f::{
     TITLE as BM25F_TITLE,
 };
 use crate::cluster::{cluster_resonance, cluster_staleness};
-use crate::config::{AppError, Config, EMBED_DIMENSION, HTTP_CLIENT, QUERY_DATE_RE, ROOM_KEY_RE};
+use crate::config::{
+    AppError, Config, EMBED_DIMENSION, EmbeddingMode, HTTP_CLIENT, QUERY_DATE_RE, ROOM_KEY_RE,
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -684,14 +686,24 @@ async fn load_semantic_vocabulary_concepts(
 }
 
 pub async fn refresh_semantic_vocabulary(pool: &PgPool, cfg: &Config) -> Result<usize, AppError> {
+    match cfg.embedding_mode {
+        EmbeddingMode::Required => {}
+        EmbeddingMode::Disabled => {
+            return Err(AppError::Config(
+                "semantic vocabulary refresh is unavailable while embedding is disabled in production"
+                    .into(),
+            ));
+        }
+        EmbeddingMode::DisabledForTest => {
+            return Err(AppError::Config(
+                "semantic vocabulary refresh is unavailable while embedding is disabled for isolated test"
+                    .into(),
+            ));
+        }
+    }
     let url = cfg.embed_url.as_deref().ok_or_else(|| {
         AppError::Config("semantic vocabulary refresh requires SOLARISAEL_EMBED_URL".into())
     })?;
-    if cfg.test_embedding_disabled {
-        return Err(AppError::Config(
-            "semantic vocabulary refresh is unavailable while embedding is disabled".into(),
-        ));
-    }
     sqlx::query("SELECT substrate_refresh_semantic_vocabulary_sources()")
         .execute(pool)
         .await?;
@@ -863,12 +875,16 @@ pub async fn recall(
         .collect::<Vec<_>>();
     let rooms = vec![params.room.clone(), "house".to_string()];
     let mut warnings = Vec::new();
-    let vector_text = match (cfg.test_embedding_disabled, cfg.embed_url.as_deref()) {
-        (true, _) => {
-            warnings.push("semantic lane absent: embedding disabled".to_string());
+    let vector_text = match (cfg.embedding_mode, cfg.embed_url.as_deref()) {
+        (EmbeddingMode::Disabled, _) => {
+            warnings.push("semantic lane absent: embedding disabled in production".to_string());
             None
         }
-        (false, Some(url)) => match embed_query(
+        (EmbeddingMode::DisabledForTest, _) => {
+            warnings.push("semantic lane absent: embedding disabled for isolated test".to_string());
+            None
+        }
+        (EmbeddingMode::Required, Some(url)) => match embed_query(
             &HTTP_CLIENT,
             url,
             &cfg.embed_model,
@@ -890,7 +906,7 @@ pub async fn recall(
                 None
             }
         },
-        (false, None) => {
+        (EmbeddingMode::Required, None) => {
             warnings.push("semantic lane absent: embedding endpoint is required".to_string());
             None
         }
@@ -1437,7 +1453,12 @@ fn protocol_pointer_files(stored: &serde_json::Value) -> serde_json::Value {
         let lines: Vec<u64> = entry
             .get("lines")
             .and_then(serde_json::Value::as_array)
-            .map(|values| values.iter().filter_map(serde_json::Value::as_u64).collect())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(serde_json::Value::as_u64)
+                    .collect()
+            })
             .unwrap_or_default();
         if lines.is_empty() {
             files.push(serde_json::json!({ "file": file }));

@@ -2,25 +2,68 @@ use house_protocol::{
     BOAT_RECEIPT_SCHEMA_VERSION, BoatReceiptProjection, PaperBoatReceiptState,
     PaperBoatReceiptStatus,
 };
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BrokerStatus {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReceiptBridgeState {
     Disabled,
+    MissingBroker,
     Connecting,
     Connected,
-    Degraded,
+    Degraded { reason: String },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+impl ReceiptBridgeState {
+    fn wire_fields(&self) -> (bool, bool, &'static str, Option<&str>) {
+        match self {
+            Self::Disabled => (false, false, "disabled", None),
+            Self::MissingBroker => (
+                true,
+                false,
+                "degraded",
+                Some("AKASHA delivery broker is not configured"),
+            ),
+            Self::Connecting => (true, true, "connecting", None),
+            Self::Connected => (true, true, "connected", None),
+            Self::Degraded { reason } => (true, true, "degraded", Some(reason)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReceiptBridgeHealth {
-    pub akasha_enabled: bool,
-    pub broker_configured: bool,
-    pub broker_status: BrokerStatus,
-    pub last_error: Option<String>,
+    pub state: ReceiptBridgeState,
     pub latest_event_id: Option<String>,
     pub latest_original_stream_sequence: Option<u64>,
+}
+
+impl Serialize for ReceiptBridgeHealth {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let (akasha_enabled, broker_configured, broker_status, last_error) =
+            self.state.wire_fields();
+        #[derive(Serialize)]
+        struct WireHealth<'a> {
+            akasha_enabled: bool,
+            broker_configured: bool,
+            broker_status: &'a str,
+            last_error: Option<&'a str>,
+            latest_event_id: &'a Option<String>,
+            latest_original_stream_sequence: Option<u64>,
+        }
+
+        WireHealth {
+            akasha_enabled,
+            broker_configured,
+            broker_status,
+            last_error,
+            latest_event_id: &self.latest_event_id,
+            latest_original_stream_sequence: self.latest_original_stream_sequence,
+        }
+        .serialize(serializer)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -40,20 +83,14 @@ pub struct ReceiptTracker {
 
 impl ReceiptTracker {
     pub fn new(akasha_enabled: bool, broker_configured: bool) -> Self {
-        let (broker_status, last_error) = match (akasha_enabled, broker_configured) {
-            (_, true) => (BrokerStatus::Connecting, None),
-            (true, false) => (
-                BrokerStatus::Degraded,
-                Some("AKASHA delivery broker is not configured".into()),
-            ),
-            (false, false) => (BrokerStatus::Disabled, None),
+        let state = match (akasha_enabled, broker_configured) {
+            (false, false) => ReceiptBridgeState::Disabled,
+            (true, false) => ReceiptBridgeState::MissingBroker,
+            (_, true) => ReceiptBridgeState::Connecting,
         };
         Self {
             health: ReceiptBridgeHealth {
-                akasha_enabled,
-                broker_configured,
-                broker_status,
-                last_error,
+                state,
                 latest_event_id: None,
                 latest_original_stream_sequence: None,
             },
@@ -63,24 +100,35 @@ impl ReceiptTracker {
     }
 
     pub fn connecting(&mut self) {
-        if self.health.broker_configured {
-            self.health.broker_status = BrokerStatus::Connecting;
-            self.health.last_error = None;
-        }
+        self.health.state = match &self.health.state {
+            ReceiptBridgeState::Connecting
+            | ReceiptBridgeState::Connected
+            | ReceiptBridgeState::Degraded { .. } => ReceiptBridgeState::Connecting,
+            ReceiptBridgeState::Disabled => ReceiptBridgeState::Disabled,
+            ReceiptBridgeState::MissingBroker => ReceiptBridgeState::MissingBroker,
+        };
     }
 
     pub fn connected(&mut self) {
-        if self.health.broker_configured {
-            self.health.broker_status = BrokerStatus::Connected;
-            self.health.last_error = None;
-        }
+        self.health.state = match &self.health.state {
+            ReceiptBridgeState::Connecting
+            | ReceiptBridgeState::Connected
+            | ReceiptBridgeState::Degraded { .. } => ReceiptBridgeState::Connected,
+            ReceiptBridgeState::Disabled => ReceiptBridgeState::Disabled,
+            ReceiptBridgeState::MissingBroker => ReceiptBridgeState::MissingBroker,
+        };
     }
 
     pub fn degraded(&mut self, reason: &str) {
-        if self.health.akasha_enabled || self.health.broker_configured {
-            self.health.broker_status = BrokerStatus::Degraded;
-            self.health.last_error = Some(bounded(reason));
-        }
+        self.health.state = match &self.health.state {
+            ReceiptBridgeState::Connecting
+            | ReceiptBridgeState::Connected
+            | ReceiptBridgeState::Degraded { .. } => ReceiptBridgeState::Degraded {
+                reason: bounded(reason),
+            },
+            ReceiptBridgeState::Disabled => ReceiptBridgeState::Disabled,
+            ReceiptBridgeState::MissingBroker => ReceiptBridgeState::MissingBroker,
+        };
     }
 
     pub fn refuse_malformed(&mut self) {
@@ -106,22 +154,29 @@ impl ReceiptTracker {
                 diagnostic: Some(reason.clone()),
             };
         }
-        match self.health.broker_status {
-            BrokerStatus::Degraded => PaperBoatReceiptState {
+        match &self.health.state {
+            ReceiptBridgeState::MissingBroker => PaperBoatReceiptState {
                 status: PaperBoatReceiptStatus::Degraded,
                 receipt: None,
-                diagnostic: self.health.last_error.clone(),
+                diagnostic: Some("AKASHA delivery broker is not configured".into()),
             },
-            BrokerStatus::Disabled => PaperBoatReceiptState {
+            ReceiptBridgeState::Degraded { reason } => PaperBoatReceiptState {
+                status: PaperBoatReceiptStatus::Degraded,
+                receipt: None,
+                diagnostic: Some(reason.clone()),
+            },
+            ReceiptBridgeState::Disabled => PaperBoatReceiptState {
                 status: PaperBoatReceiptStatus::Pending,
                 receipt: None,
                 diagnostic: Some("Paper Boat delivery receipts require AKASHA".into()),
             },
-            BrokerStatus::Connecting | BrokerStatus::Connected => PaperBoatReceiptState {
-                status: PaperBoatReceiptStatus::Pending,
-                receipt: None,
-                diagnostic: Some("waiting for a verified Paper Boat delivery receipt".into()),
-            },
+            ReceiptBridgeState::Connecting | ReceiptBridgeState::Connected => {
+                PaperBoatReceiptState {
+                    status: PaperBoatReceiptStatus::Pending,
+                    receipt: None,
+                    diagnostic: Some("waiting for a verified Paper Boat delivery receipt".into()),
+                }
+            }
         }
     }
 
@@ -257,19 +312,25 @@ mod tests {
     #[test]
     fn missing_broker_degrades_akasha_and_reconnect_restores_transport_health() {
         let missing = ReceiptTracker::new(true, false);
+        assert_eq!(missing.health().state, ReceiptBridgeState::MissingBroker);
         assert_eq!(missing.state().status, PaperBoatReceiptStatus::Degraded);
         assert!(missing.state().receipt.is_none());
 
         let vault = ReceiptTracker::new(false, false);
-        assert_eq!(vault.health().broker_status, BrokerStatus::Disabled);
+        assert_eq!(vault.health().state, ReceiptBridgeState::Disabled);
         assert_eq!(vault.state().status, PaperBoatReceiptStatus::Pending);
 
         let mut reconnect = ReceiptTracker::new(true, true);
         reconnect.degraded("connection lost");
-        assert_eq!(reconnect.health().broker_status, BrokerStatus::Degraded);
+        assert_eq!(
+            reconnect.health().state,
+            ReceiptBridgeState::Degraded {
+                reason: "connection lost".into()
+            }
+        );
         reconnect.connecting();
         reconnect.connected();
-        assert_eq!(reconnect.health().broker_status, BrokerStatus::Connected);
+        assert_eq!(reconnect.health().state, ReceiptBridgeState::Connected);
         assert!(reconnect.state().receipt.is_none());
     }
 }

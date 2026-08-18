@@ -211,7 +211,9 @@ impl LessonTriggerSpec {
                 return Err("condition must not contain empty patterns".to_owned());
             }
             if let Err(error) = Regex::new(pattern) {
-                return Err(format!("condition is not a valid regex: {pattern}: {error}"));
+                return Err(format!(
+                    "condition is not a valid regex: {pattern}: {error}"
+                ));
             }
         }
         for pattern in &self.ast_condition {
@@ -703,7 +705,10 @@ mod tests {
     #[test]
     fn language_inference_covers_the_v1_set_and_names_what_it_refuses() {
         assert_eq!(ast_language(Some("src/lib.rs")), Ok(SupportLang::Rust));
-        assert_eq!(ast_language(Some("a/b/index.ts")), Ok(SupportLang::TypeScript));
+        assert_eq!(
+            ast_language(Some("a/b/index.ts")),
+            Ok(SupportLang::TypeScript)
+        );
         assert_eq!(ast_language(Some("App.TSX")), Ok(SupportLang::Tsx));
         assert_eq!(ast_language(Some("a.js")), Ok(SupportLang::JavaScript));
         assert_eq!(ast_language(Some("a.jsx")), Ok(SupportLang::JavaScript));
@@ -728,7 +733,10 @@ mod tests {
                 },
             )],
         );
-        let fire = match_surfaces(&set, &[tool("edit", "src/a.rs", "fn f() { g().unwrap(); }")]);
+        let fire = match_surfaces(
+            &set,
+            &[tool("edit", "src/a.rs", "fn f() { g().unwrap(); }")],
+        );
         assert_eq!(fire.hits.len(), 1);
         assert_eq!(fire.hits[0].pattern_kind, PatternKind::Ast);
         assert_eq!(fire.hits[0].pattern, "$A.unwrap()");

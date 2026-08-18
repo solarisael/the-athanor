@@ -1,5 +1,5 @@
 use crate::backup;
-use crate::config::{AppError, Config, HTTP_CLIENT, ROOM_KEY_RE};
+use crate::config::{AppError, Config, EmbeddingMode, HTTP_CLIENT, ROOM_KEY_RE};
 use crate::remember::{default_backup, embed};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
@@ -120,9 +120,22 @@ impl AnamnesisParams {
         Ok((self.mode.clone(), limit))
     }
 }
+fn anamnesis_embedding_warning(mode: EmbeddingMode) -> Option<&'static str> {
+    match mode {
+        EmbeddingMode::Required => None,
+        EmbeddingMode::Disabled => {
+            Some("embedding disabled in production; cabinet embedding omitted")
+        }
+        EmbeddingMode::DisabledForTest => {
+            Some("embedding disabled for isolated test; cabinet embedding omitted")
+        }
+    }
+}
+
 async fn anamnesis_embedding(cfg: &Config, text: &str) -> Result<Option<String>, AppError> {
-    if cfg.test_embedding_disabled {
-        return Ok(None);
+    match cfg.embedding_mode {
+        EmbeddingMode::Required => {}
+        EmbeddingMode::Disabled | EmbeddingMode::DisabledForTest => return Ok(None),
     }
     let url = cfg
         .embed_url
@@ -207,9 +220,10 @@ pub async fn anamnesis_write(
                 .join("\n"),
             )
             .await?;
-            if embedding.is_none() && cfg.test_embedding_disabled {
-                warnings
-                    .push("embedding disabled for isolated test; cabinet embedding omitted".into());
+            if embedding.is_none()
+                && let Some(warning) = anamnesis_embedding_warning(cfg.embedding_mode)
+            {
+                warnings.push(warning.into());
             }
             id = sqlx::query_scalar::<_, i64>("INSERT INTO anamnesis (room,kind,fidelity,activation,active,title,shape,peak,beginning,ramp,counsel,verify_note,source_paths,canon_links,tags,body_embedding,embedded_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::vector,CASE WHEN $16 IS NULL THEN NULL ELSE NOW() END) ON CONFLICT (room,title) DO UPDATE SET kind=EXCLUDED.kind,fidelity=EXCLUDED.fidelity,activation=EXCLUDED.activation,active=EXCLUDED.active,shape=EXCLUDED.shape,peak=EXCLUDED.peak,beginning=EXCLUDED.beginning,ramp=EXCLUDED.ramp,counsel=EXCLUDED.counsel,verify_note=EXCLUDED.verify_note,source_paths=EXCLUDED.source_paths,canon_links=EXCLUDED.canon_links,tags=EXCLUDED.tags,body_embedding=EXCLUDED.body_embedding,embedded_at=EXCLUDED.embedded_at RETURNING id")
                 .bind(&req.room).bind(cabinet_kind).bind(fidelity).bind(activation).bind(!req.dormant).bind(&req.title).bind(&req.shape).bind(&req.peak).bind(&req.beginning).bind(ramp).bind(&req.counsel).bind(&req.verify_note).bind(&req.source_paths).bind(&req.canon_links).bind(&req.tags).bind(embedding).fetch_one(&mut *tx).await?;
@@ -326,6 +340,7 @@ pub async fn anamnesis(
         room: params.room,
         query: params.query,
         found: !entries.is_empty(),
+
         entries,
         warnings,
     })

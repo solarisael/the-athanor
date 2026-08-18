@@ -1,6 +1,6 @@
 use house_protocol::{
-    RecallPolicyDecision, RecallPolicyFacts, RecallPolicyState, RecallRefreshCompletion,
-    RecallRequestedMode, RecallResolvedMode,
+    RecallAction, RecallPolicyDecision, RecallPolicyFacts, RecallPolicyState,
+    RecallRefreshCompletion, RecallRequestedMode, RecallResolvedMode, RecoveryState,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -17,9 +17,26 @@ struct RecallWorkingSet {
     entries: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecallPolicySession {
+    requested_mode: RecallRequestedMode,
+    resolved_mode: RecallResolvedMode,
+    active_project: Option<String>,
+    resolution_reason: String,
+    conversation_streak: u64,
+    turns_since_refresh: u64,
+    observed_conversation_tokens: u64,
+    last_refresh_conversation_tokens: u64,
+    working_set: Option<RecallWorkingSet>,
+    recovery_state: RecoveryState,
+    last_refresh_reason: Option<String>,
+    last_refresh_at: Option<String>,
+    degraded: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyRecallPolicySession {
     requested_mode: RecallRequestedMode,
     resolved_mode: RecallResolvedMode,
     active_project: Option<String>,
@@ -36,6 +53,72 @@ pub struct RecallPolicySession {
     degraded: Option<String>,
 }
 
+impl<'de> Deserialize<'de> for RecallPolicySession {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let legacy = LegacyRecallPolicySession::deserialize(deserializer)?;
+        Ok(Self {
+            requested_mode: legacy.requested_mode,
+            resolved_mode: legacy.resolved_mode,
+            active_project: legacy.active_project,
+            resolution_reason: legacy.resolution_reason,
+            conversation_streak: legacy.conversation_streak,
+            turns_since_refresh: legacy.turns_since_refresh,
+            observed_conversation_tokens: legacy.observed_conversation_tokens,
+            last_refresh_conversation_tokens: legacy.last_refresh_conversation_tokens,
+            working_set: legacy.working_set,
+            recovery_state: if legacy.recovery_pending {
+                RecoveryState::Pending {
+                    terms: legacy.recovery_terms,
+                }
+            } else {
+                RecoveryState::Idle
+            },
+            last_refresh_reason: legacy.last_refresh_reason,
+            last_refresh_at: legacy.last_refresh_at,
+            degraded: legacy.degraded,
+        })
+    }
+}
+
+impl Serialize for RecallPolicySession {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Legacy<'a> {
+            requested_mode: RecallRequestedMode,
+            resolved_mode: RecallResolvedMode,
+            active_project: &'a Option<String>,
+            resolution_reason: &'a String,
+            conversation_streak: u64,
+            turns_since_refresh: u64,
+            observed_conversation_tokens: u64,
+            last_refresh_conversation_tokens: u64,
+            working_set: &'a Option<RecallWorkingSet>,
+            recovery_pending: bool,
+            recovery_terms: &'a [String],
+            last_refresh_reason: &'a Option<String>,
+            last_refresh_at: &'a Option<String>,
+            degraded: &'a Option<String>,
+        }
+        Legacy {
+            requested_mode: self.requested_mode,
+            resolved_mode: self.resolved_mode,
+            active_project: &self.active_project,
+            resolution_reason: &self.resolution_reason,
+            conversation_streak: self.conversation_streak,
+            turns_since_refresh: self.turns_since_refresh,
+            observed_conversation_tokens: self.observed_conversation_tokens,
+            last_refresh_conversation_tokens: self.last_refresh_conversation_tokens,
+            working_set: &self.working_set,
+            recovery_pending: self.recovery_state.is_pending(),
+            recovery_terms: self.recovery_state.terms(),
+            last_refresh_reason: &self.last_refresh_reason,
+            last_refresh_at: &self.last_refresh_at,
+            degraded: &self.degraded,
+        }
+        .serialize(serializer)
+    }
+}
+
 impl RecallPolicySession {
     pub fn from_projection(projection: &RecallPolicyState) -> Self {
         Self {
@@ -48,8 +131,7 @@ impl RecallPolicySession {
             observed_conversation_tokens: 0,
             last_refresh_conversation_tokens: 0,
             working_set: None,
-            recovery_pending: projection.recovery_pending,
-            recovery_terms: projection.recovery_terms.clone(),
+            recovery_state: projection.recovery_state.clone(),
             last_refresh_reason: projection.last_refresh_reason.clone(),
             last_refresh_at: projection.last_refresh_at.clone(),
             degraded: projection.degraded.clone(),
@@ -72,8 +154,7 @@ impl RecallPolicySession {
             observed_conversation_tokens: 0,
             last_refresh_conversation_tokens: 0,
             working_set: None,
-            recovery_pending: false,
-            recovery_terms: Vec::new(),
+            recovery_state: RecoveryState::Idle,
             last_refresh_reason: None,
             last_refresh_at: None,
             degraded: None,
@@ -117,8 +198,10 @@ impl RecallPolicySession {
 
         let explicit_lookup = is_explicit_lookup(&intent);
         let technical = intent == "technical_project";
+        let recovery_due = self.recovery_state.is_pending();
+        let recovery_query_terms = self.recovery_state.terms();
         let eligible = resolved_mode != RecallResolvedMode::Quiet
-            && (explicit_lookup || technical || self.recovery_pending);
+            && (explicit_lookup || technical || recovery_due);
         let query_terms = unique_terms(
             facts
                 .query_route
@@ -133,7 +216,7 @@ impl RecallPolicySession {
                     .then_some(active_project.clone())
                     .flatten(),
                 )
-                .chain(self.recovery_terms.clone())
+                .chain(recovery_query_terms.iter().cloned())
                 .chain(facts.query_route.terms),
             16,
         );
@@ -152,7 +235,7 @@ impl RecallPolicySession {
                 .saturating_sub(self.last_refresh_conversation_tokens)
                 >= WORKING_SET_STALE_TOKEN_DELTA;
 
-        let refresh_reason = if eligible && self.recovery_pending {
+        let refresh_reason = if eligible && recovery_due {
             Some("post-compaction-recovery")
         } else if eligible && requested_changed {
             Some("requested-mode-change")
@@ -173,11 +256,15 @@ impl RecallPolicySession {
         }
         .map(str::to_owned);
 
+        let refresh = refresh_reason.is_some() && !query_terms.is_empty();
+        let clear = resolved_mode == RecallResolvedMode::Quiet || mode_changed || project_changed;
         RecallPolicyDecision {
-            should_recall: refresh_reason.is_some() && !query_terms.is_empty(),
-            clear_working_set: resolved_mode == RecallResolvedMode::Quiet
-                || mode_changed
-                || project_changed,
+            action: match (clear, refresh) {
+                (false, false) => RecallAction::None,
+                (true, false) => RecallAction::Clear,
+                (false, true) => RecallAction::Refresh,
+                (true, true) => RecallAction::ClearThenRefresh,
+            },
             query: query_terms.join(" "),
             query_terms,
             refresh_reason,
@@ -189,8 +276,7 @@ impl RecallPolicySession {
     pub fn complete_refresh(&mut self, input: RecallRefreshCompletion, now: String) {
         self.turns_since_refresh = 0;
         self.last_refresh_conversation_tokens = self.observed_conversation_tokens;
-        self.recovery_pending = false;
-        self.recovery_terms.clear();
+        self.recovery_state = RecoveryState::Idle;
         self.last_refresh_reason = Some(input.refresh_reason);
         self.last_refresh_at = Some(now);
         self.degraded = input.warning.and_then(|value| bounded(&value, 240));
@@ -210,8 +296,9 @@ impl RecallPolicySession {
 
     pub fn invalidate_after_compaction(&mut self, summary: &str) {
         self.working_set = None;
-        self.recovery_pending = true;
-        self.recovery_terms = summary_terms(summary);
+        self.recovery_state = RecoveryState::Pending {
+            terms: summary_terms(summary),
+        };
         self.turns_since_refresh = 0;
         self.last_refresh_reason = Some("compaction-invalidated".to_owned());
     }
@@ -229,8 +316,7 @@ impl RecallPolicySession {
                 .as_ref()
                 .map(|working_set| working_set.entries)
                 .unwrap_or(0),
-            recovery_pending: self.recovery_pending,
-            recovery_terms: self.recovery_terms.clone(),
+            recovery_state: self.recovery_state.clone(),
             degraded: self.degraded.clone(),
             updated_at: Some(updated_at),
         }

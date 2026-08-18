@@ -1,6 +1,6 @@
 use athanor_substrate::{
-    Config, RecallParams, RememberRequest, ThreadContinuation, backup::source_migrations, recall,
-    remember,
+    Config, EmbeddingMode, RecallParams, RememberRequest, ThreadContinuation,
+    backup::source_migrations, recall, remember,
 };
 use house_protocol::{ClusterMaintenanceResultWire, ResponseEnvelope};
 use sqlx::{
@@ -115,8 +115,7 @@ async fn isolated_database_guard() {
         embed_url: None,
         embed_model: "disabled".into(),
         embed_dimension: 2048,
-        embed_required: false,
-        test_embedding_disabled: true,
+        embedding_mode: EmbeddingMode::DisabledForTest,
         giga_source_ledger_dir: None,
         giga_source_room: None,
     };
@@ -224,8 +223,7 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
         embed_url: None,
         embed_model: "disabled".into(),
         embed_dimension: 2048,
-        embed_required: false,
-        test_embedding_disabled: true,
+        embedding_mode: EmbeddingMode::DisabledForTest,
         giga_source_ledger_dir: None,
         giga_source_room: None,
     };
@@ -430,8 +428,7 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     embed_url: None,
                     embed_model: "test-disabled".into(),
                     embed_dimension: 2_048,
-                    embed_required: false,
-                    test_embedding_disabled: true,
+                    embedding_mode: EmbeddingMode::DisabledForTest,
                     giga_source_ledger_dir: None,
                     giga_source_room: None,
                 };

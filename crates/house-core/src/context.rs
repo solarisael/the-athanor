@@ -191,19 +191,122 @@ static PERSONAL_TERM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:what|which)\b.*\b(?:canon|entity|plan|intended|decided)\b").unwrap()
 });
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct QueryLanes {
-    pub lexical: bool,
-    pub candidates: bool,
-    pub semantic: bool,
-    pub content: bool,
-    pub date: bool,
-    pub canon: bool,
-    pub coding_lessons: bool,
-    pub project_lessons: bool,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum QueryLane {
+    Lexical,
+    Candidates,
+    Semantic,
+    Content,
+    Date,
+    Canon,
+    CodingLessons,
+    ProjectLessons,
 }
 
+impl QueryLane {
+    const fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct QueryLaneSet(u8);
+
+impl QueryLaneSet {
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub const fn from_lanes(lanes: &[QueryLane]) -> Self {
+        let mut bits = 0;
+        let mut index = 0;
+        while index < lanes.len() {
+            bits |= lanes[index].bit();
+            index += 1;
+        }
+        Self(bits)
+    }
+
+    pub const fn contains(self, lane: QueryLane) -> bool {
+        self.0 & lane.bit() != 0
+    }
+
+    pub const fn with(self, lane: QueryLane) -> Self {
+        Self(self.0 | lane.bit())
+    }
+
+    pub fn iter(self) -> impl Iterator<Item = QueryLane> {
+        [
+            QueryLane::Lexical,
+            QueryLane::Candidates,
+            QueryLane::Semantic,
+            QueryLane::Content,
+            QueryLane::Date,
+            QueryLane::Canon,
+            QueryLane::CodingLessons,
+            QueryLane::ProjectLessons,
+        ]
+        .into_iter()
+        .filter(move |lane| self.contains(*lane))
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct QueryLaneWire {
+    lexical: bool,
+    candidates: bool,
+    semantic: bool,
+    content: bool,
+    date: bool,
+    canon: bool,
+    coding_lessons: bool,
+    project_lessons: bool,
+}
+
+impl Serialize for QueryLaneSet {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        QueryLaneWire {
+            lexical: self.contains(QueryLane::Lexical),
+            candidates: self.contains(QueryLane::Candidates),
+            semantic: self.contains(QueryLane::Semantic),
+            content: self.contains(QueryLane::Content),
+            date: self.contains(QueryLane::Date),
+            canon: self.contains(QueryLane::Canon),
+            coding_lessons: self.contains(QueryLane::CodingLessons),
+            project_lessons: self.contains(QueryLane::ProjectLessons),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for QueryLaneSet {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = QueryLaneWire::deserialize(deserializer)?;
+        Ok(QueryLaneSet::empty()
+            .with_if(wire.lexical, QueryLane::Lexical)
+            .with_if(wire.candidates, QueryLane::Candidates)
+            .with_if(wire.semantic, QueryLane::Semantic)
+            .with_if(wire.content, QueryLane::Content)
+            .with_if(wire.date, QueryLane::Date)
+            .with_if(wire.canon, QueryLane::Canon)
+            .with_if(wire.coding_lessons, QueryLane::CodingLessons)
+            .with_if(wire.project_lessons, QueryLane::ProjectLessons))
+    }
+}
+
+impl QueryLaneSet {
+    const fn with_if(self, enabled: bool, lane: QueryLane) -> Self {
+        if enabled { self.with(lane) } else { self }
+    }
+}
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct QueryRoute {
@@ -221,7 +324,7 @@ pub struct QueryRoute {
     pub entity_resolution_suggested: bool,
     pub recall_query: String,
     pub should_auto_recall: bool,
-    pub lanes: QueryLanes,
+    pub lanes: QueryLaneSet,
     pub reasons: Vec<String>,
 }
 
@@ -519,23 +622,37 @@ pub fn classify_retrieval_query(query: &str, recognized_entities: &[String]) -> 
         route.query.clone()
     };
     route.should_auto_recall = route.intent != "casual_contact";
-    route.lanes = QueryLanes {
-        lexical: route.intent != "casual_contact",
-        candidates: route.intent != "casual_contact",
-        semantic: matches!(
-            route.intent.as_str(),
-            "general" | "memory_lookup" | "entity_lookup"
-        ),
-        content: matches!(
-            route.intent.as_str(),
-            "technical_project" | "memory_lookup" | "entity_lookup" | "date_lookup" | "general"
-        ),
-        date: !route.date_tokens.is_empty(),
-        canon: route.intent != "casual_contact" || terms.contains("canon"),
-        coding_lessons: route.intent == "technical_project"
-            && (terms.contains("coding") || terms.contains("lessons")),
-        project_lessons: route.intent == "technical_project",
-    };
+    route.lanes = QueryLaneSet::empty()
+        .with_if(route.intent != "casual_contact", QueryLane::Lexical)
+        .with_if(route.intent != "casual_contact", QueryLane::Candidates)
+        .with_if(
+            matches!(
+                route.intent.as_str(),
+                "general" | "memory_lookup" | "entity_lookup"
+            ),
+            QueryLane::Semantic,
+        )
+        .with_if(
+            matches!(
+                route.intent.as_str(),
+                "technical_project" | "memory_lookup" | "entity_lookup" | "date_lookup" | "general"
+            ),
+            QueryLane::Content,
+        )
+        .with_if(!route.date_tokens.is_empty(), QueryLane::Date)
+        .with_if(
+            route.intent != "casual_contact" || terms.contains("canon"),
+            QueryLane::Canon,
+        )
+        .with_if(
+            route.intent == "technical_project"
+                && (terms.contains("coding") || terms.contains("lessons")),
+            QueryLane::CodingLessons,
+        )
+        .with_if(
+            route.intent == "technical_project",
+            QueryLane::ProjectLessons,
+        );
     route
 }
 
@@ -651,17 +768,13 @@ fn keyword_reminder(directives: &[KeywordDirective]) -> Option<KeywordReminder> 
     (!directives.is_empty()).then(|| KeywordReminder {
         keywords: directives
             .iter()
-            .map(|entry| entry.keyword.clone())
+            .map(|directive| directive.keyword.clone())
             .collect(),
-        text: [
-            "## Solarisael Keyword Directive",
-            &directives
-                .iter()
-                .map(|entry| entry.directive.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n"),
-        ]
-        .join("\n"),
+        text: directives
+            .iter()
+            .map(|directive| directive.directive.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
     })
 }
 
@@ -681,7 +794,7 @@ fn room_reminder(room: &str, active_spirit: &str, operator: &str) -> String {
         "remember: the only durable write for memories and lessons. Write for the future self in the active room's natural voice; technical records may stay technical, but durability must not flatten them into assistant prose.".into(),
         "lessons: canonical typed lesson registry. Supply type=coding before writing or changing code, once per task rather than once per session.".into(),
         "anamnesis and anamnesis_write: counsel drawn from lived repetition. Counsel, never authority; a writer refusal stays final.".into(),
-        "wake and sleep: continuity across closed sessions. Receive a boat as a letter from the previous waking self; write the next one in the active spirit's ordinary voice and relationship register, carrying exact state, uncertainty, contact, and the next real door rather than a status report.".into(),
+        "wake and sleep: continuity across closed sessions. Receive a boat as a letter from the previous waking self, orient from its concrete state, relationship register, uncertainty, and next door without turning it into a script or status report.".into(),
         "room_state and set_room_state: operator and embodied spirit for this room.".into(),
         "house_lane_status and house_dispatch: bounded worker lanes. house_dispatch takes exactly one lane or familiar selector; accepted receipts expose spawnPacket.args shaped directly for the OMP task tool. Advisor is a review channel, not a dispatch lane.".into(),
         "familiar_status and familiar_dispatch: room spellbooks bind named familiars and aliases to bounded worker lanes; familiar_dispatch is the familiar-only alias of house_dispatch, spawning stays explicit, and runtime models come from agent definitions with no per-dispatch model override.".into(),
@@ -743,7 +856,7 @@ mod tests {
         let date = classify_retrieval_query("what happened on 2026-07-04", &[]);
         assert_eq!(date.intent, "date_lookup");
         assert_eq!(date.date_tokens, ["2026-07-04"]);
-        assert!(!date.lanes.semantic);
+        assert!(!date.lanes.contains(QueryLane::Semantic));
         assert_eq!(
             classify_retrieval_query(
                 "How should database indexing improve retrieval candidate ranking?",

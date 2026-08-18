@@ -4,7 +4,7 @@ use house_core::lesson_triggers::{
     CompiledTriggerSet, LessonTriggerSpec, Surface, SurfaceKind, TriggerRow, cached_set,
     match_surfaces, store_set,
 };
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -405,6 +405,9 @@ pub struct LessonTriggerFired {
     pub path: Option<String>,
     pub pattern_kind: String,
     pub pattern: String,
+    /// Ledger rows for this lesson in this room, including this fire. The
+    /// cockpit renders it as `writing#408 ×15`; cooldown never reads it.
+    pub fires: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -512,11 +515,12 @@ pub async fn lesson_trigger_match(
         .iter()
         .map(|hit| set.triggers()[hit.trigger].id)
         .collect::<Vec<_>>();
-    let ages = sqlx::query(
+    let ledger = sqlx::query(
         "SELECT lesson_key,lesson_id,
-                EXTRACT(EPOCH FROM (NOW() - MAX(fired_at)))::BIGINT AS age
+                EXTRACT(EPOCH FROM (NOW() - MAX(fired_at) FILTER (WHERE session_id=$2)))::BIGINT AS age,
+                COUNT(*) AS fires
          FROM lesson_trigger_events
-         WHERE room=$1 AND session_id=$2 AND lesson_id = ANY($3)
+         WHERE room=$1 AND lesson_id = ANY($3)
          GROUP BY lesson_key,lesson_id",
     )
     .bind(&params.room)
@@ -525,13 +529,19 @@ pub async fn lesson_trigger_match(
     .fetch_all(pool)
     .await?
     .iter()
-    .map(|row| -> Result<((String, i64), i64), sqlx::Error> {
+    .map(|row| -> Result<((String, i64), (Option<i64>, i64)), sqlx::Error> {
+        // Age stays session-scoped (the FILTER) because repeat_cooldown_secs
+        // means once-per-session; fires counts the whole room's history so the
+        // card tells the operator how often this lesson has bitten here.
         Ok((
             (
                 row.try_get::<String, _>("lesson_key")?,
                 row.try_get::<i64, _>("lesson_id")?,
             ),
-            row.try_get::<Option<i64>, _>("age")?.unwrap_or(0),
+            (
+                row.try_get::<Option<i64>, _>("age")?,
+                row.try_get::<i64, _>("fires")?,
+            ),
         ))
     })
     .collect::<Result<HashMap<_, _>, sqlx::Error>>()?;
@@ -540,7 +550,8 @@ pub async fn lesson_trigger_match(
     let mut tx = pool.begin().await?;
     for hit in &outcome.hits {
         let trigger = &set.triggers()[hit.trigger];
-        let age = ages.get(&(trigger.family.clone(), trigger.id)).copied();
+        let entry = ledger.get(&(trigger.family.clone(), trigger.id)).copied();
+        let age = entry.and_then(|(age, _)| age);
         if !trigger.cooldown.allows(age) {
             continue;
         }
@@ -573,6 +584,7 @@ pub async fn lesson_trigger_match(
             path: hit.path.clone(),
             pattern_kind: hit.pattern_kind.as_str().to_owned(),
             pattern: hit.pattern.clone(),
+            fires: entry.map(|(_, fires)| fires).unwrap_or(0) + 1,
         });
     }
     tx.commit().await?;
@@ -1157,26 +1169,94 @@ pub struct LessonDeleteParams {
     pub id: i64,
     pub expected_title: String,
 }
-#[derive(Debug, Serialize)]
-pub struct LessonMutationReceipt {
-    pub ok: bool,
-    pub kind: String,
-    pub id: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub actual_title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deleted: Option<bool>,
-    #[serde(rename = "alwaysOn", skip_serializing_if = "Option::is_none")]
-    pub always_on: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project: Option<Option<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LessonMutationKind {
+    Update,
+    Delete,
 }
+
+#[derive(Debug)]
+pub enum LessonMutationReceipt {
+    Updated {
+        kind: String,
+        id: i64,
+        title: String,
+        always_on: bool,
+        project: Option<String>,
+    },
+    Deleted {
+        kind: String,
+        id: i64,
+        title: String,
+    },
+    Refused {
+        mutation: LessonMutationKind,
+        kind: String,
+        id: i64,
+        actual_title: Option<String>,
+        error: String,
+    },
+}
+
+impl Serialize for LessonMutationReceipt {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Updated {
+                kind,
+                id,
+                title,
+                always_on,
+                project,
+            } => {
+                let mut receipt = serializer.serialize_struct("LessonMutationReceipt", 7)?;
+                receipt.serialize_field("ok", &true)?;
+                receipt.serialize_field("kind", kind)?;
+                receipt.serialize_field("id", id)?;
+                receipt.serialize_field("title", title)?;
+                receipt.serialize_field("updated", &true)?;
+                receipt.serialize_field("alwaysOn", always_on)?;
+                receipt.serialize_field("project", project)?;
+                receipt.end()
+            }
+            Self::Deleted { kind, id, title } => {
+                let mut receipt = serializer.serialize_struct("LessonMutationReceipt", 5)?;
+                receipt.serialize_field("ok", &true)?;
+                receipt.serialize_field("kind", kind)?;
+                receipt.serialize_field("id", id)?;
+                receipt.serialize_field("title", title)?;
+                receipt.serialize_field("deleted", &true)?;
+                receipt.end()
+            }
+            Self::Refused {
+                mutation,
+                kind,
+                id,
+                actual_title,
+                error,
+            } => {
+                let field_count = if actual_title.is_some() { 6 } else { 5 };
+                let mut receipt =
+                    serializer.serialize_struct("LessonMutationReceipt", field_count)?;
+                receipt.serialize_field("ok", &false)?;
+                receipt.serialize_field("kind", kind)?;
+                receipt.serialize_field("id", id)?;
+                if let Some(actual_title) = actual_title {
+                    receipt.serialize_field("actualTitle", actual_title)?;
+                }
+                match mutation {
+                    LessonMutationKind::Update => receipt.serialize_field("updated", &false)?,
+                    LessonMutationKind::Delete => receipt.serialize_field("deleted", &false)?,
+                }
+                receipt.serialize_field("error", error)?;
+                receipt.end()
+            }
+        }
+    }
+}
+
 fn lesson_key(kind: &str) -> Option<&'static str> {
     match kind {
         "coding-lesson" => Some("coding"),
@@ -1186,23 +1266,19 @@ fn lesson_key(kind: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
 fn mutation_refusal(
     p: &LessonDeleteParams,
     error: impl Into<String>,
-    actual: Option<String>,
-    update: bool,
+    actual_title: Option<String>,
+    mutation: LessonMutationKind,
 ) -> LessonMutationReceipt {
-    LessonMutationReceipt {
-        ok: false,
+    LessonMutationReceipt::Refused {
+        mutation,
         kind: p.kind.clone(),
         id: p.id,
-        title: None,
-        actual_title: actual,
-        updated: update.then_some(false),
-        deleted: (!update).then_some(false),
-        always_on: None,
-        project: None,
-        error: Some(error.into()),
+        actual_title,
+        error: error.into(),
     }
 }
 pub async fn lesson_delete(
@@ -1214,7 +1290,7 @@ pub async fn lesson_delete(
             &p,
             "kind must be coding-lesson, project-lesson, writing-lesson, or design-lesson",
             None,
-            false,
+            LessonMutationKind::Delete,
         ));
     };
     if p.id <= 0 {
@@ -1222,7 +1298,7 @@ pub async fn lesson_delete(
             &p,
             "id must be a positive integer",
             None,
-            false,
+            LessonMutationKind::Delete,
         ));
     }
     if p.expected_title.is_empty() {
@@ -1230,7 +1306,7 @@ pub async fn lesson_delete(
             &p,
             "expected_title is required",
             None,
-            false,
+            LessonMutationKind::Delete,
         ));
     }
     let mut tx = pool.begin().await?;
@@ -1242,10 +1318,20 @@ pub async fn lesson_delete(
     .fetch_optional(&mut *tx)
     .await?;
     let Some(actual) = actual else {
-        return Ok(mutation_refusal(&p, "lesson not found", None, false));
+        return Ok(mutation_refusal(
+            &p,
+            "lesson not found",
+            None,
+            LessonMutationKind::Delete,
+        ));
     };
     if actual != p.expected_title {
-        return Ok(mutation_refusal(&p, "title mismatch", Some(actual), false));
+        return Ok(mutation_refusal(
+            &p,
+            "title mismatch",
+            Some(actual),
+            LessonMutationKind::Delete,
+        ));
     }
     let changed = sqlx::query("DELETE FROM lessons WHERE lesson_key=$1 AND id=$2 AND title=$3")
         .bind(key)
@@ -1259,21 +1345,14 @@ pub async fn lesson_delete(
             &p,
             "delete affected an unexpected number of rows",
             None,
-            false,
+            LessonMutationKind::Delete,
         ));
     }
     tx.commit().await?;
-    Ok(LessonMutationReceipt {
-        ok: true,
+    Ok(LessonMutationReceipt::Deleted {
         kind: p.kind,
         id: p.id,
-        title: Some(p.expected_title),
-        actual_title: None,
-        updated: None,
-        deleted: Some(true),
-        always_on: None,
-        project: None,
-        error: None,
+        title: p.expected_title,
     })
 }
 
@@ -1315,9 +1394,7 @@ fn patch_trigger_spec(
                 .as_i64()
                 .and_then(|value| i32::try_from(value).ok())
                 .ok_or_else(|| {
-                    AppError::Invalid(
-                        "repeatCooldownSecs must be a 32-bit positive integer".into(),
-                    )
+                    AppError::Invalid("repeatCooldownSecs must be a 32-bit positive integer".into())
                 })?,
         ),
         Some(_) => {
@@ -1348,7 +1425,7 @@ pub async fn lesson_update(
             &delete,
             "kind must be coding-lesson, project-lesson, writing-lesson, or design-lesson",
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     };
     if p.id <= 0 {
@@ -1356,7 +1433,7 @@ pub async fn lesson_update(
             &delete,
             "id must be a positive integer",
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     }
     if p.expected_title.is_empty() {
@@ -1364,7 +1441,7 @@ pub async fn lesson_update(
             &delete,
             "expected_title is required",
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     }
     let Some(fields) = p.patch.as_object() else {
@@ -1372,7 +1449,7 @@ pub async fn lesson_update(
             &delete,
             "patch must be an object",
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     };
     if fields.is_empty() {
@@ -1380,7 +1457,7 @@ pub async fn lesson_update(
             &delete,
             "at least one update field is required",
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     }
     if fields.contains_key("project") && fields.contains_key("clearProject") {
@@ -1388,7 +1465,7 @@ pub async fn lesson_update(
             &delete,
             "project and clearProject are mutually exclusive",
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     }
     if fields.contains_key("clearProject") && !matches!(key, "coding" | "project") {
@@ -1396,7 +1473,7 @@ pub async fn lesson_update(
             &delete,
             format!("clearProject is not allowed for {}", p.kind),
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     }
     if let Some(clear) = fields.get("clearProject")
@@ -1406,7 +1483,7 @@ pub async fn lesson_update(
             &delete,
             "clearProject must be true when provided",
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     }
     let common = [
@@ -1453,7 +1530,7 @@ pub async fn lesson_update(
             &delete,
             format!("field not allowed for {}: {invalid}", p.kind),
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     }
     // Semantic trigger validation runs before a single row is locked: an
@@ -1471,14 +1548,19 @@ pub async fn lesson_update(
     .fetch_optional(&mut *tx)
     .await?;
     let Some(actual) = actual else {
-        return Ok(mutation_refusal(&delete, "lesson not found", None, true));
+        return Ok(mutation_refusal(
+            &delete,
+            "lesson not found",
+            None,
+            LessonMutationKind::Update,
+        ));
     };
     if actual != p.expected_title {
         return Ok(mutation_refusal(
             &delete,
             "title mismatch",
             Some(actual),
-            true,
+            LessonMutationKind::Update,
         ));
     }
     let mut qb = QueryBuilder::<Postgres>::new("UPDATE lessons SET ");
@@ -1579,7 +1661,6 @@ pub async fn lesson_update(
             }
         }
     }
-    drop(separated);
     qb.push(" WHERE lesson_key=")
         .push_bind(key)
         .push(" AND id=")
@@ -1596,21 +1677,16 @@ pub async fn lesson_update(
             &delete,
             "update affected an unexpected number of rows",
             None,
-            true,
+            LessonMutationKind::Update,
         ));
     };
     tx.commit().await?;
-    Ok(LessonMutationReceipt {
-        ok: true,
+    Ok(LessonMutationReceipt::Updated {
         kind: p.kind,
         id: p.id,
-        title: Some(title),
-        actual_title: None,
-        updated: Some(true),
-        deleted: None,
-        always_on: Some(always_on),
-        project: Some(project),
-        error: None,
+        title,
+        always_on,
+        project,
     })
 }
 
@@ -1747,17 +1823,12 @@ mod tests {
 
     #[test]
     fn mutation_receipts_keep_exact_family_identity() {
-        let receipt = LessonMutationReceipt {
-            ok: true,
+        let receipt = LessonMutationReceipt::Updated {
             kind: "design-lesson".into(),
             id: 9,
-            title: Some("Keyboard floor".into()),
-            actual_title: None,
-            updated: Some(true),
-            deleted: None,
-            always_on: None,
+            title: "Keyboard floor".into(),
+            always_on: false,
             project: None,
-            error: None,
         };
         assert_eq!(
             serde_json::to_value(receipt).unwrap(),
@@ -1766,7 +1837,9 @@ mod tests {
                 "kind": "design-lesson",
                 "id": 9,
                 "title": "Keyboard floor",
-                "updated": true
+                "updated": true,
+                "alwaysOn": false,
+                "project": null
             })
         );
     }

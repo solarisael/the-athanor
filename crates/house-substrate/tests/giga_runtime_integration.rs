@@ -1,7 +1,7 @@
 use athanor_substrate::{
-    Config, giga_candidate_list, giga_candidate_store, giga_event_claim, giga_event_finish,
-    giga_event_ingest, giga_event_replay, giga_health, giga_process, giga_promote,
-    giga_queue_maintenance, giga_review,
+    Config, EmbeddingMode, giga_candidate_list, giga_candidate_store, giga_event_claim,
+    giga_event_finish, giga_event_ingest, giga_event_replay, giga_health, giga_process,
+    giga_promote, giga_queue_maintenance, giga_review, migrations::run_migrations,
 };
 use house_core::{
     GigaAuthority, GigaCandidate, GigaCandidateKind, GigaClassifierIdentity,
@@ -13,7 +13,10 @@ use house_core::{
     GigaQueueMaintenanceScope, GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState,
     GigaScope, GigaScores, GigaSourceRef, GigaSourceType, GigaVisibility, RoomKey,
 };
-use house_protocol::{GigaCandidateListParams, GigaHealthParams};
+use house_protocol::{
+    GigaCandidateListParams, GigaCandidateStoreDisposition, GigaEventIngestDisposition,
+    GigaHealthParams,
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{
@@ -102,7 +105,7 @@ fn queue_event(event_id: &str) -> TestResult<GigaEvent> {
 async fn ingest_queue_event(pool: &PgPool, event_id: &str) -> TestResult {
     let receipt = giga_event_ingest(pool, queue_event(event_id)?).await?;
     require(
-        receipt.accepted && !receipt.duplicate,
+        receipt.disposition == GigaEventIngestDisposition::Accepted,
         "queue fixture event must be ingested",
     )
 }
@@ -628,7 +631,10 @@ async fn stage_candidate_in_room(
         EVENT_AT.into(),
     )?;
     let ingested = giga_event_ingest(pool, event).await?;
-    require(ingested.accepted, "candidate parent event must be ingested")?;
+    require(
+        ingested.disposition == GigaEventIngestDisposition::Accepted,
+        "candidate parent event must be ingested",
+    )?;
     let proof_refs = if kind.requires_proof() {
         vec![source.source_id().to_owned()]
     } else {
@@ -668,7 +674,7 @@ async fn stage_candidate_in_room(
     )?;
     let stored = giga_candidate_store(pool, candidate).await?;
     require(
-        stored.stored && !stored.duplicate,
+        stored.disposition == GigaCandidateStoreDisposition::Stored,
         "candidate fixture must be stored",
     )?;
     let review = GigaReviewAction::new(
@@ -720,7 +726,7 @@ async fn persisted_process_contract(pool: &PgPool, cfg: &Config) -> TestResult {
         EVENT_AT.into(),
     )?;
     require(
-        giga_event_ingest(pool, event).await?.accepted,
+        giga_event_ingest(pool, event).await?.disposition == GigaEventIngestDisposition::Accepted,
         "persisted-source process event must be ingested",
     )?;
     let claim = giga_event_claim(pool, claim_request("process-owner", 60)?).await?;
@@ -761,7 +767,8 @@ async fn persisted_process_contract(pool: &PgPool, cfg: &Config) -> TestResult {
         vec![],
     )?;
     require(
-        giga_candidate_store(pool, candidate).await?.stored,
+        giga_candidate_store(pool, candidate).await?.disposition
+            == GigaCandidateStoreDisposition::Stored,
         "persisted-source candidate must be stored",
     )?;
 
@@ -1084,7 +1091,6 @@ fn promotion_request(
     room: &str,
     source_refs: Vec<GigaSourceRef>,
     payload: GigaPromotionPayload,
-    publication_consent: Option<GigaPublicationConsent>,
     reviewed_at: &str,
 ) -> TestResult<GigaPromotionRequest> {
     Ok(GigaPromotionRequest::new(
@@ -1095,7 +1101,6 @@ fn promotion_request(
         "explicit deliberate publication approval".into(),
         source_refs,
         payload,
-        publication_consent,
         reviewed_at.into(),
     )?)
 }
@@ -1153,7 +1158,6 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
         ROOM,
         vec![memory_source.clone()],
         memory_payload,
-        None,
         REVIEWED_AT,
     )?;
     let memory_receipt = giga_promote(pool, cfg, memory_request.clone()).await?;
@@ -1237,7 +1241,6 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
             "The reviewed exact source supports this durable memory.".into(),
             vec!["atomicity".into(), "integration".into()],
         )?),
-        None,
         REVIEWED_AT,
     )?;
     let altered_result = giga_promote(pool, cfg, altered_retry).await;
@@ -1290,7 +1293,6 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
                 vec!["subagent-dispatch".into()],
                 vec!["atomic".into(), "postgres".into()],
             )?),
-            None,
             "2030-01-01T01:01:00Z",
         )?,
     )
@@ -1364,18 +1366,20 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
             "promote-project",
             ROOM,
             vec![project_source],
-            GigaPromotionPayload::ProjectLesson(GigaProjectLessonPromotionPayload::new(
-                "Use the isolated database guard".into(),
-                "All live database proofs must run under a generated test schema.".into(),
-                PROJECT.into(),
-                "the schema is dropped after success or failure".into(),
-                "when a proof needs real PostgreSQL concurrency".into(),
-                vec![],
-                vec!["postgresql".into()],
-                vec!["subagent-dispatch".into()],
-                vec!["integration".into(), "isolation".into()],
-            )?),
-            Some(GigaPublicationConsent::new(true, true)?),
+            GigaPromotionPayload::ProjectLesson {
+                payload: GigaProjectLessonPromotionPayload::new(
+                    "Use the isolated database guard".into(),
+                    "All live database proofs must run under a generated test schema.".into(),
+                    PROJECT.into(),
+                    "the schema is dropped after success or failure".into(),
+                    "when a proof needs real PostgreSQL concurrency".into(),
+                    vec![],
+                    vec!["postgresql".into()],
+                    vec!["subagent-dispatch".into()],
+                    vec!["integration".into(), "isolation".into()],
+                )?,
+                publication_consent: GigaPublicationConsent::new(true)?,
+            },
             "2030-01-01T01:02:00Z",
         )?,
     )
@@ -1450,7 +1454,6 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
                 "stale hash".into(),
                 vec![],
             )?),
-            None,
             "2030-01-01T01:03:00Z",
         )?,
     )
@@ -1490,7 +1493,6 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
                 "cross-room request".into(),
                 vec![],
             )?),
-            None,
             "2030-01-01T01:03:01Z",
         )?,
     )
@@ -1505,9 +1507,8 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
     )?;
 
     require(
-        GigaPublicationConsent::new(false, true).is_err()
-            && GigaPublicationConsent::new(true, false).is_err(),
-        "project authorization must require both operator and governing-spirit approval",
+        GigaPublicationConsent::new(false).is_err(),
+        "project authorization must require operator approval",
     )?;
     let auth_source = stage_candidate(
         pool,
@@ -1526,18 +1527,20 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
             "refuse-auth",
             ROOM,
             vec![auth_source],
-            GigaPromotionPayload::ProjectLesson(GigaProjectLessonPromotionPayload::new(
-                "Must not persist".into(),
-                "publication review was not required by the source".into(),
-                PROJECT.into(),
-                "source scope omits publication review authority".into(),
-                "a private candidate requests project publication".into(),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-            )?),
-            Some(GigaPublicationConsent::new(true, true)?),
+            GigaPromotionPayload::ProjectLesson {
+                payload: GigaProjectLessonPromotionPayload::new(
+                    "Must not persist".into(),
+                    "publication review was not required by the source".into(),
+                    PROJECT.into(),
+                    "source scope omits publication review authority".into(),
+                    "a private candidate requests project publication".into(),
+                    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
+                )?,
+                publication_consent: GigaPublicationConsent::new(true)?,
+            },
             "2030-01-01T01:04:00Z",
         )?,
     )
@@ -1568,18 +1571,20 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
             "refuse-project",
             ROOM,
             vec![project_refusal_source],
-            GigaPromotionPayload::ProjectLesson(GigaProjectLessonPromotionPayload::new(
-                "Must not persist".into(),
-                "project mismatch".into(),
-                "different-project".into(),
-                "candidate and payload projects differ".into(),
-                "a reviewed project lesson is promoted".into(),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-            )?),
-            Some(GigaPublicationConsent::new(true, true)?),
+            GigaPromotionPayload::ProjectLesson {
+                payload: GigaProjectLessonPromotionPayload::new(
+                    "Must not persist".into(),
+                    "project mismatch".into(),
+                    "different-project".into(),
+                    "candidate and payload projects differ".into(),
+                    "a reviewed project lesson is promoted".into(),
+                    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
+                )?,
+                publication_consent: GigaPublicationConsent::new(true)?,
+            },
             "2030-01-01T01:05:00Z",
         )?,
     )
@@ -1627,7 +1632,6 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
                 "This row is inserted before the forced review conflict.".into(),
                 vec!["rollback".into()],
             )?),
-            None,
             "2030-01-01T01:06:00Z",
         )?,
     )
@@ -1652,8 +1656,7 @@ async fn queue_and_atomic_promotion_contracts() {
         embed_url: None,
         embed_model: "test-disabled".into(),
         embed_dimension: 2_048,
-        embed_required: false,
-        test_embedding_disabled: true,
+        embedding_mode: EmbeddingMode::DisabledForTest,
         giga_source_ledger_dir: None,
         giga_source_room: None,
     };
@@ -1686,24 +1689,7 @@ async fn queue_and_atomic_promotion_contracts() {
     let result: TestResult = match pool_result {
         Ok(pool) => {
             let result: TestResult = async {
-                for migration in [
-                    migration!("0001_initial.sql"),
-                    migration!("0002_nemotron_2048.sql"),
-                    migration!("0003_giga.sql"),
-                    migration!("0004_giga_runtime.sql"),
-                    migration!("0005_giga_resonance.sql"),
-                    migration!("0006_memory_thread_graph.sql"),
-                    migration!("0007_giga_source_ordinal.sql"),
-                    migration!("0008_unified_lessons.sql"),
-                    migration!("0009_bm25f_memory_search.sql"),
-                    migration!("0010_semantic_vocabulary.sql"),
-                    migration!("0011_design_lessons.sql"),
-                    migration!("0012_design_documents.sql"),
-                    migration!("0013_lesson_eligibility_keys.sql"),
-                    migration!("0014_lesson_threads.sql"),
-                ] {
-                    sqlx::raw_sql(migration).execute(&pool).await?;
-                }
+                run_migrations(&pool).await?;
                 sqlx::raw_sql(migration!("0005_giga_resonance.sql"))
                     .execute(&pool)
                     .await?;

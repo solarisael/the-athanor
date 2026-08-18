@@ -2,7 +2,7 @@ use crate::policy::RecallPolicySession;
 use atomicwrites::{AllowOverwrite, AtomicFile, Error as AtomicError};
 use chrono::{SecondsFormat, Utc};
 use house_protocol::{
-    CommandOutcomeEvent, RecallPolicyState, RecallRequestedMode, RecallResolvedMode,
+    CommandOutcomeEvent, RecallPolicyState, RecallRequestedMode, RecallResolvedMode, RecoveryState,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -65,13 +65,14 @@ impl RoomStateStore {
         );
         policy.insert(
             "recoveryPending".into(),
-            Value::Bool(state.recovery_pending),
+            Value::Bool(state.recovery_state.is_pending()),
         );
         policy.insert(
             "recoveryTerms".into(),
             Value::Array(
                 state
-                    .recovery_terms
+                    .recovery_state
+                    .terms()
                     .iter()
                     .cloned()
                     .map(Value::String)
@@ -127,25 +128,27 @@ fn projection_from_root(root: &Value, configured_room: &str) -> Result<RecallPol
         .ok_or_else(|| {
             "recallPolicy.workingSetEntries must be a non-negative integer".to_owned()
         })?;
-    let recovery_pending = policy
-        .get("recoveryPending")
-        .and_then(Value::as_bool)
-        .ok_or_else(|| "recallPolicy.recoveryPending must be boolean".to_owned())?;
-    let recovery_terms = policy
-        .get("recoveryTerms")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "recallPolicy.recoveryTerms must be an array".to_owned())?
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .filter(|text| !text.trim().is_empty())
-                .map(str::to_owned)
-                .ok_or_else(|| {
-                    "recallPolicy.recoveryTerms must contain nonblank strings".to_owned()
-                })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let recovery = LegacyRecovery {
+        pending: policy
+            .get("recoveryPending")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| "recallPolicy.recoveryPending must be boolean".to_owned())?,
+        terms: policy
+            .get("recoveryTerms")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "recallPolicy.recoveryTerms must be an array".to_owned())?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|text| !text.trim().is_empty())
+                    .map(str::to_owned)
+                    .ok_or_else(|| {
+                        "recallPolicy.recoveryTerms must contain nonblank strings".to_owned()
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+    };
     Ok(RecallPolicyState {
         requested_mode,
         resolved_mode,
@@ -154,8 +157,7 @@ fn projection_from_root(root: &Value, configured_room: &str) -> Result<RecallPol
         last_refresh_reason: nullable_string(policy, "lastRefreshReason")?,
         last_refresh_at: nullable_string(policy, "lastRefreshAt")?,
         working_set_entries,
-        recovery_pending,
-        recovery_terms,
+        recovery_state: recovery.into_state(),
         degraded: nullable_string(policy, "degraded")?,
         updated_at: nullable_string(policy, "updatedAt")?,
     })
@@ -178,6 +180,22 @@ fn parse_resolved(value: &str) -> Result<RecallResolvedMode, String> {
         "mixed" => Ok(RecallResolvedMode::Mixed),
         "quiet" => Ok(RecallResolvedMode::Quiet),
         other => Err(format!("unknown recallPolicy.resolvedMode {other}")),
+    }
+}
+
+/// Private legacy wire DTO; persisted room JSON keeps these established fields.
+struct LegacyRecovery {
+    pending: bool,
+    terms: Vec<String>,
+}
+
+impl LegacyRecovery {
+    fn into_state(self) -> RecoveryState {
+        if self.pending {
+            RecoveryState::Pending { terms: self.terms }
+        } else {
+            RecoveryState::Idle
+        }
     }
 }
 

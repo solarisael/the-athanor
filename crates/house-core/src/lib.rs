@@ -1156,87 +1156,80 @@ impl RecallRequest {
 const MAX_CLUSTER_K: u32 = 128;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ClusterMaintenanceOperation {
-    Check,
-    Rebuild,
+pub enum ClusterExecution {
+    DryRun,
+    Execute,
 }
 
-impl ClusterMaintenanceOperation {
-    pub fn parse(value: &str) -> Result<Self, DomainError> {
-        match value {
-            "check" => Ok(Self::Check),
-            "rebuild" => Ok(Self::Rebuild),
-            other => Err(DomainError::InvalidClusterMaintenance {
-                field: "operation".into(),
-                message: format!("unsupported value: {other}"),
-            }),
-        }
-    }
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Check => "check",
-            Self::Rebuild => "rebuild",
-        }
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClusterFreshnessPolicy {
+    Always,
+    IfStale,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClusterMaintenanceRequest {
-    room: RoomKey,
-    operation: ClusterMaintenanceOperation,
-    dry_run: bool,
-    if_stale: bool,
-    k: u32,
+pub enum ClusterMaintenanceRequest {
+    Check {
+        room: RoomKey,
+        k: u32,
+    },
+    Rebuild {
+        room: RoomKey,
+        execution: ClusterExecution,
+        freshness: ClusterFreshnessPolicy,
+        k: u32,
+    },
 }
 
 impl ClusterMaintenanceRequest {
-    pub fn new(
+    pub fn check(room: RoomKey, k: u32) -> Result<Self, DomainError> {
+        Self::validate_k(k)?;
+        Ok(Self::Check { room, k })
+    }
+
+    pub fn rebuild(
         room: RoomKey,
-        operation: ClusterMaintenanceOperation,
-        dry_run: bool,
-        if_stale: bool,
+        execution: ClusterExecution,
+        freshness: ClusterFreshnessPolicy,
         k: u32,
     ) -> Result<Self, DomainError> {
+        Self::validate_k(k)?;
+        Ok(Self::Rebuild {
+            room,
+            execution,
+            freshness,
+            k,
+        })
+    }
+
+    fn validate_k(k: u32) -> Result<(), DomainError> {
         if k == 0 || k > MAX_CLUSTER_K {
             return Err(DomainError::InvalidClusterMaintenance {
                 field: "k".into(),
                 message: format!("must be between 1 and {MAX_CLUSTER_K}"),
             });
         }
-        if operation == ClusterMaintenanceOperation::Check && dry_run {
-            return Err(DomainError::InvalidClusterMaintenance {
-                field: "dryRun".into(),
-                message: "check does not accept dryRun".into(),
-            });
-        }
-        Ok(Self {
-            room,
-            operation,
-            dry_run,
-            if_stale,
-            k,
-        })
+        Ok(())
     }
+
     pub fn room(&self) -> &RoomKey {
-        &self.room
+        match self {
+            Self::Check { room, .. } | Self::Rebuild { room, .. } => room,
+        }
     }
-    pub const fn operation(&self) -> ClusterMaintenanceOperation {
-        self.operation
-    }
-    pub const fn dry_run(&self) -> bool {
-        self.dry_run
-    }
-    pub const fn if_stale(&self) -> bool {
-        self.if_stale
-    }
+
     pub const fn k(&self) -> u32 {
-        self.k
+        match self {
+            Self::Check { k, .. } | Self::Rebuild { k, .. } => *k,
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClusterStaleness {
     built_at: Option<String>,
+    clusters: u64,
+    chunks_total: u64,
     chunks_since_build: u64,
     fraction_unseen: f64,
 }
@@ -1244,6 +1237,8 @@ pub struct ClusterStaleness {
 impl ClusterStaleness {
     pub fn new(
         built_at: Option<String>,
+        clusters: u64,
+        chunks_total: u64,
         chunks_since_build: u64,
         fraction_unseen: f64,
     ) -> Result<Self, DomainError> {
@@ -1255,12 +1250,20 @@ impl ClusterStaleness {
         }
         Ok(Self {
             built_at,
+            clusters,
+            chunks_total,
             chunks_since_build,
             fraction_unseen,
         })
     }
     pub fn built_at(&self) -> Option<&str> {
         self.built_at.as_deref()
+    }
+    pub const fn clusters(&self) -> u64 {
+        self.clusters
+    }
+    pub const fn chunks_total(&self) -> u64 {
+        self.chunks_total
     }
     pub const fn chunks_since_build(&self) -> u64 {
         self.chunks_since_build
@@ -1279,6 +1282,7 @@ impl ClusterStaleness {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClusterSummary {
+    cluster_id: i64,
     label: String,
     member_count: u64,
     accepted: bool,
@@ -1286,6 +1290,7 @@ pub struct ClusterSummary {
 
 impl ClusterSummary {
     pub fn new(
+        cluster_id: i64,
         label: impl Into<String>,
         member_count: u64,
         accepted: bool,
@@ -1298,10 +1303,14 @@ impl ClusterSummary {
             });
         }
         Ok(Self {
+            cluster_id,
             label,
             member_count,
             accepted,
         })
+    }
+    pub const fn cluster_id(&self) -> i64 {
+        self.cluster_id
     }
     pub fn label(&self) -> &str {
         &self.label
@@ -1322,13 +1331,22 @@ pub struct ClusterMaintenanceStatus {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ClusterMaintenanceResult {
-    pub ok: bool,
-    pub operation: ClusterMaintenanceOperation,
-    pub dry_run: bool,
-    pub rebuilt: bool,
-    pub status: ClusterMaintenanceStatus,
-    pub clusters: Vec<ClusterSummary>,
+pub enum ClusterMaintenanceOutcome {
+    Checked {
+        status: ClusterMaintenanceStatus,
+        clusters: Vec<ClusterSummary>,
+    },
+    SkippedFresh {
+        status: ClusterMaintenanceStatus,
+        clusters: Vec<ClusterSummary>,
+    },
+    DryRun {
+        status: ClusterMaintenanceStatus,
+    },
+    Rebuilt {
+        status: ClusterMaintenanceStatus,
+        clusters: Vec<ClusterSummary>,
+    },
 }
 
 impl fmt::Display for RoomKey {
@@ -4281,7 +4299,10 @@ impl GigaProjectLessonPromotionPayload {
 pub enum GigaPromotionPayload {
     Memory(GigaMemoryPromotionPayload),
     CodingLesson(GigaCodingLessonPromotionPayload),
-    ProjectLesson(GigaProjectLessonPromotionPayload),
+    ProjectLesson {
+        payload: GigaProjectLessonPromotionPayload,
+        publication_consent: GigaPublicationConsent,
+    },
 }
 
 impl GigaPromotionPayload {
@@ -4289,37 +4310,23 @@ impl GigaPromotionPayload {
         match self {
             Self::Memory(_) => GigaPromotionKind::Memory,
             Self::CodingLesson(_) => GigaPromotionKind::CodingLesson,
-            Self::ProjectLesson(_) => GigaPromotionKind::ProjectLesson,
+            Self::ProjectLesson { .. } => GigaPromotionKind::ProjectLesson,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GigaPublicationConsent {
-    operator_approved: bool,
-    reviewer_approved: bool,
-}
+pub struct GigaPublicationConsent(());
 
 impl GigaPublicationConsent {
-    pub fn new(operator_approved: bool, reviewer_approved: bool) -> Result<Self, DomainError> {
-        if !operator_approved || !reviewer_approved {
+    pub fn new(operator_approved: bool) -> Result<Self, DomainError> {
+        if !operator_approved {
             return Err(DomainError::InvalidGiga {
                 field: "publication_consent".into(),
-                message: "project publication requires operator and governing-spirit approval"
-                    .into(),
+                message: "project publication requires operator approval".into(),
             });
         }
-        Ok(Self {
-            operator_approved,
-            reviewer_approved,
-        })
-    }
-
-    pub const fn operator_approved(&self) -> bool {
-        self.operator_approved
-    }
-    pub const fn reviewer_approved(&self) -> bool {
-        self.reviewer_approved
+        Ok(Self(()))
     }
 }
 
@@ -4344,7 +4351,6 @@ pub struct GigaPromotionRequest {
     authorization_basis: String,
     source_refs: Vec<GigaSourceRef>,
     payload: GigaPromotionPayload,
-    publication_consent: Option<GigaPublicationConsent>,
     reviewed_at: String,
 }
 
@@ -4358,7 +4364,6 @@ impl GigaPromotionRequest {
         authorization_basis: String,
         source_refs: Vec<GigaSourceRef>,
         payload: GigaPromotionPayload,
-        publication_consent: Option<GigaPublicationConsent>,
         reviewed_at: String,
     ) -> Result<Self, DomainError> {
         if source_refs.is_empty() {
@@ -4383,23 +4388,6 @@ impl GigaPromotionRequest {
                 return Err(DomainError::GigaScopeViolation);
             }
         }
-        match payload.kind() {
-            GigaPromotionKind::ProjectLesson if publication_consent.is_none() => {
-                return Err(DomainError::InvalidGiga {
-                    field: "publication_consent".into(),
-                    message: "is required for project_lesson promotion".into(),
-                });
-            }
-            GigaPromotionKind::Memory | GigaPromotionKind::CodingLesson
-                if publication_consent.is_some() =>
-            {
-                return Err(DomainError::InvalidGiga {
-                    field: "publication_consent".into(),
-                    message: "is valid only for project_lesson promotion".into(),
-                });
-            }
-            _ => {}
-        }
         Ok(Self {
             candidate_id: giga_nonempty("candidate_id", candidate_id)?,
             room,
@@ -4408,7 +4396,6 @@ impl GigaPromotionRequest {
             authorization_basis: giga_nonempty("authorization_basis", authorization_basis)?,
             source_refs,
             payload,
-            publication_consent,
             reviewed_at: giga_rfc3339("reviewed_at", reviewed_at)?,
         })
     }
@@ -4458,7 +4445,7 @@ impl GigaPromotionRequest {
                     return Err(DomainError::GigaScopeViolation);
                 }
             }
-            GigaPromotionPayload::ProjectLesson(payload) => {
+            GigaPromotionPayload::ProjectLesson { payload, .. } => {
                 if project_keys.len() != 1
                     || project_keys[0] != payload.project
                     || scope.project() != Some(payload.project())
@@ -4490,9 +4477,6 @@ impl GigaPromotionRequest {
     }
     pub fn payload(&self) -> &GigaPromotionPayload {
         &self.payload
-    }
-    pub const fn publication_consent(&self) -> Option<GigaPublicationConsent> {
-        self.publication_consent
     }
     pub fn reviewed_at(&self) -> &str {
         &self.reviewed_at
@@ -5119,49 +5103,44 @@ mod tests {
     }
     #[test]
     fn cluster_staleness_boundaries_require_unseen_chunks() {
-        let fresh = ClusterStaleness::new(Some("2026-07-20T00:00:00Z".into()), 0, 0.05).unwrap();
+        let fresh =
+            ClusterStaleness::new(Some("2026-07-20T00:00:00Z".into()), 1, 100, 0, 0.05).unwrap();
         assert!(!fresh.is_stale(30));
         assert!(
-            ClusterStaleness::new(Some("2026-07-20T00:00:00Z".into()), 1, 0.05)
+            ClusterStaleness::new(Some("2026-07-20T00:00:00Z".into()), 1, 100, 1, 0.05)
                 .unwrap()
                 .is_stale(0)
         );
         assert!(
-            ClusterStaleness::new(Some("2026-07-20T00:00:00Z".into()), 250, 0.0)
+            ClusterStaleness::new(Some("2026-07-20T00:00:00Z".into()), 1, 1000, 250, 0.0)
                 .unwrap()
                 .is_stale(0)
         );
         assert!(
-            ClusterStaleness::new(Some("2026-07-20T00:00:00Z".into()), 1, 0.0)
+            ClusterStaleness::new(Some("2026-07-20T00:00:00Z".into()), 1, 100, 1, 0.0)
                 .unwrap()
                 .is_stale(7)
         );
-        assert!(ClusterStaleness::new(None, 0, 0.0).unwrap().is_stale(0));
+        assert!(
+            ClusterStaleness::new(None, 0, 0, 0, 0.0)
+                .unwrap()
+                .is_stale(0)
+        );
     }
 
     #[test]
-    fn cluster_request_rejects_invalid_k_and_check_options() {
+    fn cluster_request_rejects_invalid_k() {
         let room = RoomKey::new("lab").unwrap();
         assert!(
-            ClusterMaintenanceRequest::new(
+            ClusterMaintenanceRequest::rebuild(
                 room.clone(),
-                ClusterMaintenanceOperation::Rebuild,
-                false,
-                false,
+                ClusterExecution::Execute,
+                ClusterFreshnessPolicy::Always,
                 0
             )
             .is_err()
         );
-        assert!(
-            ClusterMaintenanceRequest::new(
-                room,
-                ClusterMaintenanceOperation::Check,
-                true,
-                false,
-                8
-            )
-            .is_err()
-        );
+        assert!(ClusterMaintenanceRequest::check(room, 129).is_err());
     }
     fn giga_test_source(source_id: &str, hash_digit: char, scope: GigaScope) -> GigaSourceRef {
         GigaSourceRef::new(
@@ -5464,7 +5443,6 @@ mod tests {
                 )
                 .unwrap(),
             ),
-            None,
             "2026-07-24T12:04:00Z".into(),
         )
         .unwrap();
@@ -5501,7 +5479,6 @@ mod tests {
                 )
                 .unwrap(),
             ),
-            None,
             "2026-07-24T12:04:00Z".into(),
         )
         .unwrap();
@@ -5524,10 +5501,10 @@ mod tests {
             room.clone(),
             "kintsu".into(),
             "sol".into(),
-            "operator and spirit approved publication".into(),
+            "operator approved publication".into(),
             vec![project_source.clone()],
-            GigaPromotionPayload::ProjectLesson(
-                GigaProjectLessonPromotionPayload::new(
+            GigaPromotionPayload::ProjectLesson {
+                payload: GigaProjectLessonPromotionPayload::new(
                     "Stable Athanor rule".into(),
                     "Keep queue mutations transactional.".into(),
                     "athanor".into(),
@@ -5539,8 +5516,8 @@ mod tests {
                     vec!["queue".into()],
                 )
                 .unwrap(),
-            ),
-            Some(GigaPublicationConsent::new(true, true).unwrap()),
+                publication_consent: GigaPublicationConsent::new(true).unwrap(),
+            },
             "2026-07-24T12:04:00Z".into(),
         )
         .unwrap();
@@ -5578,7 +5555,6 @@ mod tests {
                 )
                 .unwrap(),
             ),
-            None,
             "2026-07-24T12:04:00Z".into(),
         )
         .unwrap();
@@ -5659,7 +5635,6 @@ mod tests {
                     )
                     .unwrap(),
                 ),
-                None,
                 "2026-07-24T12:04:00Z".into(),
             ),
             Err(DomainError::GigaScopeViolation)
@@ -5667,51 +5642,31 @@ mod tests {
     }
 
     #[test]
-    fn giga_project_promotion_requires_dual_consent_and_exact_project_scope() {
-        for (operator_approved, reviewer_approved) in [(false, true), (true, false), (false, false)]
-        {
-            assert!(matches!(
-                GigaPublicationConsent::new(operator_approved, reviewer_approved),
-                Err(DomainError::InvalidGiga { field, .. }) if field == "publication_consent"
-            ));
-        }
-        let consent = GigaPublicationConsent::new(true, true).unwrap();
-        assert!(consent.operator_approved());
-        assert!(consent.reviewer_approved());
+    fn giga_project_promotion_requires_operator_consent_and_exact_project_scope() {
+        assert!(matches!(
+            GigaPublicationConsent::new(false),
+            Err(DomainError::InvalidGiga { field, .. }) if field == "publication_consent"
+        ));
+        let consent = GigaPublicationConsent::new(true).unwrap();
 
         let room = RoomKey::new("lab").unwrap();
         let scope = giga_project_scope();
         let source = giga_test_source("turn-1", 'a', scope.clone());
-        let payload = || {
-            GigaPromotionPayload::ProjectLesson(
-                GigaProjectLessonPromotionPayload::new(
-                    "Edited title".into(),
-                    "Edited body".into(),
-                    "athanor".into(),
-                    "transaction rollback preserves the prior durable state".into(),
-                    "a project rule changes coupled database writes".into(),
-                    vec![],
-                    vec![],
-                    vec![],
-                    vec![],
-                )
-                .unwrap(),
+        let payload = || GigaPromotionPayload::ProjectLesson {
+            payload: GigaProjectLessonPromotionPayload::new(
+                "Edited title".into(),
+                "Edited body".into(),
+                "athanor".into(),
+                "transaction rollback preserves the prior durable state".into(),
+                "a project rule changes coupled database writes".into(),
+                vec![],
+                vec![],
+                vec![],
+                vec![],
             )
+            .unwrap(),
+            publication_consent: consent,
         };
-        assert!(matches!(
-            GigaPromotionRequest::new(
-                "candidate-project".into(),
-                room.clone(),
-                "kintsu".into(),
-                "sol".into(),
-                "publication reviewed".into(),
-                vec![source.clone()],
-                payload(),
-                None,
-                "2026-07-24T12:04:00Z".into(),
-            ),
-            Err(DomainError::InvalidGiga { field, .. }) if field == "publication_consent"
-        ));
 
         let request = GigaPromotionRequest::new(
             "candidate-project".into(),
@@ -5721,7 +5676,6 @@ mod tests {
             "publication reviewed".into(),
             vec![source.clone()],
             payload(),
-            Some(consent),
             "2026-07-24T12:04:00Z".into(),
         )
         .unwrap();

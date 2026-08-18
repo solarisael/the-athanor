@@ -9,8 +9,8 @@
 //! scope, remind beside block, unknown extension beside known).
 
 use athanor_substrate::{
-    LessonTriggerMatchParams, LessonTriggerMatchResult, LessonTriggerSurface, LessonUpdateParams,
-    lesson_trigger_match, lesson_update,
+    LessonMutationReceipt, LessonTriggerMatchParams, LessonTriggerMatchResult,
+    LessonTriggerSurface, LessonUpdateParams, lesson_trigger_match, lesson_update,
 };
 use serde_json::{Value, json};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -280,9 +280,10 @@ async fn patch_lesson(
     )
     .await
     {
-        Ok(receipt) => {
-            assert!(receipt.ok, "an accepted patch must return an ok receipt");
-            Ok(None)
+        Ok(LessonMutationReceipt::Updated { .. }) => Ok(None),
+        Ok(LessonMutationReceipt::Refused { error, .. }) => Ok(Some(error)),
+        Ok(LessonMutationReceipt::Deleted { .. }) => {
+            Err(std::io::Error::other("lesson update returned a delete receipt").into())
         }
         Err(error) => Ok(Some(error.to_string())),
     }
@@ -298,13 +299,21 @@ async fn patch_lesson(
 #[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn null_cooldown_fires_once_per_session_and_again_in_a_fresh_session() -> TestResult {
     let pool = temp_trigger_pool().await?;
-    insert_trigger(&pool, &Trigger::regex(901, "No unwrap in the hot path", "unwrap\\(\\)")).await?;
+    insert_trigger(
+        &pool,
+        &Trigger::regex(901, "No unwrap in the hot path", "unwrap\\(\\)"),
+    )
+    .await?;
 
     let first = match_surfaces(
         &pool,
         "kodo",
         "session-a",
-        vec![tool_surface("edit", "src/hot.rs", "let value = maybe.unwrap();")],
+        vec![tool_surface(
+            "edit",
+            "src/hot.rs",
+            "let value = maybe.unwrap();",
+        )],
     )
     .await?;
     assert_eq!(fired_ids(&first), vec![901], "first tool surface must fire");
@@ -314,7 +323,11 @@ async fn null_cooldown_fires_once_per_session_and_again_in_a_fresh_session() -> 
         &pool,
         "kodo",
         "session-a",
-        vec![tool_surface("edit", "src/hot.rs", "let other = maybe.unwrap();")],
+        vec![tool_surface(
+            "edit",
+            "src/hot.rs",
+            "let other = maybe.unwrap();",
+        )],
     )
     .await?;
     assert!(
@@ -332,7 +345,11 @@ async fn null_cooldown_fires_once_per_session_and_again_in_a_fresh_session() -> 
         &pool,
         "kodo",
         "session-b",
-        vec![tool_surface("edit", "src/hot.rs", "let third = maybe.unwrap();")],
+        vec![tool_surface(
+            "edit",
+            "src/hot.rs",
+            "let third = maybe.unwrap();",
+        )],
     )
     .await?;
     assert_eq!(
@@ -367,7 +384,11 @@ async fn elapsed_cooldown_refires_while_a_live_cooldown_stays_silent() -> TestRe
         &pool,
         "kodo",
         "session-c",
-        vec![tool_surface("write", "src/lib.rs", "fn pending() { todo!() }")],
+        vec![tool_surface(
+            "write",
+            "src/lib.rs",
+            "fn pending() { todo!() }",
+        )],
     )
     .await?;
     assert_eq!(
@@ -416,8 +437,14 @@ async fn every_fire_writes_its_ledger_row_and_dies_with_its_lesson() -> TestResu
     assert_eq!(row.try_get::<String, _>("room")?, "kodo");
     assert_eq!(row.try_get::<String, _>("session_id")?, "session-d");
     assert_eq!(row.try_get::<String, _>("surface")?, "tool");
-    assert_eq!(row.try_get::<Option<String>, _>("tool_name")?.as_deref(), Some("write"));
-    assert_eq!(row.try_get::<Option<String>, _>("path")?.as_deref(), Some("scripts/run.py"));
+    assert_eq!(
+        row.try_get::<Option<String>, _>("tool_name")?.as_deref(),
+        Some("write")
+    );
+    assert_eq!(
+        row.try_get::<Option<String>, _>("path")?.as_deref(),
+        Some("scripts/run.py")
+    );
     assert_eq!(row.try_get::<String, _>("pattern_kind")?, "regex");
     assert_eq!(row.try_get::<String, _>("matched_pattern")?, "eval\\(");
     assert_eq!(
@@ -459,7 +486,11 @@ async fn foreign_room_scope_never_fires_while_house_and_own_room_do() -> TestRes
         &pool,
         "kodo",
         "session-e",
-        vec![tool_surface("edit", "src/audio.rs", "let sample_rate = 48_000;")],
+        vec![tool_surface(
+            "edit",
+            "src/audio.rs",
+            "let sample_rate = 48_000;",
+        )],
     )
     .await?;
     assert_eq!(
@@ -659,7 +690,10 @@ async fn healthy_zero_warning_response_still_serializes_an_empty_warnings_array(
         "patternKind",
         "pattern",
     ] {
-        assert!(entry.get(key).is_some(), "fired entry is missing {key}: {entry}");
+        assert!(
+            entry.get(key).is_some(),
+            "fired entry is missing {key}: {entry}"
+        );
     }
     assert_eq!(fired_wire.get("warnings"), Some(&json!([])));
     Ok(())
@@ -683,10 +717,11 @@ async fn invalid_trigger_specs_are_refused_by_the_write_path() -> TestResult {
         (json!({ "interruptMode": "scream" }), "interruptMode"),
     ] {
         let refusal = patch_lesson(&pool, 981, "Validated lesson", patch.clone()).await?;
-        let error = refusal
-            .unwrap_or_else(|| panic!("{patch} must be refused, not accepted"));
+        let error = refusal.unwrap_or_else(|| panic!("{patch} must be refused, not accepted"));
         assert!(
-            error.to_ascii_lowercase().contains(&expectation.to_ascii_lowercase()),
+            error
+                .to_ascii_lowercase()
+                .contains(&expectation.to_ascii_lowercase()),
             "refusal for {patch} must name the offending field, got {error}"
         );
     }
@@ -697,11 +732,15 @@ async fn invalid_trigger_specs_are_refused_by_the_write_path() -> TestResult {
     )
     .fetch_one(&pool)
     .await?;
-    assert_eq!(row.try_get::<Vec<String>, _>("condition")?, vec!["ok".to_string()]);
+    assert_eq!(
+        row.try_get::<Vec<String>, _>("condition")?,
+        vec!["ok".to_string()]
+    );
     assert!(row.try_get::<Vec<String>, _>("ast_condition")?.is_empty());
     assert!(row.try_get::<Vec<String>, _>("trigger_scope")?.is_empty());
     assert!(
-        row.try_get::<Option<String>, _>("interrupt_mode")?.is_none(),
+        row.try_get::<Option<String>, _>("interrupt_mode")?
+            .is_none(),
         "a refused write must leave the row untouched"
     );
 

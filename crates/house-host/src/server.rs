@@ -731,10 +731,7 @@ async fn shell_response(state: &AppState, meta: CommandMeta, result: Value) -> R
     }
 }
 
-fn resolve_room_dir<'a>(
-    requested: Option<&'a str>,
-    config: &'a HostConfig,
-) -> Cow<'a, str> {
+fn resolve_room_dir<'a>(requested: Option<&'a str>, config: &'a HostConfig) -> Cow<'a, str> {
     match requested.filter(|room_dir| !room_dir.trim().is_empty()) {
         Some(room_dir) => Cow::Borrowed(room_dir),
         None => config.room_dir.to_string_lossy(),
@@ -1377,8 +1374,6 @@ fn event_meta_for_projection(
         visibility: "operator".into(),
         authority_class: "room_state".into(),
         created_at: timestamp(),
-        expires_at: None,
-        max_hops: 1,
         projection_id: projection_id.into(),
         sequence,
         state_hash,
@@ -1429,8 +1424,6 @@ fn receipt_snapshot(
             created_at: receipt
                 .map(|value| value.processed_at.clone())
                 .unwrap_or_else(timestamp),
-            expires_at: None,
-            max_hops: 1,
             projection_id: PAPER_BOAT_RECEIPT_PROJECTION_ID.into(),
             sequence,
             state_hash,
@@ -1657,9 +1650,6 @@ mod tests {
             nats_url: None,
         };
 
-        assert_eq!(
-            resolve_room_dir(None, &config).as_ref(),
-            "configured-room"
-        );
+        assert_eq!(resolve_room_dir(None, &config).as_ref(), "configured-room");
     }
 }

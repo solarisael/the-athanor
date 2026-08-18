@@ -1,8 +1,8 @@
 use crate::AppError;
 use house_core::hallway::{
-    HallwayCreateRequest, HallwayJoinRequest, HallwayMessage, HallwayPostReceipt,
-    HallwayPostRequest, HallwayPresenceReceipt, HallwayReadReceipt, HallwayReadRequest,
-    HallwayReceipt,
+    HallwayCreateDisposition, HallwayCreateRequest, HallwayJoinDisposition, HallwayJoinRequest,
+    HallwayMessage, HallwayPostDisposition, HallwayPostReceipt, HallwayPostRequest,
+    HallwayPresenceReceipt, HallwayReadReceipt, HallwayReadRequest, HallwayReceipt,
 };
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Row, Transaction};
@@ -146,8 +146,11 @@ pub async fn hallway_create(
     Ok(HallwayReceipt {
         ok: true,
         hallway: request.hallway,
-        created,
-        duplicate: !created,
+        disposition: if created {
+            HallwayCreateDisposition::Created
+        } else {
+            HallwayCreateDisposition::Duplicate
+        },
         operator_visible: true,
         wake_policy: "manual".into(),
     })
@@ -227,8 +230,11 @@ pub async fn hallway_join(
         room: request.room,
         spirit: request.spirit,
         session: request.session,
-        joined,
-        duplicate: !joined,
+        disposition: if joined {
+            HallwayJoinDisposition::Joined
+        } else {
+            HallwayJoinDisposition::Duplicate
+        },
         read_cursor: cursor,
     })
 }
@@ -296,7 +302,7 @@ pub async fn hallway_post(
         tx.commit().await?;
         return Ok(HallwayPostReceipt {
             ok: true,
-            duplicate: true,
+            disposition: HallwayPostDisposition::Duplicate,
             message,
         });
     }
@@ -344,7 +350,7 @@ pub async fn hallway_post(
     tx.commit().await?;
     Ok(HallwayPostReceipt {
         ok: true,
-        duplicate: false,
+        disposition: HallwayPostDisposition::Posted,
         message,
     })
 }

@@ -1,6 +1,6 @@
 use crate::backup;
 use crate::config::{
-    AppError, Config, HTTP_CLIENT, PATH_DATE_RE, ROOM_KEY_RE, STITCHED_PATH_DATE_RE,
+    AppError, Config, EmbeddingMode, HTTP_CLIENT, PATH_DATE_RE, ROOM_KEY_RE, STITCHED_PATH_DATE_RE,
 };
 use chrono::{Local, NaiveDate};
 use house_core::lesson_triggers::LessonTriggerSpec;
@@ -274,9 +274,7 @@ impl RememberRequest {
                     "project is required for project lessons".into(),
                 ));
             }
-            self.trigger_spec()
-                .validate()
-                .map_err(AppError::Invalid)?;
+            self.trigger_spec().validate().map_err(AppError::Invalid)?;
         } else {
             return Err(AppError::Invalid("unsupported remember kind".into()));
         }
@@ -393,26 +391,36 @@ pub(crate) async fn prepare_memory_write(
     let dates = derive_dates(source_path, primary_date);
     let chunks = chunk_body(body);
     let mut warnings = Vec::new();
-    let vectors = if cfg.test_embedding_disabled {
-        warnings.push("semantic embeddings disabled; lexical chunks retained".into());
-        None
-    } else {
-        let url = cfg
-            .embed_url
-            .as_deref()
-            .ok_or_else(|| AppError::Embedding("embedding endpoint is required".into()))?;
-        let vectors = embed(
-            &HTTP_CLIENT,
-            url,
-            &cfg.embed_model,
-            &chunks,
-            cfg.embed_dimension,
-        )
-        .await?;
-        if vectors.len() != chunks.len() {
-            return Err(AppError::Embedding("embedding count mismatch".into()));
+    let vectors = match cfg.embedding_mode {
+        EmbeddingMode::Disabled => {
+            warnings
+                .push("semantic embeddings disabled in production; lexical chunks retained".into());
+            None
         }
-        Some(vectors)
+        EmbeddingMode::DisabledForTest => {
+            warnings.push(
+                "semantic embeddings disabled for isolated test; lexical chunks retained".into(),
+            );
+            None
+        }
+        EmbeddingMode::Required => {
+            let url = cfg
+                .embed_url
+                .as_deref()
+                .ok_or_else(|| AppError::Embedding("embedding endpoint is required".into()))?;
+            let vectors = embed(
+                &HTTP_CLIENT,
+                url,
+                &cfg.embed_model,
+                &chunks,
+                cfg.embed_dimension,
+            )
+            .await?;
+            if vectors.len() != chunks.len() {
+                return Err(AppError::Embedding("embedding count mismatch".into()));
+            }
+            Some(vectors)
+        }
     };
     Ok(PreparedMemoryWrite {
         primary_date,

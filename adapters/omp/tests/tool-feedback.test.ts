@@ -80,6 +80,8 @@ const HOUSE_TOOL_NAMES = [
   "hallway_create",
   "hallway_join",
   "hallway_post",
+  "hallway_knock_policy",
+  "hallway_knock",
   "hallway_read",
   "hallway_inbox",
 ];

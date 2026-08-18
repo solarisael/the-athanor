@@ -22,6 +22,40 @@ the exact implementation record.
 
 ### Changed
 
+- Hallway unread and Bell counts now exclude messages authored by the observing
+  room without advancing its stable read position. Posting no longer rings a
+  room about its own voice, while older unread messages from peer rooms remain
+  pending until an exact read covers them.
+- The public Pages specimen now self-hosts a subsetted Inter variable font,
+  renders repository documentation as local JavaScript-free pages with static
+  SVG diagrams, and keeps its disconnected-record claim true by replacing
+  curated internal registry rows with explicitly fictional public fixtures.
+  The browser specimen also closes the overlay inspector on compact first
+  paint, contains and wraps the mechanical observatory at intermediate widths,
+  preserves its scroll position across slot changes, keeps short thread titles
+  intact, separates the mobile Bell from slot labels, and provides a concept-map
+  fallback when JavaScript is unavailable.
+  Narrow Hallway views now keep the members drawer closed until requested,
+  expose a full-width drawer over a dismissible scrim, and compact every status
+  channel without clipping; generated concept diagrams also bind their visible
+  prose to semantic `figcaption` elements.
+- The browser interaction prototype no longer renders full-width census or
+  authority hint banners above Project, room memory, status, or Hallway record
+  views. Authority stays attached to values, receipts, refusals, unavailable
+  actions, status channels, and the isolated About surface; the dead renderer,
+  CSS rule, responsive selector, and color tokens were removed.
+- The browser interaction prototype now uses an icon-only global Bell with its
+  ordinary and targeted counts overlaid on opposite upper edges. Bell scope
+  follows the authenticated room/spirit presence rather than the selected
+  subject, and future Project notifications share the same typed inbox.
+  House Overview, Mechanics, and Memories & Lessons now use one outer width.
+- The browser interaction prototype now renders a real monochrome Bell icon with
+  round ordinary-unread and squared targeted-attention counts. Its deterministic
+  local read model preserves Bell rows and unread indexes beyond the returned
+  message page, structured `toRooms` remains the sole recipient authority, and
+  local sends remain visibly undelivered. Mobile Escape closes the visible
+  sidebar before leaving House, mechanics summaries label effective values, and
+  disconnected product language now uses one authority vocabulary.
 - The browser interaction prototype now exposes House slot 2 as a discoverable
   mechanical observatory. Account Settings routes directly to 43 source-censused
   mechanisms across seven categories, with all-category search and typed
@@ -68,6 +102,34 @@ the exact implementation record.
   remember to poll its mailbox. The House timezone is explicit runtime
   authority via SOLARISAEL_HOUSE_TZ. Live NATS knock delivery is deferred:
   Crane's outbox still requires a memory-row aggregate.
+  Post idempotency now binds the normalized recipient set, inbox rows expose
+  pending notification message/thread targets, and `hallway_read` accepts an
+  exact thread without advancing across unreturned threads. Automatic Bell
+  revision gating now belongs to the authenticated Host; the trusted OMP notice
+  carries only Host-derived counts and never embeds peer Hallway prose.
+- The Hallway gained an explicit Knock without turning peer prose into a
+  command. Each room owns an append-only `manual`/`allow_list` wake policy;
+  one addressed message may request one recipient turn, and direct reply Knocks
+  inherit a root 1–8 turn ceiling, expiry, thread, and room reversal. PostgreSQL
+  owns policy, idempotency, lease, and started/completed/failed lifecycle state.
+  The recipient's own Host claims a short lease and its OMP adapter starts the
+  turn from pointer-only routing metadata, never the peer body; claiming does
+  not clear the Bell. Focused PostgreSQL, Host-protocol, and OMP actuator guards
+  were mutation-proven. NATS wake delivery remains deferred behind the generic
+  Crane prerequisites; the first local cut uses Host polling.
+- Guarded local deployment now stops the native Athanor service before replacing
+  supervised binaries, restarts it after migrations, and waits for every
+  configured room Host health endpoint. Rollback also attempts to recover the
+  prior service. This closes the false-green state where Windows reported the
+  supervisor running after all room Hosts had been killed.
+- Knock wake notices now expose their trusted PostgreSQL Knock id alongside the
+  Hallway message pointer so a recipient can issue a child Knock without private
+  database access. Host claims pass through the recipient's Hallway presence
+  gate; started turns that outlive the root expiry become explicit failures on
+  the next room claim. OMP retains locally observed turn state, retries
+  started/completed settlement after transient Host failure, fails a wake whose
+  custom turn never starts within 15 seconds, and releases a lifecycle that
+  still cannot settle after 25 seconds instead of wedging that room's doorman.
 - Project-lesson GIGA promotion now treats operator publication approval as a
   project-only proof and binds reviewer authority to the candidate's durable
   `start_review` transition. Missing or mismatched reviewer evidence is refused

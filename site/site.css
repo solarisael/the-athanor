@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("fonts/InterVariable.woff2") format("woff2");
+}
+
 :root {
   color-scheme: dark;
 
@@ -508,6 +516,168 @@ footer {
 
 footer strong {
   color: var(--text);
+}
+
+.noscript-note {
+  max-width: 35rem;
+  margin: calc(-1 * var(--space-3)) 0 var(--space-4);
+
+  font-size: 0.85rem;
+
+  color: var(--text-soft);
+}
+
+.documentation-shell {
+  padding-block: clamp(var(--space-6), 7vw, var(--space-8));
+}
+
+.documentation-content {
+  width: min(100%, 54rem);
+  margin-inline: auto;
+
+  overflow-wrap: break-word;
+}
+
+.documentation-content h1 {
+  margin-bottom: var(--space-6);
+
+  font-size: clamp(2.5rem, 7vw, 5rem);
+  font-weight: 650;
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+}
+
+.documentation-content h2 {
+  margin: var(--space-7) 0 var(--space-3);
+  padding-top: var(--space-4);
+  border-top: var(--rule);
+
+  font-size: clamp(1.55rem, 4vw, 2.4rem);
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.documentation-content h3 {
+  margin: var(--space-5) 0 var(--space-2);
+
+  font-size: 1.15rem;
+  line-height: 1.25;
+}
+
+.documentation-content p,
+.documentation-content li {
+  line-height: 1.7;
+
+  color: var(--text-soft);
+}
+
+.documentation-content li + li {
+  margin-top: var(--space-1);
+}
+
+.documentation-content strong,
+.documentation-content th {
+  color: var(--text);
+}
+
+.documentation-content :not(pre) > code {
+  padding: 0.12em 0.35em;
+  border: var(--rule);
+  border-radius: var(--radius-small);
+
+  font-size: 0.88em;
+
+  background: var(--surface);
+  color: var(--text);
+}
+
+.documentation-content pre {
+  margin-block: var(--space-4);
+  padding: var(--space-4);
+  border: var(--rule);
+  border-radius: var(--radius);
+
+  font-size: 0.82rem;
+  line-height: 1.6;
+
+  background: var(--surface-deep);
+  color: var(--text-soft);
+
+  overflow-x: auto;
+}
+
+.documentation-content table {
+  display: block;
+
+  width: 100%;
+  margin-block: var(--space-5);
+  border-collapse: collapse;
+
+  overflow-x: auto;
+}
+
+.documentation-content th,
+.documentation-content td {
+  min-width: 8rem;
+  padding: var(--space-2) var(--space-3);
+  border: var(--rule);
+
+  text-align: left;
+  vertical-align: top;
+}
+
+.documentation-content blockquote {
+  margin: var(--space-5) 0;
+  padding: var(--space-2) 0 var(--space-2) var(--space-4);
+  border-left: var(--rule-strong);
+}
+
+.documentation-content blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.documentation-content hr {
+  margin-block: var(--space-7);
+  border: 0;
+  border-top: var(--rule);
+}
+
+.doc-diagram {
+  margin: var(--space-6) 0;
+  padding: var(--space-4);
+  border: var(--rule);
+  border-radius: var(--radius);
+
+  background: var(--surface);
+}
+
+.doc-diagram img {
+  display: block;
+
+  width: 100%;
+  max-height: 42rem;
+
+  object-fit: contain;
+}
+
+.doc-diagram figcaption {
+  margin-top: var(--space-3);
+
+  line-height: 1.6;
+
+  color: var(--text-soft);
+}
+
+.doc-diagram details {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: var(--rule);
+
+  color: var(--text-dim);
+}
+
+.doc-diagram summary {
+  cursor: pointer;
 }
 
 @media (max-width: 58rem) {

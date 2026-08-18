@@ -1,23 +1,13 @@
-# Explaining The Athanor
+# The concept map
 
-This page is for an AI agent or person who needs to explain The Athanor to a
-peer, operator, user, engineer, or decision-maker without inventing a different
-product for each audience.
-
-Use the same canonical graph every time. Change the traversal order and depth,
-not the definitions.
-
-## Canonical one-sentence explanation
+Every explanation of The Athanor traverses one graph. Only the depth changes;
+the definitions do not.
 
 > The Athanor is infrastructure that gives AI tools bounded, attributed access
 > to project knowledge and, when needed, durable governed continuity that can
 > survive closed sessions and changing model processes.
 
-For an ordinary work user, lead with better project context. For an agent-systems
-engineer, lead with authority and cognitive offloading. Do not lead either group
-through concepts they do not need yet.
-
-## The concept graph
+## One system, any depth
 
 ```mermaid
 flowchart TB
@@ -41,7 +31,14 @@ flowchart TB
     ROUTE --> LANES[Worker lanes and familiars]
 ```
 
-## Definitions that must remain stable
+<p class="diagram-caption">
+Three core contracts—retrieval, continuity, and worker routing—sit inside one
+House with bounded rooms. Retrieval has a light path through plain files and a
+governed path through typed PostgreSQL authority. GIGA sits above storage and
+produces candidates; generation alone never creates truth.
+</p>
+
+## Words that keep their meaning
 
 ### The Athanor
 
@@ -105,15 +102,15 @@ an autonomous agent.
 A compact living handoff from one closed session to the next waking session in
 the same room. It is continuity, not the entire memory map.
 
-## Explain it to a work user
+## The short path for project work
 
-Lead with the problem they can see:
+Project work begins with the problem the operator can see:
 
 > Your AI tool only works with the context it has. The Athanor can search one or
 > several project corpora, return the relevant passages with their sources, and
 > preserve important decisions when you opt into its durable memory profile.
 
-Then show this path:
+The path stays short:
 
 ```mermaid
 flowchart LR
@@ -124,21 +121,25 @@ flowchart LR
     TOOL --> RESULT[Work you can inspect]
 ```
 
-Mention AKASHA only if the user needs durable typed decisions, semantic recall,
-lessons, chronology, or a larger governed archive.
+<p class="diagram-caption">
+Your projects and question go into Vault. Bounded excerpts come back with their
+sources, the tool does the work, and every claim remains inspectable.
+</p>
 
-Do not begin with latent space, sovereign identity, GIGA anatomy, or future
-marketplaces. Those are not required to understand the immediate work value.
+AKASHA enters only when the work needs durable typed decisions, semantic
+recall, lessons, chronology, or a larger governed archive. None of those
+concepts are required to understand the immediate value of attributed project
+context.
 
-## Explain it to an AI or agent-systems engineer
+## The architectural path
 
-Lead with the architectural distinction:
+The architectural distinction is:
 
 > The Athanor separates model judgment from continuity, retrieval, authority,
 > provenance, and repeated deterministic cognition. The active model is a
 > replaceable body operating inside those contracts, not the database of truth.
 
-Then explain:
+That path has five parts:
 
 1. Vault supplies attributed project retrieval without infrastructure weight.
 2. AKASHA supplies typed PostgreSQL authority and hybrid retrieval.
@@ -150,9 +151,9 @@ Then explain:
 
 Continue with [For latent-space explorers](./FOR_EXPLORERS.md).
 
-## Explain it to another agent that must use it
+## The operational traversal
 
-Give the agent this traversal:
+The operational traversal is explicit:
 
 ```text
 Need current project facts?
@@ -180,7 +181,7 @@ The agent should read [Usage](../USAGE.md) for operation names and
 [Architecture](./ARCHITECTURE.md) for authority boundaries before teaching
 behavior it has not verified.
 
-## A thirty-second explanation
+## Thirty seconds
 
 > The Athanor makes AI tools more reliable on real projects by controlling how
 > they receive context. Vault can search local project files and return bounded
@@ -189,7 +190,7 @@ behavior it has not verified.
 > governed cognitive workers. The model can change; the sources, authority, and
 > continuity contracts remain inspectable.
 
-## A two-minute explanation
+## Two minutes
 
 > Most AI tools either forget between sessions or recover context by dumping
 > files, transcript summaries, and vector-search results into a prompt. That can
@@ -211,9 +212,9 @@ behavior it has not verified.
 > Cingulate, NATS delivery, OMEGA, and ANON—remain roadmap rather than shipped
 > claims.
 
-## Misconceptions to reject
+## What The Athanor is not
 
-Do not describe The Athanor as:
+The Athanor is not:
 
 - merely a chatbot memory plugin;
 - a vector database with mythology around it;
@@ -226,7 +227,7 @@ Do not describe The Athanor as:
 - a system where GIGA candidates, retrieved memories, or Anamnesis counsel are
   automatically authoritative.
 
-Also do not collapse these pairs:
+The distinctions below carry the architecture:
 
 | Keep distinct | Why |
 |---|---|

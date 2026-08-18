@@ -6,6 +6,7 @@ use crate::store::{
     timestamp,
 };
 use crate::viewport::{ViewportSession, apply_viewport};
+use athanor_substrate::{AppError, hallway_inbox, hallway_knock_claim, hallway_knock_settle};
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -19,6 +20,9 @@ use house_core::conversation::{
     source_ledger_directory, source_ledger_entry, source_ledger_path, transcript_debug_path,
     transcript_entry, transcript_path, turn_key, turn_label, turn_marker,
 };
+use house_core::hallway::{
+    HallwayInboxRequest, HallwayKnockClaimRequest, HallwayKnockSettleRequest,
+};
 use house_core::lineage::{QuestLifecycle, normalize_lifecycle_memory, normalize_quest_memories};
 use house_core::routing::{
     DispatchRequest, LoadedSpellbook, SpellbookRead, familiar_status, house_dispatch, lane_status,
@@ -28,18 +32,21 @@ use house_core::triggers::{process_lesson_plan, process_lesson_reminder};
 use house_protocol::{
     BOAT_RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT, CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID,
     CONTEXT_VIEWPORTED, ClientCommand, CommandMeta, CommandOutcomeEvent, ContextAnalysisEvent,
-    ContextViewportEvent, ConversationLogRequest, DeltaEvent, EventMeta, HOST_SCHEMA_VERSION,
-    LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
-    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
-    PaperBoatReceiptEvent, PaperBoatReceiptState, RECALL_POLICY_COMMAND_ACCEPTED,
-    RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA,
-    RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE,
-    ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallPolicyDecision, RecallPolicyMutation,
-    RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT, ShellResultEvent,
-    SnapshotEvent, parse_client_command,
+    ContextViewportEvent, ConversationLogRequest, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED,
+    HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED,
+    HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
+    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID,
+    LineageResultEvent, PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT,
+    PAPER_BOAT_RECEIPT_SUBSCRIBE, PaperBoatReceiptEvent, PaperBoatReceiptState,
+    RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED,
+    RECALL_POLICY_DELTA, RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT,
+    RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallPolicyDecision,
+    RecallPolicyMutation, RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT,
+    ShellResultEvent, SnapshotEvent, parse_client_command,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use sqlx::postgres::PgPoolOptions;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::Future;
@@ -54,6 +61,7 @@ struct RuntimeState {
     projection: RecallPolicyState,
     sessions: HashMap<String, RecallPolicySession>,
     viewport_sessions: HashMap<String, ViewportSession>,
+    hallway_inbox_fingerprints: HashMap<String, String>,
     cursor: ProjectionCursor,
     durable: HostDurableStore,
 }
@@ -63,6 +71,7 @@ struct AppState {
     config: Arc<HostConfig>,
     room_store: RoomStateStore,
     runtime: Arc<Mutex<RuntimeState>>,
+    hallway_pool: Option<sqlx::PgPool>,
     cancellation: CancellationToken,
     tasks: TaskTracker,
     deltas: broadcast::Sender<String>,
@@ -77,6 +86,12 @@ pub struct Host {
 impl Host {
     pub fn new(config: HostConfig) -> Result<Self, String> {
         config.validate()?;
+        let hallway_pool = config
+            .database_url
+            .as_deref()
+            .map(|url| PgPoolOptions::new().max_connections(2).connect_lazy(url))
+            .transpose()
+            .map_err(|error| format!("Host DATABASE_URL is invalid: {error}"))?;
         let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone());
         let projection = room_store.load()?;
         let (durable, cursor, mut sessions) =
@@ -101,9 +116,11 @@ impl Host {
                     projection,
                     sessions,
                     viewport_sessions: HashMap::new(),
+                    hallway_inbox_fingerprints: HashMap::new(),
                     cursor,
                     durable,
                 })),
+                hallway_pool,
                 cancellation: CancellationToken::new(),
                 tasks: TaskTracker::new(),
                 deltas,
@@ -600,6 +617,11 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
                 delta: None,
             }
         }
+        ClientCommand::ProjectHallwayInbox { meta } => project_hallway_inbox(state, meta).await,
+        ClientCommand::ClaimHallwayKnock { meta } => claim_hallway_knock(state, meta).await,
+        ClientCommand::SettleHallwayKnock { meta, request } => {
+            settle_hallway_knock(state, meta, request).await
+        }
         ClientCommand::RoutingStatus { meta } => {
             routing_response(
                 state,
@@ -654,6 +676,213 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             let reminder = process_lesson_reminder(request.trigger.as_deref(), &request.lessons);
             shell_response(state, meta, json!({ "reminder": reminder })).await
         }
+    }
+}
+
+fn hallway_projection_changed(previous: Option<&str>, current: &str, ringing: bool) -> bool {
+    previous != Some(current) && (ringing || previous.is_some())
+}
+
+async fn project_hallway_inbox(state: &AppState, meta: CommandMeta) -> Responses {
+    let Some(pool) = state.hallway_pool.as_ref() else {
+        let failed = outcome(
+            state,
+            &meta,
+            RECALL_POLICY_COMMAND_FAILED,
+            Some("Hallway projection requires DATABASE_URL".into()),
+        )
+        .await;
+        return Responses {
+            direct: vec![serialize(&failed)],
+            delta: None,
+        };
+    };
+    let inbox = match hallway_inbox(
+        pool,
+        HallwayInboxRequest {
+            room: meta.sender_room.clone(),
+            spirit: meta.sender_spirit.clone(),
+            session: meta.sender_session.clone(),
+        },
+    )
+    .await
+    {
+        Ok(inbox) => inbox,
+        Err(error) => {
+            let failed = outcome(
+                state,
+                &meta,
+                RECALL_POLICY_COMMAND_FAILED,
+                Some(format!("Hallway projection failed: {error}")),
+            )
+            .await;
+            return Responses {
+                direct: vec![serialize(&failed)],
+                delta: None,
+            };
+        }
+    };
+    let inbox_value = serde_json::to_value(&inbox).expect("Hallway inbox serializes");
+    let fingerprint = body_hash(&inbox_value).expect("Hallway inbox hashes");
+    let ringing = inbox
+        .hallways
+        .iter()
+        .any(|entry| entry.unread > 0 || entry.mentions > 0);
+    let mut runtime = state.runtime.lock().await;
+    let previous = runtime
+        .hallway_inbox_fingerprints
+        .insert(meta.sender_session.clone(), fingerprint.clone());
+    let changed = hallway_projection_changed(previous.as_deref(), &fingerprint, ringing);
+    let event = HallwayInboxProjectionEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(&meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            HALLWAY_INBOX_PROJECTED,
+            HALLWAY_PROJECTION_ID,
+            runtime.cursor.sequence,
+            fingerprint,
+            new_id(),
+        ),
+        changed,
+        inbox,
+    };
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
+    }
+}
+
+async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
+    let Some(pool) = state.hallway_pool.as_ref() else {
+        let failed = outcome(
+            state,
+            &meta,
+            HALLWAY_KNOCK_COMMAND_FAILED,
+            Some("Hallway Knock claim requires DATABASE_URL".into()),
+        )
+        .await;
+        return Responses {
+            direct: vec![serialize(&failed)],
+            delta: None,
+        };
+    };
+    match hallway_knock_claim(
+        pool,
+        HallwayKnockClaimRequest {
+            room: meta.sender_room.clone(),
+            spirit: meta.sender_spirit.clone(),
+            session: meta.sender_session.clone(),
+        },
+    )
+    .await
+    {
+        Ok(result) => {
+            let result_value =
+                serde_json::to_value(&result).expect("Hallway Knock claim serializes");
+            let runtime = state.runtime.lock().await;
+            let event = HallwayKnockClaimedEvent {
+                meta: event_meta_for_projection(
+                    state,
+                    Some(&meta),
+                    &meta.message_id,
+                    &meta.idempotency_key,
+                    HALLWAY_KNOCK_CLAIMED,
+                    HALLWAY_PROJECTION_ID,
+                    runtime.cursor.sequence,
+                    body_hash(&result_value).expect("Hallway Knock claim hashes"),
+                    new_id(),
+                ),
+                result,
+            };
+            Responses {
+                direct: vec![serialize(&event)],
+                delta: None,
+            }
+        }
+        Err(error) => hallway_knock_error(state, &meta, "claim", error).await,
+    }
+}
+
+async fn settle_hallway_knock(
+    state: &AppState,
+    meta: CommandMeta,
+    request: house_protocol::HallwayKnockSettlePayload,
+) -> Responses {
+    let Some(pool) = state.hallway_pool.as_ref() else {
+        let failed = outcome(
+            state,
+            &meta,
+            HALLWAY_KNOCK_COMMAND_FAILED,
+            Some("Hallway Knock settlement requires DATABASE_URL".into()),
+        )
+        .await;
+        return Responses {
+            direct: vec![serialize(&failed)],
+            delta: None,
+        };
+    };
+    match hallway_knock_settle(
+        pool,
+        HallwayKnockSettleRequest {
+            room: meta.sender_room.clone(),
+            spirit: meta.sender_spirit.clone(),
+            session: meta.sender_session.clone(),
+            knock_id: request.knock_id,
+            outcome: request.outcome,
+            reason: request.reason,
+        },
+    )
+    .await
+    {
+        Ok(result) => {
+            let result_value =
+                serde_json::to_value(&result).expect("Hallway Knock settlement serializes");
+            let runtime = state.runtime.lock().await;
+            let event = HallwayKnockSettledEvent {
+                meta: event_meta_for_projection(
+                    state,
+                    Some(&meta),
+                    &meta.message_id,
+                    &meta.idempotency_key,
+                    HALLWAY_KNOCK_SETTLED,
+                    HALLWAY_PROJECTION_ID,
+                    runtime.cursor.sequence,
+                    body_hash(&result_value).expect("Hallway Knock settlement hashes"),
+                    new_id(),
+                ),
+                result,
+            };
+            Responses {
+                direct: vec![serialize(&event)],
+                delta: None,
+            }
+        }
+        Err(error) => hallway_knock_error(state, &meta, "settlement", error).await,
+    }
+}
+
+async fn hallway_knock_error(
+    state: &AppState,
+    meta: &CommandMeta,
+    operation: &str,
+    error: AppError,
+) -> Responses {
+    let (kind, reason) = match error {
+        AppError::Refusal { code, message } => (
+            HALLWAY_KNOCK_COMMAND_REFUSED,
+            format!("Hallway Knock {operation} refused ({code}): {message}"),
+        ),
+        other => (
+            HALLWAY_KNOCK_COMMAND_FAILED,
+            format!("Hallway Knock {operation} failed: {other}"),
+        ),
+    };
+    let event = outcome(state, meta, kind, Some(reason)).await;
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
     }
 }
 
@@ -1630,7 +1859,7 @@ fn new_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_room_dir;
+    use super::{hallway_projection_changed, resolve_room_dir};
     use crate::config::HostConfig;
 
     #[test]
@@ -1646,10 +1875,22 @@ mod tests {
             spirit: "Kodo".into(),
             session: "test-session".into(),
             recipient: "house-host".into(),
+            database_url: None,
             akasha_enabled: false,
             nats_url: None,
         };
 
         assert_eq!(resolve_room_dir(None, &config).as_ref(), "configured-room");
+    }
+    #[test]
+    fn hallway_projection_rings_once_per_host_observed_revision() {
+        assert!(!hallway_projection_changed(None, "quiet", false));
+        assert!(hallway_projection_changed(None, "ringing", true));
+        assert!(!hallway_projection_changed(
+            Some("ringing"),
+            "ringing",
+            true
+        ));
+        assert!(hallway_projection_changed(Some("ringing"), "quiet", false));
     }
 }

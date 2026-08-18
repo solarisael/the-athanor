@@ -86,6 +86,7 @@ fn config(root: &Path) -> HostConfig {
         spirit: "Kintsu".into(),
         session: "operator-session".into(),
         recipient: "house-host".into(),
+        database_url: None,
         akasha_enabled: false,
         nats_url: None,
     }

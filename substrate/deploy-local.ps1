@@ -40,6 +40,8 @@ $substrateStateDir = [IO.Path]::GetFullPath((Join-Path $stateRoot "substrate"))
 $stageTarget = Join-Path $athanorRoot "target\deploy"
 $stagedExe = Join-Path $stageTarget "release\athanor-substrate.exe"
 $stagedPdb = [IO.Path]::ChangeExtension($stagedExe, ".pdb")
+$stagedHostExe = Join-Path $stageTarget "release\house-host.exe"
+$stagedHostPdb = [IO.Path]::ChangeExtension($stagedHostExe, ".pdb")
 $configuredLiveExe = [string]$env:ATHANOR_SUBSTRATE_EXE
 $liveExe = if ([string]::IsNullOrWhiteSpace($configuredLiveExe)) {
     Join-Path $athanorRoot "target\release\athanor-substrate.exe"
@@ -50,8 +52,19 @@ $liveExe = if ([string]::IsNullOrWhiteSpace($configuredLiveExe)) {
 }
 $liveExe = [IO.Path]::GetFullPath($liveExe)
 $livePdb = [IO.Path]::ChangeExtension($liveExe, ".pdb")
+$liveHostExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "house-host.exe"
+$liveHostPdb = [IO.Path]::ChangeExtension($liveHostExe, ".pdb")
+$liveManagerExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "athanor-manage.exe"
 $previousExe = Join-Path $stageTarget "previous\athanor-substrate.exe"
 $previousPdb = [IO.Path]::ChangeExtension($previousExe, ".pdb")
+$previousHostExe = Join-Path $stageTarget "previous\house-host.exe"
+$previousHostPdb = [IO.Path]::ChangeExtension($previousHostExe, ".pdb")
+$liveManifest = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))) "release-manifest.json"
+$previousManifest = Join-Path $stageTarget "previous\release-manifest.json"
+$nativeServiceName = "SolarisaelAthanor"
+$runtimeConfigPath = Join-Path ([Environment]::GetFolderPath("CommonApplicationData")) "Solarisael\Athanor\config\runtime.json"
+$restartNativeService = $false
+
 
 function Invoke-Checked {
     param(
@@ -67,7 +80,7 @@ function Invoke-Checked {
     }
 }
 
-function Get-LiveSubstrateWorkers {
+function Get-LiveWorkers {
     param([Parameter(Mandatory)] [string]$ExecutablePath)
 
     $target = [IO.Path]::GetFullPath($ExecutablePath)
@@ -82,6 +95,55 @@ function Get-LiveSubstrateWorkers {
     }
 }
 
+function Start-NativeRuntimeAndWaitForHosts {
+    param(
+        [Parameter(Mandatory)] [string]$ServiceName,
+        [Parameter(Mandatory)] [string]$RuntimeConfigPath
+    )
+
+    Write-Host "==> starting native Athanor service"
+    $service = Get-Service -Name $ServiceName -ErrorAction Stop
+    if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running) {
+        Start-Service -Name $ServiceName -ErrorAction Stop
+        $service.WaitForStatus(
+            [System.ServiceProcess.ServiceControllerStatus]::Running,
+            [TimeSpan]::FromSeconds(30)
+        )
+    }
+    if (-not (Test-Path $RuntimeConfigPath -PathType Leaf)) {
+        throw "native runtime configuration is missing at $RuntimeConfigPath"
+    }
+    $runtime = Get-Content $RuntimeConfigPath -Raw | ConvertFrom-Json
+    $rooms = @($runtime.rooms)
+    if ($rooms.Count -eq 0) {
+        throw "native runtime configuration contains no room Hosts"
+    }
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        $pending = @()
+        foreach ($room in $rooms) {
+            $roomName = [string]$room.room
+            $port = [int]$room.port
+            try {
+                $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/health" -TimeoutSec 2
+                if ([string]$health.status -ne "ok") {
+                    $pending += "$roomName@$port status=$($health.status)"
+                }
+            } catch {
+                $pending += "$roomName@$port unavailable"
+            }
+        }
+        if ($pending.Count -eq 0) {
+            Write-Host "==> room Host health proof: $($rooms.Count) healthy"
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "room Hosts did not recover within 30 seconds: $($pending -join ', ')"
+}
+
 if (-not (Test-Path (Join-Path $athanorRoot "Cargo.toml") -PathType Leaf)) {
     throw "The Athanor workspace Cargo.toml is missing at $athanorRoot"
 }
@@ -92,9 +154,9 @@ if (-not (Test-Path (Join-Path $athanorRoot "crates\house-substrate\Cargo.toml")
 New-Item -ItemType Directory -Force -Path $stageTarget | Out-Null
 
 if (-not $SkipTests) {
-    Invoke-Checked -Label "Athanor core and protocol tests" -FilePath $Cargo -ArgumentList @(
+    Invoke-Checked -Label "Athanor core, protocol, and Host tests" -FilePath $Cargo -ArgumentList @(
         "test", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-        "-p", "house-core", "-p", "house-protocol"
+        "-p", "house-core", "-p", "house-protocol", "-p", "house-host"
     )
     Invoke-Checked -Label "substrate regression tests" -FilePath $Cargo -ArgumentList @(
         "test", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
@@ -104,10 +166,13 @@ if (-not $SkipTests) {
 
 Invoke-Checked -Label "staged release build" -FilePath $Cargo -ArgumentList @(
     "build", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-    "-p", "athanor-substrate", "--release", "--target-dir", $stageTarget
+    "-p", "athanor-substrate", "-p", "house-host", "--release", "--target-dir", $stageTarget
 )
 if (-not (Test-Path $stagedExe -PathType Leaf)) {
     throw "staged executable was not produced at $stagedExe"
+}
+if (-not (Test-Path $stagedHostExe -PathType Leaf)) {
+    throw "staged Host executable was not produced at $stagedHostExe"
 }
 
 if (-not $SkipBackup) {
@@ -127,17 +192,33 @@ if (-not $SkipBackup) {
     }
 }
 
-$workers = @(Get-LiveSubstrateWorkers -ExecutablePath $liveExe)
-if ($workers.Count -gt 0) {
+$nativeService = Get-Service -Name $nativeServiceName -ErrorAction SilentlyContinue
+if ($null -ne $nativeService -and
+    $nativeService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
+    Write-Host "==> stopping native Athanor service"
+    Stop-Service -Name $nativeServiceName -Force -ErrorAction Stop
+    $nativeService.WaitForStatus(
+        [System.ServiceProcess.ServiceControllerStatus]::Stopped,
+        [TimeSpan]::FromSeconds(30)
+    )
+    $restartNativeService = $true
+}
+
+foreach ($workerPath in @($liveExe, $liveHostExe)) {
+    $workers = @(Get-LiveWorkers -ExecutablePath $workerPath)
+    if ($workers.Count -eq 0) {
+        continue
+    }
+    $workerName = [IO.Path]::GetFileName($workerPath)
     $workerSummary = ($workers | ForEach-Object { "PID=$($_.ProcessId) parent=$($_.ParentProcessId)" }) -join ", "
-    Write-Host "==> stopping exact-path substrate workers: $workerSummary"
+    Write-Host "==> stopping exact-path $workerName workers: $workerSummary"
     foreach ($worker in $workers) {
         Stop-Process -Id $worker.ProcessId -Force -ErrorAction Stop
     }
 
     $deadline = [DateTime]::UtcNow.AddSeconds(10)
     do {
-        $remainingWorkers = @(Get-LiveSubstrateWorkers -ExecutablePath $liveExe)
+        $remainingWorkers = @(Get-LiveWorkers -ExecutablePath $workerPath)
         if ($remainingWorkers.Count -eq 0) {
             break
         }
@@ -145,18 +226,27 @@ if ($workers.Count -gt 0) {
     } while ([DateTime]::UtcNow -lt $deadline)
 
     if ($remainingWorkers.Count -gt 0) {
-        throw "substrate workers did not stop within 10 seconds"
+        throw "$workerName workers did not stop within 10 seconds"
     }
 }
 
 New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($liveExe)) | Out-Null
 New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($previousExe)) | Out-Null
-Remove-Item $previousExe, $previousPdb -Force -ErrorAction SilentlyContinue
+Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManifest -Force -ErrorAction SilentlyContinue
 if (Test-Path $liveExe -PathType Leaf) {
     Move-Item $liveExe $previousExe -Force
 }
 if (Test-Path $livePdb -PathType Leaf) {
     Move-Item $livePdb $previousPdb -Force
+}
+if (Test-Path $liveHostExe -PathType Leaf) {
+    Move-Item $liveHostExe $previousHostExe -Force
+}
+if (Test-Path $liveHostPdb -PathType Leaf) {
+    Move-Item $liveHostPdb $previousHostPdb -Force
+}
+if (Test-Path $liveManifest -PathType Leaf) {
+    Copy-Item $liveManifest $previousManifest -Force
 }
 
 try {
@@ -164,28 +254,82 @@ try {
     if (Test-Path $stagedPdb -PathType Leaf) {
         Copy-Item $stagedPdb $livePdb -Force
     }
+    Copy-Item $stagedHostExe $liveHostExe -Force
+    if (Test-Path $stagedHostPdb -PathType Leaf) {
+        Copy-Item $stagedHostPdb $liveHostPdb -Force
+    }
+    if (Test-Path $liveManifest -PathType Leaf) {
+        $manifest = Get-Content $liveManifest -Raw | ConvertFrom-Json
+        foreach ($binary in @(
+            @{ Path = "bin/athanor-substrate.exe"; Source = $liveExe },
+            @{ Path = "bin/house-host.exe"; Source = $liveHostExe }
+        )) {
+            $entries = @($manifest.artifacts | Where-Object { [string]$_.path -eq $binary.Path })
+            if ($entries.Count -ne 1) {
+                throw "release manifest must contain exactly one $($binary.Path) artifact"
+            }
+            $entries[0].sha256 = (Get-FileHash $binary.Source -Algorithm SHA256).Hash.ToLowerInvariant()
+            $entries[0].size = (Get-Item $binary.Source).Length
+        }
+        $manifestTemporary = "$liveManifest.new-$PID"
+        $manifest | ConvertTo-Json -Depth 8 | Set-Content $manifestTemporary -Encoding utf8NoBOM
+        Move-Item $manifestTemporary $liveManifest -Force
+    }
     Invoke-Checked -Label "ordered database migrations" -FilePath $liveExe -ArgumentList @(
         "migrations"
     )
     Invoke-Checked -Label "semantic vocabulary refresh" -FilePath $liveExe -ArgumentList @(
         "semantic-vocabulary-refresh"
     )
+    if ($restartNativeService) {
+        Start-NativeRuntimeAndWaitForHosts `
+            -ServiceName $nativeServiceName `
+            -RuntimeConfigPath $runtimeConfigPath
+    }
 } catch {
-    Remove-Item $liveExe, $livePdb -Force -ErrorAction SilentlyContinue
+    $deploymentFailure = $_
+    Remove-Item $liveExe, $livePdb, $liveHostExe, $liveHostPdb -Force -ErrorAction SilentlyContinue
     if (Test-Path $previousExe -PathType Leaf) {
         Move-Item $previousExe $liveExe -Force
     }
     if (Test-Path $previousPdb -PathType Leaf) {
         Move-Item $previousPdb $livePdb -Force
     }
-    throw
+    if (Test-Path $previousHostExe -PathType Leaf) {
+        Move-Item $previousHostExe $liveHostExe -Force
+    }
+    if (Test-Path $previousHostPdb -PathType Leaf) {
+        Move-Item $previousHostPdb $liveHostPdb -Force
+    }
+    if (Test-Path $previousManifest -PathType Leaf) {
+        Move-Item $previousManifest $liveManifest -Force
+    }
+    if ($restartNativeService) {
+        try {
+            Start-NativeRuntimeAndWaitForHosts `
+                -ServiceName $nativeServiceName `
+                -RuntimeConfigPath $runtimeConfigPath
+        } catch {
+            Write-Warning "rollback restored the prior binaries, but the native service did not recover: $($_.Exception.Message)"
+        }
+    }
+    throw $deploymentFailure
 }
 
-Remove-Item $previousExe, $previousPdb -Force -ErrorAction SilentlyContinue
+Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManifest -Force -ErrorAction SilentlyContinue
 Invoke-Checked -Label "Full-mode health proof" -FilePath $liveExe -ArgumentList @(
     "health", "--substrate-dir", $substrateRoot
 )
+if (Test-Path $liveManifest -PathType Leaf) {
+    if (-not (Test-Path $liveManagerExe -PathType Leaf)) {
+        throw "installed release manifest exists but native manager is missing at $liveManagerExe"
+    }
+    Invoke-Checked -Label "native release manifest proof" -FilePath $liveManagerExe -ArgumentList @(
+        "doctor"
+    )
+}
 
 Write-Host "==> deployment complete"
 Write-Host "live executable: $liveExe"
+Write-Host "live Host: $liveHostExe"
 Write-Host "restart OMP once before the next Athanor tool call so its transport and TypeScript tool schemas reload"

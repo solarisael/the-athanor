@@ -253,7 +253,7 @@ Sources: `adapters/omp/index.ts`, `adapters/omp/giga.ts`,
 
 ## 5. OMP tool ownership and transport
 
-The current adapter registers 34 tools. A tool name is not an authority claim;
+The current adapter registers 35 tools. A tool name is not an authority claim;
 the owner column names the boundary that actually performs or persists the
 operation.
 
@@ -293,6 +293,9 @@ operation.
 | `hallway_join` | Rust JSONL -> Hallway store |
 | `hallway_post` | Rust JSONL -> Hallway store |
 | `hallway_read` | Rust JSONL -> Hallway store |
+| `hallway_inbox` | Rust JSONL manual read; Host-owned automatic projection |
+| `hallway_knock_policy` | Rust JSONL -> append-only room-owned Hallway wake policy |
+| `hallway_knock` | Rust JSONL -> bounded Hallway Knock lifecycle |
 
 ```mermaid
 flowchart LR
@@ -318,6 +321,13 @@ flowchart LR
 IDs. A timeout after dispatch is explicitly outcome-unknown because replaying a
 write could duplicate an operation whose response was merely lost.
 
+Hallway Knock actuation follows a separate local path. The recipient Host claims
+one PostgreSQL pointer under a short session lease; the OMP doorman includes only
+trusted routing IDs in its custom wake message and invokes `pi.sendMessage` for
+one turn. The spirit reads the exact Hallway message through the ordinary
+untrusted social path. Started/completed/failed settlement returns through Host;
+claiming never advances a Hallway read cursor or clears a Bell row.
+
 Sources: `adapters/omp/solarisael-house-proof/tools.ts`,
 `adapters/omp/rust-transport.ts`, `adapters/omp/solarisael-house-proof/host.ts`.
 
@@ -340,7 +350,7 @@ flowchart TD
 
     Router --> Continuity["canon, remember, paper boat,<br/>recall, entity, anamnesis"]
     Router --> Knowledge["lesson, lesson context/triggers,<br/>design documents, cluster"]
-    Router --> Social["Hallway create/join/post/read"]
+    Router --> Social["Hallway create/join/post/read/inbox<br/>Knock policy/create"]
     Router --> Giga["GIGA ingest, queue, worker,<br/>review, promotion, health"]
     Router --> Ops["substrate health and maintenance"]
 

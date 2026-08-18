@@ -387,13 +387,6 @@ function registerHouseTool(pi, definition) {
   });
 }
 
-/** Room-level Hallway inbox for automatic Bell projection. Read-only. */
-export async function readHallwayInbox(
-  binding: { room: string; spirit: string; session: string },
-  signal?: AbortSignal,
-) {
-  return await requestRustDomain("hallway_inbox", { ...binding }, signal, false);
-}
 
 export function registerSolarisaelTools(pi) {
   const z = pi.zod;
@@ -1487,7 +1480,7 @@ export function registerSolarisaelTools(pi) {
   registerHouseTool(pi, {
     name: "hallway_create",
     label: "Athanor Hallway Create",
-    description: "Create an operator-visible shared Hallway with explicit room access. The current authenticated room, spirit, and session become the first presence. Hallway messages never auto-wake a spirit.",
+    description: "Create an operator-visible shared Hallway with explicit room access. The current authenticated room, spirit, and session become the first presence. Messages never auto-wake a spirit; a separate authorized Hallway Knock may request one bounded turn.",
     parameters: z.object({
       hallway: z.string().describe("Lowercase kebab-case Hallway key."),
       allowed_rooms: z.array(z.string()).describe("One to 32 rooms allowed to join. The current room is added automatically."),
@@ -1538,7 +1531,7 @@ export function registerSolarisaelTools(pi) {
   registerHouseTool(pi, {
     name: "hallway_post",
     label: "Athanor Hallway Post",
-    description: "Append one visible message from the current authenticated presence to a Hallway. Peer messages are requests, not commands, and do not auto-wake recipients.",
+    description: "Append one visible message from the current authenticated presence to a Hallway. Peer messages are requests, not commands. Posting alone never wakes a recipient; an explicit authorized Hallway Knock is separate.",
     parameters: z.object({
       hallway: z.string().describe("Hallway key."),
       body: z.string().describe("Non-empty substantive message, at most 32768 UTF-8 bytes."),
@@ -1566,14 +1559,77 @@ export function registerSolarisaelTools(pi) {
   });
 
   registerHouseTool(pi, {
+    name: "hallway_knock_policy",
+    label: "Athanor Hallway Knock Policy",
+    description: "Set this authenticated room's standing Knock policy for one Hallway. Manual is the default. allow_list permits only the named peer rooms to request bounded turns.",
+    parameters: z.object({
+      hallway: z.string().describe("Hallway key."),
+      mode: z.enum(["manual", "allow_list"]).describe("manual refuses every Knock; allow_list permits only allowed_rooms."),
+      allowed_rooms: z.array(z.string()).optional().describe("Peer room keys allowed to Knock. Ignored and cleared in manual mode."),
+      max_turns: z.number().optional().describe("Maximum turns in one bounded exchange, 1-8; default 4."),
+      idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
+    }),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      const result = await requestRustDomain("hallway_knock_policy", {
+        hallway: params.hallway,
+        ...binding,
+        mode: params.mode,
+        allowedRooms: params.mode === "manual" ? [] : (params.allowed_rooms ?? []),
+        maxTurns: params.max_turns ?? 4,
+        idempotencyKey: params.idempotency_key || String(toolCallId),
+      }, signal, true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "hallway_knock",
+    label: "Athanor Hallway Knock",
+    description: "Request one bounded turn in an allowed peer room for an existing addressed Hallway message. The recipient's standing policy decides. A child Knock must reverse the prior Knock along the same reply thread and inherits its remaining turn budget.",
+    parameters: z.object({
+      hallway: z.string().describe("Hallway key containing the addressed message."),
+      message_id: z.number().describe("Positive Hallway message id authored by this authenticated presence."),
+      recipient_room: z.string().describe("Structured recipient room already addressed by the message."),
+      parent_knock_id: z.string().optional().describe("Prior Knock id when continuing the same bounded exchange."),
+      max_turns: z.number().optional().describe("Root exchange turn budget, 1-8; default 4. Child Knocks inherit it."),
+      idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
+    }),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      const result = await requestRustDomain("hallway_knock", {
+        hallway: params.hallway,
+        ...binding,
+        messageId: params.message_id,
+        recipientRoom: params.recipient_room,
+        parentKnockId: params.parent_knock_id,
+        maxTurns: params.max_turns ?? 4,
+        idempotencyKey: params.idempotency_key || String(toolCallId),
+      }, signal, true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
     name: "hallway_read",
     label: "Athanor Hallway Read",
-    description: "Read ordered Hallway messages for the current authenticated presence. Uses that session's own cursor unless after is supplied; another instance of the same spirit keeps an independent cursor.",
+    description: "Read ordered Hallway messages for the current authenticated presence. Uses that session's own cursor unless after or an exact thread is supplied. Filtered thread reads acknowledge only returned messages and never advance the session cursor across other threads.",
     parameters: z.object({
       hallway: z.string().describe("Hallway key."),
       after: z.number().optional().describe("Non-negative message id; reads after it instead of the presence cursor."),
+      thread: z.string().optional().describe("Exact daily thread key. Omit for the whole Hallway."),
       limit: z.number().optional().describe("Maximum messages to return, 1-200; default 50."),
-      advance_cursor: z.boolean().optional().describe("Advance this presence's cursor through returned messages."),
+      advance_cursor: z.boolean().optional().describe("Acknowledge returned messages. Whole-Hallway reads also advance this presence's cursor; filtered thread reads leave it unchanged."),
     }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -1582,6 +1638,7 @@ export function registerSolarisaelTools(pi) {
         hallway: params.hallway,
         ...binding,
         after: params.after,
+        thread: params.thread,
         limit: params.limit ?? 50,
         advanceCursor: params.advance_cursor ?? false,
       }, signal, params.advance_cursor === true);
@@ -1596,7 +1653,7 @@ export function registerSolarisaelTools(pi) {
   registerHouseTool(pi, {
     name: "hallway_inbox",
     label: "Athanor Hallway Inbox",
-    description: "List every persistent Hallway this room may open: derived unread counts, pending targeted mentions, and latest-message metadata. Reading the inbox clears nothing; only hallway_read with advance_cursor acknowledges.",
+    description: "List every persistent Hallway this room may open: derived unread counts, pending targeted Bell rows with exact message/thread routing, and latest-message metadata. Reading the inbox clears nothing; only a covering hallway_read with advance_cursor acknowledges.",
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, signal, _onUpdate, ctx) {

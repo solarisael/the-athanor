@@ -118,16 +118,19 @@ export function hostCommand(
 export async function sendHostCommand(
   command: HostCommand,
   acceptedTypes: ReadonlySet<string>,
+  signal?: AbortSignal,
 ): Promise<HostResponse> {
   const url = hostUrlForRoom(text(command.sender_room));
   const token = requiredEnvironment("ATHANOR_HOST_TOKEN");
   return await new Promise<HostResponse>((resolve, reject) => {
     let settled = false;
     let socket: WebSocket;
+    let onAbort: (() => void) | undefined;
     const finish = (error: unknown, value?: HostResponse) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
       try { socket?.close(); } catch { /* already closed */ }
       if (error) reject(error);
       else resolve(value!);
@@ -136,6 +139,12 @@ export async function sendHostCommand(
       () => finish(new HostUnavailable(`Athanor Host timed out after ${HOST_TIMEOUT_MS}ms`)),
       HOST_TIMEOUT_MS,
     );
+    onAbort = () => finish(new HostUnavailable("Athanor Host request aborted"));
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
     try {
       const WebSocketConstructor = WebSocket as any;
       socket = new WebSocketConstructor(url, { headers: { Authorization: `Bearer ${token}` } });

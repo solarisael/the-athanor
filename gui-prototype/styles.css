@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../site/fonts/InterVariable.woff2") format("woff2");
+}
+
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
@@ -64,6 +72,7 @@ input:focus-visible {
 }
 
 .app-shell {
+  position: relative;
   display: grid;
   grid-template-columns: 280px minmax(420px, 1fr) 320px;
   grid-template-rows: minmax(0, 1fr) 34px;
@@ -998,7 +1007,8 @@ input:focus-visible {
 .subject-header[data-kind="hallway"] .subject-heading {
   min-width: 0;
 
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .hallway-statuses {
@@ -2198,6 +2208,10 @@ input:focus-visible {
   display: none;
 }
 
+.member-dock-scrim {
+  display: none;
+}
+
 .member-dock {
   grid-column: 3;
   grid-row: 1;
@@ -2455,6 +2469,10 @@ input:focus-visible {
   color: var(--fg-dim);
 
   cursor: pointer;
+}
+
+.status-compact {
+  display: none;
 }
 
 .status-bar > button:hover,
@@ -3116,6 +3134,7 @@ input:focus-visible {
 
 .mechanics-observatory {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
 
   width: min(100%, 1040px);
   margin: 0 auto;
@@ -3281,11 +3300,13 @@ input:focus-visible {
 
 .mechanics-results {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
 
   border-top: 1px solid var(--bd-region);
 }
 
 .mechanics-row {
+  min-width: 0;
   border-bottom: 1px solid var(--bd-section);
 }
 
@@ -3717,6 +3738,57 @@ input:focus-visible {
   .member-dock {
     grid-column: 3;
   }
+
+  .mechanics-categories {
+    flex-wrap: wrap;
+
+    overflow-x: visible;
+  }
+
+  .mechanics-observatory {
+    gap: 13px;
+  }
+
+  .mechanics-lead {
+    padding-top: 0;
+  }
+
+  .mechanics-search {
+    grid-template-columns: 1fr;
+
+    gap: 7px;
+  }
+
+  .mechanics-row > summary {
+    grid-template-columns: minmax(0, 1fr);
+
+    gap: 8px;
+    padding-inline: 6px;
+  }
+
+  .mechanics-row-flags {
+    justify-content: start;
+  }
+
+  .mechanics-row-body {
+    padding-inline: 6px;
+  }
+
+  .mechanics-row-body dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mechanics-row-body dl > div {
+    border-top: 1px solid var(--bd-section);
+  }
+
+  .mechanics-row-body dl > div:nth-child(-n + 2) {
+    border-top: 0;
+  }
+
+  .mechanics-row-body dl > div:nth-child(odd) {
+    border-left: 0;
+  }
 }
 
 @media (max-width: 700px) {
@@ -3752,18 +3824,49 @@ input:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .member-dock-scrim {
+    position: absolute;
+    z-index: 19;
+    inset: 44px 0 34px;
+
+    display: block;
+    border: 0;
+
+    background: var(--bg-switcher-scrim);
+
+    cursor: pointer;
+  }
+
+  .member-dock-scrim[hidden] {
+    display: none;
+  }
+
   .member-dock {
-    position: fixed;
+    position: absolute;
     z-index: 20;
     top: 44px;
     right: 0;
     bottom: 34px;
 
     display: block;
-    width: 112px;
-    padding: 14px 8px;
+    width: min(320px, calc(100vw - 46px));
+    padding: 14px 12px;
 
     box-shadow: -10px 0 30px var(--bg-inspector-dock-shadow);
+
+    pointer-events: none;
+    transform: translateX(102%);
+    transition: transform 140ms ease;
+  }
+
+  .member-dock[aria-hidden="true"] {
+    display: none;
+  }
+
+  .app-shell[data-member-dock-open="true"] .member-dock {
+    display: block;
+    pointer-events: auto;
+    transform: translateX(0);
   }
 
 
@@ -3828,6 +3931,15 @@ input:focus-visible {
 
   .mantle-context {
     padding: 0;
+  }
+
+  .subject-views {
+    padding-right: 6px;
+    scroll-padding-right: 6px;
+  }
+
+  .bell-toggle {
+    margin-left: 4px;
   }
 
   .subject-views .tab {
@@ -3931,9 +4043,6 @@ input:focus-visible {
     font-size: 10px;
   }
 
-  .app-shell[data-hallway="true"] .active-view {
-    margin-right: 112px;
-  }
 
   .app-shell[data-hallway="true"] .composer {
     margin-right: 12px;
@@ -3959,52 +4068,32 @@ input:focus-visible {
     margin: 0 12px 12px;
   }
 
+  .status-bar {
+    justify-content: space-between;
+
+    gap: 0;
+    padding-inline: 4px;
+
+    overflow-x: hidden;
+  }
+
+  .status-bar > button {
+    gap: 3px;
+    padding-inline: 4px;
+
+    font-size: 10px;
+  }
+
+  .status-full {
+    display: none;
+  }
+
+  .status-compact {
+    display: inline;
+  }
+
   .status-popover {
     left: 12px;
-  }
-  .mechanics-observatory {
-    gap: 13px;
-  }
-
-  .mechanics-lead {
-    padding-top: 0;
-  }
-
-  .mechanics-search {
-    grid-template-columns: 1fr;
-
-    gap: 7px;
-  }
-
-  .mechanics-row > summary {
-    grid-template-columns: minmax(0, 1fr);
-
-    gap: 8px;
-    padding-inline: 6px;
-  }
-
-  .mechanics-row-flags {
-    justify-content: start;
-  }
-
-  .mechanics-row-body {
-    padding-inline: 6px;
-  }
-
-  .mechanics-row-body dl {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .mechanics-row-body dl > div {
-    border-top: 1px solid var(--bd-section);
-  }
-
-  .mechanics-row-body dl > div:nth-child(-n + 2) {
-    border-top: 0;
-  }
-
-  .mechanics-row-body dl > div:nth-child(odd) {
-    border-left: 0;
   }
 }
 

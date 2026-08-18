@@ -25,8 +25,10 @@ Implemented in the candidate:
 
 - file-authoritative Rust Vault and PostgreSQL-authoritative Rust AKASHA;
 - typed canon, memory, lessons, GIGA, Recall Policy, and Paper Boat sleep/wake;
-- PostgreSQL-authoritative Hallway channels with explicit membership, ordered
-  posts, per-presence cursors, and manual wake through OMP tools;
+- PostgreSQL-authoritative Hallway membership, daily threads,
+  recipient-sensitive posts, room-stable unread state, durable Bell rows,
+  exact-thread reads, Host-owned automatic inbox projection, and explicit
+  recipient-authorized bounded Knocks; ordinary Hallway contact remains manual;
 - authenticated Host snapshots, typed deltas, resync, persistence, and restart
   recovery;
 - transaction-coupled `boat.ready` outbox delivery through NATS JetStream;
@@ -291,8 +293,9 @@ in this dependency order:
    outbox, transport, and read state;
 4. prove recipient-specific consumers, dead-letter/replay operation, and NATS
    reconstruction from PostgreSQL;
-5. pilot Hallway room delivery while preserving explicit membership,
-   per-presence cursors, and manual wake;
+5. replace the delivered PostgreSQL/Host-polled Hallway Knock with
+   recipient-scoped NATS wake hints only after steps 1–4, preserving messages,
+   Bell rows, Host authorization, exact reads, and recipient wake policy;
 6. create project identity, membership, subscriptions, and typed project records
    before adding project notifications;
 7. add addressed kitten work only for a demonstrated independent/dormant-worker

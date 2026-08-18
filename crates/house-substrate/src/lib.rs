@@ -34,7 +34,10 @@ pub use giga::{
     giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review,
 };
 pub use giga_worker::{GigaWorkerHandle, giga_process, spawn_giga_worker};
-pub use hallway::{hallway_create, hallway_inbox, hallway_join, hallway_post, hallway_read};
+pub use hallway::{
+    hallway_create, hallway_inbox, hallway_join, hallway_knock, hallway_knock_claim,
+    hallway_knock_policy, hallway_knock_settle, hallway_post, hallway_read,
+};
 pub use health::{
     SubstrateHealthOptions, SubstrateHealthResult, substrate_health, substrate_health_with_config,
 };

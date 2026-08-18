@@ -5,6 +5,9 @@ use serde::{
 pub const HALLWAY_MAX_BODY_BYTES: usize = 32 * 1024;
 pub const HALLWAY_MAX_ALLOWED_ROOMS: usize = 32;
 pub const HALLWAY_MAX_READ_LIMIT: u32 = 200;
+pub const HALLWAY_MAX_KNOCK_TURNS: u8 = 8;
+pub const HALLWAY_DEFAULT_KNOCK_TURNS: u8 = 4;
+pub const HALLWAY_MAX_KNOCK_REASON_BYTES: usize = 2048;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -57,6 +60,10 @@ pub struct HallwayReadRequest {
     pub session: String,
     #[serde(default)]
     pub after: Option<i64>,
+    /// Exact daily thread to read. Filtered reads acknowledge only returned
+    /// messages and never advance the session cursor across other threads.
+    #[serde(default)]
+    pub thread: Option<String>,
     #[serde(default = "default_read_limit")]
     pub limit: u32,
     #[serde(default)]
@@ -283,6 +290,8 @@ pub struct HallwayReadReceipt {
     pub room_read_sequence: i64,
     #[serde(default)]
     pub acked_mentions: i64,
+    #[serde(default)]
+    pub thread: Option<String>,
     pub wake_policy: String,
 }
 
@@ -292,6 +301,14 @@ pub struct HallwayInboxRequest {
     pub room: String,
     pub spirit: String,
     pub session: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayInboxNotification {
+    pub message_id: i64,
+    pub sequence: i64,
+    pub thread: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -308,6 +325,10 @@ pub struct HallwayInboxEntry {
     pub latest_spirit: Option<String>,
     pub latest_excerpt: Option<String>,
     pub latest_created_at: Option<String>,
+    /// Pending Bell rows with enough stable identity to open and acknowledge
+    /// the exact message thread. Peer prose never crosses in this structure.
+    #[serde(default)]
+    pub notifications: Vec<HallwayInboxNotification>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -317,6 +338,150 @@ pub struct HallwayInboxReceipt {
     pub room: String,
     pub spirit: String,
     pub hallways: Vec<HallwayInboxEntry>,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HallwayKnockPolicyMode {
+    Manual,
+    AllowList,
+}
+
+impl HallwayKnockPolicyMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::AllowList => "allow_list",
+        }
+    }
+}
+
+const fn default_knock_max_turns() -> u8 {
+    HALLWAY_DEFAULT_KNOCK_TURNS
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockPolicyRequest {
+    pub hallway: String,
+    pub room: String,
+    pub spirit: String,
+    pub session: String,
+    pub idempotency_key: String,
+    pub mode: HallwayKnockPolicyMode,
+    #[serde(default)]
+    pub allowed_rooms: Vec<String>,
+    #[serde(default = "default_knock_max_turns")]
+    pub max_turns: u8,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockPolicyReceipt {
+    pub ok: bool,
+    pub duplicate: bool,
+    pub hallway: String,
+    pub room: String,
+    pub mode: HallwayKnockPolicyMode,
+    pub allowed_rooms: Vec<String>,
+    pub max_turns: u8,
+    pub revision: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockRequest {
+    pub hallway: String,
+    pub room: String,
+    pub spirit: String,
+    pub session: String,
+    pub idempotency_key: String,
+    pub message_id: i64,
+    pub recipient_room: String,
+    #[serde(default)]
+    pub parent_knock_id: Option<String>,
+    #[serde(default = "default_knock_max_turns")]
+    pub max_turns: u8,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockPointer {
+    pub knock_id: String,
+    pub hallway: String,
+    pub message_id: i64,
+    pub sequence: i64,
+    pub thread: String,
+    pub from_room: String,
+    pub from_spirit: String,
+    pub recipient_room: String,
+    pub parent_knock_id: Option<String>,
+    pub root_knock_id: String,
+    pub turn_index: u8,
+    pub max_turns: u8,
+    pub status: String,
+    pub expires_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockReceipt {
+    pub ok: bool,
+    pub duplicate: bool,
+    pub knock: HallwayKnockPointer,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockClaimRequest {
+    pub room: String,
+    pub spirit: String,
+    pub session: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockClaimReceipt {
+    pub ok: bool,
+    pub knock: Option<HallwayKnockPointer>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HallwayKnockOutcome {
+    Started,
+    Completed,
+    Failed,
+}
+
+impl HallwayKnockOutcome {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockSettleRequest {
+    pub room: String,
+    pub spirit: String,
+    pub session: String,
+    pub knock_id: String,
+    pub outcome: HallwayKnockOutcome,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockSettleReceipt {
+    pub ok: bool,
+    pub duplicate: bool,
+    pub knock_id: String,
+    pub status: String,
 }
 
 fn valid_slug(value: &str) -> bool {
@@ -424,8 +589,7 @@ impl HallwayPostRequest {
         for room in &self.to_rooms {
             if !valid_slug(room) {
                 return Err(
-                    "toRooms entries must be lowercase kebab-case keys of at most 160 bytes"
-                        .into(),
+                    "toRooms entries must be lowercase kebab-case keys of at most 160 bytes".into(),
                 );
             }
         }
@@ -447,6 +611,13 @@ impl HallwayReadRequest {
         if !valid_slug(&self.hallway) {
             return Err("hallway must be a lowercase kebab-case key of at most 160 bytes".into());
         }
+        if self
+            .thread
+            .as_deref()
+            .is_some_and(|thread| !valid_slug(thread))
+        {
+            return Err("thread must be a lowercase kebab-case key of at most 160 bytes".into());
+        }
         validate_binding(&self.room, &self.spirit, &self.session)?;
         if self.after.is_some_and(|id| id < 0) {
             return Err("after must be zero or a positive message id".into());
@@ -461,6 +632,89 @@ impl HallwayReadRequest {
 impl HallwayInboxRequest {
     pub fn validate(&self) -> Result<(), String> {
         validate_binding(&self.room, &self.spirit, &self.session)
+    }
+}
+fn validate_knock_max_turns(max_turns: u8) -> Result<(), String> {
+    if !(1..=HALLWAY_MAX_KNOCK_TURNS).contains(&max_turns) {
+        return Err(format!("maxTurns must be 1-{HALLWAY_MAX_KNOCK_TURNS}"));
+    }
+    Ok(())
+}
+
+impl HallwayKnockPolicyRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        HallwayJoinRequest {
+            hallway: self.hallway.clone(),
+            room: self.room.clone(),
+            spirit: self.spirit.clone(),
+            session: self.session.clone(),
+            idempotency_key: self.idempotency_key.clone(),
+        }
+        .validate()?;
+        validate_knock_max_turns(self.max_turns)?;
+        if self.allowed_rooms.len() > HALLWAY_MAX_ALLOWED_ROOMS {
+            return Err(format!(
+                "allowedRooms must name at most {HALLWAY_MAX_ALLOWED_ROOMS} rooms"
+            ));
+        }
+        if !self.allowed_rooms.iter().all(|room| valid_slug(room)) {
+            return Err("allowedRooms entries must be lowercase kebab-case room keys".into());
+        }
+        let mut rooms = self.allowed_rooms.clone();
+        rooms.sort();
+        rooms.dedup();
+        if rooms.len() != self.allowed_rooms.len() {
+            return Err("allowedRooms must not contain duplicates".into());
+        }
+        if self.mode == HallwayKnockPolicyMode::Manual && !self.allowed_rooms.is_empty() {
+            return Err("manual policy must have an empty allowedRooms list".into());
+        }
+        Ok(())
+    }
+}
+
+impl HallwayKnockRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        HallwayJoinRequest {
+            hallway: self.hallway.clone(),
+            room: self.room.clone(),
+            spirit: self.spirit.clone(),
+            session: self.session.clone(),
+            idempotency_key: self.idempotency_key.clone(),
+        }
+        .validate()?;
+        if self.message_id <= 0 {
+            return Err("messageId must be a positive message id".into());
+        }
+        if !valid_slug(&self.recipient_room) {
+            return Err(
+                "recipientRoom must be a lowercase kebab-case key of at most 160 bytes".into(),
+            );
+        }
+        if self.recipient_room == self.room {
+            return Err("recipientRoom must name a different room".into());
+        }
+        validate_knock_max_turns(self.max_turns)
+    }
+}
+
+impl HallwayKnockClaimRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_binding(&self.room, &self.spirit, &self.session)
+    }
+}
+
+impl HallwayKnockSettleRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        validate_binding(&self.room, &self.spirit, &self.session)?;
+        if let Some(reason) = &self.reason {
+            if !valid_identity(reason, HALLWAY_MAX_KNOCK_REASON_BYTES) {
+                return Err(format!(
+                    "reason must be 1-{HALLWAY_MAX_KNOCK_REASON_BYTES} printable characters"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 

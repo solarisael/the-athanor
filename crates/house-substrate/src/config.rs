@@ -233,6 +233,8 @@ fn is_write_operation(operation: &str) -> bool {
             | "giga_tool_promote"
             | "giga_review"
             | "giga_tool_review"
+            | "hallway_knock_policy"
+            | "hallway_knock"
     )
 }
 
@@ -263,6 +265,8 @@ fn validation_owner(operation: &str) -> (&'static str, &'static str) {
         "hallway_post" => ("src/hallway.rs", "hallway_post"),
         "hallway_read" => ("src/hallway.rs", "hallway_read"),
         "hallway_inbox" => ("src/hallway.rs", "hallway_inbox"),
+        "hallway_knock_policy" => ("src/hallway.rs", "hallway_knock_policy"),
+        "hallway_knock" => ("src/hallway.rs", "hallway_knock"),
         "giga_health" => ("src/giga.rs", "giga_health"),
         _ => ("src/main.rs", "decode_line"),
     }
@@ -308,6 +312,8 @@ fn database_owner(operation: &str) -> (&'static str, &'static str) {
         "giga_candidate_list" => ("src/giga.rs", "giga_candidate_list"),
         "giga_review" => ("src/giga.rs", "giga_review"),
         "giga_tool_review" => ("src/giga.rs", "giga_tool_review"),
+        "hallway_knock_policy" => ("src/hallway.rs", "hallway_knock_policy"),
+        "hallway_knock" => ("src/hallway.rs", "hallway_knock"),
         "giga_health" => ("src/giga.rs", "giga_health"),
         _ => ("src/config.rs", "Config::pool"),
     }

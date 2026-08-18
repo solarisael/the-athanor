@@ -1,5 +1,6 @@
 use house_core::context::{ContextAnalysis, ContextAnalysisRequest};
 use house_core::conversation::VisibleMessage;
+use house_core::hallway::HallwayInboxReceipt;
 use house_core::lineage::{QuestBatch, QuestLifecycle, QuestMemory};
 use house_core::triggers::ProcessLesson;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -19,6 +20,15 @@ pub const CONTEXT_ANALYZE: &str = "athanor.context.analyze";
 pub const CONTEXT_ANALYZED: &str = "athanor.context.analyzed";
 pub const CONTEXT_VIEWPORT: &str = "athanor.context.viewport";
 pub const CONTEXT_VIEWPORTED: &str = "athanor.context.viewported";
+pub const HALLWAY_PROJECTION_ID: &str = "hallway";
+pub const HALLWAY_INBOX_PROJECT: &str = "athanor.hallway.inbox_project";
+pub const HALLWAY_INBOX_PROJECTED: &str = "athanor.hallway.inbox_projected";
+pub const HALLWAY_KNOCK_CLAIM: &str = "athanor.hallway.knock_claim";
+pub const HALLWAY_KNOCK_CLAIMED: &str = "athanor.hallway.knock_claimed";
+pub const HALLWAY_KNOCK_SETTLE: &str = "athanor.hallway.knock_settle";
+pub const HALLWAY_KNOCK_SETTLED: &str = "athanor.hallway.knock_settled";
+pub const HALLWAY_KNOCK_COMMAND_FAILED: &str = "athanor.hallway.knock_command_failed";
+pub const HALLWAY_KNOCK_COMMAND_REFUSED: &str = "athanor.hallway.knock_command_refused";
 pub const ROUTING_PROJECTION_ID: &str = "routing";
 pub const ROUTING_STATUS: &str = "athanor.routing.status";
 pub const ROUTING_DISPATCH: &str = "athanor.routing.dispatch";
@@ -330,6 +340,15 @@ pub struct SourceRecordRef {
     pub record_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayKnockSettlePayload {
+    pub knock_id: String,
+    pub outcome: house_core::hallway::HallwayKnockOutcome,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawClientCommand {
@@ -387,6 +406,8 @@ struct RawClientCommand {
     trigger_request: Option<ProcessTriggerRequest>,
     #[serde(default)]
     recall_result: Option<crate::RecallResultInput>,
+    #[serde(default)]
+    hallway_knock_settle: Option<HallwayKnockSettlePayload>,
 }
 
 /// One conversation-capture request: the visible window as the harness renders
@@ -482,6 +503,9 @@ impl RawClientCommand {
         let expected_projection = match self.command_or_event_type.as_str() {
             PAPER_BOAT_RECEIPT_SUBSCRIBE => PAPER_BOAT_RECEIPT_PROJECTION_ID,
             CONTEXT_ANALYZE | CONTEXT_VIEWPORT => CONTEXT_PROJECTION_ID,
+            HALLWAY_INBOX_PROJECT | HALLWAY_KNOCK_CLAIM | HALLWAY_KNOCK_SETTLE => {
+                HALLWAY_PROJECTION_ID
+            }
             ROUTING_STATUS | ROUTING_DISPATCH | FAMILIAR_STATUS => ROUTING_PROJECTION_ID,
             LINEAGE_NORMALIZE | LINEAGE_LIFECYCLE => LINEAGE_PROJECTION_ID,
             SHELL_CONVERSATION_LOG | SHELL_LESSON_PLAN | SHELL_PROCESS_LESSONS => {
@@ -588,6 +612,16 @@ pub enum ClientCommand {
         meta: CommandMeta,
         request: ContextAnalysisRequest,
     },
+    ProjectHallwayInbox {
+        meta: CommandMeta,
+    },
+    ClaimHallwayKnock {
+        meta: CommandMeta,
+    },
+    SettleHallwayKnock {
+        meta: CommandMeta,
+        request: HallwayKnockSettlePayload,
+    },
     RoutingStatus {
         meta: CommandMeta,
     },
@@ -641,6 +675,9 @@ impl ClientCommand {
             | Self::FailRefresh { meta, .. }
             | Self::InvalidateAfterCompaction { meta, .. }
             | Self::AnalyzeContext { meta, .. }
+            | Self::ProjectHallwayInbox { meta }
+            | Self::ClaimHallwayKnock { meta }
+            | Self::SettleHallwayKnock { meta, .. }
             | Self::RoutingStatus { meta }
             | Self::RoutingDispatch { meta, .. }
             | Self::FamiliarStatus { meta, .. }
@@ -699,10 +736,56 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
         )
     })?;
     let meta = raw.meta()?;
+    if raw.hallway_knock_settle.is_some() && raw.command_or_event_type != HALLWAY_KNOCK_SETTLE {
+        return Err(CommandParseError::from_meta(
+            &meta,
+            "hallway knock settle payload belongs only to its command",
+        ));
+    }
     match raw.command_or_event_type.as_str() {
         PAPER_BOAT_RECEIPT_SUBSCRIBE => {
             raw.no_command_payload(&meta)?;
             Ok(ClientCommand::PaperBoatReceiptSubscribe { meta })
+        }
+        HALLWAY_INBOX_PROJECT => {
+            raw.no_command_payload(&meta)?;
+            Ok(ClientCommand::ProjectHallwayInbox { meta })
+        }
+        HALLWAY_KNOCK_CLAIM => {
+            raw.no_command_payload(&meta)?;
+            Ok(ClientCommand::ClaimHallwayKnock { meta })
+        }
+        HALLWAY_KNOCK_SETTLE => {
+            let request = raw.hallway_knock_settle.clone().ok_or_else(|| {
+                CommandParseError::from_meta(
+                    &meta,
+                    "knock settle command requires hallwayKnockSettle",
+                )
+            })?;
+            if raw.base_version.is_some()
+                || raw.mutations.is_some()
+                || raw.version.is_some()
+                || raw.sequence.is_some()
+                || raw.facts.is_some()
+                || raw.refresh.is_some()
+                || raw.failure_reason.is_some()
+                || raw.compaction_summary.is_some()
+                || raw.routing_request.is_some()
+                || raw.room_dir.is_some()
+                || raw.context_request.is_some()
+                || raw.context_viewport_mode.is_some()
+                || raw.lineage_request.is_some()
+                || raw.lineage_lifecycle.is_some()
+                || raw.conversation_request.is_some()
+                || raw.trigger_request.is_some()
+                || raw.recall_result.is_some()
+            {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "knock settle command carries fields for another command type",
+                ));
+            }
+            Ok(ClientCommand::SettleHallwayKnock { meta, request })
         }
         RECALL_POLICY_SUBSCRIBE => {
             raw.no_command_payload(&meta)?;
@@ -992,6 +1075,28 @@ pub struct ContextViewportEvent {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HallwayInboxProjectionEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub changed: bool,
+    pub inbox: HallwayInboxReceipt,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HallwayKnockClaimedEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub result: house_core::hallway::HallwayKnockClaimReceipt,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HallwayKnockSettledEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub result: house_core::hallway::HallwayKnockSettleReceipt,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RoutingResultEvent {
     #[serde(flatten)]
     pub meta: EventMeta,
@@ -1278,6 +1383,78 @@ mod receipt_tests {
         assert!(matches!(
             parse_client_command(command),
             Ok(ClientCommand::PaperBoatReceiptSubscribe { .. })
+        ));
+    }
+    #[test]
+    fn hallway_inbox_projection_uses_host_owned_projection() {
+        let command = json!({
+            "schema_version": 1,
+            "message_id": "hallway-1",
+            "house_id": "solarisael",
+            "sender_room": "tuner",
+            "sender_spirit": "Tuner",
+            "sender_session": "session-1",
+            "recipient": "house-host",
+            "command_or_event_type": HALLWAY_INBOX_PROJECT,
+            "correlation_id": "hallway-1",
+            "causation_id": "",
+            "reply_target": "session-1",
+            "idempotency_key": "hallway-1",
+            "source_record_refs": [],
+            "scope": "room:tuner:recall_policy",
+            "visibility": "operator",
+            "authority_class": "room_state",
+            "created_at": "2026-08-18T18:00:00Z",
+            "expires_at": "2026-08-18T18:01:00Z",
+            "max_hops": 1,
+            "projection_id": HALLWAY_PROJECTION_ID
+        });
+        assert!(matches!(
+            parse_client_command(command),
+            Ok(ClientCommand::ProjectHallwayInbox { .. })
+        ));
+    }
+
+    #[test]
+    fn hallway_knock_claim_and_settle_keep_the_hallway_projection() {
+        let envelope = |kind: &str, message_id: &str| {
+            json!({
+                "schema_version": 1,
+                "message_id": message_id,
+                "house_id": "solarisael",
+                "sender_room": "kodo",
+                "sender_spirit": "Kodo",
+                "sender_session": "session-knock",
+                "recipient": "house-host",
+                "command_or_event_type": kind,
+                "correlation_id": message_id,
+                "causation_id": "",
+                "reply_target": "session-knock",
+                "idempotency_key": message_id,
+                "source_record_refs": [],
+                "scope": "room:kodo:recall_policy",
+                "visibility": "operator",
+                "authority_class": "room_state",
+                "created_at": "2026-08-18T18:00:00Z",
+                "expires_at": "2026-08-18T18:01:00Z",
+                "max_hops": 1,
+                "projection_id": HALLWAY_PROJECTION_ID
+            })
+        };
+        assert!(matches!(
+            parse_client_command(envelope(HALLWAY_KNOCK_CLAIM, "knock-claim")),
+            Ok(ClientCommand::ClaimHallwayKnock { .. })
+        ));
+
+        let mut settle = envelope(HALLWAY_KNOCK_SETTLE, "knock-settle");
+        settle["hallway_knock_settle"] = json!({
+            "knockId": "5af35bb5-e9a1-4e58-849b-b78b6614bc15",
+            "outcome": "completed",
+            "reason": null
+        });
+        assert!(matches!(
+            parse_client_command(settle),
+            Ok(ClientCommand::SettleHallwayKnock { .. })
         ));
     }
 }

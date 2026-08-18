@@ -962,6 +962,7 @@ version = "0.1.0"
 dependencies = [
  "async-nats",
  "athanor-house-delivery",
+ "athanor-substrate",
  "atomicwrites",
  "axum",
  "chrono",
@@ -973,6 +974,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sqlx",
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.28.0",

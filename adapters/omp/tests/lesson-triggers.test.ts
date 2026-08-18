@@ -38,9 +38,14 @@ mock.module("../solarisael-house-proof/recall.ts", () => ({
 }));
 mock.module("../solarisael-house-proof/tools.ts", () => ({
   closeRustRememberTransports: () => undefined,
-  readHallwayInbox: async () => ({ ok: false, error: "mocked" }),
   registerSolarisaelTools: () => undefined,
   writeRustMemory: async () => undefined,
+}));
+mock.module("../solarisael-house-proof/hallway.ts", () => ({
+  projectHallwayInbox: async () => ({
+    changed: false,
+    inbox: { ok: true, hallways: [] },
+  }),
 }));
 mock.module("../solarisael-house-proof/anamnesis.ts", () => ({
   closeRustAnamnesisTransports: () => undefined,

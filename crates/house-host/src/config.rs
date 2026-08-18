@@ -17,6 +17,7 @@ pub struct HostConfig {
     pub spirit: String,
     pub session: String,
     pub recipient: String,
+    pub database_url: Option<String>,
     pub akasha_enabled: bool,
     pub nats_url: Option<String>,
 }
@@ -46,8 +47,9 @@ impl HostConfig {
         let session = required("ATHANOR_HOST_SESSION")?;
         let recipient =
             optional("ATHANOR_HOST_RECIPIENT").unwrap_or_else(|| "house-host".to_owned());
+        let database_url = optional("DATABASE_URL");
         let nats_url = optional("SOLARISAEL_NATS_URL");
-        let akasha_enabled = optional("DATABASE_URL").is_some() || nats_url.is_some();
+        let akasha_enabled = database_url.is_some() || nats_url.is_some();
         Ok(Self {
             bind,
             ws_path,
@@ -60,6 +62,7 @@ impl HostConfig {
             session,
             recipient,
             akasha_enabled,
+            database_url,
             nats_url,
         })
     }

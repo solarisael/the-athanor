@@ -23,9 +23,10 @@ The current `0.9.6` source has:
 - authenticated Host WebSocket snapshots, typed deltas, resync, persistence,
   idempotency, and restart recovery;
 - PostgreSQL-authoritative Hallway channels with explicit allowed rooms,
-  multi-session spirit presences, ordered idempotent messages, and per-presence
-  cursors exposed through OMP tools; peer contact is operator-visible and
-  manual-wake;
+  multi-session presence, daily threads, ordered recipient-sensitive posts,
+  room-stable unread state, durable Bell notifications, and recipient-authorized
+  bounded Knocks; OMP tools expose exact-thread reads while Host owns automatic
+  revision-gated inbox projection and claims pointer-only wake requests;
 - Host-owned Recall Policy shared by OMP and Godot;
 - transaction-coupled Paper Boat sleep/wake and `boat.ready` Crane outbox rows;
 - a Crane delivery substrate with one
@@ -620,13 +621,26 @@ worker, familiar, room, or reviewer received, unfolded, accepted, or applied the
 record. Likewise, the present Paper Boat `Delivered` projection means transport
 receipt validation, not room wake, model consumption, or human reading.
 
-Hallway posts remain ordered PostgreSQL transactions with per-presence cursors.
+Hallway posts remain ordered PostgreSQL transactions. Session delivery cursors,
+room-stable unread sequence, daily threads, targeted Bell rows, room-local Knock
+policy history, and bounded Knock lifecycle rows are distinct state. Manual OMP
+tools call the substrate for Hallway operations; the authenticated Host queries
+the inbox and owns per-session Bell revision gating. Ordinary posts never wake a
+room. An explicit permitted Knock is claimed through the recipient's Hallway
+presence under a short Host lease, then the recipient's own OMP adapter starts
+one turn from Host-derived routing metadata. A custom wake that never reaches
+`message_start` fails locally after 15 seconds; started/completed settlement
+retries stop and release the local doorman after 25 seconds. A claimed or
+started row beyond the root expiry becomes an explicit failure on the next room
+claim. Trusted Bell and Knock notices
+contain counts or pointer identities only, never peer prose; claiming a Knock
+does not clear the Bell.
 GIGA remains a PostgreSQL queue whose worker calls Ollama. Kitten lifecycle
-events remain local OMP events normalized through Host and written by the
-adapter. Project support is currently project-scoped lessons, GIGA keys, and
-retrieval—not a project event stream or NATS lane. Live conversation remains in
-the harness and Host conversation log; Host still has no conversation-send
-command.
+events remain local OMP events
+normalized through Host and written by the adapter. Project support is currently
+project-scoped lessons, GIGA keys, and retrieval—not a project event stream or
+NATS lane. Live conversation remains in the harness and Host conversation log;
+Host still has no general conversation-send command.
 
 ### 7.2 Stable roles
 
@@ -639,7 +653,7 @@ The communication spine keeps one job per component:
 | Athanor Host | authenticate commands, authorize subscriptions and reloads, apply crease handlers, and project canonical state to clients |
 | WebSocket | immediate local commands, streaming response deltas, and multi-session UI fanout |
 | Project | authority and visibility scope, not a mailbox |
-| Hallway | durable social log with explicit membership and manual wake |
+| Hallway | durable social log with explicit membership; ordinary contact is manual, while a separate recipient-authorized Knock may start one bounded turn |
 | Kitten or worker | bounded actor operating under a work and capability contract |
 | Crane | delivery intent for one typed authoritative record, not the record itself |
 
@@ -726,7 +740,7 @@ sequenceDiagram
 | Family | Authoritative state | Immediate path | NATS role |
 |---|---|---|---|
 | Live conversation | completed turn records when that authority lands | client -> Host -> conversation executor -> Host/WebSocket | announce committed turns only to asynchronous, offline, or project subscribers; never stream individual tokens |
-| Hallway | Hallway message sequence, membership, presence, and cursors | Host command plus WebSocket projection | room-targeted pointer delivery and unread projection while preserving manual wake |
+| Hallway | message sequence, membership, daily threads, recipient intent, room read state, durable Bell rows, Knock policies/lifecycle, and session cursors | OMP tools -> substrate for reads/writes; Host -> OMP for revision-gated Bell projection and lease-claimed explicit Knocks | replace local Knock polling with recipient-scoped wake hints only after the generic delivery prerequisites; PostgreSQL and Host remain authority |
 | Project | future project identity, membership, subscriptions, typed records, and decisions | Host commands and project projections | deliver committed project-record pointers to subscribed rooms; a project is not a NATS mailbox |
 | Kitten work | work item, capability/workspace contract, lineage, lifecycle, result, and settlement | retain the current in-process OMP path | introduce addressed delivery only for a real independent or dormant worker; coalesce progress instead of persisting every twitch |
 | Crane | PostgreSQL outbox and application receipts | none; it is a delivery projection | the common pointer envelope and routing lifecycle |
@@ -737,10 +751,18 @@ Prose never silently becomes a command. A kitten may write a Hallway post, but
 that post cannot mutate project or work-item state merely because its language
 sounds imperative.
 
-### 7.5 First expansion pilot: Hallway delivery
+### 7.5 Hallway Knock and the next transport expansion
 
-Hallway is the first useful expansion because its authority, membership,
-ordering, idempotent posts, and per-presence cursors already exist.
+The first local Hallway Knock is delivered without broadening NATS. PostgreSQL
+owns an explicit Knock row referencing an existing addressed Hallway message;
+the recipient room's Host claims a short lease, and its own OMP adapter starts
+one turn with `pi.sendMessage`. This is intentionally narrower than a general
+conversation-send command.
+
+Hallway remains the first useful future NATS expansion because PostgreSQL already
+owns membership, daily threads, recipient-sensitive idempotent posts, room read
+state, durable Bell rows, Knock policy/lifecycle, and per-session cursors; Host
+already owns authorization and projection.
 
 ```mermaid
 flowchart LR
@@ -755,16 +777,21 @@ flowchart LR
   CURSOR --> PG
 ```
 
-One Hallway post creates one parent intent and bounded child intents for
-recipient rooms in the same transaction. Each room Host consumes only its
-authorized subject, reloads the message under Hallway membership rules, and
-commits an inbox/unread projection plus an application receipt before broker
-acknowledgement. Tabs and sessions fan out inside Host/WebSocket; they do not
-create one NATS message per tab.
+The future NATS projection can create bounded recipient intents from committed
+Hallway authority. Each room Host consumes only its authorized subject, reloads
+the pointer under Hallway membership rules, and commits an application receipt
+before broker acknowledgement. Tabs and sessions fan out inside Host/WebSocket;
+they do not create one NATS message per tab.
 
-Hallway delivery never auto-invokes a spirit from prose. Manual wake remains the
-default. A future explicit wake or work command uses its own typed crease and
-authorization.
+Ordinary Hallway prose never auto-invokes a spirit. Manual wake remains the
+default. The explicit Knock is its own typed crease: the sender must have authored
+and structurally addressed the referenced message, the recipient room must
+allow-list the sender, and one message may Knock one recipient only once. Roots
+carry a 1–8 turn ceiling; child Knocks must directly reply in the same thread,
+reverse the rooms, follow a parent turn that actually started, and inherit the
+root expiry and turn budget. The trusted wake notice contains routing pointers,
+not the peer's body; the spirit opens the exact Hallway message as an untrusted
+request and decides how to answer.
 
 ### 7.6 Broker and payload boundary
 

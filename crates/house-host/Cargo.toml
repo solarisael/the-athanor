@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 atomicwrites.workspace = true
+athanor-substrate = { path = "../house-substrate" }
 async-nats.workspace = true
 axum.workspace = true
 chrono.workspace = true
@@ -23,6 +24,7 @@ house-core = { path = "../house-core" }
 house-protocol = { path = "../house-protocol" }
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

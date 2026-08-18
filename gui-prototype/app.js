@@ -510,6 +510,7 @@ const state = {
   librarySelection: null,
   mechanicsCategory: "all",
   mechanicsQuery: "",
+  mechanicsScrollTop: 0,
   density: "comfortable",
   textScale: "standard",
   measure: "focused",
@@ -518,6 +519,7 @@ const state = {
   timestamps: true,
   sendWithEnter: true,
   statusVisible: true,
+  memberDockOpen: false,
   bellOpen: false,
   switcherOpen: false,
   switcherQuery: "",
@@ -551,6 +553,7 @@ const continuityStatus = document.querySelector("#continuity-status");
 const continuityGroup = composer.querySelector(".composer-continuity-group");
 const houseDoor = document.querySelector("[data-house-door]");
 const memberDock = document.querySelector(".member-dock");
+const memberDockScrim = document.querySelector(".member-dock-scrim");
 const profileLayer = document.querySelector(".profile-layer");
 let drawerFocusGeneration = 0;
 const statusPopover = document.querySelector(".status-popover");
@@ -910,6 +913,7 @@ function openConversation(id) {
   state.accessPicker = false;
   state.newSpiritOpen = false;
   state.librarySelection = null;
+  state.memberDockOpen = false;
   input.value = state.drafts.get(draftKey(incoming)) ?? "";
   input.style.height = "auto";
   setMobileSidebarOpen(false);
@@ -919,8 +923,15 @@ function openConversation(id) {
   render();
 }
 
+function preserveMechanicsScroll() {
+  if (state.activeId === "house" && state.activeView === "state") {
+    state.mechanicsScrollTop = timeline.scrollTop;
+  }
+}
+
 function openSubjectView(view, { clearMessage = false } = {}) {
   if (!SUBJECT_VIEWS.includes(view)) return false;
+  preserveMechanicsScroll();
   state.activeView = view;
   state.librarySelection = null;
   state.accessPicker = false;
@@ -1914,7 +1925,7 @@ function renderHouseSurface() {
   };
   timeline.innerHTML = views[state.activeView];
   if (state.activeView === "state") renderMechanicsResults();
-  timeline.scrollTop = 0;
+  timeline.scrollTop = state.activeView === "state" ? state.mechanicsScrollTop : 0;
 }
 
 function renderRoomMemories(item) {
@@ -2389,6 +2400,26 @@ function syncMobileSidebarAccessibility() {
   sidebar.setAttribute("aria-hidden", String(concealed));
 }
 
+function syncMemberDockAccessibility() {
+  const item = conversations[state.activeId];
+  const mobileHallway = item.kind === "hallway" && mobileLayout.matches;
+  const concealed = item.kind !== "hallway" || (mobileHallway && !state.memberDockOpen);
+  shell.dataset.memberDockOpen = String(mobileHallway && state.memberDockOpen);
+  memberDock.inert = concealed;
+  memberDock.setAttribute("aria-hidden", String(concealed));
+  memberDockScrim.hidden = !mobileHallway || !state.memberDockOpen;
+  memberDockScrim.inert = memberDockScrim.hidden;
+  if (item.kind === "hallway") {
+    inspectorToggle.hidden = !mobileLayout.matches;
+    inspectorToggle.setAttribute("aria-pressed", String(mobileHallway && state.memberDockOpen));
+  }
+}
+
+function setMemberDockOpen(open) {
+  state.memberDockOpen = Boolean(open);
+  syncMemberDockAccessibility();
+}
+
 function setMobileSidebarOpen(open) {
   shell.dataset.sidebarOpen = String(open);
   sidebarToggle.setAttribute("aria-pressed", String(open));
@@ -2447,6 +2478,7 @@ function render() {
   shell.dataset.activeProjectSessionId = activeProjectSession(item)?.id ?? "";
   shell.dataset.selectedPresenceId = state.selectedPresenceId ?? "";
   shell.dataset.hallway = String(item.kind === "hallway");
+  shell.dataset.memberDockOpen = String(state.memberDockOpen);
   shell.dataset.density = state.density;
   shell.dataset.kintsuActiveSessionId = conversations.kintsu.activeSessionId;
   shell.dataset.kodoActiveSessionId = conversations.kodo.activeSessionId;
@@ -2456,7 +2488,7 @@ function render() {
   shell.dataset.reducedMotion = String(state.reducedMotion);
   shell.dataset.timestamps = String(state.timestamps);
   shell.dataset.statusVisible = String(state.statusVisible);
-  inspectorToggle.hidden = item.kind === "hallway";
+  inspectorToggle.hidden = item.kind === "hallway" && !mobileLayout.matches;
   houseDoor.setAttribute("aria-pressed", String(item.kind === "house"));
   document.querySelectorAll(".mode-button").forEach(button => {
     const active = button.dataset.mode === state.mode;
@@ -2483,6 +2515,7 @@ function render() {
   renderPresenceProfile(item);
   renderBellToggle();
   syncMobileSidebarAccessibility();
+  syncMemberDockAccessibility();
   window.requestAnimationFrame(() => revealActiveViewButton(activeViewButton));
 }
 
@@ -3021,7 +3054,22 @@ function setInspector(open) {
   inspectorToggle.setAttribute("aria-pressed", String(open));
 }
 
-inspectorToggle.addEventListener("click", () => setInspector(shell.dataset.inspectorOpen !== "true"));
+inspectorToggle.addEventListener("click", () => {
+  const item = conversations[state.activeId];
+  if (item.kind === "hallway" && mobileLayout.matches) {
+    const open = !state.memberDockOpen;
+    setMemberDockOpen(open);
+    if (open) {
+      window.requestAnimationFrame(() => memberDock.querySelector("button")?.focus({ preventScroll: true }));
+    }
+    return;
+  }
+  setInspector(shell.dataset.inspectorOpen !== "true");
+});
+memberDockScrim.addEventListener("click", () => {
+  setMemberDockOpen(false);
+  inspectorToggle.focus();
+});
 document.querySelector(".inspector-close").addEventListener("click", () => setInspector(false));
 
 sidebarToggle.addEventListener("click", () => {
@@ -3085,6 +3133,12 @@ document.addEventListener("keydown", event => {
     event.preventDefault();
     return;
   }
+  if (mobileLayout.matches && state.memberDockOpen) {
+    event.preventDefault();
+    setMemberDockOpen(false);
+    inspectorToggle.focus();
+    return;
+  }
   if (mobileLayout.matches && shell.dataset.sidebarOpen === "true") {
     event.preventDefault();
     closeMobileSidebar();
@@ -3125,14 +3179,19 @@ const subjectViewResizeObserver = new ResizeObserver(() => {
 });
 subjectViewResizeObserver.observe(subjectViews);
 
+const overlayInspectorLayout = window.matchMedia("(max-width: 1050px)");
 const mobileLayout = window.matchMedia("(max-width: 700px)");
-if (mobileLayout.matches) setInspector(false);
+if (overlayInspectorLayout.matches) setInspector(false);
+overlayInspectorLayout.addEventListener("change", event => {
+  if (event.matches) setInspector(false);
+});
 mobileLayout.addEventListener("change", event => {
   if (event.matches) {
-    setInspector(false);
     setMobileSidebarOpen(false);
+    state.memberDockOpen = false;
   }
   syncMobileSidebarAccessibility();
+  syncMemberDockAccessibility();
 });
 setDrawerView("root", null, false);
 updateComposerState();

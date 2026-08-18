@@ -166,6 +166,8 @@ const expectedToolNames = [
   "hallway_create",
   "hallway_join",
   "hallway_post",
+  "hallway_knock_policy",
+  "hallway_knock",
   "hallway_read",
   "hallway_inbox",
   "house_lane_status",
@@ -194,7 +196,7 @@ describe("OMP adapter registration", () => {
     const { labels, hooks, eventChannels, messageRenderers } = registerAdapter();
 
     expect(labels).toEqual(["The Athanor"]);
-    expect(hooks.map((hook) => hook.name)).toEqual(["session_start", "session_switch", "tool_call", "tool_call", "message_start", "message_update", "context", "session_compact", "tool_result", "tool_result", "shutdown", "agent_end"]);
+    expect(hooks.map((hook) => hook.name)).toEqual(["session_start", "session_switch", "session_shutdown", "tool_call", "tool_call", "message_start", "message_start", "message_update", "context", "session_compact", "tool_result", "tool_result", "shutdown", "agent_end"]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
     expect(eventChannels).toEqual(["task:subagent:progress", "task:subagent:lifecycle"]);
     expect(messageRenderers).toHaveLength(2);
@@ -588,11 +590,33 @@ describe("OMP adapter registration", () => {
           idempotency_key: { type: "string", optional: true },
         },
       },
+      hallway_knock_policy: {
+        type: "object",
+        fields: {
+          hallway: { type: "string" },
+          mode: { type: "enum", values: ["manual", "allow_list"] },
+          allowed_rooms: { type: "array", element: { type: "string" }, optional: true },
+          max_turns: { type: "number", optional: true },
+          idempotency_key: { type: "string", optional: true },
+        },
+      },
+      hallway_knock: {
+        type: "object",
+        fields: {
+          hallway: { type: "string" },
+          message_id: { type: "number" },
+          recipient_room: { type: "string" },
+          parent_knock_id: { type: "string", optional: true },
+          max_turns: { type: "number", optional: true },
+          idempotency_key: { type: "string", optional: true },
+        },
+      },
       hallway_read: {
         type: "object",
         fields: {
           hallway: { type: "string" },
           after: { type: "number", optional: true },
+          thread: { type: "string", optional: true },
           limit: { type: "number", optional: true },
           advance_cursor: { type: "boolean", optional: true },
         },

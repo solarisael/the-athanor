@@ -1,77 +1,83 @@
-# The Athanor Documentation
+<p class="eyebrow">Documentation</p>
 
-Start with the root [`README.md`](../README.md) for the public current state.
-Everything below has one job; dated snapshots live under `history/` and do not
-compete with current contracts.
+# A place for AI work to stand on
 
-## Audience paths
+<p class="hero-lede">The Athanor gives AI tools bounded, attributed access to project knowledge—and, when you choose it, durable governed continuity that survives closed sessions and changing models.</p>
 
-- [`../README.md`](../README.md) — default introduction for people who want
-  better AI work tools
-- [`FOR_EXPLORERS.md`](./FOR_EXPLORERS.md) — latent-space and cognitive-
-  infrastructure argument for advanced readers
-- [`EXPLAINING_THE_ATHANOR.md`](./EXPLAINING_THE_ATHANOR.md) — canonical graph
-  and traversal paths for agents or people explaining the system to peers and
-  users
+Most AI tools either forget between sessions or recover context by pouring files,
+summaries, and search results into a prompt. That can retrieve text; it does not
+distinguish current truth from stale memory or a machine-generated guess. The
+Athanor supplies that missing structure and keeps every part of it inspectable.
 
-## Current contracts
+## Three doors in
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current components, authority, data
-  flow, component ownership, installed layout, and extension boundaries
-- [`CODE_FLOW_MAP.md`](./CODE_FLOW_MAP.md) — current module ownership, runtime
-  call order, event paths, tool boundaries, and Mermaid traversal views
-- [`RETRIEVAL.md`](./RETRIEVAL.md) — Vault and AKASHA recall behavior,
-  attribution, authority, corrections, and debugging
-- [`LESSONS.md`](./LESSONS.md) — typed lesson stores, scopes, lifecycle, and
-  guarded writes
-- [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) — GIGA event, candidate, review,
-  promotion, and evaluation contracts
-- [`EVIDENCE.md`](./EVIDENCE.md) — measured public claims, methods, fixtures,
-  and missing proof
-- [`SECURITY.md`](./SECURITY.md) — privacy, secrets, permissions, publication,
-  and destructive operations
-- [`LIMITATIONS.md`](./LIMITATIONS.md) — supported platforms, current
-  constraints, and explicit non-goals
+### I work with AI tools
 
-## Operator path
+Your tool only works with the context it has. Point Vault at one or several
+project folders and it returns relevant passages with their sources—no database,
+embeddings, or GPU. When decisions deserve to outlive the session, AKASHA adds
+durable, typed memory you govern.
 
-- [`../INSTALL.md`](../INSTALL.md) — supported installation, upgrades, and
-  observable verification
-- [`../USAGE.md`](../USAGE.md) — everyday recall, memory, lessons, sleep, wake,
-  rooms, and profiles
-- [`../IDENTITY_GUIDE.md`](../IDENTITY_GUIDE.md) — co-authoring room identity
-  and active spirits
-- [`FOR_WORK.md`](./FOR_WORK.md) — project continuity and work retrieval
-- [`FOR_COMPANIONS.md`](./FOR_COMPANIONS.md) — personal continuity and shared
-  history
+[Start with project work.](./FOR_WORK.md)
 
-## Accepted target architecture
+### I build agent systems
 
-These documents define accepted direction. They do not claim every described
-surface is already shipped.
+The Athanor separates model judgment from continuity, retrieval, authority,
+provenance, and repeated deterministic cognition. The active model is a
+replaceable body operating inside those contracts, not the database of truth.
 
-- [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) — Athanor Host, thin
-  clients, GIGA integrity, durable delivery, invocation, derivation, and proof
-- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) — the native instrument, visual-token
-  inheritance, in-world Control UI, constellations, and bodies
-- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — bounded e-graphs,
-  Z3, SyGuS, Wasmtime, proof feedback, and governed promotion
-- [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) — room sovereignty,
-  companion-authored models, and the typed signed marketplace
-- [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — product domains,
-  profiles, capabilities, governance, privacy, and naming
-- [`PLANNED_FEATURES.md`](./PLANNED_FEATURES.md) — plain-language feature status
-  and product direction
+[Start with the architecture.](./ARCHITECTURE.md)
 
-## Release path and history
+### I want to know why it is shaped like this
 
-- [`CHANGELOG.md`](../CHANGELOG.md) — active `0.9.6` work and retained RC build history
-- [`roadmap.md`](./roadmap.md) — implemented runtime dependency path and remaining
-  1.0 operator-product and release gates
-- [`../HOUSE.md`](../HOUSE.md) — project history, philosophy, and design reasons
-- [`history/`](./history/) — dated plans, progress snapshots, and development
-  history that no longer represents current release state
+Rooms, Houses, paper boats, a furnace name from alchemy. The mythology is a user
+interface for discipline, and the discipline is real.
 
-[The 2026-08-06 long-form roadmap](./history/2026-08-06-roadmap-snapshot.md)
-and [the 2026-07-13 progress snapshot](./history/2026-07-13-progress-snapshot.md)
-remain available as provenance.
+[Start with the latent-space argument.](./FOR_EXPLORERS.md)
+
+## What is true today
+
+Status words mean the same thing everywhere in these docs:
+
+- **Current:** used by the reference House now.
+- **Specified:** a written contract exists; implementation may lag.
+- **Planned:** accepted roadmap direction.
+- **Research:** investigated, with no release promise.
+
+Current means Windows x64 with the OMP harness; Vault and AKASHA retrieval;
+typed memory and lessons; GIGA Stage 1 candidates under review discipline; and
+Hallways where attention and read state remain separate facts. The Host GUI,
+Godot client, Cingulate, NATS delivery, OMEGA, and ANON remain roadmap rather
+than shipped claims.
+
+If a page says something works, a receipt should exist.
+[Evidence](./EVIDENCE.md) holds the public measurements.
+
+## Find your question
+
+| Question | Document |
+|---|---|
+| How do I install the supported release? | [Install](../INSTALL.md) |
+| How do I use rooms and organs? | [Usage](../USAGE.md) |
+| How does retrieval work right now? | [Retrieval](./RETRIEVAL.md) |
+| What is authoritative, exactly? | [Architecture](./ARCHITECTURE.md) |
+| How do typed lessons work? | [Lessons](./LESSONS.md) |
+| What may GIGA write, and what may it never do? | [Hippocampus](./HIPPOCAMPUS.md) |
+| What is actually measured? | [Evidence](./EVIDENCE.md) |
+| What is unsupported or out of scope? | [Limitations](./LIMITATIONS.md) |
+| What exists versus what is planned? | [Planned Features](./PLANNED_FEATURES.md) |
+| Why is the architecture this strange? | [For latent-space explorers](./FOR_EXPLORERS.md) |
+
+## Deep reference
+
+- [The concept map](./EXPLAINING_THE_ATHANOR.md) keeps the system's definitions stable.
+- [Runtime Architecture](./RUNTIME_ARCHITECTURE.md) owns Host, delivery, invocation, and proof.
+- [Code Flow Map](./CODE_FLOW_MAP.md) traces current module ownership and event paths.
+- [Godot Client](./GODOT_CLIENT.md) specifies the accepted native instrument.
+- [Synthesis Architecture](./SYNTHESIS_ARCHITECTURE.md) covers bounded symbolic synthesis.
+- [Companion Ecosystem](./COMPANION_ECOSYSTEM.md) covers room sovereignty and signed exchange.
+- [Product Architecture](./PRODUCT_ARCHITECTURE.md) maps domains, capabilities, and governance.
+- [Documentation history](./history/) preserves dated provenance without competing with current contracts.
+
+Nothing on the public site is connected to a live House. The interface specimen
+uses fictional browser-only records.

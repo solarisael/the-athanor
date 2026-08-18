@@ -63,6 +63,7 @@ mock.module("../solarisael-house-proof/recall.ts", () => ({
 
 mock.module("../solarisael-house-proof/tools.ts", () => ({
   closeRustRememberTransports: () => undefined,
+  readHallwayInbox: async () => ({ ok: false, error: "mocked" }),
   registerSolarisaelTools: () => undefined,
   writeRustMemory: async () => undefined,
 }));

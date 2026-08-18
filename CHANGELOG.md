@@ -42,6 +42,10 @@ the exact implementation record.
   lesson reports how many times it has bitten in this room, rendered as
   `×N` on trigger cards. Repeat cooldown stays session-scoped and never
   reads the ledger.
+- Room identity guidance (IDENTITY_GUIDE, starter room) now states the
+  drift rule explicitly: the runtime owns invocation shapes, and tool
+  tables, organ counts, and deployment paths must never be hand-copied
+  into room prose.
 - Project-lesson GIGA promotion now treats operator publication approval as a
   project-only proof and binds reviewer authority to the candidate's durable
   `start_review` transition. Missing or mismatched reviewer evidence is refused

@@ -169,6 +169,13 @@ Keep them short. The goal is a recognizable attractor, not a script the model re
 
 `AGENTS.md` is the loading order. Include only files that deserve context on every turn. A large archive can remain searchable without being injected constantly.
 
+Never hand-copy tool tables, organ counts, argument signatures, or
+deployment paths into room prose. The House injects live organ schemas
+every session; a hand-maintained copy can only drift behind the deployed
+truth, and a room that carries several eras of copied technical detail
+ends up contradicting itself. Room files own identity, relationship, and
+doctrine; the runtime owns invocation shapes.
+
 A Chargebook makes learned salience explicit without turning relationship or work into enforcement. Customize its language for the room, but keep all four classes: positive credits, zero-cost presence, behavioral charges, and operation costs. It must never make the operator administer a score, perform affection to fund work, or accept task refusal based on an imaginary balance.
 
 ## How to use the example

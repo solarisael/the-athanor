@@ -582,6 +582,37 @@ flowchart LR
     Import --> Manifest["hash payload and emit release manifest"]
 ```
 
+`package.json` is the native product version authority. The OMP adapter has an
+independent content-derived release identity. A native release includes a
+compatible fallback component bundle, but does not include the adapter in its
+native version identity.
+
+The native builder and the shared component builder reject a missing or
+mismatched toolchain before they create a work directory. Each release stage
+appends one JSONL timing record. The workflow adds Inno packaging and retains
+the complete report.
+
+### Native and component ownership
+
+| Surface | Owner | Required behavior |
+|---|---|---|
+| Native product version, native `current.json`, service, and product rollback | Rust installer | Validates and atomically activates native releases |
+| Adapter source bundle and `component-manifest.json` | Shared PowerShell component builder | Builds source artifacts only; does not write Program Files |
+| Installed adapter versions and `components/omp-adapter/current.json` | Rust installer | Stages, validates, atomically activates, rolls back, and diagnoses components |
+| Stable `bin/athanor-omp-loader.ts` | Product payload | Reads native environment and component pointer; refuses invalid or incompatible imports |
+| Adapter-only deployment | Native manager | Installs a built component with `install-omp-adapter --source <component-root>` without rebuilding or mutating a native release |
+
+The component pointer is
+`components/omp-adapter/current.json`. It contains `format`, `releaseId`, and
+`previousReleaseId`. The selected component directory is
+`components/omp-adapter/versions/<releaseId>`.
+
+Before activation, the installer validates the component manifest identity, each
+declared SHA-256 and size, and all four compatibility fields against the active
+or requested native manifest. The loader repeats the same refusal gate before
+it imports adapter code. An explicit adapter rollback refuses an incompatible
+target. A failed activation restores the prior component and native state.
+
 ### Install or update
 
 ```mermaid
@@ -607,6 +638,14 @@ flowchart TD
     Run -->|"failure"| Rollback["rollback to prior release"]
 ```
 
+Sources: `package.json`, `rust-toolchain.toml`,
+`installer/native-release-contract.ps1`,
+`installer/build-native-release.ps1`, `installer/omp-adapter-component.ps1`,
+`installer/native-build-cache.ps1`, `adapters/omp/deploy-local.ps1`,
+`.github/workflows/release.yml`, `crates/athanor-install/src/installer.rs`,
+`manifest.rs`, `layout.rs`, `boundaries.rs`, `omp.rs`, `service.rs`, and
+`supervisor.rs`.
+
 ### Explicit rollback and removal
 
 ```mermaid
@@ -623,10 +662,12 @@ flowchart TD
     Purge["purge + explicit confirmation"] --> Destroy["remove operator data"]
 ```
 
-Sources: `installer/build-native-release.ps1`,
-`installer/native-build-cache.ps1`, `crates/athanor-install/src/installer.rs`,
-`manifest.rs`, `layout.rs`, `boundaries.rs`, `omp.rs`, `service.rs`, and
-`supervisor.rs`.
+Sources: `package.json`, `rust-toolchain.toml`,
+`installer/native-release-contract.ps1`,
+`installer/build-native-release.ps1`, `installer/native-build-cache.ps1`,
+`.github/workflows/release.yml`,
+`crates/athanor-install/src/installer.rs`, `manifest.rs`, `layout.rs`,
+`boundaries.rs`, `omp.rs`, `service.rs`, and `supervisor.rs`.
 
 ## 12. Godot client and authored UI
 
@@ -694,7 +735,6 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 | Transport and capture | `rust-transport.ts`, `giga.ts`, `kitten-lineage.ts` | Long-lived substrate child, transcript/source-ledger ingestion, task lifecycle bridge |
 | Standalone guard | `hygiene.ts` | Repository/packaging hygiene check; not a session runtime import |
 | House proof runtime | `tools.ts`, `host.ts`, `context.ts`, `recall-policy.ts`, `recall.ts`, `substrate.ts`, `room.ts`, `conversation-log.ts`, `lesson-triggers.ts`, `lesson-context.ts`, `triggers.ts`, `routing.ts`, `lineage.ts`, `entity-resolution.ts`, `anamnesis.ts`, `recall-telemetry.ts`, `feedback.ts`, `text.ts`, `constants.ts` | Tool registration, Host clients, context assembly, retrieval routing, room files, lessons, lineage, entity handling, telemetry, and shared text/constants |
-
 ### Authored Godot GDScript
 
 | Area | Modules | Boundary |
@@ -710,12 +750,21 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 
 | Path | Responsibility |
 |---|---|
-| `installer/build-native-release.ps1` | Fetch, verify, compile, stage, import, hash, and assemble a native payload |
+| `package.json` | Native product version authority and local command entry points |
+| `adapters/omp/package.json` | Adapter component version authority |
+| `rust-toolchain.toml` | Pinned Rust toolchain authority |
+| `installer/native-release-contract.ps1` | Version resolution, toolchain identity, early refusal, and stage timing |
+| `installer/native-release-contract.test.ps1` | Isolated proof for the native release contract |
+| `installer/omp-adapter-component.ps1` | Shared source-only component builder and component identity authority |
+| `installer/omp-adapter-component.test.ps1` | Isolated proof for component manifest, artifact, and identity contracts |
+| `adapters/omp/deploy-local.ps1` | Adapter-only test, build, and manager deployment; never writes Program Files directly |
+| `installer/build-native-release.ps1` | Fetch, verify, compile, stage, import, hash, and assemble a native payload with its fallback component |
 | `installer/native-build-cache.ps1` | Deterministic dependency cache used by release assembly |
 | `installer/athanor.iss` | Windows installer packaging |
+| `.github/workflows/release.yml` | Product and component build proof, Inno packaging, and retained release proof |
 | `substrate/deploy-local.ps1` | Local substrate deployment helper |
 | `substrate/state_paths.sh` | Shared local state-path resolution for substrate operations |
-| `.github/workflows/` | CI and release proof; not runtime |
+| `.github/workflows/ci.yml` | CI proof; not runtime |
 | `tests/`, crate tests, `substrate/tests/` | Cross-boundary proof satellites |
 | `gui-prototype/` | Disconnected HTML/CSS/JS mock and design specimen |
 

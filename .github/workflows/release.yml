@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Semantic release version"
+        description: "Athanor product version: three or four numeric components, matching package.json"
         required: true
         type: string
 
@@ -18,32 +18,43 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.95.0
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Resolve release version
         shell: pwsh
         env:
           REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
-          $version = $env:REQUESTED -replace '^v', ''
-          if ($version -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') { throw "invalid semantic version: $version" }
-          $adapter = (Get-Content adapters/omp/package.json -Raw | ConvertFrom-Json).version
-          $root = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($adapter -ne $version -or $root -ne $version) { throw "release version must match both package manifests" }
+          . ./installer/native-release-contract.ps1
+          # One authority and one grammar: the shared contract validates the
+          # Athanor product-version shape before it compares anything, so a
+          # malformed tag or input never reaches the build, the manifest, or an
+          # installer file name.
+          $version = Get-NativeReleaseVersion -RepositoryRoot $env:GITHUB_WORKSPACE -Requested ($env:REQUESTED -replace '^v', '')
           "VERSION=$version" | Out-File $env:GITHUB_ENV -Append
       - name: Stage checksum-verified native runtime
         shell: pwsh
-        run: ./installer/build-native-release.ps1 -Version $env:VERSION -OutDir dist
+        run: ./installer/build-native-release.ps1 -OutDir dist
       - name: Compile the Inno installer
         shell: pwsh
         run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersion=$env:VERSION" "/DSourceRoot=$env:GITHUB_WORKSPACE\dist" "installer\athanor.iss"
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
-          $installer = Get-Item "dist\The-Athanor-$env:VERSION-windows-x64.exe"
-          $all = @(Get-ChildItem dist -Filter '*.exe' -File)
-          if ($all.Count -ne 1) { throw "release must contain exactly one Windows installer; found $($all.Count)" }
-          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $($installer.Name)" | Set-Content "$($installer.FullName).sha256" -Encoding ascii
+          . ./installer/native-release-contract.ps1
+          Invoke-NativeReleaseStage -Name "inno-packaging" -OutDir "dist" -Action {
+            & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DVersion=$env:VERSION" "/DSourceRoot=$env:GITHUB_WORKSPACE\dist" "installer\athanor.iss"
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+            $installer = Get-Item "dist\The-Athanor-$env:VERSION-windows-x64.exe"
+            $all = @(Get-ChildItem dist -Filter '*.exe' -File)
+            if ($all.Count -ne 1) { throw "release must contain exactly one Windows installer; found $($all.Count)" }
+            $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($installer.Name)" | Set-Content "$($installer.FullName).sha256" -Encoding ascii
+          }
+      - name: Retain native release timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: the-athanor-${{ env.VERSION }}-native-release-timings
+          path: dist/native-release-timings.jsonl
+          if-no-files-found: warn
       - name: Retain release proof
         uses: actions/upload-artifact@v4
         with:

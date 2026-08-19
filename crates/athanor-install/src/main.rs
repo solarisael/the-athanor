@@ -53,7 +53,7 @@ fn main() -> Result<()> {
     }
     if matches!(command, "help" | "--help" | "-h") {
         println!(
-            "Athanor native runtime manager\n\nCommands:\n  install --staging DIR --manifest FILE [--external-database-file FILE] [--house-config-file FILE] [--omp-config FILE --client-config FILE --operator-principal NAME]\n  update --staging DIR --manifest FILE [same options]\n  gui [--room ROOM]\n  doctor\n  rollback\n  uninstall\n  purge --confirm-data-loss\n  service"
+            "Athanor native runtime manager\n\nCommands:\n  install --staging DIR --manifest FILE [--external-database-file FILE] [--house-config-file FILE] [--omp-config FILE --client-config FILE --operator-principal NAME]\n  update --staging DIR --manifest FILE [same options]\n  install-omp-adapter --source DIR\n  rollback-omp-adapter [--release-id ID]\n  gui [--room ROOM]\n  doctor\n  rollback\n  uninstall\n  purge --confirm-data-loss\n  service"
         );
         return Ok(());
     }
@@ -134,6 +134,22 @@ fn main() -> Result<()> {
                 "{}",
                 serde_json::to_string(
                     &serde_json::json!({"ok": true, "version": outcome.version, "upgradedFrom": outcome.upgraded_from, "legacyImported": outcome.legacy_imported, "ompRegistered": outcome.omp_registered})
+                )?
+            );
+        }
+        "install-omp-adapter" => {
+            let source = PathBuf::from(value(&arguments, "--source")?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&installer.install_omp_adapter(&source)?)?
+            );
+        }
+        "rollback-omp-adapter" => {
+            let release_id = optional_value(&arguments, "--release-id")?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &installer.rollback_omp_adapter(release_id.as_deref())?
                 )?
             );
         }

@@ -34,24 +34,31 @@ initializes the database, applies ordered schema migrations, installs the
 
 ## Installed topology
 
-Product code is immutable per version. Operator data and secrets are separate:
+Product code is immutable per version. The OMP adapter is an independently
+installed immutable component. Operator data and secrets are separate:
 
 ```text
 %ProgramFiles%\Solarisael\Athanor\
-  bin\athanor-manage.exe
-  current.json
+  bin\
+    athanor-manage.exe
+    athanor-omp-loader.ts          stable product-owned loader
+  current.json                     native product activation pointer
   versions\<version>\
     release-manifest.json
     bin\
       athanor-substrate.exe
       athanor-house-delivery.exe
       house-host.exe
-      athanor-gui.exe             pinned Godot 4.7.1 runtime
-    adapters\omp\
+      athanor-gui.exe              pinned Godot 4.7.1 runtime
     runtime\
-      godot\                      imported client project + GDExtension
-      postgresql\                 EnterpriseDB PostgreSQL 18.4-2 + pgvector 0.8.6
-      nats\nats-server.exe        NATS Server 2.14.4
+      godot\                        imported client project + GDExtension
+      postgresql\                   EnterpriseDB PostgreSQL 18.4-2 + pgvector 0.8.6
+      nats\nats-server.exe          NATS Server 2.14.4
+  components\omp-adapter\
+    current.json                    component activation pointer
+    versions\<releaseId>\
+      component-manifest.json
+      index.ts and other adapter artifacts
 %ProgramData%\Solarisael\Athanor\
   config\runtime.json
   secrets\runtime-secrets.json
@@ -63,19 +70,24 @@ Product code is immutable per version. Operator data and secrets are separate:
   backups\
 ```
 
-OMP receives one stable loader entry at
-`%ProgramFiles%\Solarisael\Athanor\bin\athanor-omp-loader.ts`. The loader follows
-`current.json`, so upgrades and rollback never leave a version-pinned extension
-path. Its per-user client projection lives at
-`%USERPROFILE%\.omp\agent\athanor\client.json` with an explicit user-only ACL.
-`config.yml` contains no token, password, or database URL.
+The stable loader reads native `current.json` only to obtain the native runtime
+environment. It reads `components\omp-adapter\current.json` to select imports.
+The component pointer has `format`, `releaseId`, and `previousReleaseId` fields.
+It does not select a native product version.
 
-`current.json` is the atomic activation pointer. At least the active and previous
-versions are retained for rollback. `%ProgramData%\Solarisael\Athanor` and the
-secret file have inherited access removed and grant full control only to SYSTEM
-and the local Administrators group. Tokens and database passwords are generated
-from the operating-system random source, are never printed, and live only in the
-restricted secret file.
+The manager validates the component manifest, its release identity, every
+artifact size and SHA-256 value, and all four native compatibility fields before
+it activates an adapter. The loader repeats those checks before it imports the
+adapter. A failed check refuses the adapter; it does not load a version-pinned
+copy from the native payload.
+
+Native `current.json` is the atomic product activation pointer. The component
+pointer is a separate atomic adapter activation pointer. At least the active and
+previous product and adapter releases are retained for their own rollback paths.
+`%ProgramData%\Solarisael\Athanor` and the secret file have inherited access
+removed and grant full control only to SYSTEM and the local Administrators group.
+Tokens and database passwords are generated from the operating-system random
+source, are never printed, and live only in the restricted secret file.
 
 ## Managed service contract
 
@@ -100,8 +112,33 @@ Run the native doctor from an elevated terminal:
 & "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" doctor
 ```
 
-Doctor exits nonzero if the activation pointer, release manifest, service, or
-persistent data root is absent or invalid.
+Doctor exits nonzero if a native or component activation pointer, a native
+release manifest, a component manifest identity, a component artifact, native
+compatibility, the service, or the persistent data root is absent or invalid.
+
+## Adapter component operations
+
+The manager is the only installed writer. To install a prebuilt adapter
+component, run:
+
+```powershell
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+  install-omp-adapter --source <component-root>
+```
+
+`<component-root>` must directly contain `component-manifest.json` and every
+declared artifact. The manager stages and verifies the component before it
+renames the release directory and atomically updates the component pointer.
+
+To roll back the adapter only, run:
+
+```powershell
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+  rollback-omp-adapter [--release-id <releaseId>]
+```
+
+The manager refuses an adapter release that is incompatible with the active
+native manifest. These commands never change a native product version.
 
 The Start menu contains **The Athanor**, which asks the native manager to launch
 the pinned Godot client with the default room's token/identity in child-process

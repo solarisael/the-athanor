@@ -7,6 +7,7 @@ import {
   ATHANOR_ENV_FILE,
   ATHANOR_ROOT,
   ATHANOR_TOPOLOGY_KEYS,
+  INSTALLED_COMPONENT,
   applyAthanorEnv,
   loadAthanorEnv,
   parseAthanorEnv,
@@ -29,14 +30,13 @@ afterAll(async () => {
 });
 
 describe("structural roots", () => {
-  test("the core root is the adapter's grandparent and nothing else decides it", () => {
+  test("source resolves the repository root from adapters/omp", () => {
+    expect(INSTALLED_COMPONENT).toBe(false);
     expect(ADAPTER_ROOT.endsWith(path.join("adapters", "omp"))).toBe(true);
     expect(ATHANOR_ROOT).toBe(path.resolve(ADAPTER_ROOT, "..", ".."));
   });
 
-  test("installed topology configuration is <install-root>/state/athanor.env", () => {
-    // One level above the product tree, because <install-root>/the-athanor is
-    // immutable and state is not.
+  test("source topology configuration remains beside the repository root", () => {
     expect(ATHANOR_ENV_FILE).toBe(path.resolve(ATHANOR_ROOT, "..", "state", "athanor.env"));
     expect(path.basename(path.dirname(ATHANOR_ENV_FILE))).toBe("state");
   });
@@ -72,7 +72,7 @@ describe("athanor.env application", () => {
     const applied = applyAthanorEnv([
       "ATHANOR_STATE_DIR=/install/state",
       "ATHANOR_SUBSTRATE_ROOT=/install/the-athanor/substrate",
-      "ATHANOR_SUBSTRATE_EXE=/install/the-athanor/adapters/omp/bin/linux-x64/athanor-substrate",
+      "ATHANOR_SUBSTRATE_EXE=/install/bin/athanor-substrate",
       "ATHANOR_AUTO=1",
     ].join("\n"), env);
 
@@ -163,11 +163,21 @@ describe("fresh process", () => {
   // values up from the file alone.
   //
   // To prove that honestly the module has to resolve its OWN location inside a
-  // simulated install, so the real athanor-root.ts is staged at
-  // <install>/the-athanor/adapters/omp/ and imported relatively from there.
-  async function makeInstall(contents: string | null): Promise<string> {
+  // simulated installed component at
+  // <program-root>/components/omp-adapter/versions/<releaseId>/.
+  async function makeInstall(
+    contents: string | null,
+    componentsSegment = "components",
+    componentSegment = "omp-adapter",
+  ): Promise<string> {
     const installRoot = await makeRoot();
-    const adapter = path.join(installRoot, "the-athanor", "adapters", "omp");
+    const adapter = path.join(
+      installRoot,
+      componentsSegment,
+      componentSegment,
+      "versions",
+      "0.9.3-example",
+    );
     await mkdir(adapter, { recursive: true });
     await mkdir(path.join(installRoot, "state"), { recursive: true });
     await Bun.write(
@@ -180,8 +190,19 @@ describe("fresh process", () => {
     return installRoot;
   }
 
-  async function probeFreshProcess(installRoot: string, extraEnv: Record<string, string> = {}) {
-    const adapter = path.join(installRoot, "the-athanor", "adapters", "omp");
+  async function probeFreshProcess(
+    installRoot: string,
+    extraEnv: Record<string, string> = {},
+    componentsSegment = "components",
+    componentSegment = "omp-adapter",
+  ) {
+    const adapter = path.join(
+      installRoot,
+      componentsSegment,
+      componentSegment,
+      "versions",
+      "0.9.3-example",
+    );
     const probe = path.join(adapter, "probe.ts");
     await writeFile(
       probe,
@@ -224,10 +245,32 @@ describe("fresh process", () => {
     const result = await probeFreshProcess(install);
 
     expect(result.file).toBe(path.join(install, "state", "athanor.env"));
-    expect(result.root).toBe(path.join(install, "the-athanor"));
+    expect(result.root).toBe(install);
     expect(result.applied.sort()).toEqual(["ATHANOR_STATE_DIR", "ATHANOR_SUBSTRATE_ROOT"]);
     expect(result.stateDir).toBe("/install/state");
     expect(result.substrateRoot).toBe("/install/the-athanor/substrate");
+  });
+
+  test("Windows casing variants remain installed in a fresh process", async () => {
+    if (process.platform !== "win32") return;
+    const componentsSegment = "CoMpOnEnTs";
+    const componentSegment = "OMP-AdApTeR";
+    const install = await makeInstall(
+      "ATHANOR_STATE_DIR=C:/installed/state",
+      componentsSegment,
+      componentSegment,
+    );
+    const result = await probeFreshProcess(
+      install,
+      {},
+      componentsSegment,
+      componentSegment,
+    );
+
+    expect(result.root).toBe(install);
+    expect(result.file).toBe(path.join(install, "state", "athanor.env"));
+    expect(result.applied).toEqual(["ATHANOR_STATE_DIR"]);
+    expect(result.stateDir).toBe("C:/installed/state");
   });
 
   test("a fresh process without the file gets nothing, not a guess", async () => {

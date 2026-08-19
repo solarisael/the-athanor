@@ -1,13 +1,16 @@
 # The Athanor — OMP adapter
 
-This directory is a component of the [The Athanor](../../README.md) repository.
-It is not a separate checkout and not a separate release.
+This directory is a component source of the [The Athanor](../../README.md)
+repository. It is not a separate checkout and it does not define a native
+product version.
 
 The adapter connects The Athanor to [Oh My Pi (OMP)](https://github.com/can1357/oh-my-pi).
-In an installed tree it lives under the active immutable product version.
+An installed adapter lives independently at
+`components/omp-adapter/versions/<releaseId>`. It is not copied into a native
+`versions/<version>` directory.
 
-**Do not install from this directory.** The one installation door is
-[`INSTALL.md`](../../INSTALL.md) at the repository root.
+Install and rollback are owned by the native manager. Do not write Program
+Files from this directory or from a PowerShell builder.
 
 ## Where things live
 
@@ -53,9 +56,57 @@ becomes a second authority.
 | `starter-room/` | Example room material |
 
 Packaging, installation, migration, update, rollback, doctor, uninstall, and
-purge are owned by `crates/athanor-install` and `installer/`, not this adapter.
-The native release builder copies only the modules required at runtime; tests,
-historical portable builders, and development assets are excluded.
+purge are owned by `crates/athanor-install`. PowerShell builds source artifacts
+only. Rust validates installed artifacts, writes component pointers, and changes
+installed state.
+
+## Build and deploy the adapter component
+
+Build a component bundle with the shared builder:
+
+```powershell
+. installer/omp-adapter-component.ps1
+New-OmpAdapterComponentBundle -RepositoryRoot . -Destination dist/omp-adapter
+```
+
+The output root contains `component-manifest.json` and all declared artifacts.
+The manifest records a content-derived `releaseId`, exact native compatibility
+fields, and SHA-256 and size values for every artifact. The manager stages and
+validates this root before an atomic component-pointer update.
+
+For the adapter-only speed path, run:
+
+```powershell
+bun run deploy:omp-adapter
+```
+
+That command runs the adapter tests, builds a temporary component bundle, and
+calls the stable manager. It does not rebuild, replace, or mutate a native
+product release.
+
+Deploy an already-built component with the stable manager:
+
+```powershell
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+  install-omp-adapter --source <component-root>
+```
+
+This adapter-only path does not rebuild, replace, or mutate a native product
+release. It reuses an identical valid component release when one exists.
+
+Roll back the adapter without changing the native product:
+
+```powershell
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+  rollback-omp-adapter
+
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+  rollback-omp-adapter --release-id <releaseId>
+```
+
+Rollback refuses a target whose four compatibility fields do not exactly match
+the active native product. If an activation fails, the manager restores the
+prior component and native activation state.
 
 ## Build the native release
 
@@ -64,15 +115,12 @@ environment:
 
 ```powershell
 pwsh -File installer/build-native-release.ps1 `
-  -Version 0.9.6.1 `
   -OutDir dist/native
 ```
 
-The script builds Rust into an isolated staging target, compiles pgvector into
-the bundled EnterpriseDB tree, imports the Godot project against its
-GDExtension, rejects Godot load errors, and writes a byte-size/SHA-256 manifest.
-Inno Setup then compiles the single Windows installer from
-`installer/athanor.iss`.
+The native release assembles its fallback `components/omp-adapter` bundle
+through the shared component builder. It does not make the adapter part of the
+native version identity.
 
 ## Verify an installed tree
 

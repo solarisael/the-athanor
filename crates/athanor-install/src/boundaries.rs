@@ -3,6 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{Mutex, MutexGuard, TryLockError},
     thread,
     time::{Duration, Instant},
 };
@@ -10,6 +11,19 @@ use std::{
 pub trait FileSystem {
     fn exists(&self, path: &Path) -> bool;
     fn read(&self, path: &Path) -> Result<Vec<u8>>;
+    fn validate_regular_file(&self, root: &Path, path: &Path) -> Result<()> {
+        if !path.starts_with(root) {
+            bail!(
+                "file {} escapes its declared root {}",
+                path.display(),
+                root.display()
+            );
+        }
+        if !self.exists(path) {
+            bail!("required regular file is missing: {}", path.display());
+        }
+        Ok(())
+    }
     fn create_dir_all(&self, path: &Path) -> Result<()>;
     fn copy(&self, from: &Path, to: &Path) -> Result<()>;
     fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<()>;
@@ -18,6 +32,101 @@ pub trait FileSystem {
     fn remove_tree(&self, path: &Path) -> Result<()>;
     fn restrict_acl(&self, path: &Path) -> Result<()>;
     fn restrict_user_acl(&self, path: &Path, principal: &str) -> Result<()>;
+}
+
+static PROCESS_OPERATION_LOCK: Mutex<()> = Mutex::new(());
+const OPERATION_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(windows)]
+static WINDOWS_OPERATION_MUTEX_NAME: [u16; 33] = [
+    71, 108, 111, 98, 97, 108, 92, 65, 116, 104, 97, 110, 111, 114, 77, 97, 110, 97, 103, 101, 114,
+    77, 117, 116, 97, 116, 105, 111, 110, 46, 118, 49, 0,
+];
+
+pub struct OperationLock {
+    _process: MutexGuard<'static, ()>,
+    #[cfg(windows)]
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+impl OperationLock {
+    pub fn acquire() -> Result<Self> {
+        let deadline = Instant::now() + OPERATION_LOCK_TIMEOUT;
+        let process = loop {
+            match PROCESS_OPERATION_LOCK.try_lock() {
+                Ok(guard) => break guard,
+                Err(TryLockError::Poisoned(error)) => break error.into_inner(),
+                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(25));
+                }
+                Err(TryLockError::WouldBlock) => {
+                    bail!("timed out waiting for the process-wide Athanor manager operation lock")
+                }
+            }
+        };
+
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::{
+                Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT},
+                System::Threading::WaitForSingleObject,
+            };
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn CreateMutexW(
+                    mutex_attributes: *const std::ffi::c_void,
+                    initial_owner: i32,
+                    name: *const u16,
+                ) -> HANDLE;
+            }
+
+            // SAFETY: the static name is NUL-terminated; null selects the default
+            // security descriptor, and the returned handle is checked.
+            let handle =
+                unsafe { CreateMutexW(std::ptr::null(), 0, WINDOWS_OPERATION_MUTEX_NAME.as_ptr()) };
+            if handle.is_null() {
+                return Err(std::io::Error::last_os_error())
+                    .context("create the cross-process Athanor manager operation mutex");
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let milliseconds = remaining.as_millis().min(u32::MAX as u128) as u32;
+            // SAFETY: `handle` is a live mutex handle owned by this scope.
+            let status = unsafe { WaitForSingleObject(handle, milliseconds) };
+            match status {
+                WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(Self {
+                    _process: process,
+                    handle,
+                }),
+                WAIT_TIMEOUT => {
+                    // SAFETY: ownership was not acquired, so only the live handle is closed.
+                    unsafe { CloseHandle(handle) };
+                    bail!("timed out waiting for the cross-process Athanor manager operation mutex")
+                }
+                _ => {
+                    let error = std::io::Error::last_os_error();
+                    // SAFETY: ownership was not acquired, so only the live handle is closed.
+                    unsafe { CloseHandle(handle) };
+                    Err(error).context("wait for the cross-process Athanor manager operation mutex")
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(Self { _process: process })
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for OperationLock {
+    fn drop(&mut self) {
+        use windows_sys::Win32::{Foundation::CloseHandle, System::Threading::ReleaseMutex};
+        // SAFETY: successful waits grant this guard mutex ownership; the guard is
+        // the sole owner of the live handle and releases before closing it.
+        unsafe {
+            ReleaseMutex(self.handle);
+            CloseHandle(self.handle);
+        }
+    }
 }
 
 pub trait ServiceManager {
@@ -40,6 +149,35 @@ pub trait SecretSource {
     fn fill(&self, destination: &mut [u8]) -> Result<()>;
 }
 
+fn validate_physical_entry(path: &Path, final_entry: bool) -> Result<()> {
+    let metadata =
+        fs::symlink_metadata(path).with_context(|| format!("inspect {}", path.display()))?;
+    let mut is_reparse = metadata.file_type().is_symlink();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        is_reparse |= metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    }
+    if is_reparse {
+        bail!(
+            "refusing reparse or symbolic-link install path {}",
+            path.display()
+        );
+    }
+    if final_entry {
+        if !metadata.is_file() {
+            bail!("install artifact is not a regular file: {}", path.display());
+        }
+    } else if !metadata.is_dir() {
+        bail!(
+            "install artifact ancestor is not a directory: {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 #[derive(Default)]
 pub struct NativeFileSystem;
 
@@ -49,6 +187,31 @@ impl FileSystem for NativeFileSystem {
     }
     fn read(&self, path: &Path) -> Result<Vec<u8>> {
         fs::read(path).with_context(|| format!("read {}", path.display()))
+    }
+    fn validate_regular_file(&self, root: &Path, path: &Path) -> Result<()> {
+        let relative = path.strip_prefix(root).with_context(|| {
+            format!(
+                "file {} escapes its declared root {}",
+                path.display(),
+                root.display()
+            )
+        })?;
+        let mut cursor = root.to_path_buf();
+        let mut entries = relative.components().peekable();
+        validate_physical_entry(&cursor, entries.peek().is_none())?;
+        while let Some(component) = entries.next() {
+            use std::path::Component;
+            match component {
+                Component::Normal(name) => cursor.push(name),
+                _ => bail!(
+                    "file {} has a non-physical path below {}",
+                    path.display(),
+                    root.display()
+                ),
+            }
+            validate_physical_entry(&cursor, entries.peek().is_none())?;
+        }
+        Ok(())
     }
     fn create_dir_all(&self, path: &Path) -> Result<()> {
         fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))

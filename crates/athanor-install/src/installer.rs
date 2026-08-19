@@ -1,13 +1,17 @@
 use crate::{
-    boundaries::{FileSystem, RuntimeControl, SecretSource, ServiceManager},
-    layout::{InstallLayout, LEGACY_NAMES, SERVICE_DISPLAY_NAME, SERVICE_NAME},
+    boundaries::{FileSystem, OperationLock, RuntimeControl, SecretSource, ServiceManager},
+    component::{
+        COMPONENT_FORMAT, COMPONENT_MANIFEST, ComponentManifest, ComponentPointer,
+        read_verified_component,
+    },
+    layout::{InstallLayout, LEGACY_NAMES, SERVICE_DISPLAY_NAME, SERVICE_NAME, safe_version},
     manifest::ReleaseManifest,
     omp::{ClientEndpoint, ClientProjection, register_extension, unregister_extension},
     supervisor::HostRoomConfig,
 };
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct OperatorIntegration {
@@ -121,6 +125,23 @@ pub struct InstallOutcome {
     pub omp_registered: bool,
 }
 
+#[derive(Clone, Debug)]
+struct FileSnapshot {
+    path: PathBuf,
+    bytes: Option<Vec<u8>>,
+}
+
+struct InstallRollback {
+    files: Vec<FileSnapshot>,
+    database_backup: Option<PathBuf>,
+    database_restore_uses_attempted_config: bool,
+    target: PathBuf,
+    staging_target: PathBuf,
+    component_target: PathBuf,
+    component_target_existed: bool,
+    service_was_installed: bool,
+}
+
 pub struct Installer<'a, F, S, R, G> {
     pub fs: &'a F,
     pub services: &'a S,
@@ -133,53 +154,12 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
     Installer<'_, F, S, R, G>
 {
     pub fn install(&self, request: InstallRequest) -> Result<InstallOutcome> {
+        let _operation = OperationLock::acquire()?;
         request.manifest.validate()?;
         let house = self.resolve_house_config(&request)?;
         house.validate()?;
         self.preflight(&request, &house)?;
 
-        self.fs.create_dir_all(&self.layout.versions())?;
-        self.fs.create_dir_all(&self.layout.backups())?;
-        self.fs.create_dir_all(&self.layout.logs())?;
-        self.fs.create_dir_all(&self.layout.nats_data())?;
-        self.fs.create_dir_all(&self.layout.host_state())?;
-        self.fs.restrict_acl(&self.layout.data)?;
-        for room in &house.rooms {
-            let room_dir = house.rooms_root.join(&room.room);
-            let state_path = room_dir.join(".omp/runtime/solarisael-house-state.json");
-            if !self.fs.exists(&state_path) {
-                if house.rooms_root != self.layout.rooms() {
-                    bail!(
-                        "room {:?} has no room-state file at {}",
-                        room.room,
-                        state_path.display()
-                    );
-                }
-                self.fs.create_dir_all(state_path.parent().unwrap())?;
-                self.fs.write_atomic(
-                    &state_path,
-                    &serde_json::to_vec_pretty(&serde_json::json!({
-                        "version": 1,
-                        "operator": "operator",
-                        "agentName": room.spirit,
-                        "embodiedSpirit": room.spirit,
-                        "room": room.room,
-                        "recallPolicy": {
-                            "requestedMode": "auto",
-                            "resolvedMode": "conversation",
-                            "resolutionReason": "default"
-                        }
-                    }))?,
-                )?;
-            }
-            self.fs
-                .create_dir_all(&self.layout.host_state().join(&room.room))?;
-        }
-        if request.external_database_url.is_none() {
-            self.fs.create_dir_all(&self.layout.postgres_data())?;
-        }
-
-        let legacy_imported = self.import_legacy_once()?;
         let current = self.read_current()?;
         if current
             .as_ref()
@@ -187,125 +167,156 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         {
             bail!("release {} is already installed", request.manifest.version);
         }
+        let fallback_root = request.staging.join("components/omp-adapter");
+        let fallback_component = read_verified_component(self.fs, &fallback_root)?;
+        let mut rollback = self.capture_install_rollback(
+            &request,
+            &house,
+            &fallback_component,
+            current.is_some(),
+        )?;
 
-        let mut backup = if current.is_some() {
-            self.runtime.backup_database(&self.layout.backups())?
-        } else {
-            None
-        };
-        if self.services.is_installed(SERVICE_NAME)? {
-            self.services.stop(SERVICE_NAME)?;
-        }
-        let target = self.layout.version(&request.manifest.version);
-        let staging_target = self
-            .layout
-            .versions()
-            .join(format!(".{}.staging", request.manifest.version));
-        self.fs.remove_tree(&target)?;
-        self.fs.remove_tree(&staging_target)?;
-        self.fs.create_dir_all(&staging_target)?;
-        for artifact in &request.manifest.artifacts {
-            self.fs.copy(
-                &request.staging.join(&artifact.path),
-                &staging_target.join(&artifact.path),
+        let attempted = (|| -> Result<InstallOutcome> {
+            self.fs.create_dir_all(&self.layout.versions())?;
+            self.fs.create_dir_all(&self.layout.backups())?;
+            self.fs.create_dir_all(&self.layout.logs())?;
+            self.fs.create_dir_all(&self.layout.nats_data())?;
+            self.fs.create_dir_all(&self.layout.host_state())?;
+            self.fs.restrict_acl(&self.layout.data)?;
+            for room in &house.rooms {
+                let room_dir = house.rooms_root.join(&room.room);
+                let state_path = room_dir.join(".omp/runtime/solarisael-house-state.json");
+                if !self.fs.exists(&state_path) {
+                    if house.rooms_root != self.layout.rooms() {
+                        bail!(
+                            "room {:?} has no room-state file at {}",
+                            room.room,
+                            state_path.display()
+                        );
+                    }
+                    self.fs.create_dir_all(
+                        state_path
+                            .parent()
+                            .context("generated room state has no parent")?,
+                    )?;
+                    self.fs.write_atomic(
+                        &state_path,
+                        &serde_json::to_vec_pretty(&serde_json::json!({
+                            "version": 1,
+                            "operator": "operator",
+                            "agentName": room.spirit,
+                            "embodiedSpirit": room.spirit,
+                            "room": room.room,
+                            "recallPolicy": {
+                                "requestedMode": "auto",
+                                "resolvedMode": "conversation",
+                                "resolutionReason": "default"
+                            }
+                        }))?,
+                    )?;
+                }
+                self.fs
+                    .create_dir_all(&self.layout.host_state().join(&room.room))?;
+            }
+            if request.external_database_url.is_none() {
+                self.fs.create_dir_all(&self.layout.postgres_data())?;
+            }
+
+            if current.is_some() {
+                rollback.database_backup = self.runtime.backup_database(&self.layout.backups())?;
+            }
+            let legacy_imported = self.import_legacy_once()?;
+            let (_, component_next) =
+                self.component_transition_for(&request.manifest, &fallback_root)?;
+
+            if rollback.service_was_installed {
+                self.services.stop(SERVICE_NAME)?;
+            }
+            let staging_target = &rollback.staging_target;
+            self.fs.remove_tree(&rollback.target)?;
+            self.fs.remove_tree(staging_target)?;
+            self.fs.create_dir_all(staging_target)?;
+            for artifact in &request.manifest.artifacts {
+                self.fs.copy(
+                    &request.staging.join(&artifact.path),
+                    &staging_target.join(&artifact.path),
+                )?;
+            }
+            self.fs.write_atomic(
+                &staging_target.join("release-manifest.json"),
+                &serde_json::to_vec_pretty(&request.manifest)?,
             )?;
-        }
-        self.fs.write_atomic(
-            &staging_target.join("release-manifest.json"),
-            &serde_json::to_vec_pretty(&request.manifest)?,
-        )?;
-        self.fs.rename(&staging_target, &target)?;
+            self.verify_native_release(staging_target, &request.manifest)?;
+            self.fs.rename(staging_target, &rollback.target)?;
+            self.verify_native_release(&rollback.target, &request.manifest)?;
 
-        let manager = request
-            .manifest
-            .artifacts
-            .iter()
-            .find(|artifact| {
-                artifact.component == "installer" || artifact.path.ends_with("athanor-manage.exe")
-            })
-            .context("release has no athanor-manage.exe installer artifact")?;
-        let manager_source = target.join(&manager.path);
-        let manager_target = self.layout.manager();
-        let manager_is_current = self.fs.exists(&manager_target)
-            && self.fs.read(&manager_target)? == self.fs.read(&manager_source)?;
-        if !manager_is_current {
-            self.fs.copy(&manager_source, &manager_target)?;
-        }
-        self.write_configuration(&request, &house)?;
+            let manager = request
+                .manifest
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.path.ends_with("athanor-manage.exe"))
+                .context("release has no athanor-manage.exe installer artifact")?;
+            let manager_source = rollback.target.join(&manager.path);
+            let manager_target = self.layout.manager();
+            if self.fs.exists(&manager_target) {
+                self.fs
+                    .validate_regular_file(&self.layout.program, &manager_target)?;
+            }
+            let manager_is_current = self.fs.exists(&manager_target)
+                && self.fs.read(&manager_target)? == self.fs.read(&manager_source)?;
+            if !manager_is_current {
+                self.fs.copy(&manager_source, &manager_target)?;
+            }
+            self.write_configuration(&request, &house)?;
+            if current.is_none() && request.external_database_url.is_some() {
+                rollback.database_backup = self.runtime.backup_database(&self.layout.backups())?;
+            }
 
-        let mut next = CurrentRelease {
-            version: request.manifest.version.clone(),
-            previous_version: current.as_ref().map(|value| value.version.clone()),
-            rollback_backup: backup.clone(),
-        };
-        self.write_current(&next)?;
-        if current.is_none() && request.external_database_url.is_some() {
-            backup = match self.runtime.backup_database(&self.layout.backups()) {
-                Ok(backup) => backup,
-                Err(error) => {
-                    self.fs.remove_file(&self.layout.current())?;
-                    self.fs.remove_tree(&target)?;
-                    return Err(error)
-                        .context("first external install backup failed before database migration");
-                }
+            let next = CurrentRelease {
+                version: request.manifest.version.clone(),
+                previous_version: current.as_ref().map(|value| value.version.clone()),
+                rollback_backup: rollback.database_backup.clone(),
             };
-            next.rollback_backup = backup.clone();
             self.write_current(&next)?;
-        }
-        if let Err(error) = self.runtime.migrate_database() {
-            if let Some(previous) = &current {
-                self.write_current(previous)?;
-                if let Some(backup) = &backup {
-                    self.runtime.restore_database(backup)?;
-                }
-                self.services.start(SERVICE_NAME).ok();
-            } else {
-                if let Some(backup) = &backup {
-                    self.runtime.restore_database(backup)?;
-                }
-                self.fs.remove_file(&self.layout.current())?;
-                self.fs.remove_tree(&target)?;
+            if let Some(component) = &component_next {
+                self.write_component_pointer(component)?;
             }
-            return Err(error).context("database migration failed; activation was rolled back");
-        }
+            self.runtime.migrate_database()?;
+            self.services.install_or_update(
+                SERVICE_NAME,
+                SERVICE_DISPLAY_NAME,
+                &self.layout.manager(),
+            )?;
+            self.services.start(SERVICE_NAME)?;
+            self.runtime.wait_ready()?;
+            let omp_registered = self.write_operator_integration(&request, &house)?;
+            Ok(InstallOutcome {
+                version: request.manifest.version.clone(),
+                upgraded_from: current.as_ref().map(|value| value.version.clone()),
+                legacy_imported,
+                omp_registered,
+            })
+        })();
 
-        self.services.install_or_update(
-            SERVICE_NAME,
-            SERVICE_DISPLAY_NAME,
-            &self.layout.manager(),
-        )?;
-        if let Err(error) = self
-            .services
-            .start(SERVICE_NAME)
-            .and_then(|_| self.runtime.wait_ready())
-        {
-            self.services.stop(SERVICE_NAME).ok();
-            if let Some(previous) = &current {
-                self.write_current(previous)?;
-                if let Some(backup) = &backup {
-                    self.runtime.restore_database(backup)?;
+        match attempted {
+            Ok(outcome) => Ok(outcome),
+            Err(error) => {
+                let original = format!("{error:#}");
+                let restoration = self.restore_failed_install(&rollback);
+                match restoration {
+                    Ok(()) => Err(anyhow::anyhow!(
+                        "install failed and the prior installation was restored: {original}"
+                    )),
+                    Err(restoration) => Err(anyhow::anyhow!(
+                        "install failed: {original}; restoration failures: {restoration:#}"
+                    )),
                 }
-                self.services.start(SERVICE_NAME).ok();
-            } else {
-                if let Some(backup) = &backup {
-                    self.runtime.restore_database(backup)?;
-                }
-                self.services.remove(SERVICE_NAME).ok();
-                self.fs.remove_file(&self.layout.current())?;
-                self.fs.remove_tree(&target)?;
             }
-            return Err(error).context("new release failed readiness; rolled back current pointer");
         }
-        let omp_registered = self.write_operator_integration(&request, &house)?;
-        Ok(InstallOutcome {
-            version: request.manifest.version,
-            upgraded_from: current.map(|value| value.version),
-            legacy_imported,
-            omp_registered,
-        })
     }
 
     pub fn rollback(&self) -> Result<CurrentRelease> {
+        let _operation = OperationLock::acquire()?;
         let current = self
             .read_current()?
             .context("there is no installed release")?;
@@ -320,6 +331,14 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         if !self.fs.exists(&self.layout.version(&previous)) {
             bail!("rollback release {previous} is not retained");
         }
+        let previous_manifest = self.read_native_manifest(&previous)?;
+        let (component_before, component_next) = self.component_transition_for(
+            &previous_manifest,
+            &self
+                .layout
+                .version(&previous)
+                .join("components/omp-adapter"),
+        )?;
         let undo_backup = self.runtime.backup_database(&self.layout.backups())?;
         self.services.stop(SERVICE_NAME)?;
         let rolled_back = CurrentRelease {
@@ -327,9 +346,24 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             previous_version: Some(current.version.clone()),
             rollback_backup: undo_backup.clone(),
         };
-        self.write_current(&rolled_back)?;
+        if let Err(error) = self.write_current(&rolled_back) {
+            self.restore_activation_pointers(Some(&current), component_before.as_ref())?;
+            self.services.start(SERVICE_NAME).ok();
+            return Err(error).context(
+                "native rollback activation failed; restored native and component pointers",
+            );
+        }
+        if let Some(component) = &component_next {
+            if let Err(error) = self.write_component_pointer(component) {
+                self.restore_activation_pointers(Some(&current), component_before.as_ref())?;
+                self.services.start(SERVICE_NAME).ok();
+                return Err(error).context(
+                    "OMP adapter rollback activation failed; restored native and component pointers",
+                );
+            }
+        }
         if let Err(error) = self.runtime.restore_database(&previous_backup) {
-            self.write_current(&current)?;
+            self.restore_activation_pointers(Some(&current), component_before.as_ref())?;
             if let Some(backup) = &undo_backup {
                 self.runtime.restore_database(backup)?;
             }
@@ -342,7 +376,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             .and_then(|_| self.runtime.wait_ready())
         {
             self.services.stop(SERVICE_NAME).ok();
-            self.write_current(&current)?;
+            self.restore_activation_pointers(Some(&current), component_before.as_ref())?;
             if let Some(backup) = &undo_backup {
                 self.runtime.restore_database(backup)?;
             }
@@ -352,7 +386,491 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         Ok(rolled_back)
     }
 
+    pub fn install_omp_adapter(&self, source: &Path) -> Result<ComponentPointer> {
+        let _operation = OperationLock::acquire()?;
+        let native = self
+            .read_current()?
+            .context("cannot install OMP adapter without an active native release")?;
+        let native_manifest = self.read_native_manifest(&native.version)?;
+        let component = read_verified_component(self.fs, source)?;
+        self.require_component_compatibility(&component, &native_manifest)?;
+        self.retain_component_release(source, &component)?;
+
+        let previous = self.read_component_pointer()?;
+        if previous
+            .as_ref()
+            .is_some_and(|pointer| pointer.release_id == component.release_id)
+        {
+            return Ok(previous.expect("component pointer was present"));
+        }
+        let next = ComponentPointer {
+            format: COMPONENT_FORMAT,
+            release_id: component.release_id,
+            previous_release_id: previous.as_ref().map(|pointer| pointer.release_id.clone()),
+        };
+        if let Err(error) = self.write_component_pointer(&next) {
+            self.restore_component_pointer(previous.as_ref())?;
+            return Err(error).context("OMP adapter activation failed; restored prior pointer");
+        }
+        Ok(next)
+    }
+
+    pub fn rollback_omp_adapter(&self, release_id: Option<&str>) -> Result<ComponentPointer> {
+        let _operation = OperationLock::acquire()?;
+        let current = self
+            .read_component_pointer()?
+            .context("there is no active OMP adapter release")?;
+        let target_release = release_id
+            .map(str::to_owned)
+            .or_else(|| current.previous_release_id.clone())
+            .context("there is no retained OMP adapter rollback release")?;
+        ComponentPointer {
+            format: COMPONENT_FORMAT,
+            release_id: target_release.clone(),
+            previous_release_id: None,
+        }
+        .validate()?;
+        if target_release == current.release_id {
+            bail!("OMP adapter release {target_release} is already active");
+        }
+
+        let target_root = self.layout.omp_adapter_version(&target_release);
+        let target = read_verified_component(self.fs, &target_root)
+            .with_context(|| format!("OMP adapter rollback release {target_release} is invalid"))?;
+        if target.release_id != target_release {
+            bail!(
+                "OMP adapter rollback target identity mismatch: pointer names {target_release}, manifest names {}",
+                target.release_id
+            );
+        }
+        let native = self
+            .read_current()?
+            .context("cannot roll back OMP adapter without an active native release")?;
+        let native_manifest = self.read_native_manifest(&native.version)?;
+        self.require_component_compatibility(&target, &native_manifest)?;
+
+        let next = ComponentPointer {
+            format: COMPONENT_FORMAT,
+            release_id: target_release,
+            previous_release_id: Some(current.release_id.clone()),
+        };
+        if let Err(error) = self.write_component_pointer(&next) {
+            self.restore_component_pointer(Some(&current))?;
+            return Err(error).context("OMP adapter rollback failed; restored prior pointer");
+        }
+        Ok(next)
+    }
+
+    fn read_component_pointer(&self) -> Result<Option<ComponentPointer>> {
+        let path = self.layout.omp_adapter_current();
+        if !self.fs.exists(&path) {
+            return Ok(None);
+        }
+        self.fs
+            .validate_regular_file(&self.layout.omp_adapter(), &path)?;
+        let pointer: ComponentPointer = serde_json::from_slice(&self.fs.read(&path)?)
+            .with_context(|| format!("parse component pointer {}", path.display()))?;
+        pointer.validate()?;
+        let manifest = read_verified_component(
+            self.fs,
+            &self.layout.omp_adapter_version(&pointer.release_id),
+        )
+        .with_context(|| {
+            format!(
+                "active OMP adapter release {} is missing or invalid",
+                pointer.release_id
+            )
+        })?;
+        if manifest.release_id != pointer.release_id {
+            bail!(
+                "active OMP adapter pointer names {}, manifest names {}",
+                pointer.release_id,
+                manifest.release_id
+            );
+        }
+        if let Some(previous) = &pointer.previous_release_id {
+            let previous_manifest =
+                read_verified_component(self.fs, &self.layout.omp_adapter_version(previous))
+                    .with_context(|| {
+                        format!("previous OMP adapter release {previous} is missing or invalid")
+                    })?;
+            if previous_manifest.release_id.as_str() != previous.as_str() {
+                bail!(
+                    "previous OMP adapter pointer names {}, manifest names {}",
+                    previous,
+                    previous_manifest.release_id
+                );
+            }
+        }
+        Ok(Some(pointer))
+    }
+
+    fn write_component_pointer(&self, pointer: &ComponentPointer) -> Result<()> {
+        pointer.validate()?;
+        self.fs.write_atomic(
+            &self.layout.omp_adapter_current(),
+            &serde_json::to_vec_pretty(pointer)?,
+        )
+    }
+
+    fn restore_component_pointer(&self, pointer: Option<&ComponentPointer>) -> Result<()> {
+        match pointer {
+            Some(pointer) => self.write_component_pointer(pointer),
+            None => self.fs.remove_file(&self.layout.omp_adapter_current()),
+        }
+    }
+
+    fn read_native_manifest(&self, version: &str) -> Result<ReleaseManifest> {
+        if !safe_version(version) {
+            bail!("invalid native release version {version:?}");
+        }
+        let root = self.layout.version(version);
+        let path = root.join("release-manifest.json");
+        self.fs.validate_regular_file(&root, &path)?;
+        let manifest: ReleaseManifest = serde_json::from_slice(&self.fs.read(&path)?)
+            .with_context(|| format!("parse native release manifest {}", path.display()))?;
+        manifest.validate()?;
+        if manifest.version != version {
+            bail!(
+                "native release pointer names {version}, manifest names {}",
+                manifest.version
+            );
+        }
+        self.verify_native_release(&root, &manifest)?;
+        Ok(manifest)
+    }
+
+    fn require_component_compatibility(
+        &self,
+        component: &ComponentManifest,
+        native: &ReleaseManifest,
+    ) -> Result<()> {
+        if !component.compatibility.matches_native(native) {
+            bail!(
+                "OMP adapter {} is incompatible with native release {}: adapter {}; native hostApi={}, substrateApi={}, deliveryApi={}, schemaVersion={}",
+                component.release_id,
+                native.version,
+                component.compatibility.describe(),
+                native.compatibility.host_api,
+                native.compatibility.substrate_api,
+                native.compatibility.delivery_api,
+                native.schema_version,
+            );
+        }
+        Ok(())
+    }
+
+    fn retain_component_release(&self, source: &Path, component: &ComponentManifest) -> Result<()> {
+        let target = self.layout.omp_adapter_version(&component.release_id);
+        if self.fs.exists(&target) {
+            let retained = read_verified_component(self.fs, &target).with_context(|| {
+                format!(
+                    "retained OMP adapter release {} is invalid",
+                    component.release_id
+                )
+            })?;
+            if retained != *component {
+                bail!(
+                    "retained OMP adapter release {} differs from the source manifest",
+                    component.release_id
+                );
+            }
+            return Ok(());
+        }
+
+        self.fs
+            .create_dir_all(&self.layout.omp_adapter_versions())?;
+        let mut nonce = [0_u8; 12];
+        getrandom::fill(&mut nonce)
+            .map_err(|error| anyhow::anyhow!("generate component staging identity: {error}"))?;
+        let pending = self.layout.omp_adapter_versions().join(format!(
+            "{}.pending-{}",
+            component.release_id,
+            hex::encode(nonce)
+        ));
+        self.fs.remove_tree(&pending)?;
+        self.fs.create_dir_all(&pending)?;
+        let staged = (|| -> Result<()> {
+            for artifact in &component.artifacts {
+                self.fs
+                    .copy(&source.join(&artifact.path), &pending.join(&artifact.path))?;
+            }
+            self.fs.copy(
+                &source.join(COMPONENT_MANIFEST),
+                &pending.join(COMPONENT_MANIFEST),
+            )?;
+            let verified = read_verified_component(self.fs, &pending)?;
+            if verified != *component {
+                bail!(
+                    "staged OMP adapter release {} differs from the source manifest",
+                    component.release_id
+                );
+            }
+            self.fs.rename(&pending, &target)
+        })();
+        if staged.is_err() {
+            self.fs.remove_tree(&pending).ok();
+        }
+        staged
+    }
+
+    fn component_transition_for(
+        &self,
+        native: &ReleaseManifest,
+        fallback: &Path,
+    ) -> Result<(Option<ComponentPointer>, Option<ComponentPointer>)> {
+        let current = self.read_component_pointer()?;
+        if let Some(pointer) = &current {
+            let manifest = read_verified_component(
+                self.fs,
+                &self.layout.omp_adapter_version(&pointer.release_id),
+            )?;
+            if manifest.compatibility.matches_native(native) {
+                return Ok((current, None));
+            }
+        }
+
+        let component = read_verified_component(self.fs, fallback).with_context(|| {
+            format!(
+                "native release {} has no usable OMP adapter fallback at {}",
+                native.version,
+                fallback.display()
+            )
+        })?;
+        self.require_component_compatibility(&component, native)?;
+        self.retain_component_release(fallback, &component)?;
+        let next = ComponentPointer {
+            format: COMPONENT_FORMAT,
+            release_id: component.release_id,
+            previous_release_id: current.as_ref().map(|pointer| pointer.release_id.clone()),
+        };
+        Ok((current, Some(next)))
+    }
+
+    fn restore_native_pointer(&self, current: Option<&CurrentRelease>) -> Result<()> {
+        match current {
+            Some(current) => self.write_current(current),
+            None => self.fs.remove_file(&self.layout.current()),
+        }
+    }
+    fn restore_activation_pointers(
+        &self,
+        native: Option<&CurrentRelease>,
+        component: Option<&ComponentPointer>,
+    ) -> Result<()> {
+        let mut failures = Vec::new();
+        if let Err(error) = self.restore_native_pointer(native) {
+            failures.push(format!("native pointer: {error:#}"));
+        }
+        if let Err(error) = self.restore_component_pointer(component) {
+            failures.push(format!("component pointer: {error:#}"));
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            bail!("{}", failures.join("; "))
+        }
+    }
+
+    fn snapshot_file(&self, path: PathBuf) -> Result<FileSnapshot> {
+        let bytes = if self.fs.exists(&path) {
+            Some(self.fs.read(&path)?)
+        } else {
+            None
+        };
+        Ok(FileSnapshot { path, bytes })
+    }
+
+    fn capture_install_rollback(
+        &self,
+        request: &InstallRequest,
+        house: &HouseInstallConfig,
+        fallback_component: &ComponentManifest,
+        had_current_release: bool,
+    ) -> Result<InstallRollback> {
+        for (root, path) in [
+            (self.layout.program.clone(), self.layout.current()),
+            (self.layout.omp_adapter(), self.layout.omp_adapter_current()),
+            (self.layout.program.clone(), self.layout.manager()),
+            (self.layout.program.clone(), self.layout.omp_loader()),
+        ] {
+            if self.fs.exists(&path) {
+                self.fs.validate_regular_file(&root, &path)?;
+            }
+        }
+        let mut paths = vec![
+            self.layout.current(),
+            self.layout.omp_adapter_current(),
+            self.layout.config(),
+            self.layout.secrets(),
+            self.layout.manager(),
+            self.layout.omp_loader(),
+        ];
+        paths.push(self.layout.legacy_backup().join("imported.json"));
+        paths.extend(house.rooms.iter().map(|room| {
+            house
+                .rooms_root
+                .join(&room.room)
+                .join(".omp/runtime/solarisael-house-state.json")
+        }));
+        if let Some(integration) = &request.operator_integration {
+            paths.push(integration.omp_config_path.clone());
+            paths.push(integration.client_config_path.clone());
+        }
+        let files = paths
+            .into_iter()
+            .map(|path| self.snapshot_file(path))
+            .collect::<Result<Vec<_>>>()?;
+        let target = self.layout.version(&request.manifest.version);
+        let staging_target = self
+            .layout
+            .versions()
+            .join(format!(".{}.staging", request.manifest.version));
+        let component_target = self
+            .layout
+            .omp_adapter_version(&fallback_component.release_id);
+        Ok(InstallRollback {
+            files,
+            database_backup: None,
+            target,
+            staging_target,
+            database_restore_uses_attempted_config: !had_current_release
+                && request.external_database_url.is_some(),
+            component_target_existed: self.fs.exists(&component_target),
+            component_target,
+            service_was_installed: self.services.is_installed(SERVICE_NAME)?,
+        })
+    }
+
+    fn restore_file_snapshot(&self, snapshot: &FileSnapshot) -> Result<()> {
+        match &snapshot.bytes {
+            Some(bytes) => self.fs.write_atomic(&snapshot.path, bytes),
+            None => self.fs.remove_file(&snapshot.path),
+        }
+    }
+
+    fn restore_failed_install(&self, rollback: &InstallRollback) -> Result<()> {
+        let mut failures = Vec::new();
+        let mut attempt = |label: &str, result: Result<()>| {
+            if let Err(error) = result {
+                failures.push(format!("{label}: {error:#}"));
+            }
+        };
+
+        attempt("stop failed service", self.services.stop(SERVICE_NAME));
+        for snapshot in rollback.files.iter().filter(|snapshot| {
+            snapshot.path == self.layout.current()
+                || snapshot.path == self.layout.omp_adapter_current()
+        }) {
+            attempt(
+                &format!("restore {}", snapshot.path.display()),
+                self.restore_file_snapshot(snapshot),
+            );
+        }
+        if rollback.database_restore_uses_attempted_config {
+            if let Some(backup) = &rollback.database_backup {
+                attempt(
+                    "restore database backup",
+                    self.runtime.restore_database(backup),
+                );
+            }
+        }
+        for snapshot in rollback.files.iter().filter(|snapshot| {
+            snapshot.path == self.layout.config() || snapshot.path == self.layout.secrets()
+        }) {
+            attempt(
+                &format!("restore {}", snapshot.path.display()),
+                self.restore_file_snapshot(snapshot),
+            );
+        }
+        if !rollback.database_restore_uses_attempted_config {
+            if let Some(backup) = &rollback.database_backup {
+                attempt(
+                    "restore database backup",
+                    self.runtime.restore_database(backup),
+                );
+            }
+        }
+        for snapshot in rollback.files.iter().filter(|snapshot| {
+            snapshot.path != self.layout.current()
+                && snapshot.path != self.layout.omp_adapter_current()
+                && snapshot.path != self.layout.config()
+                && snapshot.path != self.layout.secrets()
+        }) {
+            attempt(
+                &format!("restore {}", snapshot.path.display()),
+                self.restore_file_snapshot(snapshot),
+            );
+        }
+        attempt(
+            "remove failed native staging release",
+            self.fs.remove_tree(&rollback.staging_target),
+        );
+        attempt(
+            "remove failed native release",
+            self.fs.remove_tree(&rollback.target),
+        );
+        if !rollback.component_target_existed {
+            attempt(
+                "remove failed component release",
+                self.fs.remove_tree(&rollback.component_target),
+            );
+        }
+
+        if rollback.service_was_installed {
+            attempt(
+                "restore service registration",
+                self.services.install_or_update(
+                    SERVICE_NAME,
+                    SERVICE_DISPLAY_NAME,
+                    &self.layout.manager(),
+                ),
+            );
+            attempt("restart prior service", self.services.start(SERVICE_NAME));
+            attempt("restore prior service readiness", self.runtime.wait_ready());
+        } else {
+            attempt(
+                "remove newly installed service",
+                self.services.remove(SERVICE_NAME),
+            );
+        }
+
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            bail!("{}", failures.join("; "))
+        }
+    }
+
+    fn verify_native_release(&self, root: &Path, manifest: &ReleaseManifest) -> Result<()> {
+        let manifest_path = root.join("release-manifest.json");
+        self.fs.validate_regular_file(root, &manifest_path)?;
+        let retained: ReleaseManifest = serde_json::from_slice(&self.fs.read(&manifest_path)?)
+            .with_context(|| {
+                format!("parse native release manifest {}", manifest_path.display())
+            })?;
+        retained.validate()?;
+        if retained != *manifest {
+            bail!(
+                "native release at {} differs from its declared manifest",
+                root.display()
+            );
+        }
+        for artifact in &manifest.artifacts {
+            let path = root.join(&artifact.path);
+            self.fs.validate_regular_file(root, &path)?;
+            let bytes = self.fs.read(&path)?;
+            manifest.verify_bytes(artifact, &bytes)?;
+        }
+        Ok(())
+    }
+
     pub fn uninstall(&self) -> Result<()> {
+        let _operation = OperationLock::acquire()?;
+        self.uninstall_locked()
+    }
+
+    fn uninstall_locked(&self) -> Result<()> {
         let integration = if self.fs.exists(&self.layout.config()) {
             serde_json::from_slice::<RuntimeConfig>(&self.fs.read(&self.layout.config())?)
                 .ok()
@@ -378,22 +896,33 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
     }
 
     pub fn purge(&self, confirmed: bool) -> Result<()> {
+        let _operation = OperationLock::acquire()?;
         if !confirmed {
             bail!("purge requires --confirm-data-loss");
         }
-        self.uninstall()?;
+        self.uninstall_locked()?;
         self.fs.remove_tree(&self.layout.data)
     }
 
     fn preflight(&self, request: &InstallRequest, house: &HouseInstallConfig) -> Result<()> {
         for artifact in &request.manifest.artifacts {
             let source = request.staging.join(&artifact.path);
+            self.fs.validate_regular_file(&request.staging, &source)?;
             let bytes = self
                 .fs
                 .read(&source)
                 .with_context(|| format!("read staged artifact {}", artifact.path))?;
             request.manifest.verify_bytes(artifact, &bytes)?;
         }
+        let fallback_root = request.staging.join("components/omp-adapter");
+        let fallback = read_verified_component(self.fs, &fallback_root).with_context(|| {
+            format!(
+                "native release {} has no valid OMP adapter fallback at {}",
+                request.manifest.version,
+                fallback_root.display()
+            )
+        })?;
+        self.require_component_compatibility(&fallback, &request.manifest)?;
         if house.rooms_root != self.layout.rooms() {
             for room in &house.rooms {
                 let state = house
@@ -427,13 +956,10 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                     self.layout.omp_loader().display()
                 );
             }
-            let client_dir = integration
+            integration
                 .client_config_path
                 .parent()
                 .context("OMP client projection has no parent directory")?;
-            self.fs.create_dir_all(client_dir)?;
-            self.fs
-                .restrict_user_acl(client_dir, &integration.operator_principal)?;
         }
         Ok(())
     }
@@ -468,16 +994,33 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
     }
 
     fn read_current(&self) -> Result<Option<CurrentRelease>> {
-        if !self.fs.exists(&self.layout.current()) {
+        let path = self.layout.current();
+        if !self.fs.exists(&path) {
             return Ok(None);
         }
-        Ok(Some(
-            serde_json::from_slice(&self.fs.read(&self.layout.current())?)
-                .context("parse current release pointer")?,
-        ))
+        self.fs.validate_regular_file(&self.layout.program, &path)?;
+        let current: CurrentRelease = serde_json::from_slice(&self.fs.read(&path)?)
+            .context("parse current release pointer")?;
+        if !safe_version(&current.version)
+            || current
+                .previous_version
+                .as_ref()
+                .is_some_and(|version| !safe_version(version) || version == &current.version)
+        {
+            bail!("current release pointer contains an invalid version lineage");
+        }
+        Ok(Some(current))
     }
 
     fn write_current(&self, current: &CurrentRelease) -> Result<()> {
+        if !safe_version(&current.version)
+            || current
+                .previous_version
+                .as_ref()
+                .is_some_and(|version| !safe_version(version) || version == &current.version)
+        {
+            bail!("refusing to write an invalid current release pointer");
+        }
         self.fs
             .write_atomic(&self.layout.current(), &serde_json::to_vec_pretty(current)?)
     }
@@ -616,13 +1159,9 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
 
         let config = String::from_utf8(self.fs.read(&integration.omp_config_path)?)?;
         let updated = register_extension(&config, &self.layout.omp_loader());
-        if let Err(error) = self
-            .fs
+        self.fs
             .write_atomic(&integration.omp_config_path, updated.as_bytes())
-        {
-            self.fs.remove_tree(client_dir).ok();
-            return Err(error).context("register stable OMP loader");
-        }
+            .context("register stable OMP loader")?;
         Ok(true)
     }
 

@@ -41,6 +41,18 @@ impl InstallLayout {
     pub fn current(&self) -> PathBuf {
         self.program.join(CURRENT_POINTER)
     }
+    pub fn omp_adapter(&self) -> PathBuf {
+        self.program.join("components/omp-adapter")
+    }
+    pub fn omp_adapter_versions(&self) -> PathBuf {
+        self.omp_adapter().join("versions")
+    }
+    pub fn omp_adapter_version(&self, release_id: &str) -> PathBuf {
+        self.omp_adapter_versions().join(release_id)
+    }
+    pub fn omp_adapter_current(&self) -> PathBuf {
+        self.omp_adapter().join(CURRENT_POINTER)
+    }
     pub fn config(&self) -> PathBuf {
         self.data.join(RUNTIME_CONFIG)
     }
@@ -71,8 +83,11 @@ impl InstallLayout {
 }
 
 pub fn safe_version(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
+    value.len() <= 128
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))

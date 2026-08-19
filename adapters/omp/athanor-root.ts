@@ -1,39 +1,47 @@
 // The single place that answers "where is the Athanor core?", and the single
 // place that loads installed topology configuration.
 //
-// The adapter lives inside the Athanor repository at <athanor>/adapters/omp,
-// so the core root is always exactly two directories above this module. No
-// sibling checkout is consulted, no environment variable can move it, and no
-// second copy of this rule exists: every adapter, verifier, and build
-// entrypoint imports ATHANOR_ROOT here.
-//
-// Structure is the only owner. A staged or installed tree is verified by
-// placing the adapter at <root>/adapters/omp, never by pointing an override
-// at a different root.
+// Source modules live at <repository>/adapters/omp. Installed modules live at
+// <program-root>/components/omp-adapter/versions/<releaseId>. Structure is the
+// only owner: no environment variable can select another root, and every
+// adapter entrypoint imports ATHANOR_ROOT here.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** <athanor>/adapters/omp — the directory this adapter occupies. */
+/** Source or installed component directory that contains this module. */
 export const ADAPTER_ROOT = path.dirname(fileURLToPath(import.meta.url));
 
-/** <athanor> — the canonical core root this adapter consumes. */
-export const ATHANOR_ROOT = path.resolve(ADAPTER_ROOT, "..", "..");
+const COMPONENT_VERSIONS_ROOT = path.dirname(ADAPTER_ROOT);
+const COMPONENT_ROOT = path.dirname(COMPONENT_VERSIONS_ROOT);
+const COMPONENTS_ROOT = path.dirname(COMPONENT_ROOT);
+function installedSegmentEquals(actual: string, expected: string): boolean {
+  return process.platform === "win32"
+    ? actual.toLowerCase() === expected
+    : actual === expected;
+}
+
+export const INSTALLED_COMPONENT =
+  installedSegmentEquals(path.basename(COMPONENT_ROOT), "omp-adapter") &&
+  installedSegmentEquals(path.basename(COMPONENTS_ROOT), "components");
+
+/** Repository root in source or Program Files root in an installed component. */
+export const ATHANOR_ROOT = INSTALLED_COMPONENT
+  ? path.dirname(COMPONENTS_ROOT)
+  : path.resolve(ADAPTER_ROOT, "..", "..");
 
 /**
- * Installed topology configuration: `<install-root>/state/athanor.env`.
+ * Installed topology configuration: `<program-root>/state/athanor.env`.
  *
- * An installed Athanor is `<install-root>/the-athanor` with mutable state at
- * `<install-root>/state`, so this file sits one level above the product tree —
- * found structurally, never searched for and never pointed at by a variable.
- *
- * It lives under `state/` rather than beside the product because the product
- * tree is immutable and because a file written into a shell profile does not
- * survive into a fresh process. Reading it here is what lets a freshly started
- * OMP work with no machine-level environment edits.
+ * The source tree retains its existing sibling `state/` location. An installed
+ * component resolves Program Files directly from its fixed component layout.
+ * The file is found structurally and is never selected by an environment
+ * variable.
  */
-export const ATHANOR_ENV_FILE = path.resolve(ATHANOR_ROOT, "..", "state", "athanor.env");
+export const ATHANOR_ENV_FILE = INSTALLED_COMPONENT
+  ? path.join(ATHANOR_ROOT, "state", "athanor.env")
+  : path.resolve(ATHANOR_ROOT, "..", "state", "athanor.env");
 
 /**
  * The only keys this file may set. Everything else in it is ignored, including

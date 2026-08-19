@@ -5,22 +5,27 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+# Adapter-only deployment: run the adapter tests, build one component bundle in
+# a temporary directory, and hand it to the installed Athanor manager. This
+# script never builds a native product, never edits a product payload or release
+# manifest, and never writes anything under the program root itself: every
+# installed write belongs to the manager.
+
 $AdapterRoot = (Resolve-Path $PSScriptRoot).Path
 $RepoRoot = (Resolve-Path (Join-Path $AdapterRoot "../..")).Path
-$CurrentPath = Join-Path $ProgramRoot "current.json"
-if (-not (Test-Path $CurrentPath -PathType Leaf)) {
-  throw "Athanor activation pointer is missing: $CurrentPath"
+. (Join-Path $RepoRoot "installer/omp-adapter-component.ps1")
+
+$ExpectedProgramRoot = Join-Path $env:ProgramFiles "Solarisael/Athanor"
+if (-not [IO.Path]::GetFullPath($ProgramRoot).Equals(
+    [IO.Path]::GetFullPath($ExpectedProgramRoot),
+    [StringComparison]::OrdinalIgnoreCase
+  )) {
+  throw "ProgramRoot must match the installed manager target derived from ProgramFiles: $ExpectedProgramRoot"
 }
 
-$Current = Get-Content $CurrentPath -Raw | ConvertFrom-Json
-$Version = [string]$Current.version
-if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') {
-  throw "Athanor activation pointer contains an unsafe version"
-}
-$VersionRoot = Join-Path $ProgramRoot "versions/$Version"
-$ManifestPath = Join-Path $VersionRoot "release-manifest.json"
-if (-not (Test-Path $ManifestPath -PathType Leaf)) {
-  throw "Active Athanor release manifest is missing: $ManifestPath"
+$Manager = Join-Path $ProgramRoot "bin/athanor-manage.exe"
+if (-not (Test-Path -LiteralPath $Manager -PathType Leaf)) {
+  throw "The installed Athanor manager is missing: $Manager"
 }
 
 Write-Host "==> OMP adapter tests"
@@ -50,95 +55,32 @@ try {
   }
 }
 
-$Work = Join-Path ([IO.Path]::GetTempPath()) "athanor-omp-deploy-$PID"
-$Stage = Join-Path $Work "stage"
-$Backup = Join-Path $Work "backup"
-New-Item $Stage -ItemType Directory -Force | Out-Null
-New-Item $Backup -ItemType Directory -Force | Out-Null
-
-$TopLevelFiles = @(
-  "index.ts", "hygiene.ts", "athanor-root.ts", "discovery.ts", "giga.ts",
-  "kitten-lineage.ts", "rust-transport.ts", "package.json", "bunfig.toml",
-  "README.md", "LICENSE", "NOTICE"
-)
-$Sources = @{}
-foreach ($Name in $TopLevelFiles) {
-  $Sources["adapters/omp/$Name"] = Join-Path $AdapterRoot $Name
-}
-foreach ($Directory in @("solarisael-house-proof", "starter-room")) {
-  Get-ChildItem (Join-Path $AdapterRoot $Directory) -File -Recurse | ForEach-Object {
-    $Relative = [IO.Path]::GetRelativePath($AdapterRoot, $_.FullName).Replace("\", "/")
-    $Sources["adapters/omp/$Relative"] = $_.FullName
-  }
-}
-$Sources["bin/athanor-omp-loader.ts"] = Join-Path $AdapterRoot "installed-loader.ts"
-
-$Manifest = Get-Content $ManifestPath -Raw | ConvertFrom-Json
-$Artifacts = @{}
-foreach ($Artifact in $Manifest.artifacts) {
-  $Artifacts[[string]$Artifact.path] = $Artifact
-}
-foreach ($Relative in $Sources.Keys) {
-  $Source = $Sources[$Relative]
-  if (-not (Test-Path $Source -PathType Leaf)) {
-    throw "adapter source is missing: $Source"
-  }
-  if (-not $Artifacts.ContainsKey($Relative)) {
-    # A staged source absent from the manifest is a new adapter file: the
-    # Sources set above is already the deliberate allowlist, so register it.
-    $Entry = [pscustomobject]@{
-      component  = "omp-adapter"
-      path       = $Relative
-      sha256     = ""
-      size       = 0
-      executable = $false
-    }
-    $Manifest.artifacts += $Entry
-    $Artifacts[$Relative] = $Entry
-    Write-Host "==> registering new adapter artifact: $Relative"
-  }
-  $Staged = Join-Path $Stage $Relative
-  New-Item (Split-Path $Staged -Parent) -ItemType Directory -Force | Out-Null
-  Copy-Item $Source $Staged -Force
-  $Artifacts[$Relative].sha256 = (Get-FileHash $Staged -Algorithm SHA256).Hash.ToLowerInvariant()
-  $Artifacts[$Relative].size = (Get-Item $Staged).Length
-}
-
-$ManifestStage = Join-Path $Stage "release-manifest.json"
-$Manifest | ConvertTo-Json -Depth 8 | Set-Content $ManifestStage -Encoding utf8NoBOM
-
-Write-Host "==> activate OMP adapter without rebuilding Rust/Godot/PostgreSQL"
-$Activated = @()
+$Work = Join-Path ([IO.Path]::GetTempPath()) "athanor-omp-component-$PID-$([Guid]::NewGuid().ToString('N'))"
 try {
-  foreach ($Relative in $Sources.Keys) {
-    $Target = Join-Path $VersionRoot $Relative
-    $Saved = Join-Path $Backup $Relative
-    New-Item (Split-Path $Target -Parent) -ItemType Directory -Force | Out-Null
-    New-Item (Split-Path $Saved -Parent) -ItemType Directory -Force | Out-Null
-    if (Test-Path $Target -PathType Leaf) { Copy-Item $Target $Saved -Force }
-    $Temporary = "$Target.new-$PID"
-    Copy-Item (Join-Path $Stage $Relative) $Temporary -Force
-    Move-Item $Temporary $Target -Force
-    $Activated += $Relative
+  Write-Host "==> build OMP adapter component bundle"
+  $Component = New-OmpAdapterComponentBundle -RepositoryRoot $RepoRoot -Destination (Join-Path $Work "omp-adapter")
+  $Source = $Component.Root
+  Write-Host "version: $($Component.Version)"
+  Write-Host "releaseId: $($Component.ReleaseId)"
+  Write-Host "artifacts: $($Component.ArtifactCount)"
+
+  Write-Host "==> install the OMP adapter release through the Athanor manager"
+  & $Manager install-omp-adapter --source $Source
+  if ($LASTEXITCODE -ne 0) {
+    throw "install-omp-adapter refused the component bundle (exit code $LASTEXITCODE)"
   }
-  Copy-Item $ManifestPath (Join-Path $Backup "release-manifest.json") -Force
-  $ManifestTemporary = "$ManifestPath.new-$PID"
-  Copy-Item $ManifestStage $ManifestTemporary -Force
-  Move-Item $ManifestTemporary $ManifestPath -Force
-} catch {
-  foreach ($Relative in $Activated) {
-    $Saved = Join-Path $Backup $Relative
-    $Target = Join-Path $VersionRoot $Relative
-    if (Test-Path $Saved -PathType Leaf) { Copy-Item $Saved $Target -Force }
-  }
-  $SavedManifest = Join-Path $Backup "release-manifest.json"
-  if (Test-Path $SavedManifest -PathType Leaf) { Copy-Item $SavedManifest $ManifestPath -Force }
-  throw
 } finally {
-  Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
+  # The stage carries only copies, so cleanup is unconditional; a scanner may
+  # hold a file open for a moment, so retry once before reporting the leftover.
+  foreach ($Attempt in 1, 2) {
+    if (-not (Test-Path -LiteralPath $Work)) { break }
+    Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $Work) { Start-Sleep -Milliseconds 200 }
+  }
+  if (Test-Path -LiteralPath $Work) {
+    Write-Warning "temporary OMP adapter component stage could not be removed: $Work"
+  }
 }
 
 Write-Host "==> OMP adapter deployed"
-Write-Host "version: $Version"
-Write-Host "updated artifacts: $($Sources.Count)"
 Write-Host "restart OMP once to load the new TypeScript tool schema"

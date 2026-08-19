@@ -13,11 +13,23 @@ jobs:
       - name: Check out The Athanor
         uses: actions/checkout@v4
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.95.0
       - name: Build the substrate binary
         run: cargo build --release --locked -p athanor-substrate
       - name: Test the Rust workspace
         run: cargo test --workspace --locked
+
+  installer-contract:
+    name: Native release contract
+    runs-on: windows-latest
+    steps:
+      - name: Check out The Athanor
+        uses: actions/checkout@v4
+      - name: Verify native release contracts
+        shell: pwsh
+        run: |
+          ./installer/native-release-contract.test.ps1
+          ./installer/omp-adapter-component.test.ps1
 
   omp:
     name: OMP adapter

@@ -37,6 +37,14 @@ the exact implementation record.
   predecessor's end and assigns the following end to the Knock.
 - The native release builder now gives an absent `VCToolsVersion` a stable cache
   identity instead of passing an empty mandatory cache-key segment.
+- Native release assembly now derives its product version only from the root
+  package, pins Rust 1.95.0, refuses missing or foreign MSVC tools before
+  dependency work, and retains machine-readable timing for each build and
+  packaging stage.
+- The installed OMP adapter is now an independent, integrity-checked component
+  with its own atomic pointer, compatible-release retention, rollback, and
+  doctor proof. Adapter-only deployment runs its contracts and activates the
+  verified component without rebuilding or mutating a native product release.
 - The public Pages specimen now self-hosts a subsetted Inter variable font,
   renders repository documentation as local JavaScript-free pages with static
   SVG diagrams, and keeps its disconnected-record claim true by replacing

@@ -36,13 +36,18 @@ Fetch-Verified $Dependencies.managed.pgvector.sourceUrl $Dependencies.managed.pg
 Fetch-Verified $Dependencies.managed.natsServer.url $Dependencies.managed.natsServer.sha256 $NatsZip
 Fetch-Verified $Dependencies.managed.godot.url $Dependencies.managed.godot.sha256 $GodotZip
 
+$VisualCppVersion = if ([string]::IsNullOrWhiteSpace($env:VCToolsVersion)) {
+  "not-configured"
+} else {
+  [string]$env:VCToolsVersion
+}
 $DependencyCacheKey = Get-NativeBuildCacheKey @(
   "native-dependencies-v1",
   [string]$Dependencies.managed.postgresql.sha256,
   [string]$Dependencies.managed.pgvector.sha256,
   [string]$Dependencies.managed.natsServer.sha256,
   [string]$Dependencies.managed.godot.sha256,
-  [string]$env:VCToolsVersion
+  $VisualCppVersion
 )
 $DependencyCacheRoot = Join-Path $Root "target/native-release-cache"
 $DependencyCache = Join-Path $DependencyCacheRoot $DependencyCacheKey

@@ -230,10 +230,8 @@ test("claims one pointer-only Knock and retries its bounded turn settlement", as
   expect(sent).toHaveLength(5);
   expect(aborts).toBe(1);
   expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("started");
-  await noteHallwayKnockTurnStart(
-    activeBinding,
-    "5af35bb5-e9a1-4e58-849b-b78b6614bc15",
-  );
+  await noteHallwayKnockTurnEnd(activeBinding);
+  expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("started");
   await noteHallwayKnockTurnEnd(activeBinding);
   expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("completed");
   await stopHallwayKnockDoorman(activeBinding);
@@ -264,4 +262,14 @@ test("claims one pointer-only Knock and retries its bounded turn settlement", as
     failEveryClaim = false;
     await stopHallwayKnockDoorman(backoffBinding);
   }
+
+  claimReturned = false;
+  const endFallbackBinding = { ...binding, session: "session-agent-end-fallback" };
+  startHallwayKnockDoorman(pi, ctx, endFallbackBinding);
+  await timeouts[6]();
+  expect(sent).toHaveLength(6);
+  expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("started");
+  await noteHallwayKnockTurnEnd(endFallbackBinding);
+  expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("completed");
+  await stopHallwayKnockDoorman(endFallbackBinding);
 });

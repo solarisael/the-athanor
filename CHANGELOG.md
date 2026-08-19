@@ -32,6 +32,9 @@ the exact implementation record.
   turn only after that authoritative start settlement succeeds.
   Knock Host commands use a 10-second bounded deadline, and failed claims back
   off from 5 to 60 seconds instead of hammering the Host every poll interval.
+  If OMP omits custom `message_start` metadata, the doorman completes an idle
+  Knock from its first `agent_end`; an active interruption consumes the aborted
+  predecessor's end and assigns the following end to the Knock.
 - The native release builder now gives an absent `VCToolsVersion` a stable cache
   identity instead of passing an empty mandatory cache-key segment.
 - The public Pages specimen now self-hosts a subsetted Inter variable font,

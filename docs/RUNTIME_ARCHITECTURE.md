@@ -630,11 +630,15 @@ room. An explicit permitted Knock is claimed through the recipient's Hallway
 presence under a short Host lease whether that session is idle or active. Once
 OMP accepts the trusted pointer-only injection, the adapter settles the Knock
 as started before the model can answer; an active turn is aborted only after
-that authoritative settlement succeeds. A custom wake that never reaches its
-own `message_start` fails locally after 60 seconds; started/completed settlement
-retries stop and release the local doorman after 25 seconds. A claimed or
-started row beyond the root expiry becomes an explicit failure on the next room
-claim.
+that authoritative settlement succeeds. The custom message's own
+`message_start` identifies the bounded turn when OMP preserves its metadata.
+When OMP omits that hook, the doorman uses `agent_end`: an idle delivery owns
+the first end, while an active interruption consumes the aborted predecessor's
+end and assigns the following end to the Knock. A delivered wake with no
+observable lifecycle end fails locally after 60 seconds; started/completed
+settlement retries stop and release the local doorman after 25 seconds. A
+claimed or started row beyond the root expiry becomes an explicit failure on
+the next room claim.
 Knock Host requests have a 10-second deadline. Failed claims retry with
 exponential 5–60 second backoff so one slow Host cannot create a poll storm.
 Trusted Bell and Knock notices

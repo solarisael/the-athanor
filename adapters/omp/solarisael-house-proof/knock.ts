@@ -132,6 +132,7 @@ type KnockDoormanState = {
   lastWarningAt: number;
   interruptRequested: boolean;
   interruptSent: boolean;
+  interruptedTurnEnded: boolean;
   claimFailures: number;
   nextClaimAt: number;
 };
@@ -166,6 +167,7 @@ function clearActiveKnock(state: KnockDoormanState): void {
   state.turnEndedAt = null;
   state.interruptRequested = false;
   state.interruptSent = false;
+  state.interruptedTurnEnded = false;
 }
 
 function knockMessage(knock: HallwayKnockPointer): Record<string, unknown> {
@@ -259,6 +261,7 @@ async function deliverActiveKnock(state: KnockDoormanState): Promise<void> {
     state.turnEnded = false;
     state.interruptRequested = !idle;
     state.interruptSent = false;
+    state.interruptedTurnEnded = false;
     await settleObservedTurn(state);
     await interruptActiveTurn(state);
   } catch (error) {
@@ -391,6 +394,7 @@ export function startHallwayKnockDoorman(pi: any, ctx: any, binding: HostBinding
     lastWarningAt: 0,
     interruptRequested: false,
     interruptSent: false,
+    interruptedTurnEnded: false,
     claimFailures: 0,
     nextClaimAt: 0,
   };
@@ -420,7 +424,14 @@ export async function noteHallwayKnockTurnStart(
 
 export async function noteHallwayKnockTurnEnd(binding: HostBinding): Promise<void> {
   const state = knockDoormen.get(doormanKey(binding));
-  if (!state?.active || !state.turnStarted) return;
+  if (!state?.active) return;
+  if (!state.turnStarted) {
+    if (state.interruptSent && !state.interruptedTurnEnded) {
+      state.interruptedTurnEnded = true;
+      return;
+    }
+    state.turnStarted = true;
+  }
   state.turnEnded = true;
   state.turnEndedAt = Date.now();
   await settleObservedTurn(state);

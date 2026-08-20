@@ -25,7 +25,7 @@ flowchart TB
     AUTH --> MEMORY[Memory and lessons]
     AKASHA --> GIGA[GIGA]
     GIGA --> HIP[Hippocampus Stage 1]
-    GIGA --> STR[Striatum coding/project slice]
+    GIGA --> STR[Striatum process-lesson slice]
     HIP --> CAND[Non-authoritative candidates]
     CONT --> BOAT[Paper Boats]
     ROUTE --> LANES[Worker lanes and familiars]
@@ -87,8 +87,10 @@ their own eligibility and guarded-write contracts.
 
 Grounded Indexing and Generative Annotation: the cognitive layer above AKASHA,
 not another storage profile. Hippocampus Stage 1 produces grounded,
-non-authoritative candidates for review. Striatum's current slice activates
-eligible coding and project lessons. Candidates do not become truth by existing.
+non-authoritative candidates for review. Striatum's current slice braids
+process-shape coding lessons from deterministic process triggers; the
+state-conditioned selector remains planned. Candidates do not become truth by
+existing.
 
 ### Organs
 

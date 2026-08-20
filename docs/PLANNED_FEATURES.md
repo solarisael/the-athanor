@@ -51,7 +51,7 @@ honest to sit against. Measured results are separated from planned claims in
 |---|---|---|
 | GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current |
 | Curios | Keep selected hunches until later context makes them meaningful | Current |
-| GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Current — coding/project slice |
+| GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Planned — post-Docket shadow path; current slice is deterministic process-trigger lesson braiding |
 | Native Godot operator client | Show live House, agent, message, Recall, authority, work, and health state without becoming a second authority | Current — first three 0.9.5 screens |
 | Athanor Host | Give clients one authenticated snapshot/delta/resync surface with restart-safe cursors and idempotency | Current — 0.9.5 |
 | Session Recall Policy | Make proactive retrieval visible and mode-aware without requiring ordinary users to understand retrieval engineering | Current — Rust Host + OMP + Godot |

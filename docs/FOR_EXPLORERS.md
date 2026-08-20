@@ -157,8 +157,9 @@ includes:
 - deterministic worker lanes and room-owned familiar spellbooks;
 - Anamnesis reviewed counsel;
 - Hippocampus Stage 1 event ingestion, candidate creation, review, and promotion;
-- Striatum's coding/project lesson eligibility, ranking, and warm activation
-  slice.
+- Striatum's deterministic process-trigger slice braiding process-shape coding
+  lessons; state-conditioned eligibility, ranking, and warm activation remain
+  planned.
 
 Cingulate, the Athanor Host, the native Godot client, PostgreSQL-outbox/NATS
 mailboxes, Datalog/Lean proof paths, OMEGA, ANON, and the signed marketplace

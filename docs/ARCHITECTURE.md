@@ -259,12 +259,18 @@ AKASHA also supports optional GIGA cognitive workers. Hippocampus Stage 1 logs
 exact events before asynchronous local classification and stores generated
 candidates as non-authoritative pointers to source evidence. Review, Curios,
 promotion, health, and safe queue maintenance are explicit operations.
-Striatum's first operational slice keeps up to six coding or exact-project
-lessons active across an observed project work state. Scope, project, type,
-declared stage, and register eligibility precede Nemotron similarity; hysteresis
-prevents small prose changes from churning the set, while an explicitly declared
-phase replaces prior phases and abrupt topic changes refresh it. Cingulate remains
-planned for divergence detection.
+Striatum's current operational slice is deliberately narrow: twelve hard-coded
+process-trigger patterns select at most one trigger per prompt
+(`house-core/src/context.rs`), and a matched trigger braids up to twelve
+process-shape coding lessons into the turn (`house-core/src/triggers.rs`). No
+semantic model, hysteresis, or lesson-set carryover is active; the earlier
+six-lesson Nemotron/hysteresis slice was removed. The target Striatum is a
+post-Docket, shadow-first selector over Docket facts: eligibility precedes
+ranking, degraded paths yield attributed empty-set silence rather than broader
+matching, every packet and receipt is versioned, and the selector holds no
+authority over priority, capability, or acceptance policy. Cingulate remains
+planned as non-blocking nudges and warnings first, with gates only for criteria
+explicitly marked authoritative and proof-gated after calibration.
 
 The next GIGA integrity pass keeps three contexts distinct: durable evidence,
 one-invocation model tokens, and loaded model residency. Every cold job starts

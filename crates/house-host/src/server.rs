@@ -12,8 +12,9 @@ use athanor_substrate::insula_writer::{
     end_span, flush_insula_emitter, init_insula_emitter, record_point, start_span,
 };
 use athanor_substrate::{
-    AppError, OutcomeClass, TrustedBinding, hallway_inbox, hallway_knock_claim,
-    hallway_knock_settle, validate_trusted_binding,
+    AppError, Config as SubstrateConfig, LessonFamily, LessonQueryParams, OutcomeClass,
+    RecallParams, TrustedBinding, hallway_inbox, hallway_knock_claim, hallway_knock_settle,
+    lesson_query, recall, validate_trusted_binding,
 };
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
@@ -38,19 +39,22 @@ use house_core::routing::{
 };
 use house_core::triggers::{process_lesson_plan, process_lesson_reminder};
 use house_protocol::{
-    BOAT_RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT, CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID,
-    CONTEXT_VIEWPORTED, ClientCommand, CommandMeta, CommandOutcomeEvent, ContextAnalysisEvent,
-    ContextViewportEvent, ConversationLogRequest, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED,
-    HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED,
-    HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
-    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID,
-    LineageResultEvent, PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT,
-    PAPER_BOAT_RECEIPT_SUBSCRIBE, PaperBoatReceiptEvent, PaperBoatReceiptState,
-    RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED,
-    RECALL_POLICY_DELTA, RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT,
-    RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallPolicyDecision,
-    RecallPolicyMutation, RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT,
-    ShellResultEvent, SnapshotEvent, parse_client_command,
+    AKASHA_COMMAND_FAILED, AKASHA_LESSON_RESULT, AKASHA_PROJECTION_ID, AKASHA_RECALL_RESULT,
+    AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent, AkashaRecallQueryPayload,
+    AkashaRecallResultEvent, BOAT_RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT, CONTEXT_ANALYZED,
+    CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ClientCommand, CommandMeta, CommandOutcomeEvent,
+    ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest, DeltaEvent, EventMeta,
+    HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED,
+    HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID,
+    HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent, HallwayKnockClaimedEvent,
+    HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
+    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
+    PaperBoatReceiptEvent, PaperBoatReceiptState, RECALL_POLICY_COMMAND_ACCEPTED,
+    RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA,
+    RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE,
+    ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallPolicyDecision, RecallPolicyMutation,
+    RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT, ShellResultEvent,
+    SnapshotEvent, parse_client_command,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -663,6 +667,12 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
         ClientCommand::SettleHallwayKnock { meta, request } => {
             settle_hallway_knock(state, meta, request).await
         }
+        ClientCommand::AkashaRecallQuery { meta, payload } => {
+            query_akasha_recall(state, meta, payload).await
+        }
+        ClientCommand::AkashaLessonQuery { meta, payload } => {
+            query_akasha_lessons(state, meta, payload).await
+        }
         ClientCommand::RoutingStatus { meta } => {
             routing_response(
                 state,
@@ -853,6 +863,134 @@ fn app_error_outcome(error: &AppError) -> OutcomeClass {
     match error {
         AppError::Invalid(_) | AppError::Refusal { .. } => OutcomeClass::Refused,
         _ => OutcomeClass::Error,
+    }
+}
+
+/// One honest AKASHA read failure: the reason travels, the ledger does not move.
+async fn akasha_failed(state: &AppState, meta: &CommandMeta, reason: String) -> Responses {
+    let failed = outcome(state, meta, AKASHA_COMMAND_FAILED, Some(reason)).await;
+    Responses {
+        direct: vec![serialize(&failed)],
+        delta: None,
+    }
+}
+
+/// One read-only AKASHA recall. The room is the bound sender's room, never a
+/// payload field, and every retrieval tuning field stays at its substrate
+/// default so the GUI reads exactly what the organs read.
+async fn query_akasha_recall(
+    state: &AppState,
+    meta: CommandMeta,
+    payload: AkashaRecallQueryPayload,
+) -> Responses {
+    let Some(pool) = state.hallway_pool.as_ref() else {
+        return akasha_failed(state, &meta, "Akasha recall requires DATABASE_URL".into()).await;
+    };
+    let config = match SubstrateConfig::from_env() {
+        Ok(config) => config,
+        Err(error) => {
+            return akasha_failed(
+                state,
+                &meta,
+                format!("Akasha recall requires substrate configuration: {error}"),
+            )
+            .await;
+        }
+    };
+    let params: RecallParams = serde_json::from_value(json!({
+        "room": meta.sender_room,
+        "query": payload.query
+    }))
+    .expect("recall params carry only the bound room and query, every tuning field defaulted");
+    let result = match recall(pool, &config, params).await {
+        Ok(result) => serde_json::to_value(&result).expect("Akasha recall result serializes"),
+        Err(error) => {
+            return akasha_failed(state, &meta, format!("Akasha recall failed: {error}")).await;
+        }
+    };
+    let runtime = state.runtime.lock().await;
+    let event = AkashaRecallResultEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(&meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            AKASHA_RECALL_RESULT,
+            AKASHA_PROJECTION_ID,
+            runtime.cursor.sequence,
+            body_hash(&result).expect("Akasha recall result hashes"),
+            new_id(),
+        ),
+        result,
+    };
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
+    }
+}
+
+fn lesson_family(family: AkashaLessonFamily) -> LessonFamily {
+    match family {
+        AkashaLessonFamily::Coding => LessonFamily::Coding,
+        AkashaLessonFamily::Project => LessonFamily::Project,
+        AkashaLessonFamily::Writing => LessonFamily::Writing,
+        AkashaLessonFamily::Design => LessonFamily::Design,
+        AkashaLessonFamily::Audio => LessonFamily::Audio,
+    }
+}
+
+/// One read-only AKASHA lesson query. Filters arrive bounded from the protocol;
+/// the room is binding, so a client can only ever read its own room's scope.
+async fn query_akasha_lessons(
+    state: &AppState,
+    meta: CommandMeta,
+    payload: AkashaLessonQueryPayload,
+) -> Responses {
+    let Some(pool) = state.hallway_pool.as_ref() else {
+        return akasha_failed(
+            state,
+            &meta,
+            "Akasha lesson query requires DATABASE_URL".into(),
+        )
+        .await;
+    };
+    let params = LessonQueryParams {
+        room: meta.sender_room.clone(),
+        family: lesson_family(payload.family),
+        shape: payload.shape,
+        project: payload.project,
+        register: payload.register,
+        stage: payload.stage,
+        language_keys: payload.language_keys,
+        technology_keys: payload.technology_keys,
+        query: payload.query,
+        limit: payload.limit,
+    };
+    let result = match lesson_query(pool, params).await {
+        Ok(result) => serde_json::to_value(&result).expect("Akasha lesson result serializes"),
+        Err(error) => {
+            return akasha_failed(state, &meta, format!("Akasha lesson query failed: {error}"))
+                .await;
+        }
+    };
+    let runtime = state.runtime.lock().await;
+    let event = AkashaLessonResultEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(&meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            AKASHA_LESSON_RESULT,
+            AKASHA_PROJECTION_ID,
+            runtime.cursor.sequence,
+            body_hash(&result).expect("Akasha lesson result hashes"),
+            new_id(),
+        ),
+        result,
+    };
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
     }
 }
 

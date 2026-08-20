@@ -29,6 +29,12 @@ pub const HALLWAY_KNOCK_SETTLE: &str = "athanor.hallway.knock_settle";
 pub const HALLWAY_KNOCK_SETTLED: &str = "athanor.hallway.knock_settled";
 pub const HALLWAY_KNOCK_COMMAND_FAILED: &str = "athanor.hallway.knock_command_failed";
 pub const HALLWAY_KNOCK_COMMAND_REFUSED: &str = "athanor.hallway.knock_command_refused";
+pub const AKASHA_PROJECTION_ID: &str = "akasha";
+pub const AKASHA_RECALL_QUERY: &str = "athanor.akasha.recall_query";
+pub const AKASHA_RECALL_RESULT: &str = "athanor.akasha.recall_result";
+pub const AKASHA_LESSON_QUERY: &str = "athanor.akasha.lesson_query";
+pub const AKASHA_LESSON_RESULT: &str = "athanor.akasha.lesson_result";
+pub const AKASHA_COMMAND_FAILED: &str = "athanor.akasha.command_failed";
 pub const ROUTING_PROJECTION_ID: &str = "routing";
 pub const ROUTING_STATUS: &str = "athanor.routing.status";
 pub const ROUTING_DISPATCH: &str = "athanor.routing.dispatch";
@@ -351,6 +357,125 @@ pub struct HallwayKnockSettlePayload {
     pub reason: Option<String>,
 }
 
+/// One read-only AKASHA recall query. The room is never carried here: it comes
+/// from the command binding, so a client can only ever search its own room.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AkashaRecallQueryPayload {
+    pub query: String,
+}
+
+/// The lesson families the substrate registry knows. Mirrors
+/// `athanor_substrate::LessonFamily` on the wire; the protocol crate cannot
+/// depend on the substrate, so the Host maps this one enum across the seam.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AkashaLessonFamily {
+    Coding,
+    Project,
+    Writing,
+    Design,
+    Audio,
+}
+
+/// One read-only AKASHA lesson query: the substrate's bounded lesson filters
+/// minus every identity field. `room` is binding, never payload.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AkashaLessonQueryPayload {
+    #[serde(rename = "type")]
+    pub family: AkashaLessonFamily,
+    #[serde(default)]
+    pub shape: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+    #[serde(default)]
+    pub register: Option<String>,
+    #[serde(default)]
+    pub stage: Option<String>,
+    #[serde(default)]
+    pub language_keys: Vec<String>,
+    #[serde(default)]
+    pub technology_keys: Vec<String>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default = "default_akasha_lesson_limit")]
+    pub limit: u32,
+}
+
+fn default_akasha_lesson_limit() -> u32 {
+    20
+}
+
+const AKASHA_QUERY_MAX_CHARS: usize = 512;
+const AKASHA_FILTER_MAX_CHARS: usize = 128;
+const AKASHA_KEY_MAX_CHARS: usize = 64;
+const AKASHA_KEYS_MAX: usize = 16;
+
+/// Trims one bounded free-text query, refusing blank and oversize text.
+fn bounded_akasha_query(field: &str, value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    let length = trimmed.chars().count();
+    if length == 0 || length > AKASHA_QUERY_MAX_CHARS {
+        return Err(format!(
+            "{field} must be 1 through {AKASHA_QUERY_MAX_CHARS} characters after trimming"
+        ));
+    }
+    Ok(trimmed.to_owned())
+}
+
+/// Trims one bounded optional filter. A present-but-blank filter is refused
+/// rather than dropped: an empty filter would match nothing in the substrate,
+/// and a silent zero-row answer is not an honest one.
+fn bounded_akasha_filter(field: &str, value: &str, max: usize) -> Result<String, String> {
+    let trimmed = value.trim();
+    let length = trimmed.chars().count();
+    if length == 0 || length > max {
+        return Err(format!(
+            "{field} must be omitted or 1 through {max} characters after trimming"
+        ));
+    }
+    Ok(trimmed.to_owned())
+}
+
+impl AkashaRecallQueryPayload {
+    fn normalize(&mut self) -> Result<(), String> {
+        self.query = bounded_akasha_query("recall query", &self.query)?;
+        Ok(())
+    }
+}
+
+impl AkashaLessonQueryPayload {
+    fn normalize(&mut self) -> Result<(), String> {
+        for (field, filter) in [
+            ("shape", &mut self.shape),
+            ("project", &mut self.project),
+            ("register", &mut self.register),
+            ("stage", &mut self.stage),
+        ] {
+            if let Some(value) = filter {
+                *value = bounded_akasha_filter(field, value, AKASHA_FILTER_MAX_CHARS)?;
+            }
+        }
+        for (field, keys) in [
+            ("languageKeys", &mut self.language_keys),
+            ("technologyKeys", &mut self.technology_keys),
+        ] {
+            if keys.len() > AKASHA_KEYS_MAX {
+                return Err(format!("{field} carries more than {AKASHA_KEYS_MAX} keys"));
+            }
+            for key in keys.iter_mut() {
+                *key = bounded_akasha_filter(field, key, AKASHA_KEY_MAX_CHARS)?;
+            }
+        }
+        if let Some(query) = &mut self.query {
+            *query = bounded_akasha_query("lesson query", query)?;
+        }
+        self.limit = self.limit.clamp(1, 50);
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawClientCommand {
@@ -410,6 +535,10 @@ struct RawClientCommand {
     recall_result: Option<crate::RecallResultInput>,
     #[serde(default)]
     hallway_knock_settle: Option<HallwayKnockSettlePayload>,
+    #[serde(default)]
+    akasha_recall_query: Option<AkashaRecallQueryPayload>,
+    #[serde(default)]
+    akasha_lesson_query: Option<AkashaLessonQueryPayload>,
 }
 
 /// One conversation-capture request: the visible window as the harness renders
@@ -508,6 +637,7 @@ impl RawClientCommand {
             HALLWAY_INBOX_PROJECT | HALLWAY_KNOCK_CLAIM | HALLWAY_KNOCK_SETTLE => {
                 HALLWAY_PROJECTION_ID
             }
+            AKASHA_RECALL_QUERY | AKASHA_LESSON_QUERY => AKASHA_PROJECTION_ID,
             ROUTING_STATUS | ROUTING_DISPATCH | FAMILIAR_STATUS => ROUTING_PROJECTION_ID,
             LINEAGE_NORMALIZE | LINEAGE_LIFECYCLE => LINEAGE_PROJECTION_ID,
             SHELL_CONVERSATION_LOG | SHELL_LESSON_PLAN | SHELL_PROCESS_LESSONS => {
@@ -624,6 +754,16 @@ pub enum ClientCommand {
         meta: CommandMeta,
         request: HallwayKnockSettlePayload,
     },
+    /// Read-only AKASHA recall, bound to the sender's room.
+    AkashaRecallQuery {
+        meta: CommandMeta,
+        payload: AkashaRecallQueryPayload,
+    },
+    /// Read-only AKASHA lesson query, bound to the sender's room.
+    AkashaLessonQuery {
+        meta: CommandMeta,
+        payload: AkashaLessonQueryPayload,
+    },
     RoutingStatus {
         meta: CommandMeta,
     },
@@ -680,6 +820,8 @@ impl ClientCommand {
             | Self::ProjectHallwayInbox { meta }
             | Self::ClaimHallwayKnock { meta }
             | Self::SettleHallwayKnock { meta, .. }
+            | Self::AkashaRecallQuery { meta, .. }
+            | Self::AkashaLessonQuery { meta, .. }
             | Self::RoutingStatus { meta }
             | Self::RoutingDispatch { meta, .. }
             | Self::FamiliarStatus { meta, .. }
@@ -744,6 +886,18 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
             "hallway knock settle payload belongs only to its command",
         ));
     }
+    if raw.akasha_recall_query.is_some() && raw.command_or_event_type != AKASHA_RECALL_QUERY {
+        return Err(CommandParseError::from_meta(
+            &meta,
+            "akasha recall query payload belongs only to its command",
+        ));
+    }
+    if raw.akasha_lesson_query.is_some() && raw.command_or_event_type != AKASHA_LESSON_QUERY {
+        return Err(CommandParseError::from_meta(
+            &meta,
+            "akasha lesson query payload belongs only to its command",
+        ));
+    }
     match raw.command_or_event_type.as_str() {
         PAPER_BOAT_RECEIPT_SUBSCRIBE => {
             raw.no_command_payload(&meta)?;
@@ -756,6 +910,32 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
         HALLWAY_KNOCK_CLAIM => {
             raw.no_command_payload(&meta)?;
             Ok(ClientCommand::ClaimHallwayKnock { meta })
+        }
+        AKASHA_RECALL_QUERY => {
+            raw.no_command_payload(&meta)?;
+            let mut payload = raw.akasha_recall_query.ok_or_else(|| {
+                CommandParseError::from_meta(
+                    &meta,
+                    "akasha recall query requires akasha_recall_query",
+                )
+            })?;
+            payload
+                .normalize()
+                .map_err(|reason| CommandParseError::from_meta(&meta, reason))?;
+            Ok(ClientCommand::AkashaRecallQuery { meta, payload })
+        }
+        AKASHA_LESSON_QUERY => {
+            raw.no_command_payload(&meta)?;
+            let mut payload = raw.akasha_lesson_query.ok_or_else(|| {
+                CommandParseError::from_meta(
+                    &meta,
+                    "akasha lesson query requires akasha_lesson_query",
+                )
+            })?;
+            payload
+                .normalize()
+                .map_err(|reason| CommandParseError::from_meta(&meta, reason))?;
+            Ok(ClientCommand::AkashaLessonQuery { meta, payload })
         }
         HALLWAY_KNOCK_SETTLE => {
             let request = raw.hallway_knock_settle.clone().ok_or_else(|| {
@@ -1096,6 +1276,23 @@ pub struct HallwayKnockSettledEvent {
     #[serde(flatten)]
     pub meta: EventMeta,
     pub result: house_core::hallway::HallwayKnockSettleReceipt,
+}
+
+/// One AKASHA recall answer. `result` is the substrate return serialized
+/// verbatim: the Host reads, it never reshapes evidence.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AkashaRecallResultEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub result: Value,
+}
+
+/// One AKASHA lesson answer, carrying the substrate result verbatim.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct AkashaLessonResultEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub result: Value,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1458,5 +1655,128 @@ mod receipt_tests {
             parse_client_command(settle),
             Ok(ClientCommand::SettleHallwayKnock { .. })
         ));
+    }
+
+    fn akasha_envelope(kind: &str, message_id: &str) -> serde_json::Value {
+        json!({
+            "schema_version": 1,
+            "message_id": message_id,
+            "house_id": "solarisael",
+            "sender_room": "kodo",
+            "sender_spirit": "Kodo",
+            "sender_session": "session-akasha",
+            "recipient": "house-host",
+            "command_or_event_type": kind,
+            "correlation_id": message_id,
+            "causation_id": "",
+            "reply_target": "session-akasha",
+            "idempotency_key": message_id,
+            "source_record_refs": [],
+            "scope": "room:kodo:akasha",
+            "visibility": "operator",
+            "authority_class": "room_state",
+            "created_at": "2026-08-20T18:00:00Z",
+            "expires_at": "2026-08-20T18:01:00Z",
+            "max_hops": 1,
+            "projection_id": AKASHA_PROJECTION_ID
+        })
+    }
+
+    #[test]
+    fn akasha_recall_query_parses_a_trimmed_bounded_query() {
+        let mut command = akasha_envelope(AKASHA_RECALL_QUERY, "recall-1");
+        command["akasha_recall_query"] = json!({ "query": "  paper boat  " });
+        let Ok(ClientCommand::AkashaRecallQuery { meta, payload }) =
+            parse_client_command(command)
+        else {
+            panic!("bounded recall query parses");
+        };
+        assert_eq!(payload.query, "paper boat");
+        assert_eq!(meta.sender_room, "kodo");
+        assert_eq!(meta.projection_id, AKASHA_PROJECTION_ID);
+    }
+
+    #[test]
+    fn akasha_recall_query_refuses_blank_and_oversize_queries() {
+        let oversize = "x".repeat(513);
+        for query in ["   ", oversize.as_str()] {
+            let mut command = akasha_envelope(AKASHA_RECALL_QUERY, "recall-refused");
+            command["akasha_recall_query"] = json!({ "query": query });
+            let error = parse_client_command(command).expect_err("query bound is enforced");
+            assert!(
+                error.reason.contains("recall query must be 1 through 512"),
+                "unexpected refusal: {}",
+                error.reason
+            );
+        }
+    }
+
+    #[test]
+    fn akasha_query_refuses_a_foreign_projection() {
+        let mut command = akasha_envelope(AKASHA_RECALL_QUERY, "recall-foreign");
+        command["projection_id"] = json!(RECALL_POLICY_PROJECTION_ID);
+        command["akasha_recall_query"] = json!({ "query": "paper boat" });
+        let error = parse_client_command(command).expect_err("foreign projection is refused");
+        assert_eq!(error.reason, "foreign projection_id recall_policy");
+    }
+
+    #[test]
+    fn akasha_lesson_query_keeps_bounded_filters_and_clamps_the_limit() {
+        let mut command = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-1");
+        command["akasha_lesson_query"] = json!({
+            "type": "coding",
+            "shape": "  process  ",
+            "languageKeys": [" rust "],
+            "query": " host command ",
+            "limit": 500
+        });
+        let Ok(ClientCommand::AkashaLessonQuery { payload, .. }) = parse_client_command(command)
+        else {
+            panic!("bounded lesson query parses");
+        };
+        assert_eq!(payload.family, AkashaLessonFamily::Coding);
+        assert_eq!(payload.shape.as_deref(), Some("process"));
+        assert_eq!(payload.language_keys, vec!["rust".to_owned()]);
+        assert_eq!(payload.query.as_deref(), Some("host command"));
+        assert_eq!(payload.limit, 50);
+
+        let mut zero = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-zero");
+        zero["akasha_lesson_query"] =
+            json!({ "type": "project", "project": "athanor", "limit": 0 });
+        let Ok(ClientCommand::AkashaLessonQuery { payload, .. }) = parse_client_command(zero) else {
+            panic!("zero limit clamps instead of refusing");
+        };
+        assert_eq!(payload.limit, 1);
+
+        let mut default = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-default");
+        default["akasha_lesson_query"] = json!({ "type": "writing" });
+        let Ok(ClientCommand::AkashaLessonQuery { payload, .. }) = parse_client_command(default)
+        else {
+            panic!("omitted limit takes the default");
+        };
+        assert_eq!(payload.limit, 20);
+        assert!(payload.shape.is_none());
+    }
+
+    #[test]
+    fn akasha_lesson_query_refuses_blank_filters_and_a_foreign_payload() {
+        let mut blank = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-blank");
+        blank["akasha_lesson_query"] = json!({ "type": "coding", "shape": "  " });
+        let error = parse_client_command(blank).expect_err("blank filters are refused");
+        assert!(
+            error.reason.contains("shape must be omitted"),
+            "unexpected refusal: {}",
+            error.reason
+        );
+
+        let mut crossed = akasha_envelope(AKASHA_RECALL_QUERY, "lesson-crossed");
+        crossed["akasha_recall_query"] = json!({ "query": "paper boat" });
+        crossed["akasha_lesson_query"] = json!({ "type": "coding" });
+        let error =
+            parse_client_command(crossed).expect_err("a lesson payload is not a recall payload");
+        assert_eq!(
+            error.reason,
+            "akasha lesson query payload belongs only to its command"
+        );
     }
 }

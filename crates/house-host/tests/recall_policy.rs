@@ -1,15 +1,17 @@
 use athanor_house_delivery::broker::Broker;
 use chrono::{Duration, SecondsFormat, Utc};
 use futures_util::{SinkExt, StreamExt};
-use house_host::{Host, HostConfig};
+use house_host::{Host, HostConfig, KnockAutonomy};
 use house_protocol::{
     BOAT_RECEIPT_SCHEMA_VERSION, BOAT_RECEIPT_SUBJECT, BoatReceiptProjection, CONTEXT_ANALYZE,
-    CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID, PAPER_BOAT_RECEIPT_PROJECTION_ID,
-    PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE, RECALL_POLICY_COMMAND_ACCEPTED,
-    RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_COMPLETE_REFRESH, RECALL_POLICY_DELTA,
-    RECALL_POLICY_EVALUATE, RECALL_POLICY_FAIL_REFRESH, RECALL_POLICY_INVALIDATE_AFTER_COMPACTION,
-    RECALL_POLICY_RESYNC, RECALL_POLICY_SET_REQUESTED_MODE, RECALL_POLICY_SNAPSHOT,
-    RECALL_POLICY_SUBSCRIBE, SHELL_CONVERSATION_LOG, SHELL_PROJECTION_ID, SHELL_RESULT,
+    CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID, HALLWAY_KNOCK_CLAIM, HALLWAY_KNOCK_COMMAND_FAILED,
+    HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLE, HALLWAY_PROJECTION_ID,
+    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
+    RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_COMPLETE_REFRESH,
+    RECALL_POLICY_DELTA, RECALL_POLICY_EVALUATE, RECALL_POLICY_FAIL_REFRESH,
+    RECALL_POLICY_INVALIDATE_AFTER_COMPACTION, RECALL_POLICY_RESYNC,
+    RECALL_POLICY_SET_REQUESTED_MODE, RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE,
+    SHELL_CONVERSATION_LOG, SHELL_PROJECTION_ID, SHELL_RESULT,
 };
 use serde_json::{Value, json};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -89,6 +91,7 @@ fn config(root: &Path) -> HostConfig {
         database_url: None,
         akasha_enabled: false,
         nats_url: None,
+        knock_autonomy: KnockAutonomy::Off,
     }
 }
 
@@ -1315,6 +1318,102 @@ async fn concurrent_authenticated_clients_keep_session_state_isolated() {
         beta["state_hash"]
             .as_str()
             .is_some_and(|hash| !hash.is_empty())
+    );
+    host.stop().await;
+}
+
+fn knock_command(kind: &str, message_id: &str) -> Value {
+    let mut value = command(kind, message_id, message_id, true);
+    value["projection_id"] = json!(HALLWAY_PROJECTION_ID);
+    value
+}
+
+fn knock_settle_command(message_id: &str) -> Value {
+    let mut value = knock_command(HALLWAY_KNOCK_SETTLE, message_id);
+    value["hallway_knock_settle"] = json!({
+        "knockId": "5af35bb5-e9a1-4e58-849b-b78b6614bc15",
+        "outcome": "completed",
+        "reason": null
+    });
+    value
+}
+
+#[tokio::test]
+async fn default_host_refuses_knock_claim_and_settlement_before_touching_the_database() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    // The default fixture is exactly a default installation: autonomy unset
+    // and no DATABASE_URL. A refusal (not a database failure) proves the
+    // authority gate runs before the Hallway pool is consulted at all.
+    let host = start(root.path()).await;
+    let mut socket = connect(&host).await;
+
+    send(
+        &mut socket,
+        &knock_command(HALLWAY_KNOCK_CLAIM, "knock-claim-off"),
+    )
+    .await;
+    let refused = receive(&mut socket).await;
+    assert_eq!(
+        refused["command_or_event_type"],
+        HALLWAY_KNOCK_COMMAND_REFUSED
+    );
+    assert_eq!(refused["correlation_id"], "knock-claim-off");
+    let reason = refused["reason"].as_str().expect("refusal reason");
+    assert!(
+        reason.contains("knock_autonomy_disabled"),
+        "refusal must name the disabled autonomy: {reason}"
+    );
+    assert!(
+        !reason.contains("DATABASE_URL"),
+        "a disabled Host must never reach the database path: {reason}"
+    );
+
+    send(&mut socket, &knock_settle_command("knock-settle-off")).await;
+    let refused = receive(&mut socket).await;
+    assert_eq!(
+        refused["command_or_event_type"],
+        HALLWAY_KNOCK_COMMAND_REFUSED
+    );
+    assert_eq!(refused["correlation_id"], "knock-settle-off");
+    let reason = refused["reason"].as_str().expect("refusal reason");
+    assert!(
+        reason.contains("knock_autonomy_disabled"),
+        "settlement must be gated by the same authority: {reason}"
+    );
+    assert!(
+        !reason.contains("DATABASE_URL"),
+        "a disabled Host must never reach the database path: {reason}"
+    );
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn enabling_claim_autonomy_restores_the_existing_bounded_knock_path() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let mut configured = config(root.path());
+    configured.knock_autonomy = KnockAutonomy::Claim;
+    let host = start_with_config(configured).await;
+    let mut socket = connect(&host).await;
+
+    send(
+        &mut socket,
+        &knock_command(HALLWAY_KNOCK_CLAIM, "knock-claim-on"),
+    )
+    .await;
+    let response = receive(&mut socket).await;
+    // Opt-in restores the pre-existing behaviour exactly: the command reaches
+    // the Hallway pool check and fails there because this Host has no
+    // DATABASE_URL, rather than being refused by the authority gate.
+    assert_eq!(
+        response["command_or_event_type"],
+        HALLWAY_KNOCK_COMMAND_FAILED
+    );
+    assert_eq!(response["correlation_id"], "knock-claim-on");
+    assert_eq!(
+        response["reason"],
+        "Hallway Knock claim requires DATABASE_URL"
     );
     host.stop().await;
 }

@@ -3,7 +3,7 @@ use athanor_substrate::{
     derive_semantic_hash_v1,
 };
 use chrono::Utc;
-use house_host::{Host, HostConfig};
+use house_host::{Host, HostConfig, KnockAutonomy};
 use reqwest::StatusCode;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
@@ -121,6 +121,7 @@ fn config(root: &Path) -> HostConfig {
         database_url: None,
         akasha_enabled: false,
         nats_url: None,
+        knock_autonomy: KnockAutonomy::Off,
     }
 }
 

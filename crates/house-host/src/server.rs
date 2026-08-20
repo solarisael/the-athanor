@@ -766,7 +766,32 @@ async fn project_hallway_inbox(state: &AppState, meta: CommandMeta) -> Responses
     }
 }
 
+/// Host-owned authority gate for Hallway Knock coordination.
+///
+/// Runs before any `hallway_pool` access so a disabled Host or a foreign
+/// caller never reaches the database. Authority is read from [`HostConfig`],
+/// never from the caller envelope: a bearer token proves reach to this Host,
+/// not the right to act as another room or spirit.
+fn knock_authority(config: &HostConfig, meta: &CommandMeta) -> Result<(), AppError> {
+    if !config.knock_autonomy.claims_enabled() {
+        return Err(AppError::Refusal {
+            code: "knock_autonomy_disabled",
+            message: "Host Knock autonomy is off; set ATHANOR_HOST_KNOCK_AUTONOMY=claim to enable",
+        });
+    }
+    if meta.sender_room != config.room || meta.sender_spirit != config.spirit {
+        return Err(AppError::Refusal {
+            code: "foreign_knock_authority",
+            message: "Knock commands must carry this Host's own room and spirit",
+        });
+    }
+    Ok(())
+}
+
 async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
+    if let Err(error) = knock_authority(&state.config, &meta) {
+        return hallway_knock_error(state, &meta, "claim", error).await;
+    }
     let Some(pool) = state.hallway_pool.as_ref() else {
         let failed = outcome(
             state,
@@ -783,8 +808,8 @@ async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
     match hallway_knock_claim(
         pool,
         HallwayKnockClaimRequest {
-            room: meta.sender_room.clone(),
-            spirit: meta.sender_spirit.clone(),
+            room: state.config.room.clone(),
+            spirit: state.config.spirit.clone(),
             session: meta.sender_session.clone(),
         },
     )
@@ -822,6 +847,9 @@ async fn settle_hallway_knock(
     meta: CommandMeta,
     request: house_protocol::HallwayKnockSettlePayload,
 ) -> Responses {
+    if let Err(error) = knock_authority(&state.config, &meta) {
+        return hallway_knock_error(state, &meta, "settlement", error).await;
+    }
     let Some(pool) = state.hallway_pool.as_ref() else {
         let failed = outcome(
             state,
@@ -838,8 +866,8 @@ async fn settle_hallway_knock(
     match hallway_knock_settle(
         pool,
         HallwayKnockSettleRequest {
-            room: meta.sender_room.clone(),
-            spirit: meta.sender_spirit.clone(),
+            room: state.config.room.clone(),
+            spirit: state.config.spirit.clone(),
             session: meta.sender_session.clone(),
             knock_id: request.knock_id,
             outcome: request.outcome,
@@ -1871,12 +1899,13 @@ fn new_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{hallway_projection_changed, resolve_room_dir};
-    use crate::config::HostConfig;
+    use super::{hallway_projection_changed, knock_authority, resolve_room_dir};
+    use crate::config::{HostConfig, KnockAutonomy};
+    use athanor_substrate::AppError;
+    use house_protocol::CommandMeta;
 
-    #[test]
-    fn familiar_status_defaults_to_configured_room_dir() {
-        let config = HostConfig {
+    fn config(knock_autonomy: KnockAutonomy) -> HostConfig {
+        HostConfig {
             bind: "127.0.0.1:0".parse().expect("test bind"),
             ws_path: "/athanor/v1/ws".into(),
             bearer_token: "test-token".into(),
@@ -1890,10 +1919,71 @@ mod tests {
             database_url: None,
             akasha_enabled: false,
             nats_url: None,
-        };
+            knock_autonomy,
+        }
+    }
+
+    fn meta(sender_room: &str, sender_spirit: &str) -> CommandMeta {
+        CommandMeta {
+            schema_version: 1,
+            message_id: "message-1".into(),
+            house_id: "solarisael".into(),
+            sender_room: sender_room.into(),
+            sender_spirit: sender_spirit.into(),
+            sender_session: "caller-session".into(),
+            recipient: "house-host".into(),
+            correlation_id: "message-1".into(),
+            causation_id: String::new(),
+            reply_target: "caller-session".into(),
+            idempotency_key: "message-1".into(),
+            source_record_refs: Vec::new(),
+            scope: "room:kodo:recall_policy".into(),
+            visibility: "operator".into(),
+            authority_class: "room_state".into(),
+            created_at: "2026-08-20T00:00:00.000Z".into(),
+            expires_at: "2099-08-20T00:00:00.000Z".into(),
+            max_hops: 1,
+            projection_id: "hallway".into(),
+        }
+    }
+
+    fn refusal_code(error: AppError) -> &'static str {
+        match error {
+            AppError::Refusal { code, .. } => code,
+            other => panic!("expected a typed refusal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn knock_authority_refuses_every_caller_while_autonomy_is_off() {
+        let config = config(KnockAutonomy::Off);
+        let own = knock_authority(&config, &meta("kodo", "Kodo"))
+            .expect_err("a disabled Host must refuse even its own room");
+        assert_eq!(refusal_code(own), "knock_autonomy_disabled");
+        let foreign = knock_authority(&config, &meta("kintsu", "Kintsu"))
+            .expect_err("a disabled Host must refuse a foreign room");
+        assert_eq!(refusal_code(foreign), "knock_autonomy_disabled");
+    }
+
+    #[test]
+    fn enabled_knock_authority_admits_only_this_hosts_own_room_and_spirit() {
+        let config = config(KnockAutonomy::Claim);
+        knock_authority(&config, &meta("kodo", "Kodo")).expect("the Host's own binding is allowed");
+
+        for (room, spirit) in [("kintsu", "Kodo"), ("kodo", "Kintsu"), ("kintsu", "Kintsu")] {
+            let error = knock_authority(&config, &meta(room, spirit))
+                .expect_err("a foreign room or spirit must be refused");
+            assert_eq!(refusal_code(error), "foreign_knock_authority");
+        }
+    }
+
+    #[test]
+    fn familiar_status_defaults_to_configured_room_dir() {
+        let config = config(KnockAutonomy::Off);
 
         assert_eq!(resolve_room_dir(None, &config).as_ref(), "configured-room");
     }
+
     #[test]
     fn hallway_projection_rings_once_per_host_observed_revision() {
         assert!(!hallway_projection_changed(None, "quiet", false));

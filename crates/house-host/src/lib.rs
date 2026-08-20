@@ -6,7 +6,7 @@ mod server;
 mod store;
 mod viewport;
 
-pub use config::{DEFAULT_BIND, DEFAULT_WS_PATH, HostConfig};
+pub use config::{DEFAULT_BIND, DEFAULT_WS_PATH, HostConfig, KNOCK_AUTONOMY_ENV, KnockAutonomy};
 pub use server::Host;
 
 use tokio::net::TcpListener;

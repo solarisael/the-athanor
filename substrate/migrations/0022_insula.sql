@@ -30,9 +30,6 @@ CREATE SCHEMA IF NOT EXISTS insula;
 --
 -- house_id / room / spirit / session_id are stamped by the host from the
 -- trusted binding. They are never accepted from the event payload.
---
--- quest_id / attempt_id do not exist in source yet. They are nullable imports
--- with zero fencing meaning: nothing in Insula may gate on them.
 CREATE TABLE IF NOT EXISTS insula.log (
     schema_version      SMALLINT      NOT NULL DEFAULT 1,
     event_id            UUID          PRIMARY KEY,
@@ -62,8 +59,6 @@ CREATE TABLE IF NOT EXISTS insula.log (
     -- is prohibited.
     tool_call_id        TEXT,
     provider_request_id TEXT,
-    quest_id            UUID,
-    attempt_id          UUID,
     -- The logical identity of the observation. `idempotency_version` names the
     -- derivation that produced `idempotency_key`, so a future derivation
     -- becomes version 2 beside version 1 instead of colliding with it.
@@ -152,7 +147,7 @@ CREATE TABLE IF NOT EXISTS insula.log (
     CONSTRAINT insula_log_idempotency_scope_check
         CHECK (idempotency_scope IN (
             'writer_sequence', 'tool_call', 'provider_request',
-            'trace_span', 'room_operation', 'quest_attempt'
+            'trace_span', 'room_operation'
         )),
     CONSTRAINT insula_log_idempotency_scope_not_session_check
         CHECK (idempotency_scope <> 'session'),

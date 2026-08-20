@@ -9,6 +9,7 @@ mod giga;
 mod giga_worker;
 mod hallway;
 mod health;
+pub mod insula;
 mod lesson;
 pub mod migrations;
 mod paper_boat;
@@ -40,6 +41,15 @@ pub use hallway::{
 };
 pub use health::{
     SubstrateHealthOptions, SubstrateHealthResult, substrate_health, substrate_health_with_config,
+};
+pub use insula::{
+    INSULA_DEFAULT_RETENTION_DAYS, INSULA_MAX_BATCH_EVENTS, INSULA_MAX_TRACE_ROWS,
+    INSULA_MAX_VITALS_ROWS, INSULA_QUERY_VERSION, INSULA_SCHEMA_VERSION, IdempotencyScope,
+    IngestBatch, IngestConflict, IngestConflictKind, IngestReceipt, InsulaError, ObservationEvent,
+    ObservationPhase, OutcomeClass, RetentionReceipt, RetentionStatus, TraceResult, TraceRow,
+    TraceScope, TrustedBinding, VitalsQuery, VitalsResult, VitalsRow, derive_idempotency_key_v1,
+    derive_semantic_hash_v1, ingest_batch, query_trace, query_vitals, run_retention,
+    validate_trusted_binding,
 };
 pub use lesson::{
     DesignDocument, DesignDocumentFilters, DesignDocumentQueryParams, DesignDocumentQueryResult,

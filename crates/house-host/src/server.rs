@@ -1,4 +1,5 @@
 use crate::config::HostConfig;
+use crate::insula::InsulaHost;
 use crate::policy::{RecallPolicySession, apply_requested_mode};
 use crate::receipt::{ReceiptIngest, ReceiptTracker};
 use crate::store::{
@@ -72,6 +73,7 @@ struct AppState {
     room_store: RoomStateStore,
     runtime: Arc<Mutex<RuntimeState>>,
     hallway_pool: Option<sqlx::PgPool>,
+    insula: InsulaHost,
     cancellation: CancellationToken,
     tasks: TaskTracker,
     deltas: broadcast::Sender<String>,
@@ -92,6 +94,13 @@ impl Host {
             .map(|url| PgPoolOptions::new().max_connections(2).connect_lazy(url))
             .transpose()
             .map_err(|error| format!("Host DATABASE_URL is invalid: {error}"))?;
+        let insula_pool = config
+            .database_url
+            .as_deref()
+            .map(|url| PgPoolOptions::new().max_connections(1).connect_lazy(url))
+            .transpose()
+            .map_err(|error| format!("Host Insula DATABASE_URL is invalid: {error}"))?;
+        let insula = InsulaHost::new(&config, insula_pool)?;
         let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone());
         let projection = room_store.load()?;
         let (durable, cursor, mut sessions) =
@@ -121,6 +130,7 @@ impl Host {
                     durable,
                 })),
                 hallway_pool,
+                insula,
                 cancellation: CancellationToken::new(),
                 tasks: TaskTracker::new(),
                 deltas,
@@ -143,7 +153,8 @@ impl Host {
         let app = Router::new()
             .route("/health", get(health))
             .route(&ws_path, get(upgrade))
-            .with_state(self.state.clone());
+            .with_state(self.state.clone())
+            .merge(self.state.insula.router());
         let cancellation = self.state.cancellation.clone();
         let tasks = self.state.tasks.clone();
         axum::serve(listener, app)
@@ -172,6 +183,7 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
         "sequence": runtime.cursor.sequence,
         "state_hash": runtime.cursor.state_hash,
         "akasha_delivery": receipt_health,
+        "insula": state.insula.health(),
     }))
 }
 
@@ -199,7 +211,7 @@ async fn upgrade(
         .into_response()
 }
 
-fn authorized(headers: &HeaderMap, expected: &str) -> bool {
+pub(crate) fn authorized(headers: &HeaderMap, expected: &str) -> bool {
     let Some(value) = headers.get(header::AUTHORIZATION) else {
         return false;
     };

@@ -25,6 +25,10 @@ const REQUIRED_TABLES: &[&str] = &[
     "crane_outbox",
     "crane_receipts",
     "crane_dead_letters",
+    "insula.log",
+    "insula.vitals_minute",
+    "insula.retention_receipts",
+    "insula.log_tombstones",
 ];
 const REQUIRED_EXTENSIONS: &[&str] = &["pg_trgm", "pgcrypto", "vector"];
 
@@ -186,14 +190,25 @@ async fn database_health(config: Option<&Config>) -> (Value, Option<PgPool>) {
         }
     };
     let tables = match sqlx::query_scalar::<_, String>(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = ANY($1)",
+        "SELECT CASE
+                    WHEN table_schema = 'insula' THEN 'insula.' || table_name
+                    ELSE table_name
+                END
+         FROM information_schema.tables
+         WHERE (table_schema = current_schema() AND table_name = ANY($1))
+            OR (table_schema = 'insula' AND 'insula.' || table_name = ANY($1))",
     )
     .bind(REQUIRED_TABLES)
     .fetch_all(&pool)
     .await
     {
         Ok(value) => value.into_iter().collect::<BTreeSet<_>>(),
-        Err(error) => return (json!({"ok": false, "reachable": true, "database": database, "user": user, "extensions": extensions, "error": error.to_string()}), Some(pool)),
+        Err(error) => {
+            return (
+                json!({"ok": false, "reachable": true, "database": database, "user": user, "extensions": extensions, "error": error.to_string()}),
+                Some(pool),
+            );
+        }
     };
     let missing_tables = REQUIRED_TABLES
         .iter()

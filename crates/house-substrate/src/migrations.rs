@@ -116,6 +116,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0021_hallway_knock.sql",
         sql: include_str!("../../../substrate/migrations/0021_hallway_knock.sql"),
     },
+    Migration {
+        version: 22,
+        name: "0022_insula.sql",
+        sql: include_str!("../../../substrate/migrations/0022_insula.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

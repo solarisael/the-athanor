@@ -10,7 +10,7 @@
 -- adding a field". A guard at the end of this migration fails loudly if such a
 -- column ever appears.
 --
--- Re-applicable against fresh, partially-applied and fully-applied state.
+-- Re-applicable against fresh and fully-applied state.
 
 BEGIN;
 

@@ -3981,7 +3981,6 @@ input:focus-visible {
   .insula-observation-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .mechanics-search,
   .shelf-search {
     grid-template-columns: 1fr;

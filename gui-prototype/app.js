@@ -2468,6 +2468,12 @@ timeline.addEventListener("click", event => {
     renderDurableResults();
     return;
   }
+  const durableMark = event.target.closest("[data-durable-mark]");
+  if (durableMark) {
+    state.durableMark = durableMark.dataset.durableMark;
+    renderDurableResults();
+    return;
+  }
   const subjectDoor = event.target.closest("[data-open-subject-view]");
   if (subjectDoor) {
     openSubjectView(subjectDoor.dataset.openSubjectView);

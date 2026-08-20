@@ -273,3 +273,44 @@ test("claims one pointer-only Knock and retries its bounded turn settlement", as
   expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("completed");
   await stopHallwayKnockDoorman(endFallbackBinding);
 });
+
+test("session switch retires the stale doorman and releases its claimed Knock", async () => {
+  const cleared: unknown[] = [];
+  const switchCtx = {
+    ...ctx,
+    clearTimer: (timer: unknown) => {
+      cleared.push(timer);
+    },
+  };
+
+  claimReturned = false;
+  const staleBinding = { ...binding, session: "session-before-switch" };
+  startHallwayKnockDoorman(pi, switchCtx, staleBinding);
+  await timeouts.at(-1)!();
+  expect(sent).toHaveLength(7);
+  expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("started");
+
+  const switchedBinding = { ...binding, session: "session-after-switch" };
+  startHallwayKnockDoorman(pi, switchCtx, switchedBinding);
+  expect(cleared).toHaveLength(1);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const released = commands.at(-1)!;
+  expect(released.hallway_knock_settle?.outcome).toBe("failed");
+  expect(released.session).toBe("session-before-switch");
+  expect(released.hallway_knock_settle?.reason).toContain("session identity changed");
+
+  // The turn note under the stale identity must find nothing to observe.
+  await noteHallwayKnockTurnStart(staleBinding, "5af35bb5-e9a1-4e58-849b-b78b6614bc15");
+  expect(commands.at(-1)).toBe(released);
+
+  // The surviving doorman under the new identity completes a full exchange.
+  claimReturned = false;
+  await timeouts.at(-1)!();
+  expect(sent).toHaveLength(8);
+  expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("started");
+  expect(commands.at(-1)?.session).toBe("session-after-switch");
+  await noteHallwayKnockTurnStart(switchedBinding, "5af35bb5-e9a1-4e58-849b-b78b6614bc15");
+  await noteHallwayKnockTurnEnd(switchedBinding);
+  expect(commands.at(-1)?.hallway_knock_settle?.outcome).toBe("completed");
+  await stopHallwayKnockDoorman(switchedBinding);
+});

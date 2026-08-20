@@ -367,6 +367,22 @@ export function startHallwayKnockDoorman(pi: any, ctx: any, binding: HostBinding
     return;
   }
   const key = doormanKey(binding);
+  // One process holds exactly one doorman. A session switch re-registers under
+  // the new identity; retire any doorman this process registered under an old
+  // one, or it keeps claiming Knocks whose turns it can never observe
+  // (message_start/turn_end notes look up the current identity) and fails live
+  // exchanges after 60s. Observed 2026-08-20, knock aecf98f1.
+  for (const [staleKey, stale] of knockDoormen) {
+    if (stale.pi !== pi || staleKey === key) continue;
+    stale.ctx?.clearTimer?.(stale.timer);
+    knockDoormen.delete(staleKey);
+    if (stale.active) {
+      void failActiveKnock(
+        stale,
+        "recipient session identity changed before the Knock turn completed",
+      );
+    }
+  }
   const previous = knockDoormen.get(key);
   if (previous) {
     previous.ctx?.clearTimer?.(previous.timer);

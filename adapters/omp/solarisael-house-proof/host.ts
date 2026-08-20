@@ -50,6 +50,9 @@ export function hostSessionIdentity(context: {
     || text(fallback);
 }
 
+// One definition of loopback for every Host boundary. URL runtimes differ on
+// whether an IPv6 hostname retains brackets, so both spellings belong here.
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
 function hostUrlForRoom(room: string): string {
   const override = text(process.env.ATHANOR_HOST_WS_URL);
@@ -70,10 +73,26 @@ function hostUrlForRoom(room: string): string {
     : "";
   if (!url) throw new HostUnavailable(`no installed Athanor Host endpoint exists for room ${room || "<empty>"}`);
   const parsed = new URL(url);
-  if (parsed.protocol !== "ws:" || !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) {
+  if (parsed.protocol !== "ws:" || !LOOPBACK_HOSTNAMES.has(parsed.hostname)) {
     throw new HostUnavailable(`installed Athanor Host endpoint for room ${room} must be loopback WebSocket`);
   }
   return url;
+}
+
+// The installed WebSocket endpoint is the single topology convention. Every
+// Host HTTP boundary is derived from it rather than configured a second time,
+// so an operator can never point the two at different Hosts.
+export function hostHttpEndpoint(room: string, requestPath: string): { url: string; token: string } {
+  const socket = new URL(hostUrlForRoom(text(room)));
+  if (socket.protocol !== "ws:" || !LOOPBACK_HOSTNAMES.has(socket.hostname)) {
+    throw new HostUnavailable(
+      `installed Athanor Host endpoint for room ${text(room) || "<empty>"} must be loopback WebSocket`,
+    );
+  }
+  return {
+    url: new URL(requestPath, `http://${socket.host}`).toString(),
+    token: requiredEnvironment("ATHANOR_HOST_TOKEN"),
+  };
 }
 
 export function hostCommand(

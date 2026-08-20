@@ -196,7 +196,7 @@ describe("OMP adapter registration", () => {
     const { labels, hooks, eventChannels, messageRenderers } = registerAdapter();
 
     expect(labels).toEqual(["The Athanor"]);
-    expect(hooks.map((hook) => hook.name)).toEqual(["session_start", "session_switch", "session_shutdown", "tool_call", "tool_call", "message_start", "message_start", "message_update", "context", "session_compact", "tool_result", "tool_result", "shutdown", "agent_end"]);
+    expect(hooks.map((hook) => hook.name)).toEqual(["session_start", "session_switch", "session_shutdown", "tool_call", "tool_result", "tool_call", "tool_call", "message_start", "message_start", "message_update", "context", "session_compact", "tool_result", "tool_result", "shutdown", "agent_end"]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
     expect(eventChannels).toEqual(["task:subagent:progress", "task:subagent:lifecycle"]);
     expect(messageRenderers).toHaveLength(2);
@@ -205,6 +205,92 @@ describe("OMP adapter registration", () => {
       "solarisael-process-lessons",
     ]);
     expect(messageRenderers.every((entry) => typeof entry.renderer === "function")).toBe(true);
+  });
+
+  test("observes the tool lifecycle without answering for the tools it watches", async () => {
+    const { hooks } = registerAdapter();
+    const observers = [hooks[3], hooks[4]];
+
+    expect(observers.map((hook) => hook.name)).toEqual(["tool_call", "tool_result"]);
+    for (const observer of observers) {
+      const handler = observer.handler as (event: unknown, ctx: unknown) => Promise<unknown>;
+      // A malformed event, a missing ctx, and a tool result with no observed
+      // call all resolve to nothing: an Insula tap never blocks, rewrites, or
+      // refuses the turn it is watching.
+      expect(await handler({ toolCallId: "call-1", isError: true }, {})).toBeUndefined();
+      expect(await handler({}, undefined)).toBeUndefined();
+      expect(await handler(undefined, undefined)).toBeUndefined();
+    }
+  });
+
+  test("keeps reused tool ids session-local and cancels a closing session", async () => {
+    const original = {
+      disabled: process.env.ATHANOR_DISABLE_INSULA,
+      endpoints: process.env.ATHANOR_HOST_ENDPOINTS,
+      socket: process.env.ATHANOR_HOST_WS_URL,
+      token: process.env.ATHANOR_HOST_TOKEN,
+    };
+    const received: any[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(request) {
+        const body = await request.json() as { events?: any[] };
+        received.push(...(body.events ?? []));
+        return Response.json({
+          schemaVersion: 1,
+          acceptedCount: body.events?.length ?? 0,
+          duplicateCount: 0,
+          conflicts: [],
+        });
+      },
+    });
+    try {
+      process.env.ATHANOR_DISABLE_INSULA = "0";
+      process.env.ATHANOR_HOST_ENDPOINTS = JSON.stringify({
+        "default-room": { url: `ws://127.0.0.1:${server.port}/athanor/v1/ws` },
+      });
+      delete process.env.ATHANOR_HOST_WS_URL;
+      process.env.ATHANOR_HOST_TOKEN = "adapter-registration-insula-token";
+
+      const { hooks } = registerAdapter();
+      const toolCall = hooks[3]!.handler as (event: unknown, ctx: unknown) => Promise<unknown>;
+      const toolResult = hooks[4]!.handler as (event: unknown, ctx: unknown) => Promise<unknown>;
+      const sessionShutdown = hooks[2]!.handler as (event: unknown, ctx: unknown) => Promise<unknown>;
+      const shutdown = hooks.find((hook) => hook.name === "shutdown")!.handler as () => Promise<unknown>;
+      const firstSession = { cwd: process.cwd(), sessionId: "session-a" };
+      const secondSession = { cwd: process.cwd(), sessionId: "session-b" };
+
+      await toolCall({ toolCallId: "reused-call-id" }, firstSession);
+      await toolCall({ toolCallId: "reused-call-id" }, secondSession);
+      await sessionShutdown({}, firstSession);
+      await toolResult({ toolCallId: "reused-call-id", isError: false }, secondSession);
+      await shutdown();
+
+      const tools = received.filter((event) => event.operation === "tool_call");
+      expect(tools.map((event) => `${event.phase}:${event.outcomeClass}`)).toEqual([
+        "start:unknown",
+        "start:unknown",
+        "end:cancelled",
+        "end:ok",
+      ]);
+      expect(new Set(tools.filter((event) => event.phase === "start").map((event) => event.spanId)).size)
+        .toBe(2);
+      for (const start of tools.filter((event) => event.phase === "start")) {
+        const end = tools.find((event) => event.phase === "end" && event.spanId === start.spanId);
+        expect(end).toBeDefined();
+      }
+    } finally {
+      server.stop(true);
+      if (original.disabled === undefined) delete process.env.ATHANOR_DISABLE_INSULA;
+      else process.env.ATHANOR_DISABLE_INSULA = original.disabled;
+      if (original.endpoints === undefined) delete process.env.ATHANOR_HOST_ENDPOINTS;
+      else process.env.ATHANOR_HOST_ENDPOINTS = original.endpoints;
+      if (original.socket === undefined) delete process.env.ATHANOR_HOST_WS_URL;
+      else process.env.ATHANOR_HOST_WS_URL = original.socket;
+      if (original.token === undefined) delete process.env.ATHANOR_HOST_TOKEN;
+      else process.env.ATHANOR_HOST_TOKEN = original.token;
+    }
   });
 
   test("registers the Solarisael tool surface", () => {

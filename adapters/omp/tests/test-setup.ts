@@ -138,6 +138,11 @@ assertNoLiveConfiguration();
 
 process.env.SOLARISAEL_GIGA_ENABLED = "0";
 
+// The process-wide Insula writer stays silent for the whole suite: no test may
+// post an observation to whatever Host a developer happens to have installed.
+// Tests that exercise the writer construct their own `InsulaWriter`.
+process.env.ATHANOR_DISABLE_INSULA = "1";
+
 if (process.env[ISOLATED_POSTGRES_GATE] !== "1") {
   // Bun itself is a valid inert child for tests that exercise enabled-GIGA
   // validation; unlike the production binary it cannot open the substrate.

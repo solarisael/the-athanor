@@ -70,6 +70,14 @@ import {
   type PersistedRecallPolicy,
   type RecallPolicyDecision,
 } from "./solarisael-house-proof/recall-policy.ts";
+import {
+  closeInsulaWriter,
+  endInsulaSpan,
+  insulaErrorClass,
+  recordInsulaPoint,
+  startInsulaSpan,
+  type InsulaSpan,
+} from "./solarisael-house-proof/insula.ts";
 
 const wokenSessions = new Set();
 const modelDefaultsApplied = new Set();
@@ -78,6 +86,59 @@ const kittenQuestProgress = new Map<string, KittenQuestProgress>();
 const kittenRoomsByToolCallId = new Map<string, string>();
 const kittenRoomsByAgentId = new Map<string, string>();
 const kittenBindingsByToolCallId = new Map<string, HostBinding>();
+// Insula correlation. The request span of a session is what a later tool span
+// hangs from, so a tool call is readable inside the provider request that
+// asked for it. Both maps are bounded: a lost correlation costs a parent link
+// and nothing else.
+const insulaRequestSpans = new Map<string, InsulaSpan>();
+const insulaToolSpans = new Map<string, InsulaSpan>();
+
+function insulaToolKey(room: string, session: string, toolCallId: string): string {
+  return `${room}\0${session}\0${toolCallId}`;
+}
+
+function insulaRequestKey(room: string, session: string): string {
+  return `${room}:${session}`;
+}
+
+function retireInsulaSession(room: string, session: string): void {
+  const request = insulaRequestSpans.get(insulaRequestKey(room, session));
+  if (request) {
+    endInsulaSpan(request, "cancelled", "session_shutdown");
+    insulaRequestSpans.delete(insulaRequestKey(room, session));
+  }
+  const toolPrefix = `${room}\0${session}\0`;
+  for (const [key, span] of insulaToolSpans) {
+    if (!key.startsWith(toolPrefix)) continue;
+    endInsulaSpan(span, "cancelled", "session_shutdown");
+    insulaToolSpans.delete(key);
+  }
+}
+
+function retireStaleInsulaSessions(room: string, session: string): void {
+  const roomRequestPrefix = `${room}:`;
+  const currentRequest = insulaRequestKey(room, session);
+  for (const [key, span] of insulaRequestSpans) {
+    if (!key.startsWith(roomRequestPrefix) || key === currentRequest) continue;
+    endInsulaSpan(span, "cancelled", "session_switch");
+    insulaRequestSpans.delete(key);
+  }
+  const roomToolPrefix = `${room}\0`;
+  const currentToolPrefix = `${room}\0${session}\0`;
+  for (const [key, span] of insulaToolSpans) {
+    if (!key.startsWith(roomToolPrefix) || key.startsWith(currentToolPrefix)) continue;
+    endInsulaSpan(span, "cancelled", "session_switch");
+    insulaToolSpans.delete(key);
+  }
+}
+
+function retireAllInsulaSpans(): void {
+  for (const span of new Set([...insulaRequestSpans.values(), ...insulaToolSpans.values()])) {
+    endInsulaSpan(span, "cancelled", "shutdown");
+  }
+  insulaRequestSpans.clear();
+  insulaToolSpans.clear();
+}
 
 function trimOldestMap<K, V>(map: Map<K, V>, limit: number): void {
   if (map.size <= limit) return;
@@ -443,14 +504,75 @@ export default function solarisaelHouseProof(pi) {
     startHallwayKnockDoorman(pi, ctx, binding);
   };
   pi.on("session_start", showReadyFeedback);
-  pi.on("session_switch", showReadyFeedback);
+  pi.on("session_switch", (event, ctx) => {
+    const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+    retireStaleInsulaSessions(room, hostSessionIdentity(ctx, effectiveRoomDir));
+    return showReadyFeedback(event, ctx);
+  });
   pi.on("session_shutdown", async (_event, ctx) => {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-    await stopHallwayKnockDoorman({
-      room,
-      spirit,
-      session: hostSessionIdentity(ctx, effectiveRoomDir),
-    });
+    const session = hostSessionIdentity(ctx, effectiveRoomDir);
+    retireInsulaSession(room, session);
+    await stopHallwayKnockDoorman({ room, spirit, session });
+  });
+
+  // Insula tool lifecycle. These two taps observe and nothing else: they read
+  // no content, return nothing, and swallow their own failures, so no verdict
+  // or result they sit beside can be changed by an observation.
+  pi.on("tool_call", async (event, ctx) => {
+    try {
+      const toolCallId = String(event?.toolCallId ?? "").trim();
+      if (!toolCallId) return;
+      const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
+      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const key = insulaToolKey(room, session, toolCallId);
+      if (insulaToolSpans.has(key)) return;
+      const request = insulaRequestSpans.get(insulaRequestKey(room, session));
+      const span = startInsulaSpan({
+        room,
+        operation: "tool_call",
+        toolCallId,
+        traceId: request?.traceId ?? null,
+        parentSpanId: request?.spanId ?? null,
+      });
+      if (!span) return;
+      insulaToolSpans.set(key, span);
+      trimOldestMap(insulaToolSpans, 512);
+    } catch {
+      // Observation is never load-bearing.
+    }
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
+    try {
+      const toolCallId = String(event?.toolCallId ?? "").trim();
+      if (!toolCallId) return;
+      const failed = Boolean(event?.isError);
+      const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
+      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const key = insulaToolKey(room, session, toolCallId);
+      const span = insulaToolSpans.get(key);
+      if (span) {
+        insulaToolSpans.delete(key);
+        endInsulaSpan(span, failed ? "error" : "ok", failed ? "tool_error" : null);
+        return;
+      }
+      // A result whose call was never observed is still a fact. It is recorded
+      // as one point keyed by the tool call, never as a half span.
+      const request = insulaRequestSpans.get(insulaRequestKey(room, session));
+      recordInsulaPoint({
+        room,
+        operation: "tool_result",
+        toolCallId,
+        traceId: request?.traceId ?? null,
+        parentSpanId: request?.spanId ?? null,
+        outcomeClass: failed ? "error" : "ok",
+        errorClass: failed ? "tool_error" : null,
+        scope: "tool_call",
+      });
+    } catch {
+      // Observation is never load-bearing.
+    }
   });
 
 
@@ -551,7 +673,14 @@ export default function solarisaelHouseProof(pi) {
     // still aborts the live provider and schedules a corrected continuation.
     void lessonTriggerProseStreamUpdate(event, ctx, pi);
   });
-  pi.on("context", async (event, ctx) => {
+  // Provider-request preparation. The observation is a bystander: the wrapper
+  // below returns this body's own value and rethrows this body's own error, and
+  // the only thing it adds is a start/end pair Insula can read.
+  const composeContextAdditions = async (
+    event: any,
+    ctx: any,
+    observed: { span: InsulaSpan | null },
+  ) => {
     let messages = Array.isArray(event?.messages) ? event.messages : [];
     const promptMessage = [...messages].reverse().find((message) => message?.role === "user");
     const prompt = messageText(promptMessage);
@@ -564,6 +693,7 @@ export default function solarisaelHouseProof(pi) {
     );
 
     const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx.cwd);
+    observed.span = startInsulaSpan({ room, operation: "provider_request" });
     const timestamp = Date.now();
     const additions = [];
     const activities: string[] = [];
@@ -598,6 +728,10 @@ export default function solarisaelHouseProof(pi) {
     }
 
     const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
+    if (observed.span) {
+      insulaRequestSpans.set(insulaRequestKey(room, hostSession), observed.span);
+      trimOldestMap(insulaRequestSpans, 256);
+    }
     messages = filterInterruptedLessonProse(messages, room, hostSession);
     const shellBinding = { room, spirit, session: hostSession };
     let conversation: ConversationCapture | null = null;
@@ -626,6 +760,7 @@ export default function solarisaelHouseProof(pi) {
     if (currentTurnKey && turnMemo.has(currentTurnKey)) {
       // Later requests of the same turn replay identical bytes so the
       // Anthropic prefix cache can hit past the system block.
+      endInsulaSpan(observed.span, "ok");
       return anchorTurnAdditions(messages, turnKeys, turnMemo);
     }
 
@@ -1060,7 +1195,22 @@ export default function solarisaelHouseProof(pi) {
       activities,
       warnings,
     });
+    endInsulaSpan(
+      observed.span,
+      warnings.length ? "degraded" : "ok",
+      warnings.length ? "partial_context" : null,
+    );
     return anchorTurnAdditions(messages, turnKeys, turnMemo);
+  };
+
+  pi.on("context", async (event, ctx) => {
+    const observed: { span: InsulaSpan | null } = { span: null };
+    try {
+      return await composeContextAdditions(event, ctx, observed);
+    } catch (error) {
+      endInsulaSpan(observed.span, "error", insulaErrorClass(error));
+      throw error;
+    }
   });
 
 
@@ -1134,6 +1284,11 @@ export default function solarisaelHouseProof(pi) {
     closeRustAnamnesisTransports();
     await closeGigaTransports();
     closeLessonTriggerTransports();
+    // Close every genuinely open observation before the bounded writer flush.
+    // Finished request spans are harmless no-ops; unfinished tools become
+    // explicit cancellations instead of dangling starts.
+    retireAllInsulaSpans();
+    await closeInsulaWriter();
     stopKittenProgress?.();
     stopKittenLifecycle?.();
   });

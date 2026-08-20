@@ -38,10 +38,11 @@ $stateRoot = if (-not [string]::IsNullOrWhiteSpace($configuredStateRoot)) {
 }
 $substrateStateDir = [IO.Path]::GetFullPath((Join-Path $stateRoot "substrate"))
 $stageTarget = Join-Path $athanorRoot "target\deploy"
-$stagedExe = Join-Path $stageTarget "release\athanor-substrate.exe"
-$stagedPdb = [IO.Path]::ChangeExtension($stagedExe, ".pdb")
-$stagedHostExe = Join-Path $stageTarget "release\house-host.exe"
-$stagedHostPdb = [IO.Path]::ChangeExtension($stagedHostExe, ".pdb")
+ $stagedExe = Join-Path $stageTarget "release\athanor-substrate.exe"
+ $stagedPdb = [IO.Path]::ChangeExtension($stagedExe, ".pdb")
+ $stagedHostExe = Join-Path $stageTarget "release\house-host.exe"
+ $stagedHostPdb = [IO.Path]::ChangeExtension($stagedHostExe, ".pdb")
+ $stagedManagerExe = Join-Path $stageTarget "release\athanor-manage.exe"
 $configuredLiveExe = [string]$env:ATHANOR_SUBSTRATE_EXE
 $liveExe = if ([string]::IsNullOrWhiteSpace($configuredLiveExe)) {
     Join-Path $athanorRoot "target\release\athanor-substrate.exe"
@@ -54,13 +55,16 @@ $liveExe = [IO.Path]::GetFullPath($liveExe)
 $livePdb = [IO.Path]::ChangeExtension($liveExe, ".pdb")
 $liveHostExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "house-host.exe"
 $liveHostPdb = [IO.Path]::ChangeExtension($liveHostExe, ".pdb")
-$liveManagerExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "athanor-manage.exe"
-$previousExe = Join-Path $stageTarget "previous\athanor-substrate.exe"
-$previousPdb = [IO.Path]::ChangeExtension($previousExe, ".pdb")
-$previousHostExe = Join-Path $stageTarget "previous\house-host.exe"
-$previousHostPdb = [IO.Path]::ChangeExtension($previousHostExe, ".pdb")
-$liveManifest = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))) "release-manifest.json"
-$previousManifest = Join-Path $stageTarget "previous\release-manifest.json"
+ $liveManagerExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "athanor-manage.exe"
+$stableManagerExe = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))))) "bin\athanor-manage.exe"
+ $previousExe = Join-Path $stageTarget "previous\athanor-substrate.exe"
+ $previousPdb = [IO.Path]::ChangeExtension($previousExe, ".pdb")
+ $previousHostExe = Join-Path $stageTarget "previous\house-host.exe"
+ $previousHostPdb = [IO.Path]::ChangeExtension($previousHostExe, ".pdb")
+ $previousManagerExe = Join-Path $stageTarget "previous\athanor-manage.exe"
+ $previousStableManagerExe = Join-Path $stageTarget "previous\athanor-manage-stable.exe"
+ $liveManifest = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))) "release-manifest.json"
+ $previousManifest = Join-Path $stageTarget "previous\release-manifest.json"
 $nativeServiceName = "SolarisaelAthanor"
 $runtimeConfigPath = Join-Path ([Environment]::GetFolderPath("CommonApplicationData")) "Solarisael\Athanor\config\runtime.json"
 $restartNativeService = $false
@@ -79,6 +83,7 @@ function Invoke-Checked {
         throw "$Label failed with exit code $LASTEXITCODE"
     }
 }
+
 
 function Get-LiveWorkers {
     param([Parameter(Mandatory)] [string]$ExecutablePath)
@@ -152,27 +157,42 @@ if (-not (Test-Path (Join-Path $athanorRoot "crates\house-substrate\Cargo.toml")
 }
 
 New-Item -ItemType Directory -Force -Path $stageTarget | Out-Null
+$nativeService = Get-Service -Name $nativeServiceName -ErrorAction SilentlyContinue
+if ($null -ne $nativeService -and
+    $nativeService.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running -and
+    $nativeService.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
+    throw "native Athanor service is $($nativeService.Status); recover it to Running or Stopped before deployment"
+}
+if (Test-Path $liveManifest -PathType Leaf) {
+    $liveVersionsRoot = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveManifest))
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals([IO.Path]::GetFileName($liveVersionsRoot), "versions") -or
+        -not (Test-Path $liveManagerExe -PathType Leaf) -or
+        -not (Test-Path $stableManagerExe -PathType Leaf)) {
+        throw "installed manager paths are missing or ambiguous; recover both version and stable manager paths before deployment"
+    }
+}
+
+
 
 if (-not $SkipTests) {
-    Invoke-Checked -Label "Athanor core, protocol, and Host tests" -FilePath $Cargo -ArgumentList @(
+    Invoke-Checked -Label "Athanor core, protocol, substrate, and Host tests" -FilePath $Cargo -ArgumentList @(
         "test", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-        "-p", "house-core", "-p", "house-protocol", "-p", "house-host"
-    )
-    Invoke-Checked -Label "substrate regression tests" -FilePath $Cargo -ArgumentList @(
-        "test", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-        "-p", "athanor-substrate", "--release", "--target-dir", $stageTarget
+        "-p", "house-core", "-p", "house-protocol", "-p", "athanor-substrate", "-p", "house-host", "-p", "athanor-install", "--release", "--target-dir", $stageTarget
     )
 }
 
 Invoke-Checked -Label "staged release build" -FilePath $Cargo -ArgumentList @(
     "build", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-    "-p", "athanor-substrate", "-p", "house-host", "--release", "--target-dir", $stageTarget
+    "-p", "house-core", "-p", "house-protocol", "-p", "athanor-substrate", "-p", "house-host", "-p", "athanor-install", "--release", "--target-dir", $stageTarget
 )
 if (-not (Test-Path $stagedExe -PathType Leaf)) {
     throw "staged executable was not produced at $stagedExe"
 }
 if (-not (Test-Path $stagedHostExe -PathType Leaf)) {
     throw "staged Host executable was not produced at $stagedHostExe"
+}
+if (-not (Test-Path $stagedManagerExe -PathType Leaf)) {
+    throw "staged manager executable was not produced at $stagedManagerExe"
 }
 
 if (-not $SkipBackup) {
@@ -193,6 +213,12 @@ if (-not $SkipBackup) {
 }
 
 $nativeService = Get-Service -Name $nativeServiceName -ErrorAction SilentlyContinue
+if ($null -ne $nativeService -and
+    $nativeService.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Running -and
+    $nativeService.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
+    throw "native Athanor service is $($nativeService.Status); recover it to Running or Stopped before deployment"
+}
+
 if ($null -ne $nativeService -and
     $nativeService.Status -eq [System.ServiceProcess.ServiceControllerStatus]::Running) {
     Write-Host "==> stopping native Athanor service"
@@ -230,9 +256,20 @@ foreach ($workerPath in @($liveExe, $liveHostExe)) {
     }
 }
 
+try {
+    $copiedExe = $false
+    $copiedPdb = $false
+    $copiedHostExe = $false
+    $copiedHostPdb = $false
+    $copiedManager = $false
+    $copiedStableManager = $false
 New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($liveExe)) | Out-Null
 New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($previousExe)) | Out-Null
-Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManifest -Force -ErrorAction SilentlyContinue
+foreach ($priorPath in @($previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousManifest)) {
+    if (Test-Path $priorPath -PathType Leaf) {
+        Remove-Item $priorPath -Force -ErrorAction Stop
+    }
+}
 if (Test-Path $liveExe -PathType Leaf) {
     Move-Item $liveExe $previousExe -Force
 }
@@ -246,23 +283,40 @@ if (Test-Path $liveHostPdb -PathType Leaf) {
     Move-Item $liveHostPdb $previousHostPdb -Force
 }
 if (Test-Path $liveManifest -PathType Leaf) {
+    if (-not (Test-Path $liveManagerExe -PathType Leaf) -or -not (Test-Path $stableManagerExe -PathType Leaf)) {
+        throw "installed manager paths are missing or ambiguous; recover both version and stable manager paths before deployment"
+    }
+    Move-Item $liveManagerExe $previousManagerExe -Force
+    Move-Item $stableManagerExe $previousStableManagerExe -Force
+}
+if (Test-Path $liveManifest -PathType Leaf) {
     Copy-Item $liveManifest $previousManifest -Force
 }
 
-try {
     Copy-Item $stagedExe $liveExe -Force
+    $copiedExe = $true
     if (Test-Path $stagedPdb -PathType Leaf) {
         Copy-Item $stagedPdb $livePdb -Force
+        $copiedPdb = $true
     }
     Copy-Item $stagedHostExe $liveHostExe -Force
+    $copiedHostExe = $true
     if (Test-Path $stagedHostPdb -PathType Leaf) {
         Copy-Item $stagedHostPdb $liveHostPdb -Force
+        $copiedHostPdb = $true
+    }
+    if (Test-Path $liveManifest -PathType Leaf) {
+        Copy-Item $stagedManagerExe $liveManagerExe -Force
+        $copiedManager = $true
+        Copy-Item $stagedManagerExe $stableManagerExe -Force
+        $copiedStableManager = $true
     }
     if (Test-Path $liveManifest -PathType Leaf) {
         $manifest = Get-Content $liveManifest -Raw | ConvertFrom-Json
         foreach ($binary in @(
             @{ Path = "bin/athanor-substrate.exe"; Source = $liveExe },
-            @{ Path = "bin/house-host.exe"; Source = $liveHostExe }
+            @{ Path = "bin/house-host.exe"; Source = $liveHostExe },
+            @{ Path = "bin/athanor-manage.exe"; Source = $liveManagerExe }
         )) {
             $entries = @($manifest.artifacts | Where-Object { [string]$_.path -eq $binary.Path })
             if ($entries.Count -ne 1) {
@@ -286,23 +340,54 @@ try {
             -ServiceName $nativeServiceName `
             -RuntimeConfigPath $runtimeConfigPath
     }
+    Invoke-Checked -Label "Full-mode health proof" -FilePath $liveExe -ArgumentList @(
+        "health", "--substrate-dir", $substrateRoot
+    )
+    if (Test-Path $liveManifest -PathType Leaf) {
+        Invoke-Checked -Label "native release manifest proof" -FilePath $liveManagerExe -ArgumentList @(
+            "doctor"
+        )
+    }
 } catch {
     $deploymentFailure = $_
-    Remove-Item $liveExe, $livePdb, $liveHostExe, $liveHostPdb -Force -ErrorAction SilentlyContinue
-    if (Test-Path $previousExe -PathType Leaf) {
-        Move-Item $previousExe $liveExe -Force
+    $restoreFailures = @()
+    $rollbackServiceStopped = $true
+    try {
+        $rollbackService = Get-Service -Name $nativeServiceName -ErrorAction SilentlyContinue
+        if ($null -ne $rollbackService -and
+            $rollbackService.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
+            Stop-Service -Name $nativeServiceName -Force -ErrorAction Stop
+            $rollbackService.WaitForStatus(
+                [System.ServiceProcess.ServiceControllerStatus]::Stopped,
+                [TimeSpan]::FromSeconds(30)
+            )
+        }
+    } catch {
+        $rollbackServiceStopped = $false
+        $restoreFailures += "native service stop before rollback failed: $($_.Exception.Message)"
     }
-    if (Test-Path $previousPdb -PathType Leaf) {
-        Move-Item $previousPdb $livePdb -Force
-    }
-    if (Test-Path $previousHostExe -PathType Leaf) {
-        Move-Item $previousHostExe $liveHostExe -Force
-    }
-    if (Test-Path $previousHostPdb -PathType Leaf) {
-        Move-Item $previousHostPdb $liveHostPdb -Force
-    }
-    if (Test-Path $previousManifest -PathType Leaf) {
-        Move-Item $previousManifest $liveManifest -Force
+    if ($rollbackServiceStopped) {
+    foreach ($artifact in @(
+        @{ Live = $liveExe; Previous = $previousExe; Created = $copiedExe },
+        @{ Live = $livePdb; Previous = $previousPdb; Created = $copiedPdb },
+        @{ Live = $liveHostExe; Previous = $previousHostExe; Created = $copiedHostExe },
+        @{ Live = $liveHostPdb; Previous = $previousHostPdb; Created = $copiedHostPdb },
+        @{ Live = $liveManagerExe; Previous = $previousManagerExe; Created = $copiedManager },
+        @{ Live = $stableManagerExe; Previous = $previousStableManagerExe; Created = $copiedStableManager },
+        @{ Live = $liveManifest; Previous = $previousManifest; Created = $false }
+    )) {
+        try {
+            if (Test-Path $artifact.Previous -PathType Leaf) {
+                if (Test-Path $artifact.Live -PathType Leaf) {
+                    Remove-Item $artifact.Live -Force -ErrorAction Stop
+                }
+                Move-Item $artifact.Previous $artifact.Live -Force
+            } elseif ($artifact.Created -and (Test-Path $artifact.Live -PathType Leaf)) {
+                Remove-Item $artifact.Live -Force -ErrorAction Stop
+            }
+        } catch {
+            $restoreFailures += $_.Exception.Message
+        }
     }
     if ($restartNativeService) {
         try {
@@ -310,24 +395,17 @@ try {
                 -ServiceName $nativeServiceName `
                 -RuntimeConfigPath $runtimeConfigPath
         } catch {
-            Write-Warning "rollback restored the prior binaries, but the native service did not recover: $($_.Exception.Message)"
+            $restoreFailures += "native service recovery failed: $($_.Exception.Message)"
         }
+    }
+    }
+    if ($restoreFailures.Count -gt 0) {
+        throw "$deploymentFailure; rollback also failed: $($restoreFailures -join '; ')"
     }
     throw $deploymentFailure
 }
 
-Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManifest -Force -ErrorAction SilentlyContinue
-Invoke-Checked -Label "Full-mode health proof" -FilePath $liveExe -ArgumentList @(
-    "health", "--substrate-dir", $substrateRoot
-)
-if (Test-Path $liveManifest -PathType Leaf) {
-    if (-not (Test-Path $liveManagerExe -PathType Leaf)) {
-        throw "installed release manifest exists but native manager is missing at $liveManagerExe"
-    }
-    Invoke-Checked -Label "native release manifest proof" -FilePath $liveManagerExe -ArgumentList @(
-        "doctor"
-    )
-}
+Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousManifest -Force -ErrorAction SilentlyContinue
 
 Write-Host "==> deployment complete"
 Write-Host "live executable: $liveExe"

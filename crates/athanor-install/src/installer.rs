@@ -2,7 +2,7 @@ use crate::{
     boundaries::{FileSystem, OperationLock, RuntimeControl, SecretSource, ServiceManager},
     component::{
         COMPONENT_FORMAT, COMPONENT_MANIFEST, ComponentManifest, ComponentPointer,
-        read_verified_component,
+        read_verified_component, valid_release_id,
     },
     layout::{InstallLayout, LEGACY_NAMES, SERVICE_DISPLAY_NAME, SERVICE_NAME, safe_version},
     manifest::ReleaseManifest,
@@ -299,7 +299,16 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         })();
 
         match attempted {
-            Ok(outcome) => Ok(outcome),
+            Ok(outcome) => {
+                let active = self
+                    .read_current()?
+                    .context("successful install did not retain a native release pointer")?;
+                self.prune_native_releases(&active)?;
+                if let Some(component) = self.read_component_pointer()? {
+                    self.prune_component_releases(&component)?;
+                }
+                Ok(outcome)
+            }
             Err(error) => {
                 let original = format!("{error:#}");
                 let restoration = self.restore_failed_install(&rollback);
@@ -331,7 +340,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         if !self.fs.exists(&self.layout.version(&previous)) {
             bail!("rollback release {previous} is not retained");
         }
-        let previous_manifest = self.read_native_manifest(&previous)?;
+        let previous_manifest = self.read_verified_native_manifest(&previous)?;
         let (component_before, component_next) = self.component_transition_for(
             &previous_manifest,
             &self
@@ -383,6 +392,10 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.services.start(SERVICE_NAME).ok();
             return Err(error).context("rollback release was not ready; restored newer release");
         }
+        self.prune_native_releases(&rolled_back)?;
+        if let Some(component) = self.read_component_pointer()? {
+            self.prune_component_releases(&component)?;
+        }
         Ok(rolled_back)
     }
 
@@ -391,17 +404,18 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         let native = self
             .read_current()?
             .context("cannot install OMP adapter without an active native release")?;
-        let native_manifest = self.read_native_manifest(&native.version)?;
+        let native_manifest = self.read_native_manifest_metadata(&native.version)?;
         let component = read_verified_component(self.fs, source)?;
         self.require_component_compatibility(&component, &native_manifest)?;
         self.retain_component_release(source, &component)?;
 
         let previous = self.read_component_pointer()?;
-        if previous
+        if let Some(active) = previous
             .as_ref()
-            .is_some_and(|pointer| pointer.release_id == component.release_id)
+            .filter(|pointer| pointer.release_id == component.release_id)
         {
-            return Ok(previous.expect("component pointer was present"));
+            self.prune_component_releases(active)?;
+            return Ok(active.clone());
         }
         let next = ComponentPointer {
             format: COMPONENT_FORMAT,
@@ -412,6 +426,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.restore_component_pointer(previous.as_ref())?;
             return Err(error).context("OMP adapter activation failed; restored prior pointer");
         }
+        self.prune_component_releases(&next)?;
         Ok(next)
     }
 
@@ -446,7 +461,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         let native = self
             .read_current()?
             .context("cannot roll back OMP adapter without an active native release")?;
-        let native_manifest = self.read_native_manifest(&native.version)?;
+        let native_manifest = self.read_native_manifest_metadata(&native.version)?;
         self.require_component_compatibility(&target, &native_manifest)?;
 
         let next = ComponentPointer {
@@ -458,6 +473,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.restore_component_pointer(Some(&current))?;
             return Err(error).context("OMP adapter rollback failed; restored prior pointer");
         }
+        self.prune_component_releases(&next)?;
         Ok(next)
     }
 
@@ -520,7 +536,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         }
     }
 
-    fn read_native_manifest(&self, version: &str) -> Result<ReleaseManifest> {
+    fn read_native_manifest_metadata(&self, version: &str) -> Result<ReleaseManifest> {
         if !safe_version(version) {
             bail!("invalid native release version {version:?}");
         }
@@ -536,7 +552,12 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                 manifest.version
             );
         }
-        self.verify_native_release(&root, &manifest)?;
+        Ok(manifest)
+    }
+
+    fn read_verified_native_manifest(&self, version: &str) -> Result<ReleaseManifest> {
+        let manifest = self.read_native_manifest_metadata(version)?;
+        self.verify_native_release(&self.layout.version(version), &manifest)?;
         Ok(manifest)
     }
 
@@ -612,6 +633,91 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.fs.remove_tree(&pending).ok();
         }
         staged
+    }
+
+    fn prune_native_releases(&self, pointer: &CurrentRelease) -> Result<()> {
+        self.read_verified_native_manifest(&pointer.version)?;
+        if let Some(previous) = &pointer.previous_version {
+            self.read_verified_native_manifest(previous)?;
+        }
+
+        let mut failures = Vec::new();
+        for directory in self.fs.list_directories(&self.layout.versions())? {
+            if directory.parent() != Some(self.layout.versions().as_path()) {
+                continue;
+            }
+            let Some(version) = directory.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !safe_version(version)
+                || version.eq_ignore_ascii_case(&pointer.version)
+                || pointer
+                    .previous_version
+                    .as_deref()
+                    .is_some_and(|previous| previous.eq_ignore_ascii_case(version))
+            {
+                continue;
+            }
+            if let Err(error) = self.fs.remove_tree(&directory) {
+                failures.push(format!("{}: {error:#}", directory.display()));
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            bail!(
+                "failed to prune stale native releases: {}",
+                failures.join("; ")
+            )
+        }
+    }
+
+    fn prune_component_releases(&self, pointer: &ComponentPointer) -> Result<()> {
+        for release_id in std::iter::once(pointer.release_id.as_str())
+            .chain(pointer.previous_release_id.as_deref())
+        {
+            let retained =
+                read_verified_component(self.fs, &self.layout.omp_adapter_version(release_id))?;
+            if retained.release_id != release_id {
+                bail!(
+                    "retained OMP adapter pointer names {release_id}, manifest names {}",
+                    retained.release_id
+                );
+            }
+        }
+
+        let mut failures = Vec::new();
+        for directory in self
+            .fs
+            .list_directories(&self.layout.omp_adapter_versions())?
+        {
+            if directory.parent() != Some(self.layout.omp_adapter_versions().as_path()) {
+                continue;
+            }
+            let Some(release_id) = directory.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !valid_release_id(release_id)
+                || release_id.eq_ignore_ascii_case(&pointer.release_id)
+                || pointer
+                    .previous_release_id
+                    .as_deref()
+                    .is_some_and(|previous| previous.eq_ignore_ascii_case(release_id))
+            {
+                continue;
+            }
+            if let Err(error) = self.fs.remove_tree(&directory) {
+                failures.push(format!("{}: {error:#}", directory.display()));
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            bail!(
+                "failed to prune stale OMP adapter releases: {}",
+                failures.join("; ")
+            )
+        }
     }
 
     fn component_transition_for(

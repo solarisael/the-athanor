@@ -76,8 +76,10 @@ import {
   insulaErrorClass,
   recordInsulaPoint,
   startInsulaSpan,
+  type InsulaOutcome,
   type InsulaSpan,
 } from "./solarisael-house-proof/insula.ts";
+import { showInsulaCockpit } from "./solarisael-house-proof/vitals.ts";
 
 const wokenSessions = new Set();
 const modelDefaultsApplied = new Set();
@@ -86,12 +88,28 @@ const kittenQuestProgress = new Map<string, KittenQuestProgress>();
 const kittenRoomsByToolCallId = new Map<string, string>();
 const kittenRoomsByAgentId = new Map<string, string>();
 const kittenBindingsByToolCallId = new Map<string, HostBinding>();
-// Insula correlation. The request span of a session is what a later tool span
-// hangs from, so a tool call is readable inside the provider request that
-// asked for it. Both maps are bounded: a lost correlation costs a parent link
-// and nothing else.
+// Insula correlation. The main turn lifecycle opens one provider request per
+// room and session; side-stream provider hooks carry no turn event and never
+// enter this map. Tool spans hang from the request that asked for them. Both
+// maps are bounded: a lost correlation costs a parent link and nothing else.
+type InsulaSettlement = {
+  outcomeClass: InsulaOutcome;
+  errorClass: string | null;
+  durationUs: number | null;
+  tokensIn: number;
+  tokensOut: number;
+};
+
 const insulaRequestSpans = new Map<string, InsulaSpan>();
 const insulaToolSpans = new Map<string, InsulaSpan>();
+
+const INSULA_STOP_REASONS: Record<string, { outcomeClass: InsulaOutcome; errorClass: string | null }> = {
+  stop: { outcomeClass: "ok", errorClass: null },
+  toolUse: { outcomeClass: "ok", errorClass: null },
+  length: { outcomeClass: "degraded", errorClass: "max_tokens" },
+  error: { outcomeClass: "error", errorClass: "provider_error" },
+  aborted: { outcomeClass: "cancelled", errorClass: "provider_aborted" },
+};
 
 function insulaToolKey(room: string, session: string, toolCallId: string): string {
   return `${room}\0${session}\0${toolCallId}`;
@@ -101,12 +119,87 @@ function insulaRequestKey(room: string, session: string): string {
   return `${room}:${session}`;
 }
 
-function retireInsulaSession(room: string, session: string): void {
-  const request = insulaRequestSpans.get(insulaRequestKey(room, session));
-  if (request) {
-    endInsulaSpan(request, "cancelled", "session_shutdown");
-    insulaRequestSpans.delete(insulaRequestKey(room, session));
+function insulaSessionBinding(ctx: any): { room: string; session: string } {
+  const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
+  return { room, session: hostSessionIdentity(ctx, effectiveRoomDir) };
+}
+
+/**
+ * Read the finalized assistant's own normalized usage. Buckets are summed as
+ * the provider reported them and never estimated from text, so an unmetered
+ * response stays honestly empty instead of becoming a guess.
+ */
+function insulaAssistantSettlement(message: any): InsulaSettlement | null {
+  if (message?.role !== "assistant") return null;
+  const mapped = INSULA_STOP_REASONS[String(message?.stopReason ?? "")]
+    ?? { outcomeClass: "unknown" as InsulaOutcome, errorClass: "provider_stop_unknown" };
+  const usage = message?.usage;
+  const bucket = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  const durationMs = typeof message?.duration === "number" && Number.isFinite(message.duration)
+    ? Math.max(0, message.duration)
+    : null;
+  return {
+    outcomeClass: mapped.outcomeClass,
+    errorClass: mapped.errorClass,
+    durationUs: durationMs === null ? null : durationMs * 1_000,
+    tokensIn: bucket(usage?.input) + bucket(usage?.cacheRead) + bucket(usage?.cacheWrite),
+    tokensOut: bucket(usage?.output),
+  };
+}
+
+/**
+ * Settle the open provider request once and account for its usage. The span is
+ * removed before it ends, which is what makes a repeated settlement — a second
+ * turn_end, or agent_end after turn_end — emit nothing at all.
+ */
+function settleInsulaRequest(
+  key: string,
+  outcomeClass: InsulaOutcome,
+  errorClass: string | null,
+  usage: InsulaSettlement | null = null,
+): void {
+  const span = insulaRequestSpans.get(key);
+  if (!span) return;
+  insulaRequestSpans.delete(key);
+  endInsulaSpan(span, outcomeClass, errorClass, usage?.durationUs ?? null);
+  const measured = usage && (usage.tokensIn > 0 || usage.tokensOut > 0) ? usage : null;
+  // One usage point per settled request, always. Unmetered usage is a degraded
+  // point rather than a zero-token ok one, so Vitals can tell "nothing was
+  // reported" apart from "zero was reported".
+  recordInsulaPoint({
+    room: span.room,
+    operation: "provider_usage",
+    traceId: span.traceId,
+    parentSpanId: span.spanId,
+    providerRequestId: span.providerRequestId,
+    outcomeClass: measured ? "ok" : "degraded",
+    errorClass: measured ? null : "usage_unavailable",
+    tokensIn: measured?.tokensIn ?? 0,
+    tokensOut: measured?.tokensOut ?? 0,
+    scope: span.providerRequestId ? "provider_request" : "trace_span",
+  });
+}
+
+function pruneInsulaRoomKeys(roomPrefix: string, current: string): void {
+  for (const key of [...insulaRequestSpans.keys()]) {
+    if (!key.startsWith(roomPrefix) || key === current) continue;
+    settleInsulaRequest(key, "cancelled", "session_switch");
   }
+}
+
+function openInsulaRequest(room: string, session: string, replacementError: string): void {
+  const key = insulaRequestKey(room, session);
+  settleInsulaRequest(key, "cancelled", replacementError);
+  const span = startInsulaSpan({ room, operation: "provider_request" });
+  if (!span) return;
+  insulaRequestSpans.set(key, span);
+  trimOldestMap(insulaRequestSpans, 256);
+}
+
+function retireInsulaSession(room: string, session: string): void {
+  const request = insulaRequestKey(room, session);
+  settleInsulaRequest(request, "cancelled", "session_shutdown");
   const toolPrefix = `${room}\0${session}\0`;
   for (const [key, span] of insulaToolSpans) {
     if (!key.startsWith(toolPrefix)) continue;
@@ -118,11 +211,7 @@ function retireInsulaSession(room: string, session: string): void {
 function retireStaleInsulaSessions(room: string, session: string): void {
   const roomRequestPrefix = `${room}:`;
   const currentRequest = insulaRequestKey(room, session);
-  for (const [key, span] of insulaRequestSpans) {
-    if (!key.startsWith(roomRequestPrefix) || key === currentRequest) continue;
-    endInsulaSpan(span, "cancelled", "session_switch");
-    insulaRequestSpans.delete(key);
-  }
+  pruneInsulaRoomKeys(roomRequestPrefix, currentRequest);
   const roomToolPrefix = `${room}\0`;
   const currentToolPrefix = `${room}\0${session}\0`;
   for (const [key, span] of insulaToolSpans) {
@@ -133,10 +222,8 @@ function retireStaleInsulaSessions(room: string, session: string): void {
 }
 
 function retireAllInsulaSpans(): void {
-  for (const span of new Set([...insulaRequestSpans.values(), ...insulaToolSpans.values()])) {
-    endInsulaSpan(span, "cancelled", "shutdown");
-  }
-  insulaRequestSpans.clear();
+  for (const key of [...insulaRequestSpans.keys()]) settleInsulaRequest(key, "cancelled", "shutdown");
+  for (const span of insulaToolSpans.values()) endInsulaSpan(span, "cancelled", "shutdown");
   insulaToolSpans.clear();
 }
 
@@ -493,6 +580,10 @@ export default function solarisaelHouseProof(pi) {
   pi.setLabel("The Athanor");
   pi.registerMessageRenderer?.("solarisael-lesson-trigger", lessonTriggerMessageRenderer);
   pi.registerMessageRenderer?.("solarisael-process-lessons", processLessonsMessageRenderer);
+  pi.registerCommand?.("insula", {
+    description: "Show the Host's Insula Vitals for the last 15m, 1h, or 24h",
+    handler: (args, ctx) => showInsulaCockpit(args, ctx),
+  });
   const showReadyFeedback = (_event, ctx) => {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
     const binding = {
@@ -570,6 +661,65 @@ export default function solarisaelHouseProof(pi) {
         errorClass: failed ? "tool_error" : null,
         scope: "tool_call",
       });
+    } catch {
+      // Observation is never load-bearing.
+    }
+  });
+
+  // Insula provider lifecycle. The main loop emits turn_start immediately
+  // before its provider call. Advisor, side-stream, capture, and cache-refresh
+  // traffic has no main turn event, so it never enters this correlation map.
+  pi.on("turn_start", async (_event, ctx) => {
+    try {
+      const { room, session } = insulaSessionBinding(ctx);
+      openInsulaRequest(room, session, "provider_replaced");
+    } catch {
+      // Observation is never load-bearing.
+    }
+  });
+
+  pi.on("auto_retry_start", async (_event, ctx) => {
+    try {
+      const { room, session } = insulaSessionBinding(ctx);
+      openInsulaRequest(room, session, "provider_retried");
+    } catch {
+      // Observation is never load-bearing.
+    }
+  });
+
+  pi.on("turn_end", async (event, ctx) => {
+    try {
+      // A gate stop can end a turn without an assistant, and a turn with no
+      // open request settles nothing.
+      const settlement = insulaAssistantSettlement(event?.message);
+      if (!settlement) return;
+      const { room, session } = insulaSessionBinding(ctx);
+      settleInsulaRequest(
+        insulaRequestKey(room, session),
+        settlement.outcomeClass,
+        settlement.errorClass,
+        settlement,
+      );
+    } catch {
+      // Observation is never load-bearing.
+    }
+  });
+
+  pi.on("agent_end", async (event, ctx) => {
+    try {
+      const { room, session } = insulaSessionBinding(ctx);
+      const key = insulaRequestKey(room, session);
+      const span = insulaRequestSpans.get(key);
+      if (!span) return;
+      const messages = Array.isArray(event?.messages) ? event.messages : [];
+      const currentAssistant = [...messages].reverse().find((message) =>
+        message?.role === "assistant"
+        && typeof message?.timestamp === "number"
+        && message.timestamp >= span.startedAtEpochMs
+      );
+      const fallback = insulaAssistantSettlement(currentAssistant);
+      if (fallback) settleInsulaRequest(key, fallback.outcomeClass, fallback.errorClass, fallback);
+      else settleInsulaRequest(key, "unknown", "provider_unsettled");
     } catch {
       // Observation is never load-bearing.
     }
@@ -693,7 +843,10 @@ export default function solarisaelHouseProof(pi) {
     );
 
     const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx.cwd);
-    observed.span = startInsulaSpan({ room, operation: "provider_request" });
+    // Context assembly is this adapter's own work before a request exists, not
+    // the provider request itself: the real request span opens at the provider
+    // tap, and a tool call parents to that one.
+    observed.span = startInsulaSpan({ room, operation: "context_assembly" });
     const timestamp = Date.now();
     const additions = [];
     const activities: string[] = [];
@@ -728,10 +881,6 @@ export default function solarisaelHouseProof(pi) {
     }
 
     const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
-    if (observed.span) {
-      insulaRequestSpans.set(insulaRequestKey(room, hostSession), observed.span);
-      trimOldestMap(insulaRequestSpans, 256);
-    }
     messages = filterInterruptedLessonProse(messages, room, hostSession);
     const shellBinding = { room, spirit, session: hostSession };
     let conversation: ConversationCapture | null = null;
@@ -1284,9 +1433,9 @@ export default function solarisaelHouseProof(pi) {
     closeRustAnamnesisTransports();
     await closeGigaTransports();
     closeLessonTriggerTransports();
-    // Close every genuinely open observation before the bounded writer flush.
-    // Finished request spans are harmless no-ops; unfinished tools become
-    // explicit cancellations instead of dangling starts.
+    // Close every still-open observation before the bounded writer flush, so a
+    // request settles with its usage point and an unfinished tool becomes an
+    // explicit cancellation instead of a dangling start.
     retireAllInsulaSpans();
     await closeInsulaWriter();
     stopKittenProgress?.();

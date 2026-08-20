@@ -28,20 +28,32 @@ use std::{
 #[derive(Default)]
 struct FakeFs {
     files: RefCell<BTreeMap<PathBuf, Vec<u8>>>,
+    reads: RefCell<Vec<PathBuf>>,
     dirs: RefCell<BTreeSet<PathBuf>>,
     acls: RefCell<Vec<PathBuf>>,
     fail_atomic_once: RefCell<Option<PathBuf>>,
+    fail_remove_tree_once: RefCell<Option<PathBuf>>,
 }
 impl FileSystem for FakeFs {
     fn exists(&self, path: &Path) -> bool {
         self.files.borrow().contains_key(path) || self.dirs.borrow().contains(path)
     }
     fn read(&self, path: &Path) -> Result<Vec<u8>> {
+        self.reads.borrow_mut().push(path.to_path_buf());
         self.files
             .borrow()
             .get(path)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("missing {}", path.display()))
+    }
+    fn list_directories(&self, path: &Path) -> Result<Vec<PathBuf>> {
+        Ok(self
+            .dirs
+            .borrow()
+            .iter()
+            .filter(|directory| directory.parent() == Some(path))
+            .cloned()
+            .collect())
     }
     fn create_dir_all(&self, path: &Path) -> Result<()> {
         for ancestor in path.ancestors() {
@@ -89,6 +101,15 @@ impl FileSystem for FakeFs {
         Ok(())
     }
     fn remove_tree(&self, path: &Path) -> Result<()> {
+        if self
+            .fail_remove_tree_once
+            .borrow()
+            .as_ref()
+            .is_some_and(|failed| failed == path)
+        {
+            self.fail_remove_tree_once.borrow_mut().take();
+            bail!("injected tree removal failure for {}", path.display());
+        }
         self.files
             .borrow_mut()
             .retain(|candidate, _| !candidate.starts_with(path));
@@ -266,6 +287,19 @@ fn stage_release(fs: &FakeFs, staging: &Path, manager: &[u8]) {
     );
 }
 
+fn stage_component(fs: &FakeFs, root: &Path, bytes: &[u8]) -> ComponentManifest {
+    let manifest = component(bytes);
+    fs.dirs.borrow_mut().insert(root.to_path_buf());
+    fs.files
+        .borrow_mut()
+        .insert(root.join("index.ts"), bytes.to_vec());
+    fs.files.borrow_mut().insert(
+        root.join("component-manifest.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    );
+    manifest
+}
+
 #[test]
 fn install_verifies_before_mutation_and_uninstall_preserves_data() -> Result<()> {
     let fs = FakeFs::default();
@@ -403,6 +437,130 @@ fn upgrade_records_database_backup_and_rollback_restores_it() -> Result<()> {
             .iter()
             .any(|event| event == "restore")
     );
+    Ok(())
+}
+
+#[test]
+fn native_retention_waits_for_activation_and_catches_up_to_the_pointer_pair() -> Result<()> {
+    let fs = FakeFs::default();
+    let services = FakeServices::default();
+    let runtime = FakeRuntime::default();
+    let layout = InstallLayout::new(Path::new("C:/Program Files"), Path::new("C:/ProgramData"));
+    let stages = [
+        PathBuf::from("C:/stage-one"),
+        PathBuf::from("C:/stage-two"),
+        PathBuf::from("C:/stage-three"),
+    ];
+    for (stage, bytes) in stages.iter().zip([b"one".as_slice(), b"two", b"three"]) {
+        stage_release(&fs, stage, bytes);
+    }
+    let installer = Installer {
+        fs: &fs,
+        services: &services,
+        runtime: &runtime,
+        secrets: &FixedSecrets,
+        layout: layout.clone(),
+    };
+    for (stage, version, bytes) in [
+        (&stages[0], "1.0.0", b"one".as_slice()),
+        (&stages[1], "2.0.0", b"two".as_slice()),
+    ] {
+        installer.install(InstallRequest {
+            staging: stage.clone(),
+            manifest: release(version, bytes),
+            external_database_url: None,
+            house_config: None,
+            operator_integration: None,
+        })?;
+    }
+
+    let historical = layout.version("0.8.0");
+    fs.dirs.borrow_mut().insert(historical.clone());
+    *runtime.fail_ready_once.borrow_mut() = true;
+    assert!(
+        installer
+            .install(InstallRequest {
+                staging: stages[2].clone(),
+                manifest: release("3.0.0", b"three"),
+                external_database_url: None,
+                house_config: None,
+                operator_integration: None,
+            })
+            .is_err()
+    );
+    assert!(fs.exists(&historical));
+    assert!(fs.exists(&layout.version("1.0.0")));
+    assert!(fs.exists(&layout.version("2.0.0")));
+    assert!(!fs.exists(&layout.version("3.0.0")));
+
+    installer.install(InstallRequest {
+        staging: stages[2].clone(),
+        manifest: release("3.0.0", b"three"),
+        external_database_url: None,
+        house_config: None,
+        operator_integration: None,
+    })?;
+    let pointer: CurrentRelease = serde_json::from_slice(&fs.read(&layout.current())?)?;
+    assert_eq!(pointer.version, "3.0.0");
+    assert_eq!(pointer.previous_version.as_deref(), Some("2.0.0"));
+    assert!(fs.exists(&layout.version("3.0.0")));
+    assert!(fs.exists(&layout.version("2.0.0")));
+    assert!(!fs.exists(&layout.version("1.0.0")));
+    assert!(!fs.exists(&historical));
+    Ok(())
+}
+
+#[test]
+fn native_cleanup_failure_is_reported_without_reverting_durable_pointers() -> Result<()> {
+    let fs = FakeFs::default();
+    let services = FakeServices::default();
+    let runtime = FakeRuntime::default();
+    let layout = InstallLayout::new(Path::new("C:/Program Files"), Path::new("C:/ProgramData"));
+    let stages = [
+        PathBuf::from("C:/stage-one"),
+        PathBuf::from("C:/stage-two"),
+        PathBuf::from("C:/stage-three"),
+    ];
+    for (stage, bytes) in stages.iter().zip([b"one".as_slice(), b"two", b"three"]) {
+        stage_release(&fs, stage, bytes);
+    }
+    let installer = Installer {
+        fs: &fs,
+        services: &services,
+        runtime: &runtime,
+        secrets: &FixedSecrets,
+        layout: layout.clone(),
+    };
+    for (stage, version, bytes) in [
+        (&stages[0], "1.0.0", b"one".as_slice()),
+        (&stages[1], "2.0.0", b"two".as_slice()),
+    ] {
+        installer.install(InstallRequest {
+            staging: stage.clone(),
+            manifest: release(version, bytes),
+            external_database_url: None,
+            house_config: None,
+            operator_integration: None,
+        })?;
+    }
+
+    *fs.fail_remove_tree_once.borrow_mut() = Some(layout.version("1.0.0"));
+    let error = installer
+        .install(InstallRequest {
+            staging: stages[2].clone(),
+            manifest: release("3.0.0", b"three"),
+            external_database_url: None,
+            house_config: None,
+            operator_integration: None,
+        })
+        .expect_err("stale release cleanup failure must be surfaced");
+    assert!(format!("{error:#}").contains("failed to prune stale native releases"));
+    let pointer: CurrentRelease = serde_json::from_slice(&fs.read(&layout.current())?)?;
+    assert_eq!(pointer.version, "3.0.0");
+    assert_eq!(pointer.previous_version.as_deref(), Some("2.0.0"));
+    assert!(fs.exists(&layout.version("3.0.0")));
+    assert!(fs.exists(&layout.version("2.0.0")));
+    assert!(fs.exists(&layout.version("1.0.0")));
     Ok(())
 }
 
@@ -691,6 +849,165 @@ fn component_manifest_identity_paths_and_bytes_are_strict() -> Result<()> {
         previous_release_id: Some(component(b"x").release_id),
     };
     assert!(cycle.validate().is_err());
+    Ok(())
+}
+
+#[test]
+fn component_retention_waits_for_pointer_activation_and_catches_up() -> Result<()> {
+    let fs = FakeFs::default();
+    let services = FakeServices::default();
+    let runtime = FakeRuntime::default();
+    let layout = InstallLayout::new(Path::new("C:/Program Files"), Path::new("C:/ProgramData"));
+    let native_stage = PathBuf::from("C:/stage-native");
+    stage_release(&fs, &native_stage, b"native");
+    let installer = Installer {
+        fs: &fs,
+        services: &services,
+        runtime: &runtime,
+        secrets: &FixedSecrets,
+        layout: layout.clone(),
+    };
+    installer.install(InstallRequest {
+        staging: native_stage,
+        manifest: release("1.0.0", b"native"),
+        external_database_url: None,
+        house_config: None,
+        operator_integration: None,
+    })?;
+
+    let source_one = PathBuf::from("C:/adapter-one");
+    let source_two = PathBuf::from("C:/adapter-two");
+    let source_three = PathBuf::from("C:/adapter-three");
+    let one = stage_component(&fs, &source_one, b"adapter-one");
+    let two = stage_component(&fs, &source_two, b"adapter-two");
+    let three = stage_component(&fs, &source_three, b"adapter-three");
+    installer.install_omp_adapter(&source_one)?;
+    installer.install_omp_adapter(&source_two)?;
+
+    let historical = component(b"historical");
+    let historical_root = layout.omp_adapter_version(&historical.release_id);
+    stage_component(&fs, &historical_root, b"historical");
+    *fs.fail_atomic_once.borrow_mut() = Some(layout.omp_adapter_current());
+    assert!(installer.install_omp_adapter(&source_three).is_err());
+    assert!(fs.exists(&layout.omp_adapter_version(&one.release_id)));
+    assert!(fs.exists(&layout.omp_adapter_version(&two.release_id)));
+    assert!(fs.exists(&layout.omp_adapter_version(&three.release_id)));
+    assert!(fs.exists(&historical_root));
+    let unchanged: ComponentPointer =
+        serde_json::from_slice(&fs.read(&layout.omp_adapter_current())?)?;
+    assert_eq!(unchanged.release_id, two.release_id);
+    assert_eq!(unchanged.previous_release_id, Some(one.release_id.clone()));
+
+    let active = installer.install_omp_adapter(&source_three)?;
+    assert_eq!(active.release_id, three.release_id);
+    assert_eq!(active.previous_release_id, Some(two.release_id.clone()));
+    assert!(fs.exists(&layout.omp_adapter_version(&three.release_id)));
+    assert!(fs.exists(&layout.omp_adapter_version(&two.release_id)));
+    assert!(!fs.exists(&layout.omp_adapter_version(&one.release_id)));
+    assert!(!fs.exists(&historical_root));
+    Ok(())
+}
+
+#[test]
+fn adapter_lifecycle_reads_only_validated_native_manifest_metadata() -> Result<()> {
+    let fs = FakeFs::default();
+    let services = FakeServices::default();
+    let runtime = FakeRuntime::default();
+    let layout = InstallLayout::new(Path::new("C:/Program Files"), Path::new("C:/ProgramData"));
+    let native_stage = PathBuf::from("C:/stage-native");
+    let native = release("1.0.0", b"native");
+    stage_release(&fs, &native_stage, b"native");
+    let installer = Installer {
+        fs: &fs,
+        services: &services,
+        runtime: &runtime,
+        secrets: &FixedSecrets,
+        layout: layout.clone(),
+    };
+    installer.install(InstallRequest {
+        staging: native_stage,
+        manifest: native.clone(),
+        external_database_url: None,
+        house_config: None,
+        operator_integration: None,
+    })?;
+
+    let native_root = layout.version("1.0.0");
+    let native_manifest_path = native_root.join("release-manifest.json");
+    for artifact in &native.artifacts {
+        fs.files
+            .borrow_mut()
+            .insert(native_root.join(&artifact.path), b"tampered".to_vec());
+    }
+    fs.reads.borrow_mut().clear();
+    let source = PathBuf::from("C:/adapter-one");
+    stage_component(&fs, &source, b"adapter-one");
+
+    fs.files
+        .borrow_mut()
+        .insert(native_manifest_path.clone(), b"{".to_vec());
+    let malformed = installer
+        .install_omp_adapter(&source)
+        .expect_err("malformed native metadata must reject adapter activation");
+    assert!(format!("{malformed:#}").contains("parse native release manifest"));
+
+    let mut incompatible = native.clone();
+    incompatible.compatibility.host_api = 2;
+    fs.files.borrow_mut().insert(
+        native_manifest_path.clone(),
+        serde_json::to_vec_pretty(&incompatible)?,
+    );
+    let incompatible_error = installer
+        .install_omp_adapter(&source)
+        .expect_err("unsupported native compatibility must reject adapter activation");
+    assert!(
+        format!("{incompatible_error:#}").contains("release compatibility metadata is unsupported")
+    );
+
+    fs.files.borrow_mut().insert(
+        native_manifest_path.clone(),
+        serde_json::to_vec_pretty(&native)?,
+    );
+    let activated = installer.install_omp_adapter(&source)?;
+    fs.files
+        .borrow_mut()
+        .insert(native_manifest_path.clone(), b"{".to_vec());
+    let malformed_rollback = installer
+        .rollback_omp_adapter(None)
+        .expect_err("malformed native metadata must reject adapter rollback");
+    assert!(format!("{malformed_rollback:#}").contains("parse native release manifest"));
+    fs.files.borrow_mut().insert(
+        native_manifest_path.clone(),
+        serde_json::to_vec_pretty(&incompatible)?,
+    );
+    let incompatible_rollback = installer
+        .rollback_omp_adapter(None)
+        .expect_err("unsupported native compatibility must reject adapter rollback");
+    assert!(
+        format!("{incompatible_rollback:#}")
+            .contains("release compatibility metadata is unsupported")
+    );
+    fs.files.borrow_mut().insert(
+        native_manifest_path.clone(),
+        serde_json::to_vec_pretty(&native)?,
+    );
+    let rolled_back = installer.rollback_omp_adapter(None)?;
+    assert_eq!(
+        rolled_back.previous_release_id.as_deref(),
+        Some(activated.release_id.as_str())
+    );
+
+    let reads = fs.reads.borrow();
+    let native_reads = reads
+        .iter()
+        .filter(|path| path.starts_with(&native_root))
+        .collect::<Vec<_>>();
+    assert!(native_reads.len() >= 6);
+    assert!(
+        native_reads
+            .iter()
+            .all(|path| path.as_path() == native_manifest_path)
+    );
     Ok(())
 }
 

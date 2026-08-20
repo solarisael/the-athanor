@@ -3200,6 +3200,85 @@ input:focus-visible {
   color: var(--fg-dim);
 }
 
+.insula-observation {
+  display: grid;
+
+  gap: 12px;
+  padding: 14px;
+
+  border: 1px solid var(--bd-section);
+  border-radius: 8px;
+  background: var(--bg-clear);
+}
+
+.insula-observation-lead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+
+  gap: 16px;
+}
+
+.insula-observation-lead h3 {
+  margin: 2px 0 0;
+
+  font-size: 17px;
+}
+
+.insula-observation-lead p {
+  max-width: 620px;
+  margin: 5px 0 0;
+
+  color: var(--fg-soft);
+}
+
+.insula-observation-lead .mechanics-snapshot-status {
+  justify-content: flex-end;
+
+  margin-top: 0;
+}
+
+.insula-observation-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+
+  gap: 8px;
+}
+
+.insula-observation-channel {
+  display: grid;
+  align-content: start;
+
+  min-width: 0;
+  gap: 7px;
+  padding: 11px;
+
+  border: 1px solid var(--bd-section);
+  border-radius: 6px;
+  background: var(--bg-region);
+}
+
+.insula-observation-channel > span {
+  font-size: 10px;
+  font-weight: 700;
+
+  color: var(--fg-dim);
+}
+
+.insula-observation-channel > strong {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.insula-observation-channel > p {
+  margin: 0;
+
+  font-size: 11px;
+  line-height: 1.45;
+
+  color: var(--fg-soft);
+}
+
 .mechanics-controls {
   display: grid;
 
@@ -3288,6 +3367,94 @@ input:focus-visible {
 
   background: var(--bg-tab-key);
   color: var(--fg-tab-key);
+}
+
+/* Durable shelf search — same instrument vocabulary as the observatory controls,
+   named for its own anatomy so mechanics rules stay mechanics-owned. */
+.shelf-controls {
+  display: grid;
+
+  gap: 10px;
+}
+
+.shelf-search {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.35fr) minmax(220px, 1fr);
+  align-items: center;
+
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--bd-section);
+  border-radius: 7px;
+
+  font-size: 11px;
+  font-weight: 700;
+
+  background: var(--bg-clear);
+  color: var(--fg-soft);
+}
+
+.shelf-search input {
+  min-width: 0;
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--bd-control);
+  border-radius: 6px;
+
+  background: var(--bg-clear);
+  color: var(--fg-main);
+}
+
+.shelf-search input:hover,
+.shelf-search input:focus-visible {
+  outline: none;
+  border-color: var(--bd-active);
+  background: var(--bg-active);
+}
+
+.shelf-marks {
+  display: flex;
+
+  gap: 6px;
+  padding-bottom: 3px;
+  overflow-x: auto;
+}
+
+.shelf-marks button {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+
+  min-height: 34px;
+  gap: 8px;
+  padding: 0 9px;
+  border: 1px solid var(--bd-control);
+  border-radius: 6px;
+
+  font-size: 11px;
+
+  background: var(--bg-clear);
+  color: var(--fg-soft);
+
+  cursor: pointer;
+}
+
+.shelf-marks button:hover,
+.shelf-marks button:focus-visible,
+.shelf-marks button[aria-pressed="true"] {
+  outline: none;
+  border-color: var(--bd-active);
+  background: var(--bg-active);
+  color: var(--fg-active);
+}
+
+.shelf-status {
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+[data-durable-results] {
+  display: contents;
 }
 
 .mechanics-results-status {
@@ -3739,7 +3906,8 @@ input:focus-visible {
     grid-column: 3;
   }
 
-  .mechanics-categories {
+  .mechanics-categories,
+  .shelf-marks {
     flex-wrap: wrap;
 
     overflow-x: visible;
@@ -3753,7 +3921,12 @@ input:focus-visible {
     padding-top: 0;
   }
 
-  .mechanics-search {
+  .insula-observation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mechanics-search,
+  .shelf-search {
     grid-template-columns: 1fr;
 
     gap: 7px;
@@ -3851,6 +4024,18 @@ input:focus-visible {
   }
 
   .app-shell[data-hallway="true"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .insula-observation-lead {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .insula-observation-lead .mechanics-snapshot-status {
+    justify-content: flex-start;
+  }
+
+  .insula-observation-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

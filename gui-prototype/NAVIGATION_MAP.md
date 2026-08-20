@@ -110,7 +110,7 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 | direct sessions | `openDirectSession`, `startDirectSession` |
 | project sessions | `selectProjectSession`, `closeProjectSession` |
 | presence profile | `renderPresenceProfile`, `closePresenceProfile` |
-| durable views | `renderRoomMemories`, `renderHallwayRecordView`, `renderDurableEntry` |
+| durable views | `renderRoomMemories`, `renderHallwayRecordView`, `renderDurableEntry`, `durableControls`, `durableEntries`, `renderDurableResults` |
 | switcher | `openSwitcher`, `closeSwitcher`, `executeSwitcherCommand`, `switcherCommandRegistry` |
 | Hallway Bell | `renderBellToggle`, `renderHallwayInbox`, `openBell`, `closeBell`, `routeHallwayInbox`, `acknowledgeHallwayThread` |
 | House mechanics | `openHouseMechanics`, `renderHouseMechanics`, `mechanicsEntries`, `renderMechanicsResults` |
@@ -130,7 +130,7 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 ## Asymmetries worth remembering
 
 - **The House door toggles; everything else selects.** `toggleHouse` stashes `houseReturn`; Esc walks back out. A fourth panel kind with a return pointer, deliberately outside the list grammar.
-- **The switcher is a router, not a surface.** Registry emits existing transitions plus one honestly-unavailable Recall entry. It never owns rendering. Memory search, when it lands, routes to slot 3 of the owning subject.
+- **The switcher is a router, not a surface.** Registry emits existing transitions; it never owns rendering. The Recall entry is live: it routes to House slot 3 and hands focus to the shelf search — the durable slot owns searching (`durableControls`, `renderDurableResults`), the switcher only opens the door.
 - **A hallway subject is a gathering, never a container.** Threads carry date · hallway · participants; sealed and folded threads refuse the composer with a stated reason; the Record is the gathering's durable slot, membership card on top. Rulings 2026-08-17, LESSONS_MAP product grammar.
 - **Sessions are a header fact, not a slot.** The picker's rows are the history; `New session` rides on top; Esc closes the menu before anything else falls back.
 - **The header's right slot belongs to the view's own verb.** One owner, `renderHeaderContext`: live gets the session control (or thread meta), and each other view gets a verb button only where an honest act exists — `Record memory` (direct durable, prepends a marked local draft), `Seal gathering` (open hallway durable, seals live), `Interface settings` (house state) — else its quietest fact as a non-focusable `.header-chip`. A button with nothing true to do is the deleted noun-pill disease.

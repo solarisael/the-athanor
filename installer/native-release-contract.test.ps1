@@ -472,6 +472,60 @@ try {
   $RestoredToolchain = Assert-NativeReleaseToolchain -RepositoryRoot $PinnedRepository
   Assert-True (($RestoredToolchain.cacheKeyMaterial -join "|") -ceq $AcceptedCacheKey) "the restored environment must reproduce the accepted cache key"
 
+  # --- guarded local deployment uses one reusable release-profile cache ---
+  $DeployScript = Join-Path $PSScriptRoot "../substrate/deploy-local.ps1"
+  $DeployParseErrors = $null
+  $DeployTokens = $null
+  $DeployAst = [Management.Automation.Language.Parser]::ParseFile($DeployScript, [ref]$DeployTokens, [ref]$DeployParseErrors)
+  Assert-True ($DeployParseErrors.Count -eq 0) "the local deploy script must remain valid PowerShell"
+  $DeployCalls = @($DeployAst.FindAll({
+        param($Node)
+        $Node -is [Management.Automation.Language.CommandAst] -and
+        $Node.GetCommandName() -eq "Invoke-Checked"
+      }, $true))
+  $TestCalls = @($DeployCalls | Where-Object { $_.Extent.Text -match '"test"' })
+  $BuildCalls = @($DeployCalls | Where-Object { $_.Extent.Text -match '"build"' })
+  Assert-True ($TestCalls.Count -eq 1) "the guarded deploy script must contain exactly one Cargo test invocation"
+  Assert-True ($BuildCalls.Count -eq 1) "the guarded deploy script must contain exactly one staged Cargo build invocation"
+  foreach ($Call in @($TestCalls[0], $BuildCalls[0])) {
+    Assert-True ($Call.Extent.Text -match '"--release"') "every guarded deploy Cargo invocation must use Cargo's release profile"
+    Assert-True ($Call.Extent.Text -match '"--target-dir"\s*,\s*\$stageTarget') "every guarded deploy Cargo invocation must use the reusable target/deploy cache"
+  }
+  $ExpectedPackages = @("house-core", "house-protocol", "athanor-substrate", "house-host", "athanor-install")
+  foreach ($Call in @($TestCalls[0], $BuildCalls[0])) {
+    $CallPackages = @([Regex]::Matches($Call.Extent.Text, '"-p"\s*,\s*"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
+    Assert-True (($CallPackages -join "|") -ceq ($ExpectedPackages -join "|")) "the guarded test and staged build must select the identical five packages"
+  }
+  $DeploySource = Get-Content $DeployScript -Raw
+  $DoctorCalls = @($DeployCalls | Where-Object { $_.Extent.Text -match '"doctor"' })
+  Assert-True ($DoctorCalls.Count -eq 1) "installed release manifest proof must retain exactly one Doctor invocation"
+  Assert-True ($DoctorCalls[0].Extent.Text -match '-Label\s+"native release manifest proof"') "installed release manifest proof must retain its checked Doctor label"
+  Assert-True (-not $DeploySource.Contains("FullManifestProof", [StringComparison]::Ordinal)) "installed manifest Doctor proof must not be opt-in"
+  $EarlyServicePreflight = $DeploySource.IndexOf('$nativeService = Get-Service', [StringComparison]::Ordinal)
+  $FreshServicePreflight = $DeploySource.LastIndexOf('$nativeService = Get-Service', [StringComparison]::Ordinal)
+  $FirstTest = $DeploySource.IndexOf('if (-not $SkipTests)', [StringComparison]::Ordinal)
+  $ServiceStop = $DeploySource.IndexOf('Stop-Service -Name $nativeServiceName', [StringComparison]::Ordinal)
+  Assert-True ($EarlyServicePreflight -ge 0 -and $EarlyServicePreflight -lt $FirstTest) "service state must be checked before guarded test work"
+  Assert-True ($FreshServicePreflight -gt $FirstTest -and $FreshServicePreflight -lt $ServiceStop) "service state must be refreshed immediately before stopping or swapping binaries"
+  Assert-True ($DeploySource -match '(?s)Status\s+-ne\s+\[System\.ServiceProcess\.ServiceControllerStatus\]::Running.*?Status\s+-ne\s+\[System\.ServiceProcess\.ServiceControllerStatus\]::Stopped.*?recover it to Running or Stopped') "transitional service states must refuse with a recovery instruction"
+  foreach ($RequiredFragment in @("athanor-manage.exe", "previousManagerExe", "previousStableManagerExe", "stableManagerExe", "bin/athanor-manage.exe", "stagedManagerExe")) {
+    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "manager deployment must retain $RequiredFragment"
+  }
+  Assert-True ($DeploySource -match '(?s)Move-Item\s+\$liveManagerExe\s+\$previousManagerExe.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe') "manager deployment must back up both manager copies"
+  Assert-True ($DeploySource -match '(?s)Copy-Item\s+\$stagedManagerExe\s+\$liveManagerExe.*?Copy-Item\s+\$stagedManagerExe\s+\$stableManagerExe') "manager deployment must replace both manager copies"
+  $StableManagerAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\$stableManagerExe\s*=' })[0]
+  Assert-True (([Regex]::Matches($StableManagerAssignment, 'GetDirectoryName')).Count -eq 4 -and $StableManagerAssignment -match '"bin\\athanor-manage\.exe"') "stable manager must resolve from the install root, not the versions root"
+  $TransactionCatch = $DeploySource.LastIndexOf("} catch {", [StringComparison]::Ordinal)
+  foreach ($RequiredFragment in @('$copiedExe = $false', '$copiedManager = $false', 'elseif ($artifact.Created', 'Test-Path $artifact.Previous', '$restoreFailures = @()', 'Get-Service -Name $nativeServiceName', 'native service stop before rollback failed')) {
+    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "rollback must preserve untouched files, stop a running recovered service, and aggregate failures"
+  }
+  Assert-True ($DeploySource -match '(?s)Get-Service\s+-Name\s+\$nativeServiceName.*?Stop-Service\s+-Name\s+\$nativeServiceName.*?foreach\s+\(\$artifact') "rollback must stop the managed service before restoring artifacts"
+  Assert-True ($DeploySource -match '(?s)\$rollbackServiceStopped\s*=\s*\$true.*?catch\s*\{\s*\$rollbackServiceStopped\s*=\s*\$false.*?if\s*\(\$rollbackServiceStopped\)\s*\{\s*foreach\s+\(\$artifact') "failed rollback service stop must leave artifacts and backups untouched"
+  $HealthProof = $DeploySource.IndexOf('Full-mode health proof', [StringComparison]::Ordinal)
+  $BackupCleanup = $DeploySource.LastIndexOf('Remove-Item $previousExe', [StringComparison]::Ordinal)
+  Assert-True ($HealthProof -ge 0 -and $HealthProof -lt $TransactionCatch -and $BackupCleanup -gt $TransactionCatch) "health and Doctor proofs must remain rollback-protected before backup cleanup"
+
+
   Write-Host "native release contract passed"
 } finally {
   foreach ($Name in $OriginalToolchainEnvironment.Keys) {

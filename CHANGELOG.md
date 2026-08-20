@@ -22,6 +22,38 @@ the exact implementation record.
 
 ### Changed
 
+- The OMP adapter now records provider request spans and normalized token usage.
+  The new `/insula` command shows bounded Vitals for 15 minutes, 1 hour, or
+  24 hours. It reports missing usage and unavailable Host data without false
+  zero values.
+- Guarded local native deployment now runs every required Cargo test package in
+  the reusable `target/deploy` release profile before building its staged
+  binaries, avoiding separate default-profile compilation during hot deploy.
+  It refuses a transitional native-service state before test or backup work.
+  The same guarded transaction now stages, manifests, replaces, and rolls back
+  both installed copies of `athanor-manage.exe`, so local deployment can carry
+  the current installer manager without a product-version change.
+- Native release builds now hold one exclusive dependency-cache lock across
+  cache selection, production, publication, use, and pruning, so concurrent
+  builds serialize instead of racing. Once the requested cache is verified
+  complete, superseded keyed caches and abandoned pending directories are
+  removed, so repeated dependency-key changes no longer accumulate one full
+  runtime payload per key. An incomplete cache never removes a working one, a
+  cache another build finished first is reused rather than rebuilt, and a cache
+  root, cache directory, or required artifact reached through a junction or
+  symlink is refused rather than trusted.
+- Successful native and OMP adapter activations now prune historical installed
+  releases down to the pointer-addressable current and previous pair. Failed
+  activations do not prune rollback state, and cleanup failures leave durable
+  activation pointers unchanged.
+- Adapter-only install and rollback now validate the active native manifest's
+  identity and compatibility without rereading or hashing unrelated native
+  payload artifacts. Component source and retained releases remain fully
+  integrity-checked.
+- The Host now provides an authenticated, Host-scoped Insula Vitals query.
+  The GUI prototype shows the Insula panel in House Mechanics. The disconnected
+  panel states that live Vitals, traces, and loss data are unavailable. It also
+  states that the retention runner is not scheduled.
 - Hallway unread and Bell counts now exclude messages authored by the observing
   room without advancing its stable read position. Posting no longer rings a
   room about its own voice, while older unread messages from peer rooms remain

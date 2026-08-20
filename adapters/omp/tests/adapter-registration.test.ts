@@ -117,10 +117,11 @@ function summarizeSchema(schema: Schema): SchemaSummary {
 
 function registerAdapter() {
   const labels: string[] = [];
-  const hooks: Array<{ name: string; handler: unknown }> = [];
+  const hooks: CapturedHook[] = [];
   const eventChannels: string[] = [];
   const messageRenderers: Array<{ customType: string; renderer: unknown }> = [];
   const tools: CapturedTool[] = [];
+  const commands: Record<string, CapturedCommand> = {};
 
   const pi = {
     zod: zodStub,
@@ -139,12 +140,15 @@ function registerAdapter() {
     registerMessageRenderer(customType: string, renderer: unknown) {
       messageRenderers.push({ customType, renderer });
     },
+    registerCommand(name: string, command: CapturedCommand) {
+      commands[name] = command;
+    },
     registerTool(tool: CapturedTool) {
       tools.push(tool);
     },
   };
   solarisaelHouseProof(pi);
-  return { labels, hooks, tools, eventChannels, messageRenderers };
+  return { labels, hooks, tools, eventChannels, messageRenderers, commands };
 }
 
 const expectedToolNames = [
@@ -191,12 +195,120 @@ function toolMap(tools: CapturedTool[]) {
   return Object.fromEntries(tools.map((tool) => [tool.name, tool]));
 }
 
+type CapturedHook = { name: string; handler: unknown };
+type CapturedCommand = {
+  description?: string;
+  handler: (args: string, ctx: any) => Promise<void>;
+};
+type Handler = (event?: unknown, ctx?: unknown) => Promise<unknown>;
+
+// Hooks are addressed by name. The adapter registers several taps for the same
+// event, and a positional index breaks the moment one more observation is
+// wired in; each event's first registration is the one this suite exercises.
+function firstHook(hooks: CapturedHook[], name: string): Handler {
+  const hook = hooks.find((candidate) => candidate.name === name);
+  if (!hook) throw new Error(`the adapter registered no ${name} hook`);
+  return hook.handler as Handler;
+}
+
+// The Host topology this process can see. Every test that touches it restores
+// exactly what it found, so no test can leak an endpoint into the next one or
+// reach whatever House a developer happens to have installed.
+function captureHostEnvironment(): () => void {
+  const original = {
+    disabled: process.env.ATHANOR_DISABLE_INSULA,
+    endpoints: process.env.ATHANOR_HOST_ENDPOINTS,
+    socket: process.env.ATHANOR_HOST_WS_URL,
+    token: process.env.ATHANOR_HOST_TOKEN,
+  };
+  return () => {
+    if (original.disabled === undefined) delete process.env.ATHANOR_DISABLE_INSULA;
+    else process.env.ATHANOR_DISABLE_INSULA = original.disabled;
+    if (original.endpoints === undefined) delete process.env.ATHANOR_HOST_ENDPOINTS;
+    else process.env.ATHANOR_HOST_ENDPOINTS = original.endpoints;
+    if (original.socket === undefined) delete process.env.ATHANOR_HOST_WS_URL;
+    else process.env.ATHANOR_HOST_WS_URL = original.socket;
+    if (original.token === undefined) delete process.env.ATHANOR_HOST_TOKEN;
+    else process.env.ATHANOR_HOST_TOKEN = original.token;
+  };
+}
+
+// A loopback stand-in for the installed Host's Insula ingest. The suite keeps
+// the process-wide writer silent, so a test that wants observations lifts that
+// silence for its own duration only.
+function startInsulaHost() {
+  const restore = captureHostEnvironment();
+  const received: any[] = [];
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      const body = await request.json() as { events?: any[] };
+      received.push(...(body.events ?? []));
+      return Response.json({
+        schemaVersion: 1,
+        acceptedCount: body.events?.length ?? 0,
+        duplicateCount: 0,
+        conflicts: [],
+      });
+    },
+  });
+  process.env.ATHANOR_DISABLE_INSULA = "0";
+  process.env.ATHANOR_HOST_ENDPOINTS = JSON.stringify({
+    "default-room": { url: `ws://127.0.0.1:${server.port}/athanor/v1/ws` },
+  });
+  delete process.env.ATHANOR_HOST_WS_URL;
+  process.env.ATHANOR_HOST_TOKEN = "adapter-registration-insula-token";
+  return {
+    received,
+    close() {
+      server.stop(true);
+      restore();
+    },
+  };
+}
+
+function assistantMessage(stopReason: string, usage: Record<string, number> = {}) {
+  return {
+    role: "assistant",
+    stopReason,
+    duration: 321,
+    timestamp: Date.now(),
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, ...usage },
+  };
+}
+
+function observations(received: any[], operation: string) {
+  return received.filter((event) => event.operation === operation);
+}
+
 describe("OMP adapter registration", () => {
   test("registers the public adapter label and lifecycle hooks", () => {
     const { labels, hooks, eventChannels, messageRenderers } = registerAdapter();
 
     expect(labels).toEqual(["The Athanor"]);
-    expect(hooks.map((hook) => hook.name)).toEqual(["session_start", "session_switch", "session_shutdown", "tool_call", "tool_result", "tool_call", "tool_call", "message_start", "message_start", "message_update", "context", "session_compact", "tool_result", "tool_result", "shutdown", "agent_end"]);
+    expect(hooks.map((hook) => hook.name)).toEqual([
+      "session_start",
+      "session_switch",
+      "session_shutdown",
+      "tool_call",
+      "tool_result",
+      "turn_start",
+      "auto_retry_start",
+      "turn_end",
+      "agent_end",
+      "tool_call",
+      "tool_call",
+      "message_start",
+      "message_start",
+      "message_update",
+      "context",
+      "session_compact",
+      "tool_result",
+      "tool_result",
+      "shutdown",
+      "agent_end",
+    ]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
     expect(eventChannels).toEqual(["task:subagent:progress", "task:subagent:lifecycle"]);
     expect(messageRenderers).toHaveLength(2);
@@ -209,11 +321,9 @@ describe("OMP adapter registration", () => {
 
   test("observes the tool lifecycle without answering for the tools it watches", async () => {
     const { hooks } = registerAdapter();
-    const observers = [hooks[3], hooks[4]];
+    const observers = [firstHook(hooks, "tool_call"), firstHook(hooks, "tool_result")];
 
-    expect(observers.map((hook) => hook.name)).toEqual(["tool_call", "tool_result"]);
-    for (const observer of observers) {
-      const handler = observer.handler as (event: unknown, ctx: unknown) => Promise<unknown>;
+    for (const handler of observers) {
       // A malformed event, a missing ctx, and a tool result with no observed
       // call all resolve to nothing: an Insula tap never blocks, rewrites, or
       // refuses the turn it is watching.
@@ -224,40 +334,13 @@ describe("OMP adapter registration", () => {
   });
 
   test("keeps reused tool ids session-local and cancels a closing session", async () => {
-    const original = {
-      disabled: process.env.ATHANOR_DISABLE_INSULA,
-      endpoints: process.env.ATHANOR_HOST_ENDPOINTS,
-      socket: process.env.ATHANOR_HOST_WS_URL,
-      token: process.env.ATHANOR_HOST_TOKEN,
-    };
-    const received: any[] = [];
-    const server = Bun.serve({
-      port: 0,
-      hostname: "127.0.0.1",
-      async fetch(request) {
-        const body = await request.json() as { events?: any[] };
-        received.push(...(body.events ?? []));
-        return Response.json({
-          schemaVersion: 1,
-          acceptedCount: body.events?.length ?? 0,
-          duplicateCount: 0,
-          conflicts: [],
-        });
-      },
-    });
+    const host = startInsulaHost();
     try {
-      process.env.ATHANOR_DISABLE_INSULA = "0";
-      process.env.ATHANOR_HOST_ENDPOINTS = JSON.stringify({
-        "default-room": { url: `ws://127.0.0.1:${server.port}/athanor/v1/ws` },
-      });
-      delete process.env.ATHANOR_HOST_WS_URL;
-      process.env.ATHANOR_HOST_TOKEN = "adapter-registration-insula-token";
-
       const { hooks } = registerAdapter();
-      const toolCall = hooks[3]!.handler as (event: unknown, ctx: unknown) => Promise<unknown>;
-      const toolResult = hooks[4]!.handler as (event: unknown, ctx: unknown) => Promise<unknown>;
-      const sessionShutdown = hooks[2]!.handler as (event: unknown, ctx: unknown) => Promise<unknown>;
-      const shutdown = hooks.find((hook) => hook.name === "shutdown")!.handler as () => Promise<unknown>;
+      const toolCall = firstHook(hooks, "tool_call");
+      const toolResult = firstHook(hooks, "tool_result");
+      const sessionShutdown = firstHook(hooks, "session_shutdown");
+      const shutdown = firstHook(hooks, "shutdown");
       const firstSession = { cwd: process.cwd(), sessionId: "session-a" };
       const secondSession = { cwd: process.cwd(), sessionId: "session-b" };
 
@@ -267,7 +350,7 @@ describe("OMP adapter registration", () => {
       await toolResult({ toolCallId: "reused-call-id", isError: false }, secondSession);
       await shutdown();
 
-      const tools = received.filter((event) => event.operation === "tool_call");
+      const tools = observations(host.received, "tool_call");
       expect(tools.map((event) => `${event.phase}:${event.outcomeClass}`)).toEqual([
         "start:unknown",
         "start:unknown",
@@ -281,16 +364,217 @@ describe("OMP adapter registration", () => {
         expect(end).toBeDefined();
       }
     } finally {
-      server.stop(true);
-      if (original.disabled === undefined) delete process.env.ATHANOR_DISABLE_INSULA;
-      else process.env.ATHANOR_DISABLE_INSULA = original.disabled;
-      if (original.endpoints === undefined) delete process.env.ATHANOR_HOST_ENDPOINTS;
-      else process.env.ATHANOR_HOST_ENDPOINTS = original.endpoints;
-      if (original.socket === undefined) delete process.env.ATHANOR_HOST_WS_URL;
-      else process.env.ATHANOR_HOST_WS_URL = original.socket;
-      if (original.token === undefined) delete process.env.ATHANOR_HOST_TOKEN;
-      else process.env.ATHANOR_HOST_TOKEN = original.token;
+      host.close();
     }
+  });
+
+  test("gives every main turn one provider settlement and one usage point", async () => {
+    const host = startInsulaHost();
+    try {
+      const { hooks } = registerAdapter();
+      const turnStart = firstHook(hooks, "turn_start");
+      const turnEnd = firstHook(hooks, "turn_end");
+      const toolCall = firstHook(hooks, "tool_call");
+      const shutdown = firstHook(hooks, "shutdown");
+      const session = { cwd: process.cwd(), sessionId: "session-provider" };
+      const message = assistantMessage("toolUse", { input: 120, output: 45, cacheRead: 900, cacheWrite: 30 });
+
+      await turnStart({ turnIndex: 0, timestamp: Date.now() }, session);
+      await toolCall({ toolCallId: "call-1" }, session);
+      await turnEnd({ turnIndex: 0, message, toolResults: [] }, session);
+      // Settlement happens once: a repeated turn_end is not a second request.
+      await turnEnd({ turnIndex: 0, message, toolResults: [] }, session);
+      await shutdown();
+
+      const requests = observations(host.received, "provider_request");
+      expect(requests.map((event) => `${event.phase}:${event.outcomeClass}`))
+        .toEqual(["start:unknown", "end:ok"]);
+      expect(requests[1].spanId).toBe(requests[0].spanId);
+      expect(requests[1].providerRequestId).toBeNull();
+      expect(requests[1].durationUs).toBe(321_000);
+      expect(requests[1].tokensIn).toBe(0);
+      expect(requests[1].tokensOut).toBe(0);
+
+      const usage = observations(host.received, "provider_usage");
+      expect(usage).toHaveLength(1);
+      expect(usage[0].phase).toBe("point");
+      expect(usage[0].outcomeClass).toBe("ok");
+      expect(usage[0].tokensIn).toBe(1_050);
+      expect(usage[0].tokensOut).toBe(45);
+      expect(usage[0].providerRequestId).toBeNull();
+      expect(usage[0].idempotencyScope).toBe("trace_span");
+      expect(usage[0].traceId).toBe(requests[0].traceId);
+      expect(usage[0].parentSpanId).toBe(requests[0].spanId);
+
+      // The tool span hangs from the provider request, not from context assembly.
+      const tools = observations(host.received, "tool_call");
+      expect(tools[0].traceId).toBe(requests[0].traceId);
+      expect(tools[0].parentSpanId).toBe(requests[0].spanId);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("exposes no shared provider hook that side streams can enter", async () => {
+    const host = startInsulaHost();
+    try {
+      const { hooks } = registerAdapter();
+      const names = hooks.map((hook) => hook.name);
+      expect(names).not.toContain("before_provider_request");
+      expect(names).not.toContain("after_provider_response");
+      expect(names).not.toContain("message_end");
+
+      const session = { cwd: process.cwd(), sessionId: "session-side-stream" };
+      await firstHook(hooks, "turn_end")({ message: assistantMessage("stop") }, session);
+      await firstHook(hooks, "shutdown")();
+      expect(host.received).toEqual([]);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("retires a retried attempt and pairs each attempt with its own usage", async () => {
+    const host = startInsulaHost();
+    try {
+      const { hooks } = registerAdapter();
+      const session = { cwd: process.cwd(), sessionId: "session-retry" };
+
+      await firstHook(hooks, "turn_start")({ turnIndex: 0 }, session);
+      await firstHook(hooks, "auto_retry_start")({ attempt: 2, maxAttempts: 3 }, session);
+      await firstHook(hooks, "turn_end")(
+        { message: assistantMessage("length", { input: 10, output: 20 }) },
+        session,
+      );
+      await firstHook(hooks, "shutdown")();
+
+      const requests = observations(host.received, "provider_request");
+      expect(requests.map((event) => `${event.phase}:${event.outcomeClass}:${event.errorClass ?? ""}`))
+        .toEqual([
+          "start:unknown:",
+          "end:cancelled:provider_retried",
+          "start:unknown:",
+          "end:degraded:max_tokens",
+        ]);
+      expect(requests[2].spanId).not.toBe(requests[0].spanId);
+
+      const usage = observations(host.received, "provider_usage");
+      expect(usage).toHaveLength(2);
+      expect(usage[0].outcomeClass).toBe("degraded");
+      expect(usage[0].errorClass).toBe("usage_unavailable");
+      expect(usage[0].tokensIn).toBe(0);
+      expect(usage[0].parentSpanId).toBe(requests[0].spanId);
+      expect(usage[1].outcomeClass).toBe("ok");
+      expect(usage[1].tokensIn).toBe(10);
+      expect(usage[1].tokensOut).toBe(20);
+      expect(usage[1].parentSpanId).toBe(requests[2].spanId);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("reports unmetered usage as degraded instead of a measured zero", async () => {
+    const host = startInsulaHost();
+    try {
+      const { hooks } = registerAdapter();
+      const session = { cwd: process.cwd(), sessionId: "session-unmetered" };
+
+      await firstHook(hooks, "turn_start")({ turnIndex: 0 }, session);
+      await firstHook(hooks, "turn_end")({ message: assistantMessage("stop") }, session);
+      await firstHook(hooks, "shutdown")();
+
+      const requests = observations(host.received, "provider_request");
+      expect(requests[1].outcomeClass).toBe("ok");
+      const usage = observations(host.received, "provider_usage");
+      expect(usage).toHaveLength(1);
+      expect(usage[0].outcomeClass).toBe("degraded");
+      expect(usage[0].errorClass).toBe("usage_unavailable");
+      expect(usage[0].tokensIn).toBe(0);
+      expect(usage[0].tokensOut).toBe(0);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("keeps a non-assistant turn open until shutdown retires it", async () => {
+    const host = startInsulaHost();
+    try {
+      const { hooks } = registerAdapter();
+      const turnEnd = firstHook(hooks, "turn_end");
+      const session = { cwd: process.cwd(), sessionId: "session-gate" };
+
+      await firstHook(hooks, "turn_start")({ turnIndex: 0 }, session);
+      await turnEnd({ message: { role: "user", content: [] } }, session);
+      await turnEnd({ message: { role: "custom", customType: "gate-stop" } }, session);
+      await turnEnd({ message: undefined }, session);
+      await firstHook(hooks, "shutdown")();
+
+      const requests = observations(host.received, "provider_request");
+      expect(requests.map((event) => `${event.phase}:${event.errorClass ?? ""}`))
+        .toEqual(["start:", "end:shutdown"]);
+      expect(observations(host.received, "provider_usage")).toHaveLength(1);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("settles a terminal provider error from current agent messages", async () => {
+    const host = startInsulaHost();
+    try {
+      const { hooks } = registerAdapter();
+      const session = { cwd: process.cwd(), sessionId: "session-terminal" };
+
+      await firstHook(hooks, "turn_start")({ turnIndex: 0 }, session);
+      const current = assistantMessage("error");
+      // A terminal error can end the agent loop without ever reaching turn_end.
+      await firstHook(hooks, "agent_end")({ messages: [current] }, session);
+      await firstHook(hooks, "shutdown")();
+
+      const requests = observations(host.received, "provider_request");
+      expect(requests.map((event) => `${event.phase}:${event.outcomeClass}:${event.errorClass ?? ""}`))
+        .toEqual(["start:unknown:", "end:error:provider_error"]);
+      expect(requests[1].durationUs).toBe(321_000);
+      expect(observations(host.received, "provider_usage")).toHaveLength(1);
+    } finally {
+      host.close();
+    }
+  });
+
+  test("registers the cockpit command, refuses a range, and never shows zeros for absence", async () => {
+    const { commands } = registerAdapter();
+    expect(Object.keys(commands)).toEqual(["insula"]);
+    expect(commands.insula!.description).toContain("15m");
+
+    const notices: Array<{ message: string; type?: string }> = [];
+    const ctx = {
+      cwd: process.cwd(),
+      mode: "print",
+      hasUI: false,
+      ui: {
+        notify: (message: string, type?: string) => {
+          notices.push({ message, type });
+        },
+      },
+    };
+
+    await commands.insula!.handler("2h", ctx);
+    expect(notices).toEqual([
+      { message: "Athanor /insula takes one optional range: 15m, 1h, 24h.", type: "warning" },
+    ]);
+
+    // No installed Host at all: the cockpit reports absence rather than a page
+    // of zeros it never measured, and cannot reach a real House to find out.
+    const restore = captureHostEnvironment();
+    try {
+      delete process.env.ATHANOR_HOST_ENDPOINTS;
+      delete process.env.ATHANOR_HOST_WS_URL;
+      delete process.env.ATHANOR_HOST_TOKEN;
+      await commands.insula!.handler("", ctx);
+    } finally {
+      restore();
+    }
+    expect(notices[1]!.type).toBe("warning");
+    expect(notices[1]!.message).toContain("Host Vitals unavailable (host_unavailable)");
+    expect(notices[1]!.message).toContain("absence, not zero");
   });
 
   test("registers the Solarisael tool surface", () => {

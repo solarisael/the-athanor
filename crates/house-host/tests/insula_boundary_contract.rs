@@ -30,6 +30,10 @@ fn isolated_database_url() -> String {
 }
 
 fn host_event(binding: &TrustedBinding) -> ObservationEvent {
+    host_event_with_operation(binding, "ingest")
+}
+
+fn host_event_with_operation(binding: &TrustedBinding, operation: &str) -> ObservationEvent {
     let mut event: ObservationEvent = serde_json::from_value(json!({
         "eventId": Uuid::new_v4().to_string(),
         "spanId": Uuid::new_v4().to_string(),
@@ -38,7 +42,7 @@ fn host_event(binding: &TrustedBinding) -> ObservationEvent {
         "writerSequence": 1,
         "component": "host_boundary_test",
         "layer": "host",
-        "operation": "ingest",
+        "operation": operation,
         "phase": "point",
         "observedAt": Utc::now().to_rfc3339(),
         "outcomeClass": "ok",
@@ -169,6 +173,18 @@ fn endpoint(host: &RunningHost, path: &str) -> String {
     format!("http://{}{}", host.address, path)
 }
 
+fn vitals_request() -> Value {
+    json!({
+        "component": "host_boundary_test",
+        "layer": "host",
+        "operation": "ingest",
+        "phase": "point",
+        "outcomeClass": "ok",
+        "start": "2026-08-20T00:00:00Z",
+        "end": "2026-08-20T01:00:00Z"
+    })
+}
+
 async fn error(response: reqwest::Response, expected: StatusCode) -> Value {
     assert_eq!(response.status(), expected);
     let body: Value = response.json().await.expect("mechanical error JSON");
@@ -260,6 +276,139 @@ async fn insula_http_boundary_refuses_batches_larger_than_128_before_database_ac
 }
 
 #[tokio::test]
+async fn insula_vitals_authenticates_before_parsing_and_refuses_query_strings() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let client = reqwest::Client::new();
+
+    let unauthenticated = client
+        .post(endpoint(&host, "/athanor/v1/insula/vitals"))
+        .body("this is not JSON")
+        .send()
+        .await
+        .expect("unauthenticated Vitals request completes");
+    let unauthenticated_body = error(unauthenticated, StatusCode::UNAUTHORIZED).await;
+    assert_eq!(unauthenticated_body["error"], "unauthenticated");
+
+    let unexpected_query = client
+        .post(endpoint(
+            &host,
+            "/athanor/v1/insula/vitals?room=caller-selected",
+        ))
+        .bearer_auth(TOKEN)
+        .body("this is also not JSON")
+        .send()
+        .await
+        .expect("query-bearing Vitals request completes");
+    let unexpected_query_body = error(unexpected_query, StatusCode::BAD_REQUEST).await;
+    assert_eq!(unexpected_query_body["error"], "unexpected_query");
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn insula_vitals_dto_refuses_unknown_and_authority_fields_before_database_access() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let client = reqwest::Client::new();
+
+    for (field, value) in [
+        ("unknownField", json!("not-in-the-contract")),
+        ("houseId", json!("caller-house")),
+        ("room", json!("caller-room")),
+        ("spirit", json!("CallerSpirit")),
+        ("sessionId", json!("caller-session")),
+    ] {
+        let mut request = vitals_request();
+        request
+            .as_object_mut()
+            .expect("Vitals fixture is an object")
+            .insert(field.into(), value);
+        let response = client
+            .post(endpoint(&host, "/athanor/v1/insula/vitals"))
+            .bearer_auth(TOKEN)
+            .json(&request)
+            .send()
+            .await
+            .expect("strict Vitals request completes");
+        let body = error(response, StatusCode::BAD_REQUEST).await;
+        assert_eq!(
+            body["error"], "invalid_json",
+            "field {field} must be refused"
+        );
+    }
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn insula_vitals_refuses_invalid_bounds_and_limits_before_database_access() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let client = reqwest::Client::new();
+    let invalid_requests = [
+        json!({
+            "start": "2026-08-20T00:00:00Z",
+            "end": "2026-08-20T00:00:00Z"
+        }),
+        json!({
+            "start": "2026-08-20T01:00:00Z",
+            "end": "2026-08-20T00:00:00Z"
+        }),
+        json!({
+            "start": "2025-08-18T00:00:00Z",
+            "end": "2026-08-20T00:00:00Z"
+        }),
+        json!({
+            "start": "2026-08-20T00:00:00Z",
+            "end": "2026-08-20T01:00:00Z",
+            "limit": 0
+        }),
+        json!({
+            "start": "2026-08-20T00:00:00Z",
+            "end": "2026-08-20T01:00:00Z",
+            "limit": 5000
+        }),
+    ];
+
+    for request in invalid_requests {
+        let response = client
+            .post(endpoint(&host, "/athanor/v1/insula/vitals"))
+            .bearer_auth(TOKEN)
+            .json(&request)
+            .send()
+            .await
+            .expect("invalid Vitals request completes");
+        let body = error(response, StatusCode::UNPROCESSABLE_ENTITY).await;
+        assert_eq!(body["error"], "invalid_request");
+    }
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn insula_vitals_reports_an_unavailable_pool_after_accepting_the_default_limit() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+
+    let response = reqwest::Client::new()
+        .post(endpoint(&host, "/athanor/v1/insula/vitals"))
+        .bearer_auth(TOKEN)
+        .json(&vitals_request())
+        .send()
+        .await
+        .expect("valid Vitals request completes");
+    let body = error(response, StatusCode::SERVICE_UNAVAILABLE).await;
+    assert_eq!(body["error"], "insula_unavailable");
+
+    host.stop().await;
+}
+
+#[tokio::test]
 async fn health_reports_insula_unavailable_without_degrading_the_existing_host_surface() {
     let root = TempDir::new().expect("temporary Host root");
     write_room_state(root.path());
@@ -281,8 +430,8 @@ async fn health_reports_insula_unavailable_without_degrading_the_existing_host_s
 
 #[tokio::test]
 #[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
-async fn insula_ingest_stamps_only_host_config_identity() -> Result<(), Box<dyn std::error::Error>>
-{
+async fn insula_ingest_and_vitals_stamp_only_host_config_identity()
+-> Result<(), Box<dyn std::error::Error>> {
     let database_url = isolated_database_url();
     let pool = PgPoolOptions::new()
         .max_connections(1)
@@ -304,18 +453,22 @@ async fn insula_ingest_stamps_only_host_config_identity() -> Result<(), Box<dyn 
     };
     let host = start_with_config(configured).await;
 
-    let response = reqwest::Client::new()
+    let client = reqwest::Client::new();
+    let response = client
         .post(endpoint(&host, "/athanor/v1/insula/events"))
         .bearer_auth(TOKEN)
         .json(&IngestBatch {
-            events: vec![host_event(&binding)],
+            events: vec![
+                host_event(&binding),
+                host_event_with_operation(&binding, "second-operation"),
+            ],
         })
         .send()
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
     let receipt: Value = response.json().await?;
     assert_eq!(receipt["schemaVersion"], 1);
-    assert_eq!(receipt["acceptedCount"], 1);
+    assert_eq!(receipt["acceptedCount"], 2);
     assert_eq!(receipt["duplicateCount"], 0);
 
     let identity: (String, String, String, String) =
@@ -332,6 +485,35 @@ async fn insula_ingest_stamps_only_host_config_identity() -> Result<(), Box<dyn 
         ),
         "the Host must stamp its configured binding; requests carry no authority fields"
     );
+
+    let start = Utc::now() - chrono::Duration::hours(1);
+    let end = Utc::now() + chrono::Duration::hours(1);
+    let response = client
+        .post(endpoint(&host, "/athanor/v1/insula/vitals"))
+        .bearer_auth(TOKEN)
+        .json(&json!({
+            "start": start,
+            "end": end,
+            "limit": 1
+        }))
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let vitals: Value = response.json().await?;
+    assert_eq!(vitals["schemaVersion"], 1);
+    assert_eq!(vitals["queryName"], "insula.vitals.minute");
+    assert_eq!(vitals["queryVersion"], 1);
+    assert_eq!(vitals["houseId"], "solarisael");
+    assert_eq!(vitals["room"], "kintsu");
+    assert_eq!(vitals["spirit"], "Kintsu");
+    assert_eq!(vitals["start"], json!(start));
+    assert_eq!(vitals["end"], json!(end));
+    assert_eq!(vitals["limit"], 1);
+    assert_eq!(vitals["truncated"], true);
+    assert_eq!(vitals["rows"].as_array().expect("Vitals rows").len(), 1);
+    assert_eq!(vitals["rows"][0]["houseId"], "solarisael");
+    assert_eq!(vitals["rows"][0]["room"], "kintsu");
+    assert_eq!(vitals["rows"][0]["spirit"], "Kintsu");
 
     host.stop().await;
     sqlx::query("DROP SCHEMA insula CASCADE")

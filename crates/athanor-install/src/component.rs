@@ -241,7 +241,7 @@ pub fn read_verified_component<F: FileSystem>(
     Ok(manifest)
 }
 
-fn valid_release_id(value: &str) -> bool {
+pub(crate) fn valid_release_id(value: &str) -> bool {
     value.rsplit_once('-').is_some_and(|(version, digest)| {
         safe_version(version)
             && digest.len() == 64

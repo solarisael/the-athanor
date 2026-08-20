@@ -67,10 +67,17 @@ $RequiredDependencyFiles = @(
   "nats/nats-server.exe",
   "godot/athanor-gui.exe"
 )
+# One exclusive lock covers this build's entire cache lifetime: selection,
+# production, publication, every use of the cached binaries, and pruning.
+# Concurrent native release builds serialize here rather than racing, which is
+# what lets pruning delete superseded caches without ever pulling one out from
+# under another build.
+New-Item $DependencyCacheRoot -ItemType Directory -Force | Out-Null
+$DependencyCacheLock = Enter-NativeBuildCacheOperationLock $DependencyCacheRoot
+try {
 Invoke-NativeReleaseStage -Name "dependency-preparation" -OutDir $Out -Action {
-  New-Item $DependencyCacheRoot -ItemType Directory -Force | Out-Null
-  if (-not (Test-NativeBuildCache $DependencyCache $DependencyCacheKey $RequiredDependencyFiles)) {
-    if (Test-Path $DependencyCache) { Remove-Item $DependencyCache -Recurse -Force }
+  # A cache another build finished earlier is recognized here, never deleted.
+  if (-not (Clear-NativeBuildCacheForRebuild $DependencyCacheRoot $DependencyCacheKey $RequiredDependencyFiles $DependencyCacheLock)) {
     $DependencyCacheCandidate = "$DependencyCache.pending-$PID"
     if (Test-Path $DependencyCacheCandidate) { Remove-Item $DependencyCacheCandidate -Recurse -Force }
     try {
@@ -118,6 +125,10 @@ Invoke-NativeReleaseStage -Name "dependency-preparation" -OutDir $Out -Action {
   $script:PgRoot = Join-Path $DependencyCache "postgresql"
   $script:NatsExe = Get-Item (Join-Path $DependencyCache "nats/nats-server.exe")
   $script:GodotExe = Get-Item (Join-Path $DependencyCache "godot/athanor-gui.exe")
+  # Only now that the requested cache is verified complete may its stale
+  # siblings go: one dependency payload per key would otherwise accumulate
+  # forever.
+  Remove-StaleNativeBuildCaches $DependencyCacheRoot $DependencyCacheKey $RequiredDependencyFiles $DependencyCacheLock | Out-Null
 }
 
 $CargoTarget = Join-Path $Root "target"
@@ -218,4 +229,7 @@ Invoke-NativeReleaseStage -Name "output-copy" -OutDir $Out -Action {
   Remove-Item (Join-Path $Out "payload") -Recurse -Force -ErrorAction SilentlyContinue
   Copy-Item $Stage (Join-Path $Out "payload") -Recurse -Force
   Remove-Item $Work -Recurse -Force
+}
+} finally {
+  Exit-NativeBuildCacheOperationLock $DependencyCacheLock
 }

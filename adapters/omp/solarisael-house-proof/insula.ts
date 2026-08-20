@@ -17,6 +17,9 @@
 // start and its end would claim one logical key with two semantic hashes and
 // the Host would report the pair as key reuse. `trace_span` keys on
 // trace/span/phase, and toolCallId still rides along as correlation.
+// A single point may instead claim `provider_request`, which keys on the
+// provider's own request id and is the one scope that stays idempotent across
+// processes; it is refused outright without that id.
 
 import { hostHttpEndpoint } from "./host.ts";
 
@@ -30,6 +33,7 @@ const MAX_BATCH_EVENTS = 128; // The Host refuses a larger batch.
 const MAX_QUEUED_EVENTS = 512;
 const MAX_DROP_COUNT = 1_000_000_000;
 const MAX_DURATION_US = 86_400_000_000;
+const MAX_TOKENS = 1_099_511_627_776; // The Host refuses a larger count.
 const FLUSH_DELAY_MS = 200;
 const POST_TIMEOUT_MS = 2_000;
 const CLOSE_TIMEOUT_MS = 750;
@@ -91,6 +95,10 @@ export type InsulaSpan = {
   readonly operation: string;
   readonly toolCallId: string | null;
   readonly startedAt: number;
+  readonly startedAtEpochMs: number;
+  // Learned mid-span from the provider response, so it can only reach the wire
+  // on the settlement: the start was already posted without it.
+  providerRequestId: string | null;
   finished: boolean;
 };
 
@@ -107,6 +115,9 @@ export type InsulaPointRequest = InsulaSpanRequest & {
   errorClass?: string | null;
   scope?: InsulaScope;
   durationUs?: number | null;
+  tokensIn?: number | null;
+  tokensOut?: number | null;
+  providerRequestId?: string | null;
 };
 
 export type InsulaEndpoint = { url: string; token: string };
@@ -127,7 +138,10 @@ type ObservationDraft = {
   outcomeClass: InsulaOutcome;
   errorClass: string | null;
   durationUs: number | null;
+  tokensIn: number;
+  tokensOut: number;
   toolCallId: string | null;
+  providerRequestId: string | null;
   scope: InsulaScope;
   dropCount: number;
 };
@@ -162,6 +176,11 @@ export function insulaErrorClass(error: unknown): string {
 function boundedDuration(value: number | null | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.min(MAX_DURATION_US, Math.max(0, Math.round(value)));
+}
+
+function boundedTokens(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value)) return 0;
+  return Math.min(MAX_TOKENS, Math.max(0, Math.round(value)));
 }
 
 function elapsedMicroseconds(startedAt: number): number {
@@ -243,6 +262,8 @@ export class InsulaWriter {
       operation,
       toolCallId: opaqueIdentifier(request?.toolCallId),
       startedAt: performance.now(),
+      startedAtEpochMs: Date.now(),
+      providerRequestId: null,
       finished: false,
     };
     this.#emit(span.room, {
@@ -254,7 +275,10 @@ export class InsulaWriter {
       outcomeClass: "unknown",
       errorClass: null,
       durationUs: null,
+      tokensIn: 0,
+      tokensOut: 0,
       toolCallId: span.toolCallId,
+      providerRequestId: null,
       scope: "trace_span",
       dropCount: 0,
     });
@@ -265,6 +289,7 @@ export class InsulaWriter {
     span: InsulaSpan | null | undefined,
     outcomeClass: InsulaOutcome,
     errorClass: string | null = null,
+    durationUs?: number | null,
   ): void {
     if (!span || span.finished) return;
     span.finished = true;
@@ -276,8 +301,13 @@ export class InsulaWriter {
       phase: "end",
       outcomeClass,
       errorClass: mechanicalName(errorClass),
-      durationUs: elapsedMicroseconds(span.startedAt),
+      durationUs: durationUs === undefined
+        ? elapsedMicroseconds(span.startedAt)
+        : boundedDuration(durationUs),
+      tokensIn: 0,
+      tokensOut: 0,
       toolCallId: span.toolCallId,
+      providerRequestId: span.providerRequestId,
       scope: "trace_span",
       dropCount: 0,
     });
@@ -287,10 +317,12 @@ export class InsulaWriter {
     const operation = mechanicalName(request?.operation);
     if (!operation) return;
     const toolCallId = opaqueIdentifier(request?.toolCallId);
+    const providerRequestId = opaqueIdentifier(request?.providerRequestId);
     const scope = request?.scope ?? "trace_span";
     // A scope the Host would refuse is never sent: it names a correlation this
     // observation does not carry.
     if (scope === "tool_call" && !toolCallId) return;
+    if (scope === "provider_request" && !providerRequestId) return;
     this.#emit(String(request?.room ?? "").trim(), {
       traceId: canonicalUuid(request?.traceId) ?? crypto.randomUUID(),
       spanId: crypto.randomUUID(),
@@ -300,7 +332,10 @@ export class InsulaWriter {
       outcomeClass: request.outcomeClass,
       errorClass: mechanicalName(request?.errorClass),
       durationUs: boundedDuration(request?.durationUs),
+      tokensIn: boundedTokens(request?.tokensIn),
+      tokensOut: boundedTokens(request?.tokensOut),
       toolCallId,
+      providerRequestId,
       scope,
       dropCount: 0,
     });
@@ -372,16 +407,17 @@ export class InsulaWriter {
       operation: draft.operation,
       phase: draft.phase,
       observedAt: new Date().toISOString(),
-      // A started span has not finished, so it cannot carry a duration yet.
+      // A started span has not finished, so it cannot carry a duration or a
+      // measured usage yet.
       durationUs: draft.phase === "start" ? null : draft.durationUs,
       outcomeClass: draft.outcomeClass,
       errorClass: draft.outcomeClass === "ok" ? null : draft.errorClass,
       bytesIn: 0,
       bytesOut: 0,
-      tokensIn: 0,
-      tokensOut: 0,
+      tokensIn: draft.phase === "start" ? 0 : draft.tokensIn,
+      tokensOut: draft.phase === "start" ? 0 : draft.tokensOut,
       toolCallId: draft.toolCallId,
-      providerRequestId: null,
+      providerRequestId: draft.providerRequestId,
       idempotencyVersion: 1,
       idempotencyScope: draft.scope,
       receiptKind: null,
@@ -486,13 +522,26 @@ export function startInsulaSpan(request: InsulaSpanRequest): InsulaSpan | null {
   }
 }
 
+/**
+ * Bind a provider's own request id to an open span. The start is already gone,
+ * so only the settlement and its usage point can carry the correlation.
+ */
+export function noteInsulaProviderRequestId(
+  span: InsulaSpan | null | undefined,
+  providerRequestId: unknown,
+): void {
+  if (!span || span.finished || span.providerRequestId) return;
+  span.providerRequestId = opaqueIdentifier(providerRequestId);
+}
+
 export function endInsulaSpan(
   span: InsulaSpan | null | undefined,
   outcomeClass: InsulaOutcome,
   errorClass: string | null = null,
+  durationUs?: number | null,
 ): void {
   try {
-    processInsulaWriter()?.endSpan(span, outcomeClass, errorClass);
+    processInsulaWriter()?.endSpan(span, outcomeClass, errorClass, durationUs);
   } catch {
     // Observation never propagates.
   }

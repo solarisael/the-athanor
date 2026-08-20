@@ -11,6 +11,7 @@ use std::{
 pub trait FileSystem {
     fn exists(&self, path: &Path) -> bool;
     fn read(&self, path: &Path) -> Result<Vec<u8>>;
+    fn list_directories(&self, path: &Path) -> Result<Vec<PathBuf>>;
     fn validate_regular_file(&self, root: &Path, path: &Path) -> Result<()> {
         if !path.starts_with(root) {
             bail!(
@@ -187,6 +188,24 @@ impl FileSystem for NativeFileSystem {
     }
     fn read(&self, path: &Path) -> Result<Vec<u8>> {
         fs::read(path).with_context(|| format!("read {}", path.display()))
+    }
+    fn list_directories(&self, path: &Path) -> Result<Vec<PathBuf>> {
+        fs::read_dir(path)
+            .with_context(|| format!("enumerate {}", path.display()))?
+            .filter_map(|entry| match entry {
+                Ok(entry) => match entry.file_type() {
+                    Ok(file_type) if file_type.is_dir() => Some(Ok(entry.path())),
+                    Ok(_) => None,
+                    Err(error) => Some(Err(error).with_context(|| {
+                        format!("inspect directory entry below {}", path.display())
+                    })),
+                },
+                Err(error) => Some(
+                    Err(error)
+                        .with_context(|| format!("read directory entry below {}", path.display())),
+                ),
+            })
+            .collect()
     }
     fn validate_regular_file(&self, root: &Path, path: &Path) -> Result<()> {
         let relative = path.strip_prefix(root).with_context(|| {

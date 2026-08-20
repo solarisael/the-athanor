@@ -493,6 +493,8 @@ const state = {
   mode: "direct",
   activeId: "kintsu",
   activeView: "live",
+  durableQuery: "",
+  durableMark: "all",
   selectedMessageIndex: null,
   selectedPresenceId: null,
   sessionMenuOpen: false,
@@ -913,6 +915,8 @@ function openConversation(id) {
   state.accessPicker = false;
   state.newSpiritOpen = false;
   state.librarySelection = null;
+  state.durableQuery = "";
+  state.durableMark = "all";
   state.memberDockOpen = false;
   input.value = state.drafts.get(draftKey(incoming)) ?? "";
   input.style.height = "auto";
@@ -1086,13 +1090,17 @@ function switcherCommandRegistry() {
     id: "recall:search",
     verb: "Recall",
     label: "Search memory",
-    path: "House › Recall",
-    keywords: "recall memory search akasha",
+    path: "House › Memories & Lessons",
+    keywords: "recall memory search akasha lessons shelf",
     shortcut: null,
-    available: false,
-    reason: "Host offline · Recall unavailable",
+    available: true,
     priority: 300,
-    execute: null
+    execute: () => {
+      navigateToSubjectView("house", "durable");
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        timeline.querySelector("[data-durable-search]")?.focus({ preventScroll: true });
+      }));
+    }
   });
   return commands;
 }
@@ -1490,6 +1498,34 @@ const HOUSE_MECHANICS_SNAPSHOT = {
   ]
 };
 
+const HOUSE_INSULA_OBSERVATORY = {
+  capturedAt: "2026-08-20",
+  connection: "Host offline",
+  source: "Local-only source snapshot",
+  channels: [
+    {
+      label: "Insula Vitals",
+      value: "Unavailable",
+      detail: "Connect the Host to read request, tool, latency, and token totals."
+    },
+    {
+      label: "Trace health",
+      value: "Unavailable",
+      detail: "Authenticated trace projection is absent from this disconnected surface."
+    },
+    {
+      label: "Loss",
+      value: "Unavailable",
+      detail: "Writer gaps and drop receipts require the Host record."
+    },
+    {
+      label: "Retention",
+      value: "Not scheduled",
+      detail: "Raw rows become eligible after 14 days. No production retention runner exists."
+    }
+  ]
+};
+
 function mechanicsHealthTone(health) {
   if (/offline|absent|divergent|unavailable/i.test(health)) return "attention";
   if (/calibrated|configured|defined|enforced/i.test(health)) return "steady";
@@ -1550,6 +1586,28 @@ function renderHouseMechanics() {
           <span>${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.revision)}</span>
         </div>
       </header>
+      <section class="insula-observation" aria-labelledby="insula-observation-title">
+        <header class="insula-observation-lead">
+          <div>
+            <span class="eyebrow">Insula</span>
+            <h3 id="insula-observation-title">Observation</h3>
+            <p>Request, tool, token, loss, and retention evidence owned by the Host.</p>
+          </div>
+          <div class="mechanics-snapshot-status" aria-label="Insula observation status">
+            <span data-tone="attention">${escapeHtml(HOUSE_INSULA_OBSERVATORY.connection)}</span>
+            <span>${escapeHtml(HOUSE_INSULA_OBSERVATORY.source)}</span>
+            <span>Captured ${escapeHtml(HOUSE_INSULA_OBSERVATORY.capturedAt)}</span>
+          </div>
+        </header>
+        <div class="insula-observation-grid">
+          ${HOUSE_INSULA_OBSERVATORY.channels.map(channel => `
+            <article class="insula-observation-channel">
+              <span>${escapeHtml(channel.label)}</span>
+              <strong>${escapeHtml(channel.value)}</strong>
+              <p>${escapeHtml(channel.detail)}</p>
+            </article>`).join("")}
+        </div>
+      </section>
       <div class="mechanics-controls">
         <label class="mechanics-search">
           <span>Search every mechanism</span>
@@ -1907,6 +1965,82 @@ function houseSediment() {
   return [...memories, ...lessons].sort((left, right) => right.date.localeCompare(left.date));
 }
 
+function roomSediment(item) {
+  return [...(roomMemoryShelves[item.id] ?? [])]
+    .sort((left, right) => right.date.localeCompare(left.date))
+    .map(entry => ({
+      date: entry.date,
+      title: entry.title,
+      mark: "Memory",
+      detail: `#${entry.id} · ${entry.detail}`,
+      library: { owner: item.id, type: "memory", id: entry.id }
+    }));
+}
+
+function durableShelf(item) {
+  return item.kind === "house" ? houseSediment() : roomSediment(item);
+}
+
+function durableEntries(item) {
+  const terms = state.durableQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return durableShelf(item).filter(entry => {
+    if (item.kind === "house" && state.durableMark !== "all" && entry.mark !== state.durableMark) return false;
+    if (terms.length === 0) return true;
+    const haystack = `${durableDate(entry.date)} ${entry.date} ${entry.title} ${entry.mark} ${entry.detail}`.toLowerCase();
+    return terms.every(term => haystack.includes(term));
+  });
+}
+
+function durableStatusText(item) {
+  const total = durableShelf(item).length;
+  const shown = durableEntries(item).length;
+  return shown === total ? `${total} entries` : `${shown} of ${total} entries`;
+}
+
+function durableControls(item) {
+  const searchLabel = item.kind === "house" ? "Search memories and lessons" : `Search ${item.name} room memories`;
+  const marks = item.kind === "house"
+    ? `
+      <nav class="shelf-marks" aria-label="Shelf filter">
+        ${[["all", "All"], ["Memory", "Memories"], ["Lesson", "Lessons"]].map(([id, label]) => `
+          <button type="button" data-durable-mark="${id}" aria-pressed="${String(state.durableMark === id)}">${label}</button>`).join("")}
+      </nav>`
+    : "";
+  return `
+    <div class="shelf-controls">
+      <label class="shelf-search">
+        <span>${escapeHtml(searchLabel)}</span>
+        <input type="search" data-durable-search value="${escapeHtml(state.durableQuery)}" placeholder="Title, mark, #id, date…" autocomplete="off">
+      </label>
+      ${marks}
+      <span class="shelf-status" data-durable-status role="status">${escapeHtml(durableStatusText(item))}</span>
+    </div>`;
+}
+
+function renderDurableRows(item) {
+  const entries = durableEntries(item);
+  if (entries.length === 0) {
+    if (durableShelf(item).length === 0) {
+      return renderEmptyState(`No ${item.kind === "house" ? "shared shelf" : `${item.name} room`} memories available.`);
+    }
+    const subject = item.kind === "house" ? "shared shelves" : `${item.name} room record`;
+    return renderEmptyState(`No entries on the ${subject} match that search.`);
+  }
+  return entries.map(renderDurableEntry).join("");
+}
+
+function renderDurableResults() {
+  const item = conversations[state.activeId];
+  const results = timeline.querySelector("[data-durable-results]");
+  if (!results) return;
+  results.innerHTML = renderDurableRows(item);
+  const status = timeline.querySelector("[data-durable-status]");
+  if (status) status.textContent = durableStatusText(item);
+  timeline.querySelectorAll("[data-durable-mark]").forEach(button => {
+    button.setAttribute("aria-pressed", String(button.dataset.durableMark === state.durableMark));
+  });
+}
+
 function renderHouseSurface() {
   const views = {
     live: `
@@ -1920,7 +2054,8 @@ function renderHouseSurface() {
     durable: `
       <div class="specimen-stack house-record-stack">
         ${renderSpecimenLead("House record", "Memories & Lessons")}
-        ${houseSediment().map(renderDurableEntry).join("")}
+        ${durableControls(conversations.house)}
+        <div data-durable-results>${renderDurableRows(conversations.house)}</div>
       </div>`
   };
   timeline.innerHTML = views[state.activeView];
@@ -1929,20 +2064,11 @@ function renderHouseSurface() {
 }
 
 function renderRoomMemories(item) {
-  const memories = [...(roomMemoryShelves[item.id] ?? [])].sort((left, right) => right.date.localeCompare(left.date));
-  const entries = memories.length === 0
-    ? renderEmptyState(`No ${item.name} room memories available.`)
-    : memories.map(entry => renderDurableEntry({
-        date: entry.date,
-        title: entry.title,
-        mark: "Memory",
-        detail: `#${entry.id} · ${entry.detail}`,
-        library: { owner: item.id, type: "memory", id: entry.id }
-      })).join("");
   timeline.innerHTML = `
     <div class="specimen-stack">
       ${renderSpecimenLead("Room record", item.name)}
-      ${entries}
+      ${durableControls(item)}
+      <div data-durable-results>${renderDurableRows(item)}</div>
     </div>`;
   timeline.scrollTop = 0;
 }
@@ -2787,6 +2913,12 @@ timeline.addEventListener("click", event => {
     renderMechanicsResults();
     return;
   }
+  const durableMark = event.target.closest("[data-durable-mark]");
+  if (durableMark) {
+    state.durableMark = durableMark.dataset.durableMark;
+    renderDurableResults();
+    return;
+  }
   const subjectDoor = event.target.closest("[data-open-subject-view]");
   if (subjectDoor) {
     openSubjectView(subjectDoor.dataset.openSubjectView);
@@ -2840,10 +2972,16 @@ timeline.addEventListener("click", event => {
 });
 
 timeline.addEventListener("input", event => {
-  const search = event.target.closest("[data-mechanics-search]");
-  if (!search) return;
-  state.mechanicsQuery = search.value;
-  renderMechanicsResults();
+  const mechanicsSearch = event.target.closest("[data-mechanics-search]");
+  if (mechanicsSearch) {
+    state.mechanicsQuery = mechanicsSearch.value;
+    renderMechanicsResults();
+    return;
+  }
+  const shelfSearch = event.target.closest("[data-durable-search]");
+  if (!shelfSearch) return;
+  state.durableQuery = shelfSearch.value;
+  renderDurableResults();
 });
 
 timeline.addEventListener("keydown", event => {

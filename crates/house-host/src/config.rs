@@ -9,13 +9,13 @@ pub const KNOCK_AUTONOMY_ENV: &str = "ATHANOR_HOST_KNOCK_AUTONOMY";
 /// Host-owned autonomy for Hallway Knock coordination.
 ///
 /// Autonomy is a Host property, never a caller property: a bearer token grants
-/// access to this Host, not permission to make it act on its own. Absent or
-/// unset configuration means [`KnockAutonomy::Off`], so a default installation
-/// performs no autonomous claim.
+/// access to this Host, not permission to act as another room. Absent or unset
+/// configuration means [`KnockAutonomy::Claim`] for every room; an operator may
+/// explicitly set `ATHANOR_HOST_KNOCK_AUTONOMY=off` to disable autonomous claims.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum KnockAutonomy {
-    #[default]
     Off,
+    #[default]
     Claim,
 }
 
@@ -32,10 +32,11 @@ impl KnockAutonomy {
         }
     }
 
-    /// Absent configuration is off; present configuration must be exact.
+    /// Absent configuration enables bounded claims for every room; a present
+    /// value must still be exact so an attempted opt-out cannot fail silently.
     pub fn from_optional(value: Option<&str>) -> Result<Self, String> {
         match value {
-            None => Ok(Self::Off),
+            None => Ok(Self::Claim),
             Some(value) => Self::parse(value),
         }
     }
@@ -197,12 +198,12 @@ mod tests {
     use super::{KNOCK_AUTONOMY_ENV, KnockAutonomy};
 
     #[test]
-    fn absent_knock_autonomy_is_off_and_claims_nothing() {
+    fn absent_knock_autonomy_claims_for_every_room() {
         let autonomy = KnockAutonomy::from_optional(None).expect("absent autonomy is valid");
-        assert_eq!(autonomy, KnockAutonomy::Off);
+        assert_eq!(autonomy, KnockAutonomy::Claim);
         assert_eq!(autonomy, KnockAutonomy::default());
-        assert!(!autonomy.claims_enabled());
-        assert_eq!(autonomy.as_str(), "off");
+        assert!(autonomy.claims_enabled());
+        assert_eq!(autonomy.as_str(), "claim");
     }
 
     #[test]

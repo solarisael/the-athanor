@@ -1339,12 +1339,11 @@ fn knock_settle_command(message_id: &str) -> Value {
 }
 
 #[tokio::test]
-async fn default_host_refuses_knock_claim_and_settlement_before_touching_the_database() {
+async fn explicitly_disabled_host_refuses_knock_claim_and_settlement_before_database_access() {
     let root = TempDir::new().expect("tempdir");
     write_room_state(root.path());
-    // The default fixture is exactly a default installation: autonomy unset
-    // and no DATABASE_URL. A refusal (not a database failure) proves the
-    // authority gate runs before the Hallway pool is consulted at all.
+    // This fixture explicitly selects Off. A refusal (not a database failure)
+    // proves the authority gate runs before the Hallway pool is consulted.
     let host = start(root.path()).await;
     let mut socket = connect(&host).await;
 
@@ -1389,7 +1388,7 @@ async fn default_host_refuses_knock_claim_and_settlement_before_touching_the_dat
 }
 
 #[tokio::test]
-async fn enabling_claim_autonomy_restores_the_existing_bounded_knock_path() {
+async fn claim_autonomy_uses_the_existing_bounded_knock_path() {
     let root = TempDir::new().expect("tempdir");
     write_room_state(root.path());
     let mut configured = config(root.path());
@@ -1403,9 +1402,9 @@ async fn enabling_claim_autonomy_restores_the_existing_bounded_knock_path() {
     )
     .await;
     let response = receive(&mut socket).await;
-    // Opt-in restores the pre-existing behaviour exactly: the command reaches
-    // the Hallway pool check and fails there because this Host has no
-    // DATABASE_URL, rather than being refused by the authority gate.
+    // Claim mode reaches the pre-existing Hallway pool check and fails there
+    // because this Host has no DATABASE_URL, rather than being refused by the
+    // authority gate.
     assert_eq!(
         response["command_or_event_type"],
         HALLWAY_KNOCK_COMMAND_FAILED

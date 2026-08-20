@@ -1,5 +1,5 @@
 use athanor_substrate::{
-    IngestBatch, ObservationEvent, TraceScope, TrustedBinding, VitalsQuery,
+    INSULA_MAX_TRACE_ROWS, IngestBatch, ObservationEvent, TraceScope, TrustedBinding, VitalsQuery,
     derive_idempotency_key_v1, derive_semantic_hash_v1, ingest_batch, query_trace, query_vitals,
     run_retention,
 };
@@ -69,7 +69,7 @@ fn event(writer_id: Uuid, writer_sequence: i64) -> ObservationEvent {
         "providerRequestId": null,
         "idempotencyScope": "room_operation",
         "receiptKind": "test_receipt",
-        "receiptId": format!("receipt-{writer_sequence}"),
+        "receiptId": format!("receipt-{writer_id}-{writer_sequence}"),
         "dropCount": 0
     }))
     .expect("test observation must satisfy the strict public DTO")
@@ -196,7 +196,7 @@ async fn ingest_collapses_only_identical_cross_session_redelivery_and_reports_co
                 session_id: None,
             },
             &first.trace_id,
-            257,
+            INSULA_MAX_TRACE_ROWS + 1,
         )
         .await
         .is_err(),
@@ -233,25 +233,18 @@ async fn ingest_collapses_only_identical_cross_session_redelivery_and_reports_co
     semantic_conflict.event_id = Uuid::new_v4().to_string();
     semantic_conflict.writer_id = Uuid::new_v4().to_string();
     semantic_conflict.writer_sequence = 1;
-    semantic_conflict.drop_count = 1;
-    semantic_conflict.semantic_hash = derive_semantic_hash_v1(&second_binding, &semantic_conflict)
-        .expect("conflict semantic hash");
-    semantic_conflict.idempotency_key = redelivery.idempotency_key.clone();
+    semantic_conflict.duration_us = Some(101);
 
+    // Ingest re-derives keys and hashes server-side, so corruption means a
+    // reused transport identity carrying different logical content, never a
+    // hand-mangled key.
     let mut event_id_corruption = first.clone();
-    event_id_corruption.idempotency_key =
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into();
-    event_id_corruption.semantic_hash =
-        derive_semantic_hash_v1(&first_binding, &event_id_corruption)
-            .expect("event-id corruption semantic hash");
+    event_id_corruption.writer_id = Uuid::new_v4().to_string();
+    event_id_corruption.receipt_id = Some("receipt-eventid-corruption".into());
 
     let mut writer_sequence_corruption = first.clone();
     writer_sequence_corruption.event_id = Uuid::new_v4().to_string();
-    writer_sequence_corruption.idempotency_key =
-        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into();
-    writer_sequence_corruption.semantic_hash =
-        derive_semantic_hash_v1(&first_binding, &writer_sequence_corruption)
-            .expect("writer-sequence corruption semantic hash");
+    writer_sequence_corruption.receipt_id = Some("receipt-writerseq-corruption".into());
 
     let conflicts = ingest_batch(
         &pool,

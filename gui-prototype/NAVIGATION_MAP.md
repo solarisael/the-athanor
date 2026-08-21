@@ -113,7 +113,8 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 | durable views | `renderRoomMemories`, `renderHallwayRecordView`, `renderDurableEntry`, `durableControls`, `durableEntries`, `renderDurableResults` |
 | switcher | `openSwitcher`, `closeSwitcher`, `executeSwitcherCommand`, `switcherCommandRegistry` |
 | Hallway Bell | `renderBellToggle`, `renderHallwayInbox`, `openBell`, `closeBell`, `routeHallwayInbox`, `acknowledgeHallwayThread` |
-| House mechanics | `openHouseMechanics`, `renderHouseMechanics`, `mechanicsEntries`, `renderMechanicsResults` |
+| House mechanics | `mechanics.js` — `openHouseMechanics` (shell door), `renderHouseMechanics`, `mechanicsEntries`, `renderMechanicsResults`, `handleMechanicsClick`, `handleMechanicsInput` |
+| Insula Pulse | `pulse.js` — `renderHousePulse`, `queryPulseHost` via `ensurePulseQueried` (slot waists) and `handlePulseClick` (Query Host) |
 | composer | `updateComposerState`, `composerBlockReason`, `beginLocalResponse` |
 
 ## Keyboard doors

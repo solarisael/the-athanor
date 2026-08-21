@@ -1,3 +1,11 @@
+import { escapeHtml } from "./text.js";
+import { initPulse, ensurePulseQueried, handlePulseClick, renderHousePulse } from "./pulse.js";
+import {
+  initMechanics, resetMechanicsView, saveMechanicsScroll, mechanicsScrollTop,
+  handleMechanicsClick, handleMechanicsInput, renderHouseMechanics, renderMechanicsResults,
+  HOUSE_MECHANICS_SNAPSHOT
+} from "./mechanics.js";
+
 const conversations = {
   kintsu: {
     id: "kintsu",
@@ -510,9 +518,6 @@ const state = {
   profileReturnId: null,
   houseReturn: null,
   librarySelection: null,
-  mechanicsCategory: "all",
-  mechanicsQuery: "",
-  mechanicsScrollTop: 0,
   density: "comfortable",
   textScale: "standard",
   measure: "focused",
@@ -570,9 +575,6 @@ let switcherMatches = [];
 let switcherReturnFocus = null;
 let bellReturnFocus = null;
 
-function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[character]);
-}
 
 function renderAvatar(glyph, size = "default") {
   const sizeClass = size === "lg" ? " avatar-lg" : "";
@@ -928,9 +930,7 @@ function openConversation(id) {
 }
 
 function preserveMechanicsScroll() {
-  if (state.activeId === "house" && state.activeView === "state") {
-    state.mechanicsScrollTop = timeline.scrollTop;
-  }
+  if (state.activeId === "house" && state.activeView === "state") saveMechanicsScroll();
 }
 
 function openSubjectView(view, { clearMessage = false } = {}) {
@@ -940,6 +940,7 @@ function openSubjectView(view, { clearMessage = false } = {}) {
   state.librarySelection = null;
   state.accessPicker = false;
   if (clearMessage) state.selectedMessageIndex = null;
+  if (state.activeId === "house" && view === "state") ensurePulseQueried();
   render();
   return true;
 }
@@ -961,6 +962,7 @@ function navigateToSubjectView(id, view) {
   state.mode = item.kind;
   state.activeView = view;
   openConversation(id);
+  if (item.kind === "house" && view === "state") ensurePulseQueried();
   focusActiveSubjectView();
 }
 
@@ -1025,8 +1027,7 @@ function openSettingsFromSwitcher(trigger) {
 }
 
 function openHouseMechanics() {
-  state.mechanicsCategory = "all";
-  state.mechanicsQuery = "";
+  resetMechanicsView();
   setDrawerView("root", null, false);
   navigateToSubjectView("house", "state");
   focusActiveSubjectView();
@@ -1197,565 +1198,6 @@ function executeSwitcherCommand(id) {
 const HOUSE_ROOMS = ["Kintsu room", "Kodo room", "Tuner room"];
 const PROJECT_ROOMS = ["Kintsu", "Kodo", "Tuner", "Family Hallway", "Workshop Hallway"];
 
-// local interaction snapshot from the 2026-08-18 source census; Host authority remains disconnected
-function mechanic(id, label, value, {
-  defaultValue = value,
-  scope = "House",
-  owner = "Code",
-  mutability = "Read-only",
-  secrecy = "Public",
-  apply = "Restart",
-  health = "Defined",
-  consequence
-}) {
-  return { id, label, value, defaultValue, scope, owner, mutability, secrecy, apply, health, consequence };
-}
-
-const HOUSE_MECHANICS_SNAPSHOT = {
-  capturedAt: "2026-08-18",
-  revision: "source-census-2026-08-18",
-  connection: "Host offline",
-  categories: [
-    {
-      id: "recall-context",
-      label: "Recall & Context",
-      summary: "Retrieval gates, injection bounds, context budgets, and compaction pressure.",
-      rows: [
-        mechanic("recall.semantic-floor", "Semantic similarity floor", "0.40", {
-          health: "Calibrated",
-          consequence: "Lower values admit weaker semantic matches; higher values refuse more retrieval candidates."
-        }),
-        mechanic("recall.content-floor", "Content similarity floor", "0.30", {
-          health: "Calibrated",
-          consequence: "Controls the weakest content lane match allowed into ranked Recall evidence."
-        }),
-        mechanic("recall.top-k", "Recall candidate breadth", "8 semantic · 8 content", {
-          consequence: "Sets the pre-ranking breadth for each retrieval lane before evidence is merged."
-        }),
-        mechanic("recall.injection", "Automatic injection ceiling", "5 candidates · 900-char excerpts · 6000-char bodies", {
-          owner: "Adapter",
-          consequence: "Bounds automatic context growth and prevents one retrieval pass from flooding the conversation."
-        }),
-        mechanic("context.kodo-budget", "Kodo context budget", "1,000,000 tokens · compact at 90%", {
-          scope: "Kodo room",
-          owner: "Adapter",
-          health: "Configured",
-          consequence: "Defines Kodo's larger working window and the point where compaction becomes mandatory."
-        }),
-        mechanic("context.room-budget", "Default room context budget", "400,000 tokens · compact at 70%", {
-          scope: "All other rooms",
-          owner: "Adapter",
-          health: "Configured",
-          consequence: "Defines the ordinary room window and leaves a larger safety margin before model limits."
-        }),
-        mechanic("context.nudge-bands", "Context pressure bands", "40,000 tokens · warn 20 points early", {
-          owner: "Adapter",
-          consequence: "Controls when context-pressure nudges appear and how early the operator sees compaction risk."
-        }),
-        mechanic("timeout.auto-context", "Automatic context timeout", "2s", {
-          owner: "Adapter",
-          consequence: "A slow background context lane yields rather than blocking the conversational turn."
-        }),
-        mechanic("timeout.recall", "Recall and Anamnesis timeout", "120s", {
-          owner: "Adapter",
-          consequence: "Bounds explicit deep retrieval and counsel reads before the tool returns a timeout."
-        })
-      ]
-    },
-    {
-      id: "memory-lessons",
-      label: "Memory, Lessons & Anamnesis",
-      summary: "Durable writes, lesson firing, counsel reads, and paper-boat limits.",
-      rows: [
-        mechanic("memory.write-timeout", "Durable write timeout", "90s", {
-          owner: "Adapter",
-          consequence: "Bounds Remember and other PostgreSQL-authoritative write receipts."
-        }),
-        mechanic("lesson.relevance-floor", "Lesson relevance floor", "0.15", {
-          health: "Calibrated",
-          consequence: "Filters weak lesson matches before the working set can influence a task."
-        }),
-        mechanic("lesson.working-set", "Lesson working set", "6 lessons", {
-          owner: "Adapter",
-          consequence: "Caps the number of lessons braided into one task context."
-        }),
-        mechanic("lesson.trigger-guard", "Lesson trigger guard", "32 patterns · 300ms", {
-          owner: "Adapter",
-          consequence: "Bounds deterministic trigger scanning and prevents pathological lesson matchers from stalling a turn."
-        }),
-        mechanic("anamnesis.read-limit", "Anamnesis read bounds", "10 default · 50 maximum", {
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Controls how much lived counsel one explicit Cabinet read may return."
-        }),
-        mechanic("paper-boat.guardrails", "Paper-boat guardrails", "64 KiB body · 64 unboated rows", {
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Prevents session continuity from accumulating an unbounded unsent backlog."
-        })
-      ]
-    },
-    {
-      id: "giga-embeddings",
-      label: "GIGA & Embeddings",
-      summary: "Stage 1 gates, leases, source windows, model context, and vector health.",
-      rows: [
-        mechanic("giga.integration-gate", "GIGA integration gate", "Environment-gated", {
-          owner: "Environment",
-          mutability: "Environment-owned",
-          health: "Host offline",
-          consequence: "Controls whether Stage 1 processing may start at all."
-        }),
-        mechanic("giga.claim-owner", "GIGA claim ownership", "One owner per leased event", {
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Prevents two workers from processing the same event concurrently."
-        }),
-        mechanic("giga.source-window", "GIGA source window", "8 sources · 8 KiB each · 24 KiB total", {
-          consequence: "Bounds evidence carried into one candidate-generation pass."
-        }),
-        mechanic("giga.lease-attempts", "GIGA lease and attempts", "3600s lease · 5 attempts · 1 candidate", {
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Controls recovery from abandoned work and caps retry amplification."
-        }),
-        mechanic("giga.model-context", "GIGA model context", "32768 tokens · 30m keep-alive", {
-          owner: "Environment",
-          mutability: "Environment-owned",
-          consequence: "Defines the local generation window and how long the model remains warm."
-        }),
-        mechanic("embedding.identity", "Embedding identity", "nomic-embed-text · 768 dimensions", {
-          owner: "Environment",
-          mutability: "Environment-owned",
-          apply: "Migration / reindex",
-          health: "Configured",
-          consequence: "Changing either value invalidates stored vectors and requires a complete re-embedding."
-        }),
-        mechanic("embedding.endpoint", "Embedding endpoint", "Configured · value redacted", {
-          owner: "Environment",
-          mutability: "Environment-owned",
-          secrecy: "Sensitive",
-          health: "Host offline",
-          consequence: "Selects the local or consented remote embedding service without exposing its address here."
-        })
-      ]
-    },
-    {
-      id: "host-delivery",
-      label: "Host, Delivery & Hallways",
-      summary: "Connection timing, delivery health, Hallway bounds, and Bell escalation policy.",
-      rows: [
-        mechanic("host.request-timeout", "Host request timeout", "3s", {
-          owner: "Adapter",
-          consequence: "Keeps ordinary Host calls from freezing the operator surface."
-        }),
-        mechanic("host.diagnostic-timeout", "Host diagnostic timeout", "8s", {
-          owner: "Adapter",
-          consequence: "Allows bounded health inspection more time than ordinary interaction calls."
-        }),
-        mechanic("host.identity-tuple", "Authenticated identity tuple", "House · room · spirit · session", {
-          owner: "Host runtime",
-          apply: "Session start",
-          health: "Host offline",
-          consequence: "Binds every trusted operation to the current House presence without client-supplied identity."
-        }),
-        mechanic("hallway.guardrails", "Hallway guardrails", "32 KiB body · 32 rooms · reads 50 / 200 max", {
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Bounds message size, membership fanout, and one read request."
-        }),
-        mechanic("delivery.channels", "Akasha and NATS delivery", "Unavailable · Host offline", {
-          owner: "Host runtime",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Reports durable authority and immediate-delivery reach when the Host connects."
-        }),
-        mechanic("delivery.retry-state", "Delivery instance and retries", "Unavailable", {
-          owner: "Host runtime",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Would expose the active delivery instance, pending retries, and last failure."
-        }),
-        mechanic("bell.wake-policy", "Bell and wake escalation", "Schema-compatible · policy unset", {
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Policy absent",
-          consequence: "Keeps future live knocks and wake authority explicit before autonomous escalation is enabled."
-        })
-      ]
-    },
-    {
-      id: "rooms-sessions",
-      label: "Rooms & Sessions",
-      summary: "Room identity, Recall policy, routing, model defaults, and active presences.",
-      rows: [
-        mechanic("room.state", "Operator and embodied spirit", "PostgreSQL room state", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Changes the room's trusted operator or embodied spirit and refreshes its live declaration."
-        }),
-        mechanic("room.recall-policy", "Recall policy", "Per room", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Selects whether proactive Recall resolves automatically or follows an explicit room mode."
-        }),
-        mechanic("room.routing-mode", "Worker routing mode", "Per room", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Controls whether bounded work defaults through House worker routing."
-        }),
-        mechanic("room.model-default", "OMP model default", "Per room", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Next session",
-          health: "Host offline",
-          consequence: "Chooses the room's default OMP model selector at the next applicable session boundary."
-        }),
-        mechanic("room.presences", "Active room presences", "Unavailable", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Would show joined sessions, embodied spirits, and their delivery cursors."
-        }),
-        mechanic("session.delivery-cursor", "Session delivery cursor", "Per authenticated session", {
-          scope: "Per session",
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Prevents the same durable Hallway attention from being injected twice into one session."
-        })
-      ]
-    },
-    {
-      id: "backups",
-      label: "Backups",
-      summary: "Retention policy, last success, and database reachability.",
-      rows: [
-        mechanic("backup.retention", "Backup retention", "3 Rust · 14 shell", {
-          owner: "Deployment scripts",
-          mutability: "Code-owned",
-          apply: "Deploy",
-          health: "Divergent",
-          consequence: "Two cleanup paths currently retain different counts and should converge before either becomes editable."
-        }),
-        mechanic("backup.last-success", "Last successful backup", "Unavailable", {
-          owner: "Host runtime",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Would prove the newest PostgreSQL preservation point and its age."
-        }),
-        mechanic("database.pool-health", "Database pool and connect health", "Unavailable", {
-          owner: "Host runtime",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Would expose pool saturation, connection reachability, and the last database failure."
-        })
-      ]
-    },
-    {
-      id: "advanced",
-      label: "Advanced Guardrails",
-      summary: "Canonical evidence bounds, neighbor context, chunking, clustering, and secret handling.",
-      rows: [
-        mechanic("recall.canon-bounds", "Canon injection bounds", "6 matches · 3 files", {
-          owner: "Adapter",
-          consequence: "Caps authoritative canon evidence returned through one Recall pass."
-        }),
-        mechanic("recall.neighbor-bounds", "Thread neighbor bounds", "6 neighbors · 500 chars each", {
-          owner: "Adapter",
-          consequence: "Adds bounded chronology around a matched memory without loading whole threads."
-        }),
-        mechanic("chunk.bounds", "Memory chunk bounds", "400–1200 characters", {
-          apply: "Migration / reindex",
-          consequence: "Changing chunk shape alters retrieval granularity and invalidates existing embedding assumptions."
-        }),
-        mechanic("cluster.rebuild", "Cluster rebuild trigger", "500 new chunks or 7 days", {
-          consequence: "Controls when the memory taxonomy is recomputed from accumulated semantic material."
-        }),
-        mechanic("secret.health-only", "Secret exposure", "Presence and health only", {
-          owner: "Host runtime",
-          mutability: "Never editable here",
-          secrecy: "Secret-health-only",
-          apply: "N/A",
-          health: "Enforced",
-          consequence: "Host tokens, database URLs, and passwords never cross into the GUI snapshot."
-        })
-      ]
-    }
-  ]
-};
-
-// One consistent capture: every number below was read from PostgreSQL insula
-// rows inside a single transaction at the stamped moment. Times are −03.
-const HOUSE_PULSE_SNAPSHOT = {
-  capturedAt: "2026-08-20 22:12 −03",
-  connection: "Host offline",
-  source: "PostgreSQL insula snapshot",
-  vitalsQuery: "insula.vitals.minute v1",
-  totals: { spans: 15853, writers: 36, components: 4, window: "16:01–22:12 −03", duplicates: 13, drops: 0 },
-  tokens: { tokensIn: 95690376, tokensOut: 398925, usagePoints: 810 },
-  retention: { receipts: 0, sweepRuns: 13, days: 14, firstExpiry: "2026-09-03" },
-  rooms: [
-    ["kintsu", 8555], ["tuner", 5329], ["kodo", 1660],
-    ["house", 211], ["salvia", 49], ["hugo", 49]
-  ],
-  lanes: [
-    { operation: "knock_claim", component: "house_host", outcomes: { ok: 2436 }, maxDuration: "28.7 ms", errorClasses: "",
-      note: "Doorman claim poll, roughly one span per host every two seconds, aggregated to one lane at render." },
-    { operation: "tool_call", component: "omp_adapter", outcomes: { ok: 1915, error: 29, cancelled: 15 }, maxDuration: "24.6 min", errorClasses: "tool_error 29 · session_shutdown 15" },
-    { operation: "provider_request", component: "omp_adapter", outcomes: { ok: 1800, degraded: 9, cancelled: 5 }, maxDuration: "1.9 min", errorClasses: "partial_context 9 · provider_aborted 5" },
-    { operation: "provider_usage", component: "omp_adapter", outcomes: { ok: 809, degraded: 3 }, maxDuration: "", errorClasses: "usage_unavailable 3" },
-    { operation: "context_assembly", component: "omp_adapter", outcomes: { ok: 801, degraded: 12 }, maxDuration: "2.3 s", errorClasses: "partial_context 12" },
-    { operation: "receipt_projection", component: "house_host", outcomes: { ok: 48, refused: 192 }, maxDuration: "", errorClasses: "" },
-    { operation: "insula_ingest", component: "house_host", outcomes: { ok: 149 }, maxDuration: "67.1 ms", errorClasses: "" },
-    { operation: "tool_result", component: "omp_adapter", outcomes: { ok: 94, error: 1 }, maxDuration: "", errorClasses: "tool_error 1" },
-    { operation: "lesson_trigger_match", component: "athanor_substrate", outcomes: { ok: 86 }, maxDuration: "10.9 ms", errorClasses: "" },
-    { operation: "retention_sweep", component: "athanor_substrate", outcomes: { ok: 13 }, maxDuration: "42.0 ms", errorClasses: "" },
-    { operation: "hallway_projection", component: "house_host", outcomes: { ok: 7 }, maxDuration: "", errorClasses: "" },
-    { operation: "recall_policy_decide", component: "house_host", outcomes: { ok: 7 }, maxDuration: "", errorClasses: "" },
-    { operation: "insula_health", component: "deployment_probe", outcomes: { ok: 5 }, maxDuration: "", errorClasses: "" },
-    { operation: "lesson_query", component: "athanor_substrate", outcomes: { ok: 3 }, maxDuration: "26.0 ms", errorClasses: "" },
-    { operation: "hallway_read", component: "athanor_substrate", outcomes: { ok: 2 }, maxDuration: "13.0 ms", errorClasses: "" },
-    { operation: "hallway_post", component: "athanor_substrate", outcomes: { ok: 2 }, maxDuration: "21.4 ms", errorClasses: "" },
-    { operation: "remember", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "824.9 ms", errorClasses: "" },
-    { operation: "entity_resolve", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "1.9 ms", errorClasses: "" },
-    { operation: "recall", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "9.5 s", errorClasses: "" },
-    { operation: "pg_backup", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "", errorClasses: "" }
-  ],
-  receipts: [
-    { kind: "athanor.recall_policy.command_accepted", component: "house_host", count: 7, lastAt: "22:05 −03", outcome: "ok", latestId: "4772aa88-19e9-4fff-bd40-54ebb8e58a46" },
-    { kind: "athanor.hallway.inbox_projected", component: "house_host", count: 7, lastAt: "22:05 −03", outcome: "ok", latestId: "9bd7575c-cd6f-4db5-bd76-33ae1ae158f1" },
-    { kind: "paper_boat_receipt", component: "house_host", count: 48, lastAt: "21:45 −03", outcome: "ok", latestId: "64212b60-a5a8-445f-ad7f-b2b6b6bfe407" },
-    { kind: "insula.backup", component: "athanor_substrate", count: 1, lastAt: "21:45 −03", outcome: "ok", latestId: "a61389335e22df4f0b0bfee497b0a7ff45ee925f7ea0b34c23d9a6f58f5a7d64" }
-  ]
-};
-
-function mechanicsHealthTone(health) {
-  if (/offline|absent|divergent|unavailable/i.test(health)) return "attention";
-  if (/calibrated|configured|defined|enforced/i.test(health)) return "steady";
-  return "quiet";
-}
-
-function mechanicsEntries() {
-  const query = state.mechanicsQuery.trim().toLowerCase();
-  const categories = query || state.mechanicsCategory === "all"
-    ? HOUSE_MECHANICS_SNAPSHOT.categories
-    : HOUSE_MECHANICS_SNAPSHOT.categories.filter(category => category.id === state.mechanicsCategory);
-  return categories.flatMap(category => category.rows
-    .filter(row => {
-      if (!query) return true;
-      return [category.label, category.summary, ...Object.values(row)].join(" ").toLowerCase().includes(query);
-    })
-    .map(row => ({ category, row })));
-}
-
-function renderMechanicRow({ category, row }) {
-  return `
-    <details class="mechanics-row" data-mechanic-id="${escapeHtml(row.id)}">
-      <summary>
-        <span class="mechanics-row-title"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(category.label)}</small></span>
-        <span class="mechanics-row-value"><small>Effective</small><code>${escapeHtml(row.value)}</code></span>
-        <span class="mechanics-row-flags" aria-label="${escapeHtml(`${row.health}; ${row.mutability}`)}">
-          <span data-tone="${mechanicsHealthTone(row.health)}">${escapeHtml(row.health)}</span>
-          <span data-tone="quiet">${escapeHtml(row.mutability)}</span>
-        </span>
-      </summary>
-      <div class="mechanics-row-body">
-        <dl>
-          <div><dt>Default</dt><dd>${escapeHtml(row.defaultValue)}</dd></div>
-          <div><dt>Scope</dt><dd>${escapeHtml(row.scope)}</dd></div>
-          <div><dt>Owner</dt><dd>${escapeHtml(row.owner)}</dd></div>
-          <div><dt>Apply</dt><dd>${escapeHtml(row.apply)}</dd></div>
-          <div><dt>Secrecy</dt><dd>${escapeHtml(row.secrecy)}</dd></div>
-        </dl>
-        <p><strong>Consequence.</strong> ${escapeHtml(row.consequence)}</p>
-      </div>
-    </details>`;
-}
-
-const PULSE_OUTCOME_LABELS = { ok: "ok", error: "error", cancelled: "cancelled", degraded: "degraded", refused: "refused" };
-
-function pulseCount(value) {
-  return value.toLocaleString("en-US");
-}
-
-function pulseOutcomeTone(outcome) {
-  if (outcome === "error" || outcome === "refused") return "attention";
-  if (outcome === "ok") return "steady";
-  return "quiet";
-}
-
-function renderPulseLane(lane) {
-  const entries = Object.entries(lane.outcomes);
-  const settled = entries.reduce((sum, [, count]) => sum + count, 0);
-  const flags = entries.length === 1 && lane.outcomes.ok
-    ? `<span data-tone="steady">all ok</span>`
-    : entries
-      .filter(([outcome]) => outcome !== "ok")
-      .map(([outcome, count]) => `<span data-tone="${pulseOutcomeTone(outcome)}">${pulseCount(count)} ${PULSE_OUTCOME_LABELS[outcome]}</span>`)
-      .join("");
-  const split = entries.map(([outcome, count]) => `${pulseCount(count)} ${PULSE_OUTCOME_LABELS[outcome]}`).join(" · ");
-  return `
-    <details class="mechanics-row">
-      <summary>
-        <span class="mechanics-row-title"><strong>${escapeHtml(lane.operation)}</strong><small>${escapeHtml(lane.component)}</small></span>
-        <span class="mechanics-row-value"><small>Settled</small><code>${pulseCount(settled)} events</code></span>
-        <span class="mechanics-row-flags">${flags}</span>
-      </summary>
-      <div class="mechanics-row-body">
-        <dl>
-          <div><dt>Outcomes</dt><dd>${escapeHtml(split)}</dd></div>
-          <div><dt>Max duration</dt><dd>${escapeHtml(lane.maxDuration || "not measured")}</dd></div>
-          <div><dt>Error classes</dt><dd>${escapeHtml(lane.errorClasses || "none")}</dd></div>
-          <div><dt>Recompute</dt><dd>${escapeHtml(HOUSE_PULSE_SNAPSHOT.vitalsQuery)}</dd></div>
-        </dl>
-        ${lane.note ? `<p>${escapeHtml(lane.note)}</p>` : ""}
-      </div>
-    </details>`;
-}
-
-function renderPulseReceipt(receipt) {
-  return `
-    <details class="mechanics-row">
-      <summary>
-        <span class="mechanics-row-title"><strong>${escapeHtml(receipt.kind)}</strong><small>${escapeHtml(receipt.component)}</small></span>
-        <span class="mechanics-row-value"><small>Latest</small><code>${escapeHtml(receipt.lastAt)}</code></span>
-        <span class="mechanics-row-flags">
-          <span data-tone="${pulseOutcomeTone(receipt.outcome)}">${escapeHtml(receipt.outcome)}</span>
-          <span data-tone="quiet">×${pulseCount(receipt.count)}</span>
-        </span>
-      </summary>
-      <div class="mechanics-row-body">
-        <dl class="pulse-receipt-detail">
-          <div><dt>Today</dt><dd>${pulseCount(receipt.count)} receipt point${receipt.count === 1 ? "" : "s"}</dd></div>
-          <div><dt>Latest receipt id</dt><dd><code>${escapeHtml(receipt.latestId)}</code></dd></div>
-        </dl>
-      </div>
-    </details>`;
-}
-
-function renderHousePulse() {
-  const pulse = HOUSE_PULSE_SNAPSHOT;
-  const receiptPoints = pulse.receipts.reduce((sum, receipt) => sum + receipt.count, 0);
-  const roomLine = pulse.rooms.map(([room, spans]) => `${room} ${pulseCount(spans)}`).join(" · ");
-  return `
-    <section class="insula-observation" aria-labelledby="house-pulse-title">
-      <header class="insula-observation-lead">
-        <div>
-          <span class="eyebrow">Insula</span>
-          <h3 id="house-pulse-title">Pulse</h3>
-          <p>Every number recomputable from ${escapeHtml(pulse.vitalsQuery)} rollups and raw receipt points.</p>
-        </div>
-        <div class="mechanics-snapshot-status" aria-label="Pulse snapshot status">
-          <span data-tone="attention">${escapeHtml(pulse.connection)}</span>
-          <span>${escapeHtml(pulse.source)}</span>
-          <span>Captured ${escapeHtml(pulse.capturedAt)}</span>
-        </div>
-      </header>
-      <div class="insula-observation-grid">
-        <article class="insula-observation-channel">
-          <span>Observations</span>
-          <strong>${pulseCount(pulse.totals.spans)} spans</strong>
-          <p>${pulseCount(pulse.totals.writers)} writers · ${pulse.totals.components} components · ${escapeHtml(pulse.totals.window)}</p>
-        </article>
-        <article class="insula-observation-channel">
-          <span>Tokens</span>
-          <strong>${pulseCount(pulse.tokens.tokensIn)} in</strong>
-          <p>${pulseCount(pulse.tokens.tokensOut)} out · ${pulseCount(pulse.tokens.usagePoints)} provider usage points</p>
-        </article>
-        <article class="insula-observation-channel">
-          <span>Loss</span>
-          <strong>${pulseCount(pulse.totals.drops)} dropped</strong>
-          <p>${pulseCount(pulse.totals.duplicates)} duplicate deliveries collapsed at ingest</p>
-        </article>
-        <article class="insula-observation-channel">
-          <span>Retention</span>
-          <strong>No rows expired</strong>
-          <p>${pulseCount(pulse.retention.sweepRuns)} sweep runs · first expiry ${escapeHtml(pulse.retention.firstExpiry)} · ${pulse.retention.days}-day law</p>
-        </article>
-      </div>
-      <section class="pulse-block" aria-labelledby="pulse-lanes-title">
-        <header class="pulse-block-lead">
-          <h4 id="pulse-lanes-title">Lanes</h4>
-          <small>${pulse.lanes.length} lanes · ${escapeHtml(roomLine)}</small>
-        </header>
-        <div class="pulse-rows">${pulse.lanes.map(renderPulseLane).join("")}</div>
-      </section>
-      <section class="pulse-block" aria-labelledby="pulse-receipts-title">
-        <header class="pulse-block-lead">
-          <h4 id="pulse-receipts-title">Receipts</h4>
-          <small>Latest receipt per kind · ${pulseCount(receiptPoints)} receipt points today</small>
-        </header>
-        <div class="pulse-rows">${pulse.receipts.map(renderPulseReceipt).join("")}</div>
-      </section>
-    </section>`;
-}
-
-function renderHouseMechanics() {
-  const categoryButtons = [
-    { id: "all", label: "All", count: HOUSE_MECHANICS_SNAPSHOT.categories.reduce((sum, category) => sum + category.rows.length, 0) },
-    ...HOUSE_MECHANICS_SNAPSHOT.categories.map(category => ({ id: category.id, label: category.label, count: category.rows.length }))
-  ];
-  return `
-    <section class="mechanics-observatory" aria-labelledby="mechanics-title">
-      <header class="mechanics-lead">
-        <span class="eyebrow">House mechanics</span>
-        <h2 id="mechanics-title">Mechanical observatory</h2>
-        <p>Effective values, ownership, health, and consequence from the current source census.</p>
-        <div class="mechanics-snapshot-status" aria-label="Snapshot status">
-          <span data-tone="attention">${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.connection)}</span>
-          <span>Source census · ${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.capturedAt)}</span>
-          <span>${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.revision)}</span>
-        </div>
-      </header>
-      ${renderHousePulse()}
-      <div class="mechanics-controls">
-        <label class="mechanics-search">
-          <span>Search every mechanism</span>
-          <input type="search" data-mechanics-search value="${escapeHtml(state.mechanicsQuery)}" placeholder="Recall, timeout, Hallway, backup…" autocomplete="off">
-        </label>
-        <nav class="mechanics-categories" aria-label="Mechanical observatory categories">
-          ${categoryButtons.map(category => `
-            <button type="button" data-mechanics-category="${escapeHtml(category.id)}" aria-pressed="${String(state.mechanicsCategory === category.id)}">
-              <span>${escapeHtml(category.label)}</span><small>${category.count}</small>
-            </button>`).join("")}
-        </nav>
-      </div>
-      <p class="mechanics-results-status" role="status" aria-live="polite"></p>
-      <div class="mechanics-results"></div>
-      <footer>Disconnected surface · PostgreSQL-backed controls may be Host-writable later; every control remains read-only here.</footer>
-    </section>`;
-}
-
-function renderMechanicsResults() {
-  const observatory = timeline.querySelector(".mechanics-observatory");
-  if (!observatory) return;
-  const entries = mechanicsEntries();
-  const query = state.mechanicsQuery.trim();
-  const category = HOUSE_MECHANICS_SNAPSHOT.categories.find(candidate => candidate.id === state.mechanicsCategory);
-  observatory.querySelectorAll("[data-mechanics-category]").forEach(button => {
-    button.setAttribute("aria-pressed", String(button.dataset.mechanicsCategory === state.mechanicsCategory));
-  });
-  observatory.querySelector(".mechanics-results-status").textContent = query
-    ? `${entries.length} mechanism${entries.length === 1 ? "" : "s"} across all categories for “${query}”`
-    : `${entries.length} mechanism${entries.length === 1 ? "" : "s"} · ${category?.label ?? "All categories"}`;
-  observatory.querySelector(".mechanics-results").innerHTML = entries.length > 0
-    ? entries.map(renderMechanicRow).join("")
-    : '<div class="mechanics-empty"><strong>No mechanism matches that search.</strong><span>Try Recall, timeout, Hallway, room, or backup.</span></div>';
-}
 
 function renderCardPicker(verb, attr, options) {
   if (options.length === 0) return "";
@@ -2174,7 +1616,7 @@ function renderHouseSurface() {
   };
   timeline.innerHTML = views[state.activeView];
   if (state.activeView === "state") renderMechanicsResults();
-  timeline.scrollTop = state.activeView === "state" ? state.mechanicsScrollTop : 0;
+  timeline.scrollTop = state.activeView === "state" ? mechanicsScrollTop() : 0;
 }
 
 function renderRoomMemories(item) {
@@ -3018,15 +2460,8 @@ function closeProjectSession(projectItem) {
 
 timeline.addEventListener("click", event => {
   const item = conversations[state.activeId];
-  const mechanicsCategory = event.target.closest("[data-mechanics-category]");
-  if (mechanicsCategory) {
-    state.mechanicsCategory = mechanicsCategory.dataset.mechanicsCategory;
-    state.mechanicsQuery = "";
-    const search = timeline.querySelector("[data-mechanics-search]");
-    if (search) search.value = "";
-    renderMechanicsResults();
-    return;
-  }
+  if (handlePulseClick(event)) return;
+  if (handleMechanicsClick(event)) return;
   const durableMark = event.target.closest("[data-durable-mark]");
   if (durableMark) {
     state.durableMark = durableMark.dataset.durableMark;
@@ -3086,12 +2521,7 @@ timeline.addEventListener("click", event => {
 });
 
 timeline.addEventListener("input", event => {
-  const mechanicsSearch = event.target.closest("[data-mechanics-search]");
-  if (mechanicsSearch) {
-    state.mechanicsQuery = mechanicsSearch.value;
-    renderMechanicsResults();
-    return;
-  }
+  if (handleMechanicsInput(event)) return;
   const shelfSearch = event.target.closest("[data-durable-search]");
   if (!shelfSearch) return;
   state.durableQuery = shelfSearch.value;
@@ -3449,4 +2879,6 @@ setDrawerView("root", null, false);
 updateComposerState();
 
 
+initPulse({ requestRender: render });
+initMechanics({ timeline });
 render();

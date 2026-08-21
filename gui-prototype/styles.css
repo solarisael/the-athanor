@@ -3319,6 +3319,19 @@ input:focus-visible {
   border-top: 1px solid var(--bd-section);
 }
 
+.pulse-status {
+  display: grid;
+  justify-items: end;
+
+  gap: 8px;
+}
+
+.pulse-status .mechanics-snapshot-status {
+  justify-content: flex-end;
+
+  margin-top: 0;
+}
+
 .mechanics-row-body dl.pulse-receipt-detail {
   grid-template-columns: minmax(0, 0.35fr) minmax(0, 1fr);
 }

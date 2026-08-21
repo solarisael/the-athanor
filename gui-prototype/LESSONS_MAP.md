@@ -16,13 +16,19 @@ The prototype exists to answer interaction questions while they are still cheap:
 - Which information must remain visible while the center instrument changes?
 - How do drawers, focus, keyboard movement, density, and responsive geometry feel?
 
-Keep the experiment as three static files until a real independent change reason earns a split:
+The experiment is native ES modules with real imports, no build step (operator ruling 2026-08-21: instrument centers of gravity get their own module before the monolith becomes load-bearing):
 
-- `index.html` — semantic shell and stable interaction anatomy.
+- `index.html` — semantic shell and stable interaction anatomy (`<script type="module">`).
 - `styles.css` — exploratory geometry, hierarchy, state, and responsive treatment.
-- `app.js` — fixture data, explicit UI state, rendering, transitions, and events.
+- `app.js` — the interaction shell: fixture data, the one explicit state object, the render waist, transitions, and listeners.
+- `pulse.js` — the Insula instrument: stamped snapshot, live-wire transport, derivation, render, and its own source state.
+- `mechanics.js` — the observatory: source-census snapshot, category/query/scroll view state, and its renders.
+- `text.js` — shared text safety (`escapeHtml`).
+- `serve.ts` — the local serving harness and the ONE live wire: it proxies read-only Insula queries to a room Host with the bearer token held server-side; no credential ever reaches page source.
 
-There is no framework, build step, Host connection, persistence, design-system commitment, or production claim. Do not add one merely to make the experiment resemble an application. A behavior that survives operator judgment is translated into a production contract; prototype syntax is never promoted by copy-and-paste.
+An instrument module owns its local state and exposes narrow doors: `init…` (shell injects `requestRender`/DOM handles once at boot), `handle…Click`/`handle…Input` (returns whether it owned the event), and its `render…` functions. The shell keeps the waists, the global state object, and the listeners. Bell, switcher, drawer, and composer are named extraction seams: each moves to its own module the next time it is materially touched, never in a big-bang sweep.
+
+There is no framework, build step, persistence, design-system commitment, or production claim. The Host connection exists exactly once, read-only, through the harness proxy (operator ruling 2026-08-20: "wire the GUI into the actual Athanor"): every live surface names its scope and query, and every non-live state falls back to the stamped snapshot wearing truthful chips. Nothing writes. A behavior that survives operator judgment is translated into a production contract; prototype syntax is never promoted by copy-and-paste.
 
 ## Current product grammar
 
@@ -418,3 +424,11 @@ The proof receipt names the viewport, path exercised, and observed result. `It l
 - Chromium at `390 × 844`: channel grid collapsed to one column, lane and receipt summaries stacked, the 64-hex receipt id ended at `331 px` inside the `390 px` viewport, zero elements past the right edge, zero horizontal document overflow, zero page errors.
 - Named residuals, not this wave's: `/site/fonts/InterVariable.woff2` 404s when the prototype is served standalone (reference landed in `c7ad11f` with the Pages font work); one retention mis-measure during proof was the harness typing into the still-focused search input (`backup32`), not a product regression — re-tested clean after blur.
 - No motion was added; the new sections are static anatomy. Pulse ships without a vitals drilldown door: trace/raw drilldown belongs to the Host-connected surface and its read routes, not to a disconnected fixture.
+
+### Proof receipt — 2026-08-21 live wire and module split wave
+
+- Architecture: the prototype became native ES modules — `pulse.js` (Insula instrument with pulse-local source state idle → pending → live | failed), `mechanics.js` (observatory with module-local category/query/scroll state), `text.js`, and `serve.ts` (static serving + `/live/insula/vitals|retention` proxy to the kodo Host on :8788, bearer token server-side, POST-only, unknown routes and path traversal refused). The shell shrank ~3,600 → ~2,880 lines and kept the waists; `ensurePulseQueried` fires from `openSubjectView`/`navigateToSubjectView` when House slot 2 opens, never from render.
+- Chromium at `1440 × 1000`, LIVE: entering House slot 2 auto-queried the Host and rendered `Host connected · kodo Host · room-scoped vitals · Queried 00:55 local`; 14 live lanes derived from real `insula.vitals.minute v1` rollups; channels showed 6,290 settled events and 30,563,751 tokens in for the kodo room's last 24 h (numbers grew between two queries — genuinely live); `Query Host` re-queried on demand; observatory search below returned its 3 `backup` rows with focus held; a category click cleared the query through the module handler; mechanics scroll retention held `700 → slot 3 → slot 2 → 700` through module state; zero horizontal overflow; zero page errors.
+- FALLBACK, transport failure injected at the page's fetch boundary: the surface fell back to the stamped `2026-08-20 22:12 −03` snapshot wearing `Host unreachable · Failed to fetch` beside the snapshot provenance chips — live numbers never faked; restoring transport and re-querying returned `Host connected`. Four source states, each visibly distinct.
+- Chromium at `390 × 844`: one-column channels, live chips wrapped cleanly, zero horizontal overflow, zero page errors.
+- Named residuals: the standalone-serve font 404 (`c7ad11f`, Pages-owned) remains; receipts block stays snapshot-only until a Host route serves receipt kinds; live lanes carry `raw rows only` for error classes because rollups do not carry them.

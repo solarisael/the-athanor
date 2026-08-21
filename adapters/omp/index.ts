@@ -1214,7 +1214,7 @@ export default function solarisaelHouseProof(pi) {
         const preliminaryRoute = contextAnalysis.route;
         const snapshot = await policyClient.inspect();
         policyState = snapshot.recallPolicy;
-        const resolution = policyState.requestedMode !== "quiet"
+        const resolution = policyState?.requestedMode !== "quiet"
           && preliminaryRoute.entityResolutionSuggested
           ? await resolveEntities({
             room,

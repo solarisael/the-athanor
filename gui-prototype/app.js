@@ -1498,31 +1498,48 @@ const HOUSE_MECHANICS_SNAPSHOT = {
   ]
 };
 
-const HOUSE_INSULA_OBSERVATORY = {
-  capturedAt: "2026-08-20",
+// One consistent capture: every number below was read from PostgreSQL insula
+// rows inside a single transaction at the stamped moment. Times are −03.
+const HOUSE_PULSE_SNAPSHOT = {
+  capturedAt: "2026-08-20 22:12 −03",
   connection: "Host offline",
-  source: "Local-only source snapshot",
-  channels: [
-    {
-      label: "Insula Vitals",
-      value: "Unavailable",
-      detail: "Connect the Host to read request, tool, latency, and token totals."
-    },
-    {
-      label: "Trace health",
-      value: "Unavailable",
-      detail: "Authenticated trace projection is absent from this disconnected surface."
-    },
-    {
-      label: "Loss",
-      value: "Unavailable",
-      detail: "Writer gaps and drop receipts require the Host record."
-    },
-    {
-      label: "Retention",
-      value: "Not scheduled",
-      detail: "Raw rows become eligible after 14 days. No production retention runner exists."
-    }
+  source: "PostgreSQL insula snapshot",
+  vitalsQuery: "insula.vitals.minute v1",
+  totals: { spans: 15853, writers: 36, components: 4, window: "16:01–22:12 −03", duplicates: 13, drops: 0 },
+  tokens: { tokensIn: 95690376, tokensOut: 398925, usagePoints: 810 },
+  retention: { receipts: 0, sweepRuns: 13, days: 14, firstExpiry: "2026-09-03" },
+  rooms: [
+    ["kintsu", 8555], ["tuner", 5329], ["kodo", 1660],
+    ["house", 211], ["salvia", 49], ["hugo", 49]
+  ],
+  lanes: [
+    { operation: "knock_claim", component: "house_host", outcomes: { ok: 2436 }, maxDuration: "28.7 ms", errorClasses: "",
+      note: "Doorman claim poll, roughly one span per host every two seconds, aggregated to one lane at render." },
+    { operation: "tool_call", component: "omp_adapter", outcomes: { ok: 1915, error: 29, cancelled: 15 }, maxDuration: "24.6 min", errorClasses: "tool_error 29 · session_shutdown 15" },
+    { operation: "provider_request", component: "omp_adapter", outcomes: { ok: 1800, degraded: 9, cancelled: 5 }, maxDuration: "1.9 min", errorClasses: "partial_context 9 · provider_aborted 5" },
+    { operation: "provider_usage", component: "omp_adapter", outcomes: { ok: 809, degraded: 3 }, maxDuration: "", errorClasses: "usage_unavailable 3" },
+    { operation: "context_assembly", component: "omp_adapter", outcomes: { ok: 801, degraded: 12 }, maxDuration: "2.3 s", errorClasses: "partial_context 12" },
+    { operation: "receipt_projection", component: "house_host", outcomes: { ok: 48, refused: 192 }, maxDuration: "", errorClasses: "" },
+    { operation: "insula_ingest", component: "house_host", outcomes: { ok: 149 }, maxDuration: "67.1 ms", errorClasses: "" },
+    { operation: "tool_result", component: "omp_adapter", outcomes: { ok: 94, error: 1 }, maxDuration: "", errorClasses: "tool_error 1" },
+    { operation: "lesson_trigger_match", component: "athanor_substrate", outcomes: { ok: 86 }, maxDuration: "10.9 ms", errorClasses: "" },
+    { operation: "retention_sweep", component: "athanor_substrate", outcomes: { ok: 13 }, maxDuration: "42.0 ms", errorClasses: "" },
+    { operation: "hallway_projection", component: "house_host", outcomes: { ok: 7 }, maxDuration: "", errorClasses: "" },
+    { operation: "recall_policy_decide", component: "house_host", outcomes: { ok: 7 }, maxDuration: "", errorClasses: "" },
+    { operation: "insula_health", component: "deployment_probe", outcomes: { ok: 5 }, maxDuration: "", errorClasses: "" },
+    { operation: "lesson_query", component: "athanor_substrate", outcomes: { ok: 3 }, maxDuration: "26.0 ms", errorClasses: "" },
+    { operation: "hallway_read", component: "athanor_substrate", outcomes: { ok: 2 }, maxDuration: "13.0 ms", errorClasses: "" },
+    { operation: "hallway_post", component: "athanor_substrate", outcomes: { ok: 2 }, maxDuration: "21.4 ms", errorClasses: "" },
+    { operation: "remember", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "824.9 ms", errorClasses: "" },
+    { operation: "entity_resolve", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "1.9 ms", errorClasses: "" },
+    { operation: "recall", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "9.5 s", errorClasses: "" },
+    { operation: "pg_backup", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "", errorClasses: "" }
+  ],
+  receipts: [
+    { kind: "athanor.recall_policy.command_accepted", component: "house_host", count: 7, lastAt: "22:05 −03", outcome: "ok", latestId: "4772aa88-19e9-4fff-bd40-54ebb8e58a46" },
+    { kind: "athanor.hallway.inbox_projected", component: "house_host", count: 7, lastAt: "22:05 −03", outcome: "ok", latestId: "9bd7575c-cd6f-4db5-bd76-33ae1ae158f1" },
+    { kind: "paper_boat_receipt", component: "house_host", count: 48, lastAt: "21:45 −03", outcome: "ok", latestId: "64212b60-a5a8-445f-ad7f-b2b6b6bfe407" },
+    { kind: "insula.backup", component: "athanor_substrate", count: 1, lastAt: "21:45 −03", outcome: "ok", latestId: "a61389335e22df4f0b0bfee497b0a7ff45ee925f7ea0b34c23d9a6f58f5a7d64" }
   ]
 };
 
@@ -1569,6 +1586,124 @@ function renderMechanicRow({ category, row }) {
     </details>`;
 }
 
+const PULSE_OUTCOME_LABELS = { ok: "ok", error: "error", cancelled: "cancelled", degraded: "degraded", refused: "refused" };
+
+function pulseCount(value) {
+  return value.toLocaleString("en-US");
+}
+
+function pulseOutcomeTone(outcome) {
+  if (outcome === "error" || outcome === "refused") return "attention";
+  if (outcome === "ok") return "steady";
+  return "quiet";
+}
+
+function renderPulseLane(lane) {
+  const entries = Object.entries(lane.outcomes);
+  const settled = entries.reduce((sum, [, count]) => sum + count, 0);
+  const flags = entries.length === 1 && lane.outcomes.ok
+    ? `<span data-tone="steady">all ok</span>`
+    : entries
+      .filter(([outcome]) => outcome !== "ok")
+      .map(([outcome, count]) => `<span data-tone="${pulseOutcomeTone(outcome)}">${pulseCount(count)} ${PULSE_OUTCOME_LABELS[outcome]}</span>`)
+      .join("");
+  const split = entries.map(([outcome, count]) => `${pulseCount(count)} ${PULSE_OUTCOME_LABELS[outcome]}`).join(" · ");
+  return `
+    <details class="mechanics-row">
+      <summary>
+        <span class="mechanics-row-title"><strong>${escapeHtml(lane.operation)}</strong><small>${escapeHtml(lane.component)}</small></span>
+        <span class="mechanics-row-value"><small>Settled</small><code>${pulseCount(settled)} events</code></span>
+        <span class="mechanics-row-flags">${flags}</span>
+      </summary>
+      <div class="mechanics-row-body">
+        <dl>
+          <div><dt>Outcomes</dt><dd>${escapeHtml(split)}</dd></div>
+          <div><dt>Max duration</dt><dd>${escapeHtml(lane.maxDuration || "not measured")}</dd></div>
+          <div><dt>Error classes</dt><dd>${escapeHtml(lane.errorClasses || "none")}</dd></div>
+          <div><dt>Recompute</dt><dd>${escapeHtml(HOUSE_PULSE_SNAPSHOT.vitalsQuery)}</dd></div>
+        </dl>
+        ${lane.note ? `<p>${escapeHtml(lane.note)}</p>` : ""}
+      </div>
+    </details>`;
+}
+
+function renderPulseReceipt(receipt) {
+  return `
+    <details class="mechanics-row">
+      <summary>
+        <span class="mechanics-row-title"><strong>${escapeHtml(receipt.kind)}</strong><small>${escapeHtml(receipt.component)}</small></span>
+        <span class="mechanics-row-value"><small>Latest</small><code>${escapeHtml(receipt.lastAt)}</code></span>
+        <span class="mechanics-row-flags">
+          <span data-tone="${pulseOutcomeTone(receipt.outcome)}">${escapeHtml(receipt.outcome)}</span>
+          <span data-tone="quiet">×${pulseCount(receipt.count)}</span>
+        </span>
+      </summary>
+      <div class="mechanics-row-body">
+        <dl class="pulse-receipt-detail">
+          <div><dt>Today</dt><dd>${pulseCount(receipt.count)} receipt point${receipt.count === 1 ? "" : "s"}</dd></div>
+          <div><dt>Latest receipt id</dt><dd><code>${escapeHtml(receipt.latestId)}</code></dd></div>
+        </dl>
+      </div>
+    </details>`;
+}
+
+function renderHousePulse() {
+  const pulse = HOUSE_PULSE_SNAPSHOT;
+  const receiptPoints = pulse.receipts.reduce((sum, receipt) => sum + receipt.count, 0);
+  const roomLine = pulse.rooms.map(([room, spans]) => `${room} ${pulseCount(spans)}`).join(" · ");
+  return `
+    <section class="insula-observation" aria-labelledby="house-pulse-title">
+      <header class="insula-observation-lead">
+        <div>
+          <span class="eyebrow">Insula</span>
+          <h3 id="house-pulse-title">Pulse</h3>
+          <p>Every number recomputable from ${escapeHtml(pulse.vitalsQuery)} rollups and raw receipt points.</p>
+        </div>
+        <div class="mechanics-snapshot-status" aria-label="Pulse snapshot status">
+          <span data-tone="attention">${escapeHtml(pulse.connection)}</span>
+          <span>${escapeHtml(pulse.source)}</span>
+          <span>Captured ${escapeHtml(pulse.capturedAt)}</span>
+        </div>
+      </header>
+      <div class="insula-observation-grid">
+        <article class="insula-observation-channel">
+          <span>Observations</span>
+          <strong>${pulseCount(pulse.totals.spans)} spans</strong>
+          <p>${pulseCount(pulse.totals.writers)} writers · ${pulse.totals.components} components · ${escapeHtml(pulse.totals.window)}</p>
+        </article>
+        <article class="insula-observation-channel">
+          <span>Tokens</span>
+          <strong>${pulseCount(pulse.tokens.tokensIn)} in</strong>
+          <p>${pulseCount(pulse.tokens.tokensOut)} out · ${pulseCount(pulse.tokens.usagePoints)} provider usage points</p>
+        </article>
+        <article class="insula-observation-channel">
+          <span>Loss</span>
+          <strong>${pulseCount(pulse.totals.drops)} dropped</strong>
+          <p>${pulseCount(pulse.totals.duplicates)} duplicate deliveries collapsed at ingest</p>
+        </article>
+        <article class="insula-observation-channel">
+          <span>Retention</span>
+          <strong>No rows expired</strong>
+          <p>${pulseCount(pulse.retention.sweepRuns)} sweep runs · first expiry ${escapeHtml(pulse.retention.firstExpiry)} · ${pulse.retention.days}-day law</p>
+        </article>
+      </div>
+      <section class="pulse-block" aria-labelledby="pulse-lanes-title">
+        <header class="pulse-block-lead">
+          <h4 id="pulse-lanes-title">Lanes</h4>
+          <small>${pulse.lanes.length} lanes · ${escapeHtml(roomLine)}</small>
+        </header>
+        <div class="pulse-rows">${pulse.lanes.map(renderPulseLane).join("")}</div>
+      </section>
+      <section class="pulse-block" aria-labelledby="pulse-receipts-title">
+        <header class="pulse-block-lead">
+          <h4 id="pulse-receipts-title">Receipts</h4>
+          <small>Latest receipt per kind · ${pulseCount(receiptPoints)} receipt points today</small>
+        </header>
+        <div class="pulse-rows">${pulse.receipts.map(renderPulseReceipt).join("")}</div>
+      </section>
+    </section>`;
+}
+
 function renderHouseMechanics() {
   const categoryButtons = [
     { id: "all", label: "All", count: HOUSE_MECHANICS_SNAPSHOT.categories.reduce((sum, category) => sum + category.rows.length, 0) },
@@ -1586,28 +1721,7 @@ function renderHouseMechanics() {
           <span>${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.revision)}</span>
         </div>
       </header>
-      <section class="insula-observation" aria-labelledby="insula-observation-title">
-        <header class="insula-observation-lead">
-          <div>
-            <span class="eyebrow">Insula</span>
-            <h3 id="insula-observation-title">Observation</h3>
-            <p>Request, tool, token, loss, and retention evidence owned by the Host.</p>
-          </div>
-          <div class="mechanics-snapshot-status" aria-label="Insula observation status">
-            <span data-tone="attention">${escapeHtml(HOUSE_INSULA_OBSERVATORY.connection)}</span>
-            <span>${escapeHtml(HOUSE_INSULA_OBSERVATORY.source)}</span>
-            <span>Captured ${escapeHtml(HOUSE_INSULA_OBSERVATORY.capturedAt)}</span>
-          </div>
-        </header>
-        <div class="insula-observation-grid">
-          ${HOUSE_INSULA_OBSERVATORY.channels.map(channel => `
-            <article class="insula-observation-channel">
-              <span>${escapeHtml(channel.label)}</span>
-              <strong>${escapeHtml(channel.value)}</strong>
-              <p>${escapeHtml(channel.detail)}</p>
-            </article>`).join("")}
-        </div>
-      </section>
+      ${renderHousePulse()}
       <div class="mechanics-controls">
         <label class="mechanics-search">
           <span>Search every mechanism</span>

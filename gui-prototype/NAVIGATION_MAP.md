@@ -67,7 +67,7 @@ subgraph STATE["2 · STATE — machinery underneath, no flow"]
   dState["DIRECT · Status<br>runtime · attention · context · substrate"]
   hState["HALLWAY · Status<br>live channels · embodied session · substrate"]
   pState["PROJECT · Status<br>work state · activity · involved rooms"]
-  houseState["HOUSE · Mechanics<br>seven categories · all-category search<br>typed source-census rows · Host offline"]
+  houseState["HOUSE · Mechanics<br>Insula Pulse — snapshot channels, lanes, receipts<br>seven categories · all-category search<br>typed source-census rows · Host offline"]
 end
 
 dState ~~~ hState ~~~ pState ~~~ houseState

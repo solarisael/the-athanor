@@ -1578,7 +1578,14 @@ pub async fn lesson_update(
             "technologyKeys",
         ],
         "writing" => &["voice", "register", "exampleText", "writers", "negationOf"],
-        "design" => &["voice", "register", "proofPattern", "exampleText"],
+        "design" => &[
+            "voice",
+            "register",
+            "proofPattern",
+            "exampleText",
+            "languageKeys",
+            "technologyKeys",
+        ],
         _ => &[],
     };
     if let Some(invalid) = fields

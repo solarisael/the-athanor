@@ -230,6 +230,8 @@ pub struct RecallPolicyFacts {
     pub conversation_tokens: u64,
     #[serde(default)]
     pub working_set_present: bool,
+    #[serde(default)]
+    pub tool_evidence: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

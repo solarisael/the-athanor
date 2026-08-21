@@ -65,8 +65,13 @@ import {
   takeLessonReminder,
   toolLessonCard,
 } from "./solarisael-house-proof/lesson-triggers.ts";
+import { runLessonQuery } from "./solarisael-house-proof/lesson-context.ts";
+import { lessonPacketMessageRenderer } from "./solarisael-house-proof/lesson-packet.ts";
 import {
   RecallPolicyHostClient,
+  hasToolEvidence,
+  isMutateTool,
+  markToolEvidence,
   type PersistedRecallPolicy,
   type RecallPolicyDecision,
 } from "./solarisael-house-proof/recall-policy.ts";
@@ -581,6 +586,7 @@ export default function solarisaelHouseProof(pi) {
   pi.setLabel("The Athanor");
   pi.registerMessageRenderer?.("solarisael-lesson-trigger", lessonTriggerMessageRenderer);
   pi.registerMessageRenderer?.("solarisael-process-lessons", processLessonsMessageRenderer);
+  pi.registerMessageRenderer?.("solarisael-lesson-packet", lessonPacketMessageRenderer);
   pi.registerCommand?.("insula", {
     description: "Show the Host's Insula Vitals for the last 15m, 1h, or 24h",
     handler: (args, ctx) => showInsulaCockpit(args, ctx),
@@ -797,6 +803,16 @@ export default function solarisaelHouseProof(pi) {
   // composition, and fail-open live in lesson-triggers.ts; this tap forwards
   // the verdict and drops a visible receipt when a block fires.
   pi.on("tool_call", async (event, ctx) => {
+    // Hands on files are evidence for the Recall Policy no matter what the
+    // lesson lane decides below, and the mark never blocks the tool path.
+    if (isMutateTool(event?.toolName)) {
+      try {
+        const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+        markToolEvidence({ room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) });
+      } catch {
+        // An unreadable room costs the hint, never the tool call.
+      }
+    }
     const verdict = await lessonTriggerToolCall(event, ctx);
     if (!verdict) return undefined;
     const card = toolLessonCard(verdict.lessons, String(event?.toolName ?? "tool"), "block");
@@ -836,6 +852,7 @@ export default function solarisaelHouseProof(pi) {
     observed: { span: InsulaSpan | null },
   ) => {
     let messages = Array.isArray(event?.messages) ? event.messages : [];
+    const originalMessages = messages;
     const promptMessage = [...messages].reverse().find((message) => message?.role === "user");
     const prompt = messageText(promptMessage);
     if (!prompt.trim()) return;
@@ -913,8 +930,9 @@ export default function solarisaelHouseProof(pi) {
     if (currentTurnKey && turnMemo.has(currentTurnKey)) {
       // Later requests of the same turn replay identical bytes so the
       // Anthropic prefix cache can hit past the system block.
-      endInsulaSpan(observed.span, "ok");
-      return anchorTurnAdditions(messages, turnKeys, turnMemo);
+      const anchored = anchorTurnAdditions(messages, turnKeys, turnMemo);
+      if (anchored) return anchored;
+      return messages === originalMessages ? undefined : { messages };
     }
 
     let contextAnalysis: ContextAnalysis | null = null;
@@ -1196,10 +1214,62 @@ export default function solarisaelHouseProof(pi) {
           activeProject,
           workingSetPresent: existingTypes.has("solarisael-recall-context")
             || memoHasCustomType(turnMemo, "solarisael-recall-context"),
+          toolEvidence: hasToolEvidence({ room, spirit, session: hostSession }),
           idempotencyKey: currentTurnKey ? `${currentTurnKey}:evaluate` : undefined,
         });
         decision = evaluation.decision;
         policyState = evaluation.snapshot.recallPolicy;
+
+        const resolvedMode = decision?.resolvedMode ?? policyState?.resolvedMode;
+        if (resolvedMode === "work" && !existingTypes.has("solarisael-lesson-packet")) {
+          const packet = await runLessonQuery(effectiveRoomDir, room, {
+            type: "coding",
+            alwaysOn: true,
+            limit: 12,
+          });
+          const lessons = packet.ok && Array.isArray(packet.lessons) ? packet.lessons : [];
+          if (lessons.length) {
+            const packetLessons = lessons.flatMap((value) => {
+              if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+              const lesson = value as Record<string, unknown>;
+              const family = String(lesson.type ?? "").trim();
+              const id = Number(lesson.id);
+              const title = String(lesson.title ?? "").trim();
+              const body = String(lesson.lesson ?? "").trim();
+              const proofPattern = String(lesson.proofPattern ?? "").trim();
+              if (!family || !Number.isInteger(id) || id <= 0 || !title || !body) return [];
+              return [{ family, id, title, body, proofPattern }];
+            });
+            if (packetLessons.length) {
+              additions.push({
+                role: "custom",
+                customType: "solarisael-lesson-packet",
+                content: [
+                  "<system-reminder>",
+                  "Work-mode lesson packet — always-on coding lessons; this packet supersedes earlier copies.",
+                  ...packetLessons.flatMap((lesson) => [
+                    "",
+                    `${lesson.family}#${lesson.id} — ${lesson.title}`,
+                    lesson.body,
+                    ...(lesson.proofPattern ? [`proof: ${lesson.proofPattern}`] : []),
+                  ]),
+                  "</system-reminder>",
+                ].join("\n"),
+                display: true,
+                details: {
+                  lessons: packetLessons.map(({ family, id, title }) => ({ family, id, title })),
+                  count: packetLessons.length,
+                },
+                attribution: "agent",
+                timestamp,
+              });
+            } else {
+              warnings.push("work-mode lesson packet unavailable");
+            }
+          } else {
+            warnings.push("work-mode lesson packet unavailable");
+          }
+        }
 
         if (decision.shouldRecall && decision.refreshReason) {
           const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, {
@@ -1353,7 +1423,9 @@ export default function solarisaelHouseProof(pi) {
       warnings.length ? "degraded" : "ok",
       warnings.length ? "partial_context" : null,
     );
-    return anchorTurnAdditions(messages, turnKeys, turnMemo);
+    const anchored = anchorTurnAdditions(messages, turnKeys, turnMemo);
+    if (anchored) return anchored;
+    return messages === originalMessages ? undefined : { messages };
   };
 
   pi.on("context", async (event, ctx) => {

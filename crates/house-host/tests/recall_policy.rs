@@ -272,6 +272,17 @@ fn evaluate_command(
     value
 }
 
+/// The adapter sends `tool_evidence` only when hands actually touched files, so
+/// every other evaluate helper here keeps proving the absent-field path.
+fn with_tool_evidence(mut value: Value) -> Value {
+    value
+        .get_mut("facts")
+        .and_then(Value::as_object_mut)
+        .expect("facts object")
+        .insert("tool_evidence".into(), json!(true));
+    value
+}
+
 fn complete_command(message_id: &str, key: &str, session: &str, query_terms: &[&str]) -> Value {
     let mut value = command(RECALL_POLICY_COMPLETE_REFRESH, message_id, key, true);
     let object = value.as_object_mut().expect("command object");
@@ -1187,6 +1198,70 @@ async fn host_resolves_modes_hysteresis_and_quiet_without_adapter_policy() {
         "conversation"
     );
     assert_eq!(conversation_lookup["decision"]["shouldRecall"], true);
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn host_resolves_work_from_tool_evidence_and_still_yields_to_an_explicit_lookup() {
+    let root = TempDir::new().expect("tempdir");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let mut socket = connect(&host).await;
+
+    let casual = evaluate_command(
+        "evidence-casual",
+        "evidence-casual-key",
+        "evidence-session",
+        "casual_contact",
+        &["hello"],
+        None,
+        100,
+        false,
+    );
+    send(&mut socket, &casual).await;
+    let casual = receive_for(
+        &mut socket,
+        "evidence-casual",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    assert_eq!(casual["decision"]["resolvedMode"], "conversation");
+    assert_eq!(casual["state"]["resolutionReason"], "casual-contact");
+
+    let evidence = with_tool_evidence(evaluate_command(
+        "evidence-work",
+        "evidence-work-key",
+        "evidence-session",
+        "casual_contact",
+        &["hello", "again"],
+        None,
+        200,
+        false,
+    ));
+    send(&mut socket, &evidence).await;
+    let evidence = receive_for(&mut socket, "evidence-work", RECALL_POLICY_COMMAND_ACCEPTED).await;
+    assert_eq!(evidence["decision"]["resolvedMode"], "work");
+    assert_eq!(evidence["state"]["resolutionReason"], "tool-evidence");
+
+    let lookup = with_tool_evidence(evaluate_command(
+        "evidence-lookup",
+        "evidence-lookup-key",
+        "evidence-session",
+        "memory_lookup",
+        &["continuity"],
+        None,
+        300,
+        false,
+    ));
+    send(&mut socket, &lookup).await;
+    let lookup = receive_for(
+        &mut socket,
+        "evidence-lookup",
+        RECALL_POLICY_COMMAND_ACCEPTED,
+    )
+    .await;
+    assert_eq!(lookup["decision"]["resolvedMode"], "conversation");
+    assert_eq!(lookup["state"]["resolutionReason"], "explicit-lookup");
     host.stop().await;
 }
 

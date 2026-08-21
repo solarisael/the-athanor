@@ -1600,6 +1600,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                         trigger_scope: params.trigger_scope,
                         interrupt_mode: params.interrupt_mode,
                         repeat_cooldown_secs: params.repeat_cooldown_secs,
+                        ..Default::default()
                     },
                 },
             )

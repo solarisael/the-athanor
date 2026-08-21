@@ -311,10 +311,11 @@ describe("OMP adapter registration", () => {
     ]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
     expect(eventChannels).toEqual(["task:subagent:progress", "task:subagent:lifecycle"]);
-    expect(messageRenderers).toHaveLength(2);
+    expect(messageRenderers).toHaveLength(3);
     expect(messageRenderers.map((entry) => entry.customType)).toEqual([
       "solarisael-lesson-trigger",
       "solarisael-process-lessons",
+      "solarisael-lesson-packet",
     ]);
     expect(messageRenderers.every((entry) => typeof entry.renderer === "function")).toBe(true);
   });

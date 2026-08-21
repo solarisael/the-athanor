@@ -39,6 +39,8 @@ type FiredLesson = {
   path: string | null;
   patternKind: "regex" | "ast";
   pattern: string;
+  matchStart?: number | null;
+  surfaceIndex?: number;
   /** Ledger fires for this lesson in this room, including this one. Optional
    * because a skewed furnace build may omit it; absence just drops the ×N. */
   fires?: number;
@@ -49,6 +51,7 @@ export type LessonTriggerProseDecision = {
   content: string;
   reminder: string;
   details: Record<string, unknown>;
+  blockingMatchStarts: Array<number | null>;
 };
 
 type ProseStreamState = {
@@ -65,7 +68,7 @@ type ProseStreamState = {
 };
 
 const proseStreamBySession = new Map<string, ProseStreamState>();
-const interruptedProseSessions = new Map<string, number>();
+const interruptedProseSessions = new Map<string, { at: number; resumePrefix: string | null }>();
 
 function proseStreamKey(room: string, session: string): string {
   return `${room}\0${session}`;
@@ -426,6 +429,9 @@ export async function lessonTriggerProseDecision(args: {
       content: blocking.length ? interruptParts.join("\n\n") : renderReminder(fired),
       reminder: renderReminder(fired),
       details: lessonDecisionDetails(fired, warnings),
+      blockingMatchStarts: blocking.map((entry) =>
+        typeof entry.matchStart === "number" ? entry.matchStart : null
+      ),
     };
   } catch {
     return null;
@@ -468,8 +474,81 @@ function newProseStreamState(ctx: any, pi: any): { key: string; state: ProseStre
 }
 
 export function resetLessonTriggerProseStream(event: any, ctx: any, pi: any): void {
-  if (event?.message?.role !== "assistant") return;
-  newProseStreamState(ctx, pi);
+  try {
+    if (event?.message?.role !== "assistant") return;
+    newProseStreamState(ctx, pi);
+  } catch {
+    // Fail-open: stream bookkeeping never gets custody of the conversation.
+  }
+}
+
+function stringIndexAtUtf8ByteOffset(text: string, byteOffset: number): number | null {
+  if (!Number.isSafeInteger(byteOffset) || byteOffset < 0) return null;
+  if (byteOffset === 0) return 0;
+
+  let bytes = 0;
+  for (let index = 0; index < text.length;) {
+    const codePoint = text.codePointAt(index);
+    if (codePoint === undefined) return null;
+    const codeUnits = codePoint > 0xffff ? 2 : 1;
+    let codeBytes: number;
+    if (codePoint <= 0x7f) codeBytes = 1;
+    else if (codePoint <= 0x7ff) codeBytes = 2;
+    else if (codePoint <= 0xffff) codeBytes = 3;
+    else codeBytes = 4;
+    bytes += codeBytes;
+    index += codeUnits;
+    if (bytes === byteOffset) return index;
+    if (bytes > byteOffset) return null;
+  }
+  return null;
+}
+
+function proseResumePrefix(text: string, matchStarts: Array<number | null>): string | null {
+  if (!matchStarts.length || matchStarts.some((start) => start === null)) return null;
+  const earliestByteOffset = Math.min(...matchStarts as number[]);
+  const matchStart = stringIndexAtUtf8ByteOffset(text, earliestByteOffset);
+  if (matchStart === null) return null;
+
+  let boundary = -1;
+  const sentenceBoundary = /[.!?]["'”’)\]}]*(?=\s)/gu;
+  for (const match of text.matchAll(sentenceBoundary)) {
+    const candidate = match.index + match[0].length;
+    if (candidate >= matchStart) break;
+    boundary = candidate;
+  }
+  const blankLineBoundary = /\r?\n[ \t]*\r?\n/gu;
+  for (const match of text.matchAll(blankLineBoundary)) {
+    const candidate = match.index + match[0].length;
+    if (candidate >= matchStart) break;
+    boundary = Math.max(boundary, candidate);
+  }
+  if (boundary < 0) return null;
+
+  return text.slice(0, boundary).trimEnd() || null;
+}
+
+function replaceAssistantText(message: any, prefix: string): any {
+  if (typeof message?.content === "string") return { ...message, content: prefix };
+  const field = Array.isArray(message?.content) ? "content" : Array.isArray(message?.parts) ? "parts" : null;
+  if (field) {
+    let remaining = prefix;
+    let sawText = false;
+    const parts = message[field].map((part: any) => {
+      let text: string | null = null;
+      if (typeof part === "string") text = part;
+      else if (part?.type === "text" && typeof part.text === "string") text = part.text;
+      if (text === null) return part;
+      if (sawText && remaining.startsWith("\n")) remaining = remaining.slice(1);
+      sawText = true;
+      const kept = remaining.slice(0, text.length);
+      remaining = remaining.slice(kept.length);
+      return typeof part === "string" ? kept : { ...part, text: kept };
+    });
+    return sawText ? { ...message, [field]: parts } : message;
+  }
+  if (typeof message?.text === "string") return { ...message, text: prefix };
+  return message;
 }
 
 function queueProseContinuation(
@@ -479,7 +558,15 @@ function queueProseContinuation(
 ): void {
   if (typeof state.pi?.sendMessage !== "function") return;
   const canInterrupt = decision.block && typeof state.ctx?.abort === "function";
-  const content = canInterrupt ? decision.content : decision.reminder;
+  const resumePrefix = canInterrupt
+    ? proseResumePrefix(state.checkedText, decision.blockingMatchStarts)
+    : null;
+  let content = decision.reminder;
+  if (canInterrupt) content = decision.content;
+  if (canInterrupt && resumePrefix !== null) {
+    content += "\nYour interrupted draft above was trimmed at the violation. Continue exactly from its end; do not restate anything above the cut.";
+  }
+  // enough: trim keeps the prefix in context; a post-settlement splice of prefix+continuation into one message is renderer polish behind ContextEventResult — door named, not built.
   state.pi.sendMessage(
     {
       customType: "solarisael-lesson-trigger",
@@ -497,7 +584,7 @@ function queueProseContinuation(
 
   if (!canInterrupt) return;
   state.blocked = true;
-  interruptedProseSessions.set(key, Date.now());
+  interruptedProseSessions.set(key, { at: Date.now(), resumePrefix });
   trimOldest(interruptedProseSessions);
   try {
     state.ctx.abort();
@@ -546,28 +633,32 @@ async function runProseStreamPump(key: string, state: ProseStreamState): Promise
 }
 
 export function lessonTriggerProseStreamUpdate(event: any, ctx: any, pi: any): Promise<void> {
-  if (lessonTriggersDisabled()) return Promise.resolve();
-  if (event?.message?.role !== "assistant") return Promise.resolve();
-  const eventType = String(event?.assistantMessageEvent?.type ?? "");
-  if (eventType !== "text_delta" && eventType !== "text_end") return Promise.resolve();
+  try {
+    if (lessonTriggersDisabled()) return Promise.resolve();
+    if (event?.message?.role !== "assistant") return Promise.resolve();
+    const eventType = String(event?.assistantMessageEvent?.type ?? "");
+    if (eventType !== "text_delta" && eventType !== "text_end") return Promise.resolve();
 
-  const binding = proseStreamBinding(ctx);
-  let state = proseStreamBySession.get(binding.key);
-  const text = conversationText(event.message);
-  if (!state || (state.latestText && !text.startsWith(state.latestText))) {
-    state = newProseStreamState(ctx, pi).state;
-  }
-  if (state.blocked) return state.running ?? Promise.resolve();
+    const binding = proseStreamBinding(ctx);
+    let state = proseStreamBySession.get(binding.key);
+    const text = conversationText(event.message);
+    if (!state || (state.latestText && !text.startsWith(state.latestText))) {
+      state = newProseStreamState(ctx, pi).state;
+    }
+    if (state.blocked) return state.running ?? Promise.resolve();
 
-  state.ctx = ctx;
-  state.pi = pi;
-  state.latestText = text;
-  if (eventType === "text_end") state.forceScan = true;
-  const unchecked = state.latestText.length - state.checkedText.length;
-  if (!state.running && (state.forceScan || unchecked >= PROSE_STREAM_SCAN_STEP)) {
-    state.running = runProseStreamPump(binding.key, state);
+    state.ctx = ctx;
+    state.pi = pi;
+    state.latestText = text;
+    if (eventType === "text_end") state.forceScan = true;
+    const unchecked = state.latestText.length - state.checkedText.length;
+    if (!state.running && (state.forceScan || unchecked >= PROSE_STREAM_SCAN_STEP)) {
+      state.running = runProseStreamPump(binding.key, state);
+    }
+    return state.running ?? Promise.resolve();
+  } catch {
+    return Promise.resolve();
   }
-  return state.running ?? Promise.resolve();
 }
 
 export function filterInterruptedLessonProse(
@@ -575,22 +666,36 @@ export function filterInterruptedLessonProse(
   room: string,
   session: string,
 ): any[] {
-  const key = proseStreamKey(room, session);
-  if (!interruptedProseSessions.has(key)) return messages;
-  let interruptedIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index];
-    if (message?.role === "assistant" && message?.stopReason === "aborted") {
-      interruptedIndex = index;
-      break;
+  try {
+    const key = proseStreamKey(room, session);
+    const interruption = interruptedProseSessions.get(key);
+    if (!interruption) return messages;
+    let interruptedIndex = -1;
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (message?.role === "assistant" && message?.stopReason === "aborted") {
+        interruptedIndex = index;
+        break;
+      }
     }
+    if (interruptedIndex < 0) return messages;
+    interruptedProseSessions.delete(key);
+    if (interruption.resumePrefix === null) {
+      return [
+        ...messages.slice(0, interruptedIndex),
+        ...messages.slice(interruptedIndex + 1),
+      ];
+    }
+    const interrupted = replaceAssistantText(messages[interruptedIndex], interruption.resumePrefix);
+    if (interrupted === messages[interruptedIndex]) return messages;
+    return [
+      ...messages.slice(0, interruptedIndex),
+      interrupted,
+      ...messages.slice(interruptedIndex + 1),
+    ];
+  } catch {
+    return messages;
   }
-  if (interruptedIndex < 0) return messages;
-  interruptedProseSessions.delete(key);
-  return [
-    ...messages.slice(0, interruptedIndex),
-    ...messages.slice(interruptedIndex + 1),
-  ];
 }
 
 export async function lessonTriggerProseAddition(args: {

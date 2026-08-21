@@ -52,6 +52,8 @@ pub struct LessonQueryParams {
     pub technology_keys: Vec<String>,
     #[serde(default)]
     pub query: Option<String>,
+    #[serde(default)]
+    pub always_on: bool,
     #[serde(default = "default_twelve")]
     pub limit: u32,
 }
@@ -170,6 +172,7 @@ pub struct LessonFilters {
     pub language_keys: Vec<String>,
     pub technology_keys: Vec<String>,
     pub query: Option<String>,
+    pub always_on: bool,
     pub limit: u32,
 }
 #[derive(Debug, Serialize)]
@@ -228,6 +231,9 @@ pub async fn lesson_query(
         qb.push(" AND ").push_bind(stage).push(" = ANY(stage)");
     }
     eligibility(&mut qb, &params.language_keys, &params.technology_keys);
+    if params.always_on {
+        qb.push(" AND always_on");
+    }
     if let Some(query) = params.query.as_ref().filter(|v| !v.is_empty()) {
         qb.push(" AND lesson_tsv @@ plainto_tsquery(CASE WHEN lesson_key = 'audio' THEN 'english'::regconfig ELSE 'portuguese'::regconfig END, ").push_bind(query).push(")");
     }
@@ -270,6 +276,9 @@ pub async fn lesson_query(
             expand.push(" AND project = ").push_bind(project);
         }
         eligibility(&mut expand, &params.language_keys, &params.technology_keys);
+        if params.always_on {
+            expand.push(" AND always_on");
+        }
         expand
             .push(" ORDER BY always_on DESC, updated_at DESC, id LIMIT ")
             .push_bind((50 - lessons.len()) as i64);
@@ -299,6 +308,9 @@ pub async fn lesson_query(
         &params.language_keys,
         &params.technology_keys,
     );
+    if params.always_on {
+        taxonomy_q.push(" AND always_on");
+    }
     taxonomy_q.push(" GROUP BY kind_path,shape ORDER BY count DESC,kind_path");
     let taxonomy = taxonomy_q
         .build()
@@ -331,6 +343,7 @@ pub async fn lesson_query(
             language_keys: params.language_keys,
             technology_keys: params.technology_keys,
             query: params.query,
+            always_on: params.always_on,
             limit: params.limit,
         },
         lessons,
@@ -402,9 +415,11 @@ pub struct LessonTriggerFired {
     pub proof_pattern: Option<String>,
     pub urgency: String,
     pub surface: String,
+    pub surface_index: usize,
     pub path: Option<String>,
     pub pattern_kind: String,
     pub pattern: String,
+    pub match_start: Option<usize>,
     /// Ledger rows for this lesson in this room, including this fire. The
     /// cockpit renders it as `writing#408 ×15`; cooldown never reads it.
     pub fires: i64,
@@ -420,7 +435,7 @@ pub struct LessonTriggerMatchResult {
     pub warnings: Vec<String>,
 }
 
-const TRIGGER_SELECT: &str = "SELECT id,lesson_key,title,lesson,proof_pattern,condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs,updated_at FROM lessons";
+const TRIGGER_SELECT: &str = "SELECT id,lesson_key,title,lesson,proof_pattern,condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs,language_keys,updated_at FROM lessons";
 
 /// The one visibility clause for trigger-bearing lessons. Named once here and
 /// pushed by every query that reads triggers, so the rule cannot drift.
@@ -449,6 +464,7 @@ fn trigger_row(row: &sqlx::postgres::PgRow) -> Result<TriggerRow, sqlx::Error> {
             trigger_scope: row.try_get("trigger_scope")?,
             interrupt_mode: row.try_get("interrupt_mode")?,
             repeat_cooldown_secs: row.try_get("repeat_cooldown_secs")?,
+            language_keys: row.try_get("language_keys")?,
         },
     })
 }
@@ -581,9 +597,11 @@ pub async fn lesson_trigger_match(
             proof_pattern: trigger.proof_pattern.clone(),
             urgency: trigger.urgency.as_str().to_owned(),
             surface: hit.surface.as_str().to_owned(),
+            surface_index: hit.surface_index,
             path: hit.path.clone(),
             pattern_kind: hit.pattern_kind.as_str().to_owned(),
             pattern: hit.pattern.clone(),
+            match_start: hit.match_start,
             fires: entry.map(|(_, fires)| fires).unwrap_or(0) + 1,
         });
     }
@@ -1409,6 +1427,7 @@ fn patch_trigger_spec(
         trigger_scope: strings("triggerScope")?,
         interrupt_mode,
         repeat_cooldown_secs,
+        ..Default::default()
     })
 }
 pub async fn lesson_update(

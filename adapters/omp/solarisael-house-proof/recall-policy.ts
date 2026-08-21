@@ -90,6 +90,46 @@ function snapshot(event: SnapshotEvent): RecallPolicyHostSnapshot {
   };
 }
 
+// --- hands-on-files evidence -------------------------------------------------
+// A session that has edited or written is working, whatever the prompt sounds
+// like. This module only remembers the fact and carries it to the Host on the
+// next evaluate; the resolution itself stays the Host's judgment.
+//
+// enough: evidence holds for the session's lifetime; a decay window is the door if work mode overstays casual evenings.
+
+const TOOL_EVIDENCE_SESSION_LIMIT = 256;
+const MUTATE_TOOLS = new Set(["edit", "write"]);
+const toolEvidenceSessions = new Set<string>();
+
+function evidenceKey(binding: HostBinding): string {
+  const room = String(binding?.room ?? "").trim();
+  const session = String(binding?.session ?? "").trim();
+  return room && session ? `${room}\0${session}` : "";
+}
+
+/** Single authority for which tool calls count as hands on files. */
+export function isMutateTool(toolName: unknown): boolean {
+  return MUTATE_TOOLS.has(String(toolName ?? "").trim());
+}
+
+export function markToolEvidence(binding: HostBinding): void {
+  const key = evidenceKey(binding);
+  if (!key) return;
+  // Re-marking refreshes recency, so the session actually working is the last
+  // one this bound stash forgets.
+  toolEvidenceSessions.delete(key);
+  toolEvidenceSessions.add(key);
+  if (toolEvidenceSessions.size > TOOL_EVIDENCE_SESSION_LIMIT) {
+    const oldest = toolEvidenceSessions.values().next();
+    if (!oldest.done) toolEvidenceSessions.delete(oldest.value);
+  }
+}
+
+export function hasToolEvidence(binding: HostBinding): boolean {
+  const key = evidenceKey(binding);
+  return key ? toolEvidenceSessions.has(key) : false;
+}
+
 export class RecallPolicyHostClient {
   constructor(readonly binding: HostBinding) {}
 
@@ -116,6 +156,7 @@ export class RecallPolicyHostClient {
     activeProject?: string | null;
     conversationTokens?: number;
     workingSetPresent: boolean;
+    toolEvidence?: boolean;
     idempotencyKey?: unknown;
   }): Promise<{ decision: RecallPolicyDecision; snapshot: RecallPolicyHostSnapshot }> {
     const event = await send(commandEnvelope(
@@ -132,6 +173,9 @@ export class RecallPolicyHostClient {
           active_project: input.activeProject ?? null,
           conversation_tokens: input.conversationTokens ?? 0,
           working_set_present: input.workingSetPresent,
+          // Sent only when true: a Host built before this field refuses unknown
+          // fact keys, and no evidence is exactly its existing behavior.
+          ...(input.toolEvidence ? { tool_evidence: true } : {}),
         },
       },
       input.idempotencyKey,

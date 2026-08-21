@@ -177,7 +177,12 @@ impl RecallPolicySession {
 
         let (resolved_mode, resolution_reason, conversation_streak) =
             if requested_mode == RecallRequestedMode::Auto {
-                resolve_auto_mode(self, &intent, active_project.as_deref())
+                resolve_auto_mode(
+                    self,
+                    &intent,
+                    active_project.as_deref(),
+                    facts.tool_evidence,
+                )
             } else {
                 (requested_mode.resolved(), "explicit-override".to_owned(), 0)
             };
@@ -344,6 +349,7 @@ fn resolve_auto_mode(
     session: &RecallPolicySession,
     intent: &str,
     active_project: Option<&str>,
+    tool_evidence: bool,
 ) -> (RecallResolvedMode, String, u64) {
     if intent == "technical_project" {
         return (RecallResolvedMode::Work, "technical-project".to_owned(), 0);
@@ -362,6 +368,11 @@ fn resolve_auto_mode(
                 0,
             )
         };
+    }
+    // Hands on files outrank prompt vocabulary: a session that has edited or
+    // written this conversation is working, whatever the words sound like.
+    if tool_evidence {
+        return (RecallResolvedMode::Work, "tool-evidence".to_owned(), 0);
     }
     if active_project.is_some()
         && matches!(
@@ -476,5 +487,155 @@ impl ResolvedRequestedMode for RecallRequestedMode {
             Self::Work => RecallResolvedMode::Work,
             Self::Quiet => RecallResolvedMode::Quiet,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RecallPolicySession, resolve_auto_mode};
+    use house_protocol::{
+        RecallPolicyState, RecallRequestedMode, RecallResolvedMode, RecoveryState,
+    };
+
+    fn projection() -> RecallPolicyState {
+        RecallPolicyState {
+            requested_mode: RecallRequestedMode::Auto,
+            resolved_mode: RecallResolvedMode::Conversation,
+            active_project: None,
+            resolution_reason: "default".to_owned(),
+            last_refresh_reason: None,
+            last_refresh_at: None,
+            working_set_entries: 0,
+            recovery_state: RecoveryState::Idle,
+            degraded: None,
+            updated_at: None,
+        }
+    }
+
+    fn session(resolved_mode: RecallResolvedMode, conversation_streak: u64) -> RecallPolicySession {
+        let mut session = RecallPolicySession::fresh(&projection());
+        session.resolved_mode = resolved_mode;
+        session.conversation_streak = conversation_streak;
+        session
+    }
+
+    #[test]
+    fn tool_evidence_resolves_work_whatever_the_prompt_sounds_like() {
+        for intent in ["general", "casual_contact", ""] {
+            assert_eq!(
+                resolve_auto_mode(
+                    &session(RecallResolvedMode::Conversation, 0),
+                    intent,
+                    None,
+                    true,
+                ),
+                (RecallResolvedMode::Work, "tool-evidence".to_owned(), 0),
+                "hands on files must outrank the prompt vocabulary of {intent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tool_evidence_outranks_conversation_hysteresis() {
+        assert_eq!(
+            resolve_auto_mode(
+                &session(RecallResolvedMode::Work, 0),
+                "casual_contact",
+                Some("the-athanor"),
+                true,
+            ),
+            (RecallResolvedMode::Work, "tool-evidence".to_owned(), 0)
+        );
+    }
+
+    #[test]
+    fn intent_and_explicit_lookups_outrank_tool_evidence() {
+        assert_eq!(
+            resolve_auto_mode(
+                &session(RecallResolvedMode::Conversation, 0),
+                "technical_project",
+                Some("the-athanor"),
+                true,
+            ),
+            (RecallResolvedMode::Work, "technical-project".to_owned(), 0)
+        );
+        assert_eq!(
+            resolve_auto_mode(
+                &session(RecallResolvedMode::Conversation, 0),
+                "memory_lookup",
+                None,
+                true,
+            ),
+            (
+                RecallResolvedMode::Conversation,
+                "explicit-lookup".to_owned(),
+                0
+            )
+        );
+        assert_eq!(
+            resolve_auto_mode(
+                &session(RecallResolvedMode::Conversation, 0),
+                "entity_lookup",
+                Some("the-athanor"),
+                true,
+            ),
+            (
+                RecallResolvedMode::Mixed,
+                "project-aware-lookup".to_owned(),
+                0
+            )
+        );
+    }
+
+    #[test]
+    fn absent_tool_evidence_leaves_resolution_exactly_as_it_was() {
+        assert_eq!(
+            resolve_auto_mode(
+                &session(RecallResolvedMode::Conversation, 0),
+                "general",
+                None,
+                false,
+            ),
+            (RecallResolvedMode::Conversation, "general".to_owned(), 0)
+        );
+        assert_eq!(
+            resolve_auto_mode(
+                &session(RecallResolvedMode::Conversation, 0),
+                "casual_contact",
+                None,
+                false,
+            ),
+            (
+                RecallResolvedMode::Conversation,
+                "casual-contact".to_owned(),
+                0
+            )
+        );
+        assert_eq!(
+            resolve_auto_mode(
+                &session(RecallResolvedMode::Work, 0),
+                "casual_contact",
+                Some("the-athanor"),
+                false,
+            ),
+            (
+                RecallResolvedMode::Mixed,
+                "conversation-hysteresis".to_owned(),
+                1
+            )
+        );
+        assert_eq!(
+            resolve_auto_mode(
+                &session(RecallResolvedMode::Mixed, 1),
+                "casual_contact",
+                Some("the-athanor"),
+                false,
+            ),
+            (
+                RecallResolvedMode::Conversation,
+                "conversation-hysteresis-complete".to_owned(),
+                2
+            )
+        );
     }
 }

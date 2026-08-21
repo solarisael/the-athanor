@@ -85,6 +85,9 @@ mock.module("../solarisael-house-proof/recall-policy.ts", () => ({
     async failRefresh() { return { recallPolicy: null }; }
     async invalidateAfterCompaction() { return undefined; }
   },
+  isMutateTool: () => false,
+  markToolEvidence: () => undefined,
+  hasToolEvidence: () => false,
 }));
 
 const {
@@ -128,6 +131,34 @@ const fired = {
     lesson: "Rewrite the local sentence through a different structure.",
     proofPattern: null, urgency: "block", surface: "prose",
     path: null, patternKind: "regex", pattern: "negative hinge"
+  }],
+  proseBlockTrim: [{
+    family: "writing", id: 408, title: "Retire the canned antithesis",
+    lesson: "Rewrite the local sentence through a different structure.",
+    proofPattern: null, urgency: "block", surface: "prose",
+    path: null, patternKind: "regex", pattern: "negative hinge",
+    matchStart: 39, surfaceIndex: 0
+  }],
+  proseBlockFirst: [{
+    family: "writing", id: 408, title: "Retire the canned antithesis",
+    lesson: "Rewrite the local sentence through a different structure.",
+    proofPattern: null, urgency: "block", surface: "prose",
+    path: null, patternKind: "regex", pattern: "negative hinge",
+    matchStart: 4, surfaceIndex: 0
+  }],
+  proseBlockAst: [{
+    family: "writing", id: 408, title: "Retire the canned antithesis",
+    lesson: "Rewrite the local sentence through a different structure.",
+    proofPattern: null, urgency: "block", surface: "prose",
+    path: null, patternKind: "ast", pattern: "negative hinge",
+    matchStart: null, surfaceIndex: 0
+  }],
+  proseBlockBlank: [{
+    family: "writing", id: 408, title: "Retire the canned antithesis",
+    lesson: "Rewrite the local sentence through a different structure.",
+    proofPattern: null, urgency: "block", surface: "prose",
+    path: null, patternKind: "regex", pattern: "negative hinge",
+    matchStart: 42, surfaceIndex: 0
   }],
   quiet: []
 };
@@ -406,8 +437,10 @@ describe("lesson trigger live prose tap", () => {
   }
 
   // Kills: a prose block downgraded into next-turn advice, operator feedback
-  // hidden, or generation left running after the Rust verdict.
-  // red-proof: force `canInterrupt = false` or `display = false` in queueProseContinuation.
+  // hidden, generation left running, or an omitted skew-wire offset treated as
+  // a usable cut point.
+  // red-proof: force `canInterrupt = false`, `display = false`, or default an
+  // absent `matchStart` to a number in queueProseContinuation.
   test("queues a hidden correction and aborts a live prose block", async () => {
     await installPipe("proseBlock");
     const harness = streamHarness("stream-block");
@@ -430,6 +463,7 @@ describe("lesson trigger live prose tap", () => {
     });
     expect(harness.sent[0].message.content).toContain('reason="lesson_violation"');
     expect(harness.sent[0].message.content).toContain('lesson="writing#408"');
+    expect(harness.sent[0].message.content).not.toContain("Your interrupted draft above was trimmed");
     expect(observed).toEqual([{
       method: "lesson_trigger_match",
       params: {
@@ -451,6 +485,94 @@ describe("lesson trigger live prose tap", () => {
       "kodo",
       "stream-block",
     )).toEqual([userMessage, aborted]);
+  });
+
+  // Kills: taking the violating sentence with the clean prefix, flattening the
+  // assistant message, or forgetting to tell the continuation not to restate.
+  // red-proof: use `matchStart` as the slice boundary or delete the aborted
+  // message even when proseResumePrefix returns a prefix.
+  test("keeps two clean sentences and replaces only the aborted text blocks", async () => {
+    await installPipe("proseBlockTrim");
+    const harness = streamHarness("stream-trim");
+    const text = "First sentence. Second sentence! Third negative hinge appears in the violating draft.";
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, harness.ctx, harness.pi);
+
+    await lessonTriggerProseStreamUpdate(assistantEvent(text), harness.ctx, harness.pi);
+
+    const resumeLine = "Your interrupted draft above was trimmed at the violation. Continue exactly from its end; do not restate anything above the cut.";
+    expect(harness.sent[0].message.content.endsWith(resumeLine)).toBe(true);
+    const userMessage = { role: "user", content: "original request" };
+    const aborted = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "private scratch" },
+        { type: "text", text, signature: "keep-me" },
+      ],
+      stopReason: "aborted",
+      responseId: "response-1",
+    };
+    const filtered = filterInterruptedLessonProse([userMessage, aborted], "kodo", "stream-trim");
+
+    expect(filtered).toEqual([
+      userMessage,
+      {
+        ...aborted,
+        content: [
+          aborted.content[0],
+          { type: "text", text: "First sentence. Second sentence!", signature: "keep-me" },
+        ],
+      },
+    ]);
+    expect(aborted.content[1].text).toBe(text);
+  });
+
+  // Kills: inventing a cut before the first completed sentence.
+  // red-proof: accept the match offset itself as a resumable boundary.
+  test("drops the aborted message when the match is inside the first sentence", async () => {
+    await installPipe("proseBlockFirst");
+    const harness = streamHarness("stream-first");
+    const text = "The negative hinge appears before a sufficiently long remainder in this first sentence.";
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, harness.ctx, harness.pi);
+
+    await lessonTriggerProseStreamUpdate(assistantEvent(text), harness.ctx, harness.pi);
+
+    expect(harness.sent[0].message.content).not.toContain("Your interrupted draft above was trimmed");
+    const userMessage = { role: "user", content: "original request" };
+    const aborted = { role: "assistant", content: text, stopReason: "aborted" };
+    expect(filterInterruptedLessonProse([userMessage, aborted], "kodo", "stream-first")).toEqual([userMessage]);
+  });
+
+  // Kills: treating an AST hit's null byte offset as zero or as end-of-draft.
+  // red-proof: coerce null `matchStart` values before proseResumePrefix.
+  test("drops the aborted message for an AST hit without a match offset", async () => {
+    await installPipe("proseBlockAst");
+    const harness = streamHarness("stream-ast");
+    const text = "A complete clean sentence. The negative hinge remains in a long violating sentence.";
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, harness.ctx, harness.pi);
+
+    await lessonTriggerProseStreamUpdate(assistantEvent(text), harness.ctx, harness.pi);
+
+    expect(harness.sent[0].message.content).not.toContain("Your interrupted draft above was trimmed");
+    const userMessage = { role: "user", content: "original request" };
+    const aborted = { role: "assistant", content: text, stopReason: "aborted" };
+    expect(filterInterruptedLessonProse([userMessage, aborted], "kodo", "stream-ast")).toEqual([userMessage]);
+  });
+
+  // Kills: recognizing only punctuation boundaries and discarding a complete
+  // paragraph whose final line deliberately has no terminator.
+  // red-proof: remove blankLineBoundary from proseResumePrefix.
+  test("keeps a clean paragraph before a blank-line boundary", async () => {
+    await installPipe("proseBlockBlank");
+    const harness = streamHarness("stream-blank");
+    const text = "Kept paragraph without punctuation\n\nThird negative hinge appears in a long enough draft.";
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, harness.ctx, harness.pi);
+
+    await lessonTriggerProseStreamUpdate(assistantEvent(text), harness.ctx, harness.pi);
+
+    const aborted = { role: "assistant", content: text, stopReason: "aborted", model: "house" };
+    expect(filterInterruptedLessonProse([aborted], "kodo", "stream-blank")).toEqual([
+      { ...aborted, content: "Kept paragraph without punctuation" },
+    ]);
   });
 
   // Kills: display=true exposing the hidden system payload as the default card,
@@ -654,6 +776,48 @@ describe("lesson trigger prose injection", () => {
     expect(lessonAdditions(thirdMessages)).toHaveLength(2);
     expect(lessonAdditions(thirdMessages)[0]).toEqual(secondAdditions[0]);
     expect(thirdMessages.at(-1)).toEqual(lessonAdditions(thirdMessages)[1]);
+  });
+
+  // Kills: feeding the trimmed array only to conversation logging while the
+  // provider still receives the original aborted draft.
+  // red-proof: return only anchorTurnAdditions from composeContextAdditions when
+  // filtering changed messages but no custom addition exists.
+  test("returns a trimmed-only ContextEventResult to the provider", async () => {
+    await installPipe("proseBlockTrim");
+    const handler = await contextHandler("../index.ts?lesson-trigger-trim-propagation");
+    const sessionID = "prose-trim-propagation";
+    const ctx = {
+      cwd: effectiveRoomDir,
+      sessionID,
+      abort() {},
+    };
+    const pi = { sendMessage() {} };
+    const text = "First sentence. Second sentence! Third negative hinge appears in the violating draft.";
+    resetLessonTriggerProseStream({ message: { role: "assistant" } }, ctx, pi);
+    await lessonTriggerProseStreamUpdate({
+      message: { role: "assistant", content: [{ type: "text", text }] },
+      assistantMessageEvent: { type: "text_end", contentIndex: 0 },
+    }, ctx, pi);
+    process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = "1";
+
+    const prompt = user("turn-trim", "original request");
+    const aborted = {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      stopReason: "aborted",
+      responseId: "response-trim",
+    };
+    const result = await handler({ messages: [prompt, aborted] }, ctx);
+
+    expect(result).toEqual({
+      messages: [
+        prompt,
+        {
+          ...aborted,
+          content: [{ type: "text", text: "First sentence. Second sentence!" }],
+        },
+      ],
+    });
   });
 
   // Kills: a prose failure escaping into the context hook. A dead substrate must

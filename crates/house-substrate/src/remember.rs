@@ -312,6 +312,7 @@ impl RememberRequest {
             trigger_scope: self.trigger_scope.clone(),
             interrupt_mode: self.interrupt_mode.clone(),
             repeat_cooldown_secs: self.repeat_cooldown_secs,
+            ..Default::default()
         }
     }
 }

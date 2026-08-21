@@ -132,6 +132,7 @@ struct Trigger<'a> {
     trigger_scope: Vec<&'a str>,
     interrupt_mode: Option<&'a str>,
     cooldown: Option<i32>,
+    language_keys: Vec<&'a str>,
 }
 
 impl<'a> Trigger<'a> {
@@ -145,6 +146,7 @@ impl<'a> Trigger<'a> {
             trigger_scope: vec![],
             interrupt_mode: None,
             cooldown: None,
+            language_keys: vec![],
         }
     }
 }
@@ -153,8 +155,8 @@ async fn insert_trigger(pool: &PgPool, trigger: &Trigger<'_>) -> TestResult {
     sqlx::query(
         "INSERT INTO lessons
          (lesson_key,id,scope,title,lesson,proof_pattern,condition,ast_condition,
-          trigger_scope,interrupt_mode,repeat_cooldown_secs)
-         VALUES ('coding',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+          trigger_scope,interrupt_mode,repeat_cooldown_secs,language_keys)
+         VALUES ('coding',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
     )
     .bind(trigger.id)
     .bind(trigger.scope)
@@ -184,6 +186,13 @@ async fn insert_trigger(pool: &PgPool, trigger: &Trigger<'_>) -> TestResult {
     )
     .bind(trigger.interrupt_mode)
     .bind(trigger.cooldown)
+    .bind(
+        trigger
+            .language_keys
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>(),
+    )
     .execute(pool)
     .await?;
     Ok(())
@@ -754,6 +763,83 @@ async fn invalid_trigger_specs_are_refused_by_the_write_path() -> TestResult {
     assert!(
         accepted.is_none(),
         "a valid trigger patch must still be accepted, got {accepted:?}"
+    );
+    Ok(())
+}
+
+// Kills: regex hit location metadata dropped at the substrate wire boundary, or
+// the matched surface and byte offset both hard-coded to zero.
+// red-proof: remove either location field from `LessonTriggerFired`, or replace
+// either value in its constructor with zero.
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+async fn regex_fire_serializes_surface_index_and_match_start() -> TestResult {
+    let pool = temp_trigger_pool().await?;
+    insert_trigger(
+        &pool,
+        &Trigger::regex(991, "Offset wire lesson", "unwrap\\(\\)"),
+    )
+    .await?;
+
+    let result = match_surfaces(
+        &pool,
+        "wire-offsets",
+        "session-offsets",
+        vec![
+            tool_surface("edit", "src/quiet.rs", "nothing here"),
+            tool_surface("edit", "src/hit.rs", "prefix unwrap()"),
+        ],
+    )
+    .await?;
+    let wire = serde_json::to_value(&result)?;
+    let entry = wire
+        .get("fired")
+        .and_then(Value::as_array)
+        .and_then(|entries| entries.first())
+        .expect("a regex fire must be present on the wire");
+
+    assert_eq!(entry.get("surfaceIndex"), Some(&json!(1)));
+    assert_eq!(entry.get("matchStart"), Some(&json!(7)));
+    Ok(())
+}
+
+// Kills: the language fence lost between PostgreSQL and house-core — the
+// language_keys column dropped from the trigger SELECT (every keyed lesson
+// becomes universal), or the extension check inverted. Pins both sides in one
+// call shape: the keyed lesson fires on its own language and stays silent on a
+// foreign one, while the unkeyed lesson beside it fires on both.
+// red-proof: delete `language_keys` from TRIGGER_SELECT's column list (or from
+// the spec built in `trigger_row`).
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+async fn a_rust_keyed_lesson_fires_on_rust_and_stays_silent_on_python() -> TestResult {
+    let pool = temp_trigger_pool().await?;
+    let mut keyed = Trigger::regex(971, "Rust-keyed lesson", "unwrap\\(\\)");
+    keyed.language_keys = vec!["rust"];
+    let unkeyed = Trigger::regex(972, "Unkeyed lesson", "unwrap\\(\\)");
+    insert_trigger(&pool, &keyed).await?;
+    insert_trigger(&pool, &unkeyed).await?;
+
+    let on_rust = match_surfaces(
+        &pool,
+        "kodo",
+        "session-fence-rs",
+        vec![tool_surface("edit", "src/lib.rs", "let x = y.unwrap();")],
+    )
+    .await?;
+    assert_eq!(fired_ids(&on_rust), vec![971, 972]);
+
+    let on_python = match_surfaces(
+        &pool,
+        "kodo",
+        "session-fence-py",
+        vec![tool_surface("edit", "app.py", "x = y.unwrap()")],
+    )
+    .await?;
+    assert_eq!(
+        fired_ids(&on_python),
+        vec![972],
+        "a rust-keyed lesson must not fire on a python surface"
     );
     Ok(())
 }

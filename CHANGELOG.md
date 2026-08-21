@@ -22,6 +22,28 @@ the exact implementation record.
 
 ### Changed
 
+- Lesson triggers now fence by language: a lesson carrying `language_keys`
+  fires only on tool surfaces whose file extension maps to one of its
+  languages (one authority table shared with ast-grep grammar selection;
+  `.sql` stays regex-capable). Unkeyed lessons behave exactly as before, and
+  a lesson that watches `text` while carrying language keys compiles with a
+  named warning instead of silently never firing on prose.
+- Trigger fires now carry `surfaceIndex` and `matchStart` (regex byte offset;
+  null for ast hits) on the wire, and a prose-lane block interrupt keeps the
+  clean draft up to the sentence boundary before the violation instead of
+  discarding the whole aborted message. The correction counsel instructs the
+  model to continue exactly from the cut, so only the violating tail is
+  regenerated.
+- Automatic Recall now recognizes work by evidence, not only vocabulary: the
+  first `edit`/`write` tool call of a session rides the policy evaluation as
+  `tool_evidence`, and auto mode resolves to `work` (reason `tool-evidence`)
+  beneath technical intent and explicit lookups. Evidence holds for the
+  session's lifetime.
+- Work mode now injects a lesson packet: when the resolved Recall mode is
+  `work` and the conversation carries none, the always-on coding lessons
+  (`lesson_query` gains an `alwaysOn` filter) arrive as one superseding
+  `solarisael-lesson-packet` message with an operator-visible card. Curating
+  the packet is a data operation: flip `always_on` on the lesson.
 - Insula now observes the Rust processes, not only the OMP adapter. A shared
   in-process emitter (`athanor_substrate::insula_writer`) mirrors the adapter
   writer contract: bounded queue, drop receipts, monotonic writer sequence,

@@ -123,6 +123,9 @@ session with work-immediate/conversation-hysteresis behavior, replaces one
 bounded Recall working set instead of accumulating per-turn payloads, invalidates
 it after compaction, and exposes the same status and overrides through OMP and
 the Godot client.
+Hands on files are evidence: a session that has edited or written resolves `Auto`
+to work whatever the prompt sounds like, while a named technical project or an
+explicit lookup still outranks that evidence.
 Within one visible compaction epoch, an evidence identity is eligible for one
 automatic exposure. Later refreshes hard-suppress it instead of merely lowering
 its rank; compaction resets the exposure set so recovery may rehydrate evidence

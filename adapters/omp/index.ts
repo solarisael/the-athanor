@@ -1161,6 +1161,7 @@ export default function solarisaelHouseProof(pi) {
         session: hostSession,
         text: conversationText(lastAssistant),
         timestamp,
+        cwd: ctx.cwd,
       });
       // Anchored at the current turn with every other addition below; no code
       // path here touches an earlier turn's anchor.

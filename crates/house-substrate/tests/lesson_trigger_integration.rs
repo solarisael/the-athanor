@@ -133,6 +133,7 @@ struct Trigger<'a> {
     interrupt_mode: Option<&'a str>,
     cooldown: Option<i32>,
     language_keys: Vec<&'a str>,
+    project: Option<&'a str>,
 }
 
 impl<'a> Trigger<'a> {
@@ -147,6 +148,7 @@ impl<'a> Trigger<'a> {
             interrupt_mode: None,
             cooldown: None,
             language_keys: vec![],
+            project: None,
         }
     }
 }
@@ -155,8 +157,8 @@ async fn insert_trigger(pool: &PgPool, trigger: &Trigger<'_>) -> TestResult {
     sqlx::query(
         "INSERT INTO lessons
          (lesson_key,id,scope,title,lesson,proof_pattern,condition,ast_condition,
-          trigger_scope,interrupt_mode,repeat_cooldown_secs,language_keys)
-         VALUES ('coding',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+          trigger_scope,interrupt_mode,repeat_cooldown_secs,language_keys,project)
+         VALUES ('coding',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
     )
     .bind(trigger.id)
     .bind(trigger.scope)
@@ -193,6 +195,7 @@ async fn insert_trigger(pool: &PgPool, trigger: &Trigger<'_>) -> TestResult {
             .map(|value| value.to_string())
             .collect::<Vec<_>>(),
     )
+    .bind(trigger.project)
     .execute(pool)
     .await?;
     Ok(())
@@ -222,12 +225,23 @@ async fn match_surfaces(
     session: &str,
     surfaces: Vec<LessonTriggerSurface>,
 ) -> TestResult<LessonTriggerMatchResult> {
+    match_surfaces_in_project(pool, room, session, surfaces, None).await
+}
+
+async fn match_surfaces_in_project(
+    pool: &PgPool,
+    room: &str,
+    session: &str,
+    surfaces: Vec<LessonTriggerSurface>,
+    project: Option<&str>,
+) -> TestResult<LessonTriggerMatchResult> {
     Ok(lesson_trigger_match(
         pool,
         LessonTriggerMatchParams {
             room: room.into(),
             session: session.into(),
             surfaces,
+            project: project.map(str::to_owned),
         },
     )
     .await?)
@@ -840,6 +854,69 @@ async fn a_rust_keyed_lesson_fires_on_rust_and_stays_silent_on_python() -> TestR
         fired_ids(&on_python),
         vec![972],
         "a rust-keyed lesson must not fire on a python surface"
+    );
+    Ok(())
+}
+
+// Kills: the project fence admitting foreign-project lessons, refusing the
+// caller's own project, or dropping the universal NULL rows beside it.
+// red-proof: replace the `OR lower(replace(project, ' ', '-')) =` arm in
+// trigger_eligibility with `OR TRUE` (foreign fires) or delete the arm
+// (own-project lesson dies).
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+async fn a_project_lesson_fires_only_inside_its_own_project() -> TestResult {
+    let pool = temp_trigger_pool().await?;
+    let mut tagged = Trigger::regex(991, "Athanor-only lesson", "unwrap\\(\\)");
+    tagged.project = Some("The Athanor");
+    insert_trigger(&pool, &tagged).await?;
+    insert_trigger(
+        &pool,
+        &Trigger::regex(992, "Universal lesson", "unwrap\\(\\)"),
+    )
+    .await?;
+
+    let surface = || vec![tool_surface("edit", "src/lib.rs", "value.unwrap()")];
+
+    let outside = match_surfaces(&pool, "tuner", "fence-outside", surface()).await?;
+    let outside_ids: Vec<i64> = outside.fired.iter().map(|entry| entry.id).collect();
+    assert_eq!(
+        outside_ids,
+        vec![992],
+        "no project admits only universal rows"
+    );
+
+    // The column holds "The Athanor"; the caller arrives pre-normalized. The
+    // SQL-side normalization is what bridges the recorded slug drift.
+    let inside = match_surfaces_in_project(
+        &pool,
+        "tuner",
+        "fence-inside",
+        surface(),
+        Some("the-athanor"),
+    )
+    .await?;
+    let mut inside_ids: Vec<i64> = inside.fired.iter().map(|entry| entry.id).collect();
+    inside_ids.sort_unstable();
+    assert_eq!(
+        inside_ids,
+        vec![991, 992],
+        "own project admits tagged and universal rows"
+    );
+
+    let foreign = match_surfaces_in_project(
+        &pool,
+        "tuner",
+        "fence-foreign",
+        surface(),
+        Some("multistock"),
+    )
+    .await?;
+    let foreign_ids: Vec<i64> = foreign.fired.iter().map(|entry| entry.id).collect();
+    assert_eq!(
+        foreign_ids,
+        vec![992],
+        "a foreign project never sees another project's lessons"
     );
     Ok(())
 }

@@ -11,6 +11,9 @@
 // tool_call handler throws, so every exported entry point wraps its whole body
 // and answers undefined/null on any error, timeout, or malformed response.
 
+import { existsSync } from "node:fs";
+import path from "node:path";
+
 import { discoverRustExecutable } from "../discovery.ts";
 import { RustJsonlTransport } from "../rust-transport.ts";
 import { hostSessionIdentity } from "./host.ts";
@@ -58,6 +61,7 @@ type ProseStreamState = {
   room: string;
   roomDir: string;
   session: string;
+  project: string | null;
   latestText: string;
   checkedText: string;
   forceScan: boolean;
@@ -82,6 +86,38 @@ function trimOldest<K, V>(map: Map<K, V>): void {
 
 export function lessonTriggersDisabled(): boolean {
   return process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS === "1";
+}
+
+const projectSlugByCwd = new Map<string, string | null>();
+
+/** The repo the hands are in, as a lesson project slug: the basename of the
+ * nearest ancestor holding `.git`, lowercased with spaces folded to dashes.
+ * enough: basename heuristic; an explicit registry is the door when repo
+ * names and lesson project slugs diverge. */
+function deriveProjectSlug(cwd: unknown): string | null {
+  if (typeof cwd !== "string" || !cwd.trim()) return null;
+  const start = path.resolve(cwd);
+  const cached = projectSlugByCwd.get(start);
+  if (cached !== undefined) return cached;
+
+  let slug: string | null = null;
+  try {
+    let current = start;
+    while (true) {
+      if (existsSync(path.join(current, ".git"))) {
+        slug = path.basename(current).trim().toLowerCase().replace(/\s+/g, "-") || null;
+        break;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  } catch {
+    slug = null;
+  }
+  projectSlugByCwd.set(start, slug);
+  trimOldest(projectSlugByCwd);
+  return slug;
 }
 
 const transports = new Map<string, RustJsonlTransport>();
@@ -115,13 +151,14 @@ async function matchSurfaces(
   room: string,
   session: string,
   surfaces: LessonSurface[],
+  project: string | null = null,
 ): Promise<{ fired: FiredLesson[]; warnings: string[] }> {
   if (!surfaces.length) return { fired: [], warnings: [] };
   const client = triggerTransport(roomDir);
   if (!client) return { fired: [], warnings: [] };
   const response = await client.request(
     "lesson_trigger_match",
-    { room, session, surfaces },
+    { room, session, surfaces, ...(project ? { project } : {}) },
     { timeoutMs: TRIGGER_TIMEOUT_MS },
   ) as Record<string, unknown>;
   if (!response || response.ok !== true) return { fired: [], warnings: [] };
@@ -374,7 +411,8 @@ export async function lessonTriggerToolCall(
 
     const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
     const session = hostSessionIdentity(ctx, effectiveRoomDir);
-    const { fired } = await matchSurfaces(effectiveRoomDir, room, session, surfaces);
+    const project = deriveProjectSlug(ctx?.cwd);
+    const { fired } = await matchSurfaces(effectiveRoomDir, room, session, surfaces, project);
     if (!fired.length) return undefined;
 
     const blocking = fired.filter((entry) => entry.urgency === "block");
@@ -407,6 +445,7 @@ export async function lessonTriggerProseDecision(args: {
   roomDir: string;
   session: string;
   text: string;
+  project?: string | null;
 }): Promise<LessonTriggerProseDecision | null> {
   try {
     if (lessonTriggersDisabled()) return null;
@@ -414,7 +453,7 @@ export async function lessonTriggerProseDecision(args: {
     if (!text.trim()) return null;
     const { fired, warnings } = await matchSurfaces(args.roomDir, args.room, args.session, [
       { kind: "prose", text },
-    ]);
+    ], args.project ?? null);
     if (!fired.length) return null;
 
     const blocking = fired.filter((entry) => entry.urgency === "block");
@@ -443,6 +482,7 @@ function proseStreamBinding(ctx: any): {
   room: string;
   roomDir: string;
   session: string;
+  project: string | null;
 } {
   const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
   const session = hostSessionIdentity(ctx, effectiveRoomDir);
@@ -451,6 +491,7 @@ function proseStreamBinding(ctx: any): {
     room,
     roomDir: effectiveRoomDir,
     session,
+    project: deriveProjectSlug(ctx?.cwd),
   };
 }
 
@@ -460,6 +501,7 @@ function newProseStreamState(ctx: any, pi: any): { key: string; state: ProseStre
     room: binding.room,
     roomDir: binding.roomDir,
     session: binding.session,
+    project: binding.project,
     latestText: "",
     checkedText: "",
     forceScan: false,
@@ -611,6 +653,7 @@ async function runProseStreamPump(key: string, state: ProseStreamState): Promise
         room: state.room,
         roomDir: state.roomDir,
         session: state.session,
+        project: state.project,
         text,
       });
       if (proseStreamBySession.get(key) !== state || state.blocked) return;
@@ -704,6 +747,7 @@ export async function lessonTriggerProseAddition(args: {
   session: string;
   text: string;
   timestamp: number;
+  cwd?: string;
 }): Promise<
   | {
     role: "custom";
@@ -716,7 +760,7 @@ export async function lessonTriggerProseAddition(args: {
   }
   | null
 > {
-  const decision = await lessonTriggerProseDecision(args);
+  const decision = await lessonTriggerProseDecision({ ...args, project: deriveProjectSlug(args.cwd) });
   if (!decision) return null;
   // A completed generation can only advise the next turn. Live blocks use the
   // message_update tap above and never reach this fallback when they interrupt.

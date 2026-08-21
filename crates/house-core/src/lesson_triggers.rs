@@ -30,14 +30,14 @@ struct ExtensionLanguage {
     grammar: Option<SupportLang>,
 }
 
-// enough: the v1 language set is one table, so the ast grammar and the
-// language fence can never drift — `.sql` carries a slug with no grammar
-// because ast-grep-language 0.45.1 ships no SQL parser at all, and regex
-// conditions still cover .sql surfaces. Upgrade path: enable another
-// `tree-sitter-*` feature in crates/house-core/Cargo.toml (for sql: depend on
-// `tree-sitter-sequel` and implement `LanguageExt` for a House `Sql`
-// language), then add its row here.
-const EXTENSION_LANGUAGES: [ExtensionLanguage; 7] = [
+// enough: one table, so the ast grammar and the language fence can never
+// drift. Grammarless rows (`grammar: None`) fence regex conditions only —
+// ast-grep-language 0.45.1 ships no parser for them; ast conditions skip
+// with a warning. The slug column speaks the lesson registry's live
+// `language_keys` vocabulary. Upgrade path: enable another `tree-sitter-*`
+// feature in crates/house-core/Cargo.toml and fill in the grammar, or add a
+// row when the registry grows a new slug.
+const EXTENSION_LANGUAGES: [ExtensionLanguage; 19] = [
     ExtensionLanguage {
         ext: "rs",
         slug: "rust",
@@ -71,6 +71,66 @@ const EXTENSION_LANGUAGES: [ExtensionLanguage; 7] = [
     ExtensionLanguage {
         ext: "sql",
         slug: "sql",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "go",
+        slug: "go",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "css",
+        slug: "css",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "scss",
+        slug: "css",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "html",
+        slug: "html",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "htm",
+        slug: "html",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "jinja",
+        slug: "html",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "j2",
+        slug: "html",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "gd",
+        slug: "gdscript",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "glsl",
+        slug: "glsl",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "md",
+        slug: "markdown",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "php",
+        slug: "php",
+        grammar: None,
+    },
+    ExtensionLanguage {
+        ext: "lean",
+        slug: "lean",
         grammar: None,
     },
 ];
@@ -629,10 +689,12 @@ pub fn match_surfaces(set: &CompiledTriggerSet, surfaces: &[Surface<'_>]) -> Mat
     outcome
 }
 
-// enough: the compile cache is one entry per room, replaced whenever the
-// caller's fingerprint (trigger-bearing row count + max updated_at) changes.
-// It is bounded by the number of rooms a substrate process serves. Upgrade
-// path: an LRU with a size ceiling if a host ever serves unbounded rooms.
+// enough: the compile cache is one entry per caller-built key (room, or
+// room\0project when the caller stands in one), replaced whenever that
+// fence's fingerprint (trigger-bearing row count + max updated_at) changes.
+// It is bounded by rooms × active projects a substrate process serves.
+// Upgrade path: an LRU with a size ceiling if a host ever serves unbounded
+// fences.
 static CACHE: OnceLock<Mutex<HashMap<String, Arc<CompiledTriggerSet>>>> = OnceLock::new();
 
 fn cache() -> &'static Mutex<HashMap<String, Arc<CompiledTriggerSet>>> {
@@ -831,8 +893,10 @@ mod tests {
         assert_eq!(ast_language(Some("s.py")), Ok(SupportLang::Python));
         let sql = ast_language(Some("migrations/0019.sql")).unwrap_err();
         assert!(sql.contains("no ast grammar"), "{sql}");
-        let unknown = ast_language(Some("notes.md")).unwrap_err();
-        assert!(unknown.contains("unsupported extension md"), "{unknown}");
+        let markdown = ast_language(Some("notes.md")).unwrap_err();
+        assert!(markdown.contains("no ast grammar"), "{markdown}");
+        let unknown = ast_language(Some("data.toml")).unwrap_err();
+        assert!(unknown.contains("unsupported extension toml"), "{unknown}");
         assert!(ast_language(Some("Makefile")).is_err());
         assert!(ast_language(None).is_err());
     }
@@ -1126,7 +1190,11 @@ mod tests {
         assert_eq!(language_slug(Some("a.jsx")), Some("javascript"));
         assert_eq!(language_slug(Some("s.py")), Some("python"));
         assert_eq!(language_slug(Some("db/0019.sql")), Some("sql"));
-        assert_eq!(language_slug(Some("notes.md")), None);
+        assert_eq!(language_slug(Some("main.go")), Some("go"));
+        assert_eq!(language_slug(Some("styles/app.CSS")), Some("css"));
+        assert_eq!(language_slug(Some("page.jinja")), Some("html"));
+        assert_eq!(language_slug(Some("notes.md")), Some("markdown"));
+        assert_eq!(language_slug(Some("data.toml")), None);
         assert_eq!(language_slug(Some("Makefile")), None);
         assert_eq!(language_slug(None), None);
 

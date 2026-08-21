@@ -369,6 +369,10 @@ pub struct LessonTriggerMatchParams {
     pub room: String,
     pub session: String,
     pub surfaces: Vec<LessonTriggerSurface>,
+    /// The caller's active project slug, when it has one. Absent keeps the
+    /// universal fence: only project-agnostic lessons fire.
+    #[serde(default)]
+    pub project: Option<String>,
 }
 
 // enough: one turn offers at most this many surfaces — the edited file plus the
@@ -393,6 +397,21 @@ impl LessonTriggerMatchParams {
             )));
         }
         Ok(())
+    }
+
+    /// The project slug in fence-normal form: trimmed, lowercased, spaces
+    /// folded to dashes. Empty input means no project at all.
+    fn normalized_project(&self) -> Option<String> {
+        let raw = self.project.as_deref()?.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        Some(
+            raw.to_lowercase()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join("-"),
+        )
     }
     fn scopes(&self) -> Vec<String> {
         if self.room == "house" {
@@ -439,14 +458,27 @@ const TRIGGER_SELECT: &str = "SELECT id,lesson_key,title,lesson,proof_pattern,co
 
 /// The one visibility clause for trigger-bearing lessons. Named once here and
 /// pushed by every query that reads triggers, so the rule cannot drift.
-fn trigger_eligibility(qb: &mut QueryBuilder<'_, Postgres>, scopes: &[String]) {
-    qb.push(" WHERE (condition <> '{}' OR ast_condition <> '{}')")
-        // enough: v1 fires only project-agnostic lessons. The wire carries no
-        // project, and a project lesson firing inside a foreign project is a
-        // false block. Upgrade path: add `project` to LessonTriggerMatchParams
-        // and apply lesson_query's project filter here.
-        .push(" AND project IS NULL")
-        .push(" AND (lesson_key <> 'coding' OR scope = ANY(")
+fn trigger_eligibility(
+    qb: &mut QueryBuilder<'_, Postgres>,
+    scopes: &[String],
+    project: Option<&str>,
+) {
+    qb.push(" WHERE (condition <> '{}' OR ast_condition <> '{}')");
+    // A project lesson firing inside a foreign project is a false block, so the
+    // fence admits it only when the caller stands in that project. The column
+    // side is normalized here because the data carries slug drift ("The
+    // Athanor" / "the-athanor"); the caller side arrives pre-normalized.
+    match project {
+        Some(slug) => {
+            qb.push(" AND (project IS NULL OR lower(replace(project, ' ', '-')) = ")
+                .push_bind(slug.to_owned())
+                .push(")");
+        }
+        None => {
+            qb.push(" AND project IS NULL");
+        }
+    }
+    qb.push(" AND (lesson_key <> 'coding' OR scope = ANY(")
         .push_bind(scopes.to_vec())
         .push("))");
 }
@@ -484,8 +516,9 @@ pub async fn lesson_trigger_match(
         });
     }
 
+    let project = params.normalized_project();
     let mut qb = QueryBuilder::<Postgres>::new(TRIGGER_SELECT);
-    trigger_eligibility(&mut qb, &params.scopes());
+    trigger_eligibility(&mut qb, &params.scopes(), project.as_deref());
     qb.push(" ORDER BY id");
     let rows = qb.build().fetch_all(pool).await?;
     let mut latest: Option<DateTime<Utc>> = None;
@@ -500,7 +533,14 @@ pub async fn lesson_trigger_match(
         rows.len(),
         latest.map_or(0, |value| value.timestamp_micros())
     );
-    let cached = cached_set(&params.room, &fingerprint);
+    // The compile cache fences by room AND project: the two fences see
+    // different row sets, and the fingerprint alone cannot be trusted to
+    // differ between them.
+    let cache_key = match project.as_deref() {
+        Some(slug) => format!("{}\u{0}{}", params.room, slug),
+        None => params.room.clone(),
+    };
+    let cached = cached_set(&cache_key, &fingerprint);
     let set = match cached {
         Some(set) => set,
         None => {
@@ -509,7 +549,7 @@ pub async fn lesson_trigger_match(
                 .map(trigger_row)
                 .collect::<Result<Vec<_>, sqlx::Error>>()?;
             store_set(
-                &params.room,
+                &cache_key,
                 CompiledTriggerSet::compile(fingerprint, &compiled),
             )
         }

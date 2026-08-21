@@ -10,7 +10,7 @@
 // Every test names the mutation it kills and carries a `red-proof:` line: the
 // exact edit that must make it fail.
 
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -263,6 +263,33 @@ describe("lesson trigger tool_call tap", () => {
     expect(verdict!.reason).toContain("Zero inference budget");
     expect(verdict!.reason).toContain("halt-and-ask");
     expect(observed.map((entry) => entry.method)).toEqual(["lesson_trigger_match"]);
+  });
+
+  // Kills: the project fence's caller side — the derived repo slug dropped from
+  // the wire (project lessons never become eligible), or a project field sent
+  // from a cwd with no repo (deny_unknown_fields would refuse on skew for
+  // nothing). The temp room dir has no .git ancestor, so the first call proves
+  // absence; the fabricated .git proves presence and the slug shape.
+  // red-proof: delete `...(project ? { project } : {})` from matchSurfaces, or
+  // derive from roomDir instead of ctx.cwd.
+  test("derives the repo slug from cwd and sends it only when one exists", async () => {
+    await installPipe("block");
+    await lessonTriggerToolCall(
+      toolCall("write", { path: "src/danger.ts", content: "invent the missing path" }, "call-no-repo"),
+      { cwd: effectiveRoomDir },
+    );
+    expect(observed).toHaveLength(1);
+    expect("project" in (observed[0].params as Record<string, unknown>)).toBe(false);
+
+    const repoDir = path.join(fixtureDir, "My Repo");
+    await mkdir(path.join(repoDir, ".git"), { recursive: true });
+    observed = [];
+    await lessonTriggerToolCall(
+      toolCall("write", { path: "src/danger.ts", content: "invent the missing path" }, "call-in-repo"),
+      { cwd: repoDir },
+    );
+    expect(observed).toHaveLength(1);
+    expect((observed[0].params as Record<string, unknown>).project).toBe("my-repo");
   });
 
   // Kills: fail-closed regression. OMP treats a throwing tool_call handler as a

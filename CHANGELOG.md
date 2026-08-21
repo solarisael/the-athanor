@@ -22,6 +22,13 @@ the exact implementation record.
 
 ### Changed
 
+- Project lessons now fire inside their own project: `lesson_trigger_match`
+  accepts a caller `project` slug (the adapter derives it from the git root
+  basename), and the fence admits project-tagged lessons on a normalized
+  exact match while keeping NULL-project lessons universal. The language
+  fence table now speaks the registry's full `language_keys` vocabulary
+  (go, css, html, gdscript, glsl, markdown, php, lean beside the five ast
+  grammars), so keyed lessons in any of those languages stay armable.
 - Lesson triggers now fence by language: a lesson carrying `language_keys`
   fires only on tool surfaces whose file extension maps to one of its
   languages (one authority table shared with ast-grep grammar selection;

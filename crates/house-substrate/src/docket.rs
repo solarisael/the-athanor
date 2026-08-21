@@ -711,8 +711,10 @@ async fn post_quest_activate(
         .transpose()
         .map_err(|_| AppError::Invalid("deadlineAt must be RFC3339".into()))?
         .map(|value| value.with_timezone(&Utc));
+    // An omitted deadlineAt preserves the drafted deadline; only an explicit
+    // value replaces it. Overwriting with NULL would silently unclock a quest.
     sqlx::query(
-        "UPDATE docket.quests SET state='offered',intent_authority_principal=$2,acceptance_policy=$3,acceptance_policy_digest=$4,review_class=$5,importance=$6,deadline_at=$7,activated_at=NOW(),updated_at=NOW() WHERE quest_id=$1::text::uuid",
+        "UPDATE docket.quests SET state='offered',intent_authority_principal=$2,acceptance_policy=$3,acceptance_policy_digest=$4,review_class=$5,importance=$6,deadline_at=COALESCE($7,deadline_at),activated_at=NOW(),updated_at=NOW() WHERE quest_id=$1::text::uuid",
     )
     .bind(quest_id)
     .bind(required(
@@ -1142,8 +1144,11 @@ async fn rearm_recurrent_quest(
     tx: &mut Transaction<'_, Postgres>,
     request: &QuestReportParams,
 ) -> Result<Option<String>, AppError> {
+    // The re-armed occurrence must stay clock-visible: a NULL prior deadline
+    // re-arms from NOW(), never NULL + interval = NULL (silent recurrence
+    // death — the ping only speaks about due items).
     let new_quest_id: Option<String> = sqlx::query_scalar(
-        "INSERT INTO docket.quests (house_id,goal_id,parent_quest_id,kind,title,body,authority_ceiling,required_capabilities,acceptance_policy,acceptance_policy_digest,review_class,settlement_policy,importance,deadline_at,intent_authority_principal,posted_by_room,posted_by_spirit,state,revision,activated_at) SELECT q.house_id,q.goal_id,q.quest_id,q.kind,q.title,q.body,q.authority_ceiling,q.required_capabilities,q.acceptance_policy,q.acceptance_policy_digest,q.review_class,q.settlement_policy,q.importance,q.deadline_at+g.recurrence_interval,q.intent_authority_principal,q.posted_by_room,q.posted_by_spirit,'offered',q.revision,NOW() FROM docket.quests q JOIN docket.goals g ON g.goal_id=q.goal_id WHERE q.quest_id=$1::text::uuid AND g.recurrence_interval IS NOT NULL RETURNING quest_id::text",
+        "INSERT INTO docket.quests (house_id,goal_id,parent_quest_id,kind,title,body,authority_ceiling,required_capabilities,acceptance_policy,acceptance_policy_digest,review_class,settlement_policy,importance,deadline_at,intent_authority_principal,posted_by_room,posted_by_spirit,state,revision,activated_at) SELECT q.house_id,q.goal_id,q.quest_id,q.kind,q.title,q.body,q.authority_ceiling,q.required_capabilities,q.acceptance_policy,q.acceptance_policy_digest,q.review_class,q.settlement_policy,q.importance,COALESCE(q.deadline_at,NOW())+g.recurrence_interval,q.intent_authority_principal,q.posted_by_room,q.posted_by_spirit,'offered',q.revision,NOW() FROM docket.quests q JOIN docket.goals g ON g.goal_id=q.goal_id WHERE q.quest_id=$1::text::uuid AND g.recurrence_interval IS NOT NULL RETURNING quest_id::text",
     )
     .bind(&request.quest_id)
     .fetch_optional(&mut **tx)

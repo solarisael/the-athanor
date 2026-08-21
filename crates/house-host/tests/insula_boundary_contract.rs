@@ -521,3 +521,328 @@ async fn insula_ingest_and_vitals_stamp_only_host_config_identity()
         .await?;
     Ok(())
 }
+
+fn traced_event(binding: &TrustedBinding, operation: &str, trace_id: &str) -> ObservationEvent {
+    let mut event = host_event_with_operation(binding, operation);
+    event.trace_id = trace_id.into();
+    event.idempotency_key =
+        derive_idempotency_key_v1(binding, &event).expect("test idempotency key");
+    event.semantic_hash = derive_semantic_hash_v1(binding, &event).expect("test semantic hash");
+    event
+}
+
+fn aged_event(
+    binding: &TrustedBinding,
+    operation: &str,
+    observed_at: chrono::DateTime<Utc>,
+) -> ObservationEvent {
+    let mut event = host_event_with_operation(binding, operation);
+    event.observed_at = observed_at;
+    event.idempotency_key =
+        derive_idempotency_key_v1(binding, &event).expect("test idempotency key");
+    event.semantic_hash = derive_semantic_hash_v1(binding, &event).expect("test semantic hash");
+    event
+}
+
+#[tokio::test]
+async fn insula_reads_authenticate_before_parsing_and_refuse_query_strings() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let client = reqwest::Client::new();
+
+    for path in ["/athanor/v1/insula/trace", "/athanor/v1/insula/retention"] {
+        let unauthenticated = client
+            .post(endpoint(&host, path))
+            .body("this is not JSON")
+            .send()
+            .await
+            .expect("unauthenticated read completes");
+        let body = error(unauthenticated, StatusCode::UNAUTHORIZED).await;
+        assert_eq!(body["error"], "unauthenticated", "{path} must authenticate");
+
+        let unexpected_query = client
+            .post(endpoint(&host, &format!("{path}?houseId=caller-house")))
+            .bearer_auth(TOKEN)
+            .body("this is also not JSON")
+            .send()
+            .await
+            .expect("query-bearing read completes");
+        let body = error(unexpected_query, StatusCode::BAD_REQUEST).await;
+        assert_eq!(
+            body["error"], "unexpected_query",
+            "{path} must refuse a query string"
+        );
+    }
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn insula_read_dtos_refuse_unknown_and_authority_fields_before_database_access() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let client = reqwest::Client::new();
+    let trace = Uuid::new_v4().to_string();
+
+    for (path, base) in [
+        ("/athanor/v1/insula/trace", json!({ "traceId": trace })),
+        ("/athanor/v1/insula/retention", json!({})),
+    ] {
+        for (field, value) in [
+            ("unknownField", json!("not-in-the-contract")),
+            ("houseId", json!("caller-house")),
+            ("room", json!("caller-room")),
+            ("spirit", json!("CallerSpirit")),
+            ("sessionId", json!("caller-session")),
+        ] {
+            let mut request = base.clone();
+            request
+                .as_object_mut()
+                .expect("read fixture is an object")
+                .insert(field.into(), value);
+            let response = client
+                .post(endpoint(&host, path))
+                .bearer_auth(TOKEN)
+                .json(&request)
+                .send()
+                .await
+                .expect("strict read request completes");
+            let body = error(response, StatusCode::BAD_REQUEST).await;
+            assert_eq!(
+                body["error"], "invalid_json",
+                "{path} must refuse field {field}"
+            );
+        }
+    }
+
+    // A Retention read carries no trace authority, and a Trace read cannot omit
+    // the one identifier it is allowed to name.
+    for (path, request) in [
+        (
+            "/athanor/v1/insula/retention",
+            json!({ "traceId": Uuid::new_v4().to_string() }),
+        ),
+        ("/athanor/v1/insula/trace", json!({ "limit": 10 })),
+    ] {
+        let response = client
+            .post(endpoint(&host, path))
+            .bearer_auth(TOKEN)
+            .json(&request)
+            .send()
+            .await
+            .expect("strict read request completes");
+        let body = error(response, StatusCode::BAD_REQUEST).await;
+        assert_eq!(body["error"], "invalid_json", "{path} must refuse it");
+    }
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn insula_reads_refuse_out_of_range_limits_and_garbage_traces_before_database_access() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let client = reqwest::Client::new();
+    let trace = Uuid::new_v4().to_string();
+    let invalid_requests = [
+        (
+            "/athanor/v1/insula/trace",
+            json!({ "traceId": trace, "limit": 0 }),
+        ),
+        (
+            "/athanor/v1/insula/trace",
+            json!({ "traceId": trace, "limit": 1000 }),
+        ),
+        (
+            "/athanor/v1/insula/trace",
+            json!({ "traceId": "not-a-trace" }),
+        ),
+        (
+            "/athanor/v1/insula/trace",
+            json!({ "traceId": trace.to_ascii_uppercase() }),
+        ),
+        ("/athanor/v1/insula/retention", json!({ "limit": 0 })),
+        ("/athanor/v1/insula/retention", json!({ "limit": 100 })),
+    ];
+
+    for (path, request) in invalid_requests {
+        let response = client
+            .post(endpoint(&host, path))
+            .bearer_auth(TOKEN)
+            .json(&request)
+            .send()
+            .await
+            .expect("out-of-range read completes");
+        let body = error(response, StatusCode::UNPROCESSABLE_ENTITY).await;
+        assert_eq!(
+            body["error"], "invalid_request",
+            "{path} must refuse {request} without a pool"
+        );
+    }
+
+    host.stop().await;
+}
+
+#[tokio::test]
+async fn insula_reads_report_an_unavailable_pool_after_accepting_the_default_limits() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let client = reqwest::Client::new();
+
+    for (path, request) in [
+        (
+            "/athanor/v1/insula/trace",
+            json!({ "traceId": Uuid::new_v4().to_string() }),
+        ),
+        ("/athanor/v1/insula/retention", json!({})),
+    ] {
+        let response = client
+            .post(endpoint(&host, path))
+            .bearer_auth(TOKEN)
+            .json(&request)
+            .send()
+            .await
+            .expect("valid read completes");
+        let body = error(response, StatusCode::SERVICE_UNAVAILABLE).await;
+        assert_eq!(body["error"], "insula_unavailable", "{path} without a pool");
+    }
+
+    host.stop().await;
+}
+
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+async fn insula_trace_and_retention_reads_return_ingested_rows()
+-> Result<(), Box<dyn std::error::Error>> {
+    let database_url = isolated_database_url();
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&database_url)
+        .await?;
+    sqlx::query("DROP SCHEMA IF EXISTS insula CASCADE")
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql(INSULA_MIGRATION).execute(&pool).await?;
+
+    let root = TempDir::new()?;
+    write_room_state(root.path());
+    let configured = database_config(root.path(), database_url);
+    let binding = TrustedBinding {
+        house_id: configured.house_id.clone(),
+        room: configured.room.clone(),
+        spirit: configured.spirit.clone(),
+        session_id: configured.session.clone(),
+    };
+    let host = start_with_config(configured).await;
+    let client = reqwest::Client::new();
+
+    // Observations old enough to have expired are what a sweep may delete; the
+    // live trace ingested afterwards must survive it.
+    let expired_at = Utc::now() - chrono::Duration::days(15);
+    let response = client
+        .post(endpoint(&host, "/athanor/v1/insula/events"))
+        .bearer_auth(TOKEN)
+        .json(&IngestBatch {
+            events: vec![
+                aged_event(&binding, "aged-first", expired_at),
+                aged_event(&binding, "aged-second", expired_at),
+            ],
+        })
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let sweep = athanor_substrate::run_retention(&pool, &binding.house_id, Utc::now(), 14).await?;
+    assert_eq!(sweep.event_count, 2, "the aged observations must be swept");
+
+    let trace = Uuid::new_v4().to_string();
+    let response = client
+        .post(endpoint(&host, "/athanor/v1/insula/events"))
+        .bearer_auth(TOKEN)
+        .json(&IngestBatch {
+            events: vec![
+                traced_event(&binding, "trace-first", &trace),
+                traced_event(&binding, "trace-second", &trace),
+            ],
+        })
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = client
+        .post(endpoint(&host, "/athanor/v1/insula/trace"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "traceId": trace, "limit": 10 }))
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let read: Value = response.json().await?;
+    assert_eq!(read["schemaVersion"], 1);
+    assert_eq!(read["queryName"], "insula.trace");
+    assert_eq!(read["queryVersion"], 1);
+    assert_eq!(read["houseId"], "solarisael");
+    assert_eq!(read["room"], "kintsu");
+    assert_eq!(read["traceId"], trace);
+    assert_eq!(read["limit"], 10);
+    assert_eq!(read["truncated"], false);
+    let rows = read["rows"].as_array().expect("trace rows");
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        assert_eq!(row["traceId"], trace);
+        assert_eq!(row["houseId"], "solarisael");
+        assert_eq!(row["room"], "kintsu");
+        assert_eq!(row["sessionId"], "configured-session");
+    }
+
+    let response = client
+        .post(endpoint(&host, "/athanor/v1/insula/trace"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "traceId": trace, "limit": 1 }))
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let truncated: Value = response.json().await?;
+    assert_eq!(truncated["truncated"], true);
+    assert_eq!(truncated["rows"].as_array().expect("trace rows").len(), 1);
+
+    let response = client
+        .post(endpoint(&host, "/athanor/v1/insula/retention"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "limit": 5 }))
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let receipts: Value = response.json().await?;
+    assert_eq!(receipts["schemaVersion"], 1);
+    assert_eq!(receipts["queryName"], "insula.retention.receipts");
+    assert_eq!(receipts["queryVersion"], 1);
+    assert_eq!(receipts["houseId"], "solarisael");
+    assert_eq!(receipts["limit"], 5);
+    assert_eq!(receipts["truncated"], false);
+    let rows = receipts["rows"].as_array().expect("retention rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["receiptId"], json!(sweep.receipt_id));
+    assert_eq!(rows[0]["receiptKind"], "insula.retention.raw_delete");
+    assert_eq!(rows[0]["houseId"], "solarisael");
+    assert_eq!(rows[0]["retentionDays"], 14);
+    assert_eq!(rows[0]["eventCount"], 2);
+    assert_eq!(rows[0]["rollupQueryName"], "insula.vitals.minute");
+    assert_eq!(
+        rows[0]["tombstoneEventCount"], rows[0]["eventCount"],
+        "the joined tombstones must account for every swept event"
+    );
+    assert_eq!(
+        rows[0]["tombstoneWriterCount"], rows[0]["writerCount"],
+        "one tombstone per writer proves the delete"
+    );
+
+    host.stop().await;
+    sqlx::query("DROP SCHEMA insula CASCADE")
+        .execute(&pool)
+        .await?;
+    Ok(())
+}

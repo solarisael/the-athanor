@@ -74,6 +74,7 @@ import {
   closeInsulaWriter,
   endInsulaSpan,
   insulaErrorClass,
+  noteInsulaProviderRequestId,
   recordInsulaPoint,
   startInsulaSpan,
   type InsulaOutcome,
@@ -646,17 +647,16 @@ export default function solarisaelHouseProof(pi) {
       if (span) {
         insulaToolSpans.delete(key);
         endInsulaSpan(span, failed ? "error" : "ok", failed ? "tool_error" : null);
-        return;
       }
-      // A result whose call was never observed is still a fact. It is recorded
-      // as one point keyed by the tool call, never as a half span.
+      // A result point is distinct from the call span's end: every completed
+      // call gets its own result fact, including the normal paired lifecycle.
       const request = insulaRequestSpans.get(insulaRequestKey(room, session));
       recordInsulaPoint({
         room,
         operation: "tool_result",
         toolCallId,
-        traceId: request?.traceId ?? null,
-        parentSpanId: request?.spanId ?? null,
+        traceId: span?.traceId ?? request?.traceId ?? null,
+        parentSpanId: span?.spanId ?? request?.spanId ?? null,
         outcomeClass: failed ? "error" : "ok",
         errorClass: failed ? "tool_error" : null,
         scope: "tool_call",
@@ -694,8 +694,10 @@ export default function solarisaelHouseProof(pi) {
       const settlement = insulaAssistantSettlement(event?.message);
       if (!settlement) return;
       const { room, session } = insulaSessionBinding(ctx);
+      const key = insulaRequestKey(room, session);
+      noteInsulaProviderRequestId(insulaRequestSpans.get(key), event?.message?.responseId);
       settleInsulaRequest(
-        insulaRequestKey(room, session),
+        key,
         settlement.outcomeClass,
         settlement.errorClass,
         settlement,
@@ -718,8 +720,10 @@ export default function solarisaelHouseProof(pi) {
         && message.timestamp >= span.startedAtEpochMs
       );
       const fallback = insulaAssistantSettlement(currentAssistant);
-      if (fallback) settleInsulaRequest(key, fallback.outcomeClass, fallback.errorClass, fallback);
-      else settleInsulaRequest(key, "unknown", "provider_unsettled");
+      if (fallback) {
+        noteInsulaProviderRequestId(span, currentAssistant?.responseId);
+        settleInsulaRequest(key, fallback.outcomeClass, fallback.errorClass, fallback);
+      } else settleInsulaRequest(key, "unknown", "provider_unsettled");
     } catch {
       // Observation is never load-bearing.
     }

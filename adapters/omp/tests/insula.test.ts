@@ -184,6 +184,36 @@ describe("Insula observation writer", () => {
     expect(wire).not.toMatch(/prompt|content|message|payload|body|house|spirit|session|idempotencyKey|semanticHash/i);
   });
 
+  test("emits a successful tool result point without retaining result content", async () => {
+    installHostEndpoint(INERT_PORT);
+    const sink = recorder();
+    const writer = new InsulaWriter({ transport: sink.transport, flushDelayMs: 10_000 });
+
+    writer.point({
+      room: "kintsu",
+      operation: "tool_result",
+      toolCallId: "call-success",
+      outcomeClass: "ok",
+      scope: "tool_call",
+    });
+    await writer.close();
+
+    const [result] = sink.events();
+    expect(result).toMatchObject({
+      operation: "tool_result",
+      phase: "point",
+      outcomeClass: "ok",
+      errorClass: null,
+      toolCallId: "call-success",
+      bytesIn: 0,
+      bytesOut: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      idempotencyScope: "tool_call",
+    });
+    expect(JSON.stringify(result)).not.toMatch(/content|message|payload|body/i);
+  });
+
   test("uses the provider-reported duration instead of including later tool work", async () => {
     installHostEndpoint(INERT_PORT);
     const sink = recorder();

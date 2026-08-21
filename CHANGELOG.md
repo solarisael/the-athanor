@@ -22,6 +22,25 @@ the exact implementation record.
 
 ### Changed
 
+- Insula now observes the Rust processes, not only the OMP adapter. A shared
+  in-process emitter (`athanor_substrate::insula_writer`) mirrors the adapter
+  writer contract: bounded queue, drop receipts, monotonic writer sequence,
+  body-free observations, fire-and-forget. The substrate observes every
+  protocol method (39 operations), refused decodes, and PostgreSQL backups;
+  each room Host observes Knock claims and settlements, Hallway and receipt
+  projections, recall policy decisions, and its own Insula HTTP handling.
+  System-scope work binds room `house`, spirit `Athanor`.
+- The Host now serves two authenticated Insula reads beside Vitals:
+  `/athanor/v1/insula/trace` (room-scoped causal trace drilldown) and
+  `/athanor/v1/insula/retention` (house-wide retention receipts with
+  tombstone coverage sums).
+- The substrate service now runs the proven replay-safe Insula retention
+  sweep on a fixed daily cadence, five minutes after boot, with a receipt
+  point per real deletion. This is an idempotent maintenance loop, not a
+  monitor.
+- The OMP adapter now records a result point for every completed tool call
+  (previously only orphan results were pointed) and binds the provider's own
+  request id to provider request settlements and usage points.
 - The OMP adapter now records provider request spans and normalized token usage.
   The new `/insula` command shows bounded Vitals for 15 minutes, 1 hour, or
   24 hours. It reports missing usage and unavailable Host data without false

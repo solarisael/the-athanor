@@ -1,20 +1,26 @@
-use athanor_substrate::backup::{backup_with_migrations, restore_checked, source_migrations};
+use athanor_substrate::backup::{
+    BackupError, backup_with_migrations, restore_checked, source_migrations,
+};
+use athanor_substrate::insula_writer::{
+    end_span, flush_insula_emitter, init_insula_emitter, record_point, start_span, system_binding,
+};
 use athanor_substrate::migrations::{migration_pool, run_migrations};
 use athanor_substrate::{
     AnamnesisParams, AnamnesisSeed, AnamnesisWrite, AppError, Config, DesignDocumentQueryParams,
     DesignDocumentWriteParams, EntityResolveParams, LessonContextParams, LessonDeleteParams,
-    LessonQueryParams, LessonTriggerMatchParams, LessonUpdateParams, RecallParams, RememberRequest,
-    SubstrateHealthOptions, ThreadContinuation as ServiceThreadContinuation, anamnesis,
-    anamnesis_write, canon_read, canon_write, cluster_maintenance, design_document_query,
-    design_document_write, entity_resolve, giga_candidate_list, giga_conversation_ingest,
-    giga_event_claim, giga_event_finish, giga_event_ingest, giga_event_replay, giga_health,
-    giga_promote, giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review,
-    hallway_create, hallway_inbox, hallway_join, hallway_knock, hallway_knock_policy, hallway_post,
-    hallway_read, lesson_context, lesson_delete, lesson_query, lesson_trigger_match, lesson_update,
-    paper_boat_sleep, paper_boat_wake, recall, refresh_semantic_vocabulary, remember,
-    spawn_giga_worker, substrate_health, substrate_health_with_config,
+    LessonQueryParams, LessonTriggerMatchParams, LessonUpdateParams, OutcomeClass, RecallParams,
+    RememberRequest, SubstrateHealthOptions, ThreadContinuation as ServiceThreadContinuation,
+    TrustedBinding, anamnesis, anamnesis_write, canon_read, canon_write, cluster_maintenance,
+    design_document_query, design_document_write, entity_resolve, giga_candidate_list,
+    giga_conversation_ingest, giga_event_claim, giga_event_finish, giga_event_ingest,
+    giga_event_replay, giga_health, giga_promote, giga_queue_maintenance, giga_review,
+    giga_tool_promote, giga_tool_review, hallway_create, hallway_inbox, hallway_join,
+    hallway_knock, hallway_knock_policy, hallway_post, hallway_read, lesson_context, lesson_delete,
+    lesson_query, lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake, recall,
+    refresh_semantic_vocabulary, remember, spawn_giga_worker, substrate_health,
+    substrate_health_with_config, validate_trusted_binding,
 };
-use chrono::NaiveDate;
+use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use house_core::{
     AnamnesisAddRequest as DomainAnamnesisAddRequest,
     AnamnesisAppendRequest as DomainAnamnesisAppendRequest,
@@ -422,16 +428,179 @@ fn error_json(id: String, error: ProtocolErrorBody) -> String {
     .expect("protocol error serialization cannot fail")
 }
 
-fn protocol_error(id: String, error: ProtocolError) -> String {
-    error_json(id, error.into())
+/// A response carried together with the mechanical outcome that produced it,
+/// so the dispatch loop can close one observation span at the single door
+/// instead of at every handler arm.
+struct Dispatched {
+    json: String,
+    outcome: OutcomeClass,
+    error_class: Option<&'static str>,
 }
 
-fn app_error(id: String, operation: &str, error: AppError) -> String {
-    error_json(id, error.protocol_error_body(operation))
+const INSULA_COMPONENT: &str = "athanor_substrate";
+const INSULA_LAYER: &str = "substrate";
+
+// Error classes name the error variant and nothing else: no message, code, or
+// caller text may reach an observation. `atom` in insula.rs also refuses
+// anything but a lowercase mechanical name, so `type_name` is unusable here.
+fn protocol_error_class(error: &ProtocolError) -> &'static str {
+    match error {
+        ProtocolError::Malformed(_) => "protocol_error.malformed",
+        ProtocolError::ProtocolMismatch(_) => "protocol_error.protocol_mismatch",
+        ProtocolError::UnknownMethod(_) => "protocol_error.unknown_method",
+        ProtocolError::InvalidParams(_) => "protocol_error.invalid_params",
+    }
 }
 
-fn success_json<T: Serialize>(id: String, result: T) -> Result<String, serde_json::Error> {
-    serde_json::to_string(&success(id, result))
+fn app_error_class(error: &AppError) -> &'static str {
+    match error {
+        AppError::Invalid(_) => "app_error.invalid",
+        AppError::Refusal { .. } => "app_error.refusal",
+        AppError::Config(_) => "app_error.config",
+        AppError::Database(_) => "app_error.database",
+        AppError::DatabaseConnect(_) => "app_error.database_connect",
+        AppError::DatabaseSchema(_) => "app_error.database_schema",
+        AppError::Embedding(_) => "app_error.embedding",
+        AppError::Protocol(_) => "app_error.protocol",
+        AppError::Io(_) => "app_error.io",
+    }
+}
+
+fn backup_error_class(error: &BackupError) -> &'static str {
+    match error {
+        BackupError::Config(_) => "backup_error.config",
+        BackupError::State(_) => "backup_error.state",
+        BackupError::Io(_) => "backup_error.io",
+        BackupError::Command(_) => "backup_error.command",
+        BackupError::Manifest(_) => "backup_error.manifest",
+    }
+}
+
+/// `Invalid` and `Refusal` are the House refusing a request, not the substrate
+/// failing at one: the same class of event whether request validation or a
+/// service raises it.
+fn app_error_outcome(error: &AppError) -> OutcomeClass {
+    match error {
+        AppError::Invalid(_) | AppError::Refusal { .. } => OutcomeClass::Refused,
+        _ => OutcomeClass::Error,
+    }
+}
+
+/// The observed operation is the protocol method itself: one table, so a new
+/// method cannot reach the dispatch loop without naming what it does.
+fn operation_name(request: &ProtocolRequest) -> &'static str {
+    match request {
+        ProtocolRequest::CanonWrite(_) => "canon_write",
+        ProtocolRequest::CanonRead(_) => "canon_read",
+        ProtocolRequest::Remember(_) => "remember",
+        ProtocolRequest::PaperBoatSleep(_) => "paper_boat_sleep",
+        ProtocolRequest::PaperBoatWake(_) => "paper_boat_wake",
+        ProtocolRequest::HallwayCreate(_) => "hallway_create",
+        ProtocolRequest::HallwayJoin(_) => "hallway_join",
+        ProtocolRequest::HallwayPost(_) => "hallway_post",
+        ProtocolRequest::HallwayRead(_) => "hallway_read",
+        ProtocolRequest::HallwayInbox(_) => "hallway_inbox",
+        ProtocolRequest::HallwayKnockPolicy(_) => "hallway_knock_policy",
+        ProtocolRequest::HallwayKnock(_) => "hallway_knock",
+        ProtocolRequest::Recall(_) => "recall",
+        ProtocolRequest::VaultRecall(_) => "vault_recall",
+        ProtocolRequest::Anamnesis(_) => "anamnesis",
+        ProtocolRequest::AnamnesisWrite(_) => "anamnesis_write",
+        ProtocolRequest::LessonQuery(_) => "lesson_query",
+        ProtocolRequest::LessonContext(_) => "lesson_context",
+        ProtocolRequest::LessonUpdate(_) => "lesson_update",
+        ProtocolRequest::LessonDelete(_) => "lesson_delete",
+        ProtocolRequest::LessonTriggerMatch(_) => "lesson_trigger_match",
+        ProtocolRequest::DesignDocumentQuery(_) => "design_document_query",
+        ProtocolRequest::DesignDocumentWrite(_) => "design_document_write",
+        ProtocolRequest::EntityResolve(_) => "entity_resolve",
+        ProtocolRequest::Cluster(_) => "cluster_maintenance",
+        ProtocolRequest::GigaEvent(_) => "giga_event_ingest",
+        ProtocolRequest::GigaConversationIngest(_) => "giga_conversation_ingest",
+        ProtocolRequest::GigaEventClaim(_) => "giga_event_claim",
+        ProtocolRequest::GigaEventFinish(_) => "giga_event_finish",
+        ProtocolRequest::GigaEventReplay(_) => "giga_event_replay",
+        ProtocolRequest::GigaQueueMaintenance(_) => "giga_queue_maintenance",
+        ProtocolRequest::GigaPromote(_) => "giga_promote",
+        ProtocolRequest::GigaToolPromote(_) => "giga_tool_promote",
+        ProtocolRequest::GigaCandidateList(_) => "giga_candidate_list",
+        ProtocolRequest::GigaReview(_) => "giga_review",
+        ProtocolRequest::GigaToolReview(_) => "giga_tool_review",
+        ProtocolRequest::GigaHealth(_) => "giga_health",
+        ProtocolRequest::SubstrateHealth(_) => "substrate_health",
+        ProtocolRequest::SubstrateMigrations(_) => "substrate_migrations",
+    }
+}
+
+/// Hallway requests are the only ones carrying a whole authenticated
+/// room/spirit/session triple; every other method is observed under the
+/// House's own service voice.
+fn insula_binding(request: &ProtocolRequest) -> TrustedBinding {
+    let identity = match request {
+        ProtocolRequest::HallwayCreate(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::HallwayJoin(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::HallwayPost(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::HallwayRead(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::HallwayInbox(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::HallwayKnockPolicy(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::HallwayKnock(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        _ => None,
+    };
+    let Some((room, spirit, session)) = identity else {
+        return system_binding();
+    };
+    let binding = TrustedBinding {
+        room: room.clone(),
+        spirit: spirit.clone(),
+        session_id: session.clone(),
+        ..system_binding()
+    };
+    // A caller-supplied triple is not yet an Insula binding. An invalid one
+    // would be refused at ingest and lose the observation entirely, so it is
+    // observed under the service voice instead.
+    if validate_trusted_binding(&binding).is_ok() {
+        binding
+    } else {
+        system_binding()
+    }
+}
+
+fn protocol_error(id: String, error: ProtocolError) -> Dispatched {
+    Dispatched {
+        outcome: OutcomeClass::Refused,
+        error_class: Some(protocol_error_class(&error)),
+        json: error_json(id, error.into()),
+    }
+}
+
+fn app_error(id: String, operation: &str, error: AppError) -> Dispatched {
+    Dispatched {
+        outcome: app_error_outcome(&error),
+        error_class: Some(app_error_class(&error)),
+        json: error_json(id, error.protocol_error_body(operation)),
+    }
+}
+
+fn success_json<T: Serialize>(id: String, result: T) -> Result<Dispatched, serde_json::Error> {
+    Ok(Dispatched {
+        json: serde_json::to_string(&success(id, result))?,
+        outcome: OutcomeClass::Ok,
+        error_class: None,
+    })
 }
 
 async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
@@ -463,12 +632,35 @@ async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
             let config = Config::from_env().map_err(|error| error.to_string())?;
             let pool = config.pool().await.map_err(|error| error.to_string())?;
             let source = source_migrations(&pool).await?;
-            let manifest = backup_with_migrations(
+            init_insula_emitter(pool.clone());
+            let backup = backup_with_migrations(
                 &config.database_url,
                 &PathBuf::from(&values[0]),
                 keep,
                 source,
-            )?;
+            );
+            let binding = system_binding();
+            match &backup {
+                Ok(manifest) => record_point(
+                    &binding,
+                    INSULA_COMPONENT,
+                    INSULA_LAYER,
+                    "pg_backup",
+                    OutcomeClass::Ok,
+                    None,
+                    Some(("insula.backup", &manifest.sha256)),
+                ),
+                Err(error) => record_point(
+                    &binding,
+                    INSULA_COMPONENT,
+                    INSULA_LAYER,
+                    "pg_backup",
+                    OutcomeClass::Error,
+                    Some(backup_error_class(error)),
+                    None,
+                ),
+            }
+            let manifest = backup?;
             println!("{}", serde_json::to_string(&manifest)?);
         }
         "restore" => {
@@ -642,16 +834,119 @@ impl<P: KeepaliveProcess> Drop for WslKeepalive<P> {
     }
 }
 
+const RETENTION_INITIAL_DELAY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+const RETENTION_CADENCE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+fn retention_schedule() -> (std::time::Duration, std::time::Duration) {
+    (RETENTION_INITIAL_DELAY, RETENTION_CADENCE)
+}
+
+fn retention_cutoff(now: DateTime<Utc>) -> DateTime<Utc> {
+    (now - Duration::days(14))
+        .with_second(0)
+        .and_then(|value| value.with_nanosecond(0))
+        .expect("UTC timestamps always support minute truncation")
+}
+
+fn retention_error_class(error: &athanor_substrate::InsulaError) -> &'static str {
+    match error {
+        athanor_substrate::InsulaError::Validation { .. } => "insula_error.validation",
+        athanor_substrate::InsulaError::Database(_) => "insula_error.database",
+        athanor_substrate::InsulaError::Invariant(_) => "insula_error.invariant",
+    }
+}
+
+fn spawn_retention_service() {
+    tokio::spawn(async {
+        // This is idempotent maintenance, not a heartbeat or monitor: retention
+        // receipts make scheduled sweeps replay-safe without asserting liveness.
+        let binding = athanor_substrate::insula_writer::system_binding();
+        let (initial_delay, cadence) = retention_schedule();
+        tokio::time::sleep(initial_delay).await;
+        let mut ticker = tokio::time::interval(cadence);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // enough: fixed 24h cadence; Docket standing-intent scheduling when it exists
+        loop {
+            ticker.tick().await;
+            let config = match Config::from_env() {
+                Ok(config) => config,
+                Err(error) => {
+                    tracing::warn!(
+                        error_class = app_error_class(&error),
+                        "retention_sweep_unavailable"
+                    );
+                    continue;
+                }
+            };
+            let pool = match config.pool().await {
+                Ok(pool) => pool,
+                Err(error) => {
+                    tracing::warn!(
+                        error_class = app_error_class(&error),
+                        "retention_sweep_unavailable"
+                    );
+                    continue;
+                }
+            };
+
+            let span = athanor_substrate::insula_writer::start_span(
+                &binding,
+                "athanor_substrate",
+                "substrate",
+                "retention_sweep",
+            );
+            match athanor_substrate::run_retention(
+                &pool,
+                "solarisael",
+                retention_cutoff(Utc::now()),
+                14,
+            )
+            .await
+            {
+                Ok(receipt) => {
+                    athanor_substrate::insula_writer::end_span(
+                        span,
+                        athanor_substrate::OutcomeClass::Ok,
+                        None,
+                    );
+                    if let Some(receipt_id) = receipt.receipt_id.as_deref() {
+                        athanor_substrate::insula_writer::record_point(
+                            &binding,
+                            "athanor_substrate",
+                            "substrate",
+                            "retention_sweep",
+                            athanor_substrate::OutcomeClass::Ok,
+                            None,
+                            Some(("insula.retention.raw_delete", receipt_id)),
+                        );
+                    }
+                }
+                Err(error) => {
+                    let class = retention_error_class(&error);
+                    athanor_substrate::insula_writer::end_span(
+                        span,
+                        athanor_substrate::OutcomeClass::Error,
+                        Some(class),
+                    );
+                    tracing::warn!(error_class = class, "retention_sweep_failed");
+                }
+            }
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _wsl_keepalive = WslKeepalive::start()?;
     if cli_subcommand().await? {
+        flush_insula_emitter().await;
         return Ok(());
     }
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter("warn")
         .init();
+    spawn_retention_service();
     let mut runtime = None;
     let stdin = BufReader::new(io::stdin());
     let mut lines = stdin.lines();
@@ -664,47 +959,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (id, request) = decode_line(trimmed);
         let response = match request {
             Ok(request) => {
-                let operation = match &request {
-                    ProtocolRequest::CanonWrite(_) => "canon_write",
-                    ProtocolRequest::CanonRead(_) => "canon_read",
-                    ProtocolRequest::Remember(_) => "remember",
-                    ProtocolRequest::PaperBoatSleep(_) => "paper_boat_sleep",
-                    ProtocolRequest::PaperBoatWake(_) => "paper_boat_wake",
-                    ProtocolRequest::HallwayCreate(_) => "hallway_create",
-                    ProtocolRequest::HallwayJoin(_) => "hallway_join",
-                    ProtocolRequest::HallwayPost(_) => "hallway_post",
-                    ProtocolRequest::HallwayRead(_) => "hallway_read",
-                    ProtocolRequest::HallwayInbox(_) => "hallway_inbox",
-                    ProtocolRequest::HallwayKnockPolicy(_) => "hallway_knock_policy",
-                    ProtocolRequest::HallwayKnock(_) => "hallway_knock",
-                    ProtocolRequest::Recall(_) => "recall",
-                    ProtocolRequest::VaultRecall(_) => "vault_recall",
-                    ProtocolRequest::Anamnesis(_) => "anamnesis",
-                    ProtocolRequest::AnamnesisWrite(_) => "anamnesis_write",
-                    ProtocolRequest::LessonQuery(_) => "lesson_query",
-                    ProtocolRequest::LessonContext(_) => "lesson_context",
-                    ProtocolRequest::LessonUpdate(_) => "lesson_update",
-                    ProtocolRequest::LessonDelete(_) => "lesson_delete",
-                    ProtocolRequest::LessonTriggerMatch(_) => "lesson_trigger_match",
-                    ProtocolRequest::DesignDocumentQuery(_) => "design_document_query",
-                    ProtocolRequest::DesignDocumentWrite(_) => "design_document_write",
-                    ProtocolRequest::EntityResolve(_) => "entity_resolve",
-                    ProtocolRequest::Cluster(_) => "cluster_maintenance",
-                    ProtocolRequest::GigaEvent(_) => "giga_event_ingest",
-                    ProtocolRequest::GigaConversationIngest(_) => "giga_conversation_ingest",
-                    ProtocolRequest::GigaEventClaim(_) => "giga_event_claim",
-                    ProtocolRequest::GigaEventFinish(_) => "giga_event_finish",
-                    ProtocolRequest::GigaEventReplay(_) => "giga_event_replay",
-                    ProtocolRequest::GigaQueueMaintenance(_) => "giga_queue_maintenance",
-                    ProtocolRequest::GigaPromote(_) => "giga_promote",
-                    ProtocolRequest::GigaToolPromote(_) => "giga_tool_promote",
-                    ProtocolRequest::GigaCandidateList(_) => "giga_candidate_list",
-                    ProtocolRequest::GigaReview(_) => "giga_review",
-                    ProtocolRequest::GigaToolReview(_) => "giga_tool_review",
-                    ProtocolRequest::GigaHealth(_) => "giga_health",
-                    ProtocolRequest::SubstrateHealth(_) => "substrate_health",
-                    ProtocolRequest::SubstrateMigrations(_) => "substrate_migrations",
-                };
+                let operation = operation_name(&request);
+                let binding = insula_binding(&request);
+                let span = start_span(&binding, INSULA_COMPONENT, INSULA_LAYER, operation);
                 let validation = match &request {
                     ProtocolRequest::CanonWrite(_) | ProtocolRequest::CanonRead(_) => Ok(()),
                     ProtocolRequest::Remember(request) => request.validate(),
@@ -760,7 +1017,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     | ProtocolRequest::SubstrateHealth(_)
                     | ProtocolRequest::SubstrateMigrations(_) => Ok(()),
                 };
-                if let Err(error) = validation {
+                let dispatched = if let Err(error) = validation {
                     app_error(id, operation, error)
                 } else {
                     match request {
@@ -803,8 +1060,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let initialization_error = if runtime.is_none() {
                                 match Config::from_env() {
                                     Ok(config) => match config.pool().await {
+                                        // enough: the GIGA worker's own claim and
+                                        // finish seams stay unobserved; door:
+                                        // spawn_giga_worker in giga_worker.rs.
                                         Ok(pool) => match spawn_giga_worker(&pool, &config) {
                                             Ok(worker) => {
+                                                // Observation begins with the pool;
+                                                // methods answered above this
+                                                // door stay unobserved.
+                                                init_insula_emitter(pool.clone());
                                                 runtime = Some((config, pool, worker));
                                                 None
                                             }
@@ -1073,17 +1337,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
-                }
+                };
+                end_span(span, dispatched.outcome, dispatched.error_class);
+                dispatched
             }
-            Err(error) => protocol_error(id, error),
+            Err(error) => {
+                // A refused line has no method to name, so the decode door
+                // itself is the operation.
+                let dispatched = protocol_error(id, error);
+                record_point(
+                    &system_binding(),
+                    INSULA_COMPONENT,
+                    INSULA_LAYER,
+                    "protocol_decode",
+                    dispatched.outcome,
+                    dispatched.error_class,
+                    None,
+                );
+                dispatched
+            }
         };
-        stdout.write_all(response.as_bytes()).await?;
+        stdout.write_all(response.json.as_bytes()).await?;
         stdout.write_all(b"\n").await?;
         stdout.flush().await?;
     }
     if let Some((_, _, Some(worker))) = runtime {
         worker.shutdown().await;
     }
+    flush_insula_emitter().await;
     Ok(())
 }
 
@@ -1319,5 +1600,147 @@ mod tests {
             r#"{"protocol":1,"id":"m2","method":"substrate_migrations","params":{"from":12}}"#,
         );
         assert!(matches!(partial, Err(ProtocolError::InvalidParams(_))));
+    }
+    #[test]
+    fn retention_schedule_waits_five_minutes_then_runs_daily() {
+        let (first_delay, cadence) = retention_schedule();
+
+        assert_eq!(first_delay, std::time::Duration::from_secs(5 * 60));
+        assert_eq!(cadence, std::time::Duration::from_secs(24 * 60 * 60));
+    }
+
+    /// insula.rs refuses any name that is not a lowercase mechanical atom, and
+    /// a refused event is an observation lost at ingest. Mirrored here because
+    /// the validator is private to the organ.
+    fn is_mechanical_name(value: &str) -> bool {
+        !value.is_empty()
+            && value.len() <= 64
+            && value.bytes().enumerate().all(|(index, byte)| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || (index > 0 && matches!(byte, b'_' | b'.' | b':' | b'-'))
+            })
+    }
+
+    #[test]
+    fn observed_error_classes_are_mechanical_and_carry_no_body() {
+        let body = "secret prompt body";
+        for error in [
+            AppError::Invalid(body.into()),
+            AppError::Refusal {
+                code: "rule",
+                message: "static refusal",
+            },
+            AppError::Config(body.into()),
+            AppError::Database(sqlx::Error::PoolClosed),
+            AppError::DatabaseConnect(sqlx::Error::PoolClosed),
+            AppError::DatabaseSchema(sqlx::Error::PoolClosed),
+            AppError::Embedding(body.into()),
+            AppError::Protocol(body.into()),
+            AppError::Io(std::io::Error::other(body)),
+        ] {
+            let class = app_error_class(&error);
+            assert!(is_mechanical_name(class), "{class} is not mechanical");
+            assert!(!class.contains("secret"), "{class} leaked a message");
+        }
+        for error in [
+            ProtocolError::Malformed(body.into()),
+            ProtocolError::ProtocolMismatch(2),
+            ProtocolError::UnknownMethod(body.into()),
+            ProtocolError::InvalidParams(body.into()),
+        ] {
+            let class = protocol_error_class(&error);
+            assert!(is_mechanical_name(class), "{class} is not mechanical");
+            assert!(!class.contains("secret"), "{class} leaked a message");
+        }
+        for error in [
+            BackupError::Config(body.into()),
+            BackupError::Io(std::io::Error::other(body)),
+            BackupError::Command(body.into()),
+            BackupError::Manifest(body.into()),
+        ] {
+            let class = backup_error_class(&error);
+            assert!(is_mechanical_name(class), "{class} is not mechanical");
+            assert!(!class.contains("secret"), "{class} leaked a message");
+        }
+    }
+
+    #[test]
+    fn refusals_and_faults_are_separate_outcome_classes() {
+        assert_eq!(
+            app_error_outcome(&AppError::Invalid("bad field".into())),
+            OutcomeClass::Refused
+        );
+        assert_eq!(
+            app_error_outcome(&AppError::Refusal {
+                code: "rule",
+                message: "static refusal"
+            }),
+            OutcomeClass::Refused
+        );
+        assert_eq!(
+            app_error_outcome(&AppError::Database(sqlx::Error::PoolClosed)),
+            OutcomeClass::Error
+        );
+        assert_eq!(
+            app_error_outcome(&AppError::Config("missing".into())),
+            OutcomeClass::Error
+        );
+    }
+
+    #[test]
+    fn dispatched_methods_name_their_own_mechanical_operation() {
+        for (line, expected) in [
+            (
+                r#"{"protocol":1,"id":"o1","method":"lesson_query","params":{"room":"tuner","type":"coding","limit":1}}"#,
+                "lesson_query",
+            ),
+            (
+                r#"{"protocol":1,"id":"o2","method":"hallway_inbox","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner"}}"#,
+                "hallway_inbox",
+            ),
+            (
+                r#"{"protocol":1,"id":"o3","method":"substrate_migrations","params":{}}"#,
+                "substrate_migrations",
+            ),
+        ] {
+            let (_, request) = decode_line(line);
+            let operation = operation_name(&request.expect("fixture decodes"));
+            assert_eq!(operation, expected);
+            assert!(
+                is_mechanical_name(operation),
+                "{operation} is not mechanical"
+            );
+        }
+    }
+
+    #[test]
+    fn hallway_requests_are_observed_under_caller_identity() {
+        let (_, request) = decode_line(
+            r#"{"protocol":1,"id":"b1","method":"hallway_inbox","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner"}}"#,
+        );
+        let binding = insula_binding(&request.expect("fixture decodes"));
+        assert_eq!(binding.room, "tuner");
+        assert_eq!(binding.spirit, "Tuner");
+        assert_eq!(binding.session_id, "service:tuner");
+        assert_eq!(binding.house_id, system_binding().house_id);
+    }
+
+    #[test]
+    fn service_methods_and_unusable_identities_fall_back_to_the_house_voice() {
+        let (_, service) = decode_line(
+            r#"{"protocol":1,"id":"b2","method":"lesson_query","params":{"room":"tuner","type":"coding","limit":1}}"#,
+        );
+        assert_eq!(
+            insula_binding(&service.expect("fixture decodes")),
+            system_binding()
+        );
+        let (_, unusable) = decode_line(
+            r#"{"protocol":1,"id":"b3","method":"hallway_inbox","params":{"room":"Tuner_Room","spirit":"Tuner","session":"service:tuner"}}"#,
+        );
+        assert_eq!(
+            insula_binding(&unusable.expect("fixture decodes")),
+            system_binding()
+        );
     }
 }

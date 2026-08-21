@@ -7,7 +7,13 @@ use crate::store::{
     timestamp,
 };
 use crate::viewport::{ViewportSession, apply_viewport};
-use athanor_substrate::{AppError, hallway_inbox, hallway_knock_claim, hallway_knock_settle};
+use athanor_substrate::insula_writer::{
+    end_span, flush_insula_emitter, init_insula_emitter, record_point, start_span,
+};
+use athanor_substrate::{
+    AppError, OutcomeClass, TrustedBinding, hallway_inbox, hallway_knock_claim,
+    hallway_knock_settle, validate_trusted_binding,
+};
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -73,12 +79,24 @@ struct AppState {
     room_store: RoomStateStore,
     runtime: Arc<Mutex<RuntimeState>>,
     hallway_pool: Option<sqlx::PgPool>,
+    insula_binding: Arc<TrustedBinding>,
     insula: InsulaHost,
     cancellation: CancellationToken,
     tasks: TaskTracker,
     deltas: broadcast::Sender<String>,
     receipts: broadcast::Sender<String>,
     receipt_tracker: Arc<Mutex<ReceiptTracker>>,
+}
+
+fn host_insula_binding(config: &HostConfig) -> Result<TrustedBinding, String> {
+    let binding = TrustedBinding {
+        house_id: config.house_id.clone(),
+        room: config.room.clone(),
+        spirit: config.spirit.clone(),
+        session_id: format!("host:{}", config.room),
+    };
+    validate_trusted_binding(&binding).map_err(|error| error.to_string())?;
+    Ok(binding)
 }
 
 pub struct Host {
@@ -88,6 +106,7 @@ pub struct Host {
 impl Host {
     pub fn new(config: HostConfig) -> Result<Self, String> {
         config.validate()?;
+        let insula_binding = Arc::new(host_insula_binding(&config)?);
         let hallway_pool = config
             .database_url
             .as_deref()
@@ -100,7 +119,8 @@ impl Host {
             .map(|url| PgPoolOptions::new().max_connections(1).connect_lazy(url))
             .transpose()
             .map_err(|error| format!("Host Insula DATABASE_URL is invalid: {error}"))?;
-        let insula = InsulaHost::new(&config, insula_pool)?;
+        let emitter_pool = insula_pool.clone();
+        let insula = InsulaHost::new(&config, insula_pool, insula_binding.clone())?;
         let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone());
         let projection = room_store.load()?;
         let (durable, cursor, mut sessions) =
@@ -117,6 +137,9 @@ impl Host {
             config.akasha_enabled,
             config.nats_url.is_some(),
         )));
+        if let Some(pool) = emitter_pool {
+            init_insula_emitter(pool);
+        }
         Ok(Self {
             state: AppState {
                 config: Arc::new(config),
@@ -131,6 +154,7 @@ impl Host {
                 })),
                 hallway_pool,
                 insula,
+                insula_binding,
                 cancellation: CancellationToken::new(),
                 tasks: TaskTracker::new(),
                 deltas,
@@ -157,17 +181,17 @@ impl Host {
             .merge(self.state.insula.router());
         let cancellation = self.state.cancellation.clone();
         let tasks = self.state.tasks.clone();
-        axum::serve(listener, app)
+        let serve_result = axum::serve(listener, app)
             .with_graceful_shutdown(async move {
                 shutdown.await;
                 cancellation.cancel();
             })
-            .await
-            .map_err(|error| format!("Host server failed: {error}"))?;
+            .await;
         self.state.cancellation.cancel();
         tasks.close();
         tasks.wait().await;
-        Ok(())
+        flush_insula_emitter().await;
+        serve_result.map_err(|error| format!("Host server failed: {error}"))
     }
 }
 
@@ -697,6 +721,15 @@ fn hallway_projection_changed(previous: Option<&str>, current: &str, ringing: bo
 
 async fn project_hallway_inbox(state: &AppState, meta: CommandMeta) -> Responses {
     let Some(pool) = state.hallway_pool.as_ref() else {
+        record_point(
+            state.insula_binding.as_ref(),
+            "house_host",
+            "host",
+            "hallway_projection",
+            OutcomeClass::Degraded,
+            None,
+            None,
+        );
         let failed = outcome(
             state,
             &meta,
@@ -721,6 +754,15 @@ async fn project_hallway_inbox(state: &AppState, meta: CommandMeta) -> Responses
     {
         Ok(inbox) => inbox,
         Err(error) => {
+            record_point(
+                state.insula_binding.as_ref(),
+                "house_host",
+                "host",
+                "hallway_projection",
+                app_error_outcome(&error),
+                Some("app_error"),
+                None,
+            );
             let failed = outcome(
                 state,
                 &meta,
@@ -760,6 +802,15 @@ async fn project_hallway_inbox(state: &AppState, meta: CommandMeta) -> Responses
         changed,
         inbox,
     };
+    record_point(
+        state.insula_binding.as_ref(),
+        "house_host",
+        "host",
+        "hallway_projection",
+        OutcomeClass::Ok,
+        None,
+        Some((HALLWAY_INBOX_PROJECTED, event.meta.event_id.as_str())),
+    );
     Responses {
         direct: vec![serialize(&event)],
         delta: None,
@@ -788,11 +839,26 @@ fn knock_authority(config: &HostConfig, meta: &CommandMeta) -> Result<(), AppErr
     Ok(())
 }
 
+fn app_error_outcome(error: &AppError) -> OutcomeClass {
+    match error {
+        AppError::Invalid(_) | AppError::Refusal { .. } => OutcomeClass::Refused,
+        _ => OutcomeClass::Error,
+    }
+}
+
 async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
+    let span = start_span(
+        state.insula_binding.as_ref(),
+        "house_host",
+        "host",
+        "knock_claim",
+    );
     if let Err(error) = knock_authority(&state.config, &meta) {
+        end_span(span, app_error_outcome(&error), Some("app_error"));
         return hallway_knock_error(state, &meta, "claim", error).await;
     }
     let Some(pool) = state.hallway_pool.as_ref() else {
+        end_span(span, OutcomeClass::Degraded, None);
         let failed = outcome(
             state,
             &meta,
@@ -833,12 +899,16 @@ async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
                 ),
                 result,
             };
+            end_span(span, OutcomeClass::Ok, None);
             Responses {
                 direct: vec![serialize(&event)],
                 delta: None,
             }
         }
-        Err(error) => hallway_knock_error(state, &meta, "claim", error).await,
+        Err(error) => {
+            end_span(span, app_error_outcome(&error), Some("app_error"));
+            hallway_knock_error(state, &meta, "claim", error).await
+        }
     }
 }
 
@@ -847,10 +917,18 @@ async fn settle_hallway_knock(
     meta: CommandMeta,
     request: house_protocol::HallwayKnockSettlePayload,
 ) -> Responses {
+    let span = start_span(
+        state.insula_binding.as_ref(),
+        "house_host",
+        "host",
+        "knock_settle",
+    );
     if let Err(error) = knock_authority(&state.config, &meta) {
+        end_span(span, app_error_outcome(&error), Some("app_error"));
         return hallway_knock_error(state, &meta, "settlement", error).await;
     }
     let Some(pool) = state.hallway_pool.as_ref() else {
+        end_span(span, OutcomeClass::Degraded, None);
         let failed = outcome(
             state,
             &meta,
@@ -894,12 +972,16 @@ async fn settle_hallway_knock(
                 ),
                 result,
             };
+            end_span(span, OutcomeClass::Ok, None);
             Responses {
                 direct: vec![serialize(&event)],
                 delta: None,
             }
         }
-        Err(error) => hallway_knock_error(state, &meta, "settlement", error).await,
+        Err(error) => {
+            end_span(span, app_error_outcome(&error), Some("app_error"));
+            hallway_knock_error(state, &meta, "settlement", error).await
+        }
     }
 }
 
@@ -1280,6 +1362,7 @@ fn commit_change(
     next: RecallPolicyState,
     decision: Option<RecallPolicyDecision>,
 ) -> Responses {
+    let has_decision = decision.is_some();
     let mutations = RecallPolicyMutation::between(&runtime.projection, &next);
     let base_version = runtime.cursor.version;
     let next_version = match base_version.checked_add(1) {
@@ -1408,6 +1491,20 @@ fn commit_change(
             direct: vec![serialize(&failed)],
             delta: None,
         };
+    }
+    if has_decision {
+        record_point(
+            state.insula_binding.as_ref(),
+            "house_host",
+            "host",
+            "recall_policy_decide",
+            OutcomeClass::Ok,
+            None,
+            Some((
+                RECALL_POLICY_COMMAND_ACCEPTED,
+                accepted.meta.event_id.as_str(),
+            )),
+        );
     }
     let delta_event_id = new_id();
     let delta = DeltaEvent {
@@ -1843,13 +1940,52 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                             }
                         };
                         match outcome {
-                            Ok(ReceiptIngest::Accepted(_)) => {
+                            Ok(ReceiptIngest::Accepted(receipt)) => {
+                                record_point(
+                                    state.insula_binding.as_ref(),
+                                    "house_host",
+                                    "host",
+                                    "receipt_projection",
+                                    OutcomeClass::Ok,
+                                    None,
+                                    Some(("paper_boat_receipt", receipt.event_id.as_str())),
+                                );
                                 let receipt_state = state.receipt_tracker.lock().await.state();
                                 let event = receipt_snapshot(&state, None, receipt_state);
                                 let _ = state.receipts.send(serialize(&event));
                             }
-                            Ok(ReceiptIngest::Duplicate | ReceiptIngest::Stale | ReceiptIngest::ForeignRoom) => {}
+                            Ok(ReceiptIngest::Duplicate) => {
+                                record_point(
+                                    state.insula_binding.as_ref(),
+                                    "house_host",
+                                    "host",
+                                    "receipt_projection",
+                                    OutcomeClass::Ok,
+                                    None,
+                                    None,
+                                );
+                            }
+                            Ok(ReceiptIngest::Stale | ReceiptIngest::ForeignRoom) => {
+                                record_point(
+                                    state.insula_binding.as_ref(),
+                                    "house_host",
+                                    "host",
+                                    "receipt_projection",
+                                    OutcomeClass::Refused,
+                                    None,
+                                    None,
+                                );
+                            }
                             Err(receipt_state) => {
+                                record_point(
+                                    state.insula_binding.as_ref(),
+                                    "house_host",
+                                    "host",
+                                    "receipt_projection",
+                                    OutcomeClass::Refused,
+                                    None,
+                                    None,
+                                );
                                 let event = receipt_snapshot(&state, None, receipt_state);
                                 let _ = state.receipts.send(serialize(&event));
                             }
@@ -1899,9 +2035,12 @@ fn new_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{hallway_projection_changed, knock_authority, resolve_room_dir};
+    use super::{
+        app_error_outcome, hallway_projection_changed, host_insula_binding, knock_authority,
+        resolve_room_dir,
+    };
     use crate::config::{HostConfig, KnockAutonomy};
-    use athanor_substrate::AppError;
+    use athanor_substrate::{AppError, OutcomeClass};
     use house_protocol::CommandMeta;
 
     fn config(knock_autonomy: KnockAutonomy) -> HostConfig {
@@ -1952,6 +2091,36 @@ mod tests {
             AppError::Refusal { code, .. } => code,
             other => panic!("expected a typed refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn host_insula_binding_uses_configured_identity_and_host_session() {
+        let binding =
+            host_insula_binding(&config(KnockAutonomy::Off)).expect("Host binding is valid");
+
+        assert_eq!(binding.house_id, "solarisael");
+        assert_eq!(binding.room, "kodo");
+        assert_eq!(binding.spirit, "Kodo");
+        assert_eq!(binding.session_id, "host:kodo");
+    }
+
+    #[test]
+    fn host_observation_outcomes_distinguish_refusals_from_errors() {
+        assert_eq!(
+            app_error_outcome(&AppError::Invalid("invalid".into())),
+            OutcomeClass::Refused
+        );
+        assert_eq!(
+            app_error_outcome(&AppError::Refusal {
+                code: "refused",
+                message: "refused",
+            }),
+            OutcomeClass::Refused
+        );
+        assert_eq!(
+            app_error_outcome(&AppError::Config("failed".into())),
+            OutcomeClass::Error
+        );
     }
 
     #[test]

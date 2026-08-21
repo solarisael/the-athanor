@@ -11,8 +11,13 @@ pub const INSULA_DEFAULT_RETENTION_DAYS: i16 = 14;
 pub const INSULA_MAX_BATCH_EVENTS: usize = 512;
 pub const INSULA_MAX_TRACE_ROWS: u32 = 1_000;
 pub const INSULA_MAX_VITALS_ROWS: u32 = 5_000;
+// enough: retention sweeps are one receipt per House per cutoff minute, so a
+// hundred newest-first rows already reach far past the 14-day raw window;
+// upgrade path is a keyset cursor on (created_at, receipt_id), not a bigger cap.
+pub const INSULA_MAX_RETENTION_ROWS: u32 = 100;
 const VITALS: &str = "insula.vitals.minute";
 const RETENTION: &str = "insula.retention.raw_delete";
+const RETENTION_READ: &str = "insula.retention.receipts";
 
 #[derive(Debug, Error)]
 pub enum InsulaError {
@@ -313,6 +318,42 @@ pub struct RetentionReceipt {
     pub rollup_query_name: String,
     pub rollup_query_version: i16,
     pub rollup_watermark: Option<DateTime<Utc>>,
+}
+// A persisted sweep receipt as read back, joined to the per-writer tombstone
+// summary that proves the delete. Both relations are mechanical counts and
+// hashes only, so the read is body free by construction.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RetentionReceiptRow {
+    pub receipt_id: String,
+    pub receipt_kind: String,
+    pub receipt_version: i16,
+    pub house_id: String,
+    pub sweep_version: i16,
+    pub sweep_key: String,
+    pub retention_days: i16,
+    pub swept_through: DateTime<Utc>,
+    pub window_start: DateTime<Utc>,
+    pub window_end: DateTime<Utc>,
+    pub event_count: i64,
+    pub writer_count: i64,
+    pub duplicate_count_sum: i64,
+    pub drop_count_sum: i64,
+    pub coverage_version: i16,
+    pub coverage_hash: String,
+    pub rollup_query_name: String,
+    pub rollup_query_version: i16,
+    pub rollup_watermark: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub tombstone_writer_count: i64,
+    pub tombstone_event_count: i64,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RetentionReadResult {
+    pub query_name: String,
+    pub query_version: i16,
+    pub rows: Vec<RetentionReceiptRow>,
 }
 
 fn is_house(v: &str) -> bool {
@@ -1018,6 +1059,56 @@ pub async fn query_vitals(pool: &PgPool, q: &VitalsQuery) -> Result<VitalsResult
         .collect::<Result<Vec<_>, sqlx::Error>>()?;
     Ok(VitalsResult {
         query_name: VITALS.into(),
+        query_version: 1,
+        rows,
+    })
+}
+pub async fn query_retention(
+    pool: &PgPool,
+    house_id: &str,
+    limit: u32,
+) -> Result<RetentionReadResult, InsulaError> {
+    if !is_house(house_id) {
+        return Err(bad("houseId", "invalid_house"));
+    }
+    if limit == 0 || limit > INSULA_MAX_RETENTION_ROWS {
+        return Err(bad("limit", "out_of_range"));
+    }
+    // The newest receipts are selected first, then each is joined to its own
+    // tombstone summary: the aggregate never scans tombstones for receipts the
+    // caller will not see.
+    let rs=sqlx::query("WITH recent AS(SELECT * FROM insula.retention_receipts WHERE house_id=$1 ORDER BY created_at DESC,receipt_id DESC LIMIT $2)SELECT r.receipt_id::text receipt_id,r.receipt_kind,r.receipt_version,r.house_id,r.sweep_version,r.sweep_key,r.retention_days,r.swept_through,r.window_start,r.window_end,r.event_count,r.writer_count,r.duplicate_count_sum,r.drop_count_sum,r.coverage_version,r.coverage_hash,r.rollup_query_name,r.rollup_query_version,r.rollup_watermark,r.created_at,t.tombstone_writer_count,t.tombstone_event_count FROM recent r LEFT JOIN LATERAL(SELECT COUNT(*)::bigint tombstone_writer_count,COALESCE(SUM(event_count),0)::bigint tombstone_event_count FROM insula.log_tombstones s WHERE s.receipt_id=r.receipt_id AND s.house_id=r.house_id)t ON TRUE ORDER BY r.created_at DESC,r.receipt_id DESC").bind(house_id).bind(i64::from(limit)).fetch_all(pool).await?;
+    let rows = rs
+        .into_iter()
+        .map(|r| {
+            Ok(RetentionReceiptRow {
+                receipt_id: r.try_get("receipt_id")?,
+                receipt_kind: r.try_get("receipt_kind")?,
+                receipt_version: r.try_get("receipt_version")?,
+                house_id: r.try_get("house_id")?,
+                sweep_version: r.try_get("sweep_version")?,
+                sweep_key: r.try_get("sweep_key")?,
+                retention_days: r.try_get("retention_days")?,
+                swept_through: r.try_get("swept_through")?,
+                window_start: r.try_get("window_start")?,
+                window_end: r.try_get("window_end")?,
+                event_count: r.try_get("event_count")?,
+                writer_count: r.try_get("writer_count")?,
+                duplicate_count_sum: r.try_get("duplicate_count_sum")?,
+                drop_count_sum: r.try_get("drop_count_sum")?,
+                coverage_version: r.try_get("coverage_version")?,
+                coverage_hash: r.try_get("coverage_hash")?,
+                rollup_query_name: r.try_get("rollup_query_name")?,
+                rollup_query_version: r.try_get("rollup_query_version")?,
+                rollup_watermark: r.try_get("rollup_watermark")?,
+                created_at: r.try_get("created_at")?,
+                tombstone_writer_count: r.try_get("tombstone_writer_count")?,
+                tombstone_event_count: r.try_get("tombstone_event_count")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    Ok(RetentionReadResult {
+        query_name: RETENTION_READ.into(),
         query_version: 1,
         rows,
     })

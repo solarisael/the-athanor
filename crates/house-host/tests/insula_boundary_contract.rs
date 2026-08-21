@@ -773,6 +773,25 @@ async fn insula_trace_and_retention_reads_return_ingested_rows()
         .await?;
     assert_eq!(response.status(), StatusCode::OK);
 
+    // The room fence: a foreign room's writer records spans under the very same
+    // trace directly in the substrate; the Host trace read below must never
+    // surface them, because its scope is pinned to the configured room.
+    let foreign_binding = TrustedBinding {
+        house_id: binding.house_id.clone(),
+        room: "tuner".into(),
+        spirit: "Tuner".into(),
+        session_id: "foreign-session".into(),
+    };
+    let foreign = athanor_substrate::ingest_batch(
+        &pool,
+        &foreign_binding,
+        &IngestBatch {
+            events: vec![traced_event(&foreign_binding, "trace-foreign", &trace)],
+        },
+    )
+    .await?;
+    assert_eq!(foreign.accepted_count, 1, "the foreign span must persist");
+
     let response = client
         .post(endpoint(&host, "/athanor/v1/insula/trace"))
         .bearer_auth(TOKEN)
@@ -790,7 +809,11 @@ async fn insula_trace_and_retention_reads_return_ingested_rows()
     assert_eq!(read["limit"], 10);
     assert_eq!(read["truncated"], false);
     let rows = read["rows"].as_array().expect("trace rows");
-    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows.len(),
+        2,
+        "the foreign room's span under the same trace must stay invisible"
+    );
     for row in rows {
         assert_eq!(row["traceId"], trace);
         assert_eq!(row["houseId"], "solarisael");

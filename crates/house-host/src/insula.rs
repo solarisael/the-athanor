@@ -261,6 +261,18 @@ async fn require_bearer(State(auth): State<AuthState>, request: Request, next: N
             "host",
             "insula_vitals",
         ),
+        TRACE_PATH => start_span(
+            auth.observer_binding.as_ref(),
+            "house_host",
+            "host",
+            "insula_trace",
+        ),
+        RETENTION_PATH => start_span(
+            auth.observer_binding.as_ref(),
+            "house_host",
+            "host",
+            "insula_retention",
+        ),
         _ => None,
     };
     if !authorized(request.headers(), auth.bearer_token.as_str()) {

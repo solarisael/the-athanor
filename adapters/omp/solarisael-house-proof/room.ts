@@ -4,7 +4,7 @@
 import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { HOUSE_STATE_FILENAME, OBSIDIAN_ROOT } from "./constants.ts";
+import { HOUSE_STATE_FILENAME, OBSIDIAN_ROOT, ROOM_CAPABILITY_FILENAME } from "./constants.ts";
 
 export function roomNameFromCwd(cwd) {
   return path.basename(String(cwd || "")).toLowerCase();
@@ -109,6 +109,30 @@ export function roomContext(cwd) {
 
 export function statePathForRoom(effectiveRoomDir) {
   return path.join(effectiveRoomDir, ".omp", "runtime", HOUSE_STATE_FILENAME);
+}
+
+// Operation-scoped Docket write capability.
+//
+// The omp environment is global across every room in the House, so an
+// environment variable cannot carry a per-room secret; it is an override lane
+// for tests and one-room installs and it wins when set. The durable per-room
+// answer is the room-local file, read at call time so provisioning a room does
+// not require restarting the harness.
+//
+// The secret is returned to the caller that is about to spend it and nowhere
+// else: it never enters a schema, a receipt, or a log line.
+export function roomCapabilityPath(effectiveRoomDir) {
+  return path.join(effectiveRoomDir, ".omp", "runtime", ROOM_CAPABILITY_FILENAME);
+}
+
+export function roomCapability(effectiveRoomDir, environ = process.env) {
+  const configured = String(environ.ATHANOR_ROOM_CAPABILITY || "").trim();
+  if (configured) return configured;
+  try {
+    return readFileSync(roomCapabilityPath(effectiveRoomDir), "utf8").trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 function defaultHouseState(room, spirit, operator = DEFAULT_OPERATOR) {

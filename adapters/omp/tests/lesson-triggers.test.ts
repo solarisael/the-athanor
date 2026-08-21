@@ -55,6 +55,8 @@ mock.module("../solarisael-house-proof/anamnesis.ts", () => ({
 mock.module("../solarisael-house-proof/substrate.ts", () => ({
   catchBoat: async () => ({ ok: true, found: false }),
   closePaperBoatTransports: () => undefined,
+  readQuestBoard: async () => ({ ok: true, quests: [] }),
+  formatQuestBoardSection: () => "",
 }));
 mock.module("../solarisael-house-proof/entity-resolution.ts", () => ({
   resolveEntities: async () => ({ ok: true, matches: [] }),

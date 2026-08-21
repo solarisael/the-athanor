@@ -37,7 +37,7 @@ mock.module("../solarisael-house-proof/recall.ts", () => ({ closeRustRecallTrans
 mock.module("../solarisael-house-proof/tools.ts", () => ({ closeRustRememberTransports() {}, registerSolarisaelTools() {}, writeRustMemory: async () => undefined }));
 mock.module("../solarisael-house-proof/anamnesis.ts", () => ({ closeRustAnamnesisTransports() {}, formatAnamnesisContext: () => "", queryAnamnesis: async () => ({ ok: true }) }));
 mock.module("../solarisael-house-proof/hallway.ts", () => ({ projectHallwayInbox: async () => ({ changed: false, inbox: { ok: true, hallways: [] } }) }));
-mock.module("../solarisael-house-proof/substrate.ts", () => ({ catchBoat: async () => ({ ok: true, found: false }), closePaperBoatTransports() {} }));
+mock.module("../solarisael-house-proof/substrate.ts", () => ({ catchBoat: async () => ({ ok: true, found: false }), closePaperBoatTransports() {}, readQuestBoard: async () => ({ ok: true, quests: [] }), formatQuestBoardSection: () => "" }));
 mock.module("../solarisael-house-proof/entity-resolution.ts", () => ({ resolveEntities: async () => ({ ok: true, matches: [] }) }));
 mock.module("../solarisael-house-proof/recall-telemetry.ts", () => ({ recordRecallTelemetry: async () => true }));
 mock.module("../solarisael-house-proof/triggers.ts", () => ({ processLessonsReminder: async () => null }));

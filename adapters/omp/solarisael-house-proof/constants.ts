@@ -13,3 +13,5 @@ export const WRITE_TIMEOUT_MS = 90000;
 export const OMP_SESSION_ID = "omp";
 export const TRANSCRIPT_DEBUG_LOG = "solarisael-house-transcript-debug.jsonl";
 export const HOUSE_STATE_FILENAME = "solarisael-house-state.json";
+// Room-local, operation-scoped Docket write capability. Never a schema field.
+export const ROOM_CAPABILITY_FILENAME = "room-capability";

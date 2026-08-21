@@ -14,6 +14,7 @@ export type KittenQuestProgress = {
   assignment?: unknown;
   sessionFile?: unknown;
   parentToolCallId?: unknown;
+  attemptId?: unknown;
 };
 
 const compactLine = (value: unknown): string => String(value ?? "").replace(/\s+/g, " ").trim();
@@ -28,6 +29,22 @@ export function kittenLifecycleJoinKey(payload: unknown): string {
   return compactLine(event.id);
 }
 
+// Docket attribution, when the room is standing inside a claimed quest. The
+// attempt id is read at dispatch so a later claim cannot retroactively adopt
+// work it never handed out, and it is additive: absent env, absent field, and
+// every lineage consumer behaves exactly as before.
+export function activeAttemptId(environ: Record<string, string | undefined> = process.env): string | null {
+  return compactLine(environ.ATHANOR_ACTIVE_ATTEMPT_ID) || null;
+}
+
+export function stampAttemptId<T extends Record<string, unknown>>(
+  event: T,
+  environ: Record<string, string | undefined> = process.env,
+): T {
+  const attemptId = activeAttemptId(environ);
+  return attemptId ? { ...event, attemptId } : event;
+}
+
 type KittenLineageDiagnostics = {
   progressEvents: number;
   lifecycleEvents: number;
@@ -39,6 +56,7 @@ type KittenLineageDiagnostics = {
   lastLifecycleStatus: string | null;
   lastProgressKeys: string[];
   lastLifecycleKeys: string[];
+  lastAttemptId: string | null;
 };
 
 const lineageDiagnostics: KittenLineageDiagnostics = {
@@ -52,6 +70,7 @@ const lineageDiagnostics: KittenLineageDiagnostics = {
   lastLifecycleStatus: null,
   lastProgressKeys: [],
   lastLifecycleKeys: [],
+  lastAttemptId: null,
 };
 
 function safeKeys(payload: unknown): string[] {
@@ -64,6 +83,8 @@ export function noteKittenProgress(payload: unknown, id: string): void {
   lineageDiagnostics.progressEvents += 1;
   lineageDiagnostics.lastProgressId = id || null;
   lineageDiagnostics.lastProgressKeys = safeKeys(payload);
+  const attemptId = compactLine((payload as Record<string, unknown>)?.attemptId);
+  if (attemptId) lineageDiagnostics.lastAttemptId = attemptId;
 }
 
 export function noteKittenLifecycle(payload: unknown, id: string, progressFound: boolean): void {

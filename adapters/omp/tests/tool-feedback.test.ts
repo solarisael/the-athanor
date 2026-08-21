@@ -16,6 +16,7 @@ type Schema = {
   regex(pattern: RegExp): Schema;
   optional(): Schema;
   default(value: unknown): Schema;
+  strict(): Schema;
 };
 
 type CapturedTool = {
@@ -32,6 +33,7 @@ function schema(): Schema {
     regex() { return this; },
     optional() { return this; },
     default() { return this; },
+    strict() { return this; },
   };
 }
 
@@ -84,6 +86,10 @@ const HOUSE_TOOL_NAMES = [
   "hallway_knock",
   "hallway_read",
   "hallway_inbox",
+  "quest_post",
+  "quest_board",
+  "quest_claim",
+  "quest_report",
 ];
 
 function registerTools(): CapturedTool[] {

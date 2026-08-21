@@ -4,6 +4,7 @@ mod bm25f;
 mod canon;
 mod cluster;
 mod config;
+mod docket;
 mod entity;
 mod giga;
 mod giga_worker;
@@ -29,6 +30,12 @@ pub use cluster::{
     cluster_staleness, spherical_kmeans,
 };
 pub use config::{AppError, Config, EmbeddingMode};
+pub use docket::{
+    AcceptanceSummary, QuestBoardItem, QuestBoardParams, QuestBoardResult, QuestClaimParams,
+    QuestClaimResult, QuestPostAction, QuestPostParams, QuestPostResult, QuestReportAction,
+    QuestReportParams, QuestReportResult, quest_board, quest_claim, quest_post, quest_report,
+    require_docket_capability,
+};
 pub use entity::{EntityMatch, EntityResolveParams, EntityResolveResult, entity_resolve};
 pub use giga::{
     giga_candidate_list, giga_candidate_store, giga_conversation_ingest, giga_event_claim,

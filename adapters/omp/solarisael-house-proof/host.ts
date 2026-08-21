@@ -32,6 +32,12 @@ function requiredEnvironment(name: string): string {
   if (!value) throw new HostUnavailable(`${name} is required for Athanor Host access`);
   return value;
 }
+
+// The House this installation serves. Docket goals and quests are scoped by it,
+// and no default is invented: an unnamed House means the caller must name one.
+export function hostHouseId(environ: NodeJS.ProcessEnv = process.env): string | null {
+  return text(environ.ATHANOR_HOST_HOUSE_ID) || null;
+}
 export function hostSessionIdentity(context: {
   sessionManager?: { getSessionId?: () => unknown };
   sessionID?: unknown;

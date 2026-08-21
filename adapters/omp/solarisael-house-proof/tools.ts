@@ -5,13 +5,14 @@ import { recallWithRouting } from "./recall.ts";
 import {
   loadRoomState,
   normalizeSpiritName,
+  roomCapability,
   roomContext,
   saveRoomState,
   statePathForRoom,
   writeActiveSpiritSnapshot,
 } from "./room.ts";
 import { RecallPolicyHostClient } from "./recall-policy.ts";
-import { hostSessionIdentity } from "./host.ts";
+import { hostHouseId, hostSessionIdentity } from "./host.ts";
 import { applyRecallViewport } from "./context.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./anamnesis.ts";
@@ -59,6 +60,36 @@ function hostBinding(ctx: any) {
     },
     effectiveRoomDir,
   };
+}
+
+// Docket writes carry an operation-scoped room capability. It is resolved from
+// the room the caller is standing in, never accepted as a parameter and never
+// echoed into a receipt, so no spirit can borrow another room's authority by
+// typing one. An unprovisioned room refuses here, before the substrate call.
+const DOCKET_WRITE_GATE = "docket_write capability";
+
+function docketWriteBinding(ctx: any) {
+  const { binding, effectiveRoomDir } = hostBinding(ctx);
+  return { binding, capability: roomCapability(effectiveRoomDir) };
+}
+
+function refuseDocket(code: string, gate: string, error: string) {
+  const result = { ok: false, code, gate, error };
+  return {
+    isError: true,
+    content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    details: result,
+  };
+}
+
+function refuseUnprovisionedRoom() {
+  return refuseDocket("capability_not_provisioned", DOCKET_WRITE_GATE, "room capability not provisioned");
+}
+
+// A Docket row belongs to a House. The caller may name one; otherwise the
+// installation's own House id answers. Nothing is invented when neither does.
+function docketHouseId(requested: unknown) {
+  return (typeof requested === "string" ? requested.trim() : "") || hostHouseId();
 }
 
 
@@ -1659,6 +1690,222 @@ export function registerSolarisaelTools(pi) {
     async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
       const result = await requestRustDomain("hallway_inbox", { ...binding }, signal, false);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "quest_post",
+    label: "Athanor Quest Post",
+    description: "Post or activate Docket work for this House. A post is a draft and never an assignment: goalDraft and draft write DRAFT rows that bind nobody, while goalActivate and activate are the explicit transitions that freeze authority, review class, and the acceptance tuple. An action missing its own required fields refuses by name without touching the substrate, and every Docket write refuses locally, naming the docket_write capability, when this room holds no provisioned capability.",
+    parameters: z.object({
+      action: z.enum(["goalDraft", "goalActivate", "draft", "activate"]).describe("goalDraft and draft write drafts; goalActivate and activate are the explicit transitions that freeze authority."),
+      houseId: z.string().optional().describe("House the goal or quest belongs to. Defaults to this installation's House id."),
+      goalId: z.string().optional().describe("Goal id: required by goalActivate, optional parent for draft."),
+      questId: z.string().optional().describe("Quest id being activated. Required by activate."),
+      title: z.string().optional().describe("Goal or quest title. Required by goalDraft and draft."),
+      intent: z.string().optional().describe("What the goal is for, in the House's own words. Required by goalDraft."),
+      priority: z.number().optional().describe("Goal ordering hint; higher sorts first."),
+      recurrenceInterval: z.string().optional().describe("ISO-8601 duration, such as P1W. Omit for a goal that runs once; a recurring goal re-arms its quest at settlement."),
+      intentAuthorityPrincipal: z.string().optional().describe("Principal whose intent authorizes this work. Required by goalActivate and activate."),
+      stewardRoom: z.string().optional().describe("Room accountable for the goal. Required by goalActivate."),
+      stewardSpirit: z.string().optional().describe("Spirit accountable for the goal. Required by goalActivate."),
+      kind: z.string().optional().describe("Quest kind. Required by draft."),
+      body: z.string().optional().describe("Quest body: the work as prose. Required by draft."),
+      importance: z.enum(["hint", "blocker"]).optional().describe("hint or blocker. Required by activate."),
+      deadlineAt: z.string().optional().describe("RFC3339 deadline. Omit for a quest the clock never rings about."),
+      reviewClass: z.enum(["R0", "R1", "R2", "R3"]).optional().describe("Review class frozen at activation. Required by activate."),
+      acceptanceCriteria: z.array(z.string()).optional().describe("Named criteria, at least one, frozen at activation and settled one by one. Required by activate."),
+      idempotencyKey: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
+    }).strict(),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding, capability } = docketWriteBinding(ctx);
+      if (!capability) return refuseUnprovisionedRoom();
+      const action = params.action;
+      const gate = `quest_post ${action}`;
+      let fields: Record<string, unknown>;
+      if (action === "goalDraft" || action === "draft") {
+        const houseId = docketHouseId(params.houseId);
+        if (!houseId) return refuseDocket("house_unnamed", "houseId", "houseId is required and this installation names no House");
+        if (action === "goalDraft") {
+          if (!params.title?.trim() || !params.intent?.trim()) {
+            return refuseDocket("incomplete_action", gate, "goalDraft requires title and intent");
+          }
+          fields = {
+            houseId,
+            title: params.title.trim(),
+            intent: params.intent,
+            priority: params.priority,
+            recurrenceInterval: params.recurrenceInterval?.trim() || undefined,
+          };
+        } else {
+          if (!params.kind?.trim() || !params.title?.trim() || !params.body?.trim()) {
+            return refuseDocket("incomplete_action", gate, "draft requires kind, title, and body");
+          }
+          fields = {
+            houseId,
+            goalId: params.goalId?.trim() || undefined,
+            kind: params.kind.trim(),
+            title: params.title.trim(),
+            body: params.body,
+            importance: params.importance,
+            deadlineAt: params.deadlineAt?.trim() || undefined,
+          };
+        }
+      } else if (action === "goalActivate") {
+        if (!params.goalId?.trim() || !params.intentAuthorityPrincipal?.trim()
+          || !params.stewardRoom?.trim() || !params.stewardSpirit?.trim()) {
+          return refuseDocket("incomplete_action", gate, "goalActivate requires goalId, intentAuthorityPrincipal, stewardRoom, and stewardSpirit");
+        }
+        fields = {
+          goalId: params.goalId.trim(),
+          intentAuthorityPrincipal: params.intentAuthorityPrincipal.trim(),
+          stewardRoom: params.stewardRoom.trim(),
+          stewardSpirit: params.stewardSpirit.trim(),
+        };
+      } else {
+        const criteria = (params.acceptanceCriteria ?? []).map((item: string) => item.trim()).filter(Boolean);
+        if (!params.questId?.trim() || !params.intentAuthorityPrincipal?.trim()
+          || !params.reviewClass || !params.importance || criteria.length === 0) {
+          return refuseDocket("incomplete_action", gate, "activate requires questId, intentAuthorityPrincipal, reviewClass, importance, and at least one acceptance criterion");
+        }
+        fields = {
+          questId: params.questId.trim(),
+          intentAuthorityPrincipal: params.intentAuthorityPrincipal.trim(),
+          reviewClass: params.reviewClass,
+          acceptanceCriteria: criteria,
+          importance: params.importance,
+          deadlineAt: params.deadlineAt?.trim() || undefined,
+        };
+      }
+      const result = await requestRustDomain("quest_post", {
+        action,
+        ...binding,
+        capability,
+        idempotencyKey: params.idempotencyKey?.trim() || String(toolCallId),
+        ...fields,
+      }, signal, true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "quest_board",
+    label: "Athanor Quest Board",
+    description: "Read this House's Docket board: quests by deadline, soonest first, each with its state, importance, claim epoch, and acceptance verdict counts. The board is a read and carries no capability. It offers work and never assigns it, and an empty board is an empty board rather than an instruction to invent one.",
+    parameters: z.object({
+      houseId: z.string().optional().describe("House to read. Defaults to this installation's House id."),
+      states: z.array(z.string()).optional().describe("Quest states to include, such as offered or claimed. Omit for the substrate's own default set."),
+      limit: z.number().optional().describe("Maximum quests to return. Omit for the substrate default."),
+    }).strict(),
+    approval: "read",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      const houseId = docketHouseId(params.houseId);
+      if (!houseId) return refuseDocket("house_unnamed", "houseId", "houseId is required and this installation names no House");
+      const result = await requestRustDomain("quest_board", {
+        ...binding,
+        houseId,
+        states: params.states?.length ? params.states : undefined,
+        limit: params.limit,
+      }, signal, false);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "quest_claim",
+    label: "Athanor Quest Claim",
+    description: "Take one offered quest as this room and this spirit, by consent and never by assignment. The claim mints a lease token shown exactly once, so keep it: a replay of the same idempotency key returns the existing attempt receipt without the token. A quest that is not offered refuses as not_claimable, and the write refuses locally, naming the docket_write capability, when this room holds no provisioned capability.",
+    parameters: z.object({
+      questId: z.string().describe("Offered quest to claim."),
+      idempotencyKey: z.string().optional().describe("Stable retry key. Defaults to this tool-call id. Replaying it returns the attempt without reminting the lease."),
+    }).strict(),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding, capability } = docketWriteBinding(ctx);
+      if (!capability) return refuseUnprovisionedRoom();
+      if (!params.questId?.trim()) return refuseDocket("incomplete_action", "quest_claim", "questId is required");
+      const result = await requestRustDomain("quest_claim", {
+        ...binding,
+        capability,
+        idempotencyKey: params.idempotencyKey?.trim() || String(toolCallId),
+        questId: params.questId.trim(),
+      }, signal, true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "quest_report",
+    label: "Athanor Quest Report",
+    description: "File evidence against a claimed quest: progress receipts while the work runs, one submit that yields the attempt, or one settleItem verdict on a named acceptance criterion. Every action revalidates the lease first, so an expired lease or a superseded claim epoch refuses as stale_lease and publishes nothing. An executor can never settle its own acceptance item; that refusal comes from the ledger and is surfaced as it stands.",
+    parameters: z.object({
+      questId: z.string().describe("Quest this report belongs to."),
+      attemptId: z.string().describe("Attempt id returned by quest_claim."),
+      leaseToken: z.string().describe("Lease token minted once by quest_claim. Proves this attempt still holds the quest."),
+      action: z.enum(["progress", "submit", "settleItem"]).describe("progress records evidence, submit yields the attempt for review, settleItem records one acceptance verdict."),
+      body: z.string().describe("The evidence or verdict reasoning as prose. The substrate digests it; nothing is trusted from the caller."),
+      kind: z.string().optional().describe("Receipt kind. Omit for the substrate's default for this action."),
+      performedBy: z.string().optional().describe("Familiar or worker whose hand did the work, kept visible instead of laundered."),
+      // Two roles live in this one field. A receipt names who authored the
+      // evidence (executor or reviewer); a settlement names who carries the
+      // verdict (reviewer or steward). The ledger refuses an executor verdict
+      // regardless, and the substrate refuses the wrong role for the action.
+      authoredRole: z.enum(["executor", "reviewer", "steward"]).optional().describe("Role behind this action. A receipt from progress or submit is authored by executor or reviewer. settleItem is a settlement and requires reviewer or steward; an executor verdict is refused by the ledger."),
+      itemPosition: z.number().optional().describe("1-based acceptance item position. Required by settleItem."),
+      verdict: z.enum(["met", "not_met", "unknown", "inconclusive", "not_applicable", "refused"]).optional().describe("Verdict for the named acceptance item. Required by settleItem."),
+      idempotencyKey: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
+    }).strict(),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding, capability } = docketWriteBinding(ctx);
+      if (!capability) return refuseUnprovisionedRoom();
+      const action = params.action;
+      const gate = `quest_report ${action}`;
+      if (!params.questId?.trim() || !params.attemptId?.trim() || !params.leaseToken?.trim() || !params.body?.trim()) {
+        return refuseDocket("incomplete_action", gate, "questId, attemptId, leaseToken, and body are required");
+      }
+      // The substrate requires authoredRole for settleItem and refuses an
+      // executor verdict from the ledger. Naming the missing role here spends
+      // no capability on a call that cannot land.
+      if (action === "settleItem"
+        && (!Number.isInteger(params.itemPosition) || Number(params.itemPosition) < 1
+          || !params.verdict || !params.authoredRole)) {
+        return refuseDocket("incomplete_action", gate, "settleItem requires itemPosition (1 or greater), verdict, and authoredRole");
+      }
+      const result = await requestRustDomain("quest_report", {
+        ...binding,
+        capability,
+        idempotencyKey: params.idempotencyKey?.trim() || String(toolCallId),
+        questId: params.questId.trim(),
+        attemptId: params.attemptId.trim(),
+        leaseToken: params.leaseToken.trim(),
+        action,
+        body: params.body,
+        kind: params.kind?.trim() || undefined,
+        performedBy: params.performedBy?.trim() || undefined,
+        authoredRole: params.authoredRole,
+        itemPosition: action === "settleItem" ? params.itemPosition : undefined,
+        verdict: action === "settleItem" ? params.verdict : undefined,
+      }, signal, true);
       return {
         isError: result.ok !== true,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

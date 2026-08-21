@@ -671,21 +671,26 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             room_dir,
             request,
         } => {
-            let room_dir = resolve_room_dir(room_dir.as_deref(), &state.config);
-            let result = match serde_json::from_value::<DispatchRequest>(request) {
-                Ok(request) => serde_json::to_value(house_dispatch(request, || {
-                    read_room_spellbook(room_dir.as_ref())
-                }))
-                .expect("dispatch receipt serializes"),
-                Err(error) => invalid_routing_request("routing", error),
+            let result = match resolve_room_dir(room_dir.as_deref(), &state.config) {
+                Ok(room_dir) => match serde_json::from_value::<DispatchRequest>(request) {
+                    Ok(request) => serde_json::to_value(house_dispatch(request, || {
+                        read_room_spellbook(room_dir.as_ref())
+                    }))
+                    .expect("dispatch receipt serializes"),
+                    Err(error) => invalid_routing_request("routing", error),
+                },
+                Err(rejection) => rejection,
             };
             routing_response(state, meta, result).await
         }
         ClientCommand::FamiliarStatus { meta, room_dir } => {
-            let room_dir = resolve_room_dir(room_dir.as_deref(), &state.config);
-            let result =
-                serde_json::to_value(familiar_status(read_room_spellbook(room_dir.as_ref())))
-                    .expect("familiar status serializes");
+            let result = match resolve_room_dir(room_dir.as_deref(), &state.config) {
+                Ok(room_dir) => {
+                    serde_json::to_value(familiar_status(read_room_spellbook(room_dir.as_ref())))
+                        .expect("familiar status serializes")
+                }
+                Err(rejection) => rejection,
+            };
             routing_response(state, meta, result).await
         }
         ClientCommand::NormalizeLineage { meta, request } => {
@@ -1082,11 +1087,35 @@ async fn shell_response(state: &AppState, meta: CommandMeta, result: Value) -> R
     }
 }
 
-fn resolve_room_dir<'a>(requested: Option<&'a str>, config: &'a HostConfig) -> Cow<'a, str> {
-    match requested.filter(|room_dir| !room_dir.trim().is_empty()) {
-        Some(room_dir) => Cow::Borrowed(room_dir),
-        None => config.room_dir.to_string_lossy(),
+/// Caller-selected filesystem authority is refused: a supplied `room_dir`
+/// must name this Host's configured room directory (canonicalized equal) or
+/// stay empty. Anything else is rejected loudly, never silently served.
+fn resolve_room_dir<'a>(
+    requested: Option<&'a str>,
+    config: &'a HostConfig,
+) -> Result<Cow<'a, str>, Value> {
+    let Some(requested) = requested.filter(|room_dir| !room_dir.trim().is_empty()) else {
+        return Ok(config.room_dir.to_string_lossy());
+    };
+
+    let supplied = std::path::Path::new(requested.trim());
+    let matches_configured = match (supplied.canonicalize(), config.room_dir.canonicalize()) {
+        (Ok(supplied), Ok(configured)) => supplied == configured,
+        _ => false,
+    };
+    if matches_configured {
+        return Ok(config.room_dir.to_string_lossy());
     }
+
+    Err(json!({
+        "ok": false,
+        "status": "rejected",
+        "errors": [format!(
+            "room_dir must name this Host's configured room directory; refused: {requested}"
+        )],
+        "warnings": [],
+        "spawnPacket": Value::Null,
+    }))
 }
 
 /// The Host owns the filesystem for room-local House files; `house_core` owns
@@ -2150,7 +2179,38 @@ mod tests {
     fn familiar_status_defaults_to_configured_room_dir() {
         let config = config(KnockAutonomy::Off);
 
-        assert_eq!(resolve_room_dir(None, &config).as_ref(), "configured-room");
+        let resolved =
+            resolve_room_dir(None, &config).expect("empty room_dir uses the configured one");
+        assert_eq!(resolved.as_ref(), "configured-room");
+
+        let blank =
+            resolve_room_dir(Some("   "), &config).expect("blank room_dir uses the configured one");
+        assert_eq!(blank.as_ref(), "configured-room");
+    }
+
+    #[test]
+    fn caller_selected_room_dir_is_refused() {
+        let config = config(KnockAutonomy::Off);
+
+        let rejection = resolve_room_dir(Some("C:/somewhere/else"), &config)
+            .expect_err("a foreign room_dir must be rejected");
+        assert_eq!(rejection["status"], "rejected");
+        assert_eq!(rejection["ok"], false);
+    }
+
+    #[test]
+    fn canonical_equal_room_dir_is_admitted() {
+        let dir = std::env::temp_dir().join(format!("athanor-room-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("test dir");
+        let mut config = config(KnockAutonomy::Off);
+        config.room_dir = dir.clone();
+
+        let supplied = dir.to_string_lossy().to_string();
+        let resolved =
+            resolve_room_dir(Some(&supplied), &config).expect("the configured dir is admitted");
+        assert_eq!(resolved.as_ref(), dir.to_string_lossy().as_ref());
+
+        let _ = std::fs::remove_dir(&dir);
     }
 
     #[test]

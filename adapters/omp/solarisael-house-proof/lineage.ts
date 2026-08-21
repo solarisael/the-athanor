@@ -103,6 +103,9 @@ export async function settleQuestLifecycle(
         task: text(progress.assignment ?? progress.task),
         status: text(lifecycle.status),
         sessionFile: text(lifecycle.sessionFile ?? progress.sessionFile),
+        // Stamped at dispatch when the room was standing inside a claimed
+        // quest. Absent otherwise, and the Host reads it as optional.
+        ...(text(progress.attemptId) ? { attemptId: text(progress.attemptId) } : {}),
       },
     },
     idempotencyKey,

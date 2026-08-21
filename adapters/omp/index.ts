@@ -13,6 +13,7 @@ import {
   noteKittenLifecycle,
   noteKittenLineageWrite,
   noteKittenProgress,
+  stampAttemptId,
   type KittenQuestProgress,
 } from "./kitten-lineage.ts";
 import {
@@ -20,7 +21,7 @@ import {
   settleQuestLifecycle,
   type QuestMemory,
 } from "./solarisael-house-proof/lineage.ts";
-import { hostSessionIdentity, type HostBinding } from "./solarisael-house-proof/host.ts";
+import { hostHouseId, hostSessionIdentity, type HostBinding } from "./solarisael-house-proof/host.ts";
 
 import {
   logConversationWindow,
@@ -44,7 +45,12 @@ import {
   roomContext,
   writeActiveSpiritSnapshot,
 } from "./solarisael-house-proof/room.ts";
-import { catchBoat, closePaperBoatTransports } from "./solarisael-house-proof/substrate.ts";
+import {
+  catchBoat,
+  closePaperBoatTransports,
+  formatQuestBoardSection,
+  readQuestBoard,
+} from "./solarisael-house-proof/substrate.ts";
 import { conversationText, messageText } from "./solarisael-house-proof/text.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./solarisael-house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./solarisael-house-proof/tools.ts";
@@ -738,9 +744,11 @@ export default function solarisaelHouseProof(pi) {
 
   const stopKittenProgress = pi.events?.on?.("task:subagent:progress", (payload: unknown) => {
     if (kittenLineageDisabled() || !payload || typeof payload !== "object") return;
-    const progress = payload as KittenQuestProgress;
+    // Dispatch is where a Docket attempt is still known, so the attempt id is
+    // stamped here and travels with the join to settlement.
+    const progress = stampAttemptId(payload as Record<string, unknown>) as KittenQuestProgress;
     const joinKey = kittenLifecycleJoinKey(progress);
-    noteKittenProgress(payload, joinKey);
+    noteKittenProgress(progress, joinKey);
     if (!joinKey) return;
     kittenQuestProgress.set(joinKey, progress);
     trimOldestMap(kittenQuestProgress, 1_024);
@@ -982,26 +990,48 @@ export default function solarisaelHouseProof(pi) {
     const freshWake = conversation?.fresh === true && !wokenSessions.has(wakeKey);
     if (freshWake) wokenSessions.add(wakeKey);
     if (freshWake && !existingTypes.has("solarisael-wake-context")) {
+      let letter = "";
+      let boatTitle: string | null = null;
+      let boatSource: string | null = null;
       try {
         const boat = await catchBoat(room, { timeoutMs: AUTOMATIC_CONTEXT_IO_TIMEOUT_MS });
         if (boat?.ok && boat?.found) {
-          const content = String(boat.wake_context || "");
-          if (content) {
-            additions.push({
-              role: "custom",
-              customType: "solarisael-wake-context",
-              content,
-              display: false,
-              details: { title: boat.title || null, source_path: boat.source_path || null },
-              attribution: "agent",
-              timestamp,
-            });
-            activities.push(`paper boat received${boat.title ? `: ${boat.title}` : ""}`);
-          }
+          letter = String(boat.wake_context || "");
+          boatTitle = boat.title ? String(boat.title) : null;
+          boatSource = boat.source_path ? String(boat.source_path) : null;
         }
       } catch {
         warnings.push("paper boat unavailable");
         // Auto-wake is fail-open. Manual wake remains available.
+      }
+      // The board is board state, never a summons. A silent transport, an
+      // unnamed House, and an empty board all render nothing: the wake letter
+      // never carries a section the Docket did not answer for.
+      let board = "";
+      const boardHouseId = hostHouseId();
+      if (boardHouseId) {
+        const receipt = await readQuestBoard(
+          { room, spirit, session: hostSession },
+          { houseId: boardHouseId, limit: 10, timeoutMs: AUTOMATIC_CONTEXT_IO_TIMEOUT_MS },
+        );
+        board = formatQuestBoardSection(receipt);
+        if (!board && receipt?.ok !== true) {
+          console.debug(`[athanor] quest board unavailable: ${receipt?.error ?? "no receipt"}`);
+        }
+      }
+      const content = board && letter ? `${letter.trimEnd()}\n\n${board}` : board || letter;
+      if (content) {
+        additions.push({
+          role: "custom",
+          customType: "solarisael-wake-context",
+          content,
+          display: false,
+          details: { title: boatTitle, source_path: boatSource, quest_board: board.length > 0 },
+          attribution: "agent",
+          timestamp,
+        });
+        if (letter) activities.push(`paper boat received${boatTitle ? `: ${boatTitle}` : ""}`);
+        if (board) activities.push("quest board received");
       }
     }
     if (freshWake && !existingTypes.has("solarisael-anamnesis-wake")) {

@@ -8,7 +8,8 @@ use athanor_substrate::migrations::{migration_pool, run_migrations};
 use athanor_substrate::{
     AnamnesisParams, AnamnesisSeed, AnamnesisWrite, AppError, Config, DesignDocumentQueryParams,
     DesignDocumentWriteParams, EntityResolveParams, LessonContextParams, LessonDeleteParams,
-    LessonQueryParams, LessonTriggerMatchParams, LessonUpdateParams, OutcomeClass, RecallParams,
+    LessonQueryParams, LessonTriggerMatchParams, LessonUpdateParams, OutcomeClass,
+    QuestBoardParams, QuestClaimParams, QuestPostParams, QuestReportParams, RecallParams,
     RememberRequest, SubstrateHealthOptions, ThreadContinuation as ServiceThreadContinuation,
     TrustedBinding, anamnesis, anamnesis_write, canon_read, canon_write, cluster_maintenance,
     design_document_query, design_document_write, entity_resolve, giga_candidate_list,
@@ -16,9 +17,10 @@ use athanor_substrate::{
     giga_event_replay, giga_health, giga_promote, giga_queue_maintenance, giga_review,
     giga_tool_promote, giga_tool_review, hallway_create, hallway_inbox, hallway_join,
     hallway_knock, hallway_knock_policy, hallway_post, hallway_read, lesson_context, lesson_delete,
-    lesson_query, lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake, recall,
-    refresh_semantic_vocabulary, remember, spawn_giga_worker, substrate_health,
-    substrate_health_with_config, validate_trusted_binding,
+    lesson_query, lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake,
+    quest_board, quest_claim, quest_post, quest_report, recall, refresh_semantic_vocabulary,
+    remember, spawn_giga_worker, substrate_health, substrate_health_with_config,
+    validate_trusted_binding,
 };
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use house_core::{
@@ -71,6 +73,10 @@ enum ProtocolRequest {
     Anamnesis(AnamnesisParams),
     AnamnesisWrite(AnamnesisWrite),
     LessonQuery(LessonQueryParams),
+    QuestPost(QuestPostParams),
+    QuestBoard(QuestBoardParams),
+    QuestClaim(QuestClaimParams),
+    QuestReport(QuestReportParams),
     LessonContext(LessonContextParams),
     LessonUpdate(LessonUpdateParams),
     LessonDelete(LessonDeleteParams),
@@ -348,6 +354,18 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
         "lesson_query" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::LessonQuery)
             .map_err(|error| invalid_params(error.to_string())),
+        "quest_post" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::QuestPost)
+            .map_err(|error| invalid_params(error.to_string())),
+        "quest_board" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::QuestBoard)
+            .map_err(|error| invalid_params(error.to_string())),
+        "quest_claim" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::QuestClaim)
+            .map_err(|error| invalid_params(error.to_string())),
+        "quest_report" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::QuestReport)
+            .map_err(|error| invalid_params(error.to_string())),
         "lesson_context" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::LessonContext)
             .map_err(|error| invalid_params(error.to_string())),
@@ -507,6 +525,10 @@ fn operation_name(request: &ProtocolRequest) -> &'static str {
         ProtocolRequest::Anamnesis(_) => "anamnesis",
         ProtocolRequest::AnamnesisWrite(_) => "anamnesis_write",
         ProtocolRequest::LessonQuery(_) => "lesson_query",
+        ProtocolRequest::QuestPost(_) => "quest_post",
+        ProtocolRequest::QuestBoard(_) => "quest_board",
+        ProtocolRequest::QuestClaim(_) => "quest_claim",
+        ProtocolRequest::QuestReport(_) => "quest_report",
         ProtocolRequest::LessonContext(_) => "lesson_context",
         ProtocolRequest::LessonUpdate(_) => "lesson_update",
         ProtocolRequest::LessonDelete(_) => "lesson_delete",
@@ -532,9 +554,8 @@ fn operation_name(request: &ProtocolRequest) -> &'static str {
     }
 }
 
-/// Hallway requests are the only ones carrying a whole authenticated
-/// room/spirit/session triple; every other method is observed under the
-/// House's own service voice.
+/// Hallway and Docket requests carry a whole authenticated room, spirit, and
+/// session triple. Other methods use the House service voice.
 fn insula_binding(request: &ProtocolRequest) -> TrustedBinding {
     let identity = match request {
         ProtocolRequest::HallwayCreate(request) => {
@@ -556,6 +577,18 @@ fn insula_binding(request: &ProtocolRequest) -> TrustedBinding {
             Some((&request.room, &request.spirit, &request.session))
         }
         ProtocolRequest::HallwayKnock(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::QuestPost(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::QuestBoard(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::QuestClaim(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::QuestReport(request) => {
             Some((&request.room, &request.spirit, &request.session))
         }
         _ => None,
@@ -992,6 +1025,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::Recall(request) => request.validate(),
                     ProtocolRequest::VaultRecall(_) => Ok(()),
                     ProtocolRequest::Anamnesis(request) => request.validate().map(|_| ()),
+                    ProtocolRequest::QuestPost(request) => request.validate(),
+                    ProtocolRequest::QuestBoard(request) => request.validate(),
+                    ProtocolRequest::QuestClaim(request) => request.validate(),
+                    ProtocolRequest::QuestReport(request) => request.validate(),
                     ProtocolRequest::AnamnesisWrite(_)
                     | ProtocolRequest::LessonQuery(_)
                     | ProtocolRequest::LessonContext(_)
@@ -1180,6 +1217,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     ProtocolRequest::AnamnesisWrite(request) => {
                                         match anamnesis_write(pool, config, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::QuestPost(request) => {
+                                        match quest_post(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::QuestBoard(request) => {
+                                        match quest_board(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::QuestClaim(request) => {
+                                        match quest_claim(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::QuestReport(request) => {
+                                        match quest_report(pool, request).await {
                                             Ok(result) => success_json(id, result)?,
                                             Err(error) => app_error(id, operation, error),
                                         }
@@ -1558,6 +1619,29 @@ mod tests {
     }
 
     #[test]
+    fn docket_protocols_are_strict_and_camel_cased() {
+        for line in [
+            r#"{"protocol":1,"id":"q1","method":"quest_post","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","capability":"secret","idempotencyKey":"post-1","action":"goalDraft","houseId":"solarisael","title":"Guild","intent":"Keep books"}}"#,
+            r#"{"protocol":1,"id":"q2","method":"quest_board","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","houseId":"solarisael","states":["offered"],"limit":20}}"#,
+            r#"{"protocol":1,"id":"q3","method":"quest_claim","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","capability":"secret","idempotencyKey":"claim-1","questId":"00000000-0000-0000-0000-000000000001"}}"#,
+            r#"{"protocol":1,"id":"q4","method":"quest_report","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","capability":"secret","idempotencyKey":"report-1","questId":"00000000-0000-0000-0000-000000000001","attemptId":"00000000-0000-0000-0000-000000000002","leaseToken":"token","action":"settleItem","body":"reviewed","authoredRole":"reviewer","itemPosition":1,"verdict":"met"}}"#,
+        ] {
+            let (_, request) = decode_line(line);
+            match request.expect("Docket fixture must decode") {
+                ProtocolRequest::QuestPost(request) => request.validate().unwrap(),
+                ProtocolRequest::QuestBoard(request) => request.validate().unwrap(),
+                ProtocolRequest::QuestClaim(request) => request.validate().unwrap(),
+                ProtocolRequest::QuestReport(request) => request.validate().unwrap(),
+                _ => panic!("expected Docket request"),
+            }
+        }
+        let (_, invalid) = decode_line(
+            r#"{"protocol":1,"id":"q5","method":"quest_report","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","capability":"secret","idempotencyKey":"report-2","questId":"00000000-0000-0000-0000-000000000001","attemptId":"00000000-0000-0000-0000-000000000002","leaseToken":"token","action":"progress","body":"working","role":"executor"}}"#,
+        );
+        assert!(matches!(invalid, Err(ProtocolError::InvalidParams(_))));
+    }
+
+    #[test]
     fn lesson_trigger_match_protocol_is_strict_and_camel_cased() {
         let (_, request) = decode_line(
             r#"{"protocol":1,"id":"t1","method":"lesson_trigger_match","params":{"room":"kodo","session":"s-1","surfaces":[{"kind":"tool","tool":"edit","path":"src/lib.rs","text":"x.unwrap()"},{"kind":"prose","text":"I will just unwrap it"}]}}"#,
@@ -1703,6 +1787,22 @@ mod tests {
                 r#"{"protocol":1,"id":"o3","method":"substrate_migrations","params":{}}"#,
                 "substrate_migrations",
             ),
+            (
+                r#"{"protocol":1,"id":"o4","method":"quest_post","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","capability":"secret","idempotencyKey":"post-1","action":"draft","houseId":"solarisael","kind":"work","title":"Cut Docket","body":"Build it"}}"#,
+                "quest_post",
+            ),
+            (
+                r#"{"protocol":1,"id":"o5","method":"quest_board","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","houseId":"solarisael"}}"#,
+                "quest_board",
+            ),
+            (
+                r#"{"protocol":1,"id":"o6","method":"quest_claim","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","capability":"secret","idempotencyKey":"claim-1","questId":"00000000-0000-0000-0000-000000000001"}}"#,
+                "quest_claim",
+            ),
+            (
+                r#"{"protocol":1,"id":"o7","method":"quest_report","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","capability":"secret","idempotencyKey":"report-1","questId":"00000000-0000-0000-0000-000000000001","attemptId":"00000000-0000-0000-0000-000000000002","leaseToken":"token","action":"progress","body":"working"}}"#,
+                "quest_report",
+            ),
         ] {
             let (_, request) = decode_line(line);
             let operation = operation_name(&request.expect("fixture decodes"));
@@ -1715,7 +1815,7 @@ mod tests {
     }
 
     #[test]
-    fn hallway_requests_are_observed_under_caller_identity() {
+    fn hallway_and_docket_requests_are_observed_under_caller_identity() {
         let (_, request) = decode_line(
             r#"{"protocol":1,"id":"b1","method":"hallway_inbox","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner"}}"#,
         );
@@ -1724,6 +1824,14 @@ mod tests {
         assert_eq!(binding.spirit, "Tuner");
         assert_eq!(binding.session_id, "service:tuner");
         assert_eq!(binding.house_id, system_binding().house_id);
+
+        let (_, request) = decode_line(
+            r#"{"protocol":1,"id":"b4","method":"quest_board","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","houseId":"solarisael"}}"#,
+        );
+        let binding = insula_binding(&request.expect("fixture decodes"));
+        assert_eq!(binding.room, "tuner");
+        assert_eq!(binding.spirit, "Tuner");
+        assert_eq!(binding.session_id, "service:tuner");
     }
 
     #[test]

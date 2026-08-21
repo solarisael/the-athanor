@@ -555,4 +555,53 @@ export async function catchBoat(room, { signal, timeoutMs = WRITE_TIMEOUT_MS } =
   }
 }
 
+// The wake board rides the paper-boat lane: same substrate process, same
+// timeout discipline, one transport for everything the wake letter needs.
+export const WAKE_BOARD_STATES = ["offered", "claimed"];
+
+export async function readQuestBoard(binding, { houseId, states = WAKE_BOARD_STATES, limit = 10, signal, timeoutMs = WRITE_TIMEOUT_MS } = {}) {
+  const { executable, transport } = paperBoatTransport();
+  if (!transport || !executable) {
+    return { ok: false, error: "Rust substrate executable is unavailable; the quest board is unavailable" };
+  }
+  try {
+    return await transport.request("quest_board", {
+      room: binding.room,
+      spirit: binding.spirit,
+      session: binding.session,
+      houseId,
+      states,
+      limit,
+    }, {
+      signal: signal || undefined,
+      timeoutMs,
+    });
+  } catch (error) {
+    if (!transport.usable) paperBoatTransports.delete(executable);
+    return paperBoatFailure("quest_board", error);
+  }
+}
+
+// Empty-set silence: an unanswered board, a refused board, and an empty board
+// all render nothing. The wake letter never carries a fabricated section, and a
+// quest line never claims a deadline the board did not state.
+export function formatQuestBoardSection(receipt) {
+  if (!receipt || typeof receipt !== "object" || receipt.ok !== true) return "";
+  const quests = Array.isArray(receipt.quests) ? receipt.quests : [];
+  const lines = [];
+  for (const quest of quests) {
+    if (!quest || typeof quest !== "object") continue;
+    const title = String(quest.title ?? "").replace(/\s+/g, " ").trim();
+    if (!title) continue;
+    const state = String(quest.state ?? "").trim() || "unknown state";
+    const importance = String(quest.importance ?? "").trim() || "hint";
+    // Docket receipts are camelCase end to end, unlike the older paper-boat
+    // receipts beside them. Read exactly the key the board states.
+    const deadline = String(quest.deadlineAt ?? "").trim();
+    lines.push(`- ${title} — ${state}, ${importance}, ${deadline ? `due ${deadline}` : "no deadline"}`);
+  }
+  if (lines.length === 0) return "";
+  return ["## Quest board", ...lines].join("\n");
+}
+
 

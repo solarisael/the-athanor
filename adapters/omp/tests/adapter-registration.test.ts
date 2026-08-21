@@ -13,6 +13,7 @@ type Schema = {
   kind: "string" | "boolean" | "number" | "enum" | "literal" | "object" | "array" | "discriminatedUnion";
   description?: string;
   isOptional?: boolean;
+  isStrict?: boolean;
   pattern?: string;
   values?: string[];
   shape?: Record<string, Schema>;
@@ -22,6 +23,7 @@ type Schema = {
   regex(pattern: RegExp): Schema;
   optional(): Schema;
   default(value: unknown): Schema;
+  strict(): Schema;
 };
 
 type SchemaSummary =
@@ -48,6 +50,10 @@ function makeSchema(kind: Schema["kind"], fields: Partial<Schema> = {}): Schema 
     },
     optional() {
       this.isOptional = true;
+      return this;
+    },
+    strict() {
+      this.isStrict = true;
       return this;
     },
     default(_value: unknown) {
@@ -189,6 +195,10 @@ const expectedToolNames = [
   "giga_promote_memory",
   "giga_promote_coding_lesson",
   "giga_promote_project_lesson",
+  "quest_post",
+  "quest_board",
+  "quest_claim",
+  "quest_report",
 ];
 
 function toolMap(tools: CapturedTool[]) {
@@ -611,6 +621,10 @@ describe("OMP adapter registration", () => {
       giga_promote_memory: { approval: "write" },
       giga_promote_coding_lesson: { approval: "write" },
       giga_promote_project_lesson: { approval: "write" },
+      quest_post: { approval: "write" },
+      quest_board: { approval: "read" },
+      quest_claim: { approval: "write" },
+      quest_report: { approval: "write" },
     });
   });
 
@@ -1059,7 +1073,82 @@ describe("OMP adapter registration", () => {
           clear: { type: "boolean", optional: true },
         },
       },
+      quest_post: {
+        type: "object",
+        fields: {
+          action: { type: "enum", values: ["goalDraft", "goalActivate", "draft", "activate"] },
+          houseId: { type: "string", optional: true },
+          goalId: { type: "string", optional: true },
+          questId: { type: "string", optional: true },
+          title: { type: "string", optional: true },
+          intent: { type: "string", optional: true },
+          priority: { type: "number", optional: true },
+          recurrenceInterval: { type: "string", optional: true },
+          intentAuthorityPrincipal: { type: "string", optional: true },
+          stewardRoom: { type: "string", optional: true },
+          stewardSpirit: { type: "string", optional: true },
+          kind: { type: "string", optional: true },
+          body: { type: "string", optional: true },
+          importance: { type: "enum", values: ["hint", "blocker"], optional: true },
+          deadlineAt: { type: "string", optional: true },
+          reviewClass: { type: "enum", values: ["R0", "R1", "R2", "R3"], optional: true },
+          acceptanceCriteria: { type: "array", element: { type: "string" }, optional: true },
+          idempotencyKey: { type: "string", optional: true },
+        },
+      },
+      quest_board: {
+        type: "object",
+        fields: {
+          houseId: { type: "string", optional: true },
+          states: { type: "array", element: { type: "string" }, optional: true },
+          limit: { type: "number", optional: true },
+        },
+      },
+      quest_claim: {
+        type: "object",
+        fields: {
+          questId: { type: "string" },
+          idempotencyKey: { type: "string", optional: true },
+        },
+      },
+      quest_report: {
+        type: "object",
+        fields: {
+          questId: { type: "string" },
+          attemptId: { type: "string" },
+          leaseToken: { type: "string" },
+          action: { type: "enum", values: ["progress", "submit", "settleItem"] },
+          body: { type: "string" },
+          kind: { type: "string", optional: true },
+          performedBy: { type: "string", optional: true },
+          authoredRole: { type: "enum", values: ["executor", "reviewer", "steward"], optional: true },
+          itemPosition: { type: "number", optional: true },
+          verdict: {
+            type: "enum",
+            values: ["met", "not_met", "unknown", "inconclusive", "not_applicable", "refused"],
+            optional: true,
+          },
+          idempotencyKey: { type: "string", optional: true },
+        },
+      },
     });
+  });
+
+  test("keeps every Docket device strict and its identity and capability server-side", () => {
+    const tools = toolMap(registerAdapter().tools);
+
+    for (const name of ["quest_post", "quest_board", "quest_claim", "quest_report"]) {
+      const schema = tools[name]!.parameters;
+      // Unknown keys refuse instead of being stripped in silence.
+      expect(schema.isStrict).toBe(true);
+      const fields = Object.keys(schema.shape ?? {});
+      // Identity and the operation-scoped capability are stamped from the
+      // room the caller stands in; no caller can name them.
+      expect(fields).not.toContain("capability");
+      expect(fields).not.toContain("room");
+      expect(fields).not.toContain("spirit");
+      expect(fields).not.toContain("session");
+    }
   });
 
 });

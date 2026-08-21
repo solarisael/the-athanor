@@ -121,6 +121,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "0022_insula.sql",
         sql: include_str!("../../../substrate/migrations/0022_insula.sql"),
     },
+    Migration {
+        version: 23,
+        name: "0023_docket.sql",
+        sql: include_str!("../../../substrate/migrations/0023_docket.sql"),
+    },
+    Migration {
+        version: 24,
+        name: "0024_docket_capability.sql",
+        sql: include_str!("../../../substrate/migrations/0024_docket_capability.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

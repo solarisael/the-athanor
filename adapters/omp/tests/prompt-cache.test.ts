@@ -89,6 +89,9 @@ mock.module("../solarisael-house-proof/substrate.ts", () => ({
     return { ok: true, found: false };
   },
   closePaperBoatTransports: () => undefined,
+  // An answered, empty board: the wake letter must stay unchanged.
+  readQuestBoard: async () => ({ ok: true, quests: [] }),
+  formatQuestBoardSection: () => "",
 }));
 
 mock.module("../solarisael-house-proof/entity-resolution.ts", () => ({

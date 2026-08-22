@@ -134,6 +134,7 @@ type KnockDoormanState = {
   interruptSent: boolean;
   interruptedTurnEnded: boolean;
   claimFailures: number;
+  degradedSince: number | null;
   nextClaimAt: number;
 };
 
@@ -338,6 +339,14 @@ async function tickDoorman(state: KnockDoormanState): Promise<void> {
   state.claiming = true;
   try {
     const claim = await claimHallwayKnock(state.binding);
+    if (state.degradedSince !== null) {
+      const seconds = Math.round((Date.now() - state.degradedSince) / 1000);
+      console.warn(
+        `[athanor] Hallway Knock doorman recovered for ${state.binding.room}`
+        + ` after ${state.claimFailures} failed claim(s) over ${seconds}s`,
+      );
+      state.degradedSince = null;
+    }
     state.claimFailures = 0;
     state.nextClaimAt = 0;
     if (!claim.knock) return;
@@ -352,7 +361,17 @@ async function tickDoorman(state: KnockDoormanState): Promise<void> {
       KNOCK_CLAIM_BACKOFF_BASE_MS * (2 ** exponent),
     );
     state.nextClaimAt = Date.now() + backoff;
-    warnDoorman(state, error);
+    // Degradation is a transition, never a drumbeat: one line when the door
+    // stops answering, quiet retries under backoff, one line on recovery.
+    // Pending Knocks are board state and wait out an outage unharmed.
+    if (state.degradedSince === null) {
+      state.degradedSince = Date.now();
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[athanor] Hallway Knock doorman degraded for ${state.binding.room}: ${reason}`
+        + ` (retrying quietly; pending Knocks stay claimable on the board)`,
+      );
+    }
   } finally {
     state.claiming = false;
   }
@@ -413,6 +432,7 @@ export function startHallwayKnockDoorman(pi: any, ctx: any, binding: HostBinding
     interruptedTurnEnded: false,
     claimFailures: 0,
     nextClaimAt: 0,
+    degradedSince: null,
   };
   state.timer = ctx.setInterval(() => tickDoorman(state), KNOCK_POLL_MS);
   knockDoormen.set(key, state);

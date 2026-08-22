@@ -12,7 +12,7 @@ import {
   writeActiveSpiritSnapshot,
 } from "./room.ts";
 import { RecallPolicyHostClient } from "./recall-policy.ts";
-import { hostHouseId, hostSessionIdentity } from "./host.ts";
+import { embodiedSession, hostHouseId, hostSessionIdentity } from "./host.ts";
 import { applyRecallViewport } from "./context.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./anamnesis.ts";
@@ -71,6 +71,30 @@ const DOCKET_WRITE_GATE = "docket_write capability";
 function docketWriteBinding(ctx: any) {
   const { binding, effectiveRoomDir } = hostBinding(ctx);
   return { binding, capability: roomCapability(effectiveRoomDir) };
+}
+
+// Worker-rejecting fence at the organ door (guild-hall #144, settled NOT_MET
+// against M1 criterion 4 before this cut existed). A docket write must come
+// from the room's embodied session; a worker spawned by the task tool carries
+// its own session identity and refuses here, typed, before any capability or
+// substrate work. Worker output enters receipts through the spirit's hand.
+function refuseWorkerHands(gate: string) {
+  return refuseDocket(
+    "worker_hands_off",
+    gate,
+    "docket writes require the room's embodied session; worker evidence enters through the spirit's hand",
+  );
+}
+
+export function workerAtTheDoor(
+    _ctx: any,
+    binding: { room: string; session: string },
+): boolean {
+  const embodied = embodiedSession(binding.room);
+  // No registered embodiment means no session_start has run in this process;
+  // fail closed. A fence that opens when unsure is not a fence.
+  if (!embodied) return true;
+  return binding.session !== embodied;
 }
 
 function refuseDocket(code: string, gate: string, error: string) {
@@ -1725,6 +1749,7 @@ export function registerSolarisaelTools(pi) {
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding, capability } = docketWriteBinding(ctx);
+      if (workerAtTheDoor(ctx, binding)) return refuseWorkerHands(`quest_post ${params.action}`);
       if (!capability) return refuseUnprovisionedRoom();
       const action = params.action;
       const gate = `quest_post ${action}`;
@@ -1837,6 +1862,7 @@ export function registerSolarisaelTools(pi) {
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding, capability } = docketWriteBinding(ctx);
+      if (workerAtTheDoor(ctx, binding)) return refuseWorkerHands("quest_claim");
       if (!capability) return refuseUnprovisionedRoom();
       if (!params.questId?.trim()) return refuseDocket("incomplete_action", "quest_claim", "questId is required");
       const result = await requestRustDomain("quest_claim", {
@@ -1877,6 +1903,7 @@ export function registerSolarisaelTools(pi) {
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding, capability } = docketWriteBinding(ctx);
+      if (workerAtTheDoor(ctx, binding)) return refuseWorkerHands(`quest_report ${params.action}`);
       if (!capability) return refuseUnprovisionedRoom();
       const action = params.action;
       const gate = `quest_report ${action}`;

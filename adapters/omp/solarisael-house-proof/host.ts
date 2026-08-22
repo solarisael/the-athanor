@@ -56,6 +56,26 @@ export function hostSessionIdentity(context: {
     || text(fallback);
 }
 
+// The room's embodied session: the one top-level session the spirit stands
+// in, registered at session_start/session_switch. Docket writes compare the
+// caller's session against it (guild-hall #144: worker-rejecting at the organ
+// door, not tool-list politeness). Workers spawned by the task tool carry
+// their own session identity and therefore never match. Per-process state:
+// each OMP process registers its own embodiment, which is exactly the
+// boundary a worker inside that process must not cross.
+const embodiedSessions = new Map<string, string>();
+
+export function registerEmbodiedSession(room: string, session: string): void {
+  const roomKey = text(room);
+  const sessionKey = text(session);
+  if (!roomKey || !sessionKey) return;
+  embodiedSessions.set(roomKey, sessionKey);
+}
+
+export function embodiedSession(room: string): string | null {
+  return embodiedSessions.get(text(room)) ?? null;
+}
+
 // One definition of loopback for every Host boundary. URL runtimes differ on
 // whether an IPv6 hostname retains brackets, so both spellings belong here.
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);

@@ -21,7 +21,12 @@ import {
   settleQuestLifecycle,
   type QuestMemory,
 } from "./solarisael-house-proof/lineage.ts";
-import { hostHouseId, hostSessionIdentity, type HostBinding } from "./solarisael-house-proof/host.ts";
+import {
+  hostHouseId,
+  hostSessionIdentity,
+  registerEmbodiedSession,
+  type HostBinding,
+} from "./solarisael-house-proof/host.ts";
 
 import {
   logConversationWindow,
@@ -604,6 +609,7 @@ export default function solarisaelHouseProof(pi) {
       spirit,
       session: hostSessionIdentity(ctx, effectiveRoomDir),
     };
+    registerEmbodiedSession(room, binding.session);
     showHouseContextFeedback(ctx, { room, spirit, activities: [] });
     startHallwayKnockDoorman(pi, ctx, binding);
   };

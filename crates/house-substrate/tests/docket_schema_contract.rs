@@ -1,6 +1,6 @@
 use athanor_substrate::{
-    AppError, Config, EmbeddingMode, QuestClockParams, QuestReportAction, QuestReportParams,
-    hallway_create, quest_clock, quest_report,
+    AppError, Config, EmbeddingMode, QuestClaimParams, QuestClockParams, QuestReportAction,
+    QuestReportParams, hallway_create, quest_claim, quest_clock, quest_report,
 };
 use house_core::hallway::HallwayCreateRequest;
 use sqlx::PgPool;
@@ -746,5 +746,164 @@ async fn docket_clock_pings_due_quests_and_stays_silent_on_clear() -> TestResult
         quiet.pinged.is_empty() && !quiet.rang,
         "an already-pinged deadline must not ring twice"
     );
+    Ok(())
+}
+
+// Kills: an attempt stranded forever by an expired 15-minute lease. The 0023
+// header promises reclaim; progress must keep live work warm, and a claimed
+// quest with an expired lease must be reclaimable under a new epoch while
+// the stale hand stays fenced out of publishing.
+// red-proof: remove the GREATEST renewal from the Progress arm, or restore
+// the bare `state != "offered"` refusal in quest_claim.
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+async fn docket_progress_renews_and_expired_lease_reclaims() -> TestResult {
+    let pool = fresh_docket().await?;
+    sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
+    sqlx::query(
+        "INSERT INTO docket.room_capabilities (room, operation_class, capability_hash)
+         VALUES ('test-room', 'docket_write', $1)",
+    )
+    .bind(sha256_hex("claimant-secret"))
+    .execute(&pool)
+    .await?;
+
+    let quest_id = insert_frozen_quest(&pool).await?;
+    let claimed = quest_claim(
+        &pool,
+        QuestClaimParams {
+            room: "test-room".into(),
+            spirit: "Prover".into(),
+            session: "test-session".into(),
+            capability: "claimant-secret".into(),
+            idempotency_key: "claim-fresh".into(),
+            quest_id: quest_id.clone(),
+        },
+    )
+    .await?;
+    let first_token = claimed.lease_token.expect("fresh claim mints a token");
+
+    // A live lease refuses reclaim: the claim door stays shut.
+    let live = quest_claim(
+        &pool,
+        QuestClaimParams {
+            room: "test-room".into(),
+            spirit: "Prover".into(),
+            session: "test-session".into(),
+            capability: "claimant-secret".into(),
+            idempotency_key: "claim-too-early".into(),
+            quest_id: quest_id.clone(),
+        },
+    )
+    .await;
+    match live {
+        Err(AppError::Refusal { code, .. }) => assert_eq!(
+            code, "not_claimable",
+            "a live lease must refuse reclaim as not_claimable"
+        ),
+        other => panic!("reclaim jumped a live lease: {other:?}"),
+    }
+
+    // Progress renews: shrink the lease to two minutes, report, read it back.
+    sqlx::query(
+        "UPDATE docket.quest_attempts SET lease_expires_at=NOW()+INTERVAL '2 minutes'
+         WHERE attempt_id=$1::uuid",
+    )
+    .bind(&claimed.attempt_id)
+    .execute(&pool)
+    .await?;
+    let progress = quest_report(
+        &pool,
+        work_request(
+            "test-room",
+            "claimant-secret",
+            &quest_id,
+            &claimed.attempt_id,
+            &first_token,
+            "progress-renews-1",
+            QuestReportAction::Progress,
+        ),
+    )
+    .await?;
+    let renewed = progress
+        .lease_expires_at
+        .expect("progress must report the renewed lease");
+    assert!(
+        renewed > chrono::Utc::now() + chrono::Duration::minutes(10),
+        "progress must extend the lease horizon"
+    );
+
+    // Expire the lease and reclaim under a new epoch.
+    sqlx::query(
+        "UPDATE docket.quest_attempts SET lease_expires_at=NOW()-INTERVAL '1 minute'
+         WHERE attempt_id=$1::uuid",
+    )
+    .bind(&claimed.attempt_id)
+    .execute(&pool)
+    .await?;
+    let reclaimed = quest_claim(
+        &pool,
+        QuestClaimParams {
+            room: "test-room".into(),
+            spirit: "Prover".into(),
+            session: "test-session".into(),
+            capability: "claimant-secret".into(),
+            idempotency_key: "claim-reclaim".into(),
+            quest_id: quest_id.clone(),
+        },
+    )
+    .await?;
+    assert_eq!(reclaimed.claim_epoch, claimed.claim_epoch + 1);
+    let second_token = reclaimed.lease_token.expect("reclaim mints a new token");
+    let old_state: String =
+        sqlx::query_scalar("SELECT state FROM docket.quest_attempts WHERE attempt_id=$1::uuid")
+            .bind(&claimed.attempt_id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(old_state, "reclaimed", "the stale attempt must be marked");
+    let reclaim_events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM docket.quest_events
+         WHERE quest_id=$1::uuid AND event_kind='reclaimed'",
+    )
+    .bind(&quest_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(reclaim_events, 1, "reclaim must write its ledger event");
+
+    // The stale hand cannot publish; the new lease can.
+    let stale = quest_report(
+        &pool,
+        work_request(
+            "test-room",
+            "claimant-secret",
+            &quest_id,
+            &claimed.attempt_id,
+            &first_token,
+            "stale-progress-1",
+            QuestReportAction::Progress,
+        ),
+    )
+    .await;
+    match stale {
+        Err(AppError::Refusal { code, .. }) => assert_eq!(
+            code, "stale_lease",
+            "the reclaimed hand must refuse as stale_lease"
+        ),
+        other => panic!("a reclaimed attempt published: {other:?}"),
+    }
+    let fresh = quest_report(
+        &pool,
+        work_request(
+            "test-room",
+            "claimant-secret",
+            &quest_id,
+            &reclaimed.attempt_id,
+            &second_token,
+            "fresh-progress-1",
+            QuestReportAction::Progress,
+        ),
+    )
+    .await?;
+    assert!(fresh.ok, "the reclaiming hand must publish");
     Ok(())
 }

@@ -430,6 +430,9 @@ pub struct QuestReportResult {
     pub settled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rearmed_quest_id: Option<String>,
+    /// Present on Progress: the renewed lease horizon for this attempt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_expires_at: Option<DateTime<Utc>>,
 }
 
 fn required<'a>(value: &'a Option<String>, field: &str) -> Result<&'a str, AppError> {
@@ -832,13 +835,34 @@ pub async fn quest_claim(
     }
 
     let state: String = quest.try_get("state")?;
-    if state != "offered" {
+    let prior_epoch: i64 = quest.try_get("claim_epoch")?;
+    // Reclaim door (0023 header): a claimed quest whose current attempt sits
+    // active on an EXPIRED lease may be reclaimed under a new epoch. The old
+    // epoch and lease hash fence the stale hand out of publishing.
+    let reclaimed_attempt: Option<String> = if state == "claimed" {
+        let stale = sqlx::query_scalar::<_, String>(
+            "UPDATE docket.quest_attempts SET state='reclaimed' WHERE quest_id=$1::text::uuid AND claim_epoch=$2 AND state='active' AND lease_expires_at <= NOW() RETURNING attempt_id::text",
+        )
+        .bind(&request.quest_id)
+        .bind(prior_epoch)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if stale.is_none() {
+            return Err(refusal(
+                "not_claimable",
+                "the quest is claimed and its lease is still live",
+            ));
+        }
+        stale
+    } else if state != "offered" {
         return Err(refusal(
             "not_claimable",
             "only an offered quest can be claimed",
         ));
-    }
-    let claim_epoch: i64 = quest.try_get::<i64, _>("claim_epoch")? + 1;
+    } else {
+        None
+    };
+    let claim_epoch: i64 = prior_epoch + 1;
     let quest_revision: i64 = quest.try_get("revision")?;
     let lease_token: String = sqlx::query_scalar("SELECT encode(gen_random_bytes(32),'hex')")
         .fetch_one(&mut *tx)
@@ -867,6 +891,18 @@ pub async fn quest_claim(
     .bind(claim_epoch)
     .execute(&mut *tx)
     .await?;
+    if let Some(reclaimed) = &reclaimed_attempt {
+        insert_event(
+            &mut tx,
+            &request.quest_id,
+            Some(reclaimed),
+            "reclaimed",
+            &principal(&request.room, &request.spirit),
+            json!({"priorEpoch": prior_epoch, "newEpoch": claim_epoch}),
+            Some(&format!("reclaim:{}", request.idempotency_key)),
+        )
+        .await?;
+    }
     insert_event(
         &mut tx,
         &request.quest_id,
@@ -947,7 +983,20 @@ pub async fn quest_report(
     }
 
     let result = match request.action {
-        QuestReportAction::Progress => report_progress(&mut tx, &request).await?,
+        QuestReportAction::Progress => {
+            let mut result = report_progress(&mut tx, &request).await?;
+            // Live work keeps the lease warm: progress extends the horizon,
+            // never shortens an already longer one.
+            let renewed: DateTime<Utc> = sqlx::query_scalar(
+                "UPDATE docket.quest_attempts SET lease_expires_at=GREATEST(lease_expires_at,NOW()+($2 * INTERVAL '1 minute')),heartbeat_at=NOW() WHERE attempt_id=$1::text::uuid RETURNING lease_expires_at",
+            )
+            .bind(&request.attempt_id)
+            .bind(LEASE_MINUTES)
+            .fetch_one(&mut *tx)
+            .await?;
+            result.lease_expires_at = Some(renewed);
+            result
+        }
         QuestReportAction::Submit => {
             let quest_state: String = quest.try_get("state")?;
             if quest_state != "claimed" {
@@ -1262,6 +1311,7 @@ async fn report_progress(
         attempt_state: "active".into(),
         settled: false,
         rearmed_quest_id: None,
+        lease_expires_at: None,
     })
 }
 
@@ -1306,6 +1356,7 @@ async fn report_submit(
         attempt_state: "yielded".into(),
         settled: false,
         rearmed_quest_id: None,
+        lease_expires_at: None,
     })
 }
 
@@ -1402,6 +1453,7 @@ async fn report_settle_item(
         attempt_state: "yielded".into(),
         settled,
         rearmed_quest_id,
+        lease_expires_at: None,
     })
 }
 

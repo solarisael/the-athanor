@@ -9,17 +9,18 @@ use athanor_substrate::{
     AnamnesisParams, AnamnesisSeed, AnamnesisWrite, AppError, Config, DesignDocumentQueryParams,
     DesignDocumentWriteParams, EntityResolveParams, LessonContextParams, LessonDeleteParams,
     LessonQueryParams, LessonTriggerMatchParams, LessonUpdateParams, OutcomeClass,
-    QuestBoardParams, QuestChargebookParams, QuestClaimParams, QuestClockParams, QuestPostParams,
-    QuestReportParams, RecallParams, RememberRequest, SubstrateHealthOptions,
-    ThreadContinuation as ServiceThreadContinuation, TrustedBinding, anamnesis, anamnesis_write,
-    canon_read, canon_write, cluster_maintenance, design_document_query, design_document_write,
-    entity_resolve, giga_candidate_list, giga_conversation_ingest, giga_event_claim,
-    giga_event_finish, giga_event_ingest, giga_event_replay, giga_health, giga_promote,
-    giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review, hallway_create,
-    hallway_inbox, hallway_join, hallway_knock, hallway_knock_policy, hallway_post, hallway_read,
-    lesson_context, lesson_delete, lesson_query, lesson_trigger_match, lesson_update,
-    paper_boat_sleep, paper_boat_wake, quest_board, quest_chargebook, quest_claim, quest_clock,
-    quest_post, quest_report, recall, refresh_semantic_vocabulary, remember, spawn_giga_worker,
+    QuestBoardParams, QuestChargebookParams, QuestClaimParams, QuestClockParams,
+    QuestEvidenceParams, QuestPostParams, QuestReportParams, RecallParams, RememberRequest,
+    SubstrateHealthOptions, ThreadContinuation as ServiceThreadContinuation, TrustedBinding,
+    anamnesis, anamnesis_write, canon_read, canon_write, cluster_maintenance,
+    design_document_query, design_document_write, entity_resolve, giga_candidate_list,
+    giga_conversation_ingest, giga_event_claim, giga_event_finish, giga_event_ingest,
+    giga_event_replay, giga_health, giga_promote, giga_queue_maintenance, giga_review,
+    giga_tool_promote, giga_tool_review, hallway_create, hallway_inbox, hallway_join,
+    hallway_knock, hallway_knock_policy, hallway_post, hallway_read, lesson_context, lesson_delete,
+    lesson_query, lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake,
+    quest_board, quest_chargebook, quest_claim, quest_clock, quest_evidence, quest_post,
+    quest_report, recall, refresh_semantic_vocabulary, remember, spawn_giga_worker,
     substrate_health, substrate_health_with_config, validate_trusted_binding,
 };
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
@@ -79,6 +80,7 @@ enum ProtocolRequest {
     QuestReport(QuestReportParams),
     QuestClock(QuestClockParams),
     QuestChargebook(QuestChargebookParams),
+    QuestEvidence(QuestEvidenceParams),
     LessonContext(LessonContextParams),
     LessonUpdate(LessonUpdateParams),
     LessonDelete(LessonDeleteParams),
@@ -374,6 +376,9 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
         "quest_chargebook" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::QuestChargebook)
             .map_err(|error| invalid_params(error.to_string())),
+        "quest_evidence" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::QuestEvidence)
+            .map_err(|error| invalid_params(error.to_string())),
         "lesson_context" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::LessonContext)
             .map_err(|error| invalid_params(error.to_string())),
@@ -539,6 +544,7 @@ fn operation_name(request: &ProtocolRequest) -> &'static str {
         ProtocolRequest::QuestReport(_) => "quest_report",
         ProtocolRequest::QuestClock(_) => "quest_clock",
         ProtocolRequest::QuestChargebook(_) => "quest_chargebook",
+        ProtocolRequest::QuestEvidence(_) => "quest_evidence",
         ProtocolRequest::LessonContext(_) => "lesson_context",
         ProtocolRequest::LessonUpdate(_) => "lesson_update",
         ProtocolRequest::LessonDelete(_) => "lesson_delete",
@@ -605,6 +611,9 @@ fn insula_binding(request: &ProtocolRequest) -> TrustedBinding {
             Some((&request.room, &request.spirit, &request.session))
         }
         ProtocolRequest::QuestChargebook(request) => {
+            Some((&request.room, &request.spirit, &request.session))
+        }
+        ProtocolRequest::QuestEvidence(request) => {
             Some((&request.room, &request.spirit, &request.session))
         }
         _ => None,
@@ -1047,6 +1056,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::QuestReport(request) => request.validate(),
                     ProtocolRequest::QuestClock(request) => request.validate(),
                     ProtocolRequest::QuestChargebook(request) => request.validate(),
+                    ProtocolRequest::QuestEvidence(request) => request.validate(),
                     ProtocolRequest::AnamnesisWrite(_)
                     | ProtocolRequest::LessonQuery(_)
                     | ProtocolRequest::LessonContext(_)
@@ -1271,6 +1281,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     ProtocolRequest::QuestChargebook(request) => {
                                         match quest_chargebook(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::QuestEvidence(request) => {
+                                        match quest_evidence(pool, request).await {
                                             Ok(result) => success_json(id, result)?,
                                             Err(error) => app_error(id, operation, error),
                                         }

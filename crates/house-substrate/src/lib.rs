@@ -33,10 +33,11 @@ pub use config::{AppError, Config, EmbeddingMode};
 pub use docket::{
     AcceptanceSummary, QuestBoardItem, QuestBoardParams, QuestBoardResult, QuestChargebookParams,
     QuestChargebookResult, QuestChargebookRow, QuestChargebookTotals, QuestClaimParams,
-    QuestClaimResult, QuestClockDueItem, QuestClockParams, QuestClockResult, QuestPostAction,
-    QuestPostParams, QuestPostResult, QuestReportAction, QuestReportParams, QuestReportResult,
-    quest_board, quest_chargebook, quest_claim, quest_clock, quest_post, quest_report,
-    require_docket_capability,
+    QuestClaimResult, QuestClockDueItem, QuestClockParams, QuestClockResult, QuestEvidenceEvent,
+    QuestEvidenceItem, QuestEvidenceParams, QuestEvidenceReceipt, QuestEvidenceResult,
+    QuestPostAction, QuestPostParams, QuestPostResult, QuestReportAction, QuestReportParams,
+    QuestReportResult, quest_board, quest_chargebook, quest_claim, quest_clock, quest_evidence,
+    quest_post, quest_report, require_docket_capability,
 };
 pub use entity::{EntityMatch, EntityResolveParams, EntityResolveResult, entity_resolve};
 pub use giga::{

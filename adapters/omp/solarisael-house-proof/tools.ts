@@ -1860,7 +1860,7 @@ export function registerSolarisaelTools(pi) {
     parameters: z.object({
       questId: z.string().describe("Quest this report belongs to."),
       attemptId: z.string().describe("Attempt id returned by quest_claim."),
-      leaseToken: z.string().describe("Lease token minted once by quest_claim. Proves this attempt still holds the quest."),
+      leaseToken: z.string().optional().describe("Lease token minted once by quest_claim. Required by progress and submit: it proves the claimant still holds the quest. settleItem takes no token; settlement authenticates the reviewer's own room and role."),
       action: z.enum(["progress", "submit", "settleItem"]).describe("progress records evidence, submit yields the attempt for review, settleItem records one acceptance verdict."),
       body: z.string().describe("The evidence or verdict reasoning as prose. The substrate digests it; nothing is trusted from the caller."),
       kind: z.string().optional().describe("Receipt kind. Omit for the substrate's default for this action."),
@@ -1880,8 +1880,14 @@ export function registerSolarisaelTools(pi) {
       if (!capability) return refuseUnprovisionedRoom();
       const action = params.action;
       const gate = `quest_report ${action}`;
-      if (!params.questId?.trim() || !params.attemptId?.trim() || !params.leaseToken?.trim() || !params.body?.trim()) {
-        return refuseDocket("incomplete_action", gate, "questId, attemptId, leaseToken, and body are required");
+      if (!params.questId?.trim() || !params.attemptId?.trim() || !params.body?.trim()) {
+        return refuseDocket("incomplete_action", gate, "questId, attemptId, and body are required");
+      }
+      // The bearer token binds the claimant's own work. Settlement rides the
+      // reviewer's authority instead (guild-hall #167/#171), so demanding a
+      // token here would force executors to share a secret across rooms.
+      if (action !== "settleItem" && !params.leaseToken?.trim()) {
+        return refuseDocket("incomplete_action", gate, "leaseToken is required for progress and submit");
       }
       // The substrate requires authoredRole for settleItem and refuses an
       // executor verdict from the ledger. Naming the missing role here spends
@@ -1897,7 +1903,7 @@ export function registerSolarisaelTools(pi) {
         idempotencyKey: params.idempotencyKey?.trim() || String(toolCallId),
         questId: params.questId.trim(),
         attemptId: params.attemptId.trim(),
-        leaseToken: params.leaseToken.trim(),
+        leaseToken: action === "settleItem" ? undefined : params.leaseToken?.trim(),
         action,
         body: params.body,
         kind: params.kind?.trim() || undefined,
@@ -1906,6 +1912,31 @@ export function registerSolarisaelTools(pi) {
         itemPosition: action === "settleItem" ? params.itemPosition : undefined,
         verdict: action === "settleItem" ? params.verdict : undefined,
       }, signal, true);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "quest_evidence",
+    label: "Athanor Quest Evidence",
+    description: "Read one quest's evidence: full receipt bodies, ledger events, and acceptance items with their verdicts. A read with no capability, like the board. An independent reviewer judges primary receipts here, never a claimant's summary of them.",
+    parameters: z.object({
+      questId: z.string().describe("Quest whose evidence to read."),
+      limit: z.number().optional().describe("Maximum receipts and events to return, 1-200; default 50."),
+    }).strict(),
+    approval: "read",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const { binding } = hostBinding(ctx);
+      if (!params.questId?.trim()) return refuseDocket("incomplete_action", "quest_evidence", "questId is required");
+      const result = await requestRustDomain("quest_evidence", {
+        ...binding,
+        questId: params.questId.trim(),
+        limit: params.limit,
+      }, signal, false);
       return {
         isError: result.ok !== true,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

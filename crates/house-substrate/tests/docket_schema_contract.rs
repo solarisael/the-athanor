@@ -375,7 +375,7 @@ fn settle_request(
         idempotency_key: idempotency_key.into(),
         quest_id: quest_id.into(),
         attempt_id: attempt_id.into(),
-        lease_token: lease_token.into(),
+        lease_token: Some(lease_token.into()),
         action: QuestReportAction::SettleItem,
         body: "reviewed against the criterion".into(),
         kind: None,
@@ -501,7 +501,7 @@ fn work_request(
         idempotency_key: idempotency_key.into(),
         quest_id: quest_id.into(),
         attempt_id: attempt_id.into(),
-        lease_token: lease_token.into(),
+        lease_token: Some(lease_token.into()),
         action,
         body: "work against the quest".into(),
         kind: None,
@@ -1105,18 +1105,21 @@ async fn docket_settlement_authenticates_the_reviewer_not_the_token() -> TestRes
     .fetch_one(&pool)
     .await?;
 
-    // The independent reviewer settles WITHOUT the executor's token, over a
-    // dead lease.
+    // The independent reviewer settles with NO token at all, over a dead
+    // lease: settlement takes reviewer authority, never the bearer secret.
     let settled = quest_report(
         &pool,
-        settle_request(
-            "review-room",
-            "reviewer-secret",
-            &quest_id,
-            &attempt_id,
-            "token-withheld-by-the-executor",
-            "reviewer-door-settle-1",
-        ),
+        QuestReportParams {
+            lease_token: None,
+            ..settle_request(
+                "review-room",
+                "reviewer-secret",
+                &quest_id,
+                &attempt_id,
+                "ignored",
+                "reviewer-door-settle-1",
+            )
+        },
     )
     .await?;
     assert!(

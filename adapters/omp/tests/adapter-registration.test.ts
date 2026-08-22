@@ -199,6 +199,7 @@ const expectedToolNames = [
   "quest_board",
   "quest_claim",
   "quest_report",
+  "quest_evidence",
 ];
 
 function toolMap(tools: CapturedTool[]) {
@@ -625,6 +626,7 @@ describe("OMP adapter registration", () => {
       quest_board: { approval: "read" },
       quest_claim: { approval: "write" },
       quest_report: { approval: "write" },
+      quest_evidence: { approval: "read" },
     });
   });
 
@@ -1116,7 +1118,7 @@ describe("OMP adapter registration", () => {
         fields: {
           questId: { type: "string" },
           attemptId: { type: "string" },
-          leaseToken: { type: "string" },
+          leaseToken: { type: "string", optional: true },
           action: { type: "enum", values: ["progress", "submit", "settleItem"] },
           body: { type: "string" },
           kind: { type: "string", optional: true },
@@ -1131,13 +1133,20 @@ describe("OMP adapter registration", () => {
           idempotencyKey: { type: "string", optional: true },
         },
       },
+      quest_evidence: {
+        type: "object",
+        fields: {
+          questId: { type: "string" },
+          limit: { type: "number", optional: true },
+        },
+      },
     });
   });
 
   test("keeps every Docket device strict and its identity and capability server-side", () => {
     const tools = toolMap(registerAdapter().tools);
 
-    for (const name of ["quest_post", "quest_board", "quest_claim", "quest_report"]) {
+    for (const name of ["quest_post", "quest_board", "quest_claim", "quest_report", "quest_evidence"]) {
       const schema = tools[name]!.parameters;
       // Unknown keys refuse instead of being stripped in silence.
       expect(schema.isStrict).toBe(true);

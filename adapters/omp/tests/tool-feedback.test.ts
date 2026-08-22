@@ -90,6 +90,7 @@ const HOUSE_TOOL_NAMES = [
   "quest_board",
   "quest_claim",
   "quest_report",
+  "quest_evidence",
 ];
 
 function registerTools(): CapturedTool[] {

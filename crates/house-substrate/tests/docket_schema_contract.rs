@@ -1,6 +1,7 @@
 use athanor_substrate::{
-    AppError, Config, EmbeddingMode, QuestClaimParams, QuestClockParams, QuestReportAction,
-    QuestReportParams, hallway_create, quest_claim, quest_clock, quest_report,
+    AppError, Config, EmbeddingMode, QuestChargebookParams, QuestClaimParams, QuestClockParams,
+    QuestReportAction, QuestReportParams, hallway_create, quest_chargebook, quest_claim,
+    quest_clock, quest_report,
 };
 use house_core::hallway::HallwayCreateRequest;
 use sqlx::PgPool;
@@ -905,5 +906,136 @@ async fn docket_progress_renews_and_expired_lease_reclaims() -> TestResult {
     )
     .await?;
     assert!(fresh.ok, "the reclaiming hand must publish");
+    Ok(())
+}
+
+const INSULA_MIGRATION: &str = include_str!("../../../substrate/migrations/0022_insula.sql");
+
+async fn insert_insula_row(
+    pool: &PgPool,
+    session: &str,
+    operation: &str,
+    tokens_in: i64,
+    tokens_out: i64,
+    observed_offset_minutes: i64,
+) -> TestResult {
+    sqlx::query(
+        "INSERT INTO insula.log (
+            event_id, span_id, trace_id, writer_id, writer_sequence,
+            house_id, room, spirit, session_id, component, layer, operation,
+            phase, observed_at, outcome_class, bytes_in, bytes_out,
+            tokens_in, tokens_out, idempotency_scope, idempotency_key,
+            semantic_hash, expires_at
+         ) VALUES (
+            gen_random_uuid(), gen_random_uuid(), gen_random_uuid(),
+            gen_random_uuid(), 1,
+            'test-house', 'test-room', 'Prover', $1, 'substrate', 'domain', $2,
+            'point', NOW() + ($5 * INTERVAL '1 minute'), 'ok', 10, 20,
+            $3, $4, 'trace_span', encode(sha256(gen_random_uuid()::text::bytea),'hex'),
+            encode(sha256('test-hash'::bytea),'hex'),
+            NOW() + ($5 * INTERVAL '1 minute') + INTERVAL '14 days'
+         )",
+    )
+    .bind(session)
+    .bind(operation)
+    .bind(tokens_in)
+    .bind(tokens_out)
+    .bind(observed_offset_minutes)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+// Kills: a chargebook that counts another session's tokens, counts rows from
+// before the attempt window, or loses the lineage set. Token volume is
+// evidence of cost, never merit (guild-hall #142 plane 2); the derivation
+// must therefore be exact.
+// red-proof: drop the observed_at lower bound or the session filter from
+// quest_chargebook's aggregation query.
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+async fn docket_chargebook_counts_only_the_attempt_lineage_window() -> TestResult {
+    let pool = fresh_docket().await?;
+    sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(INSULA_MIGRATION).execute(&pool).await?;
+    sqlx::query("DELETE FROM insula.log WHERE house_id='test-house'")
+        .execute(&pool)
+        .await?;
+    sqlx::query(
+        "INSERT INTO docket.room_capabilities (room, operation_class, capability_hash)
+         VALUES ('test-room', 'docket_write', $1)",
+    )
+    .bind(sha256_hex("claimant-secret"))
+    .execute(&pool)
+    .await?;
+
+    let quest_id = insert_frozen_quest(&pool).await?;
+    let claimed = quest_claim(
+        &pool,
+        QuestClaimParams {
+            room: "test-room".into(),
+            spirit: "Prover".into(),
+            session: "charge-session".into(),
+            capability: "claimant-secret".into(),
+            idempotency_key: "claim-chargebook".into(),
+            quest_id: quest_id.clone(),
+        },
+    )
+    .await?;
+
+    // Two rows inside the lineage and window; one foreign session; one row
+    // from before the attempt started.
+    insert_insula_row(&pool, "charge-session", "recall", 100, 40, 0).await?;
+    insert_insula_row(&pool, "charge-session", "remember", 7, 3, 0).await?;
+    insert_insula_row(&pool, "other-session", "recall", 1000, 1000, 0).await?;
+    insert_insula_row(&pool, "charge-session", "recall", 500, 500, -60).await?;
+
+    let book = quest_chargebook(
+        &pool,
+        QuestChargebookParams {
+            room: "test-room".into(),
+            spirit: "Prover".into(),
+            session: "reader-session".into(),
+            quest_id: quest_id.clone(),
+            attempt_id: claimed.attempt_id.clone(),
+        },
+    )
+    .await?;
+    assert_eq!(book.sessions, vec!["charge-session".to_string()]);
+    assert_eq!(book.claim_epoch, 1);
+    assert_eq!(
+        book.totals.events, 2,
+        "exactly the two in-window rows count"
+    );
+    assert_eq!(book.totals.tokens_in, 107);
+    assert_eq!(book.totals.tokens_out, 43);
+    assert_eq!(book.totals.bytes_in, 20);
+    assert_eq!(book.totals.bytes_out, 40);
+    assert_eq!(book.by_operation.len(), 2, "grouped by operation");
+    let recall = &book.by_operation[0];
+    assert_eq!(
+        (
+            recall.operation.as_str(),
+            recall.tokens_in,
+            recall.tokens_out
+        ),
+        ("recall", 100, 40)
+    );
+
+    let missing = quest_chargebook(
+        &pool,
+        QuestChargebookParams {
+            room: "test-room".into(),
+            spirit: "Prover".into(),
+            session: "reader-session".into(),
+            quest_id: quest_id.clone(),
+            attempt_id: "00000000-0000-0000-0000-000000000009".into(),
+        },
+    )
+    .await;
+    match missing {
+        Err(AppError::Refusal { code, .. }) => assert_eq!(code, "unknown_attempt"),
+        other => panic!("a missing attempt produced a chargebook: {other:?}"),
+    }
     Ok(())
 }

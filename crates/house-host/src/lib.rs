@@ -1,5 +1,6 @@
 mod config;
 mod insula;
+mod panel;
 mod policy;
 mod receipt;
 mod server;

@@ -1,5 +1,6 @@
 use crate::config::HostConfig;
 use crate::insula::InsulaHost;
+use crate::panel::PanelHost;
 use crate::policy::{RecallPolicySession, apply_requested_mode};
 use crate::receipt::{ReceiptIngest, ReceiptTracker};
 use crate::store::{
@@ -81,6 +82,7 @@ struct AppState {
     hallway_pool: Option<sqlx::PgPool>,
     insula_binding: Arc<TrustedBinding>,
     insula: InsulaHost,
+    panel: PanelHost,
     cancellation: CancellationToken,
     tasks: TaskTracker,
     deltas: broadcast::Sender<String>,
@@ -121,6 +123,7 @@ impl Host {
             .map_err(|error| format!("Host Insula DATABASE_URL is invalid: {error}"))?;
         let emitter_pool = insula_pool.clone();
         let insula = InsulaHost::new(&config, insula_pool, insula_binding.clone())?;
+        let panel = PanelHost::new(&config, hallway_pool.clone(), insula_binding.clone());
         let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone());
         let projection = room_store.load()?;
         let (durable, cursor, mut sessions) =
@@ -154,6 +157,7 @@ impl Host {
                 })),
                 hallway_pool,
                 insula,
+                panel,
                 insula_binding,
                 cancellation: CancellationToken::new(),
                 tasks: TaskTracker::new(),
@@ -178,7 +182,8 @@ impl Host {
             .route("/health", get(health))
             .route(&ws_path, get(upgrade))
             .with_state(self.state.clone())
-            .merge(self.state.insula.router());
+            .merge(self.state.insula.router())
+            .merge(self.state.panel.router());
         let cancellation = self.state.cancellation.clone();
         let tasks = self.state.tasks.clone();
         let serve_result = axum::serve(listener, app)

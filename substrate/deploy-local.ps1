@@ -407,6 +407,26 @@ if (Test-Path $liveManifest -PathType Leaf) {
 
 Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousManifest -Force -ErrorAction SilentlyContinue
 
+# Sol's standing rule (2026-08-22): do not leave compile output behind.
+# Remove the dev build trees after a good deploy. Keep target\deploy:
+# it is the ritual's build cache and makes the next deploy fast.
+# WARNING: on a dev-default install the live executable lives inside
+# target\release. Never prune a tree that holds the live binaries.
+Write-Host "==> pruning dev build trees (target\debug, target\release)"
+foreach ($devTree in @(
+    (Join-Path $athanorRoot "target\debug"),
+    (Join-Path $athanorRoot "target\release")
+)) {
+    $treePrefix = [IO.Path]::GetFullPath($devTree) + [IO.Path]::DirectorySeparatorChar
+    if ($liveExe.StartsWith($treePrefix) -or $liveHostExe.StartsWith($treePrefix)) {
+        Write-Host "    keeping $devTree (holds the live executable)"
+        continue
+    }
+    if (Test-Path $devTree -PathType Container) {
+        Remove-Item $devTree -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Host "==> deployment complete"
 Write-Host "live executable: $liveExe"
 Write-Host "live Host: $liveHostExe"

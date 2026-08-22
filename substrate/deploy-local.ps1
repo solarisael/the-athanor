@@ -199,10 +199,23 @@ if (-not $SkipBackup) {
     $priorPgWsl = $env:SOLARISAEL_PG_WSL
     try {
         $env:SOLARISAEL_PG_WSL = "1"
-        Invoke-Checked -Label "pre-deploy PostgreSQL backup" -FilePath $stagedExe -ArgumentList @(
-            "backup", "--output-dir", (Join-Path $substrateStateDir "backups"),
-            "--keep", [string]$BackupKeep
-        )
+        # The WSL pg_dump path fails intermittently on a cold WSL VM (observed
+        # twice on 2026-08-22, both times immediately after other WSL work;
+        # every manual re-run succeeds). A backup is idempotent, so retry once
+        # and loudly rather than letting the deploy die at its first step.
+        try {
+            Invoke-Checked -Label "pre-deploy PostgreSQL backup" -FilePath $stagedExe -ArgumentList @(
+                "backup", "--output-dir", (Join-Path $substrateStateDir "backups"),
+                "--keep", [string]$BackupKeep
+            )
+        } catch {
+            Write-Warning "pre-deploy backup failed once ($($_.Exception.Message)); retrying after 5 seconds"
+            Start-Sleep -Seconds 5
+            Invoke-Checked -Label "pre-deploy PostgreSQL backup (retry)" -FilePath $stagedExe -ArgumentList @(
+                "backup", "--output-dir", (Join-Path $substrateStateDir "backups"),
+                "--keep", [string]$BackupKeep
+            )
+        }
     } finally {
         if ($null -eq $priorPgWsl) {
             Remove-Item Env:SOLARISAEL_PG_WSL -ErrorAction SilentlyContinue

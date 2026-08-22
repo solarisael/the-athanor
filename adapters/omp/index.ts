@@ -24,7 +24,9 @@ import {
 import {
   hostHouseId,
   hostSessionIdentity,
+  adoptEmbodiedSession,
   registerEmbodiedSession,
+  retireEmbodiedSession,
   type HostBinding,
 } from "./solarisael-house-proof/host.ts";
 
@@ -609,20 +611,26 @@ export default function solarisaelHouseProof(pi) {
       spirit,
       session: hostSessionIdentity(ctx, effectiveRoomDir),
     };
-    registerEmbodiedSession(room, binding.session);
+    // session_start fires for task-tool workers too and OMP exposes no worker
+    // flag here, so the start path adopts first-wins; only session_switch may
+    // displace a live embodiment (host.ts carries the full discipline).
+    adoptEmbodiedSession(room, binding.session);
     showHouseContextFeedback(ctx, { room, spirit, activities: [] });
     startHallwayKnockDoorman(pi, ctx, binding);
   };
   pi.on("session_start", showReadyFeedback);
   pi.on("session_switch", (event, ctx) => {
     const { room, effectiveRoomDir } = roomContext(ctx.cwd);
-    retireStaleInsulaSessions(room, hostSessionIdentity(ctx, effectiveRoomDir));
+    const session = hostSessionIdentity(ctx, effectiveRoomDir);
+    retireStaleInsulaSessions(room, session);
+    registerEmbodiedSession(room, session);
     return showReadyFeedback(event, ctx);
   });
   pi.on("session_shutdown", async (_event, ctx) => {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
     const session = hostSessionIdentity(ctx, effectiveRoomDir);
     retireInsulaSession(room, session);
+    retireEmbodiedSession(room, session);
     await stopHallwayKnockDoorman({ room, spirit, session });
   });
 

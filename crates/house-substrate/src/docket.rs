@@ -929,6 +929,21 @@ pub async fn quest_report(
         ));
     }
 
+    // Symmetric room fence (guild-hall #159 ruling 2): the lease binds work
+    // to the claimant room, so a leaked valid token from any other room
+    // refuses Progress and Submit. SettleItem carries the inverse fence below.
+    let claimant_room: String = attempt.try_get("claimant_room")?;
+    if matches!(
+        request.action,
+        QuestReportAction::Progress | QuestReportAction::Submit
+    ) && request.room != claimant_room
+    {
+        return Err(refusal(
+            "claimant_binding",
+            "only the claimant room may progress or submit this attempt",
+        ));
+    }
+
     let result = match request.action {
         QuestReportAction::Progress => report_progress(&mut tx, &request).await?,
         QuestReportAction::Submit => {
@@ -953,7 +968,6 @@ pub async fn quest_report(
             // must differ from the claimant. The capability authenticates the
             // room and spirit text does not, so the enforceable fence is
             // room-level; spirit-level binding is a later door (0024 header).
-            let claimant_room: String = attempt.try_get("claimant_room")?;
             if request.room == claimant_room {
                 return Err(refusal(
                     "review_independence",

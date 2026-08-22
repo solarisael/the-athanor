@@ -474,3 +474,122 @@ async fn docket_review_independence_refuses_claimant_room() -> TestResult {
     );
     Ok(())
 }
+
+fn work_request(
+    room: &str,
+    capability: &str,
+    quest_id: &str,
+    attempt_id: &str,
+    lease_token: &str,
+    idempotency_key: &str,
+    action: QuestReportAction,
+) -> QuestReportParams {
+    QuestReportParams {
+        room: room.into(),
+        spirit: "Prover".into(),
+        session: "test-session".into(),
+        capability: capability.into(),
+        idempotency_key: idempotency_key.into(),
+        quest_id: quest_id.into(),
+        attempt_id: attempt_id.into(),
+        lease_token: lease_token.into(),
+        action,
+        body: "work against the quest".into(),
+        kind: None,
+        performed_by: None,
+        authored_role: None,
+        item_position: None,
+        verdict: None,
+    }
+}
+
+// Kills: a foreign room driving another room's attempt with a leaked valid
+// lease. The claimant binding (guild-hall #159 ruling 2) is the symmetric
+// twin of review independence: Progress and Submit bind to the claimant room
+// at the authenticated room level, never by the lease token alone.
+// red-proof: remove the claimant_room comparison ahead of quest_report's
+// action match.
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+async fn docket_claimant_binding_refuses_foreign_room() -> TestResult {
+    let pool = fresh_docket().await?;
+    sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
+
+    let quest_id = insert_frozen_quest(&pool).await?;
+    let lease_token = "claimant-binding-lease";
+    insert_attempt(
+        &pool,
+        &quest_id,
+        1,
+        "claim-binding",
+        &sha256_hex(lease_token),
+    )
+    .await?;
+    sqlx::query("UPDATE docket.quests SET state='claimed', claim_epoch=1 WHERE quest_id=$1::uuid")
+        .bind(&quest_id)
+        .execute(&pool)
+        .await?;
+    // The helper claims as test-room; thief-room holds a real capability and
+    // the leaked lease token, and must still be refused.
+    for (room, secret) in [
+        ("test-room", "claimant-secret"),
+        ("thief-room", "thief-secret"),
+    ] {
+        sqlx::query(
+            "INSERT INTO docket.room_capabilities (room, operation_class, capability_hash)
+             VALUES ($1, 'docket_write', $2)",
+        )
+        .bind(room)
+        .bind(sha256_hex(secret))
+        .execute(&pool)
+        .await?;
+    }
+    let attempt_id: String = sqlx::query_scalar(
+        "SELECT attempt_id::text FROM docket.quest_attempts WHERE quest_id=$1::uuid",
+    )
+    .bind(&quest_id)
+    .fetch_one(&pool)
+    .await?;
+
+    for (action, key) in [
+        (QuestReportAction::Progress, "thief-progress-1"),
+        (QuestReportAction::Submit, "thief-submit-1"),
+    ] {
+        let leaked = quest_report(
+            &pool,
+            work_request(
+                "thief-room",
+                "thief-secret",
+                &quest_id,
+                &attempt_id,
+                lease_token,
+                key,
+                action,
+            ),
+        )
+        .await;
+        match leaked {
+            Err(AppError::Refusal { code, .. }) => assert_eq!(
+                code, "claimant_binding",
+                "foreign-room refusal must name claimant_binding"
+            ),
+            other => panic!("foreign room drove the attempt: {other:?}"),
+        }
+    }
+
+    let own = quest_report(
+        &pool,
+        work_request(
+            "test-room",
+            "claimant-secret",
+            &quest_id,
+            &attempt_id,
+            lease_token,
+            "claimant-progress-1",
+            QuestReportAction::Progress,
+        ),
+    )
+    .await?;
+    assert!(own.ok, "the claimant room's own progress must succeed");
+    Ok(())
+}

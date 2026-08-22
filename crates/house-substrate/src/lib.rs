@@ -18,6 +18,7 @@ mod paper_boat;
 mod recall;
 mod remember;
 pub mod state;
+mod timeline;
 
 pub use anamnesis::{
     AnamnesisParams, AnamnesisReceipt, AnamnesisResult, AnamnesisSeed, AnamnesisWrite, anamnesis,
@@ -80,6 +81,11 @@ pub use lesson::{
 pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
 pub use recall::{RecallParams, RecallResult, recall, refresh_semantic_vocabulary};
 pub use remember::{RememberReceipt, RememberRequest, ThreadContinuation, remember};
+pub use timeline::{
+    LessonTimelineItem, LessonTimelineParams, LessonTimelineResult, MemoryReadParams,
+    MemoryReadResult, MemoryRecord, MemoryTimelineItem, MemoryTimelineParams, MemoryTimelineResult,
+    lesson_timeline, memory_read, memory_timeline,
+};
 
 #[cfg(test)]
 mod tests {

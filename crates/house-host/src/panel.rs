@@ -1,17 +1,22 @@
-//! The panel read door: board, inbox, and evidence for the Pulse GUI.
+//! The panel read door: board, inbox, evidence, and the timeline scrollers
+//! for the Pulse GUI.
 //!
-//! Contract frozen in guild-hall #172 and claimed in #174. Three POST routes
-//! behind the same bearer layer as Insula, read-only, no writes: the panel
-//! renders House state and holds no private authority. Identity is read from
-//! [`HostConfig`], never from the caller envelope — a bearer token proves
-//! reach to this Host, not the right to act as another room or spirit.
+//! Contract frozen in guild-hall #172 and claimed in #174; the memory and
+//! lesson timeline doors follow from the #177 standing offer, invoked with
+//! exact shapes in #183. POST routes behind the same bearer layer as Insula,
+//! read-only, no writes: the panel renders House state and holds no private
+//! authority. Identity is read from [`HostConfig`], never from the caller
+//! envelope - a bearer token proves reach to this Host, not the right to act
+//! as another room or spirit. The timeline doors carry no identity at all:
+//! they are pure reads and pretending otherwise would be ceremony.
 
 use crate::config::HostConfig;
 use crate::server::authorized;
 use athanor_substrate::insula_writer::{EmitterSpan, end_span, start_span};
 use athanor_substrate::{
-    OutcomeClass, QuestBoardParams, QuestEvidenceParams, TrustedBinding, hallway_inbox,
-    quest_board, quest_evidence,
+    LessonTimelineParams, MemoryReadParams, MemoryTimelineParams, OutcomeClass, QuestBoardParams,
+    QuestEvidenceParams, TrustedBinding, hallway_inbox, lesson_timeline, memory_read,
+    memory_timeline, quest_board, quest_evidence,
 };
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{DefaultBodyLimit, Request, State};
@@ -29,6 +34,9 @@ use tokio::sync::Semaphore;
 pub(crate) const BOARD_PATH: &str = "/athanor/v1/docket/board";
 pub(crate) const INBOX_PATH: &str = "/athanor/v1/hallway/inbox";
 pub(crate) const EVIDENCE_PATH: &str = "/athanor/v1/docket/evidence";
+pub(crate) const MEMORY_TIMELINE_PATH: &str = "/athanor/v1/memory/timeline";
+pub(crate) const MEMORY_READ_PATH: &str = "/athanor/v1/memory/read";
+pub(crate) const LESSON_TIMELINE_PATH: &str = "/athanor/v1/lesson/timeline";
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
 const MAX_CONCURRENT_OPERATIONS: usize = 4;
@@ -112,6 +120,9 @@ impl PanelHost {
             .route(BOARD_PATH, post(read_board))
             .route(INBOX_PATH, post(read_inbox))
             .route(EVIDENCE_PATH, post(read_evidence))
+            .route(MEMORY_TIMELINE_PATH, post(read_memory_timeline))
+            .route(MEMORY_READ_PATH, post(read_memory))
+            .route(LESSON_TIMELINE_PATH, post(read_lesson_timeline))
             .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
             .route_layer(middleware::from_fn_with_state(auth, require_bearer))
             .with_state(self.clone())
@@ -141,6 +152,24 @@ async fn require_bearer(State(auth): State<AuthState>, request: Request, next: N
             "house_host",
             "host",
             "panel_evidence",
+        ),
+        MEMORY_TIMELINE_PATH => start_span(
+            auth.observer_binding.as_ref(),
+            "house_host",
+            "host",
+            "panel_memory_timeline",
+        ),
+        MEMORY_READ_PATH => start_span(
+            auth.observer_binding.as_ref(),
+            "house_host",
+            "host",
+            "panel_memory_read",
+        ),
+        LESSON_TIMELINE_PATH => start_span(
+            auth.observer_binding.as_ref(),
+            "house_host",
+            "host",
+            "panel_lesson_timeline",
         ),
         _ => None,
     };
@@ -248,6 +277,69 @@ async fn read_evidence(
         return refused(refusal);
     }
     substrate_response(quest_evidence(pool, params).await)
+}
+
+// The three timeline handlers deserialize the substrate's own param types:
+// no identity to inject, so a second request struct would only restate the
+// contract it copies.
+async fn read_memory_timeline(
+    State(state): State<PanelHost>,
+    payload: Result<Json<MemoryTimelineParams>, JsonRejection>,
+) -> Response {
+    let request = match payload {
+        Ok(Json(request)) => request,
+        Err(rejection) => return json_rejection(rejection),
+    };
+    let Some(pool) = state.pool() else {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "panel_database_unavailable",
+        );
+    };
+    if let Err(refusal) = request.validate() {
+        return refused(refusal);
+    }
+    substrate_response(memory_timeline(pool, request).await)
+}
+
+async fn read_memory(
+    State(state): State<PanelHost>,
+    payload: Result<Json<MemoryReadParams>, JsonRejection>,
+) -> Response {
+    let request = match payload {
+        Ok(Json(request)) => request,
+        Err(rejection) => return json_rejection(rejection),
+    };
+    let Some(pool) = state.pool() else {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "panel_database_unavailable",
+        );
+    };
+    if let Err(refusal) = request.validate() {
+        return refused(refusal);
+    }
+    substrate_response(memory_read(pool, request).await)
+}
+
+async fn read_lesson_timeline(
+    State(state): State<PanelHost>,
+    payload: Result<Json<LessonTimelineParams>, JsonRejection>,
+) -> Response {
+    let request = match payload {
+        Ok(Json(request)) => request,
+        Err(rejection) => return json_rejection(rejection),
+    };
+    let Some(pool) = state.pool() else {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "panel_database_unavailable",
+        );
+    };
+    if let Err(refusal) = request.validate() {
+        return refused(refusal);
+    }
+    substrate_response(lesson_timeline(pool, request).await)
 }
 
 fn substrate_response<T>(result: Result<T, athanor_substrate::AppError>) -> Response

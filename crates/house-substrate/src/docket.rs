@@ -952,15 +952,23 @@ pub async fn quest_report(
     let lease_expires_at: DateTime<Utc> = attempt.try_get("lease_expires_at")?;
     let attempt_state: String = attempt.try_get("state")?;
     let state_is_usable = match request.action {
-        // Submission yields the attempt. Review then uses that same fenced lease.
         QuestReportAction::SettleItem => attempt_state == "yielded",
         QuestReportAction::Progress | QuestReportAction::Submit => attempt_state == "active",
     };
-    if attempt_epoch != quest_epoch
-        || lease_expires_at <= Utc::now()
-        || !state_is_usable
-        || !constant_time_equal(supplied_hash.as_bytes(), expected_hash.as_bytes())
-    {
+    // The bearer token binds the CLAIMANT'S work: Progress and Submit demand
+    // a live, matching lease. Settlement authenticates the REVIEWER against
+    // the attempt row instead (guild-hall #167): requiring the executor's
+    // secret would make review independence depend on secret-sharing. A
+    // yielded attempt therefore stays settleable after its lease dies, and
+    // review delay is board state, never delinquency.
+    let lease_is_valid = match request.action {
+        QuestReportAction::SettleItem => true,
+        QuestReportAction::Progress | QuestReportAction::Submit => {
+            lease_expires_at > Utc::now()
+                && constant_time_equal(supplied_hash.as_bytes(), expected_hash.as_bytes())
+        }
+    };
+    if attempt_epoch != quest_epoch || !state_is_usable || !lease_is_valid {
         return Err(refusal(
             "stale_lease",
             "the lease is expired, superseded, stale, or invalid",

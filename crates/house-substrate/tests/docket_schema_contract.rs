@@ -1039,3 +1039,131 @@ async fn docket_chargebook_counts_only_the_attempt_lineage_window() -> TestResul
     }
     Ok(())
 }
+
+// Kills: a settlement door that rides the executor's bearer secret. Review
+// independence must not depend on secret-sharing (guild-hall #167): the
+// reviewer authenticates against the attempt row — role, foreign room,
+// yielded state, current epoch — so a yielded attempt stays settleable with
+// the token withheld and the lease expired. The claimant's own bearer
+// fences keep their teeth: a wrong token still refuses Progress.
+// red-proof: restore the lease expiry or token-hash comparison to the
+// SettleItem arm of the lease check in quest_report.
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+async fn docket_settlement_authenticates_the_reviewer_not_the_token() -> TestResult {
+    let pool = fresh_docket().await?;
+    sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
+
+    let quest_id = insert_frozen_quest(&pool).await?;
+    let lease_token = "reviewer-door-lease";
+    insert_attempt(
+        &pool,
+        &quest_id,
+        1,
+        "claim-reviewer-door",
+        &sha256_hex(lease_token),
+    )
+    .await?;
+    sqlx::query(
+        "UPDATE docket.quests SET state='submitted', claim_epoch=1 WHERE quest_id=$1::uuid",
+    )
+    .bind(&quest_id)
+    .execute(&pool)
+    .await?;
+    // Yielded, and the lease is already DEAD: review arrived late, as it may.
+    sqlx::query(
+        "UPDATE docket.quest_attempts SET state='yielded',
+                lease_expires_at=NOW()-INTERVAL '1 hour' WHERE quest_id=$1::uuid",
+    )
+    .bind(&quest_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO docket.quest_acceptance_items (quest_id, position, criterion)
+         VALUES ($1::uuid, 1, 'reviewed')",
+    )
+    .bind(&quest_id)
+    .execute(&pool)
+    .await?;
+    for (room, secret) in [
+        ("test-room", "claimant-secret"),
+        ("review-room", "reviewer-secret"),
+    ] {
+        sqlx::query(
+            "INSERT INTO docket.room_capabilities (room, operation_class, capability_hash)
+             VALUES ($1, 'docket_write', $2)",
+        )
+        .bind(room)
+        .bind(sha256_hex(secret))
+        .execute(&pool)
+        .await?;
+    }
+    let attempt_id: String = sqlx::query_scalar(
+        "SELECT attempt_id::text FROM docket.quest_attempts WHERE quest_id=$1::uuid",
+    )
+    .bind(&quest_id)
+    .fetch_one(&pool)
+    .await?;
+
+    // The independent reviewer settles WITHOUT the executor's token, over a
+    // dead lease.
+    let settled = quest_report(
+        &pool,
+        settle_request(
+            "review-room",
+            "reviewer-secret",
+            &quest_id,
+            &attempt_id,
+            "token-withheld-by-the-executor",
+            "reviewer-door-settle-1",
+        ),
+    )
+    .await?;
+    assert!(
+        settled.settled,
+        "the reviewer's authority must settle the single-item quest"
+    );
+
+    // The claimant's bearer fence keeps its teeth: a second quest, active
+    // attempt, wrong token — Progress refuses.
+    let second_quest = insert_frozen_quest(&pool).await?;
+    insert_attempt(
+        &pool,
+        &second_quest,
+        1,
+        "claim-bearer-teeth",
+        &sha256_hex("real-token"),
+    )
+    .await?;
+    sqlx::query("UPDATE docket.quests SET state='claimed', claim_epoch=1 WHERE quest_id=$1::uuid")
+        .bind(&second_quest)
+        .execute(&pool)
+        .await?;
+    let second_attempt: String = sqlx::query_scalar(
+        "SELECT attempt_id::text FROM docket.quest_attempts WHERE quest_id=$1::uuid",
+    )
+    .bind(&second_quest)
+    .fetch_one(&pool)
+    .await?;
+    let forged = quest_report(
+        &pool,
+        work_request(
+            "test-room",
+            "claimant-secret",
+            &second_quest,
+            &second_attempt,
+            "wrong-token",
+            "bearer-teeth-1",
+            QuestReportAction::Progress,
+        ),
+    )
+    .await;
+    match forged {
+        Err(AppError::Refusal { code, .. }) => assert_eq!(
+            code, "stale_lease",
+            "a wrong bearer token must still refuse Progress"
+        ),
+        other => panic!("Progress accepted a forged token: {other:?}"),
+    }
+    Ok(())
+}

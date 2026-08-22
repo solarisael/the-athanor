@@ -1,9 +1,12 @@
+use athanor_substrate::{AppError, QuestReportAction, QuestReportParams, quest_report};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 const DOCKET_MIGRATION: &str = include_str!("../../../substrate/migrations/0023_docket.sql");
+const CAPABILITY_MIGRATION: &str =
+    include_str!("../../../substrate/migrations/0024_docket_capability.sql");
 const SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn isolated_database_url() -> String {
@@ -338,6 +341,136 @@ async fn docket_dependency_refuses_self_loop() -> TestResult {
             .to_string()
             .contains("docket_quest_dependencies_self_check"),
         "self-loop refusal must name self_check"
+    );
+    Ok(())
+}
+
+fn sha256_hex(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(text.as_bytes()))
+}
+
+fn settle_request(
+    room: &str,
+    capability: &str,
+    quest_id: &str,
+    attempt_id: &str,
+    lease_token: &str,
+    idempotency_key: &str,
+) -> QuestReportParams {
+    QuestReportParams {
+        room: room.into(),
+        spirit: "Prover".into(),
+        session: "test-session".into(),
+        capability: capability.into(),
+        idempotency_key: idempotency_key.into(),
+        quest_id: quest_id.into(),
+        attempt_id: attempt_id.into(),
+        lease_token: lease_token.into(),
+        action: QuestReportAction::SettleItem,
+        body: "reviewed against the criterion".into(),
+        kind: None,
+        performed_by: None,
+        authored_role: Some("reviewer".into()),
+        item_position: Some(1),
+        verdict: Some("met".into()),
+    }
+}
+
+// Kills: the claimant room settling its own acceptance items by declaring a
+// reviewer role. Review independence (guild-hall #144) is enforced at the
+// authenticated room level, never by the caller's role text alone.
+// red-proof: remove the claimant_room comparison from quest_report's
+// SettleItem arm.
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+async fn docket_review_independence_refuses_claimant_room() -> TestResult {
+    let pool = fresh_docket().await?;
+    sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
+
+    let quest_id = insert_frozen_quest(&pool).await?;
+    let lease_token = "review-independence-lease";
+    insert_attempt(
+        &pool,
+        &quest_id,
+        1,
+        "claim-review",
+        &sha256_hex(lease_token),
+    )
+    .await?;
+    sqlx::query(
+        "UPDATE docket.quests SET state='submitted', claim_epoch=1 WHERE quest_id=$1::uuid",
+    )
+    .bind(&quest_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query("UPDATE docket.quest_attempts SET state='yielded' WHERE quest_id=$1::uuid")
+        .bind(&quest_id)
+        .execute(&pool)
+        .await?;
+    sqlx::query(
+        "INSERT INTO docket.quest_acceptance_items (quest_id, position, criterion)
+         VALUES ($1::uuid, 1, 'reviewed')",
+    )
+    .bind(&quest_id)
+    .execute(&pool)
+    .await?;
+    // The helper claims as test-room; review-room is the independent peer.
+    for (room, secret) in [
+        ("test-room", "claimant-secret"),
+        ("review-room", "reviewer-secret"),
+    ] {
+        sqlx::query(
+            "INSERT INTO docket.room_capabilities (room, operation_class, capability_hash)
+             VALUES ($1, 'docket_write', $2)",
+        )
+        .bind(room)
+        .bind(sha256_hex(secret))
+        .execute(&pool)
+        .await?;
+    }
+    let attempt_id: String = sqlx::query_scalar(
+        "SELECT attempt_id::text FROM docket.quest_attempts WHERE quest_id=$1::uuid",
+    )
+    .bind(&quest_id)
+    .fetch_one(&pool)
+    .await?;
+
+    let self_settle = quest_report(
+        &pool,
+        settle_request(
+            "test-room",
+            "claimant-secret",
+            &quest_id,
+            &attempt_id,
+            lease_token,
+            "self-settle-1",
+        ),
+    )
+    .await;
+    match self_settle {
+        Err(AppError::Refusal { code, .. }) => assert_eq!(
+            code, "review_independence",
+            "self-settle refusal must name review_independence"
+        ),
+        other => panic!("claimant room settled its own item: {other:?}"),
+    }
+
+    let peer = quest_report(
+        &pool,
+        settle_request(
+            "review-room",
+            "reviewer-secret",
+            &quest_id,
+            &attempt_id,
+            lease_token,
+            "peer-settle-1",
+        ),
+    )
+    .await?;
+    assert!(
+        peer.settled,
+        "an independent peer settlement must settle the single-item quest"
     );
     Ok(())
 }

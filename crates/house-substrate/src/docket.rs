@@ -899,7 +899,7 @@ pub async fn quest_report(
     .await?
     .ok_or_else(|| refusal("unknown_quest", "the requested quest does not exist"))?;
     let attempt = sqlx::query(
-        "SELECT claim_epoch,lease_token_hash,lease_expires_at,state FROM docket.quest_attempts WHERE attempt_id=$1::text::uuid AND quest_id=$2::text::uuid FOR UPDATE",
+        "SELECT claim_epoch,lease_token_hash,lease_expires_at,state,claimant_room FROM docket.quest_attempts WHERE attempt_id=$1::text::uuid AND quest_id=$2::text::uuid FOR UPDATE",
     )
     .bind(&request.attempt_id)
     .bind(&request.quest_id)
@@ -947,6 +947,17 @@ pub async fn quest_report(
                 return Err(refusal(
                     "executor_cannot_settle",
                     "an executor cannot settle an acceptance item",
+                ));
+            }
+            // Review independence (guild-hall #144): the settling principal
+            // must differ from the claimant. The capability authenticates the
+            // room and spirit text does not, so the enforceable fence is
+            // room-level; spirit-level binding is a later door (0024 header).
+            let claimant_room: String = attempt.try_get("claimant_room")?;
+            if request.room == claimant_room {
+                return Err(refusal(
+                    "review_independence",
+                    "the claimant room cannot settle its own acceptance items",
                 ));
             }
             let quest_state: String = quest.try_get("state")?;

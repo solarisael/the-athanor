@@ -1,6 +1,11 @@
-use athanor_substrate::{AppError, QuestReportAction, QuestReportParams, quest_report};
+use athanor_substrate::{
+    AppError, Config, EmbeddingMode, QuestClockParams, QuestReportAction, QuestReportParams,
+    hallway_create, quest_clock, quest_report,
+};
+use house_core::hallway::HallwayCreateRequest;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
+use uuid::Uuid;
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -8,6 +13,9 @@ const DOCKET_MIGRATION: &str = include_str!("../../../substrate/migrations/0023_
 const CAPABILITY_MIGRATION: &str =
     include_str!("../../../substrate/migrations/0024_docket_capability.sql");
 const SHA256: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const HALLWAY_MIGRATION: &str =
+    include_str!("../../../substrate/migrations/0018_hallway_chatrooms.sql");
+const BELL_MIGRATION: &str = include_str!("../../../substrate/migrations/0020_hallway_bell.sql");
 
 fn isolated_database_url() -> String {
     let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
@@ -591,5 +599,152 @@ async fn docket_claimant_binding_refuses_foreign_room() -> TestResult {
     )
     .await?;
     assert!(own.ok, "the claimant room's own progress must succeed");
+    Ok(())
+}
+
+fn clock_config() -> Config {
+    Config {
+        database_url: "postgres://unused-by-clock".into(),
+        embed_url: None,
+        embed_model: "unused".into(),
+        embed_dimension: 2048,
+        embedding_mode: EmbeddingMode::Disabled,
+        giga_source_ledger_dir: None,
+        giga_source_room: None,
+        house_tz: "America/Sao_Paulo".into(),
+    }
+}
+
+fn clock_request(hallway: &str, idempotency_key: &str) -> QuestClockParams {
+    QuestClockParams {
+        room: "test-room".into(),
+        spirit: "Prover".into(),
+        session: "test-session".into(),
+        capability: "claimant-secret".into(),
+        idempotency_key: idempotency_key.into(),
+        house_id: "test-house".into(),
+        horizon_minutes: Some(120),
+        hallway: Some(hallway.into()),
+    }
+}
+
+// Kills: a clock that rings a clear board, pings without the clock principal,
+// or re-rings a deadline it already pinged. Kodo's rail (guild-hall #136):
+// the clock only reads and rings; a clear board is silence, and so is a
+// board whose due items were already pinged.
+// red-proof: drop the ON CONFLICT dedupe from the clock_ping insert, or ring
+// the Bell when pinged is empty.
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+async fn docket_clock_pings_due_quests_and_stays_silent_on_clear() -> TestResult {
+    let pool = fresh_docket().await?;
+    sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(HALLWAY_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
+    let config = clock_config();
+
+    sqlx::query(
+        "INSERT INTO docket.room_capabilities (room, operation_class, capability_hash)
+         VALUES ('test-room', 'docket_write', $1)",
+    )
+    .bind(sha256_hex("claimant-secret"))
+    .execute(&pool)
+    .await?;
+    // The clock holds its own chair: it posts through the ordinary hallway
+    // door as an allowed named presence, never through a bypass seam.
+    let hallway = format!("clock-{}", Uuid::new_v4().simple());
+    hallway_create(
+        &pool,
+        HallwayCreateRequest {
+            hallway: hallway.clone(),
+            room: "test-room".into(),
+            spirit: "Prover".into(),
+            session: "test-session".into(),
+            allowed_rooms: vec!["test-room".into(), "clock".into()],
+            idempotency_key: format!("create-{hallway}"),
+        },
+    )
+    .await?;
+
+    // Sweep 1: a quest exists but carries no deadline. The board is clear.
+    let quest_id = insert_frozen_quest(&pool).await?;
+    let clear = quest_clock(&pool, &config, clock_request(&hallway, "sweep-1")).await?;
+    assert!(
+        clear.due.is_empty(),
+        "a deadline-free board must read clear"
+    );
+    assert!(
+        clear.pinged.is_empty() && !clear.rang && clear.bell_message_id.is_none(),
+        "a clear board must be silence"
+    );
+    let events: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM docket.quest_events WHERE event_kind='clock_ping'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(events, 0, "a clear sweep must write no ping events");
+    // Scoped to this run's hallway: the shared test database keeps hallway
+    // rows across runs, and docket.quest_events is reset by fresh_docket.
+    let posts: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM hallway_messages m
+         JOIN hallway_channels c ON c.id=m.hallway_id
+         WHERE c.hallway_key=$1 AND m.room='clock'",
+    )
+    .bind(&hallway)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(posts, 0, "a clear sweep must post nothing");
+
+    // Arm the board: the quest is claimed by test-room and due in one hour.
+    insert_attempt(&pool, &quest_id, 1, "claim-clock", SHA256).await?;
+    sqlx::query(
+        "UPDATE docket.quests SET state='claimed', claim_epoch=1,
+                deadline_at=NOW()+INTERVAL '1 hour' WHERE quest_id=$1::uuid",
+    )
+    .bind(&quest_id)
+    .execute(&pool)
+    .await?;
+
+    // Sweep 2: one due quest. The clock pings the ledger and rings the Bell.
+    let ring = quest_clock(&pool, &config, clock_request(&hallway, "sweep-2")).await?;
+    assert_eq!(ring.due.len(), 1, "the due quest must be on the sweep");
+    assert_eq!(ring.pinged, vec![quest_id.clone()]);
+    assert!(ring.rang && ring.bell_message_id.is_some());
+    assert!(
+        ring.silent_rooms.is_empty(),
+        "the claimant room is a member"
+    );
+    let ping_principal: String = sqlx::query_scalar(
+        "SELECT principal FROM docket.quest_events
+         WHERE quest_id=$1::uuid AND event_kind='clock_ping'",
+    )
+    .bind(&quest_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        ping_principal, "clock:Clock",
+        "ping receipts attribute to the clock as principal"
+    );
+    let bells: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM hallway_notifications n
+         JOIN hallway_messages m ON m.id=n.message_id
+         JOIN hallway_channels c ON c.id=m.hallway_id
+         WHERE c.hallway_key=$1 AND m.room='clock' AND n.recipient_room='test-room'",
+    )
+    .bind(&hallway)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        bells, 1,
+        "the ring must leave a durable Bell for the claimant"
+    );
+
+    // Sweep 3: the same deadline is already pinged. Silence again.
+    let quiet = quest_clock(&pool, &config, clock_request(&hallway, "sweep-3")).await?;
+    assert_eq!(quiet.due.len(), 1, "the quest is still due on the board");
+    assert!(
+        quiet.pinged.is_empty() && !quiet.rang,
+        "an already-pinged deadline must not ring twice"
+    );
     Ok(())
 }

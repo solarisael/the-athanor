@@ -98,7 +98,7 @@ pub async fn memory_timeline(
         "SELECT id,room,type,COALESCE(title,'untitled') AS title,
                 LEFT(body,$5) AS excerpt,source_path,created_at
          FROM memories
-         WHERE archived_at IS NULL AND superseded_by IS NULL AND type<>'paper-boat'
+         WHERE archived_at IS NULL AND superseded_by IS NULL AND type<>$6
            AND ($1::text IS NULL OR room=$1)
            AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3))
          ORDER BY created_at DESC,id DESC
@@ -109,6 +109,7 @@ pub async fn memory_timeline(
     .bind(before_id)
     .bind(i64::from(request.limit))
     .bind(TIMELINE_EXCERPT_CHARS)
+    .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
     let memories = rows

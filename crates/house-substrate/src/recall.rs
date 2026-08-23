@@ -401,9 +401,10 @@ async fn load_bm25f_candidates_for_terms(
            WHERE m.room = ANY($1::text[])
              AND m.archived_at IS NULL
              AND m.superseded_by IS NULL
-             AND COALESCE(m.type,'') <> 'paper-boat'"#,
+             AND COALESCE(m.type,'') <> $2"#,
     )
     .bind(rooms)
+    .bind(origami::boats::MEMORY_KIND)
     .fetch_one(pool)
     .await?;
     let document_count: i64 = stats.try_get("document_count")?;
@@ -427,7 +428,7 @@ async fn load_bm25f_candidates_for_terms(
              WHERE m.room = ANY($1::text[])
                AND m.archived_at IS NULL
                AND m.superseded_by IS NULL
-               AND COALESCE(m.type,'') <> 'paper-boat'
+               AND COALESCE(m.type,'') <> $3
            )
            SELECT term,
                   count(*) FILTER (
@@ -441,6 +442,7 @@ async fn load_bm25f_candidates_for_terms(
     )
     .bind(rooms)
     .bind(&terms)
+    .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
     let document_frequency = frequency_rows
@@ -467,7 +469,7 @@ async fn load_bm25f_candidates_for_terms(
            WHERE m.room = ANY($1::text[])
              AND m.archived_at IS NULL
              AND m.superseded_by IS NULL
-             AND COALESCE(m.type,'') <> 'paper-boat'
+             AND COALESCE(m.type,'') <> $4
              AND EXISTS (
                SELECT 1 FROM terms
                WHERE c.bm25f_text_tsv @@ terms.query
@@ -492,6 +494,7 @@ async fn load_bm25f_candidates_for_terms(
     .bind(rooms)
     .bind(&terms)
     .bind(BM25F_MAX_CANDIDATES)
+    .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
     if terms.len() == 1
@@ -960,7 +963,7 @@ pub async fn recall(
                  WHERE m.room = ANY($2::text[])
                    AND m.archived_at IS NULL
                    AND m.superseded_by IS NULL
-                   AND COALESCE(m.type,'') <> 'paper-boat'
+                   AND COALESCE(m.type,'') <> $5
                    AND c.body_embedding IS NOT NULL
                ) ranked
                WHERE sim >= $3
@@ -971,6 +974,7 @@ pub async fn recall(
         .bind(&rooms)
         .bind(params.semantic_min_similarity)
         .bind(semantic_fetch_limit)
+        .bind(origami::boats::MEMORY_KIND)
         .fetch_all(pool)
         .await?;
         for row in semantic_rows {
@@ -1009,11 +1013,12 @@ pub async fn recall(
                    WHERE m.room = ANY($2::text[])
                      AND m.archived_at IS NULL
                      AND m.superseded_by IS NULL
-                     AND COALESCE(m.type,'') <> 'paper-boat'
+                     AND COALESCE(m.type,'') <> $3
                      AND c.body_embedding IS NOT NULL"#,
             )
             .bind(&vector_text)
             .bind(&rooms)
+            .bind(origami::boats::MEMORY_KIND)
             .fetch_one(pool)
             .await?;
             warnings.push(match top_sim {
@@ -1038,7 +1043,7 @@ pub async fn recall(
          WHERE m.room = ANY($2::text[])
            AND m.archived_at IS NULL
            AND m.superseded_by IS NULL
-           AND COALESCE(m.type,'') <> 'paper-boat'
+           AND COALESCE(m.type,'') <> $6
            AND ($5::text[] = '{}'::text[] OR c.body ILIKE ANY($5::text[]))
            AND word_similarity($1,c.body) >= $3
          ORDER BY sim DESC,m.source_path,c.chunk_index
@@ -1049,6 +1054,7 @@ pub async fn recall(
     .bind(params.content_min_similarity)
     .bind(content_fetch_limit)
     .bind(&content_patterns)
+    .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
     let mut content_chunks = Vec::new();
@@ -1089,13 +1095,14 @@ pub async fn recall(
              WHERE room = ANY($1::text[])
                AND archived_at IS NULL
                AND superseded_by IS NULL
-               AND COALESCE(type,'') <> 'paper-boat'
+               AND COALESCE(type,'') <> $3
                AND dates && $2::date[]
              ORDER BY source_path
              LIMIT 5",
         )
         .bind(&rooms)
         .bind(&query_dates)
+        .bind(origami::boats::MEMORY_KIND)
         .fetch_all(pool)
         .await?;
         for row in rows {
@@ -1121,7 +1128,7 @@ pub async fn recall(
          JOIN memories m ON m.id=event.memory_id
          WHERE m.room = ANY($1::text[]) AND m.archived_at IS NULL
            AND m.superseded_by IS NULL
-           AND COALESCE(m.type,'') <> 'paper-boat'
+           AND COALESCE(m.type,'') <> $4
            AND (t.thread_key ILIKE ANY($3::text[])
                 OR ref.context ILIKE ANY($3::text[])
                 OR m.source_path ILIKE ANY($3::text[]))
@@ -1131,6 +1138,7 @@ pub async fn recall(
     .bind(&rooms)
     .bind(&params.query)
     .bind(&content_patterns)
+    .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
     let mut fused: BTreeMap<String, serde_json::Value> = BTreeMap::new();
@@ -1371,11 +1379,12 @@ pub async fn recall(
          WHERE room = ANY($1::text[])
            AND archived_at IS NULL
            AND superseded_by IS NULL
-           AND COALESCE(type,'') <> 'paper-boat'
+           AND COALESCE(type,'') <> $2
          ORDER BY type
          LIMIT 20",
     )
     .bind(&rooms)
+    .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
     let thread_keys: Vec<String> = sqlx::query_scalar(
@@ -1386,11 +1395,12 @@ pub async fn recall(
          WHERE m.room = ANY($1::text[])
            AND m.archived_at IS NULL
            AND m.superseded_by IS NULL
-           AND COALESCE(m.type,'') <> 'paper-boat'
+           AND COALESCE(m.type,'') <> $2
          ORDER BY t.thread_key
          LIMIT 20",
     )
     .bind(&rooms)
+    .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
     let taxonomy = serde_json::json!({"rooms":rooms,"memoryTypes":memory_types,"threadKeys":thread_keys,"namedEntities":named_entities});

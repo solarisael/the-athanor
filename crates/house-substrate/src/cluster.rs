@@ -297,7 +297,7 @@ pub(crate) async fn cluster_resonance(
            AND m.room=ANY($2::text[])
            AND m.archived_at IS NULL
            AND m.superseded_by IS NULL
-           AND COALESCE(m.type,'') <> 'paper-boat'
+           AND COALESCE(m.type,'') <> $3
            AND (mc.label IS NULL OR mc.label NOT ILIKE 'paper boat%')
          GROUP BY mc.id,mc.label,mc.centroid
          ORDER BY activation DESC
@@ -305,6 +305,7 @@ pub(crate) async fn cluster_resonance(
     )
     .bind(vector_text)
     .bind(rooms)
+    .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
     let mut profile = Vec::new();
@@ -324,13 +325,14 @@ pub(crate) async fn cluster_resonance(
                    AND m.room=ANY($3::text[])
                    AND m.archived_at IS NULL
                    AND m.superseded_by IS NULL
-                   AND COALESCE(m.type,'') <> 'paper-boat'
+                   AND COALESCE(m.type,'') <> $4
                  ORDER BY sim DESC
                  LIMIT 2",
             )
             .bind(vector_text)
             .bind(id)
             .bind(rooms)
+            .bind(origami::boats::MEMORY_KIND)
             .fetch_all(pool)
             .await?;
             let pointers = chunks.into_iter().map(|c| serde_json::json!({"source_path":c.try_get::<String,_>("source_path").unwrap_or_default(),"heading_path":c.try_get::<Option<String>,_>("heading_path").ok().flatten(),"sim":c.try_get::<f64,_>("sim").unwrap_or(0.0).clamp(-1.0,1.0)})).collect::<Vec<_>>();

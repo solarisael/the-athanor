@@ -156,7 +156,7 @@ async fn memory_timeline_scrolls_active_rows_newest_first_with_keyset() -> TestR
         &pool,
         4,
         "room-a",
-        "paper-boat",
+        origami::boats::MEMORY_KIND,
         Some("boat"),
         "b4",
         None,

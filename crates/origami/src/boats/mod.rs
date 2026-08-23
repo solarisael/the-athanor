@@ -16,7 +16,9 @@
 // enough: bare string constants; quest A1 moves this vocabulary into the
 // memory_kinds registry with behavior flags, and consumers route on flags.
 
+pub mod error;
 pub mod identity;
+pub mod record;
 pub mod sleep;
 pub mod wake;
 
@@ -32,3 +34,7 @@ pub const CREASE_PATTERN: &str = "boat.ready.v1";
 /// The thread key every boat is filed under.
 /// Absorbs house-substrate/src/paper_boat.rs:13 `PAPER_BOAT_THREAD`.
 pub const THREAD_KEY: &str = "paper boat / sleep / for tomorrow";
+
+/// The metadata origin marker a boat carries when the sleep path wrote it.
+/// Absorbs house-substrate/src/paper_boat.rs:36.
+pub const SLEEP_ORIGIN: &str = "paper-boat-sleep";

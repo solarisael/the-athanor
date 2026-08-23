@@ -7,16 +7,21 @@
 //! Current shapes:
 //! - Boats ([`boats`]): stasis in the Sea, with a return point. A spirit
 //!   sleeps; the currents return the boat when the spirit is called.
-//! - Cranes: movement in the Sea, with a destination point. A message
-//!   flies from one spirit to another spirit or to the operator. The
-//!   crane runtime lives in `house-delivery`; its shared vocabulary
-//!   moves here as the ontology work (goal A) extracts it.
+//! - Cranes ([`cranes`]): movement in the Sea, with a destination point.
+//!   A message flies to another spirit or to the operator.
+//! - Hallways ([`hallways`]): House letters between rooms. The census of
+//!   2026-08-23 found their transport is PostgreSQL plus Host
+//!   projections; no NATS lane exists behind them today. They join the
+//!   family as a shape now; transport unification is a later quest.
 //!
-//! Hallways and project routing depend on the same NATS spine. They join
-//! this family as the extraction continues.
+//! [`sea`] holds the shared spine: digests, envelope hygiene, and
+//! subject ownership rules every shape obeys.
 //!
-//! This crate owns the shared vocabulary that the write side
-//! (`house-substrate`) and the flight side (`house-delivery`) both obey.
-//! One declaration, two consumers, no duplicated literals.
+//! This crate owns the shared vocabulary and, as the A-series quests
+//! land, the shape logic itself. Skeleton functions carry their absorb
+//! target as a `file:line` from the six-nose census of 2026-08-23.
 
 pub mod boats;
+pub mod cranes;
+pub mod hallways;
+pub mod sea;

@@ -43,7 +43,9 @@ use protocol::{
     ContextViewportEvent, ConversationLogRequest, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED,
     HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED,
     HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
-    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID,
+    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, JETSTREAM_ACK_WAIT,
+    JETSTREAM_MAX_ACK_PENDING, JETSTREAM_MAX_BATCH, JETSTREAM_MAX_DELIVER, JETSTREAM_MAX_EXPIRES,
+    JETSTREAM_NUM_REPLICAS, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID,
     LineageResultEvent, PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT,
     PAPER_BOAT_RECEIPT_SUBSCRIBE, PaperBoatReceiptEvent, PaperBoatReceiptState,
     RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED,
@@ -1833,6 +1835,13 @@ fn receipt_snapshot(
     }
 }
 
+/// How long an ephemeral receipt replay consumer may sit idle before JetStream
+/// reaps it. Its own knob, not the ack window it currently equals: this one is
+/// "how long after the socket goes quiet do we stop paying for the cursor",
+/// which is a client-liveness question, and it is free to move without touching
+/// how long a delivered receipt has to be acknowledged.
+const RECEIPT_CONSUMER_IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
 async fn run_receipt_bridge(state: AppState, nats_url: String) {
     loop {
         if state.cancellation.is_cancelled() {
@@ -1900,14 +1909,25 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                 ),
                 deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
                 ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
-                ack_wait: std::time::Duration::from_secs(30),
-                max_deliver: 5,
+                ack_wait: JETSTREAM_ACK_WAIT,
+                max_deliver: JETSTREAM_MAX_DELIVER,
                 filter_subject: BOAT_RECEIPT_SUBJECT.into(),
-                max_ack_pending: 64,
-                max_batch: 64,
-                max_expires: std::time::Duration::from_secs(5),
-                inactive_threshold: std::time::Duration::from_secs(30),
-                num_replicas: 1,
+                max_ack_pending: JETSTREAM_MAX_ACK_PENDING,
+                max_batch: JETSTREAM_MAX_BATCH,
+                max_expires: JETSTREAM_MAX_EXPIRES,
+                // The seam: this is a genuinely different consumer on the same
+                // stream as origami's cranes broker, not a drifted copy of it.
+                // The broker's lane consumers are durable ledger writers whose
+                // cursor must outlive a restart; this one is ephemeral -- named
+                // per connection, discarded after inactive_threshold, and read
+                // only to refill one live socket. A cursor nobody will resume
+                // has no reason to touch disk, so storage is memory and the
+                // consumer is allowed to disappear with the client. That is why
+                // memory_storage disagrees with broker's `false`, and why this
+                // config carries no durable_name and no CONSUMER_BACKOFF: a
+                // ten-minute backoff would outlive the socket it serves.
+                inactive_threshold: RECEIPT_CONSUMER_IDLE_TTL,
+                num_replicas: JETSTREAM_NUM_REPLICAS,
                 memory_storage: true,
                 ..Default::default()
             })

@@ -1,5 +1,7 @@
 pub mod boundaries;
 pub mod component;
+pub mod contract;
+pub mod endpoints;
 pub mod installer;
 pub mod layout;
 pub mod manifest;

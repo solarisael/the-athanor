@@ -132,10 +132,7 @@ mod windows {
         let config: SupervisorConfig = serde_json::from_slice(&fs::read(layout.config())?)?;
         let secrets: Secrets = serde_json::from_slice(&fs::read(layout.secrets())?)?;
         let database_url = secrets.external_database_url.unwrap_or_else(|| {
-            format!(
-                "postgresql://athanor:{}@127.0.0.1:5432/athanor",
-                secrets.postgres_password
-            )
+            crate::endpoints::managed_database_url(&secrets.postgres_password)
         });
         let specs = runtime_plan(
             &layout.version(&current.version),

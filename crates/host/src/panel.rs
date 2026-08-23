@@ -271,7 +271,7 @@ async fn read_evidence(
         spirit: state.spirit.as_ref().clone(),
         session: state.session.as_ref().clone(),
         quest_id: request.quest_id,
-        limit: request.limit.unwrap_or(50),
+        limit: request.limit.unwrap_or(DEFAULT_BOARD_LIMIT),
     };
     if let Err(refusal) = params.validate() {
         return refused(refusal);

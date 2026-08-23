@@ -37,11 +37,44 @@ pub trait FileSystem {
 
 static PROCESS_OPERATION_LOCK: Mutex<()> = Mutex::new(());
 const OPERATION_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
+/// The Win32 named mutex that makes "one Athanor operation at a time" true
+/// across processes, not just across threads.
+///
+/// enough: the `Global\` prefix and the `.v1` suffix are the contract with
+/// every other installed copy of this binary -- an older `athanor-manage.exe`
+/// already running holds this exact name, so renaming it would let two
+/// installers mutate one House at once. Changing it is a release-day migration.
 #[cfg(windows)]
-static WINDOWS_OPERATION_MUTEX_NAME: [u16; 33] = [
-    71, 108, 111, 98, 97, 108, 92, 65, 116, 104, 97, 110, 111, 114, 77, 97, 110, 97, 103, 101, 114,
-    77, 117, 116, 97, 116, 105, 111, 110, 46, 118, 49, 0,
-];
+const WINDOWS_OPERATION_MUTEX_LABEL: &str = r"Global\AthanorManagerMutation.v1";
+
+/// Widens an ASCII label into the NUL-terminated UTF-16 Win32 wants.
+///
+/// The ASCII assertion is what makes the widening byte-exact: below 0x80 a
+/// UTF-8 byte and its UTF-16 code unit are the same number, so this cannot
+/// silently mangle a name the way a real encoder could.
+#[cfg(windows)]
+const fn nul_terminated_utf16<const N: usize>(label: &str) -> [u16; N] {
+    let bytes = label.as_bytes();
+    assert!(
+        bytes.len() + 1 == N,
+        "the array must hold exactly the label and its NUL"
+    );
+    let mut wide = [0u16; N];
+    let mut index = 0;
+    while index < bytes.len() {
+        assert!(
+            bytes[index] < 0x80,
+            "the mutex name must stay ASCII so widening is byte-exact"
+        );
+        wide[index] = bytes[index] as u16;
+        index += 1;
+    }
+    wide
+}
+
+#[cfg(windows)]
+static WINDOWS_OPERATION_MUTEX_NAME: [u16; WINDOWS_OPERATION_MUTEX_LABEL.len() + 1] =
+    nul_terminated_utf16(WINDOWS_OPERATION_MUTEX_LABEL);
 
 pub struct OperationLock {
     _process: MutexGuard<'static, ()>,

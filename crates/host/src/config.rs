@@ -3,7 +3,13 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
 pub use protocol::DEFAULT_HOST_WS_PATH as DEFAULT_WS_PATH;
-pub const DEFAULT_BIND: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8787);
+/// Where a Host listens when nothing configured it. Port comes from the same
+/// pin the installer builds room URLs from, so the fallback bind and the
+/// fallback URL cannot disagree.
+pub const DEFAULT_BIND: SocketAddr = SocketAddr::new(
+    IpAddr::V4(Ipv4Addr::LOCALHOST),
+    protocol::DEFAULT_HOST_WS_PORT,
+);
 pub const KNOCK_AUTONOMY_ENV: &str = "ATHANOR_HOST_KNOCK_AUTONOMY";
 
 /// Host-owned autonomy for Hallway Knock coordination.

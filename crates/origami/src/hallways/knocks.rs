@@ -11,6 +11,32 @@ use hearth::hallway::{
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
+/// How long a fresh Knock waits for an answer before it expires unanswered.
+///
+/// A Knock is a request for one bounded turn, so its lifetime is a courtesy
+/// window for a peer room that may not be awake, not a lease on work.
+pub const KNOCK_REQUEST_LIFETIME: Duration = Duration::minutes(15);
+
+// The lease seconds live in a macro because the claim statement splices the
+// number into its `INTERVAL` literal at compile time; this keeps one
+// declaration serving both the constant below and that SQL.
+macro_rules! knock_claim_lease_seconds {
+    () => {
+        30
+    };
+}
+
+/// How long a claimed Knock stays claimed before another presence may take the
+/// turn.
+///
+/// Sibling of `cranes::outbox::LEASE_SECONDS`, and the same 30 seconds for the
+/// same reason: both are one worker's grip on a claimed row, sized so a crashed
+/// claimer frees the item within a human's patience rather than holding it
+/// until a restart. They stay two constants because they are two ledgers -- a
+/// Hallway turn and an outbox publish may want different patience -- but move
+/// one and you should look at the other.
+pub const KNOCK_CLAIM_LEASE_SECONDS: i64 = knock_claim_lease_seconds!();
+
 fn policy_mode_from_db(value: &str) -> Result<HallwayKnockPolicyMode, HallwayError> {
     match value {
         "manual" => Ok(HallwayKnockPolicyMode::Manual),
@@ -476,7 +502,7 @@ pub async fn knock(
             knock_id.clone(),
             1_i16,
             i16::from(request.max_turns),
-            Utc::now() + Duration::minutes(15),
+            Utc::now() + KNOCK_REQUEST_LIFETIME,
         )
     };
 
@@ -596,10 +622,18 @@ pub async fn claim(
     )
     .await?;
     sqlx::query(
-        "UPDATE hallway_knocks
+        // The lease window is spliced at compile time from the one constant
+        // rather than bound: NOW() must stay the server's clock the way it is
+        // today, and a cast on a placeholder would move the lease's encoding
+        // into the driver where nothing here can prove it.
+        concat!(
+            "UPDATE hallway_knocks
          SET status='claimed',claimed_by_room=$2,claimed_by_spirit=$3,
-             claimed_by_session=$4,lease_expires_at=NOW()+INTERVAL '30 seconds'
-         WHERE knock_id=$1::uuid",
+             claimed_by_session=$4,lease_expires_at=NOW()+INTERVAL '",
+            knock_claim_lease_seconds!(),
+            " seconds'
+         WHERE knock_id=$1::uuid"
+        ),
     )
     .bind(&knock_id)
     .bind(&request.room)

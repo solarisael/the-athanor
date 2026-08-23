@@ -1,6 +1,8 @@
 //! Newline-delimited JSON wire protocol, version 1.
+mod contract;
 mod host;
 
+pub use contract::*;
 pub use host::*;
 
 use hearth::{

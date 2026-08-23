@@ -8,8 +8,7 @@ use std::{fmt, str::FromStr};
 use uuid::Uuid;
 
 pub const EVENT_SCHEMA_VERSION: u8 = 1;
-pub const BOAT_READY_EVENT_KIND: &str = "boat.ready";
-pub const BOAT_READY_CREASE_PATTERN: &str = "boat.ready.v1";
+pub use origami::boats::{CREASE_PATTERN as BOAT_READY_CREASE_PATTERN, EVENT_KIND as BOAT_READY_EVENT_KIND};
 pub const MAX_EVENT_KIND_BYTES: usize = 128;
 pub const MAX_CREASE_PATTERN_BYTES: usize = 128;
 

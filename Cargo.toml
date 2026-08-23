@@ -6,6 +6,7 @@ members = [
     "crates/house-host",
     "crates/house-substrate",
     "crates/house-delivery",
+    "crates/origami",
     "crates/house-vault",
     "crates/athanor-install",
     "gui",

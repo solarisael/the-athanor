@@ -445,7 +445,7 @@ pub(crate) async fn write_memory_tx(
     meta: Value,
     prepared: &PreparedMemoryWrite,
 ) -> Result<(i64, bool), AppError> {
-    let (memory_id, inserted) = if memory_type == "paper-boat" {
+    let (memory_id, inserted) = if memory_type == origami::boats::MEMORY_KIND {
         let inserted_id: Option<i64> = sqlx::query_scalar(
             "INSERT INTO memories
              (room,type,date,dates,title,source_path,body,threads,meta)

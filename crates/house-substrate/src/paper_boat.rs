@@ -43,7 +43,7 @@ pub async fn paper_boat_sleep(
     let (memory_id, inserted) = write_memory_tx(
         &mut tx,
         room,
-        "paper-boat",
+        origami::boats::MEMORY_KIND,
         &title,
         &source_path,
         body,

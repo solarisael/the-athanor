@@ -9,6 +9,7 @@ chrono = { version = "0.4", features = ["serde", "clock"] }
 house-core = { path = "../house-core" }
 house-protocol = { path = "../house-protocol" }
 house-vault = { path = "../house-vault" }
+origami = { path = "../origami" }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 percent-encoding = "2"

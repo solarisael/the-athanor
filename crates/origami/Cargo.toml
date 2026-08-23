@@ -1,0 +1,11 @@
+[package]
+name = "origami"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lib]
+name = "origami"
+path = "src/lib.rs"

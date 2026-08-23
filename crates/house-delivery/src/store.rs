@@ -342,7 +342,7 @@ impl Store {
         let body: String = memory.try_get("body")?;
         match lane {
             Lane::BoatReady => {
-                if memory_type != "paper-boat" || room != event.room {
+                if memory_type != origami::boats::MEMORY_KIND || room != event.room {
                     bail!(
                         "record_mismatch: pointer does not identify the declared paper-boat room"
                     );

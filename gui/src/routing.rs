@@ -5,12 +5,10 @@ use godot::classes::{Button, IPanelContainer, Label, Node, PanelContainer};
 use godot::obj::Inherits;
 use godot::prelude::*;
 
+use crate::disclosure::{ABSENT, ROUTING_DISCLOSURE};
 use crate::host_link::LinkPhase;
 use crate::host_session::AthanorHostSession;
 use crate::protocol::{self, CommandIdentity, RoutingStatusProjection};
-
-const DISCLOSURE: &str = "READ ONLY · WORKER LANES AND ADVISOR COME FROM THE AUTHENTICATED ATHANOR HOST · THIS SCREEN DOES NOT DISPATCH, START AGENTS, OR INFER AVAILABILITY FROM THE SHELL";
-const ABSENT: &str = "—";
 
 struct Bound {
     disclosure: Gd<Label>,
@@ -206,7 +204,7 @@ impl AthanorRoutingStatus {
         let Some(bound) = &mut self.bound else {
             return;
         };
-        bound.disclosure.set_text(DISCLOSURE);
+        bound.disclosure.set_text(ROUTING_DISCLOSURE);
         bound.state.set_text(if connected {
             if self.pending_correlation.is_some() {
                 "◇ HOST CONNECTED · QUERY PENDING"

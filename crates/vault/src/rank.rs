@@ -1,3 +1,4 @@
+use crate::config::VaultSettings;
 use crate::documents::VaultDocument;
 use crate::index::VaultIndex;
 use crate::model::VaultCandidate;
@@ -5,8 +6,45 @@ use crate::text::{STOPWORDS, normalized_text, tokens};
 use regex::Regex;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-pub(crate) const MAX_RESULTS: usize = 8;
-pub(crate) const EXCERPT_CHARS: usize = 900;
+pub(crate) const FIELD_COUNT: usize = 7;
+pub(crate) const DEFAULT_MAX_RESULTS: usize = 8;
+pub(crate) const DEFAULT_EXCERPT_CHARS: usize = 900;
+
+// Term-frequency saturation, shared on purpose with akasha's BM25F
+// (crates/akasha/src/bm25f.rs): both rankers answer the same operator over the
+// same prose, so a repeated term must not bend differently by mode. Moving one
+// value alone is a deliberate divergence, never a tidy-up.
+const K1: f64 = 1.2;
+
+// A verbatim phrase in a short labelled field (path, title, heading, keys,
+// tags, metadata) is a stronger claim than the same phrase buried in a body,
+// so a body hit earns the smaller boost.
+const EXACT_PHRASE_BOOST: f64 = 2.25;
+const EXACT_PHRASE_BODY_BOOST: f64 = 1.5;
+
+// Floor for reading a separator-bearing token as a compound identifier
+// (HINGE-PROTOCOL-77, crates/vault/src). Shorter tokens like "v1.0" or "a-b"
+// would gate every result on punctuation.
+const COMPOUND_TERM_MIN_CHARS: usize = 4;
+
+// Floor for an exact-phrase claim: one- and two-character phrases occur in
+// nearly every document and would hand the phrase boost to all of them.
+const EXACT_PHRASE_MIN_CHARS: usize = 3;
+
+// The three tables below are index-aligned with `Field` and with the per-field
+// arrays on `VaultDocument`; a room override in .solarisael-room.json is keyed
+// by these names.
+pub(crate) const FIELD_NAMES: [&str; FIELD_COUNT] = [
+    "path", "title", "heading", "keys", "tags", "body", "metadata",
+];
+// Domain tuning a room may override: path and title outrank body because a
+// vault room is a file tree an operator named by hand, and the name he chose
+// carries more intent than a line inside the file.
+pub(crate) const DEFAULT_FIELD_WEIGHTS: [f64; FIELD_COUNT] = [4.2, 3.8, 3.4, 2.6, 2.8, 1.0, 1.4];
+// BM25 b per field: how hard length dilutes a match. Short labelled fields stay
+// near zero because their length says nothing about relevance; body sits high.
+pub(crate) const DEFAULT_FIELD_LENGTH_NORMALIZATIONS: [f64; FIELD_COUNT] =
+    [0.2, 0.25, 0.3, 0.45, 0.3, 0.75, 0.5];
 
 #[derive(Clone, Copy)]
 enum Field {
@@ -18,7 +56,7 @@ enum Field {
     Body,
     Metadata,
 }
-const FIELDS: [Field; 7] = [
+const FIELDS: [Field; FIELD_COUNT] = [
     Field::Path,
     Field::Title,
     Field::Heading,
@@ -32,37 +70,7 @@ impl Field {
         self as usize
     }
     fn name(self) -> &'static str {
-        match self {
-            Self::Path => "path",
-            Self::Title => "title",
-            Self::Heading => "heading",
-            Self::Keys => "keys",
-            Self::Tags => "tags",
-            Self::Body => "body",
-            Self::Metadata => "metadata",
-        }
-    }
-    fn weight(self) -> f64 {
-        match self {
-            Self::Path => 4.2,
-            Self::Title => 3.8,
-            Self::Heading => 3.4,
-            Self::Keys => 2.6,
-            Self::Tags => 2.8,
-            Self::Body => 1.0,
-            Self::Metadata => 1.4,
-        }
-    }
-    fn length_normalization(self) -> f64 {
-        match self {
-            Self::Path => 0.2,
-            Self::Title => 0.25,
-            Self::Heading => 0.3,
-            Self::Keys => 0.45,
-            Self::Tags => 0.3,
-            Self::Body => 0.75,
-            Self::Metadata => 0.5,
-        }
+        FIELD_NAMES[self.index()]
     }
 }
 
@@ -91,13 +99,13 @@ fn quoted_terms(query: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .collect()
 }
-fn excerpt(document: &VaultDocument, terms: &[String]) -> String {
+fn excerpt(document: &VaultDocument, terms: &[String], excerpt_chars: usize) -> String {
     let body = document
         .body
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
-    if body.chars().count() <= EXCERPT_CHARS {
+    if body.chars().count() <= excerpt_chars {
         return body;
     }
     let lower = normalized_text(&body);
@@ -106,13 +114,13 @@ fn excerpt(document: &VaultDocument, terms: &[String]) -> String {
         .filter_map(|term| lower.find(term))
         .min()
         .unwrap_or(0);
-    let desired_start = position.saturating_sub(EXCERPT_CHARS / 3);
+    let desired_start = position.saturating_sub(excerpt_chars / 3);
     let mut start = desired_start.min(body.len());
     while start > 0 && !body.is_char_boundary(start) {
         start -= 1;
     }
     let mut end = start;
-    for (offset, character) in body[start..].char_indices().take(EXCERPT_CHARS) {
+    for (offset, character) in body[start..].char_indices().take(excerpt_chars) {
         end = start + offset + character.len_utf8();
     }
     let clipped = body[start..end].trim();
@@ -123,7 +131,11 @@ fn excerpt(document: &VaultDocument, terms: &[String]) -> String {
         if end < body.len() { "…" } else { "" }
     )
 }
-pub(crate) fn rank(index: &VaultIndex, query: &str) -> Vec<VaultCandidate> {
+pub(crate) fn rank(
+    index: &VaultIndex,
+    query: &str,
+    settings: &VaultSettings,
+) -> Vec<VaultCandidate> {
     let terms = query_terms(query);
     if terms.is_empty() || index.documents.is_empty() {
         return Vec::new();
@@ -131,14 +143,14 @@ pub(crate) fn rank(index: &VaultIndex, query: &str) -> Vec<VaultCandidate> {
     let compound_terms = terms
         .iter()
         .filter(|term| {
-            term.len() >= 4
+            term.len() >= COMPOUND_TERM_MIN_CHARS
                 && term
                     .chars()
                     .any(|character| matches!(character, '_' | ':' | '+' | '#' | '.' | '/' | '-'))
         })
         .cloned()
         .collect::<Vec<_>>();
-    let mut averages = [1.0; 7];
+    let mut averages = [1.0; FIELD_COUNT];
     for field in FIELDS {
         averages[field.index()] = (index
             .documents
@@ -161,7 +173,7 @@ pub(crate) fn rank(index: &VaultIndex, query: &str) -> Vec<VaultCandidate> {
         .collect::<HashMap<_, _>>();
     let exact_phrases = std::iter::once(normalized_text(query).trim().to_owned())
         .chain(quoted_terms(query))
-        .filter(|term| term.chars().count() >= 3)
+        .filter(|term| term.chars().count() >= EXACT_PHRASE_MIN_CHARS)
         .collect::<BTreeSet<_>>();
     let total = index.documents.len() as f64;
     let mut ranked = Vec::new();
@@ -177,8 +189,8 @@ pub(crate) fn rank(index: &VaultIndex, query: &str) -> Vec<VaultCandidate> {
                     continue;
                 }
                 matched_fields.insert(field.index());
-                let b = field.length_normalization();
-                combined_tf += field.weight() * tf
+                let b = settings.field_length_normalizations[field.index()];
+                combined_tf += settings.field_weights[field.index()] * tf
                     / (1.0 - b
                         + b * document.lengths[field.index()] as f64 / averages[field.index()]);
             }
@@ -188,19 +200,19 @@ pub(crate) fn rank(index: &VaultIndex, query: &str) -> Vec<VaultCandidate> {
             matched_terms.push(term.clone());
             let frequency = *frequencies.get(term).unwrap_or(&0) as f64;
             score += (1.0 + (total - frequency + 0.5) / (frequency + 0.5)).ln()
-                * (2.2 * combined_tf)
-                / (1.2 + combined_tf);
+                * ((K1 + 1.0) * combined_tf)
+                / (K1 + combined_tf);
         }
         let mut exact_fields = BTreeSet::new();
         for phrase in &exact_phrases {
             for field in FIELDS {
                 if normalized_text(&document.fields[field.index()]).contains(phrase) {
                     exact_fields.insert(field.index());
-                    score += field.weight()
+                    score += settings.field_weights[field.index()]
                         * if matches!(field, Field::Body) {
-                            1.5
+                            EXACT_PHRASE_BODY_BOOST
                         } else {
-                            2.25
+                            EXACT_PHRASE_BOOST
                         };
                 }
             }
@@ -254,7 +266,7 @@ pub(crate) fn rank(index: &VaultIndex, query: &str) -> Vec<VaultCandidate> {
     });
     ranked
         .into_iter()
-        .take(MAX_RESULTS)
+        .take(settings.max_results)
         .map(
             |(score, document, matched_terms, missing_terms, reasons)| VaultCandidate {
                 source_path: document.source_path.clone(),
@@ -263,7 +275,7 @@ pub(crate) fn rank(index: &VaultIndex, query: &str) -> Vec<VaultCandidate> {
                 sources: vec![document.source_path.clone()],
                 score,
                 term_coverage: matched_terms.len() as f64 / terms.len().max(1) as f64,
-                excerpt: excerpt(document, &matched_terms),
+                excerpt: excerpt(document, &matched_terms, settings.excerpt_chars),
                 matched_terms,
                 missing_terms,
                 reasons,

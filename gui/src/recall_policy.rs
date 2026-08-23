@@ -18,18 +18,13 @@ use godot::classes::{Button, IPanelContainer, Label, LineEdit, Node, PanelContai
 use godot::obj::Inherits;
 use godot::prelude::*;
 
+use crate::disclosure::{ABSENT, RECALL_POLICY_DISCLOSURE};
 use crate::host_link::{HostLink, LinkPhase};
 use crate::host_session::AthanorHostSession;
 use crate::protocol::{
     self, CommandIdentity, HostBinding, Inbound, ProjectionCursor, RecallPolicyProjection,
     RecoveryState, RequestedMode,
 };
-
-/// Fixed copy. Rendered before any Host content and never softened.
-const DISCLOSURE: &str = "NO AUTHORITY · THIS CLIENT IS NOT MEMORY, IDENTITY, OR POLICY AUTHORITY · NO STATE APPEARS WITHOUT AN AUTHENTICATED ATHANOR HOST SNAPSHOT · HOUSE, ROOM, SPIRIT, AND SESSION COME ONLY FROM THE HOST SNAPSHOT, NEVER FROM SHELL CONTEXT OR THE WORKING DIRECTORY";
-
-/// Placeholder for every value the Host has not stated.
-const ABSENT: &str = "—";
 
 const DEFAULT_HOST_URL: &str = protocol::DEFAULT_HOST_URL;
 
@@ -499,7 +494,7 @@ impl AthanorRecallPolicy {
             return;
         };
 
-        bound.disclosure.set_text(DISCLOSURE);
+        bound.disclosure.set_text(RECALL_POLICY_DISCLOSURE);
 
         if bound.url_field.get_text().to_string().trim().is_empty() {
             bound.url_field.set_text(&host_url);
@@ -1010,7 +1005,7 @@ impl AthanorRecallPolicy {
         };
 
         // Fixed copy is re-asserted before any Host content is written.
-        bound.disclosure.set_text(DISCLOSURE);
+        bound.disclosure.set_text(RECALL_POLICY_DISCLOSURE);
         bound.disclosure.set_visible(true);
 
         bound.link_state.set_text(view.link_state.as_str());

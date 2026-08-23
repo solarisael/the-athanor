@@ -5,12 +5,10 @@ use godot::classes::{Button, IPanelContainer, Label, Node, PanelContainer};
 use godot::obj::Inherits;
 use godot::prelude::*;
 
+use crate::disclosure::{ABSENT, FAMILIAR_STATUS_DISCLOSURE};
 use crate::host_link::LinkPhase;
 use crate::host_session::AthanorHostSession;
 use crate::protocol::{self, CommandIdentity, FamiliarStatusProjection};
-
-const DISCLOSURE: &str = "READ ONLY · FAMILIAR STATUS COMES FROM THE AUTHENTICATED ATHANOR HOST · THE CLIENT DOES NOT READ A SPELLBOOK PATH, INFER A ROOM, DISPATCH, SPAWN, OR EXECUTE AN AGENT";
-const ABSENT: &str = "—";
 
 struct Bound {
     disclosure: Gd<Label>,
@@ -225,7 +223,7 @@ impl AthanorFamiliarStatus {
         let Some(bound) = &mut self.bound else {
             return;
         };
-        bound.disclosure.set_text(DISCLOSURE);
+        bound.disclosure.set_text(FAMILIAR_STATUS_DISCLOSURE);
         bound.state.set_text(if connected {
             if self.pending_correlation.is_some() {
                 "◇ HOST CONNECTED · QUERY PENDING"

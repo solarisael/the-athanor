@@ -5,15 +5,13 @@ use godot::classes::{Button, IPanelContainer, Label, Node, PanelContainer};
 use godot::obj::Inherits;
 use godot::prelude::*;
 
+use crate::disclosure::{ABSENT, HEALTH_DISCLOSURE};
 use crate::host_link::LinkPhase;
 use crate::host_session::AthanorHostSession;
 use crate::protocol::{
     self, CommandIdentity, HostBinding, Inbound, PaperBoatReceiptSnapshot, ProjectionCursor,
     RecallPolicyProjection, ReceiptStatus,
 };
-
-const DISCLOSURE: &str = "OBSERVATION ONLY · EACH CHANNEL REPORTS ITS OWN REAL HOST EVENT · TRANSPORT, BINDING, RECALL HEALTH, PAPER BOAT DELIVERY, AND PROTOCOL REFUSAL ARE NEVER COLLAPSED INTO ONE VERDICT";
-const ABSENT: &str = "—";
 
 struct Bound {
     disclosure: Gd<Label>,
@@ -258,7 +256,7 @@ impl AthanorHealth {
         let Some(bound) = &mut self.bound else {
             return;
         };
-        bound.disclosure.set_text(DISCLOSURE);
+        bound.disclosure.set_text(HEALTH_DISCLOSURE);
         bound.transport.set_text(match phase {
             Some(LinkPhase::Closed) => "◇ TRANSPORT · CLOSED",
             Some(LinkPhase::Connecting) => "◇ TRANSPORT · CONNECTING",

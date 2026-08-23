@@ -16,13 +16,13 @@ use crate::host_link::LinkPhase;
 use crate::host_session::AthanorHostSession;
 use crate::paper_boat_receipt::ReceiptFeed;
 use crate::protocol::{self, CommandIdentity, HostBinding};
+use crate::tokens::{
+    COMPACT_BREAKPOINT, COMPACT_LEFT_MARGIN, COMPACT_RECALL_STATE_COLUMNS,
+    NARROW_RECALL_STATE_COLUMNS, NO_MARGIN, WIDE_BREAKPOINT, WIDE_LEFT_MARGIN,
+    WIDE_RECALL_STATE_COLUMNS, WIDE_RIGHT_MARGIN,
+};
 
 const INITIAL_SCREEN_ENV: &str = "ATHANOR_INITIAL_SCREEN";
-const WIDE_BREAKPOINT: f32 = 1_200.0;
-const COMPACT_BREAKPOINT: f32 = 800.0;
-const WIDE_LEFT_MARGIN: i32 = 252;
-const WIDE_RIGHT_MARGIN: i32 = 316;
-const COMPACT_LEFT_MARGIN: i32 = 232;
 
 /// The S01 composer refuses to submit because no conversation contract exists.
 /// The shell says so instead of pretending a send happened.
@@ -646,8 +646,8 @@ impl AthanorProbe {
 
         let (left_margin, right_margin) = match class {
             LayoutClass::Wide => (WIDE_LEFT_MARGIN, WIDE_RIGHT_MARGIN),
-            LayoutClass::Compact => (COMPACT_LEFT_MARGIN, 0),
-            LayoutClass::Narrow => (0, 0),
+            LayoutClass::Compact => (COMPACT_LEFT_MARGIN, NO_MARGIN),
+            LayoutClass::Narrow => (NO_MARGIN, NO_MARGIN),
         };
         shell
             .center_frame
@@ -682,9 +682,9 @@ impl AthanorProbe {
             .recall_columns
             .set_vertical(class != LayoutClass::Wide);
         shell.recall_state_grid.set_columns(match class {
-            LayoutClass::Wide => 4,
-            LayoutClass::Compact => 2,
-            LayoutClass::Narrow => 1,
+            LayoutClass::Wide => WIDE_RECALL_STATE_COLUMNS,
+            LayoutClass::Compact => COMPACT_RECALL_STATE_COLUMNS,
+            LayoutClass::Narrow => NARROW_RECALL_STATE_COLUMNS,
         });
         self.layout_class = Some(class);
     }

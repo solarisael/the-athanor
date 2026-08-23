@@ -1,7 +1,7 @@
 use crate::config::ROOM_MARKER;
 use crate::error::VaultError;
 use crate::model::{VaultRecallRequest, VaultRecallResult};
-use crate::rank::{EXCERPT_CHARS, MAX_RESULTS};
+use crate::rank::{DEFAULT_EXCERPT_CHARS, DEFAULT_MAX_RESULTS};
 use crate::recall::recall;
 use crate::walk::normalized_path;
 use std::fs;
@@ -69,6 +69,13 @@ fn search(fixture: &Fixture, query: &str) -> VaultRecallResult {
         query: query.into(),
     })
     .unwrap()
+}
+fn write_marker(fixture: &Fixture, knobs: &str) {
+    fs::write(
+        fixture.room.join(ROOM_MARKER),
+        format!(r#"{{"version":1,"room":"work-room","vaultRoots":["../alpha-project","../beta-project"],"vaultIgnore":["private/**"]{knobs}}}"#),
+    )
+    .unwrap();
 }
 #[test]
 fn exact_markdown_recall_is_attributed_and_ignored_paths_stay_absent() {
@@ -183,17 +190,61 @@ fn chunks_results_and_formats_are_bounded() {
     }
     let result = search(&fixture, "BOUNDED-MARKER-99");
     assert_eq!(result.indexed_documents, baseline_documents + 13);
-    assert_eq!(result.retrieval_candidates.len(), MAX_RESULTS);
+    assert_eq!(result.retrieval_candidates.len(), DEFAULT_MAX_RESULTS);
     assert!(
         result
             .retrieval_candidates
             .iter()
-            .all(|candidate| candidate.excerpt.chars().count() <= EXCERPT_CHARS + 2)
+            .all(|candidate| candidate.excerpt.chars().count() <= DEFAULT_EXCERPT_CHARS + 2)
     );
     assert!(
         result
             .retrieval_candidates
             .iter()
             .all(|candidate| !candidate.source_path.ends_with(".csv"))
+    );
+}
+#[test]
+fn room_file_knobs_override_defaults_and_absence_keeps_todays_behavior() {
+    let fixture = fixture();
+    fs::write(
+        fixture.beta.join("heading-hit.md"),
+        "# WEIGHT-MARKER-31\nThe heading carries the name and this line does not.\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.beta.join("body-hit.md"),
+        "# Plain\nWEIGHT-MARKER-31 WEIGHT-MARKER-31 WEIGHT-MARKER-31\n",
+    )
+    .unwrap();
+    for index in 0..10 {
+        fs::write(
+            fixture.beta.join(format!("knob-{index:02}.md")),
+            format!("# Knob\nWEIGHT-MARKER-31 receipt {index}"),
+        )
+        .unwrap();
+    }
+    let defaults = search(&fixture, "WEIGHT-MARKER-31");
+    assert_eq!(defaults.retrieval_candidates.len(), DEFAULT_MAX_RESULTS);
+    assert_eq!(
+        defaults.retrieval_candidates[0].source_path,
+        normalized_path(&fixture.beta.join("heading-hit.md"))
+    );
+    write_marker(
+        &fixture,
+        r#","vaultMaxResults":3,"vaultFieldTuning":{"heading":{"weight":0.1}}"#,
+    );
+    let overridden = search(&fixture, "WEIGHT-MARKER-31");
+    assert_eq!(overridden.retrieval_candidates.len(), 3);
+    assert_eq!(
+        overridden.retrieval_candidates[0].source_path,
+        normalized_path(&fixture.beta.join("body-hit.md"))
+    );
+    write_marker(&fixture, r#","vaultMaxResults":0"#);
+    let refused = search(&fixture, "WEIGHT-MARKER-31");
+    assert_eq!(refused.retrieval_candidates.len(), DEFAULT_MAX_RESULTS);
+    assert_eq!(
+        refused.retrieval_candidates[0].source_path,
+        normalized_path(&fixture.beta.join("heading-hit.md"))
     );
 }

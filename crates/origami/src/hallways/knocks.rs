@@ -1,17 +1,3 @@
-//! Knocks: bounded-turn wake requests between rooms. A Knock is a
-//! request, never a command; the recipient's standing policy decides,
-//! and posting a message alone never wakes anybody.
-//!
-//! Census warning carried, not fixed (2026-08-23): the substrate stdio
-//! protocol mounts only `policy` and `knock`. [`claim`] and [`settle`]
-//! are reachable solely through house-host, so a Knock asked over stdio
-//! cannot be answered over stdio. They are implemented and held to the
-//! full rule set anyway — unreachable from one door is not unused.
-//!
-//! Cost and state (coding#195): every function here opens one
-//! transaction and commits it. [`claim`] additionally expires other
-//! rooms' overdue leases as a side effect of looking for work, and
-//! takes `FOR UPDATE ... SKIP LOCKED` on its candidate.
 
 use super::channels::{ensure_presence, lookup_id};
 use super::errors::{HallwayError, invalid, refusal};
@@ -127,9 +113,6 @@ async fn existing_knock_row(
     .await?)
 }
 
-/// Write a room's standing Knock policy, supersede-style: the previous
-/// revision is closed, never edited, and the new one carries the next
-/// revision number.
 pub async fn policy(
     pool: &PgPool,
     mut request: HallwayKnockPolicyRequest,
@@ -272,8 +255,6 @@ pub async fn policy(
     Ok(receipt)
 }
 
-/// Request one bounded turn in an allowed peer room, against a message
-/// this room actually authored and addressed to that recipient.
 pub async fn knock(
     pool: &PgPool,
     request: HallwayKnockRequest,
@@ -554,8 +535,6 @@ pub async fn knock(
     })
 }
 
-/// Claim a pending Knock into a bounded lease. No pending work is not a
-/// refusal: it is an honest empty receipt.
 pub async fn claim(
     pool: &PgPool,
     request: HallwayKnockClaimRequest,
@@ -642,9 +621,6 @@ pub async fn claim(
     })
 }
 
-/// Settle a started Knock with its outcome and reason. Only the room,
-/// spirit, and session holding the lease may settle it; replaying the
-/// same outcome with the same reason is a duplicate success.
 pub async fn settle(
     pool: &PgPool,
     request: HallwayKnockSettleRequest,

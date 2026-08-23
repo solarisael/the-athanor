@@ -1,8 +1,3 @@
-//!
-//! The digest domain separator is frozen: the boat memory kind, one NUL
-//! byte, the room, one NUL byte, the body. Those bytes are the identity
-//! of every boat already in the database. Changing them renames every
-//! boat that exists, so they never change.
 
 use sha2::{Digest, Sha256};
 
@@ -14,7 +9,8 @@ pub const SOURCE_PATH_SUFFIX: &str = ".md";
 
 pub const DIGEST_LABEL: &str = "sha256";
 
-/// The frozen separator byte between the digest domains.
+// kind + NUL + room + NUL + body already names every boat in the
+// database — change a byte and every existing boat renames.
 const DOMAIN_SEPARATOR: &[u8] = b"\0";
 
 pub fn source_identity(room: &str, body: &str) -> String {
@@ -30,14 +26,11 @@ pub fn source_identity(room: &str, body: &str) -> String {
     )
 }
 
-/// Read the digest back out of a boat source path, when the path is one
-/// this module minted. `None` means the path is not a boat identity.
 pub fn digest_of(source_path: &str) -> Option<&str> {
     source_path
         .strip_prefix(SOURCE_PATH_PREFIX)
         .and_then(|value| value.strip_suffix(SOURCE_PATH_SUFFIX))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -51,9 +44,6 @@ mod tests {
         assert_ne!(first, source_identity("kintsu", "different body"));
     }
 
-    /// The separator bytes are a database-wide fact, not a style choice.
-    /// These vectors were taken from `sha256sum` over the raw bytes
-    /// outside this crate, so the guard fails if the domain ever drifts.
     #[test]
     fn identity_digest_domain_stays_byte_for_byte() {
         assert_eq!(

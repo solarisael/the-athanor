@@ -1,7 +1,3 @@
-//! The crane envelope is a strict `deny_unknown_fields` pointer.
-//!
-//! The body never crosses the broker — this envelope carries identity and
-//! integrity only, and refuses body-shaped keys outright.
 
 use crate::cranes::lanes::{Lane, RecipientKind, is_recipient_key};
 use anyhow::{Context, Result, bail};

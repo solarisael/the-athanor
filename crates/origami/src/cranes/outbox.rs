@@ -1,22 +1,3 @@
-//! The crane outbox: PostgreSQL-authoritative claim, publish, receipt,
-//! and dead-letter ledger. The database is the authority side; the
-//! broker is the delivery side.
-//!
-//! Concern: the durable side of delivery. Leasing a due row, recording
-//! an acknowledged publish under that lease, bounding retries, and
-//! writing exactly one receipt per consumed event.
-//!
-//! Standing law (coding#368): JetStream dedup ends at the stream
-//! boundary. [`Store::record_receipt`] is the domain idempotency claim —
-//! it locks the existing receipt, verifies the pointed record, inserts
-//! once, and commits *before* the caller acknowledges. A redelivery
-//! after commit-before-ack returns `Replayed` with the original stream
-//! sequence instead of repeating the effect. Never simplify this away.
-//!
-//! Every SQL string here is a live schema contract; the column and state
-//! names match migrations 0016/0017 byte for byte.
-//!
-//! Door: [`Store`]. Extracted from house-delivery/src/store.rs.
 
 use crate::{
     boats,
@@ -57,8 +38,6 @@ pub struct ClaimedEvent {
 }
 
 impl ClaimedEvent {
-    /// The lane PostgreSQL says this row belongs to. `None` is unroutable, which the
-    /// `crane_outbox` recipient constraints forbid but the relay still refuses safely.
     pub fn lane(&self) -> Option<Lane> {
         match (&self.recipient_kind, &self.recipient_key) {
             (None, None) => Some(Lane::BoatReady),
@@ -308,8 +287,9 @@ impl Store {
         Ok(())
     }
 
-    /// The shared receipt ledger. Every lane walks this one transaction: lock the
-    /// existing receipt, verify the pointed record, insert exactly once.
+    /// The idempotency claim coding#368 requires: lock, verify the
+    /// pointed record, insert once, commit BEFORE the caller acks.
+    /// Redelivery then replays the recorded outcome. Never simplify.
     pub async fn record_receipt(
         &self,
         event: &CraneEvent,
@@ -372,8 +352,6 @@ impl Store {
                         "record_mismatch: pointer does not identify the declared paper-boat room"
                     );
                 }
-                // sea::payload_digest is the one digest door; a boats-side delegation fn was
-                // deleted as ceremony (coding#158).
                 if sea::payload_digest(body.as_bytes()) != event.integrity_sha256 {
                     bail!("integrity_mismatch: pointed paper-boat body digest differs");
                 }
@@ -440,8 +418,6 @@ impl Store {
         Ok(())
     }
 
-    /// `subject` is the NATS subject the failure was observed on, and is absent when
-    /// an outbox row was refused before it could ever be routed to a lane.
     #[allow(clippy::too_many_arguments)]
     async fn insert_dead_letter_tx(
         &self,

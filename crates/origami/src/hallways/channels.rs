@@ -1,6 +1,3 @@
-//! Cost and state (coding#195): every function here opens its own
-//! transaction unless it takes one; [`lookup_id`] and [`ensure_presence`]
-//! take a caller's transaction and may take row locks inside it.
 
 use super::errors::{HallwayError, invalid, refusal};
 use crate::sea::idempotency_digest;
@@ -21,11 +18,6 @@ pub(crate) async fn lookup_id(
         .ok_or_else(|| refusal("hallway_not_found", "hallway does not exist"))
 }
 
-/// Presence gate with lazy join: an authenticated session whose room is
-/// already allowed in the hallway gets its presence row created on first
-/// use, so a fresh OMP session never has to remember to join. Refusals are
-/// truthful: only a genuinely disallowed room or a spirit conflict turns
-/// the caller away.
 pub async fn ensure_presence(
     tx: &mut Transaction<'_, Postgres>,
     hallway_id: i64,
@@ -34,8 +26,6 @@ pub async fn ensure_presence(
     spirit: &str,
     session: &str,
 ) -> Result<i64, HallwayError> {
-    // Two passes: select-or-lazily-insert, then the select must hit. The
-    // ON CONFLICT DO NOTHING absorbs a concurrent lazy join racing us.
     for _ in 0..2 {
         if let Some(row) = sqlx::query(
             "SELECT read_cursor,spirit FROM hallway_presences
@@ -91,8 +81,6 @@ pub async fn ensure_presence(
     Err(invalid("hallway presence could not be established"))
 }
 
-/// The creating room joins in the same transaction; a repeat of the exact
-/// same create command is a duplicate success, a different one is refused.
 pub async fn create(
     pool: &PgPool,
     request: HallwayCreateRequest,
@@ -241,9 +229,6 @@ pub async fn join(
     .await?;
 
     let (joined, cursor) = if let Some(row) = existing {
-        // A presence row is identity, not a ledger entry: the same session
-        // re-joining as the same spirit is a duplicate success no matter
-        // which idempotency key (explicit or lazy) created the row.
         let stored_spirit: String = row.try_get("spirit")?;
         if stored_spirit != request.spirit {
             return Err(refusal(

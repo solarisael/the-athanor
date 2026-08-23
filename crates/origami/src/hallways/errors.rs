@@ -1,17 +1,8 @@
-//! Truthful-refusal discipline: a [`HallwayError::Refusal`] carries a
-//! stable code and static text that names the rule the caller broke.
-//! Refusals never interpolate state, never guess, and are only raised
-//! for a rule that was actually checked — a room genuinely not allowed,
-//! a session genuinely bound to another spirit, an idempotency key
-//! genuinely reused with different content. Anything the House merely
-//! failed to establish is [`HallwayError::Invalid`], not a refusal.
-//!
-//! These are deliberately the same four shapes the substrate's
-//! `AppError` uses for this family, so the adapter in
-//! `house-substrate/src/hallway.rs` is a rename and never a reading.
 
 use std::fmt;
 
+// Same four shapes as substrate AppError on purpose — the adapter in
+// hallway.rs is a rename, never a reading.
 #[derive(Debug)]
 pub enum HallwayError {
     Invalid(String),

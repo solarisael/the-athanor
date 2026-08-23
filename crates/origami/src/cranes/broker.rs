@@ -1,18 +1,3 @@
-//! The crane broker: the NATS JetStream delivery side. Streams,
-//! durable consumers, publish with dedup headers, health.
-//!
-//! Concern: the delivery endpoint and the exact compiled shape of every
-//! stream and consumer behind it. PostgreSQL stays the authority; this
-//! module only moves pointers and refuses to run against a JetStream
-//! configuration that has drifted from the compiled contract.
-//!
-//! This module is also the single declaration of the crane wire
-//! vocabulary — stream names, subjects, consumer names, and the bounds
-//! that go with them. Every literal here is a live wire name: changing
-//! one is a migration, never a rename.
-//!
-//! Door: [`Broker`] plus the vocabulary constants. Extracted from
-//! house-delivery/src/broker.rs.
 
 use anyhow::{Context, Result, bail};
 use async_nats::{
@@ -26,6 +11,8 @@ use async_nats::{
 use std::time::Duration;
 use uuid::Uuid;
 
+// Live wire names — JetStream and house-host both hold them, so a
+// change here is a migration, never a rename.
 pub const BOAT_READY_STREAM_NAME: &str = "ATHANOR_BOAT_READY";
 pub const BOAT_READY_SUBJECT: &str = "athanor.boat.ready";
 pub const BOAT_READY_CONSUMER_NAME: &str = "athanor-boat-ready-receipts-v1";

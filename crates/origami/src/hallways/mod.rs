@@ -1,23 +1,8 @@
-//! Transport honesty (census 2026-08-23, confirmed by full-file walk):
-//! hallway writes land in PostgreSQL and reach readers through Host
-//! projections. No NATS lane, outbox row, or spine event exists behind
-//! hallways today. Zero SQL triggers or functions in the whole family;
-//! every invariant beyond a column constraint lives in Rust — and now
-//! it lives here. Hallways join Origami as a shape now; a NATS
-//! transport is a later, explicit quest.
-//!
-//! Census warnings carried by this extraction and deliberately NOT
-//! fixed by it — each is its own quest:
-//! - `house-substrate/src/health.rs` checks the crane trio and never
-//!   touches a hallway table. A hallway family that is completely
-//!   broken still reports healthy. Nothing here changes that: do not
-//!   read a green health line as evidence about hallways.
-//! - The substrate stdio protocol exposes 7 of the 9 hallway methods.
-//!   [`knocks::claim`] and [`knocks::settle`] are reachable only
-//!   through house-host. Unreachable from stdio is not unused: the
-//!   Knock lifecycle is incomplete without them, and they are held to
-//!   exactly the rules the seven reachable doors are held to.
-//!
+//! Hallways ride PostgreSQL + Host projections; no NATS lane exists
+//! behind them (census 2026-08-23) — that transport is its own quest.
+//! Known gaps, carried not fixed: health.rs never checks hallway
+//! tables; stdio mounts 7 of 9 methods (knocks::claim/settle are
+//! house-host only).
 
 pub mod bells;
 pub mod channels;

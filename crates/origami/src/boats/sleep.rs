@@ -13,20 +13,13 @@ const OUTBOX_AGGREGATE_KIND: &str = "memory";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoatPlan {
-    /// The content-addressed provenance path; also the idempotency key.
     pub source_path: String,
-    /// The boat title, dated in the caller's clock.
     pub title: String,
-    /// The primary date the memory row is filed under.
     pub date: NaiveDate,
-    /// The single thread every boat is filed under.
     pub threads: Vec<String>,
-    /// The row metadata: origin, recording time, identity.
     pub metadata: Value,
 }
 
-/// The halves that need `Config`, embeddings, the backup hook, or a
-/// receipt stay at the substrate door by contract.
 pub fn plan(room: &str, body: &str, now: DateTime<Utc>) -> BoatPlan {
     let source_path = identity::source_identity(room, body);
     let digest = identity::digest_of(&source_path).unwrap_or_default();
@@ -44,25 +37,15 @@ pub fn plan(room: &str, body: &str, now: DateTime<Utc>) -> BoatPlan {
     }
 }
 
-//
-// enough: the boat branch stays in house-substrate `write_memory_tx`.
-// The branch is only the ON CONFLICT DO NOTHING head of one insert whose
-// column list, tail, and inputs are generic memory machinery: the shared
-// `memories` column set, `PreparedMemoryWrite` (chunking, embedding
-// vectors, thread fan-out), the supersedes update, and the chunk rows.
-// Moving the head alone would split one row write across two crates and
-// give the `memories` column shape two homes — the duplicate authority
-// this extraction exists to remove. The DO-NOTHING conflict path is
-// load-bearing and stays exactly where it is proven, untouched.
-// The way up: quest A1's memory-kind registry, where "conflict is a
-// refusal, not an update" becomes a flag on the kind and the branch
-// disappears instead of moving.
 pub fn write_boat_tx() {
-    todo!("deferred at remember.rs:448; see the enough mark above")
+    todo!(
+        "stays in remember.rs write_memory_tx: the boat branch is one head of \
+         a generic memories insert; A1's kind registry replaces it with a flag"
+    )
 }
 
-/// The one seam where the boat shape touches the crane shape: the 0016
-/// trigger enqueued this pointer in the same transaction.
+/// The one place boats touch cranes: the 0016 trigger enqueued this
+/// pointer in the same transaction we're still inside.
 pub async fn ready_pointer(
     tx: &mut Transaction<'_, Postgres>,
     memory_id: i64,

@@ -1,13 +1,3 @@
-//! Lanes: which current a crane flies. `boat.ready` predates addressing
-//! and carries none; addressed lanes name a recipient kind and key.
-//!
-//! Concern: the mapping between a recipient (kind plus key) and the one
-//! NATS subject that recipient owns, in both directions. The subject
-//! vocabulary a lane maps onto lives in [`crate::cranes::broker`]; the
-//! payload that rides a lane lives in [`crate::cranes::envelope`].
-//!
-//! Door: [`Lane`], [`RecipientKind`]. Extracted from
-//! house-delivery/src/model.rs; the envelope tests pin the routing.
 
 use crate::cranes::broker::{BOAT_READY_SUBJECT, CRANE_SUBJECT_PREFIX};
 use anyhow::{Result, bail};

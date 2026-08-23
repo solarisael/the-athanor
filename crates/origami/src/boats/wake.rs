@@ -13,9 +13,6 @@ use super::record::{
 
 const UNTITLED: &str = "untitled";
 
-/// The newest boat for a room, with the warnings the read collected.
-/// `boat` is `None` when the room has never cast one — an explicit
-/// absence, never an error.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WokenBoat {
     pub boat: Option<PaperBoatRecord>,

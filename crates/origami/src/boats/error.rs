@@ -4,10 +4,7 @@ use std::fmt;
 
 #[derive(Debug)]
 pub enum BoatError {
-    /// The request or the row cannot become a boat. The message is
-    /// caller-facing and stable.
     Invalid(String),
-    /// PostgreSQL refused or failed. The original error rides along.
     Database(sqlx::Error),
 }
 

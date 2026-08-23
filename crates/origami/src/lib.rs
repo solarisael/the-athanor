@@ -1,9 +1,7 @@
-//! Origami — the House message-shape family.
-//!
-//! Origami names every mechanic that folds a record and moves it through
-//! the House. PostgreSQL is authoritative for every body. NATS carries
-//! delivery only. A shape never becomes a second authority.
-//!
+//! The House message shapes. Boats: stasis with a return point (sleep/
+//! wake). Cranes: movement with a destination (NATS pointers). Hallways:
+//! room letters (PostgreSQL + Host only — no NATS lane behind them yet).
+//! PostgreSQL owns every body; NATS only ever carries pointers.
 
 pub mod boats;
 pub mod cranes;

@@ -1,21 +1,3 @@
-//! Hallway messages: sequenced posts, cursor reads, and the room inbox.
-//!
-//! Three laws this file exists to keep:
-//! 1. Sequence allocation is a single `UPDATE ... RETURNING` inside the
-//!    post transaction, so no two messages ever share a number and no
-//!    number is ever skipped by a torn write.
-//! 2. The cursor advances only on a covering read: a thread-filtered
-//!    read never moves the session-global delivery cursor, and the room
-//!    read sequence advances only through the exact contiguous run of
-//!    global sequence numbers actually returned.
-//! 3. Reading the inbox clears nothing. Unread is derived, never stored.
-//!
-//! Bells are minted and quieted through [`super::bells`]; this file
-//! never writes `hallway_notifications` directly.
-//!
-//! Cost and state (coding#195): [`post`] and [`read`] each open one
-//! transaction and commit it; [`inbox`] is a single read query against
-//! the pool with no transaction and no writes at all.
 
 use super::bells;
 use super::channels::{ensure_presence, lookup_id};
@@ -47,8 +29,6 @@ fn message_from_row(
     })
 }
 
-/// `house_tz` is the House-local timezone name PostgreSQL must
-/// recognize; it decides which day a new top-level thread belongs to.
 pub async fn post(
     pool: &PgPool,
     house_tz: &str,
@@ -114,7 +94,6 @@ pub async fn post(
         });
     }
 
-    // Structured recipients are stable room keys and must be members here.
     if !request.to_rooms.is_empty() {
         let allowed: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM hallway_allowed_rooms WHERE hallway_id=$1 AND room=ANY($2)",
@@ -131,8 +110,6 @@ pub async fn post(
         }
     }
 
-    // Replies inherit the parent's thread even across midnight, so a living
-    // conversation is never chopped by the date boundary.
     let inherited_thread: Option<i64> = if let Some(reply_to) = request.reply_to {
         let row =
             sqlx::query("SELECT thread_id FROM hallway_messages WHERE hallway_id=$1 AND id=$2")
@@ -161,8 +138,6 @@ pub async fn post(
             (thread_id, key)
         }
         None => {
-            // First new top-level message of the House-local day lazily and
-            // idempotently creates that day's thread.
             let key: String =
                 sqlx::query_scalar("SELECT to_char(NOW() AT TIME ZONE $1, 'YYYY-MM-DD')")
                     .bind(house_tz)
@@ -192,6 +167,7 @@ pub async fn post(
         }
     };
 
+    // one UPDATE..RETURNING so a torn write can't skip or share a number
     let sequence: i64 = sqlx::query_scalar(
         "UPDATE hallway_channels SET next_sequence=next_sequence+1
          WHERE id=$1 RETURNING next_sequence-1",
@@ -245,7 +221,6 @@ pub async fn post(
     })
 }
 
-/// Read in order; advance the cursor only on covering reads.
 pub async fn read(
     pool: &PgPool,
     request: HallwayReadRequest,
@@ -317,8 +292,6 @@ pub async fn read(
     .unwrap_or(0);
 
     let read_cursor = if request.advance_cursor {
-        // A filtered thread must never advance the session-global delivery
-        // cursor past messages from other threads that were not returned.
         let cursor = if thread_id.is_none() {
             let cursor = previous_cursor.max(visible_cursor);
             sqlx::query(
@@ -335,13 +308,9 @@ pub async fn read(
         } else {
             previous_cursor
         };
-        // The Bell quiets only for what was actually returned: a filtered
-        // read must not acknowledge hidden messages.
         let message_ids: Vec<i64> = messages.iter().map(|message| message.id).collect();
         acked_mentions = bells::acknowledge(&mut tx, id, &request.room, &message_ids).await?;
 
-        // Advance only through the exact contiguous global sequence returned.
-        // Filtered thread rows may contain gaps occupied by other threads.
         let mut state_changed = acked_mentions > 0;
         let mut covered_sequence = room_read_sequence;
         for message in &messages {
@@ -395,9 +364,6 @@ pub async fn read(
     })
 }
 
-/// Room-level inbox: which persistent Hallways can this room open, how much
-/// ordinary unread waits in each (derived, never stored), and how many
-/// targeted mentions are pending. Reading the inbox clears nothing.
 pub async fn inbox(
     pool: &PgPool,
     request: HallwayInboxRequest,

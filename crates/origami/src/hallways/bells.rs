@@ -1,10 +1,7 @@
-//! Cost and state (coding#195): every function here writes inside the
-//! caller's transaction and commits nothing itself.
 
 use super::errors::HallwayError;
 use sqlx::{Postgres, Transaction};
 
-/// Displaying or delivering Bells never clears them; only a covering read does.
 pub async fn mint(
     tx: &mut Transaction<'_, Postgres>,
     hallway_id: i64,
@@ -25,8 +22,6 @@ pub async fn mint(
     Ok(())
 }
 
-/// Every allowed room's inbox view changed: bump revisions so projections
-/// know to re-inject. Rows are created lazily for rooms that lack one.
 pub async fn bump_inbox_revisions(
     tx: &mut Transaction<'_, Postgres>,
     hallway_id: i64,
@@ -44,9 +39,6 @@ pub async fn bump_inbox_revisions(
     Ok(())
 }
 
-/// The Bell quiets only for what was actually returned: a filtered read
-/// must not acknowledge hidden messages. An empty return acknowledges
-/// nothing and touches no row.
 pub async fn acknowledge(
     tx: &mut Transaction<'_, Postgres>,
     hallway_id: i64,

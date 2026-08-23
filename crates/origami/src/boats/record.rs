@@ -8,7 +8,6 @@ pub const MAX_WARNING_BYTES: usize = 4_096;
 
 const NON_POSITIVE_ID: &str = "paper boat database ID must be positive";
 
-/// Narrow a database ID to the positive range the wire contract uses.
 pub fn positive_id(id: i64) -> BoatResult<u64> {
     u64::try_from(id)
         .ok()
@@ -16,9 +15,6 @@ pub fn positive_id(id: i64) -> BoatResult<u64> {
         .ok_or_else(|| BoatError::Invalid(NON_POSITIVE_ID.into()))
 }
 
-/// Clip `value` to at most `max_bytes` UTF-8 bytes on a character
-/// boundary. The flag reports whether anything was dropped, so the
-/// caller can warn instead of lying about a complete field.
 pub fn bounded_utf8(value: &str, max_bytes: usize) -> (String, bool) {
     if value.len() <= max_bytes {
         return (value.to_owned(), false);

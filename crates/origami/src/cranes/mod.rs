@@ -5,15 +5,25 @@
 //! recipient: worker, familiar, room, or reviewer. The body never
 //! leaves PostgreSQL; the crane carries identity and integrity only.
 //!
-//! Census 2026-08-23: the whole crane runtime lives in house-delivery.
-//! Its vocabulary to absorb here: stream, subject, and consumer names
-//! (broker.rs:13-19), envelope schema and crease bounds (model.rs:10-14),
-//! outbox lease and retry bounds (store.rs:11-13). FaroEdges finding:
-//! this module was declared by the family doc and stood empty — the
-//! declared mouth is now growing teeth.
+//! The four concerns, each its own module with one door:
+//! - [`lanes`]: which current a crane flies — recipient to subject.
+//! - [`envelope`]: what a crane payload may say, and what it may never
+//!   carry across the broker.
+//! - [`outbox`]: the PostgreSQL authority side — claim, publish record,
+//!   retry bounds, dead letters, and the commit-before-ack receipt
+//!   ledger that coding#368 requires.
+//! - [`broker`]: the NATS JetStream delivery side, and the single
+//!   declaration of the crane wire vocabulary.
+//!
+//! Census 2026-08-23 found the whole crane runtime living in
+//! house-delivery; it now lives here. house-delivery keeps only the
+//! DeliveryService composition that drives these four, plus re-export
+//! shims for its existing callers.
 
-// enough: skeleton module; the extraction quests move vocabulary values
-// here with re-exports from house-delivery, then the logic.
+// enough: the lane subject vocabulary sits in `broker` because it is wire
+// naming, so `lanes` reads its constants from the delivery side. If a
+// third reader appears, lift the subject vocabulary into its own module
+// here and let both sides import it.
 
 pub mod broker;
 pub mod envelope;

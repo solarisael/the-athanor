@@ -1,3 +1,10 @@
+//! The delivery service: the composition that drives the crane shape.
+//!
+//! Every crane mechanic — lanes, envelope, outbox ledger, JetStream
+//! broker — lives in `origami::cranes`. This crate owns only the loop
+//! that walks them: claim, publish, consume, record, acknowledge. The
+//! three modules below are re-export shims for existing callers.
+
 pub mod broker;
 pub mod model;
 pub mod store;
@@ -5,18 +12,23 @@ pub mod store;
 use anyhow::{Context, Result, bail};
 use async_nats::jetstream::{consumer::PullConsumer, message::AckKind};
 #[cfg(test)]
-use broker::{BOAT_READY_CONSUMER_NAME, CRANE_CONSUMER_NAME};
-use broker::{
-    BOAT_READY_SUBJECT, Broker, CONSUMER_BACKOFF, CRANE_SUBJECT_FILTER, MAX_DELIVER,
-    subject_matches_filter,
+use origami::cranes::broker::{BOAT_READY_CONSUMER_NAME, CRANE_CONSUMER_NAME};
+use origami::{
+    cranes::{
+        broker::{
+            BOAT_READY_SUBJECT, Broker, CONSUMER_BACKOFF, CRANE_SUBJECT_FILTER, MAX_DELIVER,
+        },
+        envelope::{CraneEvent, classify_invalid_payload, event_id_hint},
+        lanes::Lane,
+        outbox::{ClaimedEvent, ReceiptDisposition, RecordedReceipt, Store},
+    },
+    sea::subject_owns,
 };
 use chrono::Utc;
 use futures_util::StreamExt;
 use house_protocol::{BOAT_RECEIPT_SCHEMA_VERSION, BoatReceiptProjection};
-use model::{CraneEvent, Lane, classify_invalid_payload, event_id_hint};
 use serde::Serialize;
 use std::time::Duration;
-use store::{ClaimedEvent, ReceiptDisposition, RecordedReceipt, Store};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -56,8 +68,8 @@ pub struct DeliveryHealth {
     pub ok: bool,
     pub authority: &'static str,
     pub delivery: &'static str,
-    pub database: store::DatabaseHealth,
-    pub broker: broker::BrokerHealth,
+    pub database: origami::cranes::outbox::DatabaseHealth,
+    pub broker: origami::cranes::broker::BrokerHealth,
 }
 
 impl DeliveryService {
@@ -126,7 +138,7 @@ impl DeliveryService {
                 self.store
                     .mark_publish_failure(&claimed, self.lease_owner, &error.to_string())
                     .await?;
-                return Ok(if claimed.attempts >= store::MAX_PUBLISH_ATTEMPTS {
+                return Ok(if claimed.attempts >= origami::cranes::outbox::MAX_PUBLISH_ATTEMPTS {
                     PublishOutcome::DeadLettered
                 } else {
                     PublishOutcome::RetryScheduled
@@ -183,7 +195,7 @@ impl DeliveryService {
 
         // Exact subject ownership first: the subject names the lane, and the lane
         // chooses the parser that runs before the shared receipt ledger.
-        let lane = Lane::from_subject(subject).filter(|_| subject_matches_filter(subject, filter));
+        let lane = Lane::from_subject(subject).filter(|_| subject_owns(subject, filter));
         let Some(lane) = lane else {
             self.store
                 .insert_consumer_dead_letter(

@@ -112,10 +112,12 @@ dependencies = [
  "async-nats",
  "chrono",
  "futures-util",
+ "hex",
  "house-protocol",
  "origami",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
  "tracing",
@@ -1505,12 +1507,8 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 name = "origami"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "async-nats",
  "chrono",
- "hex",
- "house-protocol",
- "serde",
+ "house-core",
  "serde_json",
  "sha2",
  "sqlx",

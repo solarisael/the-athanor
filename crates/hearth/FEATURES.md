@@ -4,7 +4,7 @@ Domain rules and invariants for the House. This crate holds no input and no outp
 
 Each section names one concern. A section that points at `src/lib.rs` names a concern that still waits for its own module.
 
-### authority (src/lib.rs, lines 15-32 and 2131-2140)
+### authority (src/authority.rs)
 
 - `authorize` gives full authority only when the House runs in full mode and health is healthy.
 - Full mode with an unhealthy verdict refuses. The refusal keeps the health reason.
@@ -12,7 +12,7 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - Base mode always gives base authority. Health does not change this.
 - `HealthVerdict` carries the reason as text beside the unhealthy state.
 
-### room_key (src/lib.rs, lines 697-737 and 1352-1356)
+### room_key (src/room.rs)
 
 - A room key accepts lowercase letters, digits, and single hyphens.
 - A room key refuses a leading hyphen, a trailing hyphen, and a double hyphen.
@@ -21,14 +21,14 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - A lesson write uses `new`, so a lesson can never target the commons.
 - The key prints as its raw text.
 
-### domain_error (src/lib.rs, lines 34-149)
+### domain_error (src/error.rs)
 
 - One enum holds all 36 refusals the domain makes.
 - Most variants name the exact field and the exact reason.
 - Each variant writes one operator-readable line.
 - The enum is a standard error type, so callers can chain it.
 
-### remember (src/lib.rs, lines 1358-1902)
+### remember (src/remember.rs)
 
 - Six write kinds exist: memory, and lessons for coding, projects, writing, design, and audio.
 - `is_lesson` separates a lesson write from a memory write. Only the memory write may reach the commons.
@@ -41,7 +41,7 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - Each list field holds at most 64 values.
 - The receipt reports the memory identifier, the lesson identifier, durability, and warnings.
 
-### recall (src/lib.rs, lines 1070-1154)
+### recall (src/recall.rs)
 
 - A request holds two retrieval lanes: semantic and content.
 - Each lane carries its own count and its own minimum similarity.
@@ -50,7 +50,7 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - A blank query refuses.
 - Temporal decay stays off. `with_temporal_decay` turns it on.
 
-### canon (src/lib.rs, lines 739-1068)
+### canon (src/canon.rs)
 
 - A write never overwrites. `supersedes` names the predecessors.
 - Superseded identifiers sort, deduplicate, and must all be positive.
@@ -65,7 +65,7 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - A summary date must use the `YYYY-MM-DD` shape.
 - The receipt reports the new entity identifier, the superseded identifiers, and the attribution.
 
-### anamnesis (src/lib.rs, lines 151-696)
+### anamnesis (src/anamnesis.rs)
 
 - Two read modes exist: wake and consult. A consult needs a query. A wake does not.
 - A read limit must be between 1 and 50.
@@ -80,7 +80,7 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - An append refuses a blank source path.
 - Anamnesis writes may reach the commons.
 
-### paper_boat (src/lib.rs, lines 1904-2129)
+### paper_boat (src/paper_boat.rs)
 
 - A boat body must carry text, and must stay at or below 65536 bytes.
 - The sleep receipt reports the memory identifier, the source path, the outbox event identifier, and an inserted flag.
@@ -90,7 +90,7 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - A boat record must carry a positive identifier and a body with text.
 - A boat record lists at most 64 unboated memories, and says when the list truncates.
 
-### cluster (src/lib.rs, lines 1156-1350)
+### cluster (src/cluster.rs)
 
 - Two requests exist: check and rebuild.
 - A rebuild carries an execution choice and a freshness policy.
@@ -101,7 +101,7 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - A cluster summary needs a label with text.
 - Four outcomes exist: checked, skipped as fresh, dry run, and rebuilt.
 
-### giga (src/lib.rs, lines 2141-4707)
+### giga (src/giga/)
 
 - The review state machine holds 10 states. `can_transition` allows only the legal moves.
 - An illegal move refuses and names both states.

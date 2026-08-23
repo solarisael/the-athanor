@@ -47,9 +47,6 @@ fn message_from_row(
     })
 }
 
-/// Append one message: allocate the sequence, resolve the thread, mint
-/// targeted Bells.
-///
 /// `house_tz` is the House-local timezone name PostgreSQL must
 /// recognize; it decides which day a new top-level thread belongs to.
 pub async fn post(

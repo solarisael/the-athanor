@@ -1,5 +1,3 @@
-//! How a hallway call ends when it does not end in a receipt.
-//!
 //! Truthful-refusal discipline: a [`HallwayError::Refusal`] carries a
 //! stable code and static text that names the rule the caller broke.
 //! Refusals never interpolate state, never guess, and are only raised
@@ -14,18 +12,13 @@
 
 use std::fmt;
 
-/// Every way a hallway call ends short of a receipt.
 #[derive(Debug)]
 pub enum HallwayError {
-    /// The request could not be believed as written.
     Invalid(String),
-    /// A domain refusal whose code and message are caller-facing truths.
-    /// Static text only: refusals name the rule, never interpolate state.
     Refusal {
         code: &'static str,
         message: &'static str,
     },
-    /// House configuration PostgreSQL would not accept.
     Config(String),
     Database(sqlx::Error),
 }
@@ -56,12 +49,10 @@ impl From<sqlx::Error> for HallwayError {
     }
 }
 
-/// A request the House could not believe as written.
 pub(crate) fn invalid(message: impl Into<String>) -> HallwayError {
     HallwayError::Invalid(message.into())
 }
 
-/// A checked rule, named to the caller in words that do not move.
 pub(crate) fn refusal(code: &'static str, message: &'static str) -> HallwayError {
     HallwayError::Refusal { code, message }
 }

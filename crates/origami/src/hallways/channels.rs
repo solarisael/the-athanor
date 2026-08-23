@@ -1,10 +1,3 @@
-//! Hallway channels and presences: who may open which door.
-//!
-//! A channel is the door: a hallway key, its allowed-room list, and the
-//! sequence counter every message in it draws from. A presence is one
-//! authenticated session standing in that door. Everything else in
-//! Hallways asks this module whether a caller is really there.
-//!
 //! Cost and state (coding#195): every function here opens its own
 //! transaction unless it takes one; [`lookup_id`] and [`ensure_presence`]
 //! take a caller's transaction and may take row locks inside it.
@@ -17,7 +10,6 @@ use house_core::hallway::{
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
-/// Resolve a hallway key to its channel id, or refuse truthfully.
 pub(crate) async fn lookup_id(
     tx: &mut Transaction<'_, Postgres>,
     hallway: &str,
@@ -34,8 +26,6 @@ pub(crate) async fn lookup_id(
 /// use, so a fresh OMP session never has to remember to join. Refusals are
 /// truthful: only a genuinely disallowed room or a spirit conflict turns
 /// the caller away.
-///
-/// Returns the session's current read cursor.
 pub async fn ensure_presence(
     tx: &mut Transaction<'_, Postgres>,
     hallway_id: i64,
@@ -101,7 +91,6 @@ pub async fn ensure_presence(
     Err(invalid("hallway presence could not be established"))
 }
 
-/// Create a hallway channel with its allowed-room list, idempotently.
 /// The creating room joins in the same transaction; a repeat of the exact
 /// same create command is a duplicate success, a different one is refused.
 pub async fn create(
@@ -208,7 +197,6 @@ pub async fn create(
     })
 }
 
-/// Join this room, spirit, and session as an authenticated presence.
 pub async fn join(
     pool: &PgPool,
     request: HallwayJoinRequest,

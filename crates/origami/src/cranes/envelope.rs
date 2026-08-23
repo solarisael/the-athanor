@@ -1,14 +1,7 @@
-//! The crane envelope: a strict deny-unknown-fields pointer both lanes
-//! carry. Version, lane token, record id, room, digest, addressing,
-//! expiry, lineage.
+//! The crane envelope is a strict `deny_unknown_fields` pointer.
 //!
-//! Concern: what a crane payload is allowed to say, and what it must
-//! never carry. The body never leaves PostgreSQL — this envelope carries
-//! identity and integrity only, and refuses body-shaped keys outright.
-//!
-//! Door: [`CraneEvent`] plus [`classify_invalid_payload`] and
-//! [`event_id_hint`], the two readings taken from a payload that failed
-//! to parse. Extracted from house-delivery/src/model.rs.
+//! The body never crosses the broker — this envelope carries identity and
+//! integrity only, and refuses body-shaped keys outright.
 
 use crate::cranes::lanes::{Lane, RecipientKind, is_recipient_key};
 use anyhow::{Context, Result, bail};
@@ -22,9 +15,6 @@ pub use crate::boats::{CREASE_PATTERN as BOAT_READY_CREASE_PATTERN, EVENT_KIND a
 pub const MAX_EVENT_KIND_BYTES: usize = 128;
 pub const MAX_CREASE_PATTERN_BYTES: usize = 128;
 
-/// The strict pointer envelope carried by every lane. Optional fields are absent
-/// on the `boat.ready` lane, whose payload stays exactly the seven keys migration
-/// 0016 has always written.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CraneEvent {
@@ -104,7 +94,6 @@ impl CraneEvent {
         Ok(())
     }
 
-    /// The lane this envelope claims. Only meaningful once `validate` has passed.
     pub fn lane(&self) -> Lane {
         match (self.recipient_kind, &self.recipient_key) {
             (Some(recipient_kind), Some(recipient_key)) => Lane::Addressed {
@@ -167,7 +156,6 @@ pub fn event_id_hint(payload: &[u8]) -> Option<Uuid> {
         .ok()
 }
 
-/// A dotted, lowercase lane identifier such as `boat.ready`.
 fn is_lane_token(value: &str) -> bool {
     if value.is_empty() || value.len() > MAX_EVENT_KIND_BYTES {
         return false;

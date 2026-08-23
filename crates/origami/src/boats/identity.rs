@@ -1,8 +1,3 @@
-//! Boat identity: deterministic, room-scoped, content-addressed.
-//!
-//! One room plus one body always folds to one identity, so casting the
-//! same letter twice is the same boat and never a second row. The body
-//! itself lives in PostgreSQL; the source path is provenance only.
 //!
 //! The digest domain separator is frozen: the boat memory kind, one NUL
 //! byte, the room, one NUL byte, the body. Those bytes are the identity
@@ -13,21 +8,15 @@ use sha2::{Digest, Sha256};
 
 use super::MEMORY_KIND;
 
-/// The provenance prefix of every boat source path.
 pub const SOURCE_PATH_PREFIX: &str = "db-only/paper-boats/sha256-";
 
-/// The provenance suffix of every boat source path.
 pub const SOURCE_PATH_SUFFIX: &str = ".md";
 
-/// The label the digest carries when a boat records its own identity.
 pub const DIGEST_LABEL: &str = "sha256";
 
 /// The frozen separator byte between the digest domains.
 const DOMAIN_SEPARATOR: &[u8] = b"\0";
 
-/// Derive the deterministic room+body identity path for a boat.
-/// Absorbs house-substrate/src/paper_boat.rs:204 `paper_boat_source_path`
-/// and the `b"paper-boat\0"` hash domain separator at :206.
 pub fn source_identity(room: &str, body: &str) -> String {
     let mut digest = Sha256::new();
     digest.update(MEMORY_KIND.as_bytes());

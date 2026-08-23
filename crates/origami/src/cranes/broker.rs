@@ -179,8 +179,6 @@ impl Broker {
         }
     }
 
-    /// Creates or verifies both lane streams, the sanitized receipt stream and
-    /// both durable receipt writers, then returns the per-lane consumers.
     pub async fn configure(&self) -> Result<LaneConsumers> {
         let expected_receipt_stream = Self::receipt_stream_config();
         let receipt_stream = self
@@ -232,7 +230,6 @@ impl Broker {
         self.configure().await
     }
 
-    /// Publishes an event onto the subject its lane owns.
     pub async fn publish(&self, subject: String, event_id: Uuid, payload: Vec<u8>) -> Result<u64> {
         let mut headers = HeaderMap::new();
         headers.insert("Nats-Msg-Id", event_id.to_string());
@@ -279,7 +276,6 @@ impl Broker {
     }
 }
 
-/// The durable receipt writers, one per delivery lane.
 pub struct LaneConsumers {
     pub boat_ready: consumer::PullConsumer,
     pub crane: consumer::PullConsumer,

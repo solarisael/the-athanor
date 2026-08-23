@@ -1,13 +1,4 @@
 //! The substrate door for the boat shape.
-//!
-//! `origami::boats` owns the folding: identity, paperwork, the pointer
-//! seam, the wake read. This file owns only what belongs to this
-//! process: `Config`-driven preparation, the `AppError` vocabulary, the
-//! post-commit backup hook, and the receipts the protocol returns.
-//!
-//! Cost and state (coding#195): sleep opens one transaction, commits it,
-//! and only then runs the backup hook — a failed backup never denies a
-//! committed boat. Wake is read-only.
 
 use crate::backup;
 use crate::config::{AppError, Config};

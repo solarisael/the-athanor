@@ -1,15 +1,7 @@
-//! What a boat write or read can refuse.
-//!
-//! Two shapes only: a caller-repairable refusal, and PostgreSQL saying
-//! no. Authority stays with the database; this enum never invents a
-//! third outcome. Callers that own a richer error vocabulary (the
-//! substrate door) map these two arms onto it and keep the message text
-//! byte-identical, because refusal text is a caller-facing truth.
 
 use std::error::Error;
 use std::fmt;
 
-/// A refusal from the boat shape.
 #[derive(Debug)]
 pub enum BoatError {
     /// The request or the row cannot become a boat. The message is
@@ -19,7 +11,6 @@ pub enum BoatError {
     Database(sqlx::Error),
 }
 
-/// The result every fallible boat call returns.
 pub type BoatResult<T> = Result<T, BoatError>;
 
 impl fmt::Display for BoatError {

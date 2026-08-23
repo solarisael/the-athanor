@@ -15,10 +15,6 @@
 //! - [`broker`]: the NATS JetStream delivery side, and the single
 //!   declaration of the crane wire vocabulary.
 //!
-//! Census 2026-08-23 found the whole crane runtime living in
-//! house-delivery; it now lives here. house-delivery keeps only the
-//! DeliveryService composition that drives these four, plus re-export
-//! shims for its existing callers.
 
 // enough: the lane subject vocabulary sits in `broker` because it is wire
 // naming, so `lanes` reads its constants from the delivery side. If a

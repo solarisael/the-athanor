@@ -372,10 +372,8 @@ impl Store {
                         "record_mismatch: pointer does not identify the declared paper-boat room"
                     );
                 }
-                // Audit ruling 2026-08-23: the boat-body digest IS the Sea
-                // spine applied to boat bytes. sea::payload_digest is the one
-                // digest door; a boats-side delegation fn was deleted as
-                // ceremony (coding#158 — deletion beats abstraction).
+                // sea::payload_digest is the one digest door; a boats-side delegation fn was
+                // deleted as ceremony (coding#158).
                 if sea::payload_digest(body.as_bytes()) != event.integrity_sha256 {
                     bail!("integrity_mismatch: pointed paper-boat body digest differs");
                 }
@@ -504,8 +502,6 @@ impl Store {
     }
 }
 
-/// Each lane keeps its own durable receipt writer identity, so the boat.ready
-/// receipts committed before the Crane generalization stay addressable.
 fn lane_consumer_name(lane: &Lane) -> &'static str {
     match lane {
         Lane::BoatReady => BOAT_READY_CONSUMER_NAME,

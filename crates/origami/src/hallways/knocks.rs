@@ -2,11 +2,6 @@
 //! request, never a command; the recipient's standing policy decides,
 //! and posting a message alone never wakes anybody.
 //!
-//! The lifecycle is four doors: [`policy`] writes a room's standing
-//! answer supersede-style, [`knock`] asks for one turn against that
-//! answer, [`claim`] takes a pending ask into a 30-second lease, and
-//! [`settle`] records started, completed, or failed.
-//!
 //! Census warning carried, not fixed (2026-08-23): the substrate stdio
 //! protocol mounts only `policy` and `knock`. [`claim`] and [`settle`]
 //! are reachable solely through house-host, so a Knock asked over stdio

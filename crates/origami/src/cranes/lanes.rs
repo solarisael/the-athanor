@@ -14,7 +14,6 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
-/// Who a Crane is addressed to. `boat.ready` predates addressing and carries none.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecipientKind {
@@ -55,8 +54,6 @@ impl FromStr for RecipientKind {
     }
 }
 
-/// One delivery lane of the Crane system. `boat.ready` is the first lane and keeps
-/// its historical subject; every other lane is addressed to a recipient.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Lane {
     BoatReady,
@@ -94,7 +91,6 @@ impl Lane {
     }
 }
 
-/// A single bounded subject token, matching the `crane_outbox` recipient_key check.
 pub(crate) fn is_recipient_key(value: &str) -> bool {
     if value.is_empty() || value.len() > 64 {
         return false;

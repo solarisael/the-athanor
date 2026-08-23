@@ -1,13 +1,3 @@
-//! The wake read: the currents return the newest boat when the spirit
-//! is called.
-//!
-//! A boat rests where it was cast, so waking is a read and nothing more:
-//! newest boat for this room, then the memories written after it. No
-//! room ever sees another room's boat. Every clipped field arrives with
-//! the warning that says it was clipped.
-//!
-//! Cost and state (coding#195): two read-only statements on the pool, no
-//! transaction, no write.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use house_core::{
@@ -21,7 +11,6 @@ use super::record::{
     MAX_KIND_BYTES, MAX_SOURCE_PATH_BYTES, MAX_TITLE_BYTES, bounded_utf8, positive_id,
 };
 
-/// The stand-in title for a memory row that never carried one.
 const UNTITLED: &str = "untitled";
 
 /// The newest boat for a room, with the warnings the read collected.
@@ -29,14 +18,10 @@ const UNTITLED: &str = "untitled";
 /// absence, never an error.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WokenBoat {
-    /// The newest boat, if the room has one.
     pub boat: Option<PaperBoatRecord>,
-    /// Warnings about clipped fields or a truncated unboated tail.
     pub warnings: Vec<String>,
 }
 
-/// Return the newest boat for a room, with clipped fields.
-/// Absorbs house-substrate/src/paper_boat.rs:89 `paper_boat_wake`.
 pub async fn wake(pool: &PgPool, room: &str) -> BoatResult<WokenBoat> {
     let row = sqlx::query(
         "SELECT id,title,body,date,source_path,created_at
@@ -92,10 +77,6 @@ pub async fn wake(pool: &PgPool, room: &str) -> BoatResult<WokenBoat> {
     })
 }
 
-/// Return the memories written after the newest boat (the unboated
-/// tail), oldest first, and whether the tail was truncated at the
-/// bounded ceiling.
-/// Absorbs the selector at house-substrate/src/paper_boat.rs:123.
 pub async fn unboated_tail(
     pool: &PgPool,
     room: &str,

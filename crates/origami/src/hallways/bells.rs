@@ -1,23 +1,10 @@
-//! Bells: durable targeted attention rows. A Bell is not a display and
-//! not a delivery — it is a row that stays lit until the room it names
-//! actually reads the message that minted it.
-//!
-//! Two doors, both taking the caller's transaction so a Bell can never
-//! commit apart from the message it belongs to:
-//! [`mint`] lights one Bell per recipient room of a post, and
-//! [`acknowledge`] quiets exactly the Bells a covering read returned.
-//! [`bump_inbox_revisions`] is the third, smaller fact: a post changes
-//! every allowed room's inbox view, whether or not it was targeted.
-//!
 //! Cost and state (coding#195): every function here writes inside the
 //! caller's transaction and commits nothing itself.
 
 use super::errors::HallwayError;
 use sqlx::{Postgres, Transaction};
 
-/// Mint targeted Bell rows for a posted message: one durable attention
-/// event per recipient room. Displaying or delivering never clears
-/// these; only a covering read does.
+/// Displaying or delivering Bells never clears them; only a covering read does.
 pub async fn mint(
     tx: &mut Transaction<'_, Postgres>,
     hallway_id: i64,
@@ -57,9 +44,6 @@ pub async fn bump_inbox_revisions(
     Ok(())
 }
 
-/// Acknowledge exactly the Bells a covering read returned, and report how
-/// many actually quieted.
-///
 /// The Bell quiets only for what was actually returned: a filtered read
 /// must not acknowledge hidden messages. An empty return acknowledges
 /// nothing and touches no row.

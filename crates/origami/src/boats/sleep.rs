@@ -1,15 +1,3 @@
-//! The sleep write: a spirit casts one boat into the Sea.
-//!
-//! Sleep has three parts. The paperwork is deterministic and pure:
-//! identity, title, thread, metadata — [`plan`]. The row write is the
-//! shared `memories` insert with the boat's DO-NOTHING conflict rule —
-//! see [`write_boat_tx`], which is still at the substrate and says why.
-//! The pointer read is the one seam where the boat shape touches the
-//! crane shape — [`ready_pointer`].
-//!
-//! Cost and state (coding#195): [`plan`] touches nothing. Both other
-//! calls run inside a caller-owned transaction and never commit; the
-//! caller commits, and only then is the boat durable.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde_json::{Value, json};
@@ -19,15 +7,10 @@ use super::error::BoatResult;
 use super::identity::{self, DIGEST_LABEL};
 use super::{EVENT_KIND, SLEEP_ORIGIN, THREAD_KEY};
 
-/// The title prefix a cast boat is filed under, followed by its date.
 const TITLE_PREFIX: &str = "paper boat — ";
 
-/// The outbox aggregate kind a boat row is enqueued under. The pointer
-/// event names the memory row, never the body.
 const OUTBOX_AGGREGATE_KIND: &str = "memory";
 
-/// The deterministic paperwork of one cast boat: everything the write
-/// needs that does not touch the database.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoatPlan {
     /// The content-addressed provenance path; also the idempotency key.
@@ -42,11 +25,8 @@ pub struct BoatPlan {
     pub metadata: Value,
 }
 
-/// Fold the paperwork for one boat: identity, title, thread, metadata.
-/// Absorbs the deterministic half of
-/// house-substrate/src/paper_boat.rs:18 `paper_boat_sleep`; the halves
-/// that need `Config`, embeddings, the backup hook, or a receipt stay at
-/// the substrate door by contract.
+/// The halves that need `Config`, embeddings, the backup hook, or a
+/// receipt stay at the substrate door by contract.
 pub fn plan(room: &str, body: &str, now: DateTime<Utc>) -> BoatPlan {
     let source_path = identity::source_identity(room, body);
     let digest = identity::digest_of(&source_path).unwrap_or_default();
@@ -64,8 +44,6 @@ pub fn plan(room: &str, body: &str, now: DateTime<Utc>) -> BoatPlan {
     }
 }
 
-/// Insert the boat row with source-path idempotency inside one transaction.
-/// Absorbs the boat branch of house-substrate/src/remember.rs:448.
 //
 // enough: the boat branch stays in house-substrate `write_memory_tx`.
 // The branch is only the ON CONFLICT DO NOTHING head of one insert whose
@@ -83,10 +61,8 @@ pub fn write_boat_tx() {
     todo!("deferred at remember.rs:448; see the enough mark above")
 }
 
-/// Read the `boat.ready` outbox pointer the 0016 trigger enqueued,
-/// inside the same transaction. This is the one seam between the boat
-/// shape and the crane shape.
-/// Absorbs house-substrate/src/paper_boat.rs:56.
+/// The one seam where the boat shape touches the crane shape: the 0016
+/// trigger enqueued this pointer in the same transaction.
 pub async fn ready_pointer(
     tx: &mut Transaction<'_, Postgres>,
     memory_id: i64,

@@ -27,9 +27,14 @@ pub const STREAM_MAX_MESSAGES: i64 = 100_000;
 pub const STREAM_MAX_BYTES: i64 = 512 * 1024 * 1024;
 pub const STREAM_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 pub const DUPLICATE_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
-pub const ACK_WAIT: Duration = Duration::from_secs(30);
-pub const MAX_DELIVER: i64 = 5;
-pub const MAX_ACK_PENDING: i64 = 64;
+// The ack discipline is the House's, not the cranes': host builds its receipt
+// replay consumer from the same protocol pins. Kept re-exported under the
+// cranes names so callers that already say broker::ACK_WAIT keep working.
+pub use protocol::{
+    JETSTREAM_ACK_WAIT as ACK_WAIT, JETSTREAM_MAX_ACK_PENDING as MAX_ACK_PENDING,
+    JETSTREAM_MAX_BATCH as MAX_BATCH, JETSTREAM_MAX_DELIVER as MAX_DELIVER,
+    JETSTREAM_MAX_EXPIRES as MAX_EXPIRES, JETSTREAM_NUM_REPLICAS as NUM_REPLICAS,
+};
 pub const CONSUMER_BACKOFF: [Duration; 5] = [
     Duration::from_secs(30),
     Duration::from_secs(60),
@@ -157,9 +162,11 @@ impl Broker {
             max_deliver: MAX_DELIVER,
             filter_subject: filter_subject.to_owned(),
             max_ack_pending: MAX_ACK_PENDING,
-            max_batch: 64,
-            max_expires: Duration::from_secs(5),
-            num_replicas: 1,
+            max_batch: MAX_BATCH,
+            max_expires: MAX_EXPIRES,
+            num_replicas: NUM_REPLICAS,
+            // The lane consumers are the durable ledger writers: their cursor
+            // must survive a broker restart, so storage is file-backed.
             memory_storage: false,
             backoff: CONSUMER_BACKOFF.to_vec(),
             ..Default::default()

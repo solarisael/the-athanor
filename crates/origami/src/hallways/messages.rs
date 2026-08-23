@@ -3,7 +3,7 @@ use super::bells;
 use super::channels::{ensure_presence, lookup_id};
 use super::errors::{HallwayError, invalid, refusal};
 use crate::sea::idempotency_digest;
-use house_core::hallway::{
+use hearth::hallway::{
     HallwayInboxEntry, HallwayInboxNotification, HallwayInboxReceipt, HallwayInboxRequest,
     HallwayMessage, HallwayPostDisposition, HallwayPostReceipt, HallwayPostRequest,
     HallwayReadReceipt, HallwayReadRequest,

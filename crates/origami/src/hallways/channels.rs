@@ -1,7 +1,7 @@
 
 use super::errors::{HallwayError, invalid, refusal};
 use crate::sea::idempotency_digest;
-use house_core::hallway::{
+use hearth::hallway::{
     HallwayCreateDisposition, HallwayCreateRequest, HallwayJoinDisposition, HallwayJoinRequest,
     HallwayPresenceReceipt, HallwayReceipt,
 };

@@ -433,9 +433,9 @@ impl AthanorHealth {
         let projection = protocol::event_projection_id(&envelope);
         let correlation = protocol::event_correlation_id(&envelope).ok();
         match projection.as_deref() {
-            Ok(house_protocol::RECALL_POLICY_PROJECTION_ID) => self.apply_recall(&envelope),
-            Ok(house_protocol::PAPER_BOAT_RECEIPT_PROJECTION_ID) => self.apply_boat(&envelope),
-            Ok(house_protocol::ROUTING_PROJECTION_ID) => self.apply_routing(&envelope),
+            Ok(::protocol::RECALL_POLICY_PROJECTION_ID) => self.apply_recall(&envelope),
+            Ok(::protocol::PAPER_BOAT_RECEIPT_PROJECTION_ID) => self.apply_boat(&envelope),
+            Ok(::protocol::ROUTING_PROJECTION_ID) => self.apply_routing(&envelope),
             Ok(_) => {}
             Err(reason) => self.last_refusal = Some(format!("EventMeta refused: {reason}")),
         }

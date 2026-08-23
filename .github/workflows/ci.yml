@@ -15,7 +15,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.95.0
       - name: Build the substrate binary
-        run: cargo build --release --locked -p athanor-substrate
+        run: cargo build --release --locked -p akasha
       - name: Test the Rust workspace
         run: cargo test --workspace --locked
 

@@ -5,20 +5,20 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# The shapes speak house-core's request and receipt vocabulary, digest
+# The shapes speak core's request and receipt vocabulary, digest
 # with sha2, and read and write PostgreSQL directly. Origami never
-# depends on house-substrate or house-delivery: the arrows point here.
+# depends on akasha or delivery: the arrows point here.
 anyhow.workspace = true
 async-nats.workspace = true
 chrono.workspace = true
 hex.workspace = true
-house-core = { path = "../house-core" }
+hearth = { path = "../hearth" }
 # The sanitized boat-receipt stream and subject are protocol vocabulary
-# shared with house-host, and house-protocol is their one declaration
+# shared with host, and protocol is their one declaration
 # (coding#446 rule 4). Origami names them from there rather than minting a
-# second copy. house-protocol depends only on house-core, so no cycle: the
+# second copy. protocol depends only on core, so no cycle: the
 # dependency arrow from every implementation crate still points at origami.
-house-protocol = { path = "../house-protocol" }
+protocol = { path = "../protocol" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

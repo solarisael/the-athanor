@@ -3,7 +3,7 @@ use super::channels::{ensure_presence, lookup_id};
 use super::errors::{HallwayError, invalid, refusal};
 use crate::sea::idempotency_digest;
 use chrono::{DateTime, Duration, Utc};
-use house_core::hallway::{
+use hearth::hallway::{
     HallwayKnockClaimReceipt, HallwayKnockClaimRequest, HallwayKnockOutcome, HallwayKnockPointer,
     HallwayKnockPolicyMode, HallwayKnockPolicyReceipt, HallwayKnockPolicyRequest,
     HallwayKnockReceipt, HallwayKnockRequest, HallwayKnockSettleReceipt, HallwayKnockSettleRequest,

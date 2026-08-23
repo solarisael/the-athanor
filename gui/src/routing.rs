@@ -311,7 +311,7 @@ impl AthanorRoutingStatus {
     #[func]
     fn on_host_message(&mut self, envelope: VarDictionary) {
         match protocol::event_projection_id(&envelope) {
-            Ok(projection_id) if projection_id == house_protocol::ROUTING_PROJECTION_ID => {
+            Ok(projection_id) if projection_id == ::protocol::ROUTING_PROJECTION_ID => {
                 match protocol::parse_routing_status(&envelope) {
                     Ok(projection) => {
                         if self.pending_correlation.as_deref() != Some(&projection.correlation_id) {

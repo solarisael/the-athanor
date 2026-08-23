@@ -20,7 +20,7 @@ pub const CRANE_STREAM_NAME: &str = "ATHANOR_CRANE";
 pub const CRANE_SUBJECT_PREFIX: &str = "athanor.crane.";
 pub const CRANE_SUBJECT_FILTER: &str = "athanor.crane.>";
 pub const CRANE_CONSUMER_NAME: &str = "athanor-crane-receipts-v1";
-pub use house_protocol::{
+pub use protocol::{
     BOAT_RECEIPT_STREAM_NAME as RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT as RECEIPT_SUBJECT,
 };
 pub const STREAM_MAX_MESSAGES: i64 = 100_000;

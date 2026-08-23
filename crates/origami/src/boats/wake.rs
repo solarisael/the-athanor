@@ -1,6 +1,6 @@
 
 use chrono::{DateTime, NaiveDate, Utc};
-use house_core::{
+use hearth::{
     PAPER_BOAT_MAX_BODY_BYTES, PAPER_BOAT_MAX_UNBOATED, PaperBoatRecord, UnboatedMemory,
 };
 use sqlx::{PgPool, Row};

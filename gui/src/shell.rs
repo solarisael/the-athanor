@@ -496,7 +496,7 @@ impl AthanorProbe {
 
     fn apply_receipt_envelope(&mut self, envelope: &VarDictionary) {
         if protocol::event_projection_id(envelope).ok().as_deref()
-            != Some(house_protocol::PAPER_BOAT_RECEIPT_PROJECTION_ID)
+            != Some(::protocol::PAPER_BOAT_RECEIPT_PROJECTION_ID)
         {
             return;
         }

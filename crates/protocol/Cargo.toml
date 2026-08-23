@@ -1,0 +1,10 @@
+[package]
+name = "protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+hearth = { path = "../hearth" }
+serde.workspace = true
+serde_json.workspace = true

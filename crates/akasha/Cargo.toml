@@ -1,0 +1,34 @@
+[package]
+name = "akasha"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde", "clock"] }
+hearth = { path = "../hearth" }
+protocol = { path = "../protocol" }
+vault = { path = "../vault" }
+origami = { path = "../origami" }
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+percent-encoding = "2"
+serde.workspace = true
+serde_json.workspace = true
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "json"] }
+sha2 = "0.10"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "io-std", "time", "sync", "fs"] }
+uuid = { version = "1", features = ["v4"] }
+
+[lib]
+name = "akasha"
+path = "src/lib.rs"
+
+[[bin]]
+# enough: bin keeps the shipped exe name; deploy-local.ps1, the installer manifest,
+# and the live service all address it. Renaming the exe is a deploy-day migration.
+name = "athanor-substrate"
+path = "src/main.rs"

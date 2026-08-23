@@ -22,7 +22,7 @@ Movement with a destination. A crane carries a pointer, never a body.
 
 - `connect` opens one NATS client and one JetStream context.
 - The wire names are compiled constants: two lane streams, one receipt stream, the subjects, and the durable consumers.
-- The receipt stream name and subject come from house-protocol, which is their one declaration.
+- The receipt stream name and subject come from protocol, which is their one declaration.
 - `configure` gets or creates each stream and consumer. It then compares 14 stream fields and 12 consumer fields, and it fails on any difference.
 - Each stream holds files, denies delete, and denies purge. The limits are 100000 messages, 512 MiB, and 7 days.
 - One message holds at most 4096 bytes. The duplicate window is 24 hours.

@@ -1186,7 +1186,7 @@ impl AthanorRecallPolicy {
     #[func]
     fn on_host_message(&mut self, envelope: VarDictionary) {
         if protocol::event_projection_id(&envelope).ok().as_deref()
-            != Some(house_protocol::RECALL_POLICY_PROJECTION_ID)
+            != Some(::protocol::RECALL_POLICY_PROJECTION_ID)
         {
             return;
         }

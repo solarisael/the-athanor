@@ -20,6 +20,7 @@ pub(crate) use tokens::token_estimate;
 
 use crate::backup;
 use crate::config::{AppError, Config, ROOM_KEY_RE};
+use crate::settings::RoomSettings;
 use chrono::Local;
 use hearth::lesson_triggers::LessonTriggerSpec;
 use lessons::remember_lesson;
@@ -339,12 +340,14 @@ pub async fn remember(
     req: RememberRequest,
 ) -> Result<RememberReceipt, AppError> {
     req.validate()?;
+    let settings = RoomSettings::load(pool, &req.room).await?;
     if req.kind != "memory" {
-        return remember_lesson(pool, cfg, &req).await;
+        return remember_lesson(pool, cfg, &settings, &req).await;
     }
     let source_path = req.source_path();
     let mut prepared = prepare_memory_write(
         cfg,
+        &settings,
         &source_path,
         &req.body,
         &req.threads,
@@ -372,7 +375,8 @@ pub async fn remember(
     write_continuations_tx(&mut tx, &req.room, memory_id, &req.continues).await?;
     tx.commit().await?;
     if req.backup
-        && let Err(error) = backup::run_post_write(pool, &cfg.database_url).await
+        && let Err(error) =
+            backup::run_post_write(pool, &cfg.database_url, settings.backup_keep_count).await
     {
         warnings.push(format!("backup failed: {error}"));
     }

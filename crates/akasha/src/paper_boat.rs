@@ -3,6 +3,7 @@
 use crate::backup;
 use crate::config::{AppError, Config};
 use crate::remember::{prepare_memory_write, write_memory_tx};
+use crate::settings::RoomSettings;
 use chrono::Utc;
 use hearth::{
     PaperBoatBackupStatus, PaperBoatSleepReceipt, PaperBoatSleepRequest, PaperBoatWakeReceipt,
@@ -28,10 +29,18 @@ pub async fn paper_boat_sleep(
     request: PaperBoatSleepRequest,
 ) -> Result<PaperBoatSleepReceipt, AppError> {
     let room = request.room().as_str();
+    let settings = RoomSettings::load(pool, room).await?;
     let body = request.body();
     let plan = boats::sleep::plan(room, body, Utc::now());
-    let mut prepared =
-        prepare_memory_write(cfg, &plan.source_path, body, &plan.threads, plan.date).await?;
+    let mut prepared = prepare_memory_write(
+        cfg,
+        &settings,
+        &plan.source_path,
+        body,
+        &plan.threads,
+        plan.date,
+    )
+    .await?;
     let mut warnings = std::mem::take(&mut prepared.warnings);
 
     let mut tx = pool.begin().await?;
@@ -53,7 +62,7 @@ pub async fn paper_boat_sleep(
     let backup_status = if !request.backup() {
         PaperBoatBackupStatus::NotRequested
     } else {
-        match backup::run_post_write(pool, &cfg.database_url).await {
+        match backup::run_post_write(pool, &cfg.database_url, settings.backup_keep_count).await {
             Ok(()) => PaperBoatBackupStatus::Completed,
             Err(error) => {
                 let warning = format!(

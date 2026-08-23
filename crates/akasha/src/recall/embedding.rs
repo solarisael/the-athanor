@@ -1,4 +1,4 @@
-use crate::config::AppError;
+use crate::config::{AppError, embedding_model_timeout, giga_keep_alive};
 use reqwest::Client;
 use serde::Serialize;
 use std::time::Duration;
@@ -20,6 +20,7 @@ pub(super) async fn embed_texts(
     if texts.is_empty() {
         return Ok(Vec::new());
     }
+    let keep_alive = giga_keep_alive()?;
     // The embedder is on the hot path — every user prompt embeds a query. Ollama's
     // default 5 minute keep_alive evicted it during idle gaps and charged a cold
     // reload on the next turn, which is felt directly as latency. Residency costs
@@ -39,7 +40,7 @@ pub(super) async fn embed_texts(
                 .iter()
                 .map(|text| format!("{prefix}: {text}"))
                 .collect(),
-            keep_alive: "30m",
+            keep_alive: &keep_alive,
         })
         .send()
         .await
@@ -104,7 +105,7 @@ async fn embed_text(
         prefix,
         &[text.to_owned()],
         dim,
-        Duration::from_secs(20),
+        embedding_model_timeout()?,
     )
     .await?
     .into_iter()

@@ -1,6 +1,7 @@
 use super::{RememberReceipt, RememberRequest, normalize_strings};
 use crate::backup;
 use crate::config::{AppError, Config};
+use crate::settings::RoomSettings;
 use hearth::lesson_triggers::LessonTriggerSpec;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -123,6 +124,7 @@ pub(crate) async fn write_project_lesson_tx(
 pub(super) async fn remember_lesson(
     pool: &PgPool,
     cfg: &Config,
+    settings: &RoomSettings,
     req: &RememberRequest,
 ) -> Result<RememberReceipt, AppError> {
     let text = req.lesson_body();
@@ -197,7 +199,8 @@ pub(super) async fn remember_lesson(
             req.kind.as_str(),
             "project-lesson" | "audio-lesson" | "design-lesson"
         )
-        && let Err(error) = backup::run_post_write(pool, &cfg.database_url).await
+        && let Err(error) =
+            backup::run_post_write(pool, &cfg.database_url, settings.backup_keep_count).await
     {
         warnings.push(format!("backup failed: {error}"));
     }

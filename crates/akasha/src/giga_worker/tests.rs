@@ -1,3 +1,12 @@
+use super::bounds::{
+    GIGA_MAX_STORED_RATIONALE_BYTES, GIGA_RATIONALE_TRUNCATION_MARKER, truncate_with_marker,
+};
+use super::identity::{candidate_id, configuration_digest, sha256_bytes};
+use super::ledger::resolve_sources_from_ledger;
+use super::ollama::{OllamaConfig, salvage_json_slice};
+use super::schema::{ExtractionOutput, GateKind, GateOutput, extraction_schema};
+use super::validation::{validate_extraction, validate_gate};
+use super::worker::giga_worker_loop;
 use crate::Config;
 use crate::config::EmbeddingMode;
 use hearth::{
@@ -10,15 +19,6 @@ use std::path::Path;
 use std::{env, time::Duration};
 use tokio::{fs, sync::watch};
 use uuid::Uuid;
-use super::bounds::{
-    GIGA_MAX_STORED_RATIONALE_BYTES, GIGA_RATIONALE_TRUNCATION_MARKER, truncate_with_marker,
-};
-use super::identity::{candidate_id, configuration_digest, sha256_bytes};
-use super::ledger::resolve_sources_from_ledger;
-use super::ollama::{OllamaConfig, salvage_json_slice};
-use super::schema::{ExtractionOutput, GateKind, GateOutput, extraction_schema};
-use super::validation::{validate_extraction, validate_gate};
-use super::worker::giga_worker_loop;
 
 fn conversation_event(
     room: &RoomKey,
@@ -261,9 +261,15 @@ fn candidate_identity_is_deterministic_across_source_order() {
 fn classifier_configuration_digest_includes_normalized_provider_base_path() {
     let first = OllamaConfig {
         endpoint: Url::parse("http://127.0.0.1:11435/route-a").unwrap(),
+        model_timeout: Duration::from_secs(60),
+        keep_alive: "30m".into(),
+        num_ctx: 32_768,
     };
     let second = OllamaConfig {
         endpoint: Url::parse("http://127.0.0.1:11435/route-b").unwrap(),
+        model_timeout: Duration::from_secs(60),
+        keep_alive: "30m".into(),
+        num_ctx: 32_768,
     };
     assert_ne!(
         configuration_digest(&first).unwrap(),

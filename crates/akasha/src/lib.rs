@@ -17,6 +17,7 @@ pub mod migrations;
 mod paper_boat;
 mod recall;
 mod remember;
+pub mod settings;
 pub mod state;
 mod timeline;
 
@@ -55,14 +56,13 @@ pub use health::{
     SubstrateHealthOptions, SubstrateHealthResult, substrate_health, substrate_health_with_config,
 };
 pub use insula::{
-    INSULA_DEFAULT_RETENTION_DAYS, INSULA_MAX_BATCH_EVENTS, INSULA_MAX_RETENTION_ROWS,
-    INSULA_MAX_TRACE_ROWS, INSULA_MAX_VITALS_ROWS, INSULA_QUERY_VERSION, INSULA_SCHEMA_VERSION,
-    IdempotencyScope, IngestBatch, IngestConflict, IngestConflictKind, IngestReceipt, InsulaError,
-    ObservationEvent, ObservationPhase, OutcomeClass, RetentionReadResult, RetentionReceipt,
-    RetentionReceiptRow, RetentionStatus, TraceResult, TraceRow, TraceScope, TrustedBinding,
-    VitalsQuery, VitalsResult, VitalsRow, derive_idempotency_key_v1, derive_semantic_hash_v1,
-    ingest_batch, query_retention, query_trace, query_vitals, run_retention,
-    validate_trusted_binding,
+    INSULA_MAX_BATCH_EVENTS, INSULA_MAX_RETENTION_ROWS, INSULA_MAX_TRACE_ROWS,
+    INSULA_MAX_VITALS_ROWS, INSULA_QUERY_VERSION, INSULA_SCHEMA_VERSION, IdempotencyScope,
+    IngestBatch, IngestConflict, IngestConflictKind, IngestReceipt, InsulaError, ObservationEvent,
+    ObservationPhase, OutcomeClass, RetentionReadResult, RetentionReceipt, RetentionReceiptRow,
+    RetentionStatus, TraceResult, TraceRow, TraceScope, TrustedBinding, VitalsQuery, VitalsResult,
+    VitalsRow, derive_idempotency_key_v1, derive_semantic_hash_v1, ingest_batch, query_retention,
+    query_trace, query_vitals, run_retention, validate_trusted_binding,
 };
 pub use insula_writer::{
     EmitterSpan, end_span, flush_insula_emitter, init_insula_emitter, record_point, start_span,
@@ -81,6 +81,7 @@ pub use lesson::{
 pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
 pub use recall::{RecallParams, RecallResult, recall, refresh_semantic_vocabulary};
 pub use remember::{RememberReceipt, RememberRequest, ThreadContinuation, remember};
+pub use settings::RoomSettings;
 pub use timeline::{
     LessonTimelineItem, LessonTimelineParams, LessonTimelineResult, MemoryReadParams,
     MemoryReadResult, MemoryRecord, MemoryTimelineItem, MemoryTimelineParams, MemoryTimelineResult,
@@ -382,7 +383,7 @@ mod tests {
     }
     #[test]
     fn unicode_chunks_use_utf8_bytes() {
-        let c = chunk_body("éé");
+        let c = chunk_body("éé", &RoomSettings::default());
         assert_eq!((c[0].1, c[0].2), (0, 4));
         assert_eq!(&"éé"[c[0].1..c[0].2], "éé");
         assert!(token_estimate("é") > 0);
@@ -391,7 +392,7 @@ mod tests {
     fn oversized_chunks_preserve_separator_and_span() {
         let first = "a".repeat(2200);
         let body = format!("{first}\n\né{}", "b".repeat(2500));
-        let chunks = chunk_body(&body);
+        let chunks = chunk_body(&body, &RoomSettings::default());
         let (text, start, end, _) = &chunks[1];
         assert_eq!(text, &body[*start..*end]);
         assert!(text.contains("\n\né"));

@@ -1,9 +1,17 @@
+use super::clock::{database_now, timestamp};
+use super::error::domain_error;
+use super::promotion_payload::{
+    normalize_promotion_values, promotion_digest, promotion_sources_json, publication_consent_json,
+};
+use super::promotion_receipt::{idempotent_promotion_receipt, typed_promotion_receipt};
+use super::sources::{candidate_scope, fresh_candidate_sources};
 use crate::{
     AppError,
     config::Config,
     remember::{
         prepare_memory_write, write_coding_lesson_tx, write_memory_tx, write_project_lesson_tx,
     },
+    settings::RoomSettings,
 };
 use chrono::{DateTime, Utc};
 use hearth::{
@@ -13,19 +21,13 @@ use hearth::{
 };
 use serde_json::json;
 use sqlx::{PgPool, Row, types::Json};
-use super::clock::{database_now, timestamp};
-use super::error::domain_error;
-use super::promotion_payload::{
-    normalize_promotion_values, promotion_digest, promotion_sources_json, publication_consent_json,
-};
-use super::promotion_receipt::{idempotent_promotion_receipt, typed_promotion_receipt};
-use super::sources::{candidate_scope, fresh_candidate_sources};
 
 pub async fn giga_promote(
     pool: &PgPool,
     cfg: &Config,
     request: GigaPromotionRequest,
 ) -> Result<GigaPromotionReceipt, AppError> {
+    let settings = RoomSettings::load(pool, request.room().as_str()).await?;
     let request_digest = promotion_digest(&request)?;
     let reviewed_at = timestamp(request.reviewed_at())?;
     let prepared_memory = if let GigaPromotionPayload::Memory(payload) = request.payload() {
@@ -47,6 +49,7 @@ pub async fn giga_promote(
             );
             let prepared = prepare_memory_write(
                 cfg,
+                &settings,
                 &source_path,
                 payload.body(),
                 payload.threads(),

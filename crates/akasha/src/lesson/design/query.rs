@@ -1,10 +1,11 @@
+use super::valid_doc_type;
 use crate::config::AppError;
 use crate::lesson::defaults::default_twelve;
+use crate::settings::RoomSettings;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
-use super::valid_doc_type;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,6 +78,7 @@ pub async fn design_document_query(
             "limit must be an integer from 1 through 50".into(),
         ));
     }
+    let settings = RoomSettings::load(pool, "house").await?;
     let mut qb = QueryBuilder::<Postgres>::new(
         "SELECT id,system,doc_type,name,group_name,\"values\",body,provenance,tags,superseded_by,created_at,updated_at FROM design_documents WHERE system=",
     );
@@ -94,14 +96,18 @@ pub async fn design_document_query(
         qb.push(" AND superseded_by IS NULL");
     }
     if let Some(v) = params.query.as_ref().filter(|v| !v.is_empty()) {
-        qb.push(" AND search_tsv @@ plainto_tsquery('portuguese',")
+        qb.push(" AND search_tsv @@ plainto_tsquery(")
+            .push_bind(settings.house_language.clone())
+            .push("::regconfig,")
             .push_bind(v)
             .push(")");
     }
     let rank = params.query.clone().unwrap_or_default();
     qb.push(" ORDER BY CASE WHEN ")
         .push_bind(rank.clone())
-        .push("<>'' THEN ts_rank(search_tsv,plainto_tsquery('portuguese',")
+        .push("<>'' THEN ts_rank(search_tsv,plainto_tsquery(")
+        .push_bind(settings.house_language)
+        .push("::regconfig,")
         .push_bind(rank)
         .push(")) ELSE 0 END DESC,updated_at DESC,id LIMIT ")
         .push_bind(i64::from(params.limit));

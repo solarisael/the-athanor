@@ -3,6 +3,7 @@ use super::semantic_vocabulary::{
     SEMANTIC_VOCABULARY_MAX_TERMS, SEMANTIC_VOCABULARY_TOP_K, semantic_vocabulary_terms,
 };
 use super::temporal::giga_temporal_factor;
+use crate::settings::RoomSettings;
 use chrono::{Duration, TimeZone, Utc};
 use serde_json::{Value, json};
 
@@ -42,6 +43,7 @@ fn pointer_files_normalize_to_the_recall_wire_contract() {
 #[test]
 fn temporal_factor_treats_unsafe_metadata_as_legacy_weight() {
     let now = Utc.with_ymd_and_hms(2030, 2, 1, 0, 0, 0).single().unwrap();
+    let settings = RoomSettings::default();
     let anchor = (now - Duration::days(7)).to_rfc3339();
     let cases = [
         json!({}),
@@ -57,23 +59,27 @@ fn temporal_factor_treats_unsafe_metadata_as_legacy_weight() {
     ];
 
     for meta in cases {
-        assert_eq!(giga_temporal_factor(&meta, now), (None, 1.0));
+        assert_eq!(giga_temporal_factor(&meta, now, &settings), (None, 1.0));
     }
 }
 
 #[test]
 fn temporal_factor_follows_the_durability_shaped_half_life() {
     let now = Utc.with_ymd_and_hms(2030, 2, 1, 0, 0, 0).single().unwrap();
+    let settings = RoomSettings::default();
     let seven_days_ago = (now - Duration::days(7)).to_rfc3339();
     let twenty_eight_days_ago = (now - Duration::days(28)).to_rfc3339();
 
     let (durability_zero, factor_zero) =
-        giga_temporal_factor(&giga_meta(json!(0.0), &seven_days_ago), now);
+        giga_temporal_factor(&giga_meta(json!(0.0), &seven_days_ago), now, &settings);
     assert_eq!(durability_zero, Some(0.0));
     assert!((factor_zero - 0.5).abs() < 1e-12);
 
-    let (durability_half, factor_half) =
-        giga_temporal_factor(&giga_meta(json!(0.5), &twenty_eight_days_ago), now);
+    let (durability_half, factor_half) = giga_temporal_factor(
+        &giga_meta(json!(0.5), &twenty_eight_days_ago),
+        now,
+        &settings,
+    );
     assert_eq!(durability_half, Some(0.5));
     assert!((factor_half - 0.5).abs() < 1e-12);
 }
@@ -81,15 +87,16 @@ fn temporal_factor_follows_the_durability_shaped_half_life() {
 #[test]
 fn temporal_factor_never_decays_permanent_or_future_memories() {
     let now = Utc.with_ymd_and_hms(2030, 2, 1, 0, 0, 0).single().unwrap();
+    let settings = RoomSettings::default();
     let old_anchor = (now - Duration::days(365)).to_rfc3339();
     let future_anchor = (now + Duration::days(1)).to_rfc3339();
 
     assert_eq!(
-        giga_temporal_factor(&giga_meta(json!(1.0), &old_anchor), now),
+        giga_temporal_factor(&giga_meta(json!(1.0), &old_anchor), now, &settings),
         (Some(1.0), 1.0)
     );
     assert_eq!(
-        giga_temporal_factor(&giga_meta(json!(0.0), &future_anchor), now),
+        giga_temporal_factor(&giga_meta(json!(0.0), &future_anchor), now, &settings),
         (Some(0.0), 1.0)
     );
 }

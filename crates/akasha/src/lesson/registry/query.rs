@@ -1,11 +1,15 @@
+use super::family::LessonFamily;
 use crate::config::{AppError, ROOM_KEY_RE};
 use crate::lesson::defaults::default_twelve;
+use crate::settings::RoomSettings;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::collections::BTreeSet;
-use super::family::LessonFamily;
 
 const LESSON_SELECT: &str = "SELECT id,lesson_key,kind_path,scope,project,voice,register,shape,stage,title,lesson,trigger_context,proof_pattern,example_text,example_cmd,writers,tools,negation_of,language_keys,technology_keys,tags,thread_keys,always_on,condition,ast_condition,trigger_scope,interrupt_mode,repeat_cooldown_secs FROM lessons";
+// Audio lesson vectors are indexed with English stemming; the room language
+// controls every other family, but this asymmetry must stay paired to that index.
+const AUDIO_LESSON_LANGUAGE: &str = "english";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -179,6 +183,7 @@ pub async fn lesson_query(
     params: LessonQueryParams,
 ) -> Result<LessonQueryResult, AppError> {
     params.validate()?;
+    let settings = RoomSettings::load(pool, &params.room).await?;
     let scopes = params.scopes();
     let mut qb = QueryBuilder::<Postgres>::new(LESSON_SELECT);
     qb.push(" WHERE lesson_key = ")
@@ -207,10 +212,27 @@ pub async fn lesson_query(
         qb.push(" AND always_on");
     }
     if let Some(query) = params.query.as_ref().filter(|v| !v.is_empty()) {
-        qb.push(" AND lesson_tsv @@ plainto_tsquery(CASE WHEN lesson_key = 'audio' THEN 'english'::regconfig ELSE 'portuguese'::regconfig END, ").push_bind(query).push(")");
+        qb.push(" AND lesson_tsv @@ plainto_tsquery(CASE WHEN lesson_key = 'audio' THEN ")
+            .push_bind(AUDIO_LESSON_LANGUAGE)
+            .push("::regconfig ELSE ")
+            .push_bind(settings.house_language.clone())
+            .push("::regconfig END, ")
+            .push_bind(query)
+            .push(")");
     }
     let rank = params.query.clone().unwrap_or_default();
-    qb.push(" ORDER BY always_on DESC, CASE WHEN ").push_bind(rank.clone()).push(" <> '' THEN ts_rank(lesson_tsv, plainto_tsquery(CASE WHEN lesson_key = 'audio' THEN 'english'::regconfig ELSE 'portuguese'::regconfig END, ").push_bind(rank).push(")) ELSE 0 END DESC, updated_at DESC, id LIMIT ").push_bind(i64::from(params.limit));
+    qb.push(" ORDER BY always_on DESC, CASE WHEN ")
+        .push_bind(rank.clone())
+        .push(
+            " <> '' THEN ts_rank(lesson_tsv, plainto_tsquery(CASE WHEN lesson_key = 'audio' THEN ",
+        )
+        .push_bind(AUDIO_LESSON_LANGUAGE)
+        .push("::regconfig ELSE ")
+        .push_bind(settings.house_language)
+        .push("::regconfig END, ")
+        .push_bind(rank)
+        .push(")) ELSE 0 END DESC, updated_at DESC, id LIMIT ")
+        .push_bind(i64::from(params.limit));
     let mut lessons = qb
         .build()
         .fetch_all(pool)

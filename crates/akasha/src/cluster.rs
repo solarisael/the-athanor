@@ -1,4 +1,5 @@
 use crate::config::{AppError, EMBED_DIMENSION};
+use crate::settings::RoomSettings;
 use hearth::{
     ClusterExecution, ClusterFreshnessPolicy, ClusterMaintenanceOutcome, ClusterMaintenanceRequest,
     ClusterMaintenanceStatus as DomainClusterMaintenanceStatus,
@@ -16,15 +17,20 @@ pub struct ClusterStaleness {
     pub fraction_unseen: f64,
 }
 
-pub fn cluster_is_stale(staleness: &ClusterStaleness, now: chrono::DateTime<chrono::Utc>) -> bool {
+pub fn cluster_is_stale(
+    staleness: &ClusterStaleness,
+    now: chrono::DateTime<chrono::Utc>,
+    settings: &RoomSettings,
+) -> bool {
     let Some(built_at) = staleness.built_at else {
         return true;
     };
-    let count = staleness.chunks_since_build >= 250;
+    let count = staleness.chunks_since_build >= settings.cluster_stale_chunk_count;
     let fraction = staleness.chunks_total > 0
-        && (staleness.chunks_since_build as f64 / staleness.chunks_total as f64) >= 0.05;
-    let age =
-        now.signed_duration_since(built_at).num_days() >= 7 && staleness.chunks_since_build > 0;
+        && (staleness.chunks_since_build as f64 / staleness.chunks_total as f64)
+            >= settings.cluster_stale_fraction;
+    let age = now.signed_duration_since(built_at).num_days() >= settings.cluster_stale_days
+        && staleness.chunks_since_build > 0;
     count || fraction || age
 }
 
@@ -209,8 +215,9 @@ pub async fn cluster_maintenance(
     pool: &PgPool,
     command: ClusterMaintenanceRequest,
 ) -> Result<ClusterMaintenanceOutcome, AppError> {
+    let settings = RoomSettings::load(pool, "house").await?;
     let stale_info = cluster_staleness(pool, None).await?;
-    let stale = cluster_is_stale(&stale_info, chrono::Utc::now());
+    let stale = cluster_is_stale(&stale_info, chrono::Utc::now(), &settings);
     let status = maintenance_status(stale_info, stale)?;
 
     match command {
@@ -350,6 +357,7 @@ mod cluster_tests {
     #[test]
     fn stale_policy_boundaries_and_never_built() {
         let now = chrono::Utc::now();
+        let settings = RoomSettings::default();
         assert!(cluster_is_stale(
             &ClusterStaleness {
                 built_at: None,
@@ -358,7 +366,8 @@ mod cluster_tests {
                 chunks_since_build: 0,
                 fraction_unseen: 0.0
             },
-            now
+            now,
+            &settings,
         ));
         assert!(!cluster_is_stale(
             &ClusterStaleness {
@@ -368,7 +377,8 @@ mod cluster_tests {
                 chunks_since_build: 4,
                 fraction_unseen: 0.04
             },
-            now
+            now,
+            &settings,
         ));
         assert!(cluster_is_stale(
             &ClusterStaleness {
@@ -378,7 +388,8 @@ mod cluster_tests {
                 chunks_since_build: 5,
                 fraction_unseen: 0.05
             },
-            now
+            now,
+            &settings,
         ));
         assert!(cluster_is_stale(
             &ClusterStaleness {
@@ -388,7 +399,8 @@ mod cluster_tests {
                 chunks_since_build: 1,
                 fraction_unseen: 0.001
             },
-            now
+            now,
+            &settings,
         ));
     }
     #[test]

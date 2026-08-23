@@ -5,6 +5,15 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# The shapes speak house-core's request and receipt vocabulary, digest
+# with sha2, and read and write PostgreSQL directly. Origami never
+# depends on house-substrate or house-delivery: the arrows point here.
+chrono.workspace = true
+house-core = { path = "../house-core" }
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
 
 [lib]
 name = "origami"

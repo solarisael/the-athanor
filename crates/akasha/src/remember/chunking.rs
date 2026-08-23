@@ -1,4 +1,9 @@
-pub(crate) fn chunk_body(body: &str) -> Vec<(String, usize, usize, Option<String>)> {
+use crate::settings::RoomSettings;
+
+pub(crate) fn chunk_body(
+    body: &str,
+    settings: &RoomSettings,
+) -> Vec<(String, usize, usize, Option<String>)> {
     if body.is_empty() {
         return vec![];
     }
@@ -39,7 +44,7 @@ pub(crate) fn chunk_body(body: &str) -> Vec<(String, usize, usize, Option<String
     let mut out = Vec::new();
     for (start, end, heading) in sections {
         let text: String = chars[start..end].iter().collect();
-        if text.chars().count() <= 4000 {
+        if text.chars().count() <= settings.remember_section_split_chars {
             if !text.trim().is_empty() {
                 out.push((text, byte_at(start), byte_at(end), Some(heading)));
             }
@@ -58,9 +63,11 @@ pub(crate) fn chunk_body(body: &str) -> Vec<(String, usize, usize, Option<String
         let mut buf_start = paragraphs[0].0;
         let mut buf_end = paragraphs[0].1;
         for &(paragraph_start, paragraph_end) in paragraphs.iter().skip(1) {
-            if buf_end - buf_start + (paragraph_end - paragraph_start) + 2 > 2200 {
+            if buf_end - buf_start + (paragraph_end - paragraph_start) + 2
+                > settings.remember_chunk_chars
+            {
                 pieces.push((buf_start, buf_end));
-                buf_start = buf_end.saturating_sub(200);
+                buf_start = buf_end.saturating_sub(settings.remember_chunk_overlap_chars);
                 buf_end = paragraph_end;
             } else {
                 buf_end = paragraph_end;

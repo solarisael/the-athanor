@@ -1,6 +1,7 @@
 use crate::backup;
 use crate::config::{AppError, Config, EmbeddingMode, HTTP_CLIENT, ROOM_KEY_RE};
 use crate::remember::{default_backup, embed};
+use crate::settings::RoomSettings;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
@@ -165,6 +166,7 @@ pub async fn anamnesis_write(
     req: AnamnesisWrite,
 ) -> Result<AnamnesisReceipt, AppError> {
     validate_anamnesis_room(&req.room)?;
+    let settings = RoomSettings::load(pool, &req.room).await?;
     let mut warnings = Vec::new();
     let mut tx = pool.begin().await?;
     let (id, kind, rep_number);
@@ -278,7 +280,8 @@ pub async fn anamnesis_write(
     }
     tx.commit().await?;
     if req.backup
-        && let Err(error) = backup::run_post_write(pool, &cfg.database_url).await
+        && let Err(error) =
+            backup::run_post_write(pool, &cfg.database_url, settings.backup_keep_count).await
     {
         warnings.push(format!("backup failed: {error}"));
     }
@@ -310,6 +313,7 @@ pub async fn anamnesis(
     params: AnamnesisParams,
 ) -> Result<AnamnesisResult, AppError> {
     let (mode, limit) = params.validate()?;
+    let settings = RoomSettings::load(pool, &params.room).await?;
     let rooms = if params.room == "house" {
         vec!["house".to_string()]
     } else {
@@ -318,7 +322,7 @@ pub async fn anamnesis(
     let rows = if mode == "wake" {
         sqlx::query("SELECT id,room,kind,fidelity,activation,active,title,shape,peak,beginning,ramp,counsel,verify_note,source_paths,canon_links,tags FROM anamnesis WHERE room=ANY($1::text[]) AND ((kind='pillar' AND activation='wake') OR (kind='cycle' AND activation='wake' AND active)) ORDER BY CASE WHEN kind='pillar' THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT $2").bind(&rooms).bind(limit as i64).fetch_all(pool).await?
     } else {
-        sqlx::query("SELECT id,room,kind,fidelity,activation,active,title,shape,peak,beginning,ramp,counsel,verify_note,source_paths,canon_links,tags FROM anamnesis WHERE room=ANY($1::text[]) AND (body_tsv @@ plainto_tsquery('portuguese',$2) OR lower(title||' '||coalesce(shape,'')||' '||ramp||' '||coalesce(counsel,'')||' '||coalesce(peak,'')||' '||array_to_string(canon_links,' ')||' '||array_to_string(tags,' ')) LIKE '%'||lower($2)||'%') ORDER BY (ts_rank_cd(body_tsv, plainto_tsquery('portuguese',$2)) * 10 + similarity(lower(title||' '||coalesce(shape,'')||' '||ramp||' '||coalesce(counsel,'')||' '||coalesce(peak,'')||' '||array_to_string(canon_links,' ')||' '||array_to_string(tags,' ')), lower($2))) DESC, updated_at DESC,title LIMIT $3").bind(&rooms).bind(&params.query).bind(limit as i64).fetch_all(pool).await?
+        sqlx::query("SELECT id,room,kind,fidelity,activation,active,title,shape,peak,beginning,ramp,counsel,verify_note,source_paths,canon_links,tags FROM anamnesis WHERE room=ANY($1::text[]) AND (body_tsv @@ plainto_tsquery($4::regconfig,$2) OR lower(title||' '||coalesce(shape,'')||' '||ramp||' '||coalesce(counsel,'')||' '||coalesce(peak,'')||' '||array_to_string(canon_links,' ')||' '||array_to_string(tags,' ')) LIKE '%'||lower($2)||'%') ORDER BY (ts_rank_cd(body_tsv, plainto_tsquery($4::regconfig,$2)) * 10 + similarity(lower(title||' '||coalesce(shape,'')||' '||ramp||' '||coalesce(counsel,'')||' '||coalesce(peak,'')||' '||array_to_string(canon_links,' ')||' '||array_to_string(tags,' ')), lower($2))) DESC, updated_at DESC,title LIMIT $3").bind(&rooms).bind(&params.query).bind(limit as i64).bind(&settings.house_language).fetch_all(pool).await?
     };
     let mut entries = Vec::new();
     let mut warnings = Vec::new();

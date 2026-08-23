@@ -6,6 +6,7 @@ use crate::bm25f::{
     TITLE as BM25F_TITLE,
 };
 use crate::config::AppError;
+use crate::settings::RoomSettings;
 use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, BTreeSet};
@@ -29,6 +30,7 @@ pub(super) async fn load_bm25f_candidates_for_terms(
     terms: &[String],
     temporal_decay: bool,
     decay_now: DateTime<Utc>,
+    settings: &RoomSettings,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     if terms.is_empty() {
@@ -211,7 +213,7 @@ pub(super) async fn load_bm25f_candidates_for_terms(
         }
         let meta: serde_json::Value = row.try_get("meta")?;
         let (durability, temporal_weight) = if temporal_decay {
-            giga_temporal_factor(&meta, decay_now)
+            giga_temporal_factor(&meta, decay_now, settings)
         } else {
             (None, 1.0)
         };
@@ -254,6 +256,7 @@ pub(super) async fn load_bm25f_candidates(
     query: &str,
     temporal_decay: bool,
     decay_now: DateTime<Utc>,
+    settings: &RoomSettings,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     load_bm25f_candidates_for_terms(
@@ -262,6 +265,7 @@ pub(super) async fn load_bm25f_candidates(
         &bm25f::query_terms(query),
         temporal_decay,
         decay_now,
+        settings,
         warnings,
     )
     .await

@@ -1,14 +1,13 @@
-use crate::config::HTTP_CLIENT;
+use super::enablement::classifier_enabled;
+use super::failure::{WorkerFailure, WorkerFailureKind};
+use super::identity::{GIGA_MODEL_MANIFEST_DIGEST, GIGA_MODEL_TAG};
+use crate::config::{HTTP_CLIENT, giga_keep_alive, giga_model_timeout, giga_num_ctx};
 use reqwest::{RequestBuilder, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json, value::RawValue};
 use std::{env, time::Duration};
-use super::enablement::classifier_enabled;
-use super::failure::{WorkerFailure, WorkerFailureKind};
-use super::identity::{GIGA_MODEL_MANIFEST_DIGEST, GIGA_MODEL_TAG};
 
 pub(super) const GIGA_DEFAULT_OLLAMA_ENDPOINT: &str = "http://127.0.0.1:11434";
-const GIGA_MODEL_TIMEOUT: Duration = Duration::from_secs(60);
 const GIGA_MAX_OLLAMA_RESPONSE_BYTES: usize = 64 * 1024;
 const GIGA_MAX_MESSAGE_BYTES: usize = 16 * 1024;
 
@@ -25,16 +24,13 @@ const GIGA_MAX_MESSAGE_BYTES: usize = 16 * 1024;
 // The headroom above the window is deliberate. Classification is meant to receive
 // retrieved neighbour memories so that `novelty` is measured against what the
 // House already holds rather than asserted by a model with no past.
-pub(super) const GIGA_NUM_CTX: u32 = 32_768;
-
-// Ollama defaults to a 5 minute keep_alive, which evicted both models during idle
-// gaps and charged a cold reload on the next turn. Lower this if the card is
-// needed elsewhere; residency is a comfort setting, not a correctness one.
-const GIGA_KEEP_ALIVE: &str = "30m";
 
 #[derive(Clone)]
 pub(super) struct OllamaConfig {
     pub(super) endpoint: Url,
+    pub(super) model_timeout: Duration,
+    pub(super) keep_alive: String,
+    pub(super) num_ctx: u32,
 }
 
 pub(super) fn is_loopback(endpoint: &Url) -> bool {
@@ -75,7 +71,15 @@ pub(super) fn ollama_config() -> Result<OllamaConfig, WorkerFailure> {
     } else {
         &normalized_path
     });
-    Ok(OllamaConfig { endpoint })
+    Ok(OllamaConfig {
+        endpoint,
+        model_timeout: giga_model_timeout()
+            .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaConfiguration))?,
+        keep_alive: giga_keep_alive()
+            .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaConfiguration))?,
+        num_ctx: giga_num_ctx()
+            .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaConfiguration))?,
+    })
 }
 
 fn ollama_url(config: &OllamaConfig, suffix: &str) -> Result<Url, WorkerFailure> {
@@ -84,9 +88,12 @@ fn ollama_url(config: &OllamaConfig, suffix: &str) -> Result<Url, WorkerFailure>
         .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaConfiguration))
 }
 
-async fn bounded_response(request: RequestBuilder) -> Result<String, WorkerFailure> {
+async fn bounded_response(
+    request: RequestBuilder,
+    timeout: Duration,
+) -> Result<String, WorkerFailure> {
     let mut response = request
-        .timeout(GIGA_MODEL_TIMEOUT)
+        .timeout(timeout)
         .send()
         .await
         .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaTransport))?;
@@ -117,7 +124,11 @@ async fn bounded_response(request: RequestBuilder) -> Result<String, WorkerFailu
 }
 
 pub(super) async fn verify_ollama_model(config: &OllamaConfig) -> Result<(), WorkerFailure> {
-    let body = bounded_response(HTTP_CLIENT.get(ollama_url(config, "/api/tags")?)).await?;
+    let body = bounded_response(
+        HTTP_CLIENT.get(ollama_url(config, "/api/tags")?),
+        config.model_timeout,
+    )
+    .await?;
     let value: Value = serde_json::from_str(&body)
         .map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaResponse))?;
     let models = value
@@ -161,7 +172,7 @@ struct OllamaRequest<'a> {
     stream: bool,
     think: bool,
     format: &'a RawValue,
-    keep_alive: &'static str,
+    keep_alive: &'a str,
     options: OllamaOptions,
 }
 
@@ -185,11 +196,11 @@ pub(super) async fn request_ollama_structured<T: for<'de> Deserialize<'de>>(
         stream: false,
         think: false,
         format: schema.as_ref(),
-        keep_alive: GIGA_KEEP_ALIVE,
+        keep_alive: &config.keep_alive,
         options: OllamaOptions {
             temperature: 0,
             seed: 42,
-            num_ctx: GIGA_NUM_CTX,
+            num_ctx: config.num_ctx,
             num_predict,
         },
     };
@@ -198,6 +209,7 @@ pub(super) async fn request_ollama_structured<T: for<'de> Deserialize<'de>>(
             .post(ollama_url(config, "/api/chat")?)
             .header("content-type", "application/json")
             .json(&request),
+        config.model_timeout,
     )
     .await?;
     let envelope: Value = serde_json::from_str(&body)

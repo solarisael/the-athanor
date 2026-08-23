@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
+use percent_encoding::percent_decode_str;
 use protocol::{
     DiagnosticCategory, DiagnosticDetails, DiagnosticEvidence, DiagnosticExecution,
     DiagnosticNextCheck, DiagnosticOwner, DiagnosticRetry, DiagnosticStage, DiagnosticTarget,
     DiagnosticTargetKind, DiagnosticWriteOutcome,
 };
-use percent_encoding::percent_decode_str;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -700,11 +700,15 @@ pub fn backup_health_in(
         error: (!problems.is_empty()).then(|| problems.join("; ")),
     })
 }
-pub async fn run_post_write(pool: &PgPool, database_url: &str) -> Result<(), BackupError> {
+pub async fn run_post_write(
+    pool: &PgPool,
+    database_url: &str,
+    room_keep: usize,
+) -> Result<(), BackupError> {
     let keep = env::var("SOLARISAEL_BACKUP_KEEP")
         .ok()
         .and_then(|x| x.parse().ok())
-        .unwrap_or(3);
+        .unwrap_or(room_keep);
     let source = source_migrations(pool).await?;
     backup_with_migrations(database_url, &default_backup_dir()?, keep, source).map(|_| ())
 }

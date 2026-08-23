@@ -2,6 +2,7 @@ use super::{
     ThreadContinuation, chunk_body, derive_dates, embed, normalize_threads, token_estimate,
 };
 use crate::config::{AppError, Config, EmbeddingMode, HTTP_CLIENT};
+use crate::settings::RoomSettings;
 use chrono::NaiveDate;
 use serde_json::Value;
 use sqlx::{Postgres, Transaction};
@@ -18,6 +19,7 @@ pub(crate) struct PreparedMemoryWrite {
 
 pub(crate) async fn prepare_memory_write(
     cfg: &Config,
+    settings: &RoomSettings,
     source_path: &str,
     body: &str,
     threads: &[String],
@@ -25,7 +27,7 @@ pub(crate) async fn prepare_memory_write(
 ) -> Result<PreparedMemoryWrite, AppError> {
     let threads = normalize_threads(threads);
     let dates = derive_dates(source_path, primary_date);
-    let chunks = chunk_body(body);
+    let chunks = chunk_body(body, settings);
     let mut warnings = Vec::new();
     let vectors = match cfg.embedding_mode {
         EmbeddingMode::Disabled => {

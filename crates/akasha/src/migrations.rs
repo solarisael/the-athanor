@@ -136,6 +136,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0025_docket_draft_abandon.sql",
         sql: include_str!("../../../substrate/migrations/0025_docket_draft_abandon.sql"),
     },
+    Migration {
+        version: 26,
+        name: "0026_room_settings.sql",
+        sql: include_str!("../../../substrate/migrations/0026_room_settings.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

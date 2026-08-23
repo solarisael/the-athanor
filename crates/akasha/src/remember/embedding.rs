@@ -1,7 +1,6 @@
-use crate::config::AppError;
+use crate::config::{AppError, embedding_model_timeout};
 use reqwest::Client;
 use serde::Serialize;
-use std::time::Duration;
 
 pub(crate) async fn embed(
     client: &Client,
@@ -18,7 +17,7 @@ pub(crate) async fn embed(
     let input = chunks.iter().map(|x| format!("passage: {}", x.0)).collect();
     let value: serde_json::Value = client
         .post(url)
-        .timeout(Duration::from_secs(20))
+        .timeout(embedding_model_timeout()?)
         .json(&Input { model, input })
         .send()
         .await

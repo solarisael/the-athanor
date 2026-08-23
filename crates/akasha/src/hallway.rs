@@ -39,7 +39,8 @@ pub async fn hallway_post(
     config: &Config,
     request: HallwayPostRequest,
 ) -> Result<HallwayPostReceipt, AppError> {
-    messages::post(pool, &config.house_tz, request)
+    let house_tz = config.house_timezone(pool, &request.room).await?;
+    messages::post(pool, &house_tz, request)
         .await
         .map_err(app_error)
 }

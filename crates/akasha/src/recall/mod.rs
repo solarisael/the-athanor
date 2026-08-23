@@ -14,6 +14,7 @@ use crate::cluster::{cluster_resonance, cluster_staleness};
 use crate::config::{
     AppError, Config, EMBED_DIMENSION, EmbeddingMode, HTTP_CLIENT, QUERY_DATE_RE, ROOM_KEY_RE,
 };
+use crate::settings::RoomSettings;
 use bm25f_candidates::{load_bm25f_candidates, load_bm25f_candidates_for_terms};
 use chrono::{NaiveDate, Utc};
 use embedding::embed_query;
@@ -38,6 +39,8 @@ fn default_semantic_min_similarity() -> f64 {
 fn default_content_top_k() -> u32 {
     8
 }
+// enough: this floor is calibrated to the lexical matcher; re-measure the
+// corpus before raising it so configuration cannot manufacture false certainty.
 fn default_content_min_similarity() -> f64 {
     0.30
 }
@@ -198,6 +201,7 @@ pub async fn recall(
     params: RecallParams,
 ) -> Result<RecallResult, AppError> {
     params.validate()?;
+    let settings = RoomSettings::load(pool, &params.room).await?;
     let query_dates = query_dates(&params.query);
     let query_terms = query_terms(&params.query);
     let content_patterns = query_terms
@@ -249,6 +253,7 @@ pub async fn recall(
         &params.query,
         params.temporal_decay,
         decay_now,
+        &settings,
         &mut warnings,
     )
     .await?;
@@ -270,6 +275,7 @@ pub async fn recall(
         &semantic_vocabulary_terms,
         params.temporal_decay,
         decay_now,
+        &settings,
         &mut warnings,
     )
     .await?;
@@ -316,7 +322,7 @@ pub async fn recall(
             let body: String = row.try_get("body")?;
             let meta: serde_json::Value = row.try_get("meta")?;
             let (durability, temporal_weight) = if params.temporal_decay {
-                giga_temporal_factor(&meta, decay_now)
+                giga_temporal_factor(&meta, decay_now, &settings)
             } else {
                 (None, 1.0)
             };
@@ -394,7 +400,7 @@ pub async fn recall(
         let body: String = row.try_get("body")?;
         let meta: serde_json::Value = row.try_get("meta")?;
         let (durability, temporal_weight) = if params.temporal_decay {
-            giga_temporal_factor(&meta, decay_now)
+            giga_temporal_factor(&meta, decay_now, &settings)
         } else {
             (None, 1.0)
         };
@@ -476,7 +482,8 @@ pub async fn recall(
             c["memory_id"].as_i64().unwrap_or(0),
             c["chunk_index"].as_i64().unwrap_or(0)
         );
-        let score = (c["sim"].as_f64().unwrap_or(0.0) * 0.6 + 1.0 / (rank as f64 + 1.0) * 0.4)
+        let score = (c["sim"].as_f64().unwrap_or(0.0) * settings.recall_semantic_similarity_weight
+            + 1.0 / (rank as f64 + 1.0) * settings.recall_semantic_rank_weight)
             * c["temporal_weight"].as_f64().unwrap_or(1.0);
         let mut reasons = vec!["semantic cosine similarity"];
         if c["temporal_weight"].as_f64().unwrap_or(1.0) < 1.0 {
@@ -490,7 +497,8 @@ pub async fn recall(
             c["memory_id"].as_i64().unwrap_or(0),
             c["chunk_index"].as_i64().unwrap_or(0)
         );
-        let score = (c["ws"].as_f64().unwrap_or(0.0) * 0.6 + 1.0 / (rank as f64 + 1.0) * 0.4)
+        let score = (c["ws"].as_f64().unwrap_or(0.0) * settings.recall_content_similarity_weight
+            + 1.0 / (rank as f64 + 1.0) * settings.recall_content_rank_weight)
             * c["temporal_weight"].as_f64().unwrap_or(1.0);
         let decayed = c["temporal_weight"].as_f64().unwrap_or(1.0) < 1.0;
         let decay_reason = if decayed {
@@ -602,7 +610,8 @@ pub async fn recall(
             continue;
         }
         let normalized = weighted_lane_score(candidate, "bm25f_score") / max_semantic_lexical_score;
-        let lane_score = normalized * 0.15 + 1.0 / (rank as f64 + 1.0) * 0.05;
+        let lane_score = normalized * settings.recall_semantic_lexical_score_weight
+            + 1.0 / (rank as f64 + 1.0) * settings.recall_semantic_lexical_rank_weight;
         let chunk_index = candidate["chunk_index"].as_i64().unwrap_or_default();
         fused.insert(
             format!("{memory_id}#{chunk_index}"),
@@ -637,7 +646,7 @@ pub async fn recall(
         let rank: f64 = row.try_get("rank")?;
         // A named thread is a deliberate authoring act, so it carries weight even when
         // trigram similarity is low; the floor keeps a real key from scoring as noise.
-        let score = 0.35 + rank * 0.55;
+        let score = settings.recall_thread_base_weight + rank * settings.recall_thread_rank_weight;
         if let Some(existing) = fused
             .values_mut()
             .find(|entry| entry["memory_id"].as_i64() == Some(memory_id))
@@ -687,8 +696,8 @@ pub async fn recall(
     // caller literally named. So: whole-phrase exact, then token exact, then
     // similarity — and only the last tier competes for leftover LIMIT slots.
     let query_phrase = params.query.trim().to_lowercase();
-    let canon_rows = sqlx::query("SELECT name,kind,summary,aliases,weighty,pointer_files, (CASE WHEN lower(name) = $5 OR EXISTS (SELECT 1 FROM unnest(aliases) a1 WHERE lower(a1) = $5) THEN 0 WHEN lower(name) = ANY($2::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) a2 WHERE lower(a2) = ANY($2::text[])) THEN 1 ELSE 2 END) AS exactness FROM named_entities, websearch_to_tsquery('portuguese', $3) AS tsq WHERE room = ANY($1::text[]) AND authority = 'active' AND (lower(name) = $5 OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = $5) OR lower(name) = ANY($2::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = ANY($2::text[])) OR name ILIKE ANY($4::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE alias ILIKE ANY($4::text[])) OR summary_tsv @@ tsq) ORDER BY exactness, weighty DESC, name LIMIT 12")
-        .bind(&rooms).bind(&query_terms).bind(&params.query).bind(&content_patterns).bind(&query_phrase).fetch_all(pool).await?;
+    let canon_rows = sqlx::query("SELECT name,kind,summary,aliases,weighty,pointer_files, (CASE WHEN lower(name) = $5 OR EXISTS (SELECT 1 FROM unnest(aliases) a1 WHERE lower(a1) = $5) THEN 0 WHEN lower(name) = ANY($2::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) a2 WHERE lower(a2) = ANY($2::text[])) THEN 1 ELSE 2 END) AS exactness FROM named_entities, websearch_to_tsquery($6::regconfig, $3) AS tsq WHERE room = ANY($1::text[]) AND authority = 'active' AND (lower(name) = $5 OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = $5) OR lower(name) = ANY($2::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = ANY($2::text[])) OR name ILIKE ANY($4::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE alias ILIKE ANY($4::text[])) OR summary_tsv @@ tsq) ORDER BY exactness, weighty DESC, name LIMIT 12")
+        .bind(&rooms).bind(&query_terms).bind(&params.query).bind(&content_patterns).bind(&query_phrase).bind(&settings.house_language).fetch_all(pool).await?;
     let mut canon_matches = Vec::new();
     let mut named_entities = Vec::new();
     for row in canon_rows {

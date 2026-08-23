@@ -19,8 +19,8 @@ pub use ingest::{
     ingest_batch,
 };
 pub use retention::{
-    INSULA_DEFAULT_RETENTION_DAYS, INSULA_MAX_RETENTION_ROWS, RetentionReadResult,
-    RetentionReceipt, RetentionReceiptRow, RetentionStatus, query_retention, run_retention,
+    INSULA_MAX_RETENTION_ROWS, RetentionReadResult, RetentionReceipt, RetentionReceiptRow,
+    RetentionStatus, query_retention, run_retention,
 };
 pub use trace::{INSULA_MAX_TRACE_ROWS, TraceResult, TraceRow, TraceScope, query_trace};
 pub use version::{INSULA_QUERY_VERSION, INSULA_SCHEMA_VERSION};

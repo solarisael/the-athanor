@@ -10,10 +10,9 @@ use super::hash::{hf, hp, hs};
 use super::lock::lock;
 use super::vitals::VITALS;
 
-pub const INSULA_DEFAULT_RETENTION_DAYS: i16 = 14;
 // enough: retention sweeps are one receipt per House per cutoff minute, so a
-// hundred newest-first rows already reach far past the 14-day raw window;
-// upgrade path is a keyset cursor on (created_at, receipt_id), not a bigger cap.
+// hundred newest-first rows reach far past the configured raw window; upgrade
+// path is a keyset cursor on (created_at, receipt_id), not a bigger cap.
 pub const INSULA_MAX_RETENTION_ROWS: u32 = 100;
 const RETENTION: &str = "insula.retention.raw_delete";
 const RETENTION_READ: &str = "insula.retention.receipts";
@@ -162,7 +161,7 @@ pub async fn run_retention(
     cutoff: DateTime<Utc>,
     days: i16,
 ) -> Result<RetentionReceipt, InsulaError> {
-    if !is_house(house_id) || days != INSULA_DEFAULT_RETENTION_DAYS || cutoff > Utc::now() {
+    if !is_house(house_id) || days <= 0 || cutoff > Utc::now() {
         return Err(bad("retention", "invalid_request"));
     }
     let cutoff = cutoff

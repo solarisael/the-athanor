@@ -1,3 +1,4 @@
+use crate::settings::RoomSettings;
 use hearth::conversation::source_ledger_directory_path;
 use protocol::{
     DiagnosticCategory, DiagnosticDetails, DiagnosticEvidence, DiagnosticExecution,
@@ -23,6 +24,10 @@ use thiserror::Error;
 
 const DEFAULT_EMBED_URL: &str = "http://127.0.0.1:11434/api/embed";
 const DEFAULT_EMBED_MODEL: &str = "hf.co/zenmagnets/Nemotron-3-Embed-1B-Q4_K_M-GGUF:latest";
+const DEFAULT_GIGA_MODEL_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_GIGA_KEEP_ALIVE: &str = "30m";
+const DEFAULT_GIGA_NUM_CTX: u32 = 32_768;
+const DEFAULT_EMBEDDING_MODEL_TIMEOUT_SECS: u64 = 20;
 pub(crate) const EMBED_DIMENSION: usize = 2048;
 pub(crate) static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 pub(crate) static ROOM_KEY_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -82,8 +87,8 @@ pub struct Config {
     pub embedding_mode: EmbeddingMode,
     pub giga_source_ledger_dir: Option<PathBuf>,
     pub giga_source_room: Option<String>,
-    /// House-local timezone for Hallway daily threads. Explicit runtime
-    /// authority per house memory #3676; the default is operator-confirmed.
+    /// Environment override for Hallway daily threads. Empty means the typed
+    /// room setting is read at the call door before its default is used.
     pub house_tz: String,
 }
 
@@ -103,7 +108,10 @@ const EMBEDDING_ENV_KEYS: &[&str] = &[
     "SOLARISAEL_EMBED_DIMENSION",
     "SOLARISAEL_DISABLE_EMBEDDING",
     "SOLARISAEL_TEST_DISABLE_EMBEDDING",
+    "EMBEDDING_MODEL_TIMEOUT",
 ];
+const GIGA_ENV_KEYS: &[&str] = &["GIGA_MODEL_TIMEOUT", "GIGA_KEEP_ALIVE", "GIGA_NUM_CTX"];
+const HOUSE_ENV_KEYS: &[&str] = &["SOLARISAEL_HOUSE_TZ"];
 const GIGA_SOURCE_ENV_KEYS: &[&str] = &[
     "SOLARISAEL_GIGA_SOURCE_LEDGER_DIR",
     "SOLARISAEL_GIGA_SOURCE_ROOM",
@@ -179,11 +187,54 @@ fn configured_value(key: &str, dotenv: &Dotenv) -> Option<String> {
     env::var(key).ok().or_else(|| dotenv.value(key))
 }
 
+fn deployment_value(key: &str, default: &str) -> String {
+    configured_value(key, &Dotenv::load(dotenv_target())).unwrap_or_else(|| default.into())
+}
+
+fn deployment_positive_u64(key: &str, default: u64) -> Result<u64, AppError> {
+    let raw = deployment_value(key, &default.to_string());
+    raw.parse()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| AppError::Config(format!("{key} must be a positive integer")))
+}
+
+pub(crate) fn giga_model_timeout() -> Result<Duration, AppError> {
+    deployment_positive_u64("GIGA_MODEL_TIMEOUT", DEFAULT_GIGA_MODEL_TIMEOUT_SECS)
+        .map(Duration::from_secs)
+}
+
+pub(crate) fn giga_keep_alive() -> Result<String, AppError> {
+    let value = deployment_value("GIGA_KEEP_ALIVE", DEFAULT_GIGA_KEEP_ALIVE);
+    if value.trim().is_empty() || value.len() > 64 {
+        return Err(AppError::Config(
+            "GIGA_KEEP_ALIVE must be a non-empty value of at most 64 bytes".into(),
+        ));
+    }
+    Ok(value)
+}
+
+pub(crate) fn giga_num_ctx() -> Result<u32, AppError> {
+    let value = deployment_positive_u64("GIGA_NUM_CTX", u64::from(DEFAULT_GIGA_NUM_CTX))?;
+    u32::try_from(value)
+        .map_err(|_| AppError::Config("GIGA_NUM_CTX must fit an unsigned 32-bit integer".into()))
+}
+
+pub(crate) fn embedding_model_timeout() -> Result<Duration, AppError> {
+    deployment_positive_u64(
+        "EMBEDDING_MODEL_TIMEOUT",
+        DEFAULT_EMBEDDING_MODEL_TIMEOUT_SECS,
+    )
+    .map(Duration::from_secs)
+}
+
 fn configuration_observed(dotenv: &Dotenv, reason: &str) -> Value {
     let keys = DATABASE_ENV_KEYS
         .iter()
         .chain(EMBEDDING_ENV_KEYS)
         .chain(GIGA_SOURCE_ENV_KEYS)
+        .chain(GIGA_ENV_KEYS)
+        .chain(HOUSE_ENV_KEYS)
         .copied()
         .collect::<BTreeSet<_>>();
     let dotenv_present_keys = keys
@@ -846,9 +897,15 @@ impl Config {
                         .map(|room| source_ledger_directory_path(&room))
                 }),
             giga_source_room: configured_value("SOLARISAEL_GIGA_SOURCE_ROOM", &dotenv),
-            house_tz: configured_value("SOLARISAEL_HOUSE_TZ", &dotenv)
-                .unwrap_or_else(|| "America/Sao_Paulo".into()),
+            house_tz: configured_value("SOLARISAEL_HOUSE_TZ", &dotenv).unwrap_or_default(),
         })
+    }
+
+    pub async fn house_timezone(&self, pool: &PgPool, room: &str) -> Result<String, AppError> {
+        if !self.house_tz.trim().is_empty() {
+            return Ok(self.house_tz.clone());
+        }
+        Ok(RoomSettings::load(pool, room).await?.house_tz)
     }
 
     pub async fn pool(&self) -> Result<PgPool, AppError> {

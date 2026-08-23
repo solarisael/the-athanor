@@ -1,6 +1,4 @@
-use akasha::backup::{
-    BackupError, backup_with_migrations, restore_checked, source_migrations,
-};
+use akasha::backup::{BackupError, backup_with_migrations, restore_checked, source_migrations};
 use akasha::insula_writer::{
     end_span, flush_insula_emitter, init_insula_emitter, record_point, start_span, system_binding,
 };
@@ -45,7 +43,6 @@ use protocol::{
     ResponseEnvelope, ResponsePayload, SubstrateHealthParams, SubstrateMigrationsParams,
     VaultRecallParams, success,
 };
-use vault::{VaultRecallRequest, recall as vault_recall};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -54,6 +51,7 @@ use std::{
     process::{Child, Command, Stdio},
 };
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use vault::{VaultRecallRequest, recall as vault_recall};
 
 #[derive(Debug)]
 enum ProtocolRequest {
@@ -946,6 +944,13 @@ fn spawn_retention_service() {
                     continue;
                 }
             };
+            let settings = match akasha::RoomSettings::load(&pool, "house").await {
+                Ok(settings) => settings,
+                Err(error) => {
+                    tracing::warn!(error = %error, "retention_settings_unavailable");
+                    continue;
+                }
+            };
 
             let span = akasha::insula_writer::start_span(
                 &binding,
@@ -957,16 +962,12 @@ fn spawn_retention_service() {
                 &pool,
                 "solarisael",
                 retention_cutoff(Utc::now()),
-                14,
+                settings.insula_retention_days,
             )
             .await
             {
                 Ok(receipt) => {
-                    akasha::insula_writer::end_span(
-                        span,
-                        akasha::OutcomeClass::Ok,
-                        None,
-                    );
+                    akasha::insula_writer::end_span(span, akasha::OutcomeClass::Ok, None);
                     if let Some(receipt_id) = receipt.receipt_id.as_deref() {
                         akasha::insula_writer::record_point(
                             &binding,
@@ -981,11 +982,7 @@ fn spawn_retention_service() {
                 }
                 Err(error) => {
                     let class = retention_error_class(&error);
-                    akasha::insula_writer::end_span(
-                        span,
-                        akasha::OutcomeClass::Error,
-                        Some(class),
-                    );
+                    akasha::insula_writer::end_span(span, akasha::OutcomeClass::Error, Some(class));
                     tracing::warn!(error_class = class, "retention_sweep_failed");
                 }
             }

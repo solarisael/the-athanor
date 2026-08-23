@@ -1,8 +1,11 @@
+use crate::settings::RoomSettings;
+
 use chrono::{DateTime, Utc};
 
 pub(super) fn giga_temporal_factor(
     meta: &serde_json::Value,
     now: DateTime<Utc>,
+    settings: &RoomSettings,
 ) -> (Option<f64>, f64) {
     let Some(object) = meta.as_object() else {
         return (None, 1.0);
@@ -34,7 +37,11 @@ pub(super) fn giga_temporal_factor(
     if age_days <= 0.0 || durability >= 1.0 {
         return (Some(durability), 1.0);
     }
-    let factor = (-std::f64::consts::LN_2 * age_days * (1.0 - durability).powi(2) / 7.0).exp();
+    let factor = (-std::f64::consts::LN_2
+        * age_days
+        * (1.0 - durability).powi(settings.recall_temporal_durability_curve_power)
+        / settings.recall_temporal_half_life_days)
+        .exp();
     (
         Some(durability),
         if factor.is_finite() { factor } else { 1.0 },

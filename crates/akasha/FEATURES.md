@@ -17,7 +17,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `spawn_retention_service` sweeps raw observation rows once each day. The first sweep waits five minutes.
 - `WslKeepalive` holds a helper process open on Windows and terminates it on drop.
 
-### remember.rs — the durable write
+### remember/ — the durable write
 
 - `remember` writes one memory in one transaction: the row, its threads, its chunks, and its continuations.
 - `RememberRequest::validate` checks the room slug and the kind before any write.
@@ -33,7 +33,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `normalize_strings`, `normalize_threads`, and `token_estimate` clean the inputs the writers store.
 - A memory write calls `backup::run_post_write`. A lesson write backs up only the project, audio, and design kinds.
 
-### recall.rs — the retrieval door
+### recall/ — the retrieval door
 
 - `recall` runs the whole retrieval and fuses the lanes into `retrievalCandidates`. It never fails on one absent lane; it adds a warning instead.
 - The semantic lane embeds the query and ranks chunks by cosine similarity. An empty lane reports the top similarity it found.
@@ -50,7 +50,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `recall` also returns date matches, the room taxonomy, cluster staleness, and cluster resonance.
 - `RecallParams::validate` refuses the `house` room, an empty query, a limit above 1000, and a similarity outside [0, 1].
 
-### giga.rs — the Stage 1 candidate plane
+### giga/ — the Stage 1 candidate plane
 
 - Event ingest. `giga_event_ingest` writes one event and its sources in one transaction. `lifecycle_json` and `lifecycle_from_json` carry the typed lifecycle.
 - Conversation ingest. `giga_conversation_ingest` folds one turn window into an event. It accepts one to eight turns, one session, and stable unique turn ids. The event id is a hash of the room, the session, and the turn hashes.
@@ -66,7 +66,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `giga_tool_promote` builds the promotion request from the room context and the stored candidate.
 - `verify_resonance`, `fresh_candidate_sources`, and `promotion_digest` keep authority tied to the exact reviewed sources.
 
-### giga_worker.rs — the local classifier worker
+### giga_worker/ — the local classifier worker
 
 - `spawn_giga_worker` starts the loop when the classifier is enabled. `giga_worker_loop` polls, claims, processes, and honors the shutdown signal.
 - `giga_process` runs one event: it validates the claim, resolves the sources, classifies, stores the candidate, and finishes the attempt.
@@ -81,7 +81,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `candidate_id`, `source_digest`, and `configuration_digest` make the candidate identity reproducible.
 - `WorkerFailure` classes each failure. `giga_classifier_health` reports the last error and the failure streak.
 
-### docket.rs — the cooperation plane
+### docket/ — the cooperation plane
 
 - Capability gate. `require_docket_capability` hashes the supplied capability and compares it in constant time. Every write passes this gate first.
 - Quest post. `quest_post` drafts and activates goals and quests. A replayed draft returns the existing row instead of a twin.
@@ -94,7 +94,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - Evidence. `quest_evidence` returns the full receipt bodies, the ledger events, and the acceptance verdicts. It grants no capability.
 - Validation helpers refuse a bad room, spirit, session, UUID, duration, and any field the action does not accept.
 
-### lesson.rs — the lesson registry and the design catalogue
+### lesson/ — the lesson registry and the design catalogue
 
 - Lesson query. `lesson_query` reads one lesson family with filters for scope, project, shape, register, stage, language, and technology. It ranks by always-on, then text rank, then update time.
 - The query expands the result along shared thread keys, up to 50 rows.
@@ -106,7 +106,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - Design document write. `design_document_write` writes one catalogue entry. `valid_doc_type` limits the type to token, component, contract, or guideline.
 - `LessonFamily` names the five families: coding, project, writing, design, and audio.
 
-### insula.rs — the observation store
+### insula/ — the observation store
 
 - `ingest_batch` writes up to 512 observation events in one transaction. It returns the accepted rows and every conflict.
 - `derive_idempotency_key_v1` and `derive_semantic_hash_v1` are the two identity recipes. The semantic hash excludes transport identity, so a failover redelivery matches.

@@ -5,15 +5,15 @@ Vault retrieval without a database. The configured files stay the authority. One
 ### BM25F scoring
 
 - `rank` scores each document over 7 weighted fields: path 4.2, title 3.8, heading 3.4, tags 2.8, keys 2.6, metadata 1.4, body 1.0.
-- Each field carries its own length normalization, from 0.2 for the path to 0.75 for the body.
+- Each field carries its own length normalization, from 0.2 for the path to 0.75 for the body. The room may retune both tables.
 - The term frequency saturates at 2.2 over 1.2. The document frequency comes from the index of this request.
 - An exact phrase adds the field weight again: 2.25 outside the body, and 1.5 inside it.
 - The whole query counts as a phrase. Each quoted part counts as a phrase. A phrase needs 3 characters.
 - A compound query term must match, or the document drops out. A compound term holds 4 characters and one separator.
-- Results sort by score, then by source path, then by heading path. Eight results come back.
+- Results sort by score, then by source path, then by heading path. Eight results come back, unless the room names another count.
 - Each result carries the score, the term coverage, the matched and missing terms, the reasons, and an excerpt.
 - The reasons name the fields that matched, and the fields that held an exact phrase.
-- An excerpt holds 900 characters. A long body clips around the first matched term, with an ellipsis on each cut side.
+- An excerpt holds 900 characters, unless the room names another size. A long body clips around the first matched term, with an ellipsis on each cut side.
 
 ### documents and chunks
 
@@ -26,7 +26,7 @@ Vault retrieval without a database. The configured files stay the authority. One
 - A JSONL file splits per line, and each heading names the line number.
 - A malformed JSON file gives a warning and no documents. Malformed JSONL lines give a warning with their count.
 - Any other eligible file becomes `__document__` chunks.
-- A body over 6000 characters splits, with 400 characters of overlap. Later chunks number their heading.
+- A body over 6000 characters splits, with 400 characters of overlap. The room may name other sizes. Later chunks number their heading.
 
 ### the file walk
 
@@ -64,6 +64,12 @@ Vault retrieval without a database. The configured files stay the authority. One
 - `vaultIgnore` adds ignore rules.
 - `vaultMaxFileBytes` defaults to 512 KiB, and it accepts 16 KiB to 4 MiB.
 - `vaultMaxFiles` defaults to 5000, and it accepts 1 to 50000.
+- `vaultMaxResults` defaults to 8, and it accepts 1 to 100.
+- `vaultExcerptChars` defaults to 900, and it accepts 80 to 20000.
+- `vaultChunkChars` defaults to 6000, and it accepts 500 to 200000.
+- `vaultChunkOverlap` defaults to 400, and it accepts 0 to half of the chunk size, so the chunk walk always advances.
+- `vaultFieldTuning` retunes named fields: `path`, `title`, `heading`, `keys`, `tags`, `body`, `metadata`.
+- A tuned field takes `weight`, from 0 to 100, and `lengthNormalization`, from 0 to 1. An unnamed field keeps the table in the code.
 - A value outside its range returns the default.
 
 ### the recall door

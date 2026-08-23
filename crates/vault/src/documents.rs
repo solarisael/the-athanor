@@ -1,3 +1,4 @@
+use crate::config::{VaultConfig, VaultSettings};
 use crate::text::term_frequency;
 use crate::walk::normalized_path;
 use serde_json::Value;
@@ -5,8 +6,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-const CHUNK_CHARS: usize = 6_000;
-const CHUNK_OVERLAP: usize = 400;
+// One chunk is what a room can hand a reader in one breath: large enough that a
+// whole section of prose stays together, small enough that a match points at a
+// place rather than at a file. A room may override both in .solarisael-room.json.
+pub(crate) const DEFAULT_CHUNK_CHARS: usize = 6_000;
+// Overlap keeps a sentence that straddles a chunk edge findable from both sides;
+// load_config holds it at or under half a chunk so the walk always advances.
+pub(crate) const DEFAULT_CHUNK_OVERLAP: usize = 400;
 
 pub(crate) struct VaultDocument {
     pub(crate) source_path: String,
@@ -49,12 +55,12 @@ fn make_document(
         lengths,
     }
 }
-fn split_body(body: &str) -> Vec<String> {
+fn split_body(body: &str, settings: &VaultSettings) -> Vec<String> {
     let trimmed = body.trim();
     if trimmed.is_empty() {
         return Vec::new();
     }
-    if trimmed.chars().count() <= CHUNK_CHARS {
+    if trimmed.chars().count() <= settings.chunk_chars {
         return vec![trimmed.to_owned()];
     }
     let mut chunks = Vec::new();
@@ -62,7 +68,7 @@ fn split_body(body: &str) -> Vec<String> {
     loop {
         let end = trimmed[start..]
             .char_indices()
-            .nth(CHUNK_CHARS)
+            .nth(settings.chunk_chars)
             .map_or(trimmed.len(), |(offset, _)| start + offset);
         let chunk = trimmed[start..end].trim();
         if !chunk.is_empty() {
@@ -74,12 +80,17 @@ fn split_body(body: &str) -> Vec<String> {
         start = trimmed[..end]
             .char_indices()
             .rev()
-            .nth(CHUNK_OVERLAP.saturating_sub(1))
+            .nth(settings.chunk_overlap.saturating_sub(1))
             .map_or(end, |(offset, _)| offset);
     }
     chunks
 }
-fn markdown_documents(source_path: &str, path_text: &str, content: &str) -> Vec<VaultDocument> {
+fn markdown_documents(
+    source_path: &str,
+    path_text: &str,
+    content: &str,
+    settings: &VaultSettings,
+) -> Vec<VaultDocument> {
     let title = Path::new(source_path)
         .file_stem()
         .and_then(|value| value.to_str())
@@ -125,7 +136,10 @@ fn markdown_documents(source_path: &str, path_text: &str, content: &str) -> Vec<
                 .collect::<Vec<_>>()
                 .join(" > ")
         };
-        for (index, chunk) in split_body(&current.join("\n")).into_iter().enumerate() {
+        for (index, chunk) in split_body(&current.join("\n"), settings)
+            .into_iter()
+            .enumerate()
+        {
             let heading = if index == 0 {
                 heading_path.clone()
             } else {
@@ -204,6 +218,7 @@ fn json_documents(
     path_text: &str,
     value: &Value,
     heading_prefix: &str,
+    settings: &VaultSettings,
 ) -> Vec<VaultDocument> {
     let title = Path::new(source_path)
         .file_stem()
@@ -233,7 +248,7 @@ fn json_documents(
         .flat_map(|(heading, record)| {
             let (keys, body) =
                 flatten_json(record, if heading.is_empty() { "$" } else { &heading });
-            split_body(&body)
+            split_body(&body, settings)
                 .into_iter()
                 .enumerate()
                 .map(|(index, body)| {
@@ -260,7 +275,7 @@ fn json_documents(
 pub(crate) fn parse_file(
     root: &Path,
     absolute: &Path,
-    max_file_bytes: u64,
+    config: &VaultConfig,
     warnings: &mut Vec<String>,
 ) -> Vec<VaultDocument> {
     let source_path = normalized_path(absolute);
@@ -271,9 +286,10 @@ pub(crate) fn parse_file(
             return Vec::new();
         }
     };
-    if metadata.len() > max_file_bytes {
+    if metadata.len() > config.max_file_bytes {
         warnings.push(format!(
-            "{source_path}: skipped file larger than {max_file_bytes} bytes."
+            "{source_path}: skipped file larger than {} bytes.",
+            config.max_file_bytes
         ));
         return Vec::new();
     }
@@ -294,9 +310,11 @@ pub(crate) fn parse_file(
         .unwrap_or("")
         .to_lowercase();
     match extension.as_str() {
-        "md" | "markdown" => markdown_documents(&source_path, &path_text, &content),
+        "md" | "markdown" => {
+            markdown_documents(&source_path, &path_text, &content, &config.settings)
+        }
         "json" => match serde_json::from_str(&content) {
-            Ok(value) => json_documents(&source_path, &path_text, &value, ""),
+            Ok(value) => json_documents(&source_path, &path_text, &value, "", &config.settings),
             Err(_) => {
                 warnings.push(format!("{source_path}: skipped malformed JSON."));
                 Vec::new()
@@ -315,6 +333,7 @@ pub(crate) fn parse_file(
                         &path_text,
                         &value,
                         &format!("line:{}", index + 1),
+                        &config.settings,
                     )),
                     Err(_) => malformed += 1,
                 }
@@ -332,7 +351,7 @@ pub(crate) fn parse_file(
                 .file_stem()
                 .and_then(|value| value.to_str())
                 .unwrap_or("");
-            split_body(&content)
+            split_body(&content, &config.settings)
                 .into_iter()
                 .enumerate()
                 .map(|(index, body)| {

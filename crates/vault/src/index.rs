@@ -14,12 +14,7 @@ pub(crate) fn build_index(config: &VaultConfig) -> VaultIndex {
     let scanned_files = files.len();
     let mut documents = Vec::new();
     for (root, absolute) in files {
-        documents.extend(parse_file(
-            &root,
-            &absolute,
-            config.max_file_bytes,
-            &mut warnings,
-        ));
+        documents.extend(parse_file(&root, &absolute, config, &mut warnings));
     }
     VaultIndex {
         roots: config

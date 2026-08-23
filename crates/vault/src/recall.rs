@@ -27,7 +27,7 @@ pub fn recall(request: VaultRecallRequest) -> Result<VaultRecallResult, VaultErr
     }
     let config = load_config(&room_dir)?;
     let index = build_index(&config);
-    let retrieval_candidates = rank(&index, &request.query);
+    let retrieval_candidates = rank(&index, &request.query, &config.settings);
     Ok(VaultRecallResult {
         ok: true,
         query: request.query,

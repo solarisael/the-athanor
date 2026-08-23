@@ -8,6 +8,9 @@ use protocol::{
 };
 use std::collections::{HashMap, HashSet};
 
+// enough: one hardcoded English list serving every room. The way up is the
+// docketed per-room vocabulary work — a room owning its own glue and stopword
+// lists where it is configured — not another literal added to this array.
 const DEFAULT_GLUE_TERMS: &[&str] = &[
     "a",
     "an",
@@ -72,6 +75,39 @@ const NON_DISTINCTIVE_EXACT_TERMS: &[&str] = &[
     "works",
 ];
 
+// A term shorter than this is usually a shared English word, so matching it
+// exactly says nothing about which memory the operator meant.
+// enough: a hand-set character floor standing in for distinctiveness. The way
+// up is deriving it from the corpus — document frequency over the room's own
+// memories — after which this floor and NON_DISTINCTIVE_EXACT_TERMS both go.
+const DISTINCTIVE_TERM_MIN_CHARS: usize = 7;
+
+// Presentation caps for one recall candidate. A cap trims, it never refuses:
+// the viewport hands the client a bounded card, and the Host stays the place a
+// whole record is read from.
+const MAX_SOURCE_PATH_CHARS: usize = 2048;
+const MAX_TITLE_CHARS: usize = 512;
+const MAX_HEADING_PATH_CHARS: usize = 1024;
+const MAX_THREAD_KEY_CHARS: usize = 512;
+// Six neighbors is a thread's visible shoulder: enough to see where a memory
+// sits in its thread without redrawing the thread inside a card.
+const MAX_THREAD_NEIGHBORS: usize = 6;
+const MAX_THREAD_NAME_CHARS: usize = 512;
+// Direction and authority state are closed vocabularies, never prose.
+const MAX_DIRECTION_CHARS: usize = 32;
+const MAX_AUTHORITY_STATE_CHARS: usize = 64;
+// A neighbor is a pointer, so it shows less body than the candidate it hangs off.
+const MAX_NEIGHBOR_EXCERPT_CHARS: usize = 500;
+// Sources, terms, and reasons are the evidence line under a card: they are read
+// at a glance, so the counts stay small and the strings stay short.
+const MAX_SOURCES: usize = 4;
+const MAX_SOURCE_CHARS: usize = 256;
+const MAX_TERMS: usize = 8;
+const MAX_TERM_CHARS: usize = 128;
+const MAX_REASONS: usize = 5;
+const MAX_REASON_CHARS: usize = 256;
+const MAX_CANDIDATE_EXCERPT_CHARS: usize = 900;
+
 #[derive(Debug, Default)]
 pub struct ViewportSession {
     exposures: HashMap<String, u64>,
@@ -112,7 +148,8 @@ fn contains_term(value: &str, term: &str) -> bool {
 
 fn distinctive_exact_term(value: &str) -> bool {
     let term = key(value);
-    term.len() >= 7 && !NON_DISTINCTIVE_EXACT_TERMS.contains(&term.as_str())
+    term.len() >= DISTINCTIVE_TERM_MIN_CHARS
+        && !NON_DISTINCTIVE_EXACT_TERMS.contains(&term.as_str())
 }
 
 fn candidate_identity(candidate: &RecallCandidate, index: usize) -> String {
@@ -194,7 +231,8 @@ fn exact_signals(
     {
         signals.insert("project");
     }
-    if (key(&candidate.title).len() >= 7 && contains_term(query, &candidate.title))
+    if (key(&candidate.title).len() >= DISTINCTIVE_TERM_MIN_CHARS
+        && contains_term(query, &candidate.title))
         || candidate
             .matched_terms
             .iter()
@@ -206,7 +244,7 @@ fn exact_signals(
         .matched_terms
         .iter()
         .any(|term| distinctive_exact_term(term) && contains_term(&path, term))
-        || (path.len() >= 7 && contains_term(query, &path))
+        || (path.len() >= DISTINCTIVE_TERM_MIN_CHARS && contains_term(query, &path))
     {
         signals.insert("path");
     }
@@ -215,58 +253,56 @@ fn exact_signals(
 
 fn compact_candidate(candidate: &RecallCandidate) -> RecallPresentationCandidate {
     RecallPresentationCandidate {
-        source_path: bounded(&candidate.source_path, 2048),
-        title: bounded(&candidate.title, 512),
-        heading_path: bounded(&candidate.heading_path, 1024),
+        source_path: bounded(&candidate.source_path, MAX_SOURCE_PATH_CHARS),
+        title: bounded(&candidate.title, MAX_TITLE_CHARS),
+        heading_path: bounded(&candidate.heading_path, MAX_HEADING_PATH_CHARS),
         memory_id: candidate.memory_id,
         thread_key: candidate
             .thread_key
             .as_deref()
-            .map(|value| bounded(value, 512)),
+            .map(|value| bounded(value, MAX_THREAD_KEY_CHARS)),
         thread_neighbors: candidate
             .thread_neighbors
             .iter()
-            .take(6)
-            .map(
-                |neighbor| protocol::RecallPresentationThreadNeighbor {
-                    thread: bounded(&neighbor.thread, 512),
-                    direction: bounded(&neighbor.direction, 32),
-                    id: neighbor.id,
-                    title: bounded(&neighbor.title, 512),
-                    source_path: bounded(&neighbor.source_path, 2048),
-                    excerpt: bounded(&neighbor.excerpt, 500),
-                    authority_state: bounded(&neighbor.authority_state, 64),
-                    superseded_by: neighbor.superseded_by,
-                },
-            )
+            .take(MAX_THREAD_NEIGHBORS)
+            .map(|neighbor| protocol::RecallPresentationThreadNeighbor {
+                thread: bounded(&neighbor.thread, MAX_THREAD_NAME_CHARS),
+                direction: bounded(&neighbor.direction, MAX_DIRECTION_CHARS),
+                id: neighbor.id,
+                title: bounded(&neighbor.title, MAX_TITLE_CHARS),
+                source_path: bounded(&neighbor.source_path, MAX_SOURCE_PATH_CHARS),
+                excerpt: bounded(&neighbor.excerpt, MAX_NEIGHBOR_EXCERPT_CHARS),
+                authority_state: bounded(&neighbor.authority_state, MAX_AUTHORITY_STATE_CHARS),
+                superseded_by: neighbor.superseded_by,
+            })
             .collect(),
         sources: candidate
             .sources
             .iter()
-            .take(4)
-            .map(|value| bounded(value, 256))
+            .take(MAX_SOURCES)
+            .map(|value| bounded(value, MAX_SOURCE_CHARS))
             .collect(),
         score: candidate.score,
         term_coverage: candidate.term_coverage.clone(),
         matched_terms: candidate
             .matched_terms
             .iter()
-            .take(8)
-            .map(|value| bounded(value, 128))
+            .take(MAX_TERMS)
+            .map(|value| bounded(value, MAX_TERM_CHARS))
             .collect(),
         missing_terms: candidate
             .missing_terms
             .iter()
-            .take(8)
-            .map(|value| bounded(value, 128))
+            .take(MAX_TERMS)
+            .map(|value| bounded(value, MAX_TERM_CHARS))
             .collect(),
         reasons: candidate
             .reasons
             .iter()
-            .take(5)
-            .map(|value| bounded(value, 256))
+            .take(MAX_REASONS)
+            .map(|value| bounded(value, MAX_REASON_CHARS))
             .collect(),
-        excerpt: bounded(&candidate.excerpt, 900),
+        excerpt: bounded(&candidate.excerpt, MAX_CANDIDATE_EXCERPT_CHARS),
     }
 }
 

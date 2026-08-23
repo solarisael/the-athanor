@@ -372,9 +372,10 @@ impl Store {
                         "record_mismatch: pointer does not identify the declared paper-boat room"
                     );
                 }
-                // enough: the boat-body digest is the Sea spine applied to boat
-                // bytes; boats::identity::body_digest is its declared home and
-                // routes here once that skeleton is implemented.
+                // Audit ruling 2026-08-23: the boat-body digest IS the Sea
+                // spine applied to boat bytes. sea::payload_digest is the one
+                // digest door; a boats-side delegation fn was deleted as
+                // ceremony (coding#158 — deletion beats abstraction).
                 if sea::payload_digest(body.as_bytes()) != event.integrity_sha256 {
                     bail!("integrity_mismatch: pointed paper-boat body digest differs");
                 }

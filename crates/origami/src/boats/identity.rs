@@ -49,11 +49,6 @@ pub fn digest_of(source_path: &str) -> Option<&str> {
         .and_then(|value| value.strip_suffix(SOURCE_PATH_SUFFIX))
 }
 
-/// Digest a boat body for pointer integrity checks.
-/// Absorbs house-delivery/src/model.rs:244 `body_sha256`.
-pub fn body_digest() {
-    todo!("extraction: absorbs model.rs:244")
-}
 
 #[cfg(test)]
 mod tests {

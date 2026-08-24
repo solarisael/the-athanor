@@ -282,7 +282,7 @@ describe("OMP prompt-cache history", () => {
       messages: [user("bounded-turn", "recall this bounded technical thread")],
     }, context("automatic-context-budget"));
 
-    expect(automaticWakeOptions).toEqual([{ timeoutMs: 2_000 }]);
+    expect(automaticWakeOptions).toEqual([{ timeoutMs: 15_000 }]);
     expect(automaticAnamnesisOptions).toEqual([{ mode: "wake", timeoutMs: 2_000 }]);
     expect(automaticEntityInputs).toEqual([{
       room: "kodo",

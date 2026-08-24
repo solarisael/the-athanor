@@ -22,6 +22,14 @@ the exact implementation record.
 
 ### Changed
 
+- Managed runtime startup now tears down every already-started child when the
+  next child exits before readiness, preventing a transient delivery failure
+  from leaving Windows SCM stuck in `START_PENDING` with an orphaned NATS
+  process.
+- Automatic session wake now gives the cold paper-boat read a dedicated
+  15-second budget instead of the shared 2-second context budget. A failed
+  receipt produces a bounded visible warning rather than silently omitting
+  previous-session continuity.
 - Project lessons now fire inside their own project: `lesson_trigger_match`
   accepts a caller `project` slug (the adapter derives it from the git root
   basename), and the fence admits project-tagged lessons on a normalized

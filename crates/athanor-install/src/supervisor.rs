@@ -226,7 +226,21 @@ impl<P: Processes> Supervisor<P> {
             started.push(name.to_owned());
             checkpoint((index + 1) as u32, name)?;
             let deadline = Instant::now() + START_TIMEOUT;
-            while !self.processes.ready(name, &spec.readiness)? {
+            loop {
+                let ready = match self.processes.ready(name, &spec.readiness) {
+                    Ok(ready) => ready,
+                    Err(error) => {
+                        if let Err(cleanup_error) = self.stop_names(&started) {
+                            return Err(error.context(format!(
+                                "managed startup cleanup also failed: {cleanup_error:#}"
+                            )));
+                        }
+                        return Err(error);
+                    }
+                };
+                if ready {
+                    break;
+                }
                 if Instant::now() >= deadline {
                     self.stop_names(&started)?;
                     bail!(

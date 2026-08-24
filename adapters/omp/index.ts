@@ -58,6 +58,7 @@ import {
   formatQuestBoardSection,
   readQuestBoard,
 } from "./solarisael-house-proof/substrate.ts";
+import { receiveAutomaticWake } from "./solarisael-house-proof/wake-context/index.ts";
 import { conversationText, messageText } from "./solarisael-house-proof/text.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./solarisael-house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./solarisael-house-proof/tools.ts";
@@ -1002,22 +1003,16 @@ export default function solarisaelHouseProof(pi) {
     }
     const wakeKey = `${room}:${hostSession}`;
     const freshWake = conversation?.fresh === true && !wokenSessions.has(wakeKey);
-    if (freshWake) wokenSessions.add(wakeKey);
     if (freshWake && !existingTypes.has("solarisael-wake-context")) {
       let letter = "";
       let boatTitle: string | null = null;
       let boatSource: string | null = null;
-      try {
-        const boat = await catchBoat(room, { timeoutMs: AUTOMATIC_CONTEXT_IO_TIMEOUT_MS });
-        if (boat?.ok && boat?.found) {
-          letter = String(boat.wake_context || "");
-          boatTitle = boat.title ? String(boat.title) : null;
-          boatSource = boat.source_path ? String(boat.source_path) : null;
-        }
-      } catch {
-        warnings.push("paper boat unavailable");
-        // Auto-wake is fail-open. Manual wake remains available.
-      }
+      const wake = await receiveAutomaticWake(room);
+      letter = wake.letter;
+      boatTitle = wake.title;
+      boatSource = wake.source;
+      if (wake.warning) warnings.push(wake.warning);
+      if (wake.answered) wokenSessions.add(wakeKey);
       // The board is board state, never a summons. A silent transport, an
       // unnamed House, and an empty board all render nothing: the wake letter
       // never carries a section the Docket did not answer for.

@@ -21,10 +21,12 @@ The experiment is native ES modules with real imports, no build step (operator r
 - `index.html` — semantic shell and stable interaction anatomy (`<script type="module">`).
 - `styles.css` — exploratory geometry, hierarchy, state, and responsive treatment.
 - `app.js` — the interaction shell: fixture data, the one explicit state object, the render waist, transitions, and listeners.
+- `board/index.js` — the Docket instrument: live quest board, room Hallway inbox, evidence drawers, and its own source state.
+- `sediment/index.js` — the durable instrument: live memory and lesson timelines, full memory reads, keyset pagination, and per-shelf source state.
 - `pulse.js` — the Insula instrument: stamped snapshot, live-wire transport, derivation, render, and its own source state.
 - `mechanics.js` — the observatory: source-census snapshot, category/query/scroll view state, and its renders.
 - `text.js` — shared text safety (`escapeHtml`).
-- `serve.ts` — the local serving harness and the ONE live wire: it proxies read-only Insula queries to a room Host with the bearer token held server-side; no credential ever reaches page source.
+- `serve.ts` — the local serving harness and the ONE live wire: it proxies an explicit allow-list of read-only House queries to a room Host with the bearer token held server-side; no credential ever reaches page source.
 
 An instrument module owns its local state and exposes narrow doors: `init…` (shell injects `requestRender`/DOM handles once at boot), `handle…Click`/`handle…Input` (returns whether it owned the event), and its `render…` functions. The shell keeps the waists, the global state object, and the listeners. Bell, switcher, drawer, and composer are named extraction seams: each moves to its own module the next time it is materially touched, never in a big-bang sweep.
 
@@ -432,3 +434,12 @@ The proof receipt names the viewport, path exercised, and observed result. `It l
 - FALLBACK, transport failure injected at the page's fetch boundary: the surface fell back to the stamped `2026-08-20 22:12 −03` snapshot wearing `Host unreachable · Failed to fetch` beside the snapshot provenance chips — live numbers never faked; restoring transport and re-querying returned `Host connected`. Four source states, each visibly distinct.
 - Chromium at `390 × 844`: one-column channels, live chips wrapped cleanly, zero horizontal overflow, zero page errors.
 - Named residuals: the standalone-serve font 404 (`c7ad11f`, Pages-owned) remains; receipts block stays snapshot-only until a Host route serves receipt kinds; live lanes carry `raw rows only` for error classes because rollups do not carry them.
+
+### Proof receipt — 2026-08-24 Pulse rung 2
+
+- Architecture: House slot 1 now enters through `board/index.js`; House and room slot 3 enter through `sediment/index.js`. `app.js` keeps the render and event waists, while `serve.ts` exposes only the named POST proxy routes for board, inbox, evidence, memory timeline/read, lesson timeline, and the existing Insula reads. The bearer token remains server-side. Entering House now initiates the board read rather than leaving a truthful-but-idle panel behind.
+- Chromium at `1440 × 1000`, LIVE against the kodo Host on `:8788`: the board auto-read 19 quests and two Hallways; the rung-2 evidence drawer disclosed five acceptance criteria and two full receipts, with all seven inner ledger rows collapsed first. House slot 3 read 25 memories and 25 lessons, retired every fixture row, loaded both keyset timelines to 50 rows, and opened PostgreSQL memory `#3959` to its 2,841-character body. The lesson cursor uses `updatedAt`; the memory cursor uses `createdAt`; both send numeric ids.
+- Failure and safety proof: forced refusals on board, inbox, evidence, memory timeline, lesson timeline, and memory read each rendered the exact named reason and no invented live rows. Forced empty arrays rendered named absence. Malformed timeline collections refused instead of masquerading as empty. Hostile markup across every dynamic surface produced zero injected nodes and no script execution. The actual bearer token was absent from all 11 served prototype sources checked.
+- Chromium at `390 × 844`: the durable surface occupied `364 px` inside the `390 px` viewport; both timeline columns occupied `334 px`, collapsed to one column, and the center scroller measured `690 / 6,181 px` client/scroll height with zero horizontal document overflow. Desktop and narrow proof produced no page errors. The pre-existing standalone font request remained the sole console 404.
+- Focused contracts: `house-protocol` passed 49 tests; `house-host --lib` passed 19; `panel_boundary_contract` passed its unauthenticated/no-database boundary test with two dedicated-PostgreSQL cases correctly ignored. The live browser round supplied the PostgreSQL-backed proof those ignored tests deliberately do not borrow from production.
+- Open authority gate: the implementation and rendered evidence are complete, but acceptance criterion 5 remains Sol's own squint-test verdict. The executor does not settle the operator's visual judgment on his behalf.

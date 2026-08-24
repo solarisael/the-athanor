@@ -1,16 +1,29 @@
 // Local serving harness for the GUI prototype — the one live wire.
 //
-// Serves the three static prototype files AND proxies read-only Insula
-// queries to one room Host, holding the bearer token server-side so the
-// page never sees a credential. Operator ruling 2026-08-20 (Sol): the
-// prototype may read the actual Athanor; it still writes nothing.
+// Serves the static prototype files AND proxies read-only House queries to one
+// room Host, holding the bearer token server-side so the page never sees a
+// credential. Operator ruling 2026-08-20 (Sol): the prototype may read the
+// actual Athanor; it still writes nothing.
 //
 // Run: bun gui-prototype/serve.ts   (PULSE_ROOM=kodo PULSE_PORT=4175)
 
 const ROOT = import.meta.dir;
 const CONFIG_PATH = "C:/ProgramData/Solarisael/Athanor/config/runtime.json";
 const SECRETS_PATH = "C:/ProgramData/Solarisael/Athanor/secrets/runtime-secrets.json";
-const LIVE_ROUTES = new Set(["vitals", "retention"]);
+
+// Named doors, never a pattern: every proxied path is written here beside the
+// exact upstream it reaches, so no upstream opens by accident and a typo is a
+// 404 rather than a surprise. POST only, bearer added on this side.
+const LIVE_ROUTES = new Map([
+  ["/live/insula/vitals", "/athanor/v1/insula/vitals"],
+  ["/live/insula/retention", "/athanor/v1/insula/retention"],
+  ["/live/docket/board", "/athanor/v1/docket/board"],
+  ["/live/docket/evidence", "/athanor/v1/docket/evidence"],
+  ["/live/hallway/inbox", "/athanor/v1/hallway/inbox"],
+  ["/live/memory/timeline", "/athanor/v1/memory/timeline"],
+  ["/live/memory/read", "/athanor/v1/memory/read"],
+  ["/live/lesson/timeline", "/athanor/v1/lesson/timeline"],
+]);
 
 const runtime = await Bun.file(CONFIG_PATH).json();
 const secrets = await Bun.file(SECRETS_PATH).json();
@@ -25,11 +38,12 @@ Bun.serve({
   async fetch(request) {
     const url = new URL(request.url);
 
-    const live = url.pathname.match(/^\/live\/insula\/([a-z]+)$/);
-    if (live) {
-      if (!LIVE_ROUTES.has(live[1])) return new Response("unknown live route", { status: 404 });
+    if (url.pathname.startsWith("/live/")) {
+      const upstreamPath = LIVE_ROUTES.get(url.pathname);
+      if (!upstreamPath) return new Response("unknown live route", { status: 404 });
       if (request.method !== "POST") return new Response("POST only", { status: 405 });
-      const upstream = await fetch(`http://127.0.0.1:${host.port}/athanor/v1/insula/${live[1]}`, {
+
+      const upstream = await fetch(`http://127.0.0.1:${host.port}${upstreamPath}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -51,4 +65,4 @@ Bun.serve({
   },
 });
 
-console.log(`prototype on http://127.0.0.1:${port} · live Insula reads via ${room} Host :${host.port}`);
+console.log(`prototype on http://127.0.0.1:${port} · live House reads via ${room} Host :${host.port}`);

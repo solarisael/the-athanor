@@ -22,6 +22,27 @@ the exact implementation record.
 
 ### Changed
 
+- The authenticated Host read surface now carries the House data needed by
+  operator panels: room-bound Docket board and evidence, Hallway inbox,
+  newest-first memory and lesson timelines, full memory reads, and bounded
+  WebSocket AKASHA recall and typed lesson queries. These remain read-only and
+  inherit the Host bearer and room-binding fences rather than gaining panel
+  authority.
+- The browser interaction prototype now uses live House data as its primary
+  working surface. House Overview auto-reads quests, Hallway attention, and
+  collapsed evidence drawers; Memories & Lessons reads PostgreSQL timelines,
+  opens full memory bodies, paginates both shelves with their exact keyset
+  cursors, and keeps empty, refused, malformed, and fixture fallback states
+  visibly distinct.
+
+- Managed runtime startup now tears down every already-started child when the
+  next child exits before readiness, preventing a transient delivery failure
+  from leaving Windows SCM stuck in `START_PENDING` with an orphaned NATS
+  process.
+- Automatic session wake now gives the cold paper-boat read a dedicated
+  15-second budget instead of the shared 2-second context budget. A failed
+  receipt produces a bounded visible warning rather than silently omitting
+  previous-session continuity.
 - Project lessons now fire inside their own project: `lesson_trigger_match`
   accepts a caller `project` slug (the adapter derives it from the git root
   basename), and the fence admits project-tagged lessons on a normalized

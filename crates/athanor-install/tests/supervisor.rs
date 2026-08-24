@@ -9,6 +9,7 @@ use std::{cell::RefCell, collections::BTreeMap, path::PathBuf, time::Duration};
 struct FakeProcesses {
     events: RefCell<Vec<String>>,
     timeout: RefCell<Option<String>>,
+    ready_failure: RefCell<Option<String>>,
 }
 impl Processes for FakeProcesses {
     fn spawn(&self, spec: &ProcessSpec) -> Result<u32> {
@@ -19,6 +20,9 @@ impl Processes for FakeProcesses {
     }
     fn ready(&self, name: &str, _: &Readiness) -> Result<bool> {
         self.events.borrow_mut().push(format!("ready:{name}"));
+        if self.ready_failure.borrow().as_deref() == Some(name) {
+            anyhow::bail!("managed child {name} exited before readiness");
+        }
         Ok(true)
     }
     fn request_stop(&self, name: &str) -> Result<()> {
@@ -84,6 +88,39 @@ fn reports_checkpoints_only_after_each_child_is_spawned_and_ready() -> Result<()
         ]
     );
     Ok(())
+}
+
+#[test]
+fn readiness_failure_stops_every_started_child_in_reverse_order() {
+    let processes = FakeProcesses::default();
+    *processes.ready_failure.borrow_mut() = Some("delivery".into());
+    let supervisor = Supervisor { processes };
+    let specs = [
+        spec("nats", 4222),
+        spec("delivery", 4223),
+        spec("host", 8787),
+    ];
+
+    let error = supervisor.run(&specs, |_, _| Ok(())).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("managed child delivery exited before readiness")
+    );
+    assert_eq!(
+        supervisor.processes.events.borrow().as_slice(),
+        [
+            "spawn:nats",
+            "ready:nats",
+            "spawn:delivery",
+            "ready:delivery",
+            "stop:delivery",
+            "wait:delivery",
+            "stop:nats",
+            "wait:nats",
+        ]
+    );
 }
 
 #[test]

@@ -1,7 +1,7 @@
 import { escapeHtml } from "./text.js";
 import { initPulse, ensurePulseQueried, handlePulseClick } from "./pulse.js";
-import { initBoard, ensureBoardQueried, handleBoardClick, renderHouseBoard } from "./board.js";
-import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSediment, renderRoomSediment } from "./sediment.js";
+import { initBoard, ensureBoardQueried, handleBoardClick, renderHouseBoard } from "./board/index.js";
+import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSediment, renderRoomSediment } from "./sediment/index.js";
 import {
   initMechanics, resetMechanicsView, saveMechanicsScroll, mechanicsScrollTop,
   handleMechanicsClick, handleMechanicsInput, renderHouseMechanics, renderMechanicsResults,
@@ -2215,6 +2215,7 @@ function toggleHouse() {
   state.houseReturn = { mode: state.mode, activeId: state.activeId, activeView: state.activeView };
   state.activeView = "live";
   openConversation("house");
+  ensureBoardQueried();
 }
 
 function extendHallwayAccess(item, room) {

@@ -3362,6 +3362,7 @@ input:focus-visible {
 .sediment-shelves {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-items: start;
 
   gap: 18px;
 }
@@ -3421,9 +3422,21 @@ input:focus-visible {
   padding-bottom: 4px;
 }
 
-.evidence-row > summary,
-.sediment-row > summary {
+.mechanics-row.evidence-row > summary {
   grid-template-columns: minmax(0, 1fr) minmax(120px, 0.45fr) auto;
+}
+
+.mechanics-row.sediment-row > summary {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.sediment-row > summary .mechanics-row-title {
+  grid-column: 1 / -1;
+}
+
+.sediment-row > summary .mechanics-row-flags {
+  justify-content: start;
 }
 
 .mechanics-row-body dl.evidence-receipt-detail {

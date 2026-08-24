@@ -25,12 +25,6 @@ const LIVE_ROUTES = new Map([
   ["/live/lesson/timeline", "/athanor/v1/lesson/timeline"],
 ]);
 
-// The three durable doors above are mapped but not yet cut upstream: as of
-// 2026-08-22 the kodo Host answers all three with 404 and another room owns the
-// cut. That 404 is therefore the upstream's answer and not a typo here, which
-// is why the page must tell the two apart — an unmapped path never reaches
-// fetch and returns this proxy's own "unknown live route" body instead.
-
 const runtime = await Bun.file(CONFIG_PATH).json();
 const secrets = await Bun.file(SECRETS_PATH).json();
 const room = Bun.env.PULSE_ROOM ?? "kodo";

@@ -8,7 +8,7 @@
 // renders no rows at all.
 // An empty board is an empty board; a missing door is a missing door.
 
-import { escapeHtml } from "./text.js";
+import { escapeHtml } from "../text.js";
 
 const BOARD_ROUTE = "/live/docket/board";
 const INBOX_ROUTE = "/live/hallway/inbox";

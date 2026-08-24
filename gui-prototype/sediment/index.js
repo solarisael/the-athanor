@@ -1,17 +1,14 @@
 // Sediment — the durable instrument in House slot 3 and in every room's slot 3.
 //
 // Owns the live wires to the room's durable record through the serve.ts proxy:
-// the memory timeline, one memory's full body, and the lesson timeline. Two of
-// those three doors are not cut upstream yet, and this module's whole job while
-// that holds is to say so without lying in either direction — it renders no
-// invented rows, and it does not hide the fixture shelf the operator already
-// has. The fixtures keep their chips and stay visible until live rows actually
-// flow; then they retire, and not one round earlier.
+// the memory timeline, one memory's full body, and the lesson timeline. It
+// renders no invented rows and keeps the fixture shelf visibly named until
+// live rows actually flow; then the fixtures retire, and not one round earlier.
 //
 // The app owns the fixture data and the fixture row markup. This module owns
 // the doors, the shelf composition, and the keyset walk.
 
-import { escapeHtml } from "./text.js";
+import { escapeHtml } from "../text.js";
 
 const MEMORY_TIMELINE_ROUTE = "/live/memory/timeline";
 const MEMORY_READ_ROUTE = "/live/memory/read";
@@ -109,17 +106,31 @@ function shelfByKey(key) {
 // carries a lesson column — the same shape the fixture shelves already have.
 function buildShelf(key, item) {
   const roomFilter = item.kind === "house" ? {} : { room: item.room ?? item.id };
-  const columns = [openColumn("memories", "Memories", MEMORY_TIMELINE_ROUTE, "memories", roomFilter)];
-  if (item.kind === "house") columns.push(openColumn("lessons", "Lessons", LESSON_TIMELINE_ROUTE, "lessons", {}));
+  const columns = [openColumn("memories", "Memories", MEMORY_TIMELINE_ROUTE, "memories", roomFilter, "createdAt")];
+  if (item.kind === "house") {
+    columns.push(openColumn("lessons", "Lessons", LESSON_TIMELINE_ROUTE, "lessons", {}, "updatedAt"));
+  }
 
   return { key, status: "idle", queriedAt: null, columns };
 }
 
-// One column of a shelf: its door, the filter that door is asked with, the rows
-// that have landed, and the keyset cursor to ask past. Rows accumulate across
-// 'load more' rounds; a refusal belongs to the last round alone.
-function openColumn(id, label, route, collection, filter) {
-  return { id, label, route, collection, filter, rows: [], cursor: null, exhausted: false, status: "idle", refusal: null };
+// One column of a shelf: its door, filter, cursor timestamp field, rows already
+// landed, and keyset cursor to ask past. Rows accumulate across "load more"
+// rounds; a refusal belongs to the last round alone.
+function openColumn(id, label, route, collection, filter, cursorStamp) {
+  return {
+    id,
+    label,
+    route,
+    collection,
+    filter,
+    cursorStamp,
+    rows: [],
+    cursor: null,
+    exhausted: false,
+    status: "idle",
+    refusal: null
+  };
 }
 
 async function queryShelf(shelf) {
@@ -157,9 +168,14 @@ async function askColumn(column, { append }) {
   if (answer.refusal) return;
 
   const rows = readRows(answer.data, column.collection);
+  if (rows === null) {
+    column.refusal = `Host answer carried no ${column.collection} array`;
+    return;
+  }
+
   column.rows = append ? [...column.rows, ...rows] : rows;
   column.exhausted = rows.length < PAGE_LIMIT;
-  column.cursor = keysetCursor(column.rows.at(-1));
+  column.cursor = keysetCursor(column.rows.at(-1), column.cursorStamp);
 }
 
 async function askMemoryBody(key) {
@@ -219,24 +235,23 @@ function parseJson(text) {
   }
 }
 
-// The contract for these three doors may still be reshaped by the door-cutter's
-// first guild reply, so the payload is read tolerantly: a missing collection is
-// no rows, and a collection that is not an array is no rows either. Nothing here
-// guesses at a shape it was not handed.
+// The wire shape is fixed: an empty array is an honest empty shelf, while a
+// missing or malformed collection is a protocol refusal rather than no rows.
 function readRows(payload, collection) {
   const rows = payload?.[collection];
-  return Array.isArray(rows) ? rows.filter(row => row !== null && typeof row === "object") : [];
+  if (!Array.isArray(rows)) return null;
+
+  return rows.filter(row => row !== null && typeof row === "object");
 }
 
-// The cursor is whatever the oldest held row can honestly supply. An absent
-// createdAt means no cursor at all, and no cursor means no 'load more' rather
-// than a walk that starts over from the newest row.
-function keysetCursor(row) {
-  const stamp = fieldText(row?.createdAt) || fieldText(row?.updatedAt);
-  if (!stamp) return null;
+// Each door names its own timestamp field and requires a numeric id. A row
+// without either part remains readable, but cannot start another page honestly.
+function keysetCursor(row, stampField) {
+  const stamp = fieldText(row?.[stampField]);
+  const id = Number(row?.id);
+  if (!stamp || !Number.isSafeInteger(id) || id < 1) return null;
 
-  const id = fieldText(row?.id);
-  return id ? { createdAt: stamp, id } : { createdAt: stamp };
+  return { [stampField]: stamp, id };
 }
 
 function fieldText(value) {
@@ -283,10 +298,8 @@ function absence(text) {
   return `<p class="sediment-absence">${escapeHtml(text)}</p>`;
 }
 
-// serve.ts answers an unmapped path with its own prose and never reaches the
-// Host; a mapped path whose upstream is uncut returns the Host's own 404. From
-// this page the two are both refusals, so the chip says which one it read and
-// carries the exact body either way.
+// An unmapped proxy path never reaches the Host. Every other failure carries
+// the upstream status and exact refusal body without guessing why it failed.
 function doorChip(column) {
   if (column.status !== "answered") {
     return `<span data-tone="quiet">${escapeHtml(`${column.label} · asking`)}</span>`;
@@ -296,9 +309,6 @@ function doorChip(column) {
   }
   if (column.refusal.includes("unknown live route")) {
     return `<span data-tone="attention">${escapeHtml(`${column.label} · not mapped in this proxy · ${column.refusal}`)}</span>`;
-  }
-  if (column.refusal.startsWith("HTTP 404")) {
-    return `<span data-tone="attention">${escapeHtml(`${column.label} · door pending upstream · ${column.refusal}`)}</span>`;
   }
 
   return `<span data-tone="attention">${escapeHtml(`${column.label} · refused · ${column.refusal}`)}</span>`;
@@ -382,14 +392,18 @@ function renderLessonRow(row) {
 
 function renderColumnRows(shelf, column) {
   if (column.status !== "answered") return absence(`Asking the ${column.label} door…`);
-  if (column.refusal) {
-    return absence(`The ${column.label} door has not answered with rows: ${column.refusal}. Nothing is shown in its place.`);
+  if (column.rows.length === 0) {
+    return column.refusal
+      ? absence(`The ${column.label} door has not answered with rows: ${column.refusal}. Nothing is shown in its place.`)
+      : absence(`The ${column.label} door answered with no rows.`);
   }
-  if (column.rows.length === 0) return absence(`The ${column.label} door answered with no rows.`);
 
-  return column.id === "lessons"
+  const rows = column.id === "lessons"
     ? column.rows.map(renderLessonRow).join("")
     : column.rows.map(row => renderMemoryRow(shelf, row)).join("");
+  if (!column.refusal) return rows;
+
+  return `${rows}${absence(`Walking farther through the ${column.label} door refused: ${column.refusal}. The preceding live rows remain.`)}`;
 }
 
 function renderWalkControl(shelf, column) {

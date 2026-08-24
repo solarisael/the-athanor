@@ -1,6 +1,6 @@
 # Install contract (I0) — DRAFT
 
-Status: draft for three-chair review and Sol's shaping.
+Status: consolidated 2026-08-24 — Sol and Kodo resolved the open questions from census evidence (two read-only crate/port censuses of this checkout). Chairs may still object; objections reopen the specific section.
 Follows: A0 ontology contract (`docs/ONTOLOGY_CONTRACT.md`), goal A "Foundation before floors".
 Evidence: `crates/athanor-install/src/supervisor.rs` (runtime_plan), `crates/host/src/config.rs` (akasha_enabled), `crates/akasha/src/config.rs` (embed defaults), House memory #3953.
 
@@ -23,6 +23,10 @@ The ship target adds selectable modes: vault, akasha, giga, omega. Four booleans
 4. **Ollama boots with akasha.** When the manifest declares akasha with a managed embedder, the supervisor owns the Ollama process.
 5. **Live proof comes after the contract.** The chairs review this draft first. Code follows consolidation. A live install test follows the code.
 6. **The vault-mode spirit is minimal and file-backed** (Sol, 2026-08-24). The spirit keeps identity and working memory as markdown files in the vault, and updates them itself. The same surface is the fallback when akasha is declared but the database is unhealthy. This gives hearth's `base` authority mode its concrete meaning.
+7. **Vocabulary is free; capability is gated** (2026-08-24). Types and wire shapes for a module may live in always-crates. The module gates its processes, its schema, its config keys, its health checks, and its mounted doors.
+8. **The Host is house-scoped** (2026-08-24). One Host process serves every declared room. The supervisor spawns one Host, never one per room.
+9. **Cutover is atomic** (2026-08-24). One quest lands the Host redesign, the deletions, the adapter fix, and config regeneration together. No dual-stack period.
+10. **Anon is a toggle, not a module** (Sol, 2026-08-24). The manifest does not carry it.
 
 ## 3. The design
 
@@ -59,8 +63,13 @@ Every component reads the manifest and nothing else for module presence:
 
 ### 3.3 One door
 
-- One Host listener on one declared port. Rooms route by name in the path (`/room/<key>`).
-- `HostRoomConfig.port` is deleted. The duplicate-port checks in `runtime_plan` are deleted with it. The machinery exists only because the design permits collision; the new design does not permit it.
+- One house-scoped Host process (ruling 8). One listener on one declared port. Rooms route by name in the path (`/room/<key>`) on the WebSocket route and on every HTTP route (insula, vitals, panel).
+- `HostRoomConfig.port` is deleted. Both collision checkers die with it: `supervisor.rs:303,320-326` and the independent second copy at `installer.rs:94,111-113`.
+- `HostConfig` is single-room by construction (`host/src/config.rs:63-78`). House-scoping the Host is the named work item of this section. The Host reads the room registry from config, never from flat env.
+- The single port becomes a declared key: `host_port` beside `nats_port` in `SupervisorConfig`/`RuntimeConfig`. Today nothing declares it — `ATHANOR_HOST_BIND` is transport and `DEFAULT_HOST_WS_PORT` is a fallback pin, documented as such at `contract.rs:39-43`.
+- Installed `config.json` carries `"port"` under `deny_unknown_fields`: this change is a data migration. The installer regenerates config on upgrade. `deploy-local.ps1:133` currently coerces a missing port to `0` and fails with a misleading message; the deploy script updates in the same quest.
+- The OMP adapter derives HTTP endpoints from host:port and discards the path (`adapters/omp/solarisael-house-proof/host.ts:144-157`). Under path routing this strips the room silently. The adapter fix ships in the same quest.
+- The room-key grammar exists in three hand-copied spellings (`host/src/config.rs:180-190`, `supervisor.rs:305-313`, `installer.rs:96-104`). As a path segment it becomes a path-traversal surface. One function in `protocol` owns the grammar; the three copies call it.
 - Loopback-only stays. The single door inherits the existing loopback refusal.
 
 ### 3.4 Ollama as a managed child
@@ -68,17 +77,22 @@ Every component reads the manifest and nothing else for module presence:
 - One more `ProcessSpec` in `runtime_plan`, gated on `embedder: "managed"`: spawn `ollama serve`, readiness `Tcp(127.0.0.1:11434)`, stopped with the rest in reverse order.
 - Named asymmetry: every other child ships in `version_root`; Ollama is a system install resolved from PATH or a declared absolute path. This special case is load-bearing. Do not smooth it into the shipped-runtime shape.
 
-### 3.5 Module ↔ crate mapping (proposed)
+### 3.5 Module ↔ crate mapping (consolidated 2026-08-24)
 
 | crate | evidence | module |
 |---|---|---|
-| `hearth` | pure domain rules, no IO | always |
+| `hearth` | pure domain rules — census confirmed zero IO deps | always |
 | `protocol` | wire shapes | always |
 | `host` | the room server, the spirit's door | always |
 | `athanor-install` | the installer itself | always |
-| `vault` | retrieval without a database, by design | vault |
-| `origami`, `delivery`, `akasha` | PostgreSQL bodies, NATS pointers | akasha |
-| giga modules inside `akasha` | schema + worker toggle | giga |
+| `gui` | Godot client, protocol-only deps; renders per-module panels from the manifest | always |
+| `vault` | retrieval without a database — guarded by test (`vault_recall_dispatch_has_no_database_parameters`) | vault |
+| `origami`, `delivery` | NATS pointers, PostgreSQL bodies | akasha |
+| `akasha` | PostgreSQL bodies and the managed-embedder client | akasha |
+
+GIGA lives in four places: types in `hearth/src/giga/`, wire shapes in `protocol`, the worker in `akasha/src/giga_worker/`, a source-ledger surface in `host`. Ruling 7 makes this legal: the vocabulary stays in always-crates; the `giga` toggle gates the worker, the schema, and the mounted doors.
+
+**Named debt, in scope for I0:** `host` hard-depends on `akasha` (`host/Cargo.toml:19`) with direct sqlx and NATS use. `vault` is reachable only through the akasha crate, so a vault-only install links no vault code today. Decouple the Host: it reads the manifest and reaches akasha through one module boundary; vault gets a direct consumer so ruling 6 has a body.
 
 The markdown-spirit surface (ruling 6) lives with `vault`: the crate already owns the file authority.
 
@@ -93,18 +107,31 @@ Two organs never got a file-backed form and complete the mode:
 
 The akasha degraded fallback writes to the same files, so a database outage degrades to the original room, not to nothing.
 
+The file contract, per room root (resolves open question 1):
+
+| file | writer | format |
+|---|---|---|
+| `identity.md` | hand + spirit | free markdown, the always-true layer |
+| `active_spirit.md` | host | fixed header (Agent / Operator / Embodied) |
+| `spellbook.md` | spirit | familiar bindings |
+| `memory/YYYY-MM-DD_slug.md` | spirit (remember) | YAML frontmatter `title`, `written` (ISO), `kind`; the body stands alone |
+| `boats/YYYY-MM-DD_HHMM.md` | spirit (sleep) | same frontmatter; wake reads the lexicographic maximum |
+| `anamnesis.md` | spirit | rolling digest compacted from `memory/` |
+
+The frontmatter is load-bearing for recovery: files written by the akasha fallback during an outage re-ingest into PostgreSQL mechanically. Filename plus frontmatter carry everything the database row needs.
+
 ## 4. Enforcement placement
 
 - Installer: refuses invalid module combinations at selection.
 - Supervisor: builds children from the manifest only.
 - Components: read the manifest through one typed door (the `RoomSettings` pattern from knobs, applied to install scope). Per coding#446 the manifest reader is one module with one public door; no component parses the file itself.
-- The derived `akasha_enabled` expression is deleted, not deprecated.
+- The derived `akasha_enabled` expression is deleted, not deprecated. The field itself survives (`host/src/config.rs:75,120`) and the manifest feeds it: the `/health` wire name `akasha_delivery` is a published contract, and `receipt.rs:85-89` uses the flag as one of a pair whose `(false,false)` state IS the vault-mode degraded behaviour ruling 6 wants.
 
-## 5. Open questions for the chairs
+## 5. Open questions — resolved 2026-08-24
 
-1. Markdown-spirit file contract: exact names and formats, so the akasha fallback and vault mode share one surface.
-2. Single-door migration: cutover order for existing installs with per-room ports.
-3. Omega scope: undefined today; the manifest reserves the word and nothing else.
+1. Markdown-spirit file contract: resolved in §3.6.
+2. Single-door migration: atomic cutover (ruling 9). Every existing install is Sol's; the census counted twenty external touchpoints, all cited in the OneDoor census report. No migration shims.
+3. Omega: defined in the roadmap as org governance (memory #2768), unbuilt. The manifest reserves the word; scope stays zero in I0. Anon is a toggle inside akasha configuration, never a manifest module (ruling 10).
 
 ## 6. Acceptance
 

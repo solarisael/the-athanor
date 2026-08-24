@@ -785,7 +785,7 @@ async fn insula_trace_and_retention_reads_return_ingested_rows()
     let foreign = akasha::ingest_batch(
         &pool,
         &foreign_binding,
-        &IngestBatch {
+        IngestBatch {
             events: vec![traced_event(&foreign_binding, "trace-foreign", &trace)],
         },
     )

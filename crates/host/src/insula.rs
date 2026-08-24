@@ -325,7 +325,7 @@ async fn ingest_events(
 
     substrate_response(
         &state,
-        ingest_batch(pool, state.binding.as_ref(), &batch).await,
+        ingest_batch(pool, state.binding.as_ref(), batch).await,
     )
 }
 

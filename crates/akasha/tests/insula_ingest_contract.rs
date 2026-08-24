@@ -94,7 +94,7 @@ async fn ingest_collapses_only_identical_cross_session_redelivery_and_reports_co
     let accepted = ingest_batch(
         &pool,
         &first_binding,
-        &IngestBatch {
+        IngestBatch {
             events: vec![first.clone()],
         },
     )
@@ -116,7 +116,7 @@ async fn ingest_collapses_only_identical_cross_session_redelivery_and_reports_co
     let duplicate = ingest_batch(
         &pool,
         &second_binding,
-        &IngestBatch {
+        IngestBatch {
             events: vec![redelivery.clone()],
         },
     )
@@ -249,7 +249,7 @@ async fn ingest_collapses_only_identical_cross_session_redelivery_and_reports_co
     let conflicts = ingest_batch(
         &pool,
         &second_binding,
-        &IngestBatch {
+        IngestBatch {
             events: vec![
                 semantic_conflict,
                 event_id_corruption,
@@ -303,7 +303,7 @@ async fn ingest_collapses_only_identical_cross_session_redelivery_and_reports_co
 async fn trace_projection_orders_cross_writer_parent_before_clock_skewed_child() -> TestResult {
     let pool = fresh_insula().await?;
     let trusted = binding("causal-trace-session");
-    let mut parent = event(Uuid::new_v4(), 1);
+    let parent = event(Uuid::new_v4(), 1);
     let mut child = event(Uuid::new_v4(), 1);
     child.trace_id = parent.trace_id.clone();
     child.parent_span_id = Some(parent.span_id.clone());
@@ -316,7 +316,7 @@ async fn trace_projection_orders_cross_writer_parent_before_clock_skewed_child()
     let receipt = ingest_batch(
         &pool,
         &trusted,
-        &IngestBatch {
+        IngestBatch {
             events: vec![seal(&trusted, child), seal(&trusted, parent)],
         },
     )
@@ -379,7 +379,7 @@ async fn ingest_rejects_future_observation_time_before_database_access() {
     let result = ingest_batch(
         &pool,
         &trusted,
-        &IngestBatch {
+        IngestBatch {
             events: vec![future],
         },
     )
@@ -409,7 +409,7 @@ async fn retention_is_replay_safe_keeps_coverage_and_preserves_recomputable_vita
     let receipt = ingest_batch(
         &pool,
         &binding,
-        &IngestBatch {
+        IngestBatch {
             events: vec![seal(&binding, first), seal(&binding, second)],
         },
     )

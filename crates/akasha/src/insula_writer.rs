@@ -406,7 +406,7 @@ async fn persist_groups(pool: &PgPool, batch: Vec<QueuedObservation>) {
 
     // The writer's own persistence is behind a recursion fence: Insula database work is never observed.
     for (binding, events) in groups {
-        let _ = ingest_batch(pool, &binding, &IngestBatch { events }).await;
+        let _ = ingest_batch(pool, &binding, IngestBatch { events }).await;
     }
 }
 

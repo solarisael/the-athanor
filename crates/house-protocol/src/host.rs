@@ -1686,8 +1686,7 @@ mod receipt_tests {
     fn akasha_recall_query_parses_a_trimmed_bounded_query() {
         let mut command = akasha_envelope(AKASHA_RECALL_QUERY, "recall-1");
         command["akasha_recall_query"] = json!({ "query": "  paper boat  " });
-        let Ok(ClientCommand::AkashaRecallQuery { meta, payload }) =
-            parse_client_command(command)
+        let Ok(ClientCommand::AkashaRecallQuery { meta, payload }) = parse_client_command(command)
         else {
             panic!("bounded recall query parses");
         };
@@ -1743,7 +1742,8 @@ mod receipt_tests {
         let mut zero = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-zero");
         zero["akasha_lesson_query"] =
             json!({ "type": "project", "project": "athanor", "limit": 0 });
-        let Ok(ClientCommand::AkashaLessonQuery { payload, .. }) = parse_client_command(zero) else {
+        let Ok(ClientCommand::AkashaLessonQuery { payload, .. }) = parse_client_command(zero)
+        else {
             panic!("zero limit clamps instead of refusing");
         };
         assert_eq!(payload.limit, 1);

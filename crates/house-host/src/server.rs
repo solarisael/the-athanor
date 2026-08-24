@@ -40,21 +40,21 @@ use house_core::routing::{
 use house_core::triggers::{process_lesson_plan, process_lesson_reminder};
 use house_protocol::{
     AKASHA_COMMAND_FAILED, AKASHA_LESSON_RESULT, AKASHA_PROJECTION_ID, AKASHA_RECALL_RESULT,
-    AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent, AkashaRecallQueryPayload,
-    AkashaRecallResultEvent, BOAT_RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT, CONTEXT_ANALYZED,
-    CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ClientCommand, CommandMeta, CommandOutcomeEvent,
-    ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest, DeltaEvent, EventMeta,
-    HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED,
-    HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID,
-    HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent, HallwayKnockClaimedEvent,
-    HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
-    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
-    PaperBoatReceiptEvent, PaperBoatReceiptState, RECALL_POLICY_COMMAND_ACCEPTED,
-    RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA,
-    RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE,
-    ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallPolicyDecision, RecallPolicyMutation,
-    RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT, ShellResultEvent,
-    SnapshotEvent, parse_client_command,
+    AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent,
+    AkashaRecallQueryPayload, AkashaRecallResultEvent, BOAT_RECEIPT_STREAM_NAME,
+    BOAT_RECEIPT_SUBJECT, CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED,
+    ClientCommand, CommandMeta, CommandOutcomeEvent, ContextAnalysisEvent, ContextViewportEvent,
+    ConversationLogRequest, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED,
+    HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED,
+    HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
+    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID,
+    LineageResultEvent, PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT,
+    PAPER_BOAT_RECEIPT_SUBSCRIBE, PaperBoatReceiptEvent, PaperBoatReceiptState,
+    RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED,
+    RECALL_POLICY_DELTA, RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT,
+    RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallPolicyDecision,
+    RecallPolicyMutation, RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT,
+    ShellResultEvent, SnapshotEvent, parse_client_command,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -964,6 +964,7 @@ async fn query_akasha_lessons(
         language_keys: payload.language_keys,
         technology_keys: payload.technology_keys,
         query: payload.query,
+        always_on: false,
         limit: payload.limit,
     };
     let result = match lesson_query(pool, params).await {

@@ -50,7 +50,7 @@ pub use giga::{
 pub use giga_worker::{GigaWorkerHandle, giga_process, spawn_giga_worker};
 pub use hallway::{
     hallway_create, hallway_inbox, hallway_join, hallway_knock, hallway_knock_claim,
-    hallway_knock_policy, hallway_knock_settle, hallway_post, hallway_read,
+    hallway_knock_policy, hallway_knock_settle, hallway_messages, hallway_post, hallway_read,
 };
 pub use health::{
     SubstrateHealthOptions, SubstrateHealthResult, substrate_health, substrate_health_with_config,

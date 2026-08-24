@@ -6,7 +6,7 @@
 // observatory frame, so this module composes it.
 
 import { escapeHtml } from "./text.js";
-import { renderHousePulse } from "./pulse.js";
+import { renderHousePulse, hostLinkChip } from "./pulse.js";
 
 // local interaction snapshot from the 2026-08-18 source census; Host authority remains disconnected
 function mechanic(id, label, value, {
@@ -25,7 +25,6 @@ function mechanic(id, label, value, {
 export const HOUSE_MECHANICS_SNAPSHOT = {
   capturedAt: "2026-08-18",
   revision: "source-census-2026-08-18",
-  connection: "Host offline",
   categories: [
     {
       id: "recall-context",
@@ -413,7 +412,7 @@ export function renderHouseMechanics() {
         <h2 id="mechanics-title">Mechanical observatory</h2>
         <p>Effective values, ownership, health, and consequence from the current source census.</p>
         <div class="mechanics-snapshot-status" aria-label="Snapshot status">
-          <span data-tone="attention">${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.connection)}</span>
+          ${hostLinkChip()}
           <span>Source census · ${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.capturedAt)}</span>
           <span>${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.revision)}</span>
         </div>

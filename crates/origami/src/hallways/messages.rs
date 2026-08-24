@@ -5,8 +5,9 @@ use super::errors::{HallwayError, invalid, refusal};
 use crate::sea::idempotency_digest;
 use hearth::hallway::{
     HallwayInboxEntry, HallwayInboxNotification, HallwayInboxReceipt, HallwayInboxRequest,
-    HallwayMessage, HallwayPostDisposition, HallwayPostReceipt, HallwayPostRequest,
-    HallwayReadReceipt, HallwayReadRequest,
+    HallwayMessage, HallwayMessagesItem, HallwayMessagesPage, HallwayMessagesRequest,
+    HallwayPostDisposition, HallwayPostReceipt, HallwayPostRequest, HallwayReadReceipt,
+    HallwayReadRequest,
 };
 use sqlx::{PgPool, Row};
 
@@ -21,6 +22,19 @@ fn message_from_row(
         room: row.try_get("room")?,
         spirit: row.try_get("spirit")?,
         session: row.try_get("session_id")?,
+        body: row.try_get("body")?,
+        reply_to: row.try_get("reply_to")?,
+        created_at: row.try_get("created_at_text")?,
+        thread: row.try_get("thread_key")?,
+        to_rooms: row.try_get("to_rooms")?,
+    })
+}
+
+fn page_item_from_row(row: &sqlx::postgres::PgRow) -> Result<HallwayMessagesItem, HallwayError> {
+    Ok(HallwayMessagesItem {
+        id: row.try_get("id")?,
+        room: row.try_get("room")?,
+        spirit: row.try_get("spirit")?,
         body: row.try_get("body")?,
         reply_to: row.try_get("reply_to")?,
         created_at: row.try_get("created_at_text")?,
@@ -361,6 +375,64 @@ pub async fn read(
         acked_mentions,
         thread: request.thread,
         wake_policy: "manual".into(),
+    })
+}
+
+// The Pulse panel's newest-first page. `read` above owns every cursor, Bell
+// acknowledgement and presence row in this hallway; the panel borrows none of
+// that authority, so this transaction holds SELECTs only and exists just to
+// take the fence and the page from one snapshot.
+pub async fn page(
+    pool: &PgPool,
+    request: HallwayMessagesRequest,
+) -> Result<HallwayMessagesPage, HallwayError> {
+    request.validate().map_err(invalid)?;
+    let limit = request.page_limit();
+    let mut tx = pool.begin().await?;
+    let id = lookup_id(&mut tx, &request.hallway).await?;
+    let allowed = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM hallway_allowed_rooms WHERE hallway_id=$1 AND room=$2
+         )",
+    )
+    .bind(id)
+    .bind(&request.room)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !allowed {
+        return Err(refusal(
+            "room_not_allowed",
+            "room is not allowed in this hallway",
+        ));
+    }
+    let before = request.before.map(|cursor| cursor.id);
+    let rows = sqlx::query(
+        "SELECT m.id,m.room,m.spirit,m.body,m.reply_to,
+                m.created_at::text AS created_at_text,m.to_rooms,
+                COALESCE(t.thread_key,'') AS thread_key
+         FROM hallway_messages m
+         LEFT JOIN hallway_threads t ON t.id=m.thread_id
+         WHERE m.hallway_id=$1 AND ($2::bigint IS NULL OR m.id<$2)
+         ORDER BY m.id DESC LIMIT $3",
+    )
+    .bind(id)
+    .bind(before)
+    .bind(i64::from(limit) + 1)
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    let has_more = rows.len() > limit as usize;
+    let messages = rows
+        .iter()
+        .take(limit as usize)
+        .map(page_item_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(HallwayMessagesPage {
+        hallway: request.hallway,
+        messages,
+        has_more,
     })
 }
 

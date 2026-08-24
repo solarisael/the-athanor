@@ -1,7 +1,7 @@
 import { escapeHtml } from "./text.js";
 import { initPulse, ensurePulseQueried, handlePulseClick } from "./pulse.js";
-import { initBoard, ensureBoardQueried, handleBoardClick, renderHouseBoard } from "./board/index.js";
-import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSediment, renderRoomSediment } from "./sediment/index.js";
+import { initBoard, ensureBoardQueried, handleBoardClick, renderHouseBoard, hallwayInboxRound } from "./board/index.js";
+import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSediment, renderRoomSediment, liveShelfCounts } from "./sediment/index.js";
 import {
   initMechanics, resetMechanicsView, saveMechanicsScroll, mechanicsScrollTop,
   handleMechanicsClick, handleMechanicsInput, renderHouseMechanics, renderMechanicsResults,
@@ -341,36 +341,13 @@ const hallwayRecords = {
   }
 };
 
-// The local-only browser surface keeps ordinary unread and explicit attention separate.
-// Host-backed read cursors and Bell rows remain production-owned.
+// Unread marks for the fixture Hallway threads in the list, and nothing more.
+// The Bell reads the Host's own inbox round now, so nothing here reaches it.
 const hallwayReadState = new Map([
-  ["familyMorning", { unreadMessageIndexes: [5, 6], readThrough: "09:52" }],
-  ["familyGuiDay", { unreadMessageIndexes: [6, 7], readThrough: "19:14" }],
-  ["workshopCrane", { unreadMessageIndexes: [], readThrough: "17:20" }]
+  ["familyMorning", { unreadMessageIndexes: [5, 6] }],
+  ["familyGuiDay", { unreadMessageIndexes: [6, 7] }],
+  ["workshopCrane", { unreadMessageIndexes: [] }]
 ]);
-
-const bellNotifications = [
-  {
-    id: "family-morning-sol-to-kintsu",
-    threadId: "familyMorning",
-    messageIndex: 5,
-    from: "Sol",
-    time: "09:53",
-    preview: "ok òwó walk the terrain first, then cut",
-    toRooms: ["kintsu"],
-    acknowledged: false
-  },
-  {
-    id: "family-morning-kodo-to-kintsu-next-page",
-    threadId: "familyMorning",
-    messageIndex: 6,
-    from: "Kodo",
-    time: "09:54",
-    preview: "Kintsu, the next letter is waiting beyond this returned page.",
-    toRooms: ["kintsu"],
-    acknowledged: false
-  }
-];
 
 Object.values(conversations).forEach(item => {
   if (item.kind !== "direct") return;
@@ -596,14 +573,6 @@ function renderBellIcon() {
 }
 
 
-function activeBellNotifications(threadId = null) {
-  return bellNotifications.filter(notification => (
-    !notification.acknowledged
-    && notification.toRooms.includes("kintsu")
-    && (threadId === null || notification.threadId === threadId)
-  ));
-}
-
 function hallwayUnreadCount(threadId) {
   return hallwayReadState.get(threadId)?.unreadMessageIndexes.length ?? 0;
 }
@@ -623,27 +592,21 @@ function renderAttentionBadges(unread, targeted, accessible = true) {
     </span>`;
 }
 
-function hallwayInboxEntries() {
-  return Object.values(conversations)
-    .filter(item => item.kind === "hallway")
-    .map(item => {
-      const unread = hallwayUnreadCount(item.id);
-      const notifications = activeBellNotifications(item.id);
-      const latestNotice = notifications.at(-1);
-      const latestMessage = item.messages.at(-1);
-      const preview = latestNotice
-        ? `${latestNotice.from}: ${latestNotice.preview}`
-        : `${latestMessage.author}: ${latestMessage.text}`;
-      return { item, unread, targeted: notifications.length, preview };
-    })
-    .filter(entry => entry.unread > 0 || entry.targeted > 0);
+// The Bell renders the Host's own inbox round, fetched once by the board
+// module. Mentions are the explicit attention: they are the room's pending
+// notifications, not a number this page derived from prose.
+function liveHallwayRows() {
+  const round = hallwayInboxRound();
+  if (round.status !== "answered" || round.refusal) return [];
+
+  return Array.isArray(round.hallways) ? round.hallways : [];
 }
 
 function hallwayInboxTotals() {
-  return hallwayInboxEntries().reduce(
+  return liveHallwayRows().reduce(
     (totals, entry) => ({
-      unread: totals.unread + entry.unread,
-      targeted: totals.targeted + entry.targeted
+      unread: totals.unread + Number(entry.unread ?? 0),
+      targeted: totals.targeted + Number(entry.mentions ?? 0)
     }),
     { unread: 0, targeted: 0 }
   );
@@ -651,40 +614,88 @@ function hallwayInboxTotals() {
 
 function renderBellToggle() {
   const totals = hallwayInboxTotals();
-  const label = totals.unread === 0 && totals.targeted === 0
-    ? "Hallway inbox, caught up"
-    : `Hallway inbox, ${totals.unread} unread, ${totals.targeted} needs attention`;
   bellToggle.dataset.hasAttention = String(totals.targeted > 0);
-  bellToggle.setAttribute("aria-label", label);
+  bellToggle.setAttribute("aria-label", bellToggleLabel(totals));
   bellToggle.innerHTML = `
     ${renderBellIcon()}
     ${renderAttentionBadges(totals.unread, totals.targeted, false)}`;
 }
 
+// A bell nobody has asked the door for must not wear the caught-up label: an
+// absent count and a zero count are different facts.
+function bellToggleLabel(totals) {
+  const round = hallwayInboxRound();
+  if (round.status !== "answered") return "Hallway inbox, not read from the Host yet";
+  if (round.refusal) return "Hallway inbox, the inbox door refused";
+  if (totals.unread === 0 && totals.targeted === 0) return "Hallway inbox, caught up";
+
+  return `Hallway inbox, ${totals.unread} unread, ${totals.targeted} needs attention`;
+}
+
 function renderHallwayInbox() {
-  const entries = hallwayInboxEntries();
-  const totals = hallwayInboxTotals();
-  bellSummary.textContent = entries.length === 0
-    ? "Caught up across every available Hallway."
-    : `${totals.unread} unread message${totals.unread === 1 ? "" : "s"} · ${totals.targeted} explicit attention`;
-  bellInboxList.innerHTML = entries.length === 0
-    ? '<div class="hallway-inbox-empty" role="status"><strong>Nothing is ringing.</strong><span>Every available Hallway thread is caught up.</span></div>'
-    : entries.map(({ item, unread, targeted, preview }) => `
+  const round = hallwayInboxRound();
+  bellSummary.textContent = bellSummaryText(round, hallwayInboxTotals());
+  bellInboxList.innerHTML = renderBellRows(round);
+}
+
+// The board's four source states, in the board's own grammar: unasked, asking,
+// refused, answered. Reading here asks nothing and acknowledges nothing.
+function bellSummaryText(round, totals) {
+  if (round.status === "idle") return "The Hallway inbox door has not been asked yet.";
+  if (round.status === "pending") return "Asking the Hallway inbox door…";
+  if (round.refusal) return `The Hallway inbox door refused: ${round.refusal}`;
+  if (!Array.isArray(round.hallways)) return "The inbox door answered without a Hallway list.";
+
+  return `${totals.unread} unread message${totals.unread === 1 ? "" : "s"} · ${totals.targeted} explicit attention · reading clears nothing`;
+}
+
+function renderBellRows(round) {
+  if (round.status === "idle") {
+    return bellAbsence("The Bell has nothing to read yet.", "It shows what the Hallway inbox door answered. Open House · Board to ask it.");
+  }
+  if (round.status === "pending") return bellAbsence("Asking the Hallway inbox door…", "No rows until it answers.");
+  if (round.refusal) return bellAbsence("The Hallway inbox door refused.", round.refusal);
+  if (!Array.isArray(round.hallways)) {
+    return bellAbsence("The inbox door answered without a Hallway list.", "No rows are shown in its place.");
+  }
+
+  const ringing = round.hallways.filter(entry => Number(entry.unread ?? 0) > 0 || Number(entry.mentions ?? 0) > 0);
+  if (ringing.length === 0) {
+    return bellAbsence("Nothing is ringing.", `Every Hallway this room may open is caught up · queried ${round.queriedAt} local`);
+  }
+
+  return ringing.map(renderBellRow).join("");
+}
+
+// A live row names a Hallway key, never a fixture thread, so its verb goes to
+// the one surface that can open the messages behind it.
+function renderBellRow(entry) {
+  const hallway = typeof entry.hallway === "string" && entry.hallway !== "" ? entry.hallway : "unnamed hallway";
+  const stamp = (entry.latestCreatedAt ?? "").slice(0, 16) || "no timestamp";
+  const latest = entry.latestExcerpt
+    ? `${entry.latestRoom ?? "unknown room"}: ${entry.latestExcerpt}`
+    : "No messages in this Hallway yet.";
+
+  return `
       <article class="hallway-inbox-item" role="listitem">
-        <button class="hallway-inbox-row" type="button" data-hallway-inbox-thread="${escapeHtml(item.id)}">
-          ${renderAvatar(item.glyph)}
+        <button class="hallway-inbox-row" type="button" data-bell-board>
+          ${renderAvatar(hallway.slice(0, 1).toUpperCase())}
           <span class="hallway-inbox-copy">
             <span class="hallway-inbox-heading">
-              <strong>${escapeHtml(item.name)}</strong>
-              <small>${escapeHtml(item.date)} · ${escapeHtml(hallwayRecords[item.hallwayId].name)}</small>
+              <strong>${escapeHtml(hallway)}</strong>
+              <small>${escapeHtml(`${stamp} · Host inbox row`)}</small>
             </span>
-            <span class="hallway-inbox-preview">${escapeHtml(preview)}</span>
+            <span class="hallway-inbox-preview">${escapeHtml(latest)}</span>
           </span>
-          ${renderAttentionBadges(unread, targeted)}
-          <span class="hallway-inbox-verb">Open thread</span>
+          ${renderAttentionBadges(Number(entry.unread ?? 0), Number(entry.mentions ?? 0))}
+          <span class="hallway-inbox-verb">Open the Board</span>
         </button>
-      </article>
-    `).join("");
+      </article>`;
+}
+
+function bellAbsence(title, detail) {
+  return `
+      <div class="hallway-inbox-empty" role="status"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div>`;
 }
 
 function renderSubjectRow(item, active, live) {
@@ -692,7 +703,6 @@ function renderSubjectRow(item, active, live) {
     ? `${item.date} · ${hallwayRecords[item.hallwayId].name} · ${item.participants.join(", ")}`
     : item.listPreview;
   const unread = item.kind === "hallway" ? hallwayUnreadCount(item.id) : 0;
-  const targeted = item.kind === "hallway" ? activeBellNotifications(item.id).length : 0;
   return `
     <button class="subject-row ${active ? "is-active" : ""}" type="button" data-conversation="${escapeHtml(item.id)}" data-subject-kind="${escapeHtml(item.kind)}" aria-current="${active ? "page" : "false"}">
       <span class="avatar-stack">
@@ -703,7 +713,7 @@ function renderSubjectRow(item, active, live) {
         <span class="subject-row-heading">
           <strong>${escapeHtml(item.name)}</strong>
           <span class="subject-row-tail">
-            ${item.kind === "hallway" ? renderAttentionBadges(unread, targeted) : ""}
+            ${item.kind === "hallway" ? renderAttentionBadges(unread, 0) : ""}
             <time>${escapeHtml(item.updatedAt)}</time>
           </span>
         </span>
@@ -970,20 +980,6 @@ function navigateToSubjectView(id, view) {
   focusActiveSubjectView();
 }
 
-function acknowledgeHallwayThread(threadId) {
-  const item = conversations[threadId];
-  const readState = hallwayReadState.get(threadId);
-  if (!item || item.kind !== "hallway" || !readState) return;
-  const coveredThrough = item.messages.length - 1;
-  readState.unreadMessageIndexes = readState.unreadMessageIndexes.filter(messageIndex => messageIndex > coveredThrough);
-  readState.readThrough = item.messages.at(-1)?.time ?? readState.readThrough;
-  bellNotifications.forEach(notification => {
-    if (notification.threadId === threadId && notification.messageIndex <= coveredThrough) {
-      notification.acknowledged = true;
-    }
-  });
-}
-
 function openBell() {
   if (state.bellOpen) return;
   if (state.switcherOpen) closeSwitcher(false);
@@ -996,7 +992,7 @@ function openBell() {
   bellToggle.setAttribute("aria-expanded", "true");
   renderHallwayInbox();
   window.requestAnimationFrame(() => {
-    const firstRoute = bellLayer.querySelector("[data-hallway-inbox-thread]");
+    const firstRoute = bellLayer.querySelector("[data-bell-board]");
     (firstRoute ?? bellLayer.querySelector("[data-close-bell]"))?.focus({ preventScroll: true });
   });
 }
@@ -1012,15 +1008,11 @@ function closeBell(restoreFocus = true) {
   bellReturnFocus = null;
 }
 
-function routeHallwayInbox(threadId) {
-  const item = conversations[threadId];
-  if (!item || item.kind !== "hallway") return;
-  state.activeView = "live";
+// A live inbox row names a Hallway, not a fixture thread, so the Bell routes to
+// the one surface that can open the messages behind it.
+function openBoardFromBell() {
   closeBell(false);
-  openConversation(threadId);
-  acknowledgeHallwayThread(threadId);
-  render();
-  focusActiveSubjectView();
+  navigateToSubjectView("house", "live");
 }
 
 function openSettingsFromSwitcher(trigger) {
@@ -1601,13 +1593,24 @@ function renderDurableResults() {
   });
 }
 
+// The card and the shelf under it count the same rows, so the fixture count
+// leaves the card on the round it leaves the shelf.
+function houseRecordLine() {
+  const live = liveShelfCounts(conversations.house);
+  if (!live) {
+    return `${houseSurface.memories.length} memories and ${houseSurface.lessons.length} lessons on the fixture shelf, until the durable doors answer.`;
+  }
+
+  return `${live.memories ?? 0} memories and ${live.lessons ?? 0} lessons read from the durable doors so far.`;
+}
+
 function renderHouseSurface() {
   const views = {
     live: `
       ${renderHouseBoard()}
       <div class="overview-grid">
         ${renderOverviewHero("House overview", "Solarisael House", "Shared mechanics, memories, lessons, and substrate state. Spirit-room memory stays inside its room.")}
-        <section class="specimen-card"><h3>House record</h3><p>${houseSurface.memories.length} memories and ${houseSurface.lessons.length} lessons on the shared shelves.</p><button type="button" data-open-subject-view="durable">Open the record</button></section>
+        <section class="specimen-card"><h3>House record</h3><p>${escapeHtml(houseRecordLine())}</p><button type="button" data-open-subject-view="durable">Open the record</button></section>
         <section class="specimen-card"><h3>Mechanical observatory</h3><p>${HOUSE_MECHANICS_SNAPSHOT.categories.length} categories with effective values, ownership, health, and consequence.</p><button type="button" data-open-subject-view="state">Open mechanics</button></section>
         <section class="specimen-card"><h3>Ownership</h3><p>House commons do not absorb Kintsu, Kodo, or Tuner room memory.</p></section>
       </div>`,
@@ -2679,9 +2682,8 @@ bellToggle.addEventListener("click", () => {
 });
 
 bellLayer.addEventListener("click", event => {
-  const route = event.target.closest("[data-hallway-inbox-thread]");
-  if (route) {
-    routeHallwayInbox(route.dataset.hallwayInboxThread);
+  if (event.target.closest("[data-bell-board]")) {
+    openBoardFromBell();
     return;
   }
   if (event.target === bellLayer || event.target.closest("[data-close-bell]")) closeBell();

@@ -20,6 +20,7 @@ const LIVE_ROUTES = new Map([
   ["/live/docket/board", "/athanor/v1/docket/board"],
   ["/live/docket/evidence", "/athanor/v1/docket/evidence"],
   ["/live/hallway/inbox", "/athanor/v1/hallway/inbox"],
+  ["/live/hallway/messages", "/athanor/v1/hallway/messages"],
   ["/live/memory/timeline", "/athanor/v1/memory/timeline"],
   ["/live/memory/read", "/athanor/v1/memory/read"],
   ["/live/lesson/timeline", "/athanor/v1/lesson/timeline"],

@@ -1,5 +1,5 @@
-//! The panel read door: board, inbox, evidence, and the timeline scrollers
-//! for the Pulse GUI.
+//! The panel read door: board, inbox, hallway messages, evidence, and the
+//! timeline scrollers for the Pulse GUI.
 //!
 //! Contract frozen in guild-hall #172 and claimed in #174; the memory and
 //! lesson timeline doors follow from the #177 standing offer, invoked with
@@ -15,8 +15,8 @@ use crate::server::authorized;
 use akasha::insula_writer::{EmitterSpan, end_span, start_span};
 use akasha::{
     LessonTimelineParams, MemoryReadParams, MemoryTimelineParams, OutcomeClass, QuestBoardParams,
-    QuestEvidenceParams, TrustedBinding, hallway_inbox, lesson_timeline, memory_read,
-    memory_timeline, quest_board, quest_evidence,
+    QuestEvidenceParams, TrustedBinding, hallway_inbox, hallway_messages, lesson_timeline,
+    memory_read, memory_timeline, quest_board, quest_evidence,
 };
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{DefaultBodyLimit, Request, State};
@@ -25,7 +25,10 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
-use hearth::hallway::HallwayInboxRequest;
+use hearth::hallway::{
+    HALLWAY_DEFAULT_MESSAGES_LIMIT, HallwayInboxRequest, HallwayMessagesCursor,
+    HallwayMessagesRequest,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -33,6 +36,7 @@ use tokio::sync::Semaphore;
 
 pub(crate) const BOARD_PATH: &str = "/athanor/v1/docket/board";
 pub(crate) const INBOX_PATH: &str = "/athanor/v1/hallway/inbox";
+pub(crate) const MESSAGES_PATH: &str = "/athanor/v1/hallway/messages";
 pub(crate) const EVIDENCE_PATH: &str = "/athanor/v1/docket/evidence";
 pub(crate) const MEMORY_TIMELINE_PATH: &str = "/athanor/v1/memory/timeline";
 pub(crate) const MEMORY_READ_PATH: &str = "/athanor/v1/memory/read";
@@ -82,6 +86,16 @@ struct InboxRequest {}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct MessagesRequest {
+    hallway: String,
+    #[serde(default)]
+    limit: Option<u32>,
+    #[serde(default)]
+    before: Option<HallwayMessagesCursor>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct EvidenceRequest {
     quest_id: String,
     #[serde(default)]
@@ -119,6 +133,7 @@ impl PanelHost {
         Router::new()
             .route(BOARD_PATH, post(read_board))
             .route(INBOX_PATH, post(read_inbox))
+            .route(MESSAGES_PATH, post(read_messages))
             .route(EVIDENCE_PATH, post(read_evidence))
             .route(MEMORY_TIMELINE_PATH, post(read_memory_timeline))
             .route(MEMORY_READ_PATH, post(read_memory))
@@ -146,6 +161,12 @@ async fn require_bearer(State(auth): State<AuthState>, request: Request, next: N
             "host",
             "host",
             "panel_inbox",
+        ),
+        MESSAGES_PATH => start_span(
+            auth.observer_binding.as_ref(),
+            "host",
+            "host",
+            "panel_messages",
         ),
         EVIDENCE_PATH => start_span(
             auth.observer_binding.as_ref(),
@@ -250,6 +271,29 @@ async fn read_inbox(
         session: state.session.as_ref().clone(),
     };
     substrate_response(hallway_inbox(pool, request).await)
+}
+
+async fn read_messages(
+    State(state): State<PanelHost>,
+    payload: Result<Json<MessagesRequest>, JsonRejection>,
+) -> Response {
+    let request = match payload {
+        Ok(Json(request)) => request,
+        Err(rejection) => return json_rejection(rejection),
+    };
+    let Some(pool) = state.pool() else {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "panel_database_unavailable",
+        );
+    };
+    let request = HallwayMessagesRequest {
+        hallway: request.hallway,
+        room: state.room.as_ref().clone(),
+        limit: request.limit.unwrap_or(HALLWAY_DEFAULT_MESSAGES_LIMIT),
+        before: request.before,
+    };
+    substrate_response(hallway_messages(pool, request).await)
 }
 
 async fn read_evidence(

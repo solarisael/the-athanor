@@ -4,8 +4,8 @@
 //! Kills: a panel route reachable without the bearer token, a query string
 //! smuggled past the body contract, a panel that invents data when the
 //! database is absent, or a read that leaks write authority. The panel is
-//! read-only: board, inbox, evidence, memory timeline, memory read, lesson
-//! timeline - nothing else.
+//! read-only: board, inbox, hallway messages, evidence, memory timeline,
+//! memory read, lesson timeline - nothing else.
 
 use host::{Host, HostConfig, KnockAutonomy};
 use reqwest::StatusCode;
@@ -130,6 +130,7 @@ async fn panel_refuses_the_unauthenticated_and_the_database_less() {
     for path in [
         "/athanor/v1/docket/board",
         "/athanor/v1/hallway/inbox",
+        "/athanor/v1/hallway/messages",
         "/athanor/v1/docket/evidence",
         "/athanor/v1/memory/timeline",
         "/athanor/v1/memory/read",
@@ -201,6 +202,58 @@ async fn panel_refuses_the_unauthenticated_and_the_database_less() {
         no_database_timeline.status(),
         StatusCode::SERVICE_UNAVAILABLE
     );
+
+    host.stop().await;
+}
+
+// red-proof: drop deny_unknown_fields on the messages params, route the door
+// past the bearer layer, or answer a database-less Host with an empty page.
+#[tokio::test]
+async fn panel_messages_door_refuses_bearerless_get_and_unknown_fields() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start_with_config(config(root.path())).await;
+    let client = reqwest::Client::new();
+    let door = endpoint(&host, "/athanor/v1/hallway/messages");
+
+    let unauthenticated = client
+        .post(door.as_str())
+        .json(&json!({"hallway": "family-hallway"}))
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+
+    // The panel reads by POST body; a GET is not a smaller version of it.
+    let fetched = client
+        .get(door.as_str())
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(fetched.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+    // `cursor` is the GUI's word for it, never this door's: refused, not
+    // silently stripped into a first page.
+    let unknown_field = client
+        .post(door.as_str())
+        .bearer_auth(TOKEN)
+        .json(&json!({"hallway": "family-hallway", "cursor": {"id": 4}}))
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(unknown_field.status(), StatusCode::BAD_REQUEST);
+
+    let no_database = client
+        .post(door.as_str())
+        .bearer_auth(TOKEN)
+        .json(&json!({"hallway": "family-hallway"}))
+        .send()
+        .await
+        .expect("request");
+    assert_eq!(no_database.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value = no_database.json().await.expect("error body");
+    assert_eq!(body["error"], "panel_database_unavailable");
 
     host.stop().await;
 }
@@ -431,4 +484,107 @@ async fn panel_reads_memory_and_lesson_timelines_read_only() {
     assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
 
     host.stop().await;
+}
+
+// red-proof: let the messages door take the hallway_read path (presence,
+// cursor, Bell acknowledgement) and the read-only counts below go red; invent
+// a page for a hallway that does not exist and the refusal check goes red.
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; creates and removes its own hallway"]
+async fn panel_messages_door_pages_an_empty_hallway_without_touching_cursors() {
+    let url = isolated_database_url();
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("connect test database");
+    sqlx::raw_sql(HALLWAY_MIGRATION)
+        .execute(&pool)
+        .await
+        .expect("hallway migration");
+    sqlx::raw_sql(BELL_MIGRATION)
+        .execute(&pool)
+        .await
+        .expect("bell migration");
+    let hallway = format!(
+        "panel-messages-proof-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .subsec_nanos()
+    );
+    let hallway_id: i64 = sqlx::query_scalar(
+        "INSERT INTO hallway_channels (
+            hallway_key, created_by_room, created_by_spirit, created_by_session,
+            create_idempotency_key, create_digest
+         ) VALUES ($1,'test-room','Prover','configured-session',$1,$1)
+         RETURNING id",
+    )
+    .bind(&hallway)
+    .fetch_one(&pool)
+    .await
+    .expect("insert proof hallway");
+    sqlx::query("INSERT INTO hallway_allowed_rooms (hallway_id, room) VALUES ($1,'test-room')")
+        .bind(hallway_id)
+        .execute(&pool)
+        .await
+        .expect("allow the panel's own room");
+
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let mut configured = config(root.path());
+    configured.database_url = Some(url);
+    let host = start_with_config(configured).await;
+    let client = reqwest::Client::new();
+
+    let page = client
+        .post(endpoint(&host, "/athanor/v1/hallway/messages"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "hallway": &hallway }))
+        .send()
+        .await
+        .expect("messages request");
+    assert_eq!(page.status(), StatusCode::OK);
+    let page: Value = page.json().await.expect("messages body");
+    assert_eq!(page["hallway"], Value::String(hallway.clone()));
+    assert_eq!(
+        page["messages"].as_array().expect("messages array").len(),
+        0,
+        "an empty hallway is an empty page, never invented rows"
+    );
+    assert_eq!(page["hasMore"], false);
+
+    let presences: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM hallway_presences WHERE hallway_id=$1")
+            .bind(hallway_id)
+            .fetch_one(&pool)
+            .await
+            .expect("count presences");
+    assert_eq!(presences, 0, "the panel page must not join the hallway");
+    let room_state: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM hallway_room_state WHERE hallway_id=$1")
+            .bind(hallway_id)
+            .fetch_one(&pool)
+            .await
+            .expect("count room state");
+    assert_eq!(room_state, 0, "the panel page must not move a read cursor");
+
+    // A hallway nobody opened is a named refusal, never an empty page.
+    let missing = client
+        .post(endpoint(&host, "/athanor/v1/hallway/messages"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "hallway": "panel-messages-absent" }))
+        .send()
+        .await
+        .expect("missing hallway request");
+    assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
+
+    host.stop().await;
+
+    sqlx::query("DELETE FROM hallway_channels WHERE id=$1")
+        .bind(hallway_id)
+        .execute(&pool)
+        .await
+        .expect("clean proof hallway");
 }

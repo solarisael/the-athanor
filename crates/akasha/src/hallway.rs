@@ -5,8 +5,9 @@ use hearth::hallway::{
     HallwayCreateRequest, HallwayInboxReceipt, HallwayInboxRequest, HallwayJoinRequest,
     HallwayKnockClaimReceipt, HallwayKnockClaimRequest, HallwayKnockPolicyReceipt,
     HallwayKnockPolicyRequest, HallwayKnockReceipt, HallwayKnockRequest, HallwayKnockSettleReceipt,
-    HallwayKnockSettleRequest, HallwayPostReceipt, HallwayPostRequest, HallwayPresenceReceipt,
-    HallwayReadReceipt, HallwayReadRequest, HallwayReceipt,
+    HallwayKnockSettleRequest, HallwayMessagesPage, HallwayMessagesRequest, HallwayPostReceipt,
+    HallwayPostRequest, HallwayPresenceReceipt, HallwayReadReceipt, HallwayReadRequest,
+    HallwayReceipt,
 };
 use origami::hallways::{HallwayError, channels, knocks, messages};
 use sqlx::PgPool;
@@ -57,6 +58,13 @@ pub async fn hallway_inbox(
     request: HallwayInboxRequest,
 ) -> Result<HallwayInboxReceipt, AppError> {
     messages::inbox(pool, request).await.map_err(app_error)
+}
+
+pub async fn hallway_messages(
+    pool: &PgPool,
+    request: HallwayMessagesRequest,
+) -> Result<HallwayMessagesPage, AppError> {
+    messages::page(pool, request).await.map_err(app_error)
 }
 
 pub async fn hallway_knock_policy(

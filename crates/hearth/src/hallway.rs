@@ -5,6 +5,7 @@ use serde::{
 pub const HALLWAY_MAX_BODY_BYTES: usize = 32 * 1024;
 pub const HALLWAY_MAX_ALLOWED_ROOMS: usize = 32;
 pub const HALLWAY_MAX_READ_LIMIT: u32 = 200;
+pub const HALLWAY_DEFAULT_MESSAGES_LIMIT: u32 = 30;
 pub const HALLWAY_MAX_KNOCK_TURNS: u8 = 8;
 pub const HALLWAY_DEFAULT_KNOCK_TURNS: u8 = 4;
 pub const HALLWAY_MAX_KNOCK_REASON_BYTES: usize = 2048;
@@ -339,6 +340,49 @@ pub struct HallwayInboxReceipt {
     pub spirit: String,
     pub hallways: Vec<HallwayInboxEntry>,
 }
+
+/// Frozen wire shape for the Host's `hallway/messages` panel door: the Pulse
+/// GUI builds directly to these names, so a rename here renames the panel.
+/// Deliberately not [`HallwayMessage`] - `sequence` and `session` are cursor
+/// and identity bookkeeping the glass has no business carrying.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayMessagesRequest {
+    pub hallway: String,
+    pub room: String,
+    pub limit: u32,
+    pub before: Option<HallwayMessagesCursor>,
+}
+
+/// Keyset door, never an offset: a hallway grows under the scroller while it
+/// is open, so a page is named by the id it walks back from.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HallwayMessagesCursor {
+    pub id: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HallwayMessagesItem {
+    pub id: i64,
+    pub room: String,
+    pub spirit: String,
+    pub body: String,
+    pub reply_to: Option<i64>,
+    pub created_at: String,
+    pub thread: String,
+    pub to_rooms: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HallwayMessagesPage {
+    pub hallway: String,
+    pub messages: Vec<HallwayMessagesItem>,
+    pub has_more: bool,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HallwayKnockPolicyMode {
@@ -632,6 +676,27 @@ impl HallwayReadRequest {
 impl HallwayInboxRequest {
     pub fn validate(&self) -> Result<(), String> {
         validate_binding(&self.room, &self.spirit, &self.session)
+    }
+}
+
+impl HallwayMessagesRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        if !valid_slug(&self.hallway) {
+            return Err("hallway must be a lowercase kebab-case key of at most 160 bytes".into());
+        }
+        if !valid_slug(&self.room) {
+            return Err("room must be a lowercase kebab-case key of at most 160 bytes".into());
+        }
+        if self.before.is_some_and(|cursor| cursor.id <= 0) {
+            return Err("before.id must be a positive message id".into());
+        }
+        Ok(())
+    }
+
+    /// A scroller may ask for any page size; the panel still answers under
+    /// the same ceiling `hallway_read` honors.
+    pub fn page_limit(&self) -> u32 {
+        self.limit.clamp(1, HALLWAY_MAX_READ_LIMIT)
     }
 }
 fn validate_knock_max_turns(max_turns: u8) -> Result<(), String> {

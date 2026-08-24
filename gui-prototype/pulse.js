@@ -13,7 +13,6 @@ import { escapeHtml } from "./text.js";
 // rows inside a single transaction at the stamped moment. Times are −03.
 const PULSE_SNAPSHOT = {
   capturedAt: "2026-08-20 22:12 −03",
-  connection: "Host offline",
   source: "PostgreSQL insula snapshot",
   vitalsQuery: "insula.vitals.minute v1",
   totals: { spans: 15853, writers: 36, components: 4, window: "16:01–22:12 −03", duplicates: 13, drops: 0 },
@@ -286,33 +285,34 @@ function renderReceipt(receipt) {
     </details>`;
 }
 
-// Four explicit source states. Snapshot provenance stays visible in every
-// state that still renders snapshot numbers.
+// The chip says which source is on screen; the rest of the line says where the
+// numbers beside it came from.
 function statusChips() {
-  const snapshotChips = `
-          <span>${escapeHtml(PULSE_SNAPSHOT.source)}</span>
-          <span>Captured ${escapeHtml(PULSE_SNAPSHOT.capturedAt)}</span>`;
-
   if (live.status === "live") {
     const truncation = live.truncated ? " · truncated" : "";
     return `
-          <span data-tone="steady">Host connected</span>
+          ${hostLinkChip()}
           <span>${escapeHtml(live.room)} Host · room-scoped vitals</span>
           <span>Queried ${escapeHtml(live.queriedAt)} local${truncation}</span>`;
   }
 
-  if (live.status === "pending") {
-    return `
-          <span data-tone="quiet">Querying Host…</span>${snapshotChips}`;
-  }
-
-  if (live.status === "failed") {
-    return `
-          <span data-tone="attention">Host unreachable · ${escapeHtml(live.reason)}</span>${snapshotChips}`;
-  }
-
   return `
-          <span data-tone="attention">${escapeHtml(PULSE_SNAPSHOT.connection)}</span>${snapshotChips}`;
+          ${hostLinkChip()}
+          <span>${escapeHtml(PULSE_SNAPSHOT.source)}</span>
+          <span>Captured ${escapeHtml(PULSE_SNAPSHOT.capturedAt)}</span>`;
+}
+
+// Slot 2 renders two headers — Pulse's own and the observatory's above it. Both
+// chips come from here, so the surface can never say Host connected in one line
+// and Host offline in the line above it.
+export function hostLinkChip() {
+  if (live.status === "live") return '<span data-tone="steady">Host connected</span>';
+  if (live.status === "pending") return '<span data-tone="quiet">Querying Host…</span>';
+  if (live.status === "failed") {
+    return `<span data-tone="attention">Host unreachable · ${escapeHtml(live.reason)}</span>`;
+  }
+
+  return '<span data-tone="attention">Host not queried</span>';
 }
 
 export function renderHousePulse() {

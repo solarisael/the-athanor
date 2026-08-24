@@ -3336,6 +3336,100 @@ input:focus-visible {
   grid-template-columns: minmax(0, 0.35fr) minmax(0, 1fr);
 }
 
+/* Slots 1 and 3 stack their instrument above the rest of the page: same column,
+   so each reads as one page rather than two widths. */
+.house-board,
+.house-sediment {
+  align-self: flex-start;
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+/* A named absence, where rows would be. Never styled to look like a row. */
+.board-absence,
+.sediment-absence {
+  margin: 0;
+  padding: 10px 2px;
+
+  font-size: 12px;
+
+  color: var(--fg-dim);
+}
+
+/* Memories and lessons stand beside each other where there is room for both,
+   and a shelf with one door takes the whole width rather than half of it. */
+.sediment-shelves {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+
+  gap: 18px;
+}
+
+.sediment-fixtures {
+  padding-top: 6px;
+  border-top: 1px solid var(--bd-section);
+}
+
+/* The fixture chip rides the row's own metadata line: the section header states
+   it in markup, and this repeats it per row so no single row can be read out of
+   its shelf and mistaken for something a door sent. */
+[data-fixture-shelf] .durable-entry small::after {
+  content: " · fixture, not from a door";
+
+  color: var(--fg-active);
+}
+
+/* The evidence drawer is a second disclosure inside a quest row, so its own
+   rows get narrower columns than a top-level row can afford. */
+.evidence-drawer > summary {
+  padding: 7px 2px;
+  border: 1px solid transparent;
+
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+
+  color: var(--fg-soft);
+
+  cursor: pointer;
+}
+
+.evidence-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+.evidence-drawer > summary:hover {
+  color: var(--fg-active);
+}
+
+/* Focus rides the border edge, the same contract the row species use: a
+   background or shadow is stripped under forced colors and would leave a
+   keyboard user with no focus position at all on this disclosure. */
+.evidence-drawer > summary:focus-visible {
+  outline: none;
+  border-color: var(--bd-focus);
+
+  color: var(--fg-active);
+}
+
+.evidence-drawer-body {
+  display: grid;
+
+  gap: 12px;
+
+  padding-bottom: 4px;
+}
+
+.evidence-row > summary,
+.sediment-row > summary {
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.45fr) auto;
+}
+
+.mechanics-row-body dl.evidence-receipt-detail {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .mechanics-controls {
   display: grid;
 
@@ -3923,6 +4017,8 @@ input:focus-visible {
   .tab:focus-visible,
   .message-timeline:focus-visible,
   .switcher-query input:focus-visible,
+  .evidence-row > summary:focus-visible,
+  .sediment-row > summary:focus-visible,
   .session-menu {
     outline: 1px solid Highlight;
     outline-offset: -1px;
@@ -3981,7 +4077,6 @@ input:focus-visible {
   .insula-observation-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
   .mechanics-search,
   .shelf-search {
     grid-template-columns: 1fr;

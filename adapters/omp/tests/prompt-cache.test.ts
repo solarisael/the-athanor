@@ -177,6 +177,7 @@ mock.module("../solarisael-house-proof/recall-policy.ts", () => ({
   isMutateTool: () => false,
   markToolEvidence: () => undefined,
   hasToolEvidence: () => false,
+  workContextEvidence: () => ({ languageKeys: [], technologyKeys: [], families: ["coding"], project: null }),
 }));
 
 const { default: registerAdapter } = await import("../index.ts");

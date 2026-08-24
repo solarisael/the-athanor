@@ -68,6 +68,7 @@ import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./solarisael-house-proof/consta
 import { showHouseContextFeedback } from "./solarisael-house-proof/feedback.ts";
 import {
   closeLessonTriggerTransports,
+  extractToolSurfaces,
   filterInterruptedLessonProse,
   lessonTriggerMessageRenderer,
   lessonTriggerProseAddition,
@@ -79,13 +80,13 @@ import {
   takeLessonReminder,
   toolLessonCard,
 } from "./solarisael-house-proof/lesson-triggers.ts";
-import { runLessonQuery } from "./solarisael-house-proof/lesson-context.ts";
-import { lessonPacketMessageRenderer } from "./solarisael-house-proof/lesson-packet.ts";
+import { collectLessonPacket, lessonPacketMessageRenderer } from "./solarisael-house-proof/lesson-packet.ts";
 import {
   RecallPolicyHostClient,
   hasToolEvidence,
   isMutateTool,
   markToolEvidence,
+  workContextEvidence,
   type PersistedRecallPolicy,
   type RecallPolicyDecision,
 } from "./solarisael-house-proof/recall-policy.ts";
@@ -831,7 +832,11 @@ export default function solarisaelHouseProof(pi) {
     if (isMutateTool(event?.toolName)) {
       try {
         const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-        markToolEvidence({ room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) });
+        const surfaces = extractToolSurfaces(String(event?.toolName ?? ""), event?.input);
+        markToolEvidence({ room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) }, {
+          paths: surfaces.flatMap((surface) => (surface.path ? [surface.path] : [])),
+          cwd: String(ctx?.cwd ?? ""),
+        });
       } catch {
         // An unreadable room costs the hint, never the tool call.
       }
@@ -1247,7 +1252,8 @@ export default function solarisaelHouseProof(pi) {
           );
         }
         queryRoute = contextAnalysis.route;
-        const activeProject = null;
+        const workContext = workContextEvidence({ room, spirit, session: hostSession });
+        const activeProject = workContext.project;
         const evaluation = await policyClient.evaluate({
           queryRoute,
           conversationTokens: conversationTokenEstimate(messages),
@@ -1262,50 +1268,39 @@ export default function solarisaelHouseProof(pi) {
 
         const resolvedMode = decision?.resolvedMode ?? policyState?.resolvedMode;
         if (resolvedMode === "work" && !existingTypes.has("solarisael-lesson-packet")) {
-          const packet = await runLessonQuery(effectiveRoomDir, room, {
-            type: "coding",
-            alwaysOn: true,
-            limit: 12,
-          });
-          const lessons = packet.ok && Array.isArray(packet.lessons) ? packet.lessons : [];
-          if (lessons.length) {
-            const packetLessons = lessons.flatMap((value) => {
-              if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-              const lesson = value as Record<string, unknown>;
-              const family = String(lesson.type ?? "").trim();
-              const id = Number(lesson.id);
-              const title = String(lesson.title ?? "").trim();
-              const body = String(lesson.lesson ?? "").trim();
-              const proofPattern = String(lesson.proofPattern ?? "").trim();
-              if (!family || !Number.isInteger(id) || id <= 0 || !title || !body) return [];
-              return [{ family, id, title, body, proofPattern }];
+          const packet = await collectLessonPacket(effectiveRoomDir, room, workContext);
+          for (const warning of packet.warnings) warnings.push(warning);
+          if (packet.lessons.length) {
+            const detected = [
+              `families: ${workContext.families.join("+")}`,
+              ...(workContext.languageKeys.length ? [`languages: ${workContext.languageKeys.join(", ")}`] : []),
+              ...(workContext.technologyKeys.length ? [`technologies: ${workContext.technologyKeys.join(", ")}`] : []),
+            ].join("; ");
+            additions.push({
+              role: "custom",
+              customType: "solarisael-lesson-packet",
+              content: [
+                "<system-reminder>",
+                `Work-mode lesson packet (${detected}) — always-on and evidence-keyed lessons; this packet supersedes earlier copies.`,
+                ...packet.lessons.flatMap((lesson) => [
+                  "",
+                  `${lesson.family}#${lesson.id} — ${lesson.title}`,
+                  lesson.body,
+                  ...(lesson.proofPattern ? [`proof: ${lesson.proofPattern}`] : []),
+                ]),
+                "</system-reminder>",
+              ].join("\n"),
+              display: true,
+              details: {
+                lessons: packet.lessons.map(({ family, id, title }) => ({ family, id, title })),
+                count: packet.lessons.length,
+                families: workContext.families,
+                languageKeys: workContext.languageKeys,
+                technologyKeys: workContext.technologyKeys,
+              },
+              attribution: "agent",
+              timestamp,
             });
-            if (packetLessons.length) {
-              additions.push({
-                role: "custom",
-                customType: "solarisael-lesson-packet",
-                content: [
-                  "<system-reminder>",
-                  "Work-mode lesson packet — always-on coding lessons; this packet supersedes earlier copies.",
-                  ...packetLessons.flatMap((lesson) => [
-                    "",
-                    `${lesson.family}#${lesson.id} — ${lesson.title}`,
-                    lesson.body,
-                    ...(lesson.proofPattern ? [`proof: ${lesson.proofPattern}`] : []),
-                  ]),
-                  "</system-reminder>",
-                ].join("\n"),
-                display: true,
-                details: {
-                  lessons: packetLessons.map(({ family, id, title }) => ({ family, id, title })),
-                  count: packetLessons.length,
-                },
-                attribution: "agent",
-                timestamp,
-              });
-            } else {
-              warnings.push("work-mode lesson packet unavailable");
-            }
           } else {
             warnings.push("work-mode lesson packet unavailable");
           }

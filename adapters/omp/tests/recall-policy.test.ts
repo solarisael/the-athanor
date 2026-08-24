@@ -4,9 +4,13 @@ import {
   RecallPolicyHostUnavailable,
   hasToolEvidence,
   isMutateTool,
+  workContextEvidence,
 } from "../solarisael-house-proof/recall-policy.ts";
 import { hostCommand, hostSessionIdentity } from "../solarisael-house-proof/host.ts";
 import { roomContext } from "../solarisael-house-proof/room.ts";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 // The adapter's own tool registration needs OMP's zod surface, which a test pi
 // does not have. Everything else in the graph stays real: the evidence must
@@ -371,6 +375,60 @@ describe("hands-on-files evidence", () => {
       await runToolCall({ toolName: "write", toolCallId: "evidence-call-2", input: { path: "a.ts", content: "const a = 1;\n" } }, hostile);
       expect(hasToolEvidence(bindingFor("evidence-hostile-session"))).toBe(false);
     } finally {
+      if (killSwitch === undefined) delete process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
+      else process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = killSwitch;
+    }
+  });
+
+  // Kills: the tap dropping surface paths on the floor, or the vocabulary
+  // table losing the css→design summons the lesson packet rides on.
+  // red-proof: remove the `paths` field from the markToolEvidence call in the
+  // index.ts tool_call tap.
+  test("touched css files summon the design family with css keys", async () => {
+    const killSwitch = process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
+    process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = "1";
+    try {
+      const binding = bindingFor("evidence-css-session");
+      await runToolCall(
+        {
+          toolName: "edit",
+          toolCallId: "evidence-css-1",
+          input: { input: "[styles/site.css#1A2B]\nPUT 1.=1:\n+.door { color: red; }\n" },
+        },
+        { cwd: process.cwd(), sessionID: binding.session },
+      );
+      const work = workContextEvidence(binding);
+      expect(work.languageKeys).toContain("css");
+      expect(work.families).toEqual(["coding", "design"]);
+    } finally {
+      if (killSwitch === undefined) delete process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
+      else process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = killSwitch;
+    }
+  });
+
+  // Kills: losing the repo walk that names the active project — the evaluate
+  // wire would fall back to the hardcoded null the Host can never act on.
+  // red-proof: return null unconditionally from repoName.
+  test("an absolute touch inside a repo names the active project", async () => {
+    const killSwitch = process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
+    process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = "1";
+    const repo = mkdtempSync(join(tmpdir(), "athanor-evidence-repo-"));
+    try {
+      mkdirSync(join(repo, ".git"));
+      const binding = bindingFor("evidence-project-session");
+      await runToolCall(
+        {
+          toolName: "write",
+          toolCallId: "evidence-project-1",
+          input: { path: join(repo, "src", "main.rs"), content: "fn main() {}\n" },
+        },
+        { cwd: process.cwd(), sessionID: binding.session },
+      );
+      const work = workContextEvidence(binding);
+      expect(work.languageKeys).toContain("rust");
+      expect(work.project).toBe(basename(repo).toLowerCase());
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
       if (killSwitch === undefined) delete process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
       else process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = killSwitch;
     }

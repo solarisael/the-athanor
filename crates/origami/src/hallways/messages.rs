@@ -2,6 +2,7 @@
 use super::bells;
 use super::channels::{ensure_presence, lookup_id};
 use super::errors::{HallwayError, invalid, refusal};
+use super::rows;
 use crate::sea::idempotency_digest;
 use hearth::hallway::{
     HallwayInboxEntry, HallwayInboxNotification, HallwayInboxReceipt, HallwayInboxRequest,
@@ -193,20 +194,13 @@ pub async fn post(
         "INSERT INTO hallway_messages(
             hallway_id,sequence,room,spirit,session_id,idempotency_key,body,body_digest,
             reply_to,thread_id,to_rooms
-         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         )
+         SELECT hallway_id,sequence,room,spirit,session_id,idempotency_key,body,body_digest,
+                reply_to,thread_id,to_rooms
+         FROM jsonb_populate_record(NULL::hallway_messages,$1)
          RETURNING id,created_at::text AS created_at_text",
     )
-    .bind(id)
-    .bind(sequence)
-    .bind(&request.room)
-    .bind(&request.spirit)
-    .bind(&request.session)
-    .bind(&request.idempotency_key)
-    .bind(&request.body)
-    .bind(&body_digest)
-    .bind(request.reply_to)
-    .bind(thread_id)
-    .bind(&request.to_rooms)
+    .bind(rows::message(id, sequence, &request, &body_digest, thread_id))
     .fetch_one(&mut *tx)
     .await?;
     let message_id: i64 = row.try_get("id")?;

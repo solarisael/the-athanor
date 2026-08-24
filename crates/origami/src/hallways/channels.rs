@@ -1,5 +1,6 @@
 
 use super::errors::{HallwayError, invalid, refusal};
+use super::rows;
 use crate::sea::idempotency_digest;
 use hearth::hallway::{
     HallwayCreateDisposition, HallwayCreateRequest, HallwayJoinDisposition, HallwayJoinRequest,
@@ -66,15 +67,19 @@ pub async fn ensure_presence(
         sqlx::query(
             "INSERT INTO hallway_presences(
                 hallway_id,room,spirit,session_id,join_idempotency_key,join_digest
-             ) VALUES($1,$2,$3,$4,$5,$6)
+             )
+             SELECT hallway_id,room,spirit,session_id,join_idempotency_key,join_digest
+             FROM jsonb_populate_record(NULL::hallway_presences,$1)
              ON CONFLICT DO NOTHING",
         )
-        .bind(hallway_id)
-        .bind(room)
-        .bind(spirit)
-        .bind(session)
-        .bind(format!("lazy:{session}"))
-        .bind(&join_digest)
+        .bind(rows::presence(
+            hallway_id,
+            room,
+            spirit,
+            session,
+            &format!("lazy:{session}"),
+            &join_digest,
+        ))
         .execute(&mut **tx)
         .await?;
     }
@@ -108,16 +113,14 @@ pub async fn create(
         "INSERT INTO hallway_channels(
             hallway_key,created_by_room,created_by_spirit,created_by_session,
             create_idempotency_key,create_digest
-         ) VALUES($1,$2,$3,$4,$5,$6)
+         )
+         SELECT hallway_key,created_by_room,created_by_spirit,created_by_session,
+                create_idempotency_key,create_digest
+         FROM jsonb_populate_record(NULL::hallway_channels,$1)
          ON CONFLICT DO NOTHING
          RETURNING id",
     )
-    .bind(&request.hallway)
-    .bind(&request.room)
-    .bind(&request.spirit)
-    .bind(&request.session)
-    .bind(&request.idempotency_key)
-    .bind(&create_digest)
+    .bind(rows::channel(&request, &create_digest))
     .fetch_optional(&mut *tx)
     .await?;
 
@@ -159,14 +162,18 @@ pub async fn create(
         sqlx::query(
             "INSERT INTO hallway_presences(
                 hallway_id,room,spirit,session_id,join_idempotency_key,join_digest
-             ) VALUES($1,$2,$3,$4,$5,$6)",
+             )
+             SELECT hallway_id,room,spirit,session_id,join_idempotency_key,join_digest
+             FROM jsonb_populate_record(NULL::hallway_presences,$1)",
         )
-        .bind(id)
-        .bind(&request.room)
-        .bind(&request.spirit)
-        .bind(&request.session)
-        .bind(&request.idempotency_key)
-        .bind(&join_digest)
+        .bind(rows::presence(
+            id,
+            &request.room,
+            &request.spirit,
+            &request.session,
+            &request.idempotency_key,
+            &join_digest,
+        ))
         .execute(&mut *tx)
         .await?;
     }
@@ -241,14 +248,18 @@ pub async fn join(
         sqlx::query(
             "INSERT INTO hallway_presences(
                 hallway_id,room,spirit,session_id,join_idempotency_key,join_digest
-             ) VALUES($1,$2,$3,$4,$5,$6)",
+             )
+             SELECT hallway_id,room,spirit,session_id,join_idempotency_key,join_digest
+             FROM jsonb_populate_record(NULL::hallway_presences,$1)",
         )
-        .bind(id)
-        .bind(&request.room)
-        .bind(&request.spirit)
-        .bind(&request.session)
-        .bind(&request.idempotency_key)
-        .bind(&join_digest)
+        .bind(rows::presence(
+            id,
+            &request.room,
+            &request.spirit,
+            &request.session,
+            &request.idempotency_key,
+            &join_digest,
+        ))
         .execute(&mut *tx)
         .await?;
         (true, 0)

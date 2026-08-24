@@ -375,21 +375,32 @@ impl Store {
             }
         }
 
+        let stream_sequence_i64 =
+            i64::try_from(stream_sequence).context("stream sequence exceeds PostgreSQL bigint")?;
+        let first_delivery_count =
+            i32::try_from(delivery_count).context("delivery count exceeds PostgreSQL integer")?;
+
+        // Keys are crane_receipts columns (0016_boat_ready_delivery.sql:59-70,
+        // renamed 0017:21), matched by NAME. processed_at merges below because
+        // SELECT * nulls its DEFAULT -- quietly, for any later nullable column.
         let inserted = sqlx::query(
-            "INSERT INTO crane_receipts (
-               consumer_name, event_id, event_kind, aggregate_id, room,
-               integrity_sha256, stream_sequence, first_delivery_count
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "INSERT INTO crane_receipts
+             SELECT * FROM jsonb_populate_record(
+               NULL::crane_receipts,
+               $1::jsonb || jsonb_build_object('processed_at', NOW())
+             )
              RETURNING processed_at",
         )
-        .bind(consumer_name)
-        .bind(event.event_id)
-        .bind(&event.event_kind)
-        .bind(event.record_id_i64())
-        .bind(&event.room)
-        .bind(&event.integrity_sha256)
-        .bind(i64::try_from(stream_sequence).context("stream sequence exceeds PostgreSQL bigint")?)
-        .bind(i32::try_from(delivery_count).context("delivery count exceeds PostgreSQL integer")?)
+        .bind(serde_json::json!({
+            "consumer_name": consumer_name,
+            "event_id": event.event_id,
+            "event_kind": event.event_kind,
+            "aggregate_id": event.record_id_i64(),
+            "room": event.room,
+            "integrity_sha256": event.integrity_sha256,
+            "stream_sequence": stream_sequence_i64,
+            "first_delivery_count": first_delivery_count,
+        }))
         .fetch_one(&mut *transaction)
         .await?;
         let receipt = RecordedReceipt {
@@ -442,24 +453,32 @@ impl Store {
         payload: &[u8],
         delivery_count: Option<i64>,
     ) -> Result<()> {
+        // Keys are crane_dead_letters columns (0016_boat_ready_delivery.sql:75-90;
+        // subject lost NOT NULL at 0017:209), matched by NAME. Its two DEFAULT
+        // columns merge below because SELECT * nulls them; later ones must too.
         sqlx::query(
-            "INSERT INTO crane_dead_letters (
-               event_id, source, subject, reason_code, reason,
-               payload_sha256, payload_bytes, delivery_count
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "INSERT INTO crane_dead_letters
+             SELECT * FROM jsonb_populate_record(
+               NULL::crane_dead_letters,
+               $1::jsonb || jsonb_build_object(
+                 'dead_letter_id', gen_random_uuid(), 'observed_at', NOW()
+               )
+             )
              ON CONFLICT (source, event_id, payload_sha256, reason_code)
              DO UPDATE SET observed_at = NOW(), delivery_count = GREATEST(
                crane_dead_letters.delivery_count, EXCLUDED.delivery_count
              )",
         )
-        .bind(event_id)
-        .bind(source)
-        .bind(subject)
-        .bind(reason_code)
-        .bind(bounded_reason(reason))
-        .bind(sea::payload_digest(payload))
-        .bind(i32::try_from(payload.len()).unwrap_or(i32::MAX))
-        .bind(delivery_count.and_then(|count| i32::try_from(count).ok()))
+        .bind(serde_json::json!({
+            "event_id": event_id,
+            "source": source,
+            "subject": subject,
+            "reason_code": reason_code,
+            "reason": bounded_reason(reason),
+            "payload_sha256": sea::payload_digest(payload),
+            "payload_bytes": i32::try_from(payload.len()).unwrap_or(i32::MAX),
+            "delivery_count": delivery_count.and_then(|count| i32::try_from(count).ok()),
+        }))
         .execute(&mut **transaction)
         .await?;
         Ok(())

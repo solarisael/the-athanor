@@ -55,6 +55,11 @@ async fn temp_lesson_pool() -> TestResult<PgPool> {
     )
     .execute(&pool)
     .await?;
+    // RoomSettings::load runs inside lesson_query since 0026; with search_path
+    // locked to pg_temp the public table is invisible, so the fixture mirrors it.
+    sqlx::query("CREATE TEMP TABLE room_settings (LIKE public.room_settings INCLUDING ALL)")
+        .execute(&pool)
+        .await?;
     Ok(pool)
 }
 

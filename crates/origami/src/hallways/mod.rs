@@ -9,5 +9,6 @@ pub mod channels;
 pub mod errors;
 pub mod knocks;
 pub mod messages;
+mod rows;
 
 pub use errors::HallwayError;

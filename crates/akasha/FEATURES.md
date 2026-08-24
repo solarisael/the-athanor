@@ -25,7 +25,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `write_memory_tx` also links threads, prunes dropped thread events, marks superseded memories, and rewrites every chunk row.
 - `write_continuations_tx` records which memory a thread continues from.
 - `remember_lesson` writes five lesson kinds: coding, project, writing, design, and audio.
-- Two named lesson writers exist: `write_coding_lesson_tx` and `write_project_lesson_tx`. The writing, design, and audio kinds use upserts written inline in `remember_lesson`.
+- Five named lesson writers exist, one per kind: `write_coding_lesson_tx`, `write_project_lesson_tx`, `write_writing_lesson_tx`, `write_design_lesson_tx`, and `write_audio_lesson_tx`. Each sends one jsonb row to `jsonb_populate_record`; `remember_lesson` only dispatches.
 - `prepare_memory_write` is the shared preparation step. It normalizes threads, derives dates, chunks the body, and asks for vectors.
 - `chunk_body` splits the body on `## ` headings. A section above 4000 characters splits again on paragraphs, with a 200 character overlap.
 - `derive_dates` reads dates out of the source path. A stitched path date moves to the next day.

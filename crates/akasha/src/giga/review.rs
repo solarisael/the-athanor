@@ -1,7 +1,7 @@
 use crate::AppError;
 use hearth::{GigaResonance, GigaReviewAction, GigaReviewState, GigaVisibility, RoomKey};
 use protocol::{GigaClassifierParams, GigaResonanceParams, GigaReviewResult, RequiredNullable};
-use serde_json::json;
+use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Row, Transaction, types::Json};
 use std::collections::HashSet;
 use super::clock::timestamp;
@@ -80,6 +80,71 @@ async fn verify_resonance(
         verify_event_source(tx, resonance.event_id(), source).await?;
     }
     Ok(())
+}
+
+// The substrate review write set, named once and spent twice by the INSERT in
+// giga_review. The list is explicit because id is BIGSERIAL and must keep its
+// sequence default (0003_giga.sql:110) — a record `SELECT *` would write NULL
+// over it — and because the four columns 0004 added stay NULL for a substrate
+// review (0004_giga_runtime.sql:74-78).
+const REVIEW_INSERT_COLUMNS: &str = "candidate_id,action,reviewer_principal,authorization_basis,previous_state,new_state,reason,promotion_target,merge_targets,target_refs,reviewed_at";
+
+// Keys are giga_reviews column names; the table is the only schema
+// (0003_giga.sql:109-131). jsonb_populate_record matches by NAME, so a wrong
+// key dies as a NOT NULL or CHECK refusal instead of a silent positional swap.
+fn review_row(review: &GigaReviewAction) -> Result<Value, AppError> {
+    let merge_targets =
+        if review.merge_target().is_some() || !review.merge_source_candidates().is_empty() {
+            Some(json!([{
+                "target": review.merge_target(),
+                "sources": review.merge_source_candidates(),
+            }]))
+        } else {
+            None
+        };
+    Ok(json!({
+        "candidate_id": review.candidate_id(),
+        "action": review_action(review.new_state()),
+        "reviewer_principal": review.reviewer_id(),
+        "authorization_basis": review.authorization_basis(),
+        "previous_state": review.previous_state().as_str(),
+        "new_state": review.new_state().as_str(),
+        "reason": review.reason(),
+        "promotion_target": review.promotion_target().map(|target| json!({"ref": target})),
+        "merge_targets": merge_targets,
+        "target_refs": review
+            .source_refs()
+            .iter()
+            .map(|source| source.content_hash())
+            .collect::<Vec<_>>(),
+        "reviewed_at": timestamp(review.reviewed_at())?,
+    }))
+}
+
+// Keys are giga_review_resonances column names; the table is the only schema
+// (0005_giga_resonance.sql:29-48). All twelve columns are NOT NULL with no
+// DEFAULT and the table has no generated columns, so `SELECT *` is safe: a
+// missing key refuses loudly at the first write.
+fn resonance_row(
+    review_id: i64,
+    candidate_id: &str,
+    resonance: &GigaResonance,
+) -> Result<Value, AppError> {
+    let classifier = resonance.classifier();
+    Ok(json!({
+        "review_id": review_id,
+        "candidate_id": candidate_id,
+        "event_id": resonance.event_id(),
+        "score": resonance.score(),
+        "classifier_model": classifier.model(),
+        "classifier_provider_type": classifier.provider_type(),
+        "classifier_model_version": classifier.model_version(),
+        "classifier_prompt_version": classifier.prompt_version(),
+        "classifier_configuration_digest": classifier.configuration_digest(),
+        "classifier_run_id": classifier.run_id(),
+        "classifier_completed_at": timestamp(classifier.completed_at())?,
+        "source_refs": promotion_sources_json(resonance.source_refs()),
+    }))
 }
 
 pub async fn giga_review(
@@ -175,66 +240,25 @@ pub async fn giga_review(
         verify_resonance(&mut tx, &room, resonance).await?;
     }
 
-    let reviewed_at = timestamp(review.reviewed_at())?;
-    let promotion_target = review
-        .promotion_target()
-        .map(|target| json!({"ref": target}));
-    let merge_targets =
-        if review.merge_target().is_some() || !review.merge_source_candidates().is_empty() {
-            Some(json!([{
-                "target": review.merge_target(),
-                "sources": review.merge_source_candidates(),
-            }]))
-        } else {
-            None
-        };
-    let target_refs = review
-        .source_refs()
-        .iter()
-        .map(|source| source.content_hash().to_owned())
-        .collect::<Vec<_>>();
-    let review_id: i64 = sqlx::query_scalar(
-        "INSERT INTO giga_reviews
-         (candidate_id,action,reviewer_principal,authorization_basis,previous_state,new_state,
-          reason,promotion_target,merge_targets,target_refs,reviewed_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-         RETURNING id",
-    )
-    .bind(review.candidate_id())
-    .bind(review_action(review.new_state()))
-    .bind(review.reviewer_id())
-    .bind(review.authorization_basis())
-    .bind(review.previous_state().as_str())
-    .bind(review.new_state().as_str())
-    .bind(review.reason())
-    .bind(promotion_target)
-    .bind(merge_targets)
-    .bind(Json(target_refs))
-    .bind(reviewed_at)
-    .fetch_one(&mut *tx)
-    .await?;
+    let sql = format!(
+        "INSERT INTO giga_reviews ({REVIEW_INSERT_COLUMNS})
+         SELECT {REVIEW_INSERT_COLUMNS} FROM jsonb_populate_record(NULL::giga_reviews,$1)
+         RETURNING id"
+    );
+    let review_id: i64 = sqlx::query_scalar(&sql)
+        .bind(review_row(&review)?)
+        .fetch_one(&mut *tx)
+        .await?;
     if let Some(resonance) = review.resonance() {
-        let classifier = resonance.classifier();
         sqlx::query(
             "INSERT INTO giga_review_resonances
-             (review_id,candidate_id,event_id,score,classifier_model,classifier_provider_type,
-              classifier_model_version,classifier_prompt_version,
-              classifier_configuration_digest,classifier_run_id,classifier_completed_at,
-              source_refs)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+             SELECT * FROM jsonb_populate_record(NULL::giga_review_resonances,$1)",
         )
-        .bind(review_id)
-        .bind(review.candidate_id())
-        .bind(resonance.event_id())
-        .bind(resonance.score())
-        .bind(classifier.model())
-        .bind(classifier.provider_type())
-        .bind(classifier.model_version())
-        .bind(classifier.prompt_version())
-        .bind(classifier.configuration_digest())
-        .bind(classifier.run_id())
-        .bind(timestamp(classifier.completed_at())?)
-        .bind(Json(promotion_sources_json(resonance.source_refs())))
+        .bind(resonance_row(
+            review_id,
+            review.candidate_id(),
+            resonance,
+        )?)
         .execute(&mut *tx)
         .await?;
     }

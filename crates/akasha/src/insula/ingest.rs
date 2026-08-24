@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 
@@ -64,8 +64,16 @@ pub async fn ingest_batch(
 
     // Validate and stamp both hashes before any transaction opens: a bad
     // event refuses the whole batch without touching the database.
+    // observed_at truncates to microseconds first: timestamptz stores micros,
+    // and a nanosecond tail rounds on the jsonb text path while the vitals
+    // binary bind truncates — half a microsecond apart, retention's coverage
+    // proof refuses the sweep (coding#251, lived 2026-08-24).
     let mut expiries = Vec::with_capacity(batch.events.len());
     for e in &mut batch.events {
+        e.observed_at = e
+            .observed_at
+            .with_nanosecond(e.observed_at.nanosecond() / 1_000 * 1_000)
+            .unwrap_or(e.observed_at);
         expiries.push(event(e)?);
         e.idempotency_key = derive_idempotency_key_v1(b, e)?;
         e.semantic_hash = derive_semantic_hash_v1(b, e)?;
@@ -142,9 +150,15 @@ async fn insert_new(
         .map(|(e, x)| row(b, e, x))
         .collect();
 
+    // ingested_at merges server-side: NOW() is transaction time, one value for
+    // the whole batch — a client clock here skews retention's replay proof.
     let inserted = sqlx::query(
         "INSERT INTO insula.log
-         SELECT * FROM jsonb_populate_recordset(NULL::insula.log, $1)
+         SELECT * FROM jsonb_populate_recordset(
+             NULL::insula.log,
+             (SELECT jsonb_agg(e || jsonb_build_object('ingested_at', NOW()))
+                FROM jsonb_array_elements($1) e)
+         )
          ON CONFLICT DO NOTHING
          RETURNING event_id::text",
     )
@@ -197,7 +211,6 @@ fn row(b: &TrustedBinding, e: &ObservationEvent, x: DateTime<Utc>) -> serde_json
         "expires_at": x,
         "duplicate_count": 0,
         "last_duplicate_at": null,
-        "ingested_at": Utc::now(),
     })
 }
 

@@ -71,6 +71,49 @@ async fn lock_predecessors(
     Ok(prior_names)
 }
 
+// The canon write set, named once and spent twice by the INSERT below. It is
+// deliberately not ENTITY_COLUMNS: summary_tsv is GENERATED ALWAYS
+// (0001_initial.sql:73) and created_at/updated_at keep their DDL DEFAULT NOW()
+// (0001_initial.sql:78-79), so none of the three may travel in the record.
+const ENTITY_INSERT_COLUMNS: &str = "id,room,name,kind,summary,aliases,search_boost,weighty,pointer_files,summary_as_of,meta,authority,supersedes,attributed_by,attribution_origin";
+
+// Keys are named_entities column names; the table is the only schema
+// (0001_initial.sql:63-81, 0015_canon_authority.sql:3-8). jsonb_populate_record
+// matches by NAME, so a wrong or missing key dies as a NOT NULL refusal here
+// instead of a silent positional swap. A new NOT NULL column must be added to
+// this function and to ENTITY_INSERT_COLUMNS; the first write refuses loudly.
+fn entity_row(
+    entity_id: i64,
+    request: &CanonWriteRequest,
+    aliases: &[String],
+    pointer_files: &Value,
+    summary_as_of: Option<NaiveDate>,
+    predecessor_ids: &[i64],
+) -> Value {
+    json!({
+        "id": entity_id,
+        "room": request.room().as_str(),
+        "name": request.name(),
+        "kind": request.kind(),
+        "summary": request.summary(),
+        "aliases": aliases,
+        "search_boost": request.search_boost(),
+        "weighty": request.weighty(),
+        "pointer_files": pointer_files,
+        "summary_as_of": summary_as_of,
+        "meta": {
+            "canon_writer": {
+                "actor": request.attribution().actor(),
+                "origin": request.attribution().origin(),
+            }
+        },
+        "authority": "active",
+        "supersedes": predecessor_ids,
+        "attributed_by": request.attribution().actor(),
+        "attribution_origin": request.attribution().origin(),
+    })
+}
+
 pub async fn canon_write(
     pool: &PgPool,
     request: CanonWriteRequest,
@@ -153,32 +196,22 @@ pub async fn canon_write(
         }
     }
 
-    let meta = json!({
-        "canon_writer": {
-            "actor": request.attribution().actor(),
-            "origin": request.attribution().origin(),
-        }
-    });
-    sqlx::query(
-        "INSERT INTO named_entities (id,room,name,kind,summary,aliases,search_boost,weighty,pointer_files,summary_as_of,meta,authority,supersedes,attributed_by,attribution_origin) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12,$13,$14)",
-    )
-    .bind(entity_id)
-    .bind(request.room().as_str())
-    .bind(request.name())
-    .bind(request.kind())
-    .bind(request.summary())
-    .bind(&aliases)
-    .bind(request.search_boost())
-    .bind(request.weighty())
-    .bind(Json(pointer_files))
-    .bind(summary_as_of)
-    .bind(Json(meta))
-    .bind(&predecessor_ids)
-    .bind(request.attribution().actor())
-    .bind(request.attribution().origin())
-    .execute(&mut *tx)
-    .await
-    .map_err(canon_database_error)?;
+    let row = entity_row(
+        entity_id,
+        &request,
+        &aliases,
+        &pointer_files,
+        summary_as_of,
+        &predecessor_ids,
+    );
+    let sql = format!(
+        "INSERT INTO named_entities ({ENTITY_INSERT_COLUMNS}) SELECT {ENTITY_INSERT_COLUMNS} FROM jsonb_populate_record(NULL::named_entities,$1)"
+    );
+    sqlx::query(&sql)
+        .bind(row)
+        .execute(&mut *tx)
+        .await
+        .map_err(canon_database_error)?;
 
     sqlx::query("SELECT substrate_refresh_semantic_vocabulary_sources()")
         .execute(&mut *tx)

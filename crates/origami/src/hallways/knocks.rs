@@ -1,6 +1,7 @@
 
 use super::channels::{ensure_presence, lookup_id};
 use super::errors::{HallwayError, invalid, refusal};
+use super::rows;
 use crate::sea::idempotency_digest;
 use chrono::{DateTime, Duration, Utc};
 use hearth::hallway::{
@@ -261,19 +262,13 @@ pub async fn policy(
         "INSERT INTO hallway_knock_policies(
             hallway_id,room,spirit,session_id,idempotency_key,request_digest,
             mode,allowed_rooms,max_turns,revision
-         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         )
+         SELECT hallway_id,room,spirit,session_id,idempotency_key,request_digest,
+                mode,allowed_rooms,max_turns,revision
+         FROM jsonb_populate_record(NULL::hallway_knock_policies,$1)
          RETURNING mode,allowed_rooms,max_turns,revision",
     )
-    .bind(id)
-    .bind(&request.room)
-    .bind(&request.spirit)
-    .bind(&request.session)
-    .bind(&request.idempotency_key)
-    .bind(&request_digest)
-    .bind(request.mode.as_str())
-    .bind(&request.allowed_rooms)
-    .bind(i16::from(request.max_turns))
-    .bind(revision)
+    .bind(rows::knock_policy(id, &request, &request_digest, revision))
     .fetch_one(&mut *tx)
     .await?;
     let receipt = policy_receipt_from_row(&row, request.hallway, request.room, false)?;
@@ -511,24 +506,23 @@ pub async fn knock(
             knock_id,hallway_id,message_id,from_room,from_spirit,request_session,
             idempotency_key,request_digest,recipient_room,parent_knock_id,
             root_knock_id,turn_index,max_turns,expires_at
-         ) VALUES(
-            $1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10::uuid,$11::uuid,$12,$13,$14
-         )",
+         )
+         SELECT knock_id,hallway_id,message_id,from_room,from_spirit,request_session,
+                idempotency_key,request_digest,recipient_room,parent_knock_id,
+                root_knock_id,turn_index,max_turns,expires_at
+         FROM jsonb_populate_record(NULL::hallway_knocks,$1)",
     )
-    .bind(&knock_id)
-    .bind(id)
-    .bind(request.message_id)
-    .bind(&request.room)
-    .bind(&request.spirit)
-    .bind(&request.session)
-    .bind(&request.idempotency_key)
-    .bind(&request_digest)
-    .bind(&request.recipient_room)
-    .bind(parent_knock_id.as_deref())
-    .bind(&root_knock_id)
-    .bind(turn_index)
-    .bind(max_turns)
-    .bind(expires_at)
+    .bind(rows::knock(
+        id,
+        &knock_id,
+        &request,
+        &request_digest,
+        parent_knock_id.as_deref(),
+        &root_knock_id,
+        turn_index,
+        max_turns,
+        expires_at,
+    ))
     .execute(&mut *tx)
     .await?;
     let bumped = sqlx::query(

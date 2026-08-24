@@ -386,6 +386,18 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                 sqlx::raw_sql(migration!("0001_initial.sql"))
                     .execute(&pool)
                     .await?;
+                // recall's read path spans these migrations: 0006 thread graph,
+                // 0009 bm25f columns, 0010 semantic vocabulary, 0015 canon
+                // authority. An isolated schema missing one fails on shadowed
+                // tables, not on the contract under test.
+                for sql in [
+                    migration!("0006_memory_thread_graph.sql"),
+                    migration!("0009_bm25f_memory_search.sql"),
+                    migration!("0010_semantic_vocabulary.sql"),
+                    migration!("0015_canon_authority.sql"),
+                ] {
+                    sqlx::raw_sql(sql).execute(&pool).await?;
+                }
 
                 let room = "temporal-decay-integration";
                 let body = "identical lexical durability recall evidence";

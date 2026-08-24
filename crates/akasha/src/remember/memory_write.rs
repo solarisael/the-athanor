@@ -4,7 +4,7 @@ use super::{
 use crate::config::{AppError, Config, EmbeddingMode, HTTP_CLIENT};
 use crate::settings::RoomSettings;
 use chrono::NaiveDate;
-use serde_json::Value;
+use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use std::collections::{BTreeSet, HashSet};
 
@@ -82,23 +82,32 @@ pub(crate) async fn write_memory_tx(
     meta: Value,
     prepared: &PreparedMemoryWrite,
 ) -> Result<(i64, bool), AppError> {
+    // One jsonb row serves both branches: keys are `memories` column names
+    // (0001_initial.sql:19), matched by NAME. The column lists stay written out
+    // because `body_tsv` (0001_initial.sql:28) and `bm25f_meta_tsv`
+    // (0009_bm25f_memory_search.sql:26) are GENERATED.
+    let row = json!({
+        "room": room,
+        "type": memory_type,
+        "date": prepared.primary_date,
+        "dates": prepared.dates,
+        "title": title,
+        "source_path": source_path,
+        "body": body,
+        "threads": prepared.threads,
+        "meta": meta,
+    });
+
     let (memory_id, inserted) = if memory_type == origami::boats::MEMORY_KIND {
         let inserted_id: Option<i64> = sqlx::query_scalar(
             "INSERT INTO memories
              (room,type,date,dates,title,source_path,body,threads,meta)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             SELECT room,type,date,dates,title,source_path,body,threads,meta
+             FROM jsonb_populate_record(NULL::memories, $1)
              ON CONFLICT (room,source_path) DO NOTHING
              RETURNING id",
         )
-        .bind(room)
-        .bind(memory_type)
-        .bind(prepared.primary_date)
-        .bind(&prepared.dates)
-        .bind(title)
-        .bind(source_path)
-        .bind(body)
-        .bind(&prepared.threads)
-        .bind(&meta)
+        .bind(row)
         .fetch_optional(&mut **tx)
         .await?;
         if let Some(memory_id) = inserted_id {
@@ -130,21 +139,14 @@ pub(crate) async fn write_memory_tx(
         sqlx::query_as(
             "INSERT INTO memories
              (room,type,date,dates,title,source_path,body,threads,meta)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+             SELECT room,type,date,dates,title,source_path,body,threads,meta
+             FROM jsonb_populate_record(NULL::memories, $1)
              ON CONFLICT (room,source_path) DO UPDATE
              SET type=EXCLUDED.type,date=EXCLUDED.date,dates=EXCLUDED.dates,title=EXCLUDED.title,
                  body=EXCLUDED.body,threads=EXCLUDED.threads,meta=EXCLUDED.meta
              RETURNING id,(xmax=0) AS inserted",
         )
-        .bind(room)
-        .bind(memory_type)
-        .bind(prepared.primary_date)
-        .bind(&prepared.dates)
-        .bind(title)
-        .bind(source_path)
-        .bind(body)
-        .bind(&prepared.threads)
-        .bind(&meta)
+        .bind(row)
         .fetch_one(&mut **tx)
         .await?
     };
@@ -209,6 +211,10 @@ pub(crate) async fn write_memory_tx(
                     .join(",")
             )
         });
+        // enough: positional binds, not one jsonb row; `body_embedding` only
+        // becomes vector(2048) through 0002_nemotron_2048.sql's guarded ALTER,
+        // and the `$8::vector` cast below is what pins that. Convert it once a
+        // live DB proves jsonb_populate_record's input path for the column.
         sqlx::query(
             "INSERT INTO memory_chunks
              (memory_id,chunk_index,heading_path,body,char_start,char_end,token_estimate,

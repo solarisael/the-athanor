@@ -1,10 +1,41 @@
 use crate::AppError;
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
 use hearth::{GIGA_MAX_EVENT_ATTEMPTS, GigaEventClaimReceipt, GigaEventClaimRequest};
+use serde_json::{Value, json};
 use sqlx::{PgPool, Row};
 use super::clock::database_now;
 use super::error::domain_error;
 use super::event_store::event_from_store;
+
+// Keys are giga_event_attempts column names; the table is the only schema
+// (0004_giga_runtime.sql:33-50). `SELECT *` from the record writes over column
+// DEFAULTs, so every column is named here: candidate_count carries its DDL
+// default 0 and the four outcome columns carry NULL. A new column must be added
+// here; the first claim after the migration refuses loudly otherwise.
+fn attempt_row(
+    event_id: &str,
+    replay_count: i32,
+    attempt_count: i32,
+    room: &str,
+    worker_id: &str,
+    claimed_at: DateTime<Utc>,
+    lease_expires_at: DateTime<Utc>,
+) -> Value {
+    json!({
+        "event_id": event_id,
+        "replay_count": replay_count,
+        "attempt_count": attempt_count,
+        "room": room,
+        "worker_id": worker_id,
+        "claimed_at": claimed_at,
+        "lease_expires_at": lease_expires_at,
+        "outcome": null,
+        "candidate_count": 0,
+        "error_class": null,
+        "available_at": null,
+        "finished_at": null,
+    })
+}
 
 pub async fn giga_event_claim(
     pool: &PgPool,
@@ -107,6 +138,9 @@ pub async fn giga_event_claim(
         .await?;
     }
     let attempt_count = previous_attempt + 1;
+    // A lease mutation, not a row image: attempt_count/retry_count advance from
+    // the stored row and $3 is a predicate inside the CASE, so these scalars
+    // stay normal parameters (giga_events, 0004_giga_runtime.sql:3-9).
     sqlx::query(
         "UPDATE giga_events
          SET queue_state='running',attempt_count=$2,
@@ -125,16 +159,17 @@ pub async fn giga_event_claim(
     .await?;
     sqlx::query(
         "INSERT INTO giga_event_attempts
-         (event_id,replay_count,attempt_count,room,worker_id,claimed_at,lease_expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)",
+         SELECT * FROM jsonb_populate_record(NULL::giga_event_attempts,$1)",
     )
-    .bind(&event_id)
-    .bind(replay_count)
-    .bind(attempt_count)
-    .bind(&room)
-    .bind(request.worker_id())
-    .bind(claimed_at)
-    .bind(lease_expires_at)
+    .bind(attempt_row(
+        &event_id,
+        replay_count,
+        attempt_count,
+        &room,
+        request.worker_id(),
+        claimed_at,
+        lease_expires_at,
+    ))
     .execute(&mut *tx)
     .await?;
     let event = event_from_store(&mut tx, &event_id).await?;

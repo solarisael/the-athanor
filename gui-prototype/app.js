@@ -1,5 +1,7 @@
 import { escapeHtml } from "./text.js";
-import { initPulse, ensurePulseQueried, handlePulseClick, renderHousePulse } from "./pulse.js";
+import { initPulse, ensurePulseQueried, handlePulseClick } from "./pulse.js";
+import { initBoard, ensureBoardQueried, handleBoardClick, renderHouseBoard } from "./board.js";
+import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSediment, renderRoomSediment } from "./sediment.js";
 import {
   initMechanics, resetMechanicsView, saveMechanicsScroll, mechanicsScrollTop,
   handleMechanicsClick, handleMechanicsInput, renderHouseMechanics, renderMechanicsResults,
@@ -941,6 +943,7 @@ function openSubjectView(view, { clearMessage = false } = {}) {
   state.accessPicker = false;
   if (clearMessage) state.selectedMessageIndex = null;
   if (state.activeId === "house" && view === "state") ensurePulseQueried();
+  if (state.activeId === "house" && view === "live") ensureBoardQueried();
   render();
   return true;
 }
@@ -963,6 +966,7 @@ function navigateToSubjectView(id, view) {
   state.activeView = view;
   openConversation(id);
   if (item.kind === "house" && view === "state") ensurePulseQueried();
+  if (item.kind === "house" && view === "live") ensureBoardQueried();
   focusActiveSubjectView();
 }
 
@@ -1600,6 +1604,7 @@ function renderDurableResults() {
 function renderHouseSurface() {
   const views = {
     live: `
+      ${renderHouseBoard()}
       <div class="overview-grid">
         ${renderOverviewHero("House overview", "Solarisael House", "Shared mechanics, memories, lessons, and substrate state. Spirit-room memory stays inside its room.")}
         <section class="specimen-card"><h3>House record</h3><p>${houseSurface.memories.length} memories and ${houseSurface.lessons.length} lessons on the shared shelves.</p><button type="button" data-open-subject-view="durable">Open the record</button></section>
@@ -1607,25 +1612,17 @@ function renderHouseSurface() {
         <section class="specimen-card"><h3>Ownership</h3><p>House commons do not absorb Kintsu, Kodo, or Tuner room memory.</p></section>
       </div>`,
     state: renderHouseMechanics(),
-    durable: `
-      <div class="specimen-stack house-record-stack">
-        ${renderSpecimenLead("House record", "Memories & Lessons")}
-        ${durableControls(conversations.house)}
-        <div data-durable-results>${renderDurableRows(conversations.house)}</div>
-      </div>`
+    durable: renderHouseSediment(conversations.house)
   };
   timeline.innerHTML = views[state.activeView];
   if (state.activeView === "state") renderMechanicsResults();
+  if (state.activeView === "durable") ensureSedimentQueried(conversations.house);
   timeline.scrollTop = state.activeView === "state" ? mechanicsScrollTop() : 0;
 }
 
 function renderRoomMemories(item) {
-  timeline.innerHTML = `
-    <div class="specimen-stack">
-      ${renderSpecimenLead("Room record", item.name)}
-      ${durableControls(item)}
-      <div data-durable-results>${renderDurableRows(item)}</div>
-    </div>`;
+  timeline.innerHTML = renderRoomSediment(item);
+  ensureSedimentQueried(item);
   timeline.scrollTop = 0;
 }
 
@@ -2460,8 +2457,10 @@ function closeProjectSession(projectItem) {
 
 timeline.addEventListener("click", event => {
   const item = conversations[state.activeId];
+  if (handleBoardClick(event)) return;
   if (handlePulseClick(event)) return;
   if (handleMechanicsClick(event)) return;
+  if (handleSedimentClick(event)) return;
   const durableMark = event.target.closest("[data-durable-mark]");
   if (durableMark) {
     state.durableMark = durableMark.dataset.durableMark;
@@ -2886,5 +2885,12 @@ updateComposerState();
 
 
 initPulse({ requestRender: render });
+initBoard({ requestRender: render });
+initSediment({
+  requestRender: render,
+  renderLead: renderSpecimenLead,
+  renderShelfControls: durableControls,
+  renderFixtureRows: renderDurableRows
+});
 initMechanics({ timeline });
 render();

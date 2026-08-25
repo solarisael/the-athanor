@@ -45,6 +45,7 @@ import {
   type GigaPromotionTarget,
   type GigaSafeReviewState,
 } from "../giga.ts";
+import { registerRestartDoor } from "./restart-door.ts";
 
 const rustRememberTransports = new Map<string, RustJsonlTransport>();
 const LANE_STATUS_HEALTH_TIMEOUT_MS = 3_000;
@@ -443,7 +444,7 @@ function registerHouseTool(pi, definition) {
 }
 
 
-export function registerSolarisaelTools(pi) {
+export function registerSolarisaelTools(pi, release) {
   const z = pi.zod;
 
   registerHouseTool(pi, {
@@ -1970,5 +1971,14 @@ export function registerSolarisaelTools(pi) {
         details: result,
       };
     },
+  });
+
+  // The exit door owns its own module; it is handed the substrate seam, the
+  // live transport map, and the loaded release instead of reaching in here.
+  registerRestartDoor(pi, {
+    requestDomain: requestRustDomain,
+    transports: rustRememberTransports,
+    registerTool: (definition) => registerHouseTool(pi, definition),
+    release,
   });
 }

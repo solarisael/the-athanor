@@ -567,6 +567,11 @@ export default async function installedAthanor(pi: unknown, options: LoaderOptio
   if (typeof athanor.default !== "function" || typeof hygiene.default !== "function") {
     throw new Error("installed Athanor extensions do not export OMP entrypoints");
   }
-  await athanor.default(pi);
+  // Pass-through, not new state: the entry receives the release this loader
+  // resolved so the adapter never re-reads the pointer to name itself.
+  await athanor.default(pi, {
+    releaseId: modules.releaseId,
+    previousReleaseId: modules.previousReleaseId,
+  });
   await hygiene.default(pi);
 }

@@ -1,4 +1,10 @@
 import { existsSync } from "node:fs";
+// isSubagentSessionContext reaches for path.dirname inside a try/catch whose
+// catch returns "this is a subagent". Without this import that call threw
+// ReferenceError on every turn, the catch swallowed it, and every session
+// looked like a subagent - so turn ingest was silently dead from b635264 until
+// the restart door's production-seam test surfaced it.
+import path from "node:path";
 
 import { discoverRustExecutable } from "./discovery.ts";
 import {

@@ -72,26 +72,50 @@ the exact implementation record.
   capability secret. The crate carries its own README and its own tests, and the
   tests need no database.
 - The OMP adapter now exposes `request_restart`, the exit door for its own
-  session. The tool refuses unless `restart_status` already reports a requested
-  intent for the workspace. The refusal names the missing prerequisite and shows
-  how to create the intent. A claimed intent also refuses, because only a
-  requested intent may exit. Before it arms, the tool reports what dies with the
-  exit: every open Rust transport, and every hub job that does not persist. The
-  armed exit fires at `agent_end`, never inside a turn. It moves the intent to
-  `exiting`, then leaves omp with code 87 for the keeper. A refused transition
-  stands the exit down, names the substrate's code, and keeps the session alive.
+  session. The tool records the intent itself when the House holds none. It then
+  arms that intent in the same call. The room must hold the `restart_request`
+  secret to ask, and the `restart_exit` secret to arm. An unprovisioned room
+  cannot restart itself, and the refusal says so. A claimed intent refuses,
+  because only a requested intent may exit. A second arm refuses with
+  `already_armed` while one exit waits. A `fresh` restart refuses with
+  `fresh_without_boat` when the room holds no paper boat. The tool reads the
+  boat and never consumes it. Before it arms, the tool reports what dies with
+  the exit: this session's async jobs, buffered GIGA turns, and every open
+  substrate transport. It names each casualty class it cannot see, and it claims
+  nothing about that class. The armed exit fires at `agent_end`, never inside a
+  turn. It moves the intent to `exiting`, then leaves omp with code 87 for the
+  keeper. A refused transition stands the exit down, names the substrate's code,
+  and keeps the session alive.
 - The installed loader now hands the resolved release to the adapter entry. The
   arm report names that loaded release, so a session can show `installed` against
   `loaded`.
 - The adapter holds no keeper claim token, and it needs none. The `requested` to
-  `exiting` transition is tokenless and adapter-initiated. The intent id is the
-  proof, because only the House hands one out. The adapter's identity rides as
-  JSON in `detail`, trimmed to the substrate's 2048-byte ceiling.
+  `exiting` transition carries the room's `restart_exit` secret and the door's
+  own harness session identity. The intent id proves nothing, because
+  `restart_status` gives it to any caller. The adapter's account of the exit
+  rides as JSON in `detail`. The door measures the serialized payload against
+  the 2048-byte ceiling, so JSON escaping cannot carry the payload over it.
 
 ### Known ceilings
 
-- The adapter cannot enumerate hub jobs from inside the running session. The arm
-  report names the casualty class and marks it as not enumerable.
+- The adapter reports this session's async jobs from the harness snapshot. It
+  cannot list hub processes, because the plugin surface exposes no process
+  listing. The arm report names that class and claims nothing about it.
+- An intent requested by another session still arms. The exit then learns
+  `exit_not_authorized` at `agent_end`. A session-owner flag on `restart_status`
+  is the way up. Today `restart_status` needs no capability, so it must not
+  carry a live session identity.
+
+### Fixed
+
+- GIGA conversation ingest was dead in production. `giga.ts` called
+  `path.dirname` without importing `path`. The `ReferenceError` fell into a
+  `catch` that answers "this is a subagent session". Every session therefore
+  looked like a subagent, and the adapter buffered no turn. The break started at
+  `b635264`. Turn ingest resumes with this release. Set
+  `SOLARISAEL_GIGA_ENABLED=0` to hold it off if the queue load surprises you.
+  Kintsu's demand for a production-seam proof found this. The restart door's new
+  seam test showed it.
 
 ### Changed
 

@@ -6,6 +6,7 @@ param(
     [string[]]$OmpArgs = @(),
     [string]$Workspace,
     [string]$ProgramRoot = "$env:ProgramFiles/Solarisael/Athanor",
+    [string]$StateRoot,
     [ValidateRange(0, 3600)][int]$WatchIntervalSecs = 30,
     [string]$SubstrateEnv = "C:/Solarisael/Obsidian/obsidian/house/state/substrate/.env",
     [string]$CapabilityScript
@@ -48,6 +49,18 @@ if ([string]::IsNullOrWhiteSpace($Workspace)) {
 } else {
     $Workspace = [IO.Path]::GetFullPath($Workspace)
 }
+if ([string]::IsNullOrWhiteSpace($StateRoot)) {
+    $StateRoot = [IO.Path]::GetDirectoryName(
+        [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($SubstrateEnv))
+    )
+} elseif (-not [IO.Path]::IsPathRooted($StateRoot)) {
+    throw "StateRoot must be absolute: $StateRoot"
+} else {
+    $StateRoot = [IO.Path]::GetFullPath($StateRoot)
+}
+if (-not (Test-Path $StateRoot -PathType Container)) {
+    throw "Athanor state root does not exist: $StateRoot"
+}
 
 $runtime = Join-Path ([IO.Path]::GetFullPath($RoomDir)) ".omp/runtime"
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
@@ -85,6 +98,7 @@ try {
         ompLaunch = @([IO.Path]::GetFullPath($OmpProgram)) + @($OmpArgs)
         workspace = $Workspace
         programRoot = [IO.Path]::GetFullPath($ProgramRoot)
+        stateRoot = $StateRoot
         capabilityPath = Join-Path $runtime "restart-capability"
         claimant = "omp-keeper"
         watchIntervalSecs = $WatchIntervalSecs

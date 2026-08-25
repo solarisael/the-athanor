@@ -54,7 +54,7 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
         // # enough: one substrate child for each ask; it keeps the release pointer fresh (census 1.9)
         let executable = resolve_substrate_exe(&config.program_root)
             .context("the current substrate could not be resolved")?;
-        let mut session = SubstrateSession::start(&executable)?;
+        let mut session = SubstrateSession::start(&executable, &config.state_root)?;
 
         let pending = match ask_status(&mut session, config, None)? {
             Ok(pending) => pending,
@@ -529,7 +529,7 @@ fn adopt_verified_successor<T>(current: &mut T, successor: T, close_result: Resu
 
 fn watch_status(config: &KeeperConfig) -> Result<Option<RestartStatusIntent>> {
     let executable = resolve_substrate_exe(&config.program_root)?;
-    let mut session = SubstrateSession::start(&executable)?;
+    let mut session = SubstrateSession::start(&executable, &config.state_root)?;
     let answer = ask_status(&mut session, config, None);
     session.close()?;
     match answer? {

@@ -526,7 +526,7 @@ try {
   [void][Management.Automation.Language.Parser]::ParseFile($KeeperProvisioner, [ref]$KeeperProvisionTokens, [ref]$KeeperProvisionErrors)
   Assert-True ($KeeperProvisionErrors.Count -eq 0) "the keeper provisioner must remain valid PowerShell"
   $KeeperProvisionSource = Get-Content $KeeperProvisioner -Raw
-  foreach ($RequiredFragment in @("restart_claim", "restart_request", "restart_exit", "restart_verify", "omp-keeper.json", "restart-capability", "watchIntervalSecs", "-Remove")) {
+  foreach ($RequiredFragment in @("restart_claim", "restart_request", "restart_exit", "restart_verify", "omp-keeper.json", "restart-capability", "stateRoot", "watchIntervalSecs", "-Remove")) {
     Assert-True ($KeeperProvisionSource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "keeper provisioner must retain $RequiredFragment"
   }
   $CapabilityProvisionSource = Get-Content (Join-Path $PSScriptRoot "../substrate/provision-restart-capability.ps1") -Raw

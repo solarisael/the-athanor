@@ -74,6 +74,7 @@ fn tree() -> Tree {
     .expect("current pointer");
     fs::copy(example("fake_substrate"), bin.join(substrate_exe_name())).expect("fake substrate");
 
+    fs::create_dir_all(root.join("state")).expect("state root");
     fs::create_dir_all(root.join("workspace")).expect("workspace");
 
     let program = root.join(format!("omp-run{}", std::env::consts::EXE_SUFFIX));
@@ -104,6 +105,7 @@ fn write_config(tree: &Tree, launch: &[String], watch_interval_secs: u64) {
         "ompLaunch": launch,
         "workspace": tree.root.join("workspace"),
         "programRoot": &tree.program_root,
+        "stateRoot": tree.root.join("state"),
         "capabilityPath": &tree.capability,
         "watchIntervalSecs": watch_interval_secs,
     });
@@ -183,7 +185,15 @@ fn run_keeper_timed(tree: &Tree, mode: &str, extra: &[(&str, &str)]) -> Ran {
 #[test]
 fn the_full_loop_runs_from_an_armed_exit_to_a_verified_successor() {
     let tree = tree();
-    let ran = run_keeper_timed(&tree, "full-loop", &[]);
+    let state_root = tree.root.join("state").display().to_string();
+    let ran = run_keeper_timed(
+        &tree,
+        "full-loop",
+        &[
+            ("ATHANOR_STATE_DIR", "D:/wrong-inherited-state"),
+            ("FAKE_SUBSTRATE_EXPECT_STATE_ROOT", &state_root),
+        ],
+    );
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
     assert!(
         ran.output.status.success(),

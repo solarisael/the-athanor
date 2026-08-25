@@ -19,8 +19,9 @@ pub struct SubstrateSession {
 }
 
 impl SubstrateSession {
-    pub fn start(executable: &Path) -> Result<Self> {
+    pub fn start(executable: &Path, state_root: &Path) -> Result<Self> {
         let mut child = Command::new(executable)
+            .env("ATHANOR_STATE_DIR", state_root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

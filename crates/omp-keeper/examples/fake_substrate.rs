@@ -70,6 +70,15 @@ fn main() {
     let transcript = std::env::var("FAKE_SUBSTRATE_TRANSCRIPT").expect("transcript path");
     let mode = std::env::var("FAKE_SUBSTRATE_MODE").unwrap_or_else(|_| "full-loop".to_string());
     let script_path = format!("{transcript}.script.json");
+    if let Ok(expected) = std::env::var("FAKE_SUBSTRATE_EXPECT_STATE_ROOT") {
+        let actual = std::env::var("ATHANOR_STATE_DIR").unwrap_or_default();
+        if actual != expected {
+            eprintln!(
+                "fake substrate: ATHANOR_STATE_DIR mismatch: expected {expected}, got {actual}"
+            );
+            std::process::exit(74);
+        }
+    }
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {

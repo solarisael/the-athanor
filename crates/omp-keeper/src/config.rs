@@ -15,6 +15,7 @@ pub struct KeeperConfig {
     pub omp_launch: Vec<String>,
     pub workspace: String,
     pub program_root: PathBuf,
+    pub state_root: PathBuf,
     #[serde(default = "default_claimant")]
     pub claimant: String,
     #[serde(default = "default_watch_interval_secs")]
@@ -64,6 +65,9 @@ impl KeeperConfig {
         }
         if self.program_root.as_os_str().is_empty() {
             bail!("programRoot must name the installed Athanor program root");
+        }
+        if self.state_root.as_os_str().is_empty() || !self.state_root.is_absolute() {
+            bail!("stateRoot must be an absolute Athanor state root");
         }
         if !is_principal_name(&self.claimant) {
             bail!("claimant must be a lowercase slug, for example omp-keeper");
@@ -161,9 +165,7 @@ where
     let mut path = None;
     while let Some(argument) = arguments.next() {
         let value = if argument == "--config" {
-            arguments
-                .next()
-                .context("--config needs a path; {USAGE}")?
+            arguments.next().context("--config needs a path; {USAGE}")?
         } else if let Some(inline) = argument.strip_prefix("--config=") {
             inline.to_string()
         } else {
@@ -190,6 +192,7 @@ mod tests {
         "ompLaunch": ["C:/Program Files/omp/omp.exe", "--resume"],
         "workspace": "C:/Solarisael/Obsidian/obsidian/kodo",
         "programRoot": "C:/Program Files/The Athanor",
+        "stateRoot": "C:/Solarisael/Obsidian/obsidian/house/state",
         "capabilityPath": "D:/ProgramData/keeper.capability"
     }"#;
 
@@ -207,8 +210,24 @@ mod tests {
             config.program_root,
             PathBuf::from("C:/Program Files/The Athanor")
         );
+        assert_eq!(
+            config.state_root,
+            PathBuf::from("C:/Solarisael/Obsidian/obsidian/house/state")
+        );
         assert_eq!(config.claimant, DEFAULT_CLAIMANT);
         assert_eq!(config.watch_interval_secs, DEFAULT_WATCH_INTERVAL_SECS);
+    }
+
+    #[test]
+    fn refuses_a_missing_or_relative_state_root() {
+        let state_line = "\"stateRoot\": \"C:/Solarisael/Obsidian/obsidian/house/state\",";
+        let missing = MINIMAL.replace(state_line, "");
+        let error = parse(&missing).expect_err("missing state root refuses");
+        assert!(format!("{error:#}").contains("not valid keeper JSON"));
+        let relative =
+            MINIMAL.replace("C:/Solarisael/Obsidian/obsidian/house/state", "house/state");
+        let error = parse(&relative).expect_err("relative state root refuses");
+        assert!(format!("{error:#}").contains("stateRoot must be an absolute"));
     }
 
     #[test]
@@ -259,7 +278,10 @@ mod tests {
             &format!("\"capabilityPath\": {}", serde_json::json!(file)),
         );
         let config = parse(&text).expect("capability path parses");
-        assert_eq!(config.read_capability().expect("file read").expose(), "file-secret");
+        assert_eq!(
+            config.read_capability().expect("file read").expose(),
+            "file-secret"
+        );
 
         std::fs::write(&file, "   \n").expect("blank capability file");
         let error = config.read_capability().expect_err("blank file refuses");
@@ -274,10 +296,7 @@ mod tests {
 
     #[test]
     fn refuses_an_empty_launch_and_a_blank_program() {
-        let empty = MINIMAL.replace(
-            "[\"C:/Program Files/omp/omp.exe\", \"--resume\"]",
-            "[]",
-        );
+        let empty = MINIMAL.replace("[\"C:/Program Files/omp/omp.exe\", \"--resume\"]", "[]");
         let error = parse(&empty).expect_err("empty ompLaunch refuses");
         assert!(format!("{error:#}").contains("ompLaunch must name"));
 
@@ -338,11 +357,8 @@ mod tests {
         assert!(config_path_from_args(vec!["--config".to_string()]).is_err());
         assert!(config_path_from_args(vec!["--wat".to_string()]).is_err());
         assert!(
-            config_path_from_args(vec![
-                "--config=a".to_string(),
-                "--config=b".to_string()
-            ])
-            .is_err()
+            config_path_from_args(vec!["--config=a".to_string(), "--config=b".to_string()])
+                .is_err()
         );
     }
 

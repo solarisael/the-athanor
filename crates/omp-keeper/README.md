@@ -39,6 +39,7 @@ The keeper reads `omp-keeper.json` beside its own program file. The option
 | `ompLaunch` | yes | The literal omp command. The first entry is the program. |
 | `workspace` | yes | The omp workspace path. The keeper asks about this workspace and starts omp in it. |
 | `programRoot` | yes | The installed Athanor program root that holds `current.json`. |
+| `stateRoot` | yes | The Athanor state root. The keeper exports it to every substrate child. |
 | `capabilityPath` | one of two | The file that holds the keeper capability secret. |
 | `capability` | one of two | The keeper capability secret, in the file itself. |
 | `claimant` | no | The keeper principal name. Default `omp-keeper`. |
@@ -51,6 +52,7 @@ Example:
   "ompLaunch": ["C:/Users/Sol/AppData/Roaming/npm/omp.cmd", "--resume"],
   "workspace": "C:/Solarisael/Obsidian/obsidian/kodo",
   "programRoot": "C:/Program Files/Solarisael/Athanor",
+  "stateRoot": "C:/Solarisael/Obsidian/obsidian/house/state",
   "capabilityPath": "C:/Solarisael/Obsidian/obsidian/kodo/.omp/runtime/restart-capability",
   "watchIntervalSecs": 30
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { registerRestartDoor } from "../solarisael-house-proof/restart-door.ts";
+import { exitDetailFor, registerRestartDoor } from "../solarisael-house-proof/restart-door.ts";
 
 // 87 is the keeper handshake code in the frozen wire contract, so it is pinned
 // here as a literal. Asserting the module's own constant would defend nothing.
@@ -100,6 +100,7 @@ function buildDoor(options: {
   // env/file resolver to answer.
   exitCapability?: (roomDir: string) => string | null;
   requestCapability?: (roomDir: string) => string | null;
+  latestBoat?: (room: string, options?: unknown) => Promise<Record<string, unknown>>;
 } = {}): DoorHarness {
   const hooks: DoorHarness["hooks"] = [];
   const tools: CapturedTool[] = [];
@@ -132,6 +133,7 @@ function buildDoor(options: {
     ...("gigaBuffers" in options ? { gigaBuffers: options.gigaBuffers } : {}),
     ...("exitCapability" in options ? { exitCapability: options.exitCapability } : {}),
     ...("requestCapability" in options ? { requestCapability: options.requestCapability } : {}),
+    ...("latestBoat" in options ? { latestBoat: options.latestBoat } : {}),
     exit(code) {
       exits.push(code);
     },
@@ -231,10 +233,13 @@ describe("adapter exit door", () => {
   // the tool creates its own when the room is provisioned to ask.
   // ---------------------------------------------------------------------------
 
+  // This one asks for fresh, so it now has to show a boat too: the fence below
+  // caught this very test creating a fresh intent with no letter waiting.
   test("creates the intent through restart_request when the room may ask, then arms it", async () => {
     const door = withCapability({
       status: { ok: true },
       requestCapability: () => REQUEST_CAPABILITY,
+      latestBoat: async (room: string) => ({ ok: true, found: true, room, id: "boat-12" }),
     });
 
     const result = await callTool(door, { mode: "fresh", reason: "the loaded release is stale" });
@@ -533,6 +538,167 @@ describe("adapter exit door", () => {
     expect(parsed.session).toBe("session-under-restart");
     expect(parsed.truncated).toBe(true);
   }, 5000);
+
+  // Kintsu's second review, reproduced live: 4,000 quote characters clamped
+  // against a 2,048-byte "budget" serialized to 3,892 bytes, because the clamp
+  // measured the RAW value and never re-measured after JSON escaping. One quote
+  // costs two bytes once serialized, one control character costs six, so a
+  // budget taken from an empty field can lie by up to 6x. The ceiling now holds
+  // on the serialized candidate itself, which is the only thing the substrate
+  // ever sees.
+  const escapingFloods: Array<[string, string]> = [
+    ["quote flood", '"'.repeat(4000)],
+    ["backslash flood", "\\".repeat(4000)],
+    ["control characters", "\u0001".repeat(4000)],
+    ["multibyte and escaping combined", '\u00e9"\u0007\u2026\\'.repeat(1200)],
+    ["astral plane and quotes", '\u{1F409}"'.repeat(1200)],
+  ];
+
+  for (const [name, reason] of escapingFloods) {
+    test(`holds the serialized ceiling against a ${name}`, async () => {
+      const door = withCapability();
+
+      await callTool(door, { mode: "resume", reason });
+      await door.agentEnd();
+
+      const detail = String(door.calls[1]!.params.detail);
+      expect(Buffer.byteLength(detail, "utf8")).toBeLessThanOrEqual(DETAIL_CEILING_BYTES);
+      // Valid JSON, not a blob cut mid-escape: the substrate parses this.
+      const parsed = JSON.parse(detail);
+      expect(parsed.session).toBe("session-under-restart");
+      expect(parsed.truncated).toBe(true);
+      // A lone surrogate would survive JSON.parse but is still a broken rune.
+      if (typeof parsed.reason === "string") {
+        expect(parsed.reason).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+      }
+    }, 5000);
+  }
+
+  // The loop that shrinks the candidate has to terminate even when no field can
+  // ever fit, because the fixed overhead alone already exceeds the ceiling. The
+  // infinite-loop scar from the first repair is why this is proven, not argued:
+  // a synchronous spin here cannot be interrupted by a test timeout.
+  test("terminates and stays parseable when the ceiling is smaller than the fixed overhead", () => {
+    const armed = {
+      intentId: "intent-4711",
+      mode: "resume",
+      room: "kodo",
+      spirit: "Kodo",
+      session: "session-under-restart",
+      workspace: "D:/athanor-wt/restart-door",
+      roomDir: "C:/Solarisael/Obsidian/obsidian/kodo",
+      reason: "\u00e9".repeat(500),
+    };
+
+    for (const limit of [0, 1, 8, 46, 64, 200]) {
+      const detail = exitDetailFor(armed, limit);
+      expect(() => JSON.parse(detail)).not.toThrow();
+      expect(JSON.parse(detail).source).toBe("omp-adapter");
+    }
+
+    // And with room to work it still spends the whole ceiling on the account.
+    const generous = exitDetailFor(armed, DETAIL_CEILING_BYTES);
+    expect(Buffer.byteLength(generous, "utf8")).toBeLessThanOrEqual(DETAIL_CEILING_BYTES);
+    expect(JSON.parse(generous).session).toBe("session-under-restart");
+  }, 5000);
+
+  // ---------------------------------------------------------------------------
+  // The frozen contract: fresh mode is "the same launch after the House
+  // confirms a paper boat exists for the session's room". Nothing checked it,
+  // so a fresh restart could throw away a session with no letter waiting on the
+  // other side. The door reads the boat and never consumes it: paper_boat_wake
+  // is a pure read (crates/house-substrate/tests/paper_boat_integration.rs
+  // wakes the same room twice and gets the boat both times).
+  // ---------------------------------------------------------------------------
+
+  test("refuses a fresh restart when the House holds no paper boat for this room", async () => {
+    const boatReads: string[] = [];
+    const door = withCapability({
+      status: { ok: true },
+      requestCapability: () => REQUEST_CAPABILITY,
+      latestBoat: async (room: string) => {
+        boatReads.push(room);
+        return { ok: true, found: false, room };
+      },
+    });
+
+    const result = await callTool(door, { mode: "fresh", reason: "start clean" });
+    await door.agentEnd();
+    await settle();
+
+    expect(result.isError).toBe(true);
+    expect(result.details.code).toBe("fresh_without_boat");
+    expect(result.details.remedy).toContain("sleep");
+    expect(boatReads.length).toBe(1);
+    // Nothing recorded, nothing armed: the refusal lands before the intent.
+    expect(door.calls.map((call) => call.method)).toEqual(["restart_status"]);
+    expect(door.exits).toEqual([]);
+  });
+
+  test("creates and arms a fresh restart once the boat is confirmed", async () => {
+    const door = withCapability({
+      status: { ok: true },
+      requestCapability: () => REQUEST_CAPABILITY,
+      latestBoat: async (room: string) => ({ ok: true, found: true, room, id: "boat-77", title: "paper boat" }),
+    });
+
+    const result = await callTool(door, { mode: "fresh", reason: "start clean" });
+
+    expect(result.details.armed).toBe(true);
+    expect(result.details.created).toBe(true);
+    expect(result.details.boat).toMatchObject({ confirmed: true, id: "boat-77" });
+    expect(door.calls.map((call) => call.method)).toEqual(["restart_status", "restart_request"]);
+    expect(door.calls[1]!.params.mode).toBe("fresh");
+  });
+
+  // An unreadable boat is not an absent boat, and it is not a confirmation
+  // either. The contract says the House confirms; silence is not a confirmation.
+  test("refuses a fresh restart when the boat cannot be read at all", async () => {
+    const door = withCapability({
+      status: { ok: true },
+      requestCapability: () => REQUEST_CAPABILITY,
+      latestBoat: async () => ({ ok: false, error: "Rust substrate executable is unavailable" }),
+    });
+
+    const result = await callTool(door, { mode: "fresh", reason: "start clean" });
+
+    expect(result.isError).toBe(true);
+    expect(result.details.code).toBe("fresh_boat_unconfirmed");
+    expect(door.calls.map((call) => call.method)).toEqual(["restart_status"]);
+  });
+
+  // The fence follows the mode that will actually be honored, not the word the
+  // caller typed: a pending fresh intent needs the boat just as much.
+  test("refuses arming a pending fresh intent with no boat", async () => {
+    const door = withCapability({
+      status: { ok: true, intent: { intentId: "intent-fresh-7", state: "requested", mode: "fresh" } },
+      latestBoat: async (room: string) => ({ ok: true, found: false, room }),
+    });
+
+    const result = await callTool(door, { mode: "fresh", reason: "start clean" });
+    await door.agentEnd();
+    await settle();
+
+    expect(result.details.code).toBe("fresh_without_boat");
+    expect(door.calls.map((call) => call.method)).toEqual(["restart_status"]);
+    expect(door.exits).toEqual([]);
+  });
+
+  test("a resume restart never reads a paper boat", async () => {
+    let reads = 0;
+    const door = withCapability({
+      latestBoat: async (room: string) => {
+        reads += 1;
+        return { ok: true, found: false, room };
+      },
+    });
+
+    const result = await callTool(door, { mode: "resume", reason: "the loaded release is stale" });
+
+    expect(result.details.armed).toBe(true);
+    expect(reads).toBe(0);
+    expect(result.details.boat).toBeUndefined();
+  });
 
   // ---------------------------------------------------------------------------
   // Kintsu item 3 (not_met at 8deb66a): the report enumerated only the one

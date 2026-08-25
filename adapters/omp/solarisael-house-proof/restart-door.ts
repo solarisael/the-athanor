@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 
 import { roomContext } from "./room.ts";
 import { hostSessionIdentity } from "./host.ts";
-import type { RustJsonlTransport } from "../rust-transport.ts";
+import { catchBoat } from "./substrate.ts";
 
 // omp exit code 87 means "armed exit, restart me" (keeper handshake, frozen
 // wire contract v1). Any other code makes the keeper poll restart_status.
@@ -100,6 +100,9 @@ export type RestartDoorDeps = {
   // room's own runtime config; injected in tests so proving a fence never
   // requires provisioning a real secret.
   exitCapability?: (effectiveRoomDir: string) => string | null;
+  // Reads the room's latest paper boat. Defaults to the adapter's own wake
+  // seam; a read, never a consume.
+  latestBoat?: (room: string, options?: { signal?: AbortSignal }) => Promise<Record<string, unknown>>;
   requestCapability?: (effectiveRoomDir: string) => string | null;
   exit?: (code: number) => void;
 };
@@ -292,15 +295,46 @@ function loadedRelease(release: LoadedRelease) {
   };
 }
 
-// Clamp on a character boundary without ever growing past the byte budget: a
-// truncated multi-byte tail decodes to U+FFFD, so it is dropped rather than
-// shipped as a mangled rune.
-function clampUtf8(value: string, limitBytes: number): string {
-  if (limitBytes <= 0) return "";
-  const bytes = Buffer.from(value, "utf8");
-  if (bytes.length <= limitBytes) return value;
-  const cut = bytes.subarray(0, limitBytes).toString("utf8");
-  return cut.endsWith("\uFFFD") ? cut.slice(0, -1) : cut;
+// A tail cut on UTF-16 code units can split a surrogate pair. JSON.stringify
+// serializes the orphan as \udXXX, so it survives the wire and lands in the
+// event log as a broken rune; drop it instead.
+function dropOrphanSurrogate(value: string): string {
+  const last = value.charCodeAt(value.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? value.slice(0, -1) : value;
+}
+
+// Shrink one field until the SERIALIZED candidate fits. Measuring the raw value
+// against a budget taken from an empty field is the bug Kintsu reproduced: JSON
+// escaping expands as it serializes - one quote or backslash becomes two bytes,
+// one control character becomes six - so a raw-byte budget lied by up to 6x
+// (4,000 quotes "clamped" to 2,048 serialized as 3,883 bytes; 4,000 control
+// characters as 11,223). Only the serialized candidate is what the substrate
+// refuses, so only the serialized candidate is measured here.
+//
+// Termination is load-bearing: each pass keeps at most candidate.length - 1
+// characters, so the string strictly shrinks to "" and the loop ends even when
+// no length can ever fit. The first repair of this function spun forever on a
+// negative budget, and a synchronous spin here cannot be interrupted by a test
+// timeout.
+function fitField(
+  base: Record<string, unknown>,
+  key: string,
+  value: string,
+  limitBytes: number,
+): Record<string, unknown> | null {
+  let candidate = value;
+  while (candidate.length > 0) {
+    const trial = { ...base, [key]: candidate };
+    const bytes = detailBytes(trial);
+    if (bytes <= limitBytes) return trial;
+    // Scale by the observed byte ratio so an escape-heavy field converges in a
+    // few passes instead of one character at a time, and always drop at least
+    // one character so the loop cannot stall.
+    const scaled = Math.floor((candidate.length * limitBytes) / bytes);
+    const keep = Math.max(0, Math.min(candidate.length - 1, scaled));
+    candidate = dropOrphanSurrogate(candidate.slice(0, keep));
+  }
+  return null;
 }
 
 function serialize(detail: Record<string, unknown>): string {
@@ -313,20 +347,28 @@ function detailBytes(detail: Record<string, unknown>): number {
 
 // This blob is the transition event's only account of the exit, and the
 // substrate refuses an over-budget detail outright - a refused transition means
-// the session never restarts. So the named ceiling is enforced on the SERIALIZED
-// payload, not on the free-text field alone: the identity the substrate
-// verifies is built first, then each account field is added only while it still
-// fits, in a declared yielding order (the operator's reason goes first, the
-// session identity last). `truncated` is seeded false so flipping it to true
-// can never add a byte, which is what lets this function promise the ceiling
-// instead of hoping for it. The previous version subtracted the identity from
-// the budget and clamped only the reason, so a deep workspace path made the
-// budget negative and spun the clamp loop forever.
-function exitDetail(exit: ArmedExit): string {
-  let detail: Record<string, unknown> = { source: DETAIL_SOURCE, session: exit.session, truncated: false };
-  if (detailBytes(detail) > DETAIL_LIMIT_BYTES) {
-    const room = DETAIL_LIMIT_BYTES - detailBytes({ source: DETAIL_SOURCE, session: "", truncated: true });
-    detail = { source: DETAIL_SOURCE, session: clampUtf8(exit.session, room), truncated: true };
+// the session never restarts. The identity the substrate verifies is built
+// first, then each account field is added only while the serialized whole still
+// fits, in a declared yielding order: the operator's reason yields first, the
+// session identity last. `truncated` is seeded false so flipping it to true can
+// never add a byte.
+//
+// The comment that stood here claimed the ceiling was "enforced on the
+// SERIALIZED payload" while the clamp underneath measured raw UTF-8 - true for
+// every input the tests fed it, false for anything JSON escapes. Kintsu found
+// it with 4,000 quotes. The claim now matches the code because every measure
+// below runs through detailBytes on a real candidate.
+export function exitDetailFor(exit: ArmedExit, limitBytes: number = DETAIL_LIMIT_BYTES): string {
+  const seed: Record<string, unknown> = { source: DETAIL_SOURCE, session: exit.session, truncated: false };
+  let detail: Record<string, unknown>;
+  if (detailBytes(seed) <= limitBytes) {
+    detail = seed;
+  } else {
+    // Even the identity overflows: keep the field the substrate verifies, cut
+    // to fit, and say so. If nothing fits, the smallest honest blob goes out
+    // and the substrate refuses it loudly instead of this door hanging.
+    detail = fitField({ source: DETAIL_SOURCE, truncated: true }, "session", exit.session, limitBytes)
+      ?? { source: DETAIL_SOURCE, truncated: true };
   }
   const account: Array<[string, unknown]> = [
     ["mode", exit.mode],
@@ -338,16 +380,19 @@ function exitDetail(exit: ArmedExit): string {
   ];
   for (const [key, value] of account) {
     const candidate = { ...detail, [key]: value };
-    if (detailBytes(candidate) <= DETAIL_LIMIT_BYTES) {
+    if (detailBytes(candidate) <= limitBytes) {
       detail = candidate;
       continue;
     }
-    detail.truncated = true;
+    detail = { ...detail, truncated: true };
     if (typeof value !== "string") continue;
-    const clipped = clampUtf8(value, DETAIL_LIMIT_BYTES - detailBytes({ ...detail, [key]: "" }));
-    if (clipped) detail = { ...detail, [key]: clipped };
+    detail = fitField(detail, key, value, limitBytes) ?? detail;
   }
   return serialize(detail);
+}
+
+function exitDetail(exit: ArmedExit): string {
+  return exitDetailFor(exit, DETAIL_LIMIT_BYTES);
 }
 
 export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
@@ -357,6 +402,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     ?? ((roomDir: string) => readCapability(roomDir, EXIT_CAPABILITY_ENV, EXIT_CAPABILITY_FILENAME));
   const resolveRequestCapability = deps.requestCapability
     ?? ((roomDir: string) => readCapability(roomDir, REQUEST_CAPABILITY_ENV, REQUEST_CAPABILITY_FILENAME));
+  const resolveLatestBoat = deps.latestBoat ?? catchBoat;
   // Armed state is closure-local: one door, one pending exit, no process-wide
   // flag another registration could inherit.
   let armed: ArmedExit | null = null;
@@ -427,8 +473,76 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
         );
       }
 
+      // One state fence, whichever intent we end up arming: a pre-existing one
+      // is checked here, a freshly recorded one right after it is recorded.
+      // Refused at the tool rather than at agent_end, because the substrate
+      // would answer exit_not_requested long after the turn ended, where the
+      // operator can no longer see why nothing happened.
+      const notArmable = (candidate: Record<string, unknown>) => {
+        const candidateState = text(candidate.state);
+        if (ARMABLE_STATES.has(candidateState)) return null;
+        return refuse(
+          "intent_not_armable",
+          `request_restart refuses: the intent for this workspace is ${candidateState || "in an unreported state"}, and only a requested intent may exit`,
+          { missingPrerequisite: MISSING_PREREQUISITE, intentId: intentId(candidate), state: candidateState, workspace },
+        );
+      };
+
       let intent = pendingIntent(status);
       let created = false;
+      if (intent) {
+        const refusal = notArmable(intent);
+        if (refusal) return refusal;
+      }
+
+      // The mode the House already agreed to wins over the word the caller
+      // typed, and a disagreement is a refusal rather than a silent override.
+      const pendingMode = intent ? text(intent.mode) : "";
+      if (pendingMode && mode && pendingMode !== mode) {
+        return refuse(
+          "mode_mismatch",
+          `request_restart refuses: the pending intent is ${pendingMode}, not ${mode}`,
+          { intentId: intentId(intent!), intentMode: pendingMode, requestedMode: mode, workspace },
+        );
+      }
+      const effectiveMode = pendingMode || mode;
+
+      // The frozen contract: fresh mode is the same launch "after the House
+      // confirms a paper boat exists for the session's room". Fresh throws this
+      // session's context away, so the letter has to be waiting on the other
+      // side before the door agrees to leave - otherwise the restart is just
+      // amnesia. Confirming never consumes: paper_boat_wake is a pure read, and
+      // crates/house-substrate/tests/paper_boat_integration.rs wakes one room
+      // twice and gets the boat both times.
+      let boat: Record<string, unknown> | undefined;
+      if (effectiveMode === "fresh") {
+        const wake = await resolveLatestBoat(room, { signal });
+        if (wake?.ok === false) {
+          return refuse(
+            "fresh_boat_unconfirmed",
+            "request_restart refuses: a fresh restart needs a confirmed paper boat, and the House could not be asked for one",
+            { workspace, room, upstreamError: text(wake?.error) },
+          );
+        }
+        if (wake?.found !== true) {
+          return refuse(
+            "fresh_without_boat",
+            "request_restart refuses: a fresh restart abandons this session's context and this room has no paper boat waiting",
+            {
+              workspace,
+              room,
+              remedy: "write the boat first with the sleep tool, or restart with mode resume to carry this session's context",
+            },
+          );
+        }
+        boat = {
+          confirmed: true,
+          id: text(wake.id) || null,
+          title: text(wake.title) || null,
+          createdAt: text(wake.createdAt) || null,
+        };
+      }
+
       if (!intent) {
         // Nothing else in the House can open one: the substrate only records an
         // intent, the keeper only claims one. So the room asking to restart asks
@@ -484,32 +598,14 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
           );
         }
         created = true;
+        const refusal = notArmable(intent);
+        if (refusal) return refusal;
       }
 
       const state = text(intent.state);
-      if (!ARMABLE_STATES.has(state)) {
-        // Refused here, at the tool, rather than at agent_end: the substrate
-        // would answer exit_not_requested long after the turn ended, where the
-        // operator can no longer see why nothing happened.
-        return refuse(
-          "intent_not_armable",
-          `request_restart refuses: the intent for this workspace is ${state || "in an unreported state"}, and only a requested intent may exit`,
-          { missingPrerequisite: MISSING_PREREQUISITE, intentId: intentId(intent), state, workspace },
-        );
-      }
-
-      const intentMode = text(intent.mode);
-      if (intentMode && mode && intentMode !== mode) {
-        return refuse(
-          "mode_mismatch",
-          `request_restart refuses: the pending intent is ${intentMode}, not ${mode}`,
-          { intentId: intentId(intent), intentMode, requestedMode: mode, workspace },
-        );
-      }
-
       armed = {
         intentId: intentId(intent),
-        mode: intentMode || mode,
+        mode: effectiveMode,
         room,
         spirit,
         session,
@@ -535,6 +631,9 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
           sessionId: text(intent.sessionId) || null,
           deadlines: intent.deadlines ?? intent.stageDeadlines ?? null,
         },
+        // Present only for fresh, because only fresh has to prove it: this is
+        // the letter the next session wakes into.
+        ...(boat ? { boat } : {}),
         workspace,
         room,
         spirit,

@@ -38,6 +38,20 @@ the exact implementation record.
   `/athanor/v1/insula/unverified-exit`. It reports sessions that armed an exit
   and never returned verified inside the stage window. The route reads only and
   commands nothing.
+- The new `omp-keeper` program owns the console seam for a self-restart. It
+  starts omp as a console-inheriting child, and it starts omp again after an
+  armed exit. Exit code 87 is only a hint: the keeper asks `restart_status` for
+  every exit code. The keeper resolves the substrate through
+  `<programRoot>/current.json` before every ask, so a release change during a
+  session takes effect. The keeper claims a pending intent from `requested` or
+  `exiting`, transitions it to `relaunching`, and starts omp with the same
+  command. The keeper kills the omp child only when the intent says `exiting`
+  and the deadline passes. A relaunch that cannot start retries one time, then
+  transitions the intent to `failed`. A storm-guard refusal ends the loop with a
+  plain operator message. A config file beside the program holds the omp
+  command, the workspace, the program root, and the door to the keeper
+  capability secret. The crate carries its own README and its own tests, and the
+  tests need no database.
 
 ### Changed
 

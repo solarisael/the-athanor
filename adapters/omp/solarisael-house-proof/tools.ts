@@ -36,6 +36,7 @@ import {
 import {
   GIGA_OMP_ROOM_BINDING,
   flushGigaTurnsDetached,
+  gigaBufferedTurnCensus,
   gigaTransportFailure,
   requestGigaCandidateList,
   requestGigaHealth,
@@ -1974,11 +1975,13 @@ export function registerSolarisaelTools(pi, release) {
   });
 
   // The exit door owns its own module; it is handed the substrate seam, the
-  // live transport map, and the loaded release instead of reaching in here.
+  // live transport map, the buffered-turn census, and the loaded release
+  // instead of reaching in here.
   registerRestartDoor(pi, {
     requestDomain: requestRustDomain,
     transports: rustRememberTransports,
     registerTool: (definition) => registerHouseTool(pi, definition),
+    gigaBuffers: gigaBufferedTurnCensus,
     release,
   });
 }

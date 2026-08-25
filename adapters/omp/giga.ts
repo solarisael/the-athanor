@@ -201,6 +201,21 @@ export function flushGigaTurnsDetached(ctx: any): void {
   }
 }
 
+// Read-only census of turns still waiting for a flush, for the callers that
+// must report what an exit destroys. Buffered turns are a real casualty:
+// closeGigaTransports drains them on a graceful shutdown, and a process.exit
+// never reaches that door. Counts only - never turn content - and it mutates
+// nothing, so reporting can never cost a flush.
+export function gigaBufferedTurnCensus(): Array<{ session: string; cwd: string; turns: number }> {
+  return [...gigaTurnBuffers]
+    .filter(([, buffered]) => buffered.turns.length)
+    .map(([key, buffered]) => ({
+      session: key.slice(key.indexOf("\0") + 1),
+      cwd: buffered.cwd,
+      turns: buffered.turns.length,
+    }));
+}
+
 export async function closeGigaTransports(): Promise<void> {
   const pending = [...gigaTurnBuffers.values()].filter((buffer) => buffer.turns.length);
   gigaTurnBuffers.clear();

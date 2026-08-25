@@ -128,9 +128,9 @@ The request envelope is `{ kind, id, expectedTitle, patch }`. The guard requires
 - the exact current title in `expectedTitle`;
 - at least one explicit replacement field inside `patch`.
 
-Omitted patch fields remain unchanged, and the row ID remains stable. For coding lessons, `alwaysOn` changes eligibility without replacing the row. Coding and project lessons accept `project`; use `clearProject: true` instead to write SQL `NULL`. `project` and `clearProject` are mutually exclusive, and lesson kinds without a project field refuse `clearProject`.
+Omitted patch fields remain unchanged, and the row ID remains stable. For coding, writing, and design lessons, `alwaysOn` changes eligibility without replacing the row. Coding and project lessons accept `project`; use `clearProject: true` instead to write SQL `NULL`. `project` and `clearProject` are mutually exclusive, and lesson kinds without a project field refuse `clearProject`.
 
-Update a lesson when its rule remains the same identity but wording, trigger, or typed metadata changes. Coding lessons also accept voice, scope, proof pattern, language and technology keys, and negation fields; project lessons accept proof-pattern and eligibility-key fields; writing lessons accept voice, registers, example text, writers, and negation fields. Cross-store fields are refused rather than silently discarded.
+Update a lesson when its rule remains the same identity but wording, trigger, or typed metadata changes. Coding lessons also accept voice, scope, proof pattern, language and technology keys, and negation fields; project lessons accept proof-pattern and eligibility-key fields; writing lessons accept voice, registers, example text, writers, negation, and eligibility-key fields; design lessons accept voice, registers, proof pattern, example text, and eligibility-key fields. Cross-store fields are refused rather than silently discarded.
 
 ## Deleting lessons
 

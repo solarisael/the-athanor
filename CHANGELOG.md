@@ -22,6 +22,11 @@ the exact implementation record.
 
 ### Changed
 
+- `update_lesson` now accepts the routing eligibility fields for writing and
+  design lessons: both kinds take `alwaysOn`, and writing lessons additionally
+  take `languageKeys`/`technologyKeys` (design already accepted keys). The
+  per-kind gate itself remains: cross-store fields such as coding `scope` still
+  refuse for writing/design, proven by a live-database update proof.
 - The authenticated Host read surface now carries the House data needed by
   operator panels: room-bound Docket board and evidence, Hallway inbox,
   newest-first memory and lesson timelines, full memory reads, and bounded

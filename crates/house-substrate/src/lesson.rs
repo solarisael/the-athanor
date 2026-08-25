@@ -1577,7 +1577,16 @@ pub async fn lesson_update(
             "languageKeys",
             "technologyKeys",
         ],
-        "writing" => &["voice", "register", "exampleText", "writers", "negationOf"],
+        "writing" => &[
+            "voice",
+            "register",
+            "exampleText",
+            "writers",
+            "negationOf",
+            "alwaysOn",
+            "languageKeys",
+            "technologyKeys",
+        ],
         "design" => &[
             "voice",
             "register",
@@ -1585,6 +1594,7 @@ pub async fn lesson_update(
             "exampleText",
             "languageKeys",
             "technologyKeys",
+            "alwaysOn",
         ],
         _ => &[],
     };

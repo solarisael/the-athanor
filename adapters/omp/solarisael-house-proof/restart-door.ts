@@ -603,6 +603,12 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       // travels into the notice: restart_capability, exit_not_authorized,
       // exit_not_requested, restart_storm, intent_expired, unknown_intent and
       // invalid_params each mean a different repair.
+      //
+      // enough: an intent requested by another session is armed and only learns
+      // exit_not_authorized here, at agent_end; a status-side ownSession flag is
+      // the way up if operators ever hit it. Deliberate - pulling the check to
+      // tool time would put a live session id on restart_status, which is
+      // capability-free and callable by the whole machine.
       const code = text(receipt.code) || "refused";
       ctx?.ui?.notify?.(`Athanor restart exit stood down (${code}): the intent never reached exiting.`, "warning");
       return;

@@ -17,6 +17,16 @@ fn main() {
             println!("fake omp: staying alive for {sleep_secs}s (run {run})");
             let _ = std::io::stdout().flush();
             std::thread::sleep(std::time::Duration::from_secs(sleep_secs));
+            // Outliving the sleep means nobody killed this child. The smoke reads
+            // this file to catch an omp the keeper orphaned instead of putting down.
+            if let Ok(path) = std::env::var("FAKE_OMP_SURVIVED") {
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .expect("fake omp survival log");
+                writeln!(file, "survived run {run}").expect("fake omp survival line");
+            }
             return;
         }
     }

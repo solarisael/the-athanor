@@ -66,6 +66,14 @@ pub fn deadline(published: Option<&str>, now: DateTime<Utc>, net_secs: i64) -> R
     }
 }
 
+/// The instant the House published, as a deadline that names the House as its
+/// source. The relaunching stage takes only this door: it has no net, because a
+/// locally minted window there would give a silent successor more time than the
+/// House allowed. See `keeper::relaunching_window`.
+pub fn house_deadline(published: &str) -> Result<Deadline> {
+    Ok(Deadline::House(house_instant(published)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

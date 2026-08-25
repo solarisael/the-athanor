@@ -29,6 +29,9 @@ struct Tree {
     capability: PathBuf,
     runs: PathBuf,
     transcript: PathBuf,
+    /// Where a child that outlived its sleep records the fact. An entry here
+    /// means the keeper walked away from a live omp instead of killing it.
+    survived: PathBuf,
 }
 
 fn example(name: &str) -> PathBuf {
@@ -86,6 +89,7 @@ fn tree() -> Tree {
         capability,
         runs: root.join("omp-runs.log"),
         transcript: root.join("substrate-transcript.jsonl"),
+        survived: root.join("omp-survived.log"),
         root,
         _temp: temp,
     };
@@ -118,7 +122,8 @@ fn run_keeper_with(tree: &Tree, mode: &str, extra: &[(&str, &str)]) -> Output {
         .env("FAKE_OMP_RUNS", &tree.runs)
         .env("FAKE_SUBSTRATE_TRANSCRIPT", &tree.transcript)
         .env("FAKE_SUBSTRATE_MODE", mode)
-        .env("FAKE_OMP_PROGRAM", &tree.program);
+        .env("FAKE_OMP_PROGRAM", &tree.program)
+        .env("FAKE_OMP_SURVIVED", &tree.survived);
     for (name, value) in extra {
         command.env(name, value);
     }
@@ -522,5 +527,104 @@ fn a_cmd_shim_launch_starts_omp_with_its_console_and_arguments_intact() {
         methods(&tree.transcript),
         ["restart_status"],
         "nothing pending, so the keeper asks once and stops"
+    );
+}
+
+/// P1(2)a: the House vanishing after the spawn must not leave omp behind.
+///
+/// Pre-repair the error escaped `attempt_relaunch` through `?`, which drops the
+/// Child without killing it -- on Windows that is a live omp with no keeper and
+/// an intent stuck in relaunching. The keeper cannot reach `failed` here, because
+/// the transition needs the same dead session; what it must still do is put the
+/// child down and say so.
+#[test]
+fn a_house_that_vanishes_after_the_spawn_leaves_no_orphaned_omp() {
+    let tree = tree();
+    let ran = run_keeper_timed(
+        &tree,
+        "substrate-dies-mid-watch",
+        &[("FAKE_OMP_SLEEP_SECS", "6"), ("FAKE_OMP_SLEEP_FROM_RUN", "2")],
+    );
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert_ne!(
+        ran.output.status.code(),
+        Some(0),
+        "losing the House mid-relaunch is not a success:\n{stdout}\n{stderr}"
+    );
+    assert!(
+        !stdout.contains("saw the successor verify"),
+        "a lost House is never a verify: {stdout}"
+    );
+    assert_eq!(
+        lines(&tree.runs).len(),
+        2,
+        "the armed exit and one relaunch attempt: {stdout}"
+    );
+    // The guarantee, checked before any wording: outlive the child's own sleep,
+    // because an orphan records itself only once it gets past that.
+    std::thread::sleep(Duration::from_secs(9));
+    assert!(
+        lines(&tree.survived).is_empty(),
+        "the keeper dropped a live omp instead of killing it -- orphaned: {:?}\n{stdout}\n{stderr}",
+        lines(&tree.survived)
+    );
+    assert!(
+        stderr.contains("lost the House mid-relaunch"),
+        "the keeper names what happened to it: {stderr}"
+    );
+}
+
+/// P1(2)b: a refused window read keeps the deadline the House last published.
+///
+/// The retry's window read is refused here. Pre-repair the keeper answered that
+/// by minting a window of its own from the claim's `relaunchingSecs` -- it said
+/// so out loud, "watching for 2s instead", and then killed on "a keeper fallback
+/// deadline". Whatever that number is, it is the keeper granting a silent
+/// successor time the House never granted. Post-repair the last House instant
+/// stands, is already past, and the attempt ends on it.
+#[test]
+fn a_refused_window_read_keeps_the_last_house_deadline_and_never_mints_one() {
+    let tree = tree();
+    let ran = run_keeper_timed(
+        &tree,
+        "window-read-refused",
+        &[("FAKE_OMP_SLEEP_SECS", "200"), ("FAKE_OMP_SLEEP_FROM_RUN", "2")],
+    );
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "an unverified restart is a failure:\n{stdout}\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("a keeper fallback deadline"),
+        "no attempt may wait on a deadline the keeper invented:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("the deadline it last published stands"),
+        "the keeper says whose clock it kept: {stderr}"
+    );
+    assert!(
+        ran.elapsed < Duration::from_secs(60),
+        "the kept deadline is already past, so the give-up is immediate \
+         (took {:?}):\n{stdout}\n{stderr}",
+        ran.elapsed
+    );
+    let transitions = requests_for(&tree.transcript, "restart_transition");
+    assert_eq!(
+        transitions.len(),
+        3,
+        "two attempts, then failed:\n{stdout}\n{stderr}"
+    );
+    assert_eq!(transitions[2]["params"]["to"], "failed");
+    assert!(
+        stdout.contains("failed:relaunching") && stdout.contains("omp is not running"),
+        "the operator learns omp is gone: {stdout}"
+    );
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        lines(&tree.survived).is_empty(),
+        "both attempts were put down, not abandoned: {:?}",
+        lines(&tree.survived)
     );
 }

@@ -118,6 +118,21 @@ fn answer(id: &str, method: &str, mode: &str, params: &Value, script: &mut Scrip
             if mode == "storm" {
                 return storm_refusal(id);
             }
+            // The substrate walking off mid-watch, which is what a crashed or
+            // restarted House looks like to the keeper: the verify poll after the
+            // window read gets no answer at all, ever.
+            if mode == "substrate-dies-mid-watch" && script.statuses >= 2 {
+                std::process::exit(0);
+            }
+            // The retry's window read is refused, so the keeper must keep the
+            // deadline the House published for the first attempt.
+            if mode == "window-read-refused" && script.relaunch_transitions >= 2 {
+                return refusal(
+                    id,
+                    "stale_lease",
+                    "the lease is expired, superseded, stale, or invalid",
+                );
+            }
             let index = script.statuses;
             script.statuses += 1;
             let receipt = RestartStatusReceipt {
@@ -173,8 +188,8 @@ fn pending_intent(mode: &str, index: u32, script: &Script) -> Option<RestartStat
         ("exiting-overrun", 0) => Some(exiting_intent(-OVERRUN_SECS)),
         ("exiting-overrun", _) => None,
         // the successor never verifies: the intent stays relaunching forever
-        ("unverified", 0) => Some(exiting_intent(deadlines.exiting_secs)),
-        ("unverified", _) => Some(relaunching_intent(script, &deadlines)),
+        ("unverified" | "window-read-refused", 0) => Some(exiting_intent(deadlines.exiting_secs)),
+        ("unverified" | "window-read-refused", _) => Some(relaunching_intent(script, &deadlines)),
         (_, 0) => Some(exiting_intent(deadlines.exiting_secs)),
         (_, 1) => Some(relaunching_intent(script, &deadlines)),
         (_, _) => None,
@@ -218,7 +233,7 @@ fn relaunching_intent(script: &Script, deadlines: &RestartStageDeadlines) -> Res
 }
 
 fn stage_deadlines(mode: &str) -> RestartStageDeadlines {
-    let relaunching_secs = if mode == "unverified" {
+    let relaunching_secs = if mode == "unverified" || mode == "window-read-refused" {
         UNVERIFIED_RELAUNCHING_SECS
     } else {
         RELAUNCHING_DEADLINE_SECS

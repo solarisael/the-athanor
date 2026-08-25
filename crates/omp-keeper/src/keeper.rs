@@ -1,5 +1,9 @@
+use crate::clock::{Deadline, deadline};
 use crate::config::KeeperConfig;
-use crate::decide::{ExitingAction, RelaunchAction, StatusStep, armed_exit_hint, exiting_action, relaunch_action, status_step};
+use crate::decide::{
+    ExitingAction, RelaunchAction, StatusStep, VerifyWatch, armed_exit_hint, exiting_action,
+    relaunch_action, status_step, verify_watch,
+};
 use crate::protocol::{
     EXITING_DEADLINE_SECS, METHOD_RESTART_CLAIM, METHOD_RESTART_STATUS, METHOD_RESTART_TRANSITION,
     ProtocolErrorBody, RestartClaimParams, RestartClaimReceipt, RestartState, RestartStatusIntent,
@@ -9,10 +13,14 @@ use crate::protocol::{
 use crate::resolve::resolve_substrate_exe;
 use crate::session::{Answer, SubstrateSession};
 use anyhow::{Context, Result, bail};
+use chrono::Utc;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 const CHILD_POLL: Duration = Duration::from_millis(200);
+/// The relaunching stage is seconds-scale by contract, so the keeper looks for
+/// the successor's verify often, on the substrate session it already holds open.
+const VERIFY_POLL: Duration = Duration::from_secs(1);
 const UNKNOWN_EXIT_CODE: i32 = -1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,6 +28,20 @@ pub enum Outcome {
     Stopped { exit_code: i32 },
     Refused { message: String },
     Failed { message: String },
+}
+
+/// Where one relaunch stage ended.
+enum Relaunched {
+    /// The successor is running and the House saw it verify.
+    Verified(Child),
+    /// The loop is over: a refusal, or the retry budget spent.
+    Stopped(Outcome),
+}
+
+/// Why one relaunch attempt produced no verified successor.
+enum Attempt {
+    Verified(Child),
+    Failed(String),
 }
 
 pub fn run(config: &KeeperConfig) -> Result<Outcome> {
@@ -86,56 +108,196 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
             pending.intent_id, claim.claim_epoch
         );
 
-        match transition(
-            &mut session,
-            &pending,
-            &claim.claim_token,
-            RestartTransitionTarget::Relaunching,
-            None,
-        )? {
-            Answer::Ok(result) => println!(
-                "omp-keeper: intent {} is {}",
-                pending.intent_id,
-                result.state.as_str()
-            ),
-            Answer::Refused(refusal) => {
+        match relaunch(config, &mut session, &pending, &claim)? {
+            Relaunched::Verified(successor) => child = successor,
+            Relaunched::Stopped(outcome) => {
                 session.close()?;
-                return Ok(refusal_outcome(&refusal));
+                return Ok(outcome);
             }
         }
-
-        let mut failed_attempts = 0;
-        child = loop {
-            match spawn_omp(config) {
-                Ok(child) => break child,
-                Err(error) => {
-                    failed_attempts += 1;
-                    eprintln!("omp-keeper: relaunch attempt {failed_attempts} failed: {error:#}");
-                    if relaunch_action(failed_attempts, claim.stage_deadlines.relaunch_attempt_limit)
-                        == RelaunchAction::Fail
-                    {
-                        let detail = format!("relaunch failed twice: {error:#}");
-                        let refusal = transition(
-                            &mut session,
-                            &pending,
-                            &claim.claim_token,
-                            RestartTransitionTarget::Failed,
-                            Some(detail.clone()),
-                        )?;
-                        session.close()?;
-                        if let Answer::Refused(refusal) = refusal {
-                            return Ok(refusal_outcome(&refusal));
-                        }
-                        let message = format!(
-                            "omp-keeper: {detail}; intent {} is failed:relaunching and omp is not running",
-                            pending.intent_id
-                        );
-                        return Ok(Outcome::Failed { message });
-                    }
-                }
-            }
-        };
         session.close()?;
+    }
+}
+
+/// Bring omp back and hold the stage open until the House has seen the successor
+/// verify. An attempt fails for either reason — omp would not start, or it
+/// started and never proved itself inside the window — and both spend from the
+/// same budget the claim handed over.
+fn relaunch(
+    config: &KeeperConfig,
+    session: &mut SubstrateSession,
+    pending: &RestartStatusIntent,
+    claim: &RestartClaimReceipt,
+) -> Result<Relaunched> {
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        // One relaunching transition per attempt. The intent row counts
+        // relaunch_attempts and mints a fresh relaunching_deadline_at on every
+        // relaunching transition (house-substrate/src/restart/mod.rs:518-545),
+        // so a retry runs inside the House's own new window instead of a second
+        // clock invented here.
+        let detail = (attempts > 1).then(|| format!("relaunch attempt {attempts}"));
+        match transition(
+            session,
+            pending,
+            &claim.claim_token,
+            RestartTransitionTarget::Relaunching,
+            detail,
+        )? {
+            Answer::Ok(receipt) => match receipt.state {
+                RestartState::Relaunching => println!(
+                    "omp-keeper: intent {} is relaunching (attempt {attempts})",
+                    pending.intent_id
+                ),
+                // the House spends the budget itself when a keeper asks once too often
+                RestartState::Failed => {
+                    return Ok(Relaunched::Stopped(Outcome::Failed {
+                        message: format!(
+                            "omp-keeper: the House spent the relaunch budget for intent {}; it is failed:relaunching and omp is not running",
+                            pending.intent_id
+                        ),
+                    }));
+                }
+                other => bail!(
+                    "a relaunching transition answered {}, which the keeper cannot act on",
+                    other.as_str()
+                ),
+            },
+            Answer::Refused(refusal) => return Ok(Relaunched::Stopped(refusal_outcome(&refusal))),
+        }
+
+        let failure = match attempt_relaunch(config, session, pending, claim)? {
+            Attempt::Verified(child) => {
+                println!(
+                    "omp-keeper: the House saw the successor verify intent {}",
+                    pending.intent_id
+                );
+                return Ok(Relaunched::Verified(child));
+            }
+            Attempt::Failed(failure) => failure,
+        };
+        eprintln!("omp-keeper: relaunch attempt {attempts} failed: {failure}");
+
+        if relaunch_action(attempts, claim.stage_deadlines.relaunch_attempt_limit)
+            == RelaunchAction::Fail
+        {
+            let detail = format!("{attempts} relaunch attempts failed; the last: {failure}");
+            let answer = transition(
+                session,
+                pending,
+                &claim.claim_token,
+                RestartTransitionTarget::Failed,
+                Some(detail.clone()),
+            )?;
+            if let Answer::Refused(refusal) = answer {
+                return Ok(Relaunched::Stopped(refusal_outcome(&refusal)));
+            }
+            return Ok(Relaunched::Stopped(Outcome::Failed {
+                message: format!(
+                    "omp-keeper: {detail}; intent {} is failed:relaunching and omp is not running",
+                    pending.intent_id
+                ),
+            }));
+        }
+    }
+}
+
+/// One attempt: start omp, then hold it against the House's relaunching window
+/// until the successor verifies. A successor that runs but never verifies is not
+/// the session Sol asked for, so it does not outlive its deadline.
+fn attempt_relaunch(
+    config: &KeeperConfig,
+    session: &mut SubstrateSession,
+    pending: &RestartStatusIntent,
+    claim: &RestartClaimReceipt,
+) -> Result<Attempt> {
+    let mut child = match spawn_omp(config) {
+        Ok(child) => child,
+        Err(error) => return Ok(Attempt::Failed(format!("{error:#}"))),
+    };
+    let window = relaunching_window(session, config, pending, claim)?;
+    loop {
+        if verified(session, config, pending)? {
+            return Ok(Attempt::Verified(child));
+        }
+        if window.has_passed(Utc::now()) {
+            kill_child(&mut child)?;
+            return Ok(Attempt::Failed(format!(
+                "the successor did not verify by {} ({})",
+                window.at().to_rfc3339(),
+                window.source()
+            )));
+        }
+        if child
+            .try_wait()
+            .context("the relaunched omp child could not be inspected")?
+            .is_some()
+        {
+            // verified and exited in one breath is still verified, so ask once more
+            return Ok(if verified(session, config, pending)? {
+                Attempt::Verified(child)
+            } else {
+                Attempt::Failed("the successor exited before it verified".to_string())
+            });
+        }
+        std::thread::sleep(VERIFY_POLL);
+    }
+}
+
+/// The window the House minted for this attempt. `restart_status` is the only
+/// place the absolute instant appears; the claim's `relaunchingSecs` is the net
+/// under a House that published none.
+fn relaunching_window(
+    session: &mut SubstrateSession,
+    config: &KeeperConfig,
+    pending: &RestartStatusIntent,
+    claim: &RestartClaimReceipt,
+) -> Result<Deadline> {
+    let published = match ask_status(session, config)? {
+        Ok(Some(intent)) if intent.intent_id == pending.intent_id => {
+            intent.deadlines.relaunching_deadline_at
+        }
+        Ok(_) => None,
+        Err(refusal) => {
+            eprintln!(
+                "omp-keeper: the House refused the relaunching window read ({}: {})",
+                refusal.code, refusal.message
+            );
+            None
+        }
+    };
+    if published.is_none() {
+        eprintln!(
+            "omp-keeper: the House published no relaunching deadline; watching for {}s instead",
+            claim.stage_deadlines.relaunching_secs
+        );
+    }
+    deadline(
+        published.as_deref(),
+        Utc::now(),
+        claim.stage_deadlines.relaunching_secs,
+    )
+}
+
+/// One look at the House: has this intent left the pending set?
+fn verified(
+    session: &mut SubstrateSession,
+    config: &KeeperConfig,
+    pending: &RestartStatusIntent,
+) -> Result<bool> {
+    match ask_status(session, config)? {
+        Ok(now_pending) => {
+            Ok(verify_watch(&pending.intent_id, now_pending.as_ref()) == VerifyWatch::Verified)
+        }
+        Err(refusal) => {
+            // a refused read never decides a restart on its own
+            eprintln!(
+                "omp-keeper: the House refused a verification read ({}: {})",
+                refusal.code, refusal.message
+            );
+            Ok(false)
+        }
     }
 }
 
@@ -201,7 +363,10 @@ fn ask_status(
 }
 
 fn spawn_omp(config: &KeeperConfig) -> Result<Child> {
-    // console-inheriting on purpose: Sol watches this child, so no detach and no hidden window
+    // Console-inheriting on purpose: Sol watches this child, so no detach and no
+    // hidden window. A `.cmd`/`.bat` shim — which is what Sol's npm-installed omp
+    // is — is started by std through the command processor, arguments escaped for
+    // it, so the documented invocation needs no shell of our own here.
     Command::new(config.program())
         .args(config.program_args())
         .current_dir(&config.workspace)
@@ -213,7 +378,6 @@ fn spawn_omp(config: &KeeperConfig) -> Result<Child> {
 }
 
 fn watch_child(config: &KeeperConfig, child: &mut Child) -> Result<i32> {
-    let mut exiting_since: Option<Instant> = None;
     let mut last_poll = Instant::now();
     loop {
         if let Some(status) = child.try_wait().context("omp child could not be inspected")? {
@@ -234,25 +398,44 @@ fn watch_child(config: &KeeperConfig, child: &mut Child) -> Result<i32> {
                 continue;
             }
         };
+        // The intent carries the instant it must be gone by, so the keeper reads
+        // that instant instead of timing the stage itself. A keeper that started
+        // after the adapter armed is already late on this first look.
         let state = watched.as_ref().map(|pending| pending.state);
-        // deadline measured from the keeper's first sight of exiting: the status shape carries an
-        // absolute exitingDeadlineAt, and the keeper owns no clock that reads it, so the local grace stands
-        if state == Some(RestartState::Exiting) {
-            exiting_since.get_or_insert_with(Instant::now);
-        } else {
-            exiting_since = None;
-        }
-        let elapsed = exiting_since.map(|since| since.elapsed().as_secs()).unwrap_or(0);
-        let deadline = EXITING_DEADLINE_SECS;
-        if exiting_action(state, elapsed, deadline) == ExitingAction::Kill {
+        let exiting_deadline = match watched.as_ref() {
+            Some(pending) if pending.state == RestartState::Exiting => Some(deadline(
+                pending.deadlines.exiting_deadline_at.as_deref(),
+                Utc::now(),
+                EXITING_DEADLINE_SECS,
+            )?),
+            _ => None,
+        };
+        if exiting_action(state, exiting_deadline, Utc::now()) == ExitingAction::Kill {
+            let passed = exiting_deadline.expect("a kill decision carries the deadline it read");
             println!(
-                "omp-keeper: omp did not leave within {deadline}s of its exiting intent; killing it"
+                "omp-keeper: omp did not leave by {} ({}); killing it",
+                passed.at().to_rfc3339(),
+                passed.source()
             );
-            child.kill().context("omp child could not be killed")?;
-            let status = child.wait().context("killed omp child could not be reaped")?;
-            return Ok(status.code().unwrap_or(UNKNOWN_EXIT_CODE));
+            return kill_child(child);
         }
     }
+}
+
+/// Kill and reap. An unreaped child is a handle the keeper would hold forever,
+/// and a child that died between the look and the kill is already what we wanted.
+fn kill_child(child: &mut Child) -> Result<i32> {
+    if let Err(error) = child.kill() {
+        if child
+            .try_wait()
+            .context("omp child could not be inspected")?
+            .is_none()
+        {
+            return Err(error).context("omp child could not be killed");
+        }
+    }
+    let status = child.wait().context("killed omp child could not be reaped")?;
+    Ok(status.code().unwrap_or(UNKNOWN_EXIT_CODE))
 }
 
 fn watch_status(config: &KeeperConfig) -> Result<Option<RestartStatusIntent>> {

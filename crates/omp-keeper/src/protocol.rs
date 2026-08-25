@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 
 pub use house_protocol::PROTOCOL_VERSION;
 pub use house_protocol::restart::{
-    RestartClaimParams, RestartClaimReceipt, RestartState, RestartStatusIntent,
-    RestartStatusParams, RestartStatusReceipt, RestartTransitionParams, RestartTransitionReceipt,
-    RestartTransitionTarget,
+    RestartClaimParams, RestartClaimReceipt, RestartState, RestartStatusDeadlines,
+    RestartStatusIntent, RestartStatusParams, RestartStatusReceipt, RestartTransitionParams,
+    RestartTransitionReceipt, RestartTransitionTarget,
 };
 
 /// The three methods the keeper calls. `restart_request` and `restart_verify`
@@ -31,11 +31,12 @@ pub const STORM_REFUSAL_CODE: &str = "restart_storm";
 /// `restart_status` for every exit code, armed or not.
 pub const ARMED_EXIT_CODE: i32 = 87;
 
-/// The grace the keeper allows an `exiting` child before it kills it. The stage
-/// seconds arrive at claim time, but this watch runs before any claim and
-/// `restart_status` publishes absolute deadline timestamps rather than seconds,
-/// so the watch carries the contract's number locally.
-pub const EXITING_DEADLINE_SECS: u64 = 60;
+/// The net under the `exiting` stage, used only when a status answer carries no
+/// `exitingDeadlineAt` at all. The House normally publishes that instant — the
+/// substrate sets it on the exiting transition — and the keeper obeys the
+/// instant, not this number. It exists so a missing field cannot mean "wait
+/// forever", and it matches the contract's stage seconds.
+pub const EXITING_DEADLINE_SECS: i64 = 60;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RequestEnvelope<'a, P> {

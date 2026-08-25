@@ -113,7 +113,8 @@ describe("work-mode lesson packet", () => {
   test("css evidence summons design lessons past a full coding shelf", async () => {
     mode = "work"; queries.length = 0;
     workContext = { languageKeys: ["css"], technologyKeys: [], families: ["coding", "design"], project: null };
-    const codingShelf = Array.from({ length: 24 }, (_, index) => ({ type: "coding", id: index + 1, title: `coding ${index + 1}`, lesson: "body", languageKeys: [] }));
+    const { PACKET_BUDGET } = await import("../solarisael-house-proof/lesson-packet.ts");
+    const codingShelf = Array.from({ length: PACKET_BUDGET }, (_, index) => ({ type: "coding", id: index + 1, title: `coding ${index + 1}`, lesson: "body", languageKeys: [] }));
     respond = (filters) => filters.type === "design"
       ? { ok: true, lessons: filters.alwaysOn ? [] : [{ type: "design", id: 77, title: "Contrast carries hierarchy", lesson: "body", languageKeys: ["css"] }] }
       : { ok: true, lessons: filters.alwaysOn ? codingShelf : [] };
@@ -121,7 +122,7 @@ describe("work-mode lesson packet", () => {
     const [packetMessage] = packets(messages);
     expect(String(packetMessage.content)).toContain("design#77 — Contrast carries hierarchy");
     expect(String(packetMessage.content)).toContain("languages: css");
-    expect((packetMessage.details as Record<string, any>).count).toBeLessThanOrEqual(24);
+    expect((packetMessage.details as Record<string, any>).count).toBeLessThanOrEqual(PACKET_BUDGET);
     expect(queries.some((query) => query.type === "design" && query.alwaysOn === true && Array.isArray(query.languageKeys) && (query.languageKeys as string[]).includes("css"))).toBe(true);
   });
 

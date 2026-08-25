@@ -4,7 +4,8 @@ import type { WorkContext } from "./recall-policy.ts";
 export type PacketLesson = { family: string; id: number; title: string; body: string; proofPattern: string };
 
 // 24 by Sol's word (2026-08-25): 12 starved design once the family doors opened.
-const PACKET_BUDGET = 24;
+// Exported so tests bound the packet against the knob instead of mirroring it.
+export const PACKET_BUDGET = 24;
 // enough: keyed rows compete inside a 50-row recency window because the wire
 // has no keyed-only filter; a keyedOnly flag on lesson_query is the way up.
 const KEYED_FETCH_LIMIT = 50;

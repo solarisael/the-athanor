@@ -6,6 +6,7 @@
 // door is registered with, so the door can be proven without a live House.
 
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { roomContext } from "./room.ts";
@@ -36,24 +37,35 @@ const DETAIL_SOURCE = "omp-adapter";
 
 const MISSING_PREREQUISITE = "restart_status";
 
-// Room-local, operation-scoped restart_exit capability, resolved exactly the
-// way room.ts:114-136 resolves the Docket one: the environment override wins
-// for tests and one-room installs, the durable answer is the room-local
-// runtime file, and it is read at call time so provisioning a room never needs
-// a harness restart. The secret is spent on the wire and never enters a
-// schema, a parameter, a receipt, or a log line.
+// Room-local, operation-scoped restart capabilities, resolved exactly the way
+// room.ts:114-136 resolves the Docket one: the environment override wins for
+// tests and one-room installs, the durable answer is the room-local runtime
+// file, and it is read at call time so provisioning a room never needs a
+// harness restart. Two classes, two secrets, because they are two different
+// rights: restart_request is the right to have the House record an intent,
+// restart_exit is the right to prove one at the door. A secret is spent on the
+// wire and never enters a schema, a parameter, a receipt, or a log line.
 const EXIT_CAPABILITY_ENV = "ATHANOR_RESTART_EXIT_CAPABILITY";
 const EXIT_CAPABILITY_FILENAME = "restart-exit-capability";
+const REQUEST_CAPABILITY_ENV = "ATHANOR_RESTART_REQUEST_CAPABILITY";
+const REQUEST_CAPABILITY_FILENAME = "restart-request-capability";
 
-// Echoed on refusal so the caller can create the intent instead of guessing.
+// The House records an intent because the room is provisioned to ask for one,
+// and the operator's standing policy is what that provisioning means. The door
+// never lets a caller declare a stronger consent than the room was given.
+const DOOR_CONSENT_SOURCE = "operator-standing-policy";
+
+// Echoed when this room cannot ask for its own intent, so an operator can
+// provision the room instead of guessing at the wire.
 const CREATE_INTENT_RECIPE = [
-  "Create the intent first with restart_request:",
+  "This room holds no restart_request capability, so it cannot record its own intent.",
+  `Provision one (${REQUEST_CAPABILITY_ENV}, or the room's runtime ${REQUEST_CAPABILITY_FILENAME} file)`,
+  "and this tool will call restart_request itself:",
   '{ harness: "omp", workspace, mode: "resume" | "fresh", reason,',
-  ' consentSource: "operator-standing-policy" | "operator-approval",',
-  " requesterRoom, requesterSpirit, requesterSession, capability, idempotencyKey }",
-  "The capability is the room's provisioned restart_request secret; consentSource",
-  "alone is a declaration, not authority, and is refused as restart_capability.",
-  "restart_status then reports it as pending and this door can arm.",
+  ` consentSource: "${DOOR_CONSENT_SOURCE}",`,
+  " requesterRoom, requesterSpirit, requesterSession, sessionId, capability, idempotencyKey }",
+  "consentSource alone is a declaration, not authority: without the capability the",
+  "substrate refuses the call as restart_capability.",
 ].join("\n");
 
 type DomainReceipt = Record<string, unknown>;
@@ -84,10 +96,11 @@ export type RestartDoorDeps = {
   release?: LoadedRelease;
   // giga.ts's read-only buffered-turn census.
   gigaBuffers?: () => GigaBufferCensus[] | null;
-  // Resolves the room's restart_exit secret at spend time. Defaults to the
-  // room's own runtime config; injected in tests so proving the fence never
+  // Resolve the room's two restart secrets at spend time. Both default to the
+  // room's own runtime config; injected in tests so proving a fence never
   // requires provisioning a real secret.
   exitCapability?: (effectiveRoomDir: string) => string | null;
+  requestCapability?: (effectiveRoomDir: string) => string | null;
   exit?: (code: number) => void;
 };
 
@@ -124,15 +137,20 @@ function report(result: Record<string, unknown>) {
   };
 }
 
-function exitCapabilityPath(effectiveRoomDir: string): string {
-  return path.join(effectiveRoomDir, ".omp", "runtime", EXIT_CAPABILITY_FILENAME);
+function capabilityPath(effectiveRoomDir: string, filename: string): string {
+  return path.join(effectiveRoomDir, ".omp", "runtime", filename);
 }
 
-function readExitCapability(effectiveRoomDir: string, environ: NodeJS.ProcessEnv = process.env): string | null {
-  const configured = String(environ[EXIT_CAPABILITY_ENV] || "").trim();
+function readCapability(
+  effectiveRoomDir: string,
+  environKey: string,
+  filename: string,
+  environ: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const configured = String(environ[environKey] || "").trim();
   if (configured) return configured;
   try {
-    return readFileSync(exitCapabilityPath(effectiveRoomDir), "utf8").trim() || null;
+    return readFileSync(capabilityPath(effectiveRoomDir, filename), "utf8").trim() || null;
   } catch {
     return null;
   }
@@ -335,7 +353,10 @@ function exitDetail(exit: ArmedExit): string {
 export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
   const z = pi.zod;
   const exitProcess = deps.exit ?? ((code: number) => process.exit(code));
-  const resolveCapability = deps.exitCapability ?? ((roomDir: string) => readExitCapability(roomDir));
+  const resolveCapability = deps.exitCapability
+    ?? ((roomDir: string) => readCapability(roomDir, EXIT_CAPABILITY_ENV, EXIT_CAPABILITY_FILENAME));
+  const resolveRequestCapability = deps.requestCapability
+    ?? ((roomDir: string) => readCapability(roomDir, REQUEST_CAPABILITY_ENV, REQUEST_CAPABILITY_FILENAME));
   // Armed state is closure-local: one door, one pending exit, no process-wide
   // flag another registration could inherit.
   let armed: ArmedExit | null = null;
@@ -346,8 +367,9 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     description: [
       "Arm this omp session's own exit so the keeper can relaunch it.",
       "The exit never fires inside a turn: it falls at agent_end, after the current agent loop finishes.",
-      "This refuses unless restart_status already reports a pending restart intent for this workspace",
-      "AND this room holds the restart_exit capability that proves the exit to the substrate.",
+      "It records the intent itself when the House holds none and this room is provisioned to ask,",
+      "then arms that intent in the same call. It refuses unless this room holds the restart_exit",
+      "capability that proves the exit to the substrate; an unprovisioned room cannot self-restart.",
       "On arming it reports what dies with the exit: this session's async jobs, buffered GIGA turns,",
       "open substrate transports, and every casualty class it cannot see, named as unseen.",
     ].join("\n"),
@@ -387,13 +409,81 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
         );
       }
 
-      const intent = pendingIntent(status);
-      if (!intent) {
+      // Authority before anything is recorded OR armed. An exit armed without
+      // the room's capability buys restart_capability at agent_end, long after
+      // the operator could see why nothing happened - and an intent recorded
+      // for a room that cannot prove it would sit pending until it expired,
+      // spending the storm guard on a restart that could never fire. The
+      // secret is only proven present here; it is spent, and read again, when
+      // the exit actually fires.
+      if (!text(resolveCapability(effectiveRoomDir))) {
         return refuse(
-          "no_pending_intent",
-          "request_restart refuses: this workspace has no pending restart intent",
-          { missingPrerequisite: MISSING_PREREQUISITE, workspace, createIntent: CREATE_INTENT_RECIPE },
+          "restart_capability_unavailable",
+          "request_restart refuses: this room holds no restart_exit capability, and a pending intent alone does not authorize an exit",
+          {
+            workspace,
+            provision: `provision the room's restart_exit capability: set ${EXIT_CAPABILITY_ENV} or write ${capabilityPath(effectiveRoomDir, EXIT_CAPABILITY_FILENAME)}`,
+          },
         );
+      }
+
+      let intent = pendingIntent(status);
+      let created = false;
+      if (!intent) {
+        // Nothing else in the House can open one: the substrate only records an
+        // intent, the keeper only claims one. So the room asking to restart asks
+        // for its own, and only when the operator provisioned it to ask - which
+        // is what makes "operator-standing-policy" true here rather than a
+        // caller's word. This completes the sentence the quest opened with:
+        // the agent requests, the House records, the adapter arms.
+        const requestCapability = text(resolveRequestCapability(effectiveRoomDir));
+        if (!requestCapability) {
+          return refuse(
+            "no_pending_intent",
+            "request_restart refuses: this workspace has no pending restart intent and this room may not open one",
+            { missingPrerequisite: MISSING_PREREQUISITE, workspace, createIntent: CREATE_INTENT_RECIPE },
+          );
+        }
+
+        // A fresh key per genuine creation: the door only reaches here because
+        // restart_status showed nothing pending, so a retry that already
+        // succeeded finds the intent and arms it instead of forking a second
+        // one, and the substrate's storm guard fences the racing edge.
+        const receipt = await deps.requestDomain("restart_request", {
+          harness: "omp",
+          workspace,
+          mode,
+          sessionId: session,
+          reason,
+          consentSource: DOOR_CONSENT_SOURCE,
+          requesterRoom: room,
+          requesterSpirit: spirit,
+          requesterSession: session,
+          capability: requestCapability,
+          idempotencyKey: randomUUID(),
+        }, signal, true);
+
+        if (receipt?.ok === false) {
+          // The substrate's own name travels, minus the secret it was given:
+          // restart_capability, restart_storm and invalid_params each mean a
+          // different repair.
+          const upstreamCode = text(receipt.code) || "refused";
+          return refuse(
+            "restart_request_refused",
+            `request_restart refuses: the House would not record this intent (${upstreamCode})`,
+            { workspace, upstreamCode, upstreamError: text(receipt.error) },
+          );
+        }
+
+        intent = pendingIntent(receipt);
+        if (!intent) {
+          return refuse(
+            "restart_request_unusable",
+            "request_restart refuses: the House accepted the request but named no intent id, so there is nothing to arm",
+            { workspace, upstreamState: text(receipt?.state) },
+          );
+        }
+        created = true;
       }
 
       const state = text(intent.state);
@@ -417,23 +507,6 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
         );
       }
 
-      // Authority before arming, for the same reason as the state fence: an
-      // exit armed without the room's capability buys restart_capability at
-      // agent_end, long after the operator could see why nothing happened.
-      // The secret is only proven present here; it is spent, and read again,
-      // when the exit actually fires.
-      if (!text(resolveCapability(effectiveRoomDir))) {
-        return refuse(
-          "restart_capability_unavailable",
-          "request_restart refuses: this room holds no restart_exit capability, and a pending intent alone does not authorize an exit",
-          {
-            intentId: intentId(intent),
-            workspace,
-            provision: `provision the room's restart_exit capability: set ${EXIT_CAPABILITY_ENV} or write ${exitCapabilityPath(effectiveRoomDir)}`,
-          },
-        );
-      }
-
       armed = {
         intentId: intentId(intent),
         mode: intentMode || mode,
@@ -448,6 +521,10 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       return report({
         ok: true,
         armed: true,
+        // True when this call opened the intent itself, false when it armed one
+        // the House already held: the operator can tell a self-request from a
+        // pre-recorded one without reading the event log.
+        created,
         tool: "request_restart",
         firesAt: "agent_end",
         exitCode: ARMED_EXIT_CODE,

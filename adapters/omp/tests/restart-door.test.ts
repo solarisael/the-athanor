@@ -65,6 +65,10 @@ const FAKE_EXECUTABLE = "C:/fake/versions/0.10.1/bin/athanor-substrate.exe";
 // parameter and must never appear in a receipt.
 const EXIT_CAPABILITY = "restart-exit-secret-0e6c";
 const CAPABILITY_ENV = "ATHANOR_RESTART_EXIT_CAPABILITY";
+// The room's provisioned restart_request secret: the right to have the House
+// record an intent at all. Separate class, separate secret.
+const REQUEST_CAPABILITY = "restart-request-secret-4711";
+const REQUEST_CAPABILITY_ENV = "ATHANOR_RESTART_REQUEST_CAPABILITY";
 
 // The real harness shape: AsyncJobSnapshotItem is Pick<AsyncJob, "id" | "type" |
 // "status" | "label" | "startTime"> and AsyncJob carries no persist or detached
@@ -87,6 +91,7 @@ const PENDING_INTENT = {
 
 function buildDoor(options: {
   status?: Record<string, unknown>;
+  request?: Record<string, unknown>;
   transition?: Record<string, unknown>;
   release?: { releaseId?: string | null; previousReleaseId?: string | null } | null;
   transports?: Map<string, { usable: boolean }>;
@@ -94,6 +99,7 @@ function buildDoor(options: {
   // Omitted entirely (not set to a stub) when a test wants the module's own
   // env/file resolver to answer.
   exitCapability?: (roomDir: string) => string | null;
+  requestCapability?: (roomDir: string) => string | null;
 } = {}): DoorHarness {
   const hooks: DoorHarness["hooks"] = [];
   const tools: CapturedTool[] = [];
@@ -112,6 +118,9 @@ function buildDoor(options: {
     async requestDomain(method, params, _signal, write) {
       calls.push({ method, params, write });
       if (method === "restart_status") return options.status ?? PENDING_INTENT;
+      if (method === "restart_request") {
+        return options.request ?? { ok: true, intentId: "intent-fresh-91", state: "requested", expiresAt: "2026-08-25T18:00:00Z" };
+      }
       if (method === "restart_transition") return options.transition ?? { ok: true, state: "exiting" };
       return { ok: false, error: `unexpected method ${method}` };
     },
@@ -122,6 +131,7 @@ function buildDoor(options: {
     release: "release" in options ? options.release : { releaseId: "0.9.3-abc", previousReleaseId: "0.9.2-def" },
     ...("gigaBuffers" in options ? { gigaBuffers: options.gigaBuffers } : {}),
     ...("exitCapability" in options ? { exitCapability: options.exitCapability } : {}),
+    ...("requestCapability" in options ? { requestCapability: options.requestCapability } : {}),
     exit(code) {
       exits.push(code);
     },
@@ -175,6 +185,7 @@ function withCapability(options: Parameters<typeof buildDoor>[0] = {}) {
 
 afterEach(() => {
   delete process.env[CAPABILITY_ENV];
+  delete process.env[REQUEST_CAPABILITY_ENV];
 });
 
 describe("adapter exit door", () => {
@@ -192,8 +203,11 @@ describe("adapter exit door", () => {
     expect(door.hookNames()).toEqual(["agent_end"]);
   });
 
-  test("refuses by name when no pending intent exists, naming restart_status", async () => {
-    const door = withCapability({ status: { ok: true } });
+  // An unprovisioned room simply cannot self-restart: it can neither record an
+  // intent nor prove one, so this refusal is now honestly reachable instead of
+  // echoing a recipe no surface ever called.
+  test("refuses by name when there is no pending intent and no request capability", async () => {
+    const door = withCapability({ status: { ok: true }, requestCapability: () => null });
 
     const result = await callTool(door);
 
@@ -207,7 +221,128 @@ describe("adapter exit door", () => {
     // The recipe has to name the capability too, or it teaches a call the
     // substrate now refuses with restart_capability.
     expect(result.details.createIntent).toContain("capability");
+    // Nothing was recorded: no intent may exist that this room cannot exit.
     expect(door.calls.map((call) => call.method)).toEqual(["restart_status"]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Completing the circuit (Kodo's ruling, 2026-08-25): "agent requests, House
+  // records, adapter arms". Nothing else in the House can create an intent, so
+  // the tool creates its own when the room is provisioned to ask.
+  // ---------------------------------------------------------------------------
+
+  test("creates the intent through restart_request when the room may ask, then arms it", async () => {
+    const door = withCapability({
+      status: { ok: true },
+      requestCapability: () => REQUEST_CAPABILITY,
+    });
+
+    const result = await callTool(door, { mode: "fresh", reason: "the loaded release is stale" });
+
+    expect(door.calls.map((call) => call.method)).toEqual(["restart_status", "restart_request"]);
+    const request = door.calls[1]!;
+    expect(request.write).toBe(true);
+    expect(request.params).toMatchObject({
+      harness: "omp",
+      mode: "fresh",
+      reason: "the loaded release is stale",
+      consentSource: "operator-standing-policy",
+      requesterRoom: expect.any(String),
+      requesterSpirit: expect.any(String),
+      requesterSession: "session-under-restart",
+      sessionId: "session-under-restart",
+      capability: REQUEST_CAPABILITY,
+    });
+    expect(String(request.params.workspace ?? "").length).toBeGreaterThan(0);
+    // A retry must be able to land on the same intent instead of a second one.
+    expect(String(request.params.idempotencyKey ?? "").length).toBeGreaterThan(0);
+
+    // The fresh intent is armed in the same call: request, record, arm.
+    expect(result.isError).toBeUndefined();
+    expect(result.details.armed).toBe(true);
+    expect(result.details.created).toBe(true);
+    expect(result.details.intent.intentId).toBe("intent-fresh-91");
+    expect(result.details.intent.mode).toBe("fresh");
+
+    await door.agentEnd();
+    const transition = door.calls[2]!;
+    expect(transition.method).toBe("restart_transition");
+    expect(transition.params.intentId).toBe("intent-fresh-91");
+  });
+
+  test("the created intent carries the door's own session id, never a caller's", async () => {
+    const door = withCapability({ status: { ok: true }, requestCapability: () => REQUEST_CAPABILITY });
+
+    await callTool(door, {
+      mode: "resume",
+      reason: "a forged requester",
+      requesterSession: "forged-session",
+      sessionId: "forged-session",
+      consentSource: "operator-approval",
+    });
+
+    const request = door.calls[1]!;
+    expect(request.params.requesterSession).toBe("session-under-restart");
+    expect(request.params.sessionId).toBe("session-under-restart");
+    // Consent is the room's standing policy, not a caller's declaration.
+    expect(request.params.consentSource).toBe("operator-standing-policy");
+  });
+
+  // The sharp edge: recording an intent this room cannot prove would leave a
+  // pending row that expires unused and counts against the storm guard.
+  test("never records an intent the room could not exit", async () => {
+    const door = buildDoor({
+      status: { ok: true },
+      exitCapability: () => null,
+      requestCapability: () => REQUEST_CAPABILITY,
+    });
+
+    const result = await callTool(door);
+
+    expect(result.details.code).toBe("restart_capability_unavailable");
+    expect(door.calls.map((call) => call.method)).toEqual(["restart_status"]);
+  });
+
+  test("never creates a second intent when one is already pending", async () => {
+    const door = withCapability({ requestCapability: () => REQUEST_CAPABILITY });
+
+    const result = await callTool(door);
+
+    expect(door.calls.map((call) => call.method)).toEqual(["restart_status"]);
+    expect(result.details.created).toBe(false);
+    expect(result.details.intent.intentId).toBe("intent-4711");
+  });
+
+  test("carries a refused restart_request into a named refusal without arming", async () => {
+    const door = withCapability({
+      status: { ok: true },
+      requestCapability: () => REQUEST_CAPABILITY,
+      request: { ok: false, code: "restart_storm", error: "more than 3 intents this hour" },
+    });
+
+    const result = await callTool(door);
+    await door.agentEnd();
+    await settle();
+
+    expect(result.isError).toBe(true);
+    expect(result.details.code).toBe("restart_request_refused");
+    expect(result.details.upstreamCode).toBe("restart_storm");
+    expect(door.calls.map((call) => call.method)).toEqual(["restart_status", "restart_request"]);
+    expect(door.exits).toEqual([]);
+  });
+
+  test("refuses when restart_request answers without a usable intent", async () => {
+    const door = withCapability({
+      status: { ok: true },
+      requestCapability: () => REQUEST_CAPABILITY,
+      request: { ok: true, state: "requested" },
+    });
+
+    const result = await callTool(door);
+
+    expect(result.isError).toBe(true);
+    expect(result.details.code).toBe("restart_request_unusable");
+    expect(door.exits).toEqual([]);
   });
 
   test("refuses an intent that is no longer pending", async () => {

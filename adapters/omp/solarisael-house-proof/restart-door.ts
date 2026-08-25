@@ -298,6 +298,10 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
           hubJobs: hubJobCasualties(pi, deps.hubJobs),
           rustTransports: transportCasualties(deps.transports),
         },
+        // An unclaimed intent retires 300s after restart_request, and an agent
+        // loop can outlive that. The exit then stands down instead of firing,
+        // so the arming report says it rather than letting the silence explain.
+        standsDownIf: "the intent expires before this agent loop ends (intent_expired), or the substrate refuses the transition",
       });
     },
   });

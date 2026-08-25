@@ -201,9 +201,9 @@ fn scripted_intent(mode: &str, index: u32, script: &Script) -> Option<RestartSta
         // the successor never verifies: the intent stays relaunching forever
         ("unverified" | "window-read-refused", 0) => Some(exiting_intent(deadlines.exiting_secs)),
         ("unverified" | "window-read-refused", _) => Some(relaunching_intent(script, &deadlines)),
-        // a stranger's live intent turns up mid-watch. Under the one-live-intent
-        // fence this cannot happen, so it stands for the substrate answering
-        // wrongly -- and answering it as "ours verified" is the bug under proof.
+        // A second live intent in one workspace, which the restart schema makes
+        // unconstructible: a relaxed fence, not a shape today's wire can produce.
+        // Kept because reading it as "ours verified" is the bug under proof.
         ("stranger-intent", 0) => Some(exiting_intent(deadlines.exiting_secs)),
         ("stranger-intent", 1) => Some(relaunching_intent(script, &deadlines)),
         ("stranger-intent", _) => Some(stranger_intent()),

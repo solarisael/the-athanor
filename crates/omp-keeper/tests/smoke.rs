@@ -629,15 +629,22 @@ fn a_refused_window_read_keeps_the_last_house_deadline_and_never_mints_one() {
     );
 }
 
-/// P1(1): a different live intent turning up mid-watch is not our verify.
+/// P1(1): a row that is not ours is never our verify.
 ///
 /// Pre-repair the keeper read "the answer is not our intent" as proof our
 /// successor had verified, and declared victory over a restart that never
 /// happened -- a stranger's row, or plain absence, both counted as success. Now
 /// only our own id, reported `verified` by the exact-id read, is proof; anything
 /// else finished is finished-but-unproven and takes the retry path.
+///
+/// What this defends is a relaxed fence, not a shape today's wire can produce.
+/// The exact-id read is scoped by workspace, so another workspace's row already
+/// reads as none, and the restart schema makes a second LIVE intent in one
+/// workspace unconstructible. Terminal rows do pile up per workspace, though,
+/// which is the real reason the watch keys on the id it claimed and never on
+/// "the newest thing this workspace has".
 #[test]
-fn a_stranger_intent_mid_watch_is_never_read_as_our_verify() {
+fn a_stranger_intent_is_never_our_verify_even_if_the_live_intent_fence_relaxes() {
     let tree = tree();
     let ran = run_keeper_timed(
         &tree,

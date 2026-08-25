@@ -91,12 +91,16 @@ const HOUSE_TOOL_NAMES = [
   "quest_claim",
   "quest_report",
   "quest_evidence",
+  "request_restart",
 ];
 
 function registerTools(): CapturedTool[] {
   const tools: CapturedTool[] = [];
   registerSolarisaelTools({
     zod,
+    // The exit door registers its own agent_end tap through the same call, so
+    // the stand-in carries the hook surface the real pi always has.
+    on(_name: string, _handler: unknown) {},
     registerTool(tool: CapturedTool) { tools.push(tool); },
   });
   return tools;

@@ -200,6 +200,7 @@ const expectedToolNames = [
   "quest_claim",
   "quest_report",
   "quest_evidence",
+  "request_restart",
 ];
 
 function toolMap(tools: CapturedTool[]) {
@@ -318,6 +319,9 @@ describe("OMP adapter registration", () => {
       "tool_result",
       "tool_result",
       "shutdown",
+      "agent_end",
+      // The exit door's own agent_end tap, registered last so every other
+      // agent_end write settles before it can fire an exit.
       "agent_end",
     ]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
@@ -627,6 +631,7 @@ describe("OMP adapter registration", () => {
       quest_claim: { approval: "write" },
       quest_report: { approval: "write" },
       quest_evidence: { approval: "read" },
+      request_restart: { approval: "write" },
     });
   });
 
@@ -884,6 +889,13 @@ describe("OMP adapter registration", () => {
           technology_keys: { type: "array", element: { type: "string" }, optional: true },
           tags: { type: "array", element: { type: "string" }, optional: true },
           publication_approved: { type: "boolean" },
+        },
+      },
+      request_restart: {
+        type: "object",
+        fields: {
+          mode: { type: "enum", values: ["resume", "fresh"] },
+          reason: { type: "string" },
         },
       },
       room_state: { type: "object", fields: {} },

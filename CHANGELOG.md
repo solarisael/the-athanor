@@ -20,6 +20,28 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Added
+
+- The OMP adapter now exposes `request_restart`, the exit door for its own
+  session. The tool refuses unless `restart_status` already reports a pending
+  consented intent for the workspace. The refusal names the missing prerequisite
+  and shows how to create the intent. Before it arms, the tool reports what dies
+  with the exit: every open Rust transport, and every hub job that does not
+  persist. The armed exit fires at `agent_end`, never inside a turn. It moves the
+  intent to `exiting`, then leaves omp with code 87 for the keeper. A refused
+  transition stands the exit down and keeps the session alive.
+- The installed loader now hands the resolved release to the adapter entry. The
+  arm report names that loaded release, so a session can show `installed` against
+  `loaded`.
+
+### Known ceilings
+
+- The adapter holds no keeper claim token. It requests the `exiting` transition
+  with the intent id and its own session identity instead. The substrate may
+  refuse that request while the token fence stands.
+- The adapter cannot enumerate hub jobs from inside the running session. The arm
+  report names the casualty class and marks it as not enumerable.
+
 ### Changed
 
 - `update_lesson` now accepts the routing eligibility fields for writing and

@@ -597,7 +597,9 @@ async function recordAutomaticContextTelemetry(
   });
 }
 
-export default function solarisaelHouseProof(pi) {
+// The loader hands the entry the release it actually loaded, so a session can
+// report loadedRelease as derived state instead of re-resolving the pointer.
+export default function solarisaelHouseProof(pi, release) {
   pi.setLabel("The Athanor");
   pi.registerMessageRenderer?.("solarisael-lesson-trigger", lessonTriggerMessageRenderer);
   pi.registerMessageRenderer?.("solarisael-process-lessons", processLessonsMessageRenderer);
@@ -1580,5 +1582,5 @@ export default function solarisaelHouseProof(pi) {
     }
   });
 
-  registerSolarisaelTools(pi);
+  registerSolarisaelTools(pi, release);
 }

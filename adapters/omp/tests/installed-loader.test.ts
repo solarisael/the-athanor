@@ -75,6 +75,7 @@ type InstalledTree = {
 type LoaderRuntime = typeof globalThis & {
   __installedLoaderImports?: string[];
   __installedLoaderCalls?: string[];
+  __installedLoaderRelease?: unknown;
 };
 
 const roots: string[] = [];
@@ -93,9 +94,9 @@ const adapterSources: Record<string, string> = {
     "",
   ].join("\n"),
   "index.ts": [
-    "const state = globalThis as typeof globalThis & { __installedLoaderImports?: string[]; __installedLoaderCalls?: string[] };",
+    "const state = globalThis as typeof globalThis & { __installedLoaderImports?: string[]; __installedLoaderCalls?: string[]; __installedLoaderRelease?: unknown };",
     "(state.__installedLoaderImports ??= []).push('index');",
-    "export default async function index() { (state.__installedLoaderCalls ??= []).push('index'); }",
+    "export default async function index(_pi, release) { (state.__installedLoaderCalls ??= []).push('index'); state.__installedLoaderRelease = release; }",
     "",
   ].join("\n"),
   "solarisael-house-proof/constants.ts": "export const INSTALLED_COMPONENT_PROOF = 1;\n",
@@ -104,6 +105,7 @@ const adapterSources: Record<string, string> = {
 afterEach(async () => {
   delete (globalThis as LoaderRuntime).__installedLoaderImports;
   delete (globalThis as LoaderRuntime).__installedLoaderCalls;
+  delete (globalThis as LoaderRuntime).__installedLoaderRelease;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -140,6 +142,7 @@ function runtime(): LoaderRuntime {
 function resetRuntime() {
   delete runtime().__installedLoaderImports;
   delete runtime().__installedLoaderCalls;
+  delete runtime().__installedLoaderRelease;
 }
 
 async function persistNativePointer(tree: InstalledTree) {
@@ -344,6 +347,42 @@ test("accepts explicit null previous release metadata", async () => {
     env: tree.env,
   });
   expect(modules.previousReleaseId).toBeNull();
+});
+
+// The adapter reports "installed != loaded" from what the loader handed it, so
+// the entry must receive the release the loader actually resolved. A loader that
+// silently drops it leaves the adapter naming nothing.
+test("hands the resolved release through to the adapter entry", async () => {
+  const previousReleaseId = `0.9.2-${"c".repeat(64)}`;
+  const tree = await makeInstalledTree(previousReleaseId);
+  resetRuntime();
+
+  await installedAthanor(null, {
+    programRoot: tree.program,
+    userProfile: tree.profile,
+    env: tree.env,
+  });
+
+  expect(runtime().__installedLoaderRelease).toEqual({
+    releaseId: tree.manifest.releaseId,
+    previousReleaseId,
+  });
+});
+
+test("hands through an explicit null previous release rather than omitting it", async () => {
+  const tree = await makeInstalledTree(null);
+  resetRuntime();
+
+  await installedAthanor(null, {
+    programRoot: tree.program,
+    userProfile: tree.profile,
+    env: tree.env,
+  });
+
+  expect(runtime().__installedLoaderRelease).toEqual({
+    releaseId: tree.manifest.releaseId,
+    previousReleaseId: null,
+  });
 });
 
 test("parses pointer and component manifest objects exactly", async () => {

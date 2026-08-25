@@ -20,8 +20,9 @@ use athanor_substrate::{
     hallway_knock, hallway_knock_policy, hallway_post, hallway_read, lesson_context, lesson_delete,
     lesson_query, lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake,
     quest_board, quest_chargebook, quest_claim, quest_clock, quest_evidence, quest_post,
-    quest_report, recall, refresh_semantic_vocabulary, remember, spawn_giga_worker,
-    substrate_health, substrate_health_with_config, validate_trusted_binding,
+    quest_report, recall, refresh_semantic_vocabulary, remember, restart_claim, restart_request,
+    restart_status, restart_transition, restart_verify, spawn_giga_worker, substrate_health,
+    substrate_health_with_config, validate_trusted_binding,
 };
 use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
 use house_core::{
@@ -36,6 +37,10 @@ use house_core::{
         HallwayCreateRequest, HallwayInboxRequest, HallwayJoinRequest, HallwayKnockPolicyRequest,
         HallwayKnockRequest, HallwayPostRequest, HallwayReadRequest,
     },
+};
+use house_protocol::restart::{
+    RestartClaimParams, RestartRequestParams, RestartStatusParams, RestartTransitionParams,
+    RestartVerifyParams,
 };
 use house_protocol::{
     ClusterMaintenanceResultWire, GigaCandidateListRequest, GigaConversationIngestParams,
@@ -81,6 +86,11 @@ enum ProtocolRequest {
     QuestClock(QuestClockParams),
     QuestChargebook(QuestChargebookParams),
     QuestEvidence(QuestEvidenceParams),
+    RestartRequest(RestartRequestParams),
+    RestartClaim(RestartClaimParams),
+    RestartTransition(RestartTransitionParams),
+    RestartVerify(RestartVerifyParams),
+    RestartStatus(RestartStatusParams),
     LessonContext(LessonContextParams),
     LessonUpdate(LessonUpdateParams),
     LessonDelete(LessonDeleteParams),
@@ -379,6 +389,21 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
         "quest_evidence" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::QuestEvidence)
             .map_err(|error| invalid_params(error.to_string())),
+        "restart_request" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::RestartRequest)
+            .map_err(|error| invalid_params(error.to_string())),
+        "restart_claim" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::RestartClaim)
+            .map_err(|error| invalid_params(error.to_string())),
+        "restart_transition" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::RestartTransition)
+            .map_err(|error| invalid_params(error.to_string())),
+        "restart_verify" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::RestartVerify)
+            .map_err(|error| invalid_params(error.to_string())),
+        "restart_status" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::RestartStatus)
+            .map_err(|error| invalid_params(error.to_string())),
         "lesson_context" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::LessonContext)
             .map_err(|error| invalid_params(error.to_string())),
@@ -545,6 +570,11 @@ fn operation_name(request: &ProtocolRequest) -> &'static str {
         ProtocolRequest::QuestClock(_) => "quest_clock",
         ProtocolRequest::QuestChargebook(_) => "quest_chargebook",
         ProtocolRequest::QuestEvidence(_) => "quest_evidence",
+        ProtocolRequest::RestartRequest(_) => "restart_request",
+        ProtocolRequest::RestartClaim(_) => "restart_claim",
+        ProtocolRequest::RestartTransition(_) => "restart_transition",
+        ProtocolRequest::RestartVerify(_) => "restart_verify",
+        ProtocolRequest::RestartStatus(_) => "restart_status",
         ProtocolRequest::LessonContext(_) => "lesson_context",
         ProtocolRequest::LessonUpdate(_) => "lesson_update",
         ProtocolRequest::LessonDelete(_) => "lesson_delete",
@@ -615,6 +645,19 @@ fn insula_binding(request: &ProtocolRequest) -> TrustedBinding {
         }
         ProtocolRequest::QuestEvidence(request) => {
             Some((&request.room, &request.spirit, &request.session))
+        }
+        // The restart plane binds only where a whole triple exists: the
+        // requesting session names itself, and the successor proves itself by
+        // room, spirit, and its new session. A keeper claim, a token-fenced
+        // transition, and the anonymous status read have no spirit to bind, so
+        // they stay in the House service voice.
+        ProtocolRequest::RestartRequest(request) => Some((
+            &request.requester_room,
+            &request.requester_spirit,
+            &request.requester_session,
+        )),
+        ProtocolRequest::RestartVerify(request) => {
+            Some((&request.room, &request.spirit, &request.successor_session))
         }
         _ => None,
     };
@@ -1057,6 +1100,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::QuestClock(request) => request.validate(),
                     ProtocolRequest::QuestChargebook(request) => request.validate(),
                     ProtocolRequest::QuestEvidence(request) => request.validate(),
+                    ProtocolRequest::RestartRequest(request) => {
+                        request.validate().map_err(AppError::Invalid)
+                    }
+                    ProtocolRequest::RestartClaim(request) => {
+                        request.validate().map_err(AppError::Invalid)
+                    }
+                    ProtocolRequest::RestartTransition(request) => {
+                        request.validate().map_err(AppError::Invalid)
+                    }
+                    ProtocolRequest::RestartVerify(request) => {
+                        request.validate().map_err(AppError::Invalid)
+                    }
+                    ProtocolRequest::RestartStatus(request) => {
+                        request.validate().map_err(AppError::Invalid)
+                    }
                     ProtocolRequest::AnamnesisWrite(_)
                     | ProtocolRequest::LessonQuery(_)
                     | ProtocolRequest::LessonContext(_)
@@ -1287,6 +1345,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     ProtocolRequest::QuestEvidence(request) => {
                                         match quest_evidence(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::RestartRequest(request) => {
+                                        match restart_request(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::RestartClaim(request) => {
+                                        match restart_claim(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::RestartTransition(request) => {
+                                        match restart_transition(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::RestartVerify(request) => {
+                                        match restart_verify(pool, request).await {
+                                            Ok(result) => success_json(id, result)?,
+                                            Err(error) => app_error(id, operation, error),
+                                        }
+                                    }
+                                    ProtocolRequest::RestartStatus(request) => {
+                                        match restart_status(pool, request).await {
                                             Ok(result) => success_json(id, result)?,
                                             Err(error) => app_error(id, operation, error),
                                         }
@@ -1687,6 +1775,45 @@ mod tests {
         assert!(matches!(invalid, Err(ProtocolError::InvalidParams(_))));
     }
 
+    // Kills: a restart method that decodes loose params, or a validation arm
+    // that lets the tokenless exit door carry a keeper token.
+    // red-proof: drop deny_unknown_fields from a restart params struct, or
+    // remove the RestartTransition arm from main()'s validation table.
+    #[test]
+    fn restart_protocols_are_strict_and_camel_cased() {
+        for line in [
+            r#"{"protocol":1,"id":"r1","method":"restart_request","params":{"harness":"omp","workspace":"D:/athanor-wt/restart-intent","mode":"resume","sessionId":"s-1","reason":"installed release is newer than the loaded one","consentSource":"operator-standing-policy","requesterRoom":"kodo","requesterSpirit":"Kodo","requesterSession":"service:kodo","idempotencyKey":"request-1"}}"#,
+            r#"{"protocol":1,"id":"r2","method":"restart_claim","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimant":"omp-keeper","capability":"secret","idempotencyKey":"claim-1"}}"#,
+            r#"{"protocol":1,"id":"r3","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","to":"exiting","detail":"{\"session\":\"service:kodo\"}"}}"#,
+            r#"{"protocol":1,"id":"r4","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimToken":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","to":"relaunching"}}"#,
+            r#"{"protocol":1,"id":"r5","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo"}}"#,
+            r#"{"protocol":1,"id":"r6","method":"restart_status","params":{"workspace":"D:/athanor-wt/restart-intent"}}"#,
+        ] {
+            let (_, request) = decode_line(line);
+            match request.expect("restart fixture must decode") {
+                ProtocolRequest::RestartRequest(request) => request.validate().unwrap(),
+                ProtocolRequest::RestartClaim(request) => request.validate().unwrap(),
+                ProtocolRequest::RestartTransition(request) => request.validate().unwrap(),
+                ProtocolRequest::RestartVerify(request) => request.validate().unwrap(),
+                ProtocolRequest::RestartStatus(request) => request.validate().unwrap(),
+                _ => panic!("expected restart request"),
+            }
+        }
+        let (_, snake) = decode_line(
+            r#"{"protocol":1,"id":"r7","method":"restart_request","params":{"harness":"omp","workspace":"D:/w","mode":"resume","reason":"why","consentSource":"operator-approval","requester_room":"kodo","requesterSpirit":"Kodo","requesterSession":"service:kodo","idempotencyKey":"request-2"}}"#,
+        );
+        assert!(matches!(snake, Err(ProtocolError::InvalidParams(_))));
+        let (_, tokened_exit) = decode_line(
+            r#"{"protocol":1,"id":"r8","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimToken":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","to":"exiting","detail":"armed"}}"#,
+        );
+        match tokened_exit.expect("the tokened exit decodes: it is validation that refuses it") {
+            ProtocolRequest::RestartTransition(request) => {
+                assert!(request.validate().is_err(), "the exit door is tokenless")
+            }
+            _ => panic!("expected restart transition"),
+        }
+    }
+
     #[test]
     fn lesson_trigger_match_protocol_is_strict_and_camel_cased() {
         let (_, request) = decode_line(
@@ -1849,6 +1976,26 @@ mod tests {
                 r#"{"protocol":1,"id":"o7","method":"quest_report","params":{"room":"tuner","spirit":"Tuner","session":"service:tuner","capability":"secret","idempotencyKey":"report-1","questId":"00000000-0000-0000-0000-000000000001","attemptId":"00000000-0000-0000-0000-000000000002","leaseToken":"token","action":"progress","body":"working"}}"#,
                 "quest_report",
             ),
+            (
+                r#"{"protocol":1,"id":"o8","method":"restart_request","params":{"harness":"omp","workspace":"D:/w","mode":"resume","reason":"newer release installed","consentSource":"operator-standing-policy","requesterRoom":"kodo","requesterSpirit":"Kodo","requesterSession":"service:kodo","idempotencyKey":"request-1"}}"#,
+                "restart_request",
+            ),
+            (
+                r#"{"protocol":1,"id":"o9","method":"restart_claim","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimant":"omp-keeper","capability":"secret","idempotencyKey":"claim-1"}}"#,
+                "restart_claim",
+            ),
+            (
+                r#"{"protocol":1,"id":"o10","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","to":"exiting","detail":"armed"}}"#,
+                "restart_transition",
+            ),
+            (
+                r#"{"protocol":1,"id":"o11","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo"}}"#,
+                "restart_verify",
+            ),
+            (
+                r#"{"protocol":1,"id":"o12","method":"restart_status","params":{"workspace":"D:/w"}}"#,
+                "restart_status",
+            ),
         ] {
             let (_, request) = decode_line(line);
             let operation = operation_name(&request.expect("fixture decodes"));
@@ -1878,6 +2025,22 @@ mod tests {
         assert_eq!(binding.room, "tuner");
         assert_eq!(binding.spirit, "Tuner");
         assert_eq!(binding.session_id, "service:tuner");
+
+        // The restart plane's two identity-bearing doors: the requesting
+        // session names itself, the successor names its new session.
+        let (_, request) = decode_line(
+            r#"{"protocol":1,"id":"b5","method":"restart_request","params":{"harness":"omp","workspace":"D:/w","mode":"resume","reason":"newer release installed","consentSource":"operator-standing-policy","requesterRoom":"tuner","requesterSpirit":"Tuner","requesterSession":"service:tuner","idempotencyKey":"request-1"}}"#,
+        );
+        let binding = insula_binding(&request.expect("fixture decodes"));
+        assert_eq!(binding.room, "tuner");
+        assert_eq!(binding.spirit, "Tuner");
+        assert_eq!(binding.session_id, "service:tuner");
+
+        let (_, request) = decode_line(
+            r#"{"protocol":1,"id":"b6","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:tuner-2","room":"tuner","spirit":"Tuner"}}"#,
+        );
+        let binding = insula_binding(&request.expect("fixture decodes"));
+        assert_eq!(binding.session_id, "service:tuner-2");
     }
 
     #[test]

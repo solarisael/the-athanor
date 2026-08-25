@@ -1,4 +1,5 @@
 use chrono::{DateTime, Duration, SecondsFormat, Timelike, Utc};
+use house_protocol::restart::RestartState;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
@@ -15,9 +16,14 @@ pub const INSULA_MAX_VITALS_ROWS: u32 = 5_000;
 // hundred newest-first rows already reach far past the 14-day raw window;
 // upgrade path is a keyset cursor on (created_at, receipt_id), not a bigger cap.
 pub const INSULA_MAX_RETENTION_ROWS: u32 = 100;
+// enough: a restart storm is bounded to three exits per workspace per hour, so
+// a hundred newest-first rows cover days of unverified exits; upgrade path is a
+// keyset cursor on (exiting_at, intent_id), not a bigger cap.
+pub const INSULA_MAX_UNVERIFIED_EXIT_ROWS: u32 = 100;
 const VITALS: &str = "insula.vitals.minute";
 const RETENTION: &str = "insula.retention.raw_delete";
 const RETENTION_READ: &str = "insula.retention.receipts";
+const UNVERIFIED_EXIT: &str = "insula.session.unverified_exit";
 
 #[derive(Debug, Error)]
 pub enum InsulaError {
@@ -354,6 +360,32 @@ pub struct RetentionReadResult {
     pub query_name: String,
     pub query_version: i16,
     pub rows: Vec<RetentionReceiptRow>,
+}
+/// One session that armed a restart exit and never came back verified. The
+/// restart plane owns these columns (`restart.intents`); this family only
+/// observes them, which is why the row carries no writer or span identity.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UnverifiedExitRow {
+    pub intent_id: String,
+    pub workspace: String,
+    pub session_id: Option<String>,
+    pub mode: String,
+    pub state: String,
+    pub failed_stage: Option<String>,
+    pub requester_room: String,
+    pub requester_spirit: String,
+    pub requester_session: String,
+    pub exiting_at: DateTime<Utc>,
+    pub deadline_at: DateTime<Utc>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UnverifiedExitResult {
+    pub query_name: String,
+    pub query_version: i16,
+    pub window_secs: i64,
+    pub rows: Vec<UnverifiedExitRow>,
 }
 
 fn is_house(v: &str) -> bool {
@@ -1110,6 +1142,58 @@ pub async fn query_retention(
     Ok(RetentionReadResult {
         query_name: RETENTION_READ.into(),
         query_version: 1,
+        rows,
+    })
+}
+
+/// Sessions whose restart intent reached `exiting` and never reached
+/// `verified` inside the stage window. Read-only and House-wide: the restart
+/// plane carries no house dimension, exactly like a retention receipt.
+///
+/// The window comes from the restart module's const block — one authority for
+/// the deadline, so a policy change here can never drift from the plane that
+/// enforces it.
+pub async fn query_unverified_exit(
+    pool: &PgPool,
+    limit: u32,
+) -> Result<UnverifiedExitResult, InsulaError> {
+    if limit == 0 || limit > INSULA_MAX_UNVERIFIED_EXIT_ROWS {
+        return Err(bad("limit", "out_of_range"));
+    }
+    let window_secs =
+        crate::restart::EXITING_DEADLINE_SECS + crate::restart::RELAUNCHING_DEADLINE_SECS;
+    // The first exiting event is the one that starts the clock: a retry never
+    // buys a session more silence.
+    let rs = sqlx::query(
+        "SELECT intent.intent_id::text intent_id,intent.workspace,intent.session_id,intent.mode,intent.state,intent.failed_stage,intent.requester_room,intent.requester_spirit,intent.requester_session,exit_event.created_at exiting_at,exit_event.created_at+($1*INTERVAL '1 second')deadline_at FROM restart.intents intent JOIN LATERAL(SELECT created_at FROM restart.intent_events WHERE intent_id=intent.intent_id AND event_kind=$2 ORDER BY created_at LIMIT 1)exit_event ON TRUE WHERE intent.verified_at IS NULL AND exit_event.created_at+($1*INTERVAL '1 second')<=NOW() ORDER BY exit_event.created_at DESC LIMIT $3",
+    )
+    .bind(window_secs)
+    .bind(RestartState::Exiting.as_str())
+    .bind(limit as i64)
+    .fetch_all(pool)
+    .await?;
+    let rows = rs
+        .into_iter()
+        .map(|r| {
+            Ok(UnverifiedExitRow {
+                intent_id: r.try_get("intent_id")?,
+                workspace: r.try_get("workspace")?,
+                session_id: r.try_get("session_id")?,
+                mode: r.try_get("mode")?,
+                state: r.try_get("state")?,
+                failed_stage: r.try_get("failed_stage")?,
+                requester_room: r.try_get("requester_room")?,
+                requester_spirit: r.try_get("requester_spirit")?,
+                requester_session: r.try_get("requester_session")?,
+                exiting_at: r.try_get("exiting_at")?,
+                deadline_at: r.try_get("deadline_at")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    Ok(UnverifiedExitResult {
+        query_name: UNVERIFIED_EXIT.into(),
+        query_version: 1,
+        window_secs,
         rows,
     })
 }

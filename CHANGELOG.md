@@ -20,6 +20,25 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Added
+
+- The House now records a restart intent. A session asks for a harness restart.
+  The adapter arms the exit. A keeper claims the exit and relaunches. The
+  successor session proves the return.
+- Schema `restart` (migration 26) holds the intents and an append-only event
+  ledger. Five substrate methods carry the plane: `restart_request`,
+  `restart_claim`, `restart_transition`, `restart_verify`, and `restart_status`.
+  `restart_status` is a read. It needs no capability.
+- `restart_request` refuses with the code `restart_storm` after three intents
+  reach the exit stage for one workspace in one hour. An unclaimed request
+  expires after 300 seconds. An expired intent never fires.
+- The keeper claims under its own capability row, never as a room. Provision the
+  keeper secret with `substrate/provision-restart-capability.ps1`.
+- The authenticated Host read surface gains one route:
+  `/athanor/v1/insula/unverified-exit`. It reports sessions that armed an exit
+  and never returned verified inside the stage window. The route reads only and
+  commands nothing.
+
 ### Changed
 
 - `update_lesson` now accepts the routing eligibility fields for writing and

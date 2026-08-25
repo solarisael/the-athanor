@@ -2,10 +2,11 @@ use crate::config::HostConfig;
 use crate::server::authorized;
 use athanor_substrate::insula_writer::{EmitterSpan, end_span, start_span};
 use athanor_substrate::{
-    INSULA_MAX_RETENTION_ROWS, INSULA_MAX_TRACE_ROWS, INSULA_MAX_VITALS_ROWS, IngestBatch,
-    InsulaError, ObservationPhase, OutcomeClass, RetentionReceiptRow, TraceRow, TraceScope,
-    TrustedBinding, VitalsQuery, VitalsRow, ingest_batch, query_retention, query_trace,
-    query_vitals, validate_trusted_binding,
+    INSULA_MAX_RETENTION_ROWS, INSULA_MAX_TRACE_ROWS, INSULA_MAX_UNVERIFIED_EXIT_ROWS,
+    INSULA_MAX_VITALS_ROWS, IngestBatch, InsulaError, ObservationPhase, OutcomeClass,
+    RetentionReceiptRow, TraceRow, TraceScope, TrustedBinding, UnverifiedExitRow, VitalsQuery,
+    VitalsRow, ingest_batch, query_retention, query_trace, query_unverified_exit, query_vitals,
+    validate_trusted_binding,
 };
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{DefaultBodyLimit, Request, State};
@@ -26,6 +27,10 @@ pub(crate) const EVENTS_PATH: &str = "/athanor/v1/insula/events";
 pub(crate) const VITALS_PATH: &str = "/athanor/v1/insula/vitals";
 pub(crate) const TRACE_PATH: &str = "/athanor/v1/insula/trace";
 pub(crate) const RETENTION_PATH: &str = "/athanor/v1/insula/retention";
+// The restart plane's operator window: which sessions armed an exit and never
+// came back. A read behind the same bearer as the rest of this family; it
+// commands no restart and claims no intent.
+pub(crate) const UNVERIFIED_EXIT_PATH: &str = "/athanor/v1/insula/unverified-exit";
 
 const API_SCHEMA_VERSION: u16 = 1;
 const MAX_BATCH_EVENTS: usize = 128;
@@ -39,6 +44,8 @@ const DEFAULT_TRACE_LIMIT: u32 = 100;
 const MAX_TRACE_LIMIT: u32 = INSULA_MAX_TRACE_ROWS - 1;
 const DEFAULT_RETENTION_LIMIT: u32 = 20;
 const MAX_RETENTION_LIMIT: u32 = INSULA_MAX_RETENTION_ROWS - 1;
+const DEFAULT_UNVERIFIED_EXIT_LIMIT: u32 = 20;
+const MAX_UNVERIFIED_EXIT_LIMIT: u32 = INSULA_MAX_UNVERIFIED_EXIT_ROWS - 1;
 
 const HEALTH_UNVERIFIED: u8 = 0;
 const HEALTH_OK: u8 = 1;
@@ -154,6 +161,26 @@ struct RetentionResponse<'a> {
     rows: Vec<RetentionReceiptRow>,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct UnverifiedExitRequest {
+    #[serde(default = "default_unverified_exit_limit")]
+    limit: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnverifiedExitResponse<'a> {
+    schema_version: u16,
+    query_name: String,
+    query_version: i16,
+    house_id: &'a str,
+    window_secs: i64,
+    limit: u32,
+    truncated: bool,
+    rows: Vec<UnverifiedExitRow>,
+}
+
 const fn default_vitals_limit() -> u32 {
     DEFAULT_VITALS_LIMIT
 }
@@ -164,6 +191,10 @@ const fn default_trace_limit() -> u32 {
 
 const fn default_retention_limit() -> u32 {
     DEFAULT_RETENTION_LIMIT
+}
+
+const fn default_unverified_exit_limit() -> u32 {
+    DEFAULT_UNVERIFIED_EXIT_LIMIT
 }
 
 impl InsulaHost {
@@ -204,6 +235,7 @@ impl InsulaHost {
             .route(VITALS_PATH, post(read_vitals))
             .route(TRACE_PATH, post(read_trace))
             .route(RETENTION_PATH, post(read_retention))
+            .route(UNVERIFIED_EXIT_PATH, post(read_unverified_exit))
             .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
             .route_layer(middleware::from_fn_with_state(auth, require_bearer))
             .with_state(self.clone())
@@ -272,6 +304,12 @@ async fn require_bearer(State(auth): State<AuthState>, request: Request, next: N
             "house_host",
             "host",
             "insula_retention",
+        ),
+        UNVERIFIED_EXIT_PATH => start_span(
+            auth.observer_binding.as_ref(),
+            "house_host",
+            "host",
+            "insula_unverified_exit",
         ),
         _ => None,
     };
@@ -469,6 +507,46 @@ async fn read_retention(
                     query_name: result.query_name,
                     query_version: result.query_version,
                     house_id: state.binding.house_id.as_str(),
+                    limit: requested_limit,
+                    truncated,
+                    rows: result.rows,
+                }
+            }),
+    )
+}
+
+async fn read_unverified_exit(
+    State(state): State<InsulaHost>,
+    payload: Result<Json<UnverifiedExitRequest>, JsonRejection>,
+) -> Response {
+    let Json(request) = match payload {
+        Ok(payload) => payload,
+        Err(rejection) => return json_rejection(rejection),
+    };
+    if request.limit == 0 || request.limit > MAX_UNVERIFIED_EXIT_LIMIT {
+        return error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_request");
+    }
+    let Some(pool) = state.pool() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "insula_unavailable");
+    };
+
+    // A restart intent carries no house or room dimension: it is scoped by
+    // workspace, and this Host serves one House. The window and the row shape
+    // are the substrate's, so nothing here decides restart policy.
+    let requested_limit = request.limit;
+    substrate_response(
+        &state,
+        query_unverified_exit(pool, requested_limit + 1)
+            .await
+            .map(|mut result| {
+                let truncated = result.rows.len() > requested_limit as usize;
+                result.rows.truncate(requested_limit as usize);
+                UnverifiedExitResponse {
+                    schema_version: API_SCHEMA_VERSION,
+                    query_name: result.query_name,
+                    query_version: result.query_version,
+                    house_id: state.binding.house_id.as_str(),
+                    window_secs: result.window_secs,
                     limit: requested_limit,
                     truncated,
                     rows: result.rows,

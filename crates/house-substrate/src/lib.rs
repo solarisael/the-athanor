@@ -17,6 +17,7 @@ pub mod migrations;
 mod paper_boat;
 mod recall;
 mod remember;
+mod restart;
 pub mod state;
 mod timeline;
 
@@ -56,12 +57,13 @@ pub use health::{
 };
 pub use insula::{
     INSULA_DEFAULT_RETENTION_DAYS, INSULA_MAX_BATCH_EVENTS, INSULA_MAX_RETENTION_ROWS,
-    INSULA_MAX_TRACE_ROWS, INSULA_MAX_VITALS_ROWS, INSULA_QUERY_VERSION, INSULA_SCHEMA_VERSION,
-    IdempotencyScope, IngestBatch, IngestConflict, IngestConflictKind, IngestReceipt, InsulaError,
-    ObservationEvent, ObservationPhase, OutcomeClass, RetentionReadResult, RetentionReceipt,
-    RetentionReceiptRow, RetentionStatus, TraceResult, TraceRow, TraceScope, TrustedBinding,
+    INSULA_MAX_TRACE_ROWS, INSULA_MAX_UNVERIFIED_EXIT_ROWS, INSULA_MAX_VITALS_ROWS,
+    INSULA_QUERY_VERSION, INSULA_SCHEMA_VERSION, IdempotencyScope, IngestBatch, IngestConflict,
+    IngestConflictKind, IngestReceipt, InsulaError, ObservationEvent, ObservationPhase,
+    OutcomeClass, RetentionReadResult, RetentionReceipt, RetentionReceiptRow, RetentionStatus,
+    TraceResult, TraceRow, TraceScope, TrustedBinding, UnverifiedExitResult, UnverifiedExitRow,
     VitalsQuery, VitalsResult, VitalsRow, derive_idempotency_key_v1, derive_semantic_hash_v1,
-    ingest_batch, query_retention, query_trace, query_vitals, run_retention,
+    ingest_batch, query_retention, query_trace, query_unverified_exit, query_vitals, run_retention,
     validate_trusted_binding,
 };
 pub use insula_writer::{
@@ -81,6 +83,11 @@ pub use lesson::{
 pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
 pub use recall::{RecallParams, RecallResult, recall, refresh_semantic_vocabulary};
 pub use remember::{RememberReceipt, RememberRequest, ThreadContinuation, remember};
+pub use restart::{
+    EXITING_DEADLINE_SECS, RELAUNCH_ATTEMPT_LIMIT, RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS,
+    STORM_MAX_EXITING_PER_WINDOW, STORM_WINDOW_SECS, restart_claim, restart_request,
+    restart_status, restart_transition, restart_verify,
+};
 pub use timeline::{
     LessonTimelineItem, LessonTimelineParams, LessonTimelineResult, MemoryReadParams,
     MemoryReadResult, MemoryRecord, MemoryTimelineItem, MemoryTimelineParams, MemoryTimelineResult,

@@ -1,5 +1,8 @@
 //! Newline-delimited JSON wire protocol, version 1.
 mod host;
+/// The restart intent vocabulary keeps its own namespace: consumers name the
+/// door (`house_protocol::restart::...`) instead of importing a flat re-export.
+pub mod restart;
 
 pub use host::*;
 

@@ -20,11 +20,12 @@ this work, because the terminal belongs to the operator, not to a service.
      `relaunching`, then start omp again with the same command.
    - Pending intent in another state: print one line and exit. Only `requested`
      and `exiting` accept a claim.
-6. Hold the relaunch open until the House has seen the successor verify. The
-   successor proves itself with `restart_verify`, so the keeper watches
-   `restart_status`: the intent leaving the pending set is the verify. A
-   successor that never verifies inside the intent's relaunching deadline is
-   killed, and the attempt counts as failed.
+6. Hold the relaunch open until the House confirms the successor. The successor
+   proves itself with `restart_verify`. The keeper then asks `restart_status`
+   about its own intent by id, because only that read reports a terminal state.
+   One answer is proof: our own intent id, reported `verified`. Anything else is
+   not. A successor that is never confirmed inside the intent's relaunching
+   deadline is killed, and the attempt counts as failed.
 7. Stop when the House refuses. A storm-guard refusal ends the loop with a plain
    message that says omp is not running.
 
@@ -79,7 +80,8 @@ Every answer is one line that holds `result` or `error`.
 
 | Method | When | Answer the keeper uses |
 | --- | --- | --- |
-| `restart_status` | after every child exit, and on every watch tick | the pending intent, or none |
+| `restart_status`, workspace only | after every child exit, and on every watch tick | the pending intent, or none |
+| `restart_status`, with `intentId` | on every verify watch poll | that one intent, in whatever state it reached |
 | `restart_claim` | intent in `requested` or `exiting` | the claim token and the claim epoch |
 | `restart_transition` | after the claim | the new state |
 
@@ -99,14 +101,18 @@ Deadlines and refusals:
 - The keeper kills the omp child only when the intent says `exiting` and the
   published instant has passed. The contract's stage length is 60 seconds; the
   keeper's own 60 is only a net for an answer that carries no instant at all.
-- A relaunch attempt fails two ways: omp will not start, or omp starts and the
-  House never sees it verify before `relaunchingDeadlineAt`. Either way the
-  attempt retries one time and a second failure transitions the intent to
-  `failed` and stops the keeper.
+- A relaunch attempt fails three ways: omp will not start, omp starts and the
+  House never confirms it before `relaunchingDeadlineAt`, or the keeper loses the
+  House after the spawn. Every one of them kills the child, retries one time, and
+  transitions the intent to `failed` on the second failure.
 - Each attempt enters `relaunching` again, because the intent row counts
   `relaunch_attempts` and mints a fresh `relaunchingDeadlineAt` on every
   `relaunching` transition. The retry runs inside the House's new window; the
   keeper never opens a second window of its own.
+- The relaunching window has no net. When a window read fails or carries no
+  instant, the deadline the House last published stands. Where the House has
+  never named one, there is no window to wait inside and the attempt ends. A
+  window the keeper invents is time the House never granted.
 - The idempotency key for a claim is `<claimant>:claim:<intentId>`. A repeated
   claim for one intent carries the same key.
 - `resume` mode and `fresh` mode start the same command. omp resumes its own

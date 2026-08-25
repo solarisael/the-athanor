@@ -20,11 +20,16 @@ pub enum RelaunchAction {
     Fail,
 }
 
-/// Whether the House has seen the successor prove itself yet.
+/// What one look at the House says about our own intent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VerifyWatch {
+    /// Ours, still on its way.
     Waiting,
+    /// Ours, verified. The only positive proof there is.
     Verified,
+    /// Ours is finished but not as verified, or the answer was not about ours at
+    /// all. Which terminal state it reached is not the keeper's to guess.
+    Terminal,
 }
 
 /// The 87 exit is the fast-path hint only; the keeper asks restart_status for every exit code.
@@ -70,18 +75,32 @@ pub fn relaunch_action(failed_attempts: i32, attempt_limit: i32) -> RelaunchActi
     }
 }
 
-/// Has the successor verified?
+/// Has our own successor verified?
 ///
-/// `restart_status` reports only the pending states — requested, exiting,
-/// claimed, relaunching (house-substrate/src/restart/mod.rs:628-634) — so a
-/// verified intent reads as absent and never as the word `verified`. The keeper
-/// therefore observes verification as its own intent leaving the pending set.
-/// `failed` leaves that set too, but only the keeper writes `failed`, and while
-/// it is still waiting it has not.
-pub fn verify_watch(intent_id: &str, pending: Option<&RestartStatusIntent>) -> VerifyWatch {
-    match pending {
-        Some(pending) if pending.intent_id == intent_id => VerifyWatch::Waiting,
-        _ => VerifyWatch::Verified,
+/// Answer the exact-id read, never the workspace read. The workspace read
+/// reports live states only, so it can never say `verified` and its silence
+/// means nothing about which end our intent reached; asking by id is what makes
+/// a positive sighting possible at all (house-protocol restart: intentId
+/// present returns that intent in whatever state, terminal included).
+///
+/// Only `verified` for our own id is proof. Absent, or some other intent, is
+/// terminal-but-unproven and takes the retry path — a stranger's row says
+/// nothing about ours, and reading it as success is how a keeper declares
+/// victory over a restart that never happened.
+pub fn verify_watch(intent_id: &str, observed: Option<&RestartStatusIntent>) -> VerifyWatch {
+    let Some(observed) = observed else {
+        return VerifyWatch::Terminal;
+    };
+    if observed.intent_id != intent_id {
+        return VerifyWatch::Terminal;
+    }
+    match observed.state {
+        RestartState::Verified => VerifyWatch::Verified,
+        RestartState::Failed | RestartState::Expired => VerifyWatch::Terminal,
+        RestartState::Requested
+        | RestartState::Exiting
+        | RestartState::Claimed
+        | RestartState::Relaunching => VerifyWatch::Waiting,
     }
 }
 
@@ -213,37 +232,61 @@ mod tests {
         assert_eq!(relaunch_action(0, -1), RelaunchAction::Fail);
     }
 
-    /// The mutation this kills: waiting for the literal word `verified` on the
-    /// wire, which `restart_status` never says, so the keeper would wait forever
-    /// on a successor that already proved itself.
+    /// The mutation this kills: reading anything-but-ours as success. Absence and
+    /// a stranger's row both used to mean "verified", so a keeper could declare
+    /// victory over a restart that never happened.
     #[test]
-    fn verification_is_the_intent_leaving_the_pending_set() {
+    fn only_our_own_id_reported_verified_is_proof_of_a_verify() {
         let ours = "3f6b9c2a-7d41-4e58-9a0b-1c8e5d2f4a67";
+        let stranger = "8c1d0e4f-2a3b-4c5d-9e6f-7a8b9c0d1e2f";
         assert_eq!(
-            verify_watch(ours, Some(&intent(ours, RestartState::Relaunching))),
-            VerifyWatch::Waiting,
-            "still relaunching means still unproven"
+            verify_watch(ours, Some(&intent(ours, RestartState::Verified))),
+            VerifyWatch::Verified,
+            "ours, said verified by the House, is the only proof there is"
         );
         assert_eq!(
             verify_watch(ours, None),
-            VerifyWatch::Verified,
-            "gone from the pending read is the only way a verify shows up"
+            VerifyWatch::Terminal,
+            "absent says our intent is finished, never which end it reached"
         );
-        assert_eq!(
-            verify_watch(ours, Some(&intent("8c1d0e4f-2a3b-4c5d-9e6f-7a8b9c0d1e2f", RestartState::Requested))),
-            VerifyWatch::Verified,
-            "a different intent is not ours to wait on"
-        );
-        // our own id in any pending state is still ours, and still unproven
+        // every state a stranger's row could carry, including verified: a verify
+        // that belongs to someone else is not ours
         for state in [
             RestartState::Requested,
             RestartState::Exiting,
             RestartState::Claimed,
+            RestartState::Relaunching,
+            RestartState::Verified,
+            RestartState::Failed,
+            RestartState::Expired,
+        ] {
+            assert_eq!(
+                verify_watch(ours, Some(&intent(stranger, state))),
+                VerifyWatch::Terminal,
+                "a stranger's intent as {} proves nothing about ours",
+                state.as_str()
+            );
+        }
+        // ours, still on its way
+        for state in [
+            RestartState::Requested,
+            RestartState::Exiting,
+            RestartState::Claimed,
+            RestartState::Relaunching,
         ] {
             assert_eq!(
                 verify_watch(ours, Some(&intent(ours, state))),
                 VerifyWatch::Waiting,
-                "our intent still pending as {} is not a verify",
+                "our intent live as {} is not yet a verify",
+                state.as_str()
+            );
+        }
+        // ours, finished the wrong way: never a verify, and never a wait either
+        for state in [RestartState::Failed, RestartState::Expired] {
+            assert_eq!(
+                verify_watch(ours, Some(&intent(ours, state))),
+                VerifyWatch::Terminal,
+                "our intent as {} is over, not pending",
                 state.as_str()
             );
         }

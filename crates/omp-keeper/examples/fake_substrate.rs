@@ -34,6 +34,8 @@ use std::io::{BufRead, Write};
 
 /// A canonical lowercase UUID, because `uuid_shaped` refuses anything else.
 const INTENT_ID: &str = "3f6b9c2a-7d41-4e58-9a0b-1c8e5d2f4a67";
+/// Another intent's id, for the mid-watch stranger.
+const STRANGER_INTENT_ID: &str = "8c1d0e4f-2a3b-4c5d-9e6f-7a8b9c0d1e2f";
 /// 64 lowercase hex, because `hex_token` refuses anything else.
 const CLAIM_TOKEN: &str = "9f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d6035";
 const SESSION_ID: &str = "session-1";
@@ -133,11 +135,23 @@ fn answer(id: &str, method: &str, mode: &str, params: &Value, script: &mut Scrip
                     "the lease is expired, superseded, stale, or invalid",
                 );
             }
+            let asked: RestartStatusParams = parse(params).expect("validated status params");
             let index = script.statuses;
             script.statuses += 1;
+            let scripted = scripted_intent(mode, index, script);
+            // The read split the real door draws: asking by id answers about that
+            // one intent in whatever state it reached, terminal included, while the
+            // workspace question only ever reports live intents. Only the first can
+            // ever say `verified`.
+            let intent = match asked.intent_id.as_deref() {
+                Some(asked_id) => scripted.filter(|intent| {
+                    intent.intent_id == asked_id || mode == "stranger-intent"
+                }),
+                None => scripted.filter(|intent| is_live(intent.state)),
+            };
             let receipt = RestartStatusReceipt {
-                workspace: params["workspace"].as_str().unwrap_or_default().to_string(),
-                intent: pending_intent(mode, index, script),
+                workspace: asked.workspace,
+                intent,
             };
             result(id, &receipt)
         }
@@ -174,13 +188,10 @@ fn answer(id: &str, method: &str, mode: &str, params: &Value, script: &mut Scrip
     }
 }
 
-/// The pending intent each mode publishes for the nth status ask.
-///
-/// `restart_status` only ever reports the pending states — requested, exiting,
-/// claimed, relaunching — so a verified intent reads as absent, never as
-/// `verified`. Returning `None` here is how this fixture says "the successor
-/// verified", exactly as the real read does.
-fn pending_intent(mode: &str, index: u32, script: &Script) -> Option<RestartStatusIntent> {
+/// Which intent, in which state, each mode holds at the nth status ask. The read
+/// kind decides whether the caller is allowed to see it; this only says what the
+/// House knows.
+fn scripted_intent(mode: &str, index: u32, script: &Script) -> Option<RestartStatusIntent> {
     let deadlines = stage_deadlines(mode);
     match (mode, index) {
         ("no-intent", _) => None,
@@ -190,9 +201,55 @@ fn pending_intent(mode: &str, index: u32, script: &Script) -> Option<RestartStat
         // the successor never verifies: the intent stays relaunching forever
         ("unverified" | "window-read-refused", 0) => Some(exiting_intent(deadlines.exiting_secs)),
         ("unverified" | "window-read-refused", _) => Some(relaunching_intent(script, &deadlines)),
+        // a stranger's live intent turns up mid-watch. Under the one-live-intent
+        // fence this cannot happen, so it stands for the substrate answering
+        // wrongly -- and answering it as "ours verified" is the bug under proof.
+        ("stranger-intent", 0) => Some(exiting_intent(deadlines.exiting_secs)),
+        ("stranger-intent", 1) => Some(relaunching_intent(script, &deadlines)),
+        ("stranger-intent", _) => Some(stranger_intent()),
         (_, 0) => Some(exiting_intent(deadlines.exiting_secs)),
         (_, 1) => Some(relaunching_intent(script, &deadlines)),
-        (_, _) => None,
+        // the successor proved itself: terminal, so only the exact read sees it
+        (_, _) => Some(verified_intent()),
+    }
+}
+
+/// The live states, the only ones the workspace read may report.
+fn is_live(state: RestartState) -> bool {
+    matches!(
+        state,
+        RestartState::Requested
+            | RestartState::Exiting
+            | RestartState::Claimed
+            | RestartState::Relaunching
+    )
+}
+
+fn verified_intent() -> RestartStatusIntent {
+    RestartStatusIntent {
+        intent_id: INTENT_ID.to_string(),
+        state: RestartState::Verified,
+        mode: RestartMode::Resume,
+        session_id: Some(SESSION_ID.to_string()),
+        deadlines: RestartStatusDeadlines {
+            expires_at: instant(REQUESTED_TTL_SECS),
+            exiting_deadline_at: None,
+            relaunching_deadline_at: None,
+        },
+    }
+}
+
+fn stranger_intent() -> RestartStatusIntent {
+    RestartStatusIntent {
+        intent_id: STRANGER_INTENT_ID.to_string(),
+        state: RestartState::Relaunching,
+        mode: RestartMode::Resume,
+        session_id: Some("session-2".to_string()),
+        deadlines: RestartStatusDeadlines {
+            expires_at: instant(REQUESTED_TTL_SECS),
+            exiting_deadline_at: None,
+            relaunching_deadline_at: Some(instant(RELAUNCHING_DEADLINE_SECS)),
+        },
     }
 }
 

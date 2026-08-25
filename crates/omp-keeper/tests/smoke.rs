@@ -628,3 +628,58 @@ fn a_refused_window_read_keeps_the_last_house_deadline_and_never_mints_one() {
         lines(&tree.survived)
     );
 }
+
+/// P1(1): a different live intent turning up mid-watch is not our verify.
+///
+/// Pre-repair the keeper read "the answer is not our intent" as proof our
+/// successor had verified, and declared victory over a restart that never
+/// happened -- a stranger's row, or plain absence, both counted as success. Now
+/// only our own id, reported `verified` by the exact-id read, is proof; anything
+/// else finished is finished-but-unproven and takes the retry path.
+#[test]
+fn a_stranger_intent_mid_watch_is_never_read_as_our_verify() {
+    let tree = tree();
+    let ran = run_keeper_timed(
+        &tree,
+        "stranger-intent",
+        &[("FAKE_OMP_SLEEP_SECS", "30"), ("FAKE_OMP_SLEEP_FROM_RUN", "2")],
+    );
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert!(
+        !stdout.contains("saw the successor verify"),
+        "another intent is never our successor's verify:\n{stdout}"
+    );
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "an unproven restart is a failure, not a success:\n{stdout}\n{stderr}"
+    );
+    // every status the keeper sent while watching named the intent it claimed
+    let watch_reads: Vec<_> = requests_for(&tree.transcript, "restart_status")
+        .into_iter()
+        .filter(|request| !request["params"]["intentId"].is_null())
+        .collect();
+    assert!(
+        !watch_reads.is_empty(),
+        "the verify watch must ask by id, or it can never see a verify at all"
+    );
+    for read in &watch_reads {
+        assert_eq!(
+            read["params"]["intentId"], INTENT_ID,
+            "the keeper asks about its own intent, never a stranger's: {read}"
+        );
+    }
+    let transitions = requests_for(&tree.transcript, "restart_transition");
+    assert_eq!(
+        transitions.len(),
+        3,
+        "two attempts against a House that never confirms, then failed:\n{stdout}\n{stderr}"
+    );
+    assert_eq!(transitions[2]["params"]["to"], "failed");
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        lines(&tree.survived).is_empty(),
+        "the unproven successors were put down: {:?}",
+        lines(&tree.survived)
+    );
+}

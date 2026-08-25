@@ -56,7 +56,7 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
             .context("the current substrate could not be resolved")?;
         let mut session = SubstrateSession::start(&executable)?;
 
-        let pending = match ask_status(&mut session, config)? {
+        let pending = match ask_status(&mut session, config, None)? {
             Ok(pending) => pending,
             Err(refusal) => {
                 session.close()?;
@@ -261,8 +261,17 @@ fn watch_relaunched(
         )));
     };
     loop {
-        if verified(session, config, pending)? {
-            return Ok(Watched::Verified);
+        match observe(session, config, pending)? {
+            VerifyWatch::Verified => return Ok(Watched::Verified),
+            // Finished, but the House never said verified. Which end it reached
+            // is not ours to guess, so it counts as no verify at all.
+            VerifyWatch::Terminal => {
+                return Ok(Watched::Unproven(format!(
+                    "intent {} is finished without a verify the House would confirm",
+                    pending.intent_id
+                )));
+            }
+            VerifyWatch::Waiting => {}
         }
         if window.has_passed(Utc::now()) {
             return Ok(Watched::Unproven(format!(
@@ -277,10 +286,9 @@ fn watch_relaunched(
             .is_some()
         {
             // verified and exited in one breath is still verified, so ask once more
-            return Ok(if verified(session, config, pending)? {
-                Watched::Verified
-            } else {
-                Watched::Unproven("the successor exited before it verified".to_string())
+            return Ok(match observe(session, config, pending)? {
+                VerifyWatch::Verified => Watched::Verified,
+                _ => Watched::Unproven("the successor exited before it verified".to_string()),
             });
         }
         std::thread::sleep(VERIFY_POLL);
@@ -298,7 +306,7 @@ fn relaunching_window(
     pending: &RestartStatusIntent,
     last_window: &mut Option<Deadline>,
 ) -> Result<Option<Deadline>> {
-    let published = match ask_status(session, config) {
+    let published = match ask_status(session, config, Some(&pending.intent_id)) {
         Ok(Ok(Some(intent))) if intent.intent_id == pending.intent_id => {
             intent.deadlines.relaunching_deadline_at
         }
@@ -327,23 +335,22 @@ fn relaunching_window(
     }
 }
 
-/// One look at the House: has this intent left the pending set?
-fn verified(
+/// One look at our own intent, by id. A refused read decides nothing: it is
+/// neither a verify nor a terminal sighting, so the window is left to end the
+/// wait rather than this answer.
+fn observe(
     session: &mut SubstrateSession,
     config: &KeeperConfig,
     pending: &RestartStatusIntent,
-) -> Result<bool> {
-    match ask_status(session, config)? {
-        Ok(now_pending) => {
-            Ok(verify_watch(&pending.intent_id, now_pending.as_ref()) == VerifyWatch::Verified)
-        }
+) -> Result<VerifyWatch> {
+    match ask_status(session, config, Some(&pending.intent_id))? {
+        Ok(observed) => Ok(verify_watch(&pending.intent_id, observed.as_ref())),
         Err(refusal) => {
-            // a refused read never decides a restart on its own
             eprintln!(
                 "omp-keeper: the House refused a verification read ({}: {})",
                 refusal.code, refusal.message
             );
-            Ok(false)
+            Ok(VerifyWatch::Waiting)
         }
     }
 }
@@ -399,12 +406,18 @@ fn transition(
     )
 }
 
+/// `intent_id` absent asks the workspace question — is there anything pending —
+/// which is the live-states-only read. `intent_id` present asks about that one
+/// intent in whatever state it reached, which is the only read that can show a
+/// `verified` successor.
 fn ask_status(
     session: &mut SubstrateSession,
     config: &KeeperConfig,
+    intent_id: Option<&str>,
 ) -> Result<std::result::Result<Option<RestartStatusIntent>, ProtocolErrorBody>> {
     let params = RestartStatusParams {
         workspace: config.workspace.clone(),
+        intent_id: intent_id.map(str::to_string),
     };
     match session.call::<_, RestartStatusReceipt>(METHOD_RESTART_STATUS, &params)? {
         Answer::Ok(receipt) => Ok(Ok(receipt.intent)),
@@ -500,7 +513,7 @@ fn leave_no_child(child: &mut Child) {
 fn watch_status(config: &KeeperConfig) -> Result<Option<RestartStatusIntent>> {
     let executable = resolve_substrate_exe(&config.program_root)?;
     let mut session = SubstrateSession::start(&executable)?;
-    let answer = ask_status(&mut session, config);
+    let answer = ask_status(&mut session, config, None);
     session.close()?;
     match answer? {
         Ok(pending) => Ok(pending),

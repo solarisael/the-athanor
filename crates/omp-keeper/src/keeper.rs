@@ -343,6 +343,9 @@ fn transition(
             intent_id: pending.intent_id.clone(),
             // the keeper's transitions always carry the minted token; only the adapter's exit is tokenless
             claim_token: Some(claim_token.to_string()),
+            // exiting-arm fields; the keeper never uses that door
+            requester_session: None,
+            capability: None,
             to,
             detail,
         },

@@ -100,6 +100,8 @@ mod tests {
         let params = RestartTransitionParams {
             intent_id: "i1".to_string(),
             claim_token: Some("t1".to_string()),
+            requester_session: None,
+            capability: None,
             to: RestartTransitionTarget::Relaunching,
             detail: None,
         };

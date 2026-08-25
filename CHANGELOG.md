@@ -29,6 +29,15 @@ the exact implementation record.
   ledger. Five substrate methods carry the plane: `restart_request`,
   `restart_claim`, `restart_transition`, `restart_verify`, and `restart_status`.
   `restart_status` is a read. It needs no capability.
+- One workspace carries one live restart intent. The schema refuses a second
+  live row, and `restart_request` refuses with the code `intent_pending` before
+  it makes one. The keeper reads the newest live intent for a workspace, so a
+  second one lets a new request stand in for a successor that never came back.
+- `restart_status` answers two questions. Without an intent id it reports the
+  pending intent for the workspace, as before. With an intent id it reports that
+  one intent in every state, terminal states included, so a keeper can see its
+  own successor reach `verified`. The workspace still scopes the read: an
+  intent id from another workspace reports nothing.
 - `restart_request` refuses with the code `restart_storm` after three intents
   reach the exit stage for one workspace in one hour. The cap now applies when
   an intent reaches the exit stage, not only when a session asks, so requests

@@ -345,11 +345,21 @@ impl RestartVerifyParams {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RestartStatusParams {
     pub workspace: String,
+    /// Absent: the pending read the adapter arms against, live states only.
+    /// Present: that one intent in whatever state it reached, terminal states
+    /// included, because the keeper's verify watch needs a positive sighting of
+    /// `verified` for its own id and the pending read can never show one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent_id: Option<String>,
 }
 
 impl RestartStatusParams {
     pub fn validate(&self) -> Result<(), String> {
-        bounded(&self.workspace, "workspace", MAX_WORKSPACE)
+        bounded(&self.workspace, "workspace", MAX_WORKSPACE)?;
+        match self.intent_id.as_deref() {
+            Some(intent_id) => uuid_shaped(intent_id, "intentId"),
+            None => Ok(()),
+        }
     }
 }
 

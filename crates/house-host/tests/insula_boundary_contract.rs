@@ -17,6 +17,7 @@ use tokio::time::{Duration, timeout};
 use uuid::Uuid;
 
 const INSULA_MIGRATION: &str = include_str!("../../../substrate/migrations/0022_insula.sql");
+const RESTART_MIGRATION: &str = include_str!("../../../substrate/migrations/0026_restart.sql");
 
 fn isolated_database_url() -> String {
     let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
@@ -922,6 +923,116 @@ async fn insula_trace_and_retention_reads_return_ingested_rows()
 
     host.stop().await;
     sqlx::query("DROP SCHEMA insula CASCADE")
+        .execute(&pool)
+        .await?;
+    Ok(())
+}
+
+/// Seed one intent that reached `exiting` before the stage window closed. The
+/// ledger refuses UPDATE, so the arrival is written already old.
+async fn seed_exiting_intent(
+    pool: &sqlx::PgPool,
+    workspace: &str,
+    room: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let intent_id: String = sqlx::query_scalar(
+        "INSERT INTO restart.intents (harness,workspace,mode,session_id,reason,consent_source,requester_room,requester_spirit,requester_session,idempotency_key,state,expires_at) VALUES ('omp',$1,'resume',$2,'the loader installed a newer release','operator-standing-policy',$3,'Spirit',$2,$4,'exiting',NOW()+INTERVAL '300 seconds') RETURNING intent_id::text",
+    )
+    .bind(workspace)
+    .bind(format!("session-{room}"))
+    .bind(room)
+    .bind(format!("seed-{room}-{workspace}"))
+    .fetch_one(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO restart.intent_events (intent_id,event_kind,principal,created_at) VALUES ($1::text::uuid,'exiting',$2,NOW()-INTERVAL '10 minutes')",
+    )
+    .bind(&intent_id)
+    .bind(format!("{room}:Spirit"))
+    .execute(pool)
+    .await?;
+    Ok(intent_id)
+}
+
+/// The successor came back. The schema writes the verified state and its
+/// successor triple together or not at all, so this is one statement.
+async fn mark_verified(
+    pool: &sqlx::PgPool,
+    intent_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    sqlx::query(
+        "UPDATE restart.intents SET state='verified',successor_session='successor',successor_room=requester_room,successor_spirit=requester_spirit,verified_at=NOW() WHERE intent_id=$1::text::uuid",
+    )
+    .bind(intent_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+// Kills: a divergence route that answers from the wrong room, and a proof that
+// only ever reaches insula_unavailable. This one carries a real pool, a real
+// divergence row, and the real HTTP surface.
+// red-proof: drop the requester_room predicate from query_unverified_exit, or
+// pass a caller-supplied room instead of state.binding.room.
+#[tokio::test]
+#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated restart schema"]
+async fn unverified_exit_route_reports_this_rooms_divergence_over_http()
+-> Result<(), Box<dyn std::error::Error>> {
+    let database_url = isolated_database_url();
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&database_url)
+        .await?;
+    // This proof owns the restart schema of the scratch database, exactly like
+    // the substrate's own lifecycle proof: the two must not run together.
+    sqlx::query("DROP SCHEMA IF EXISTS restart CASCADE")
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql(RESTART_MIGRATION).execute(&pool).await?;
+
+    let diverged = seed_exiting_intent(&pool, "D:/athanor-wt/host-diverged", "kintsu").await?;
+    let returned = seed_exiting_intent(&pool, "D:/athanor-wt/host-returned", "kintsu").await?;
+    mark_verified(&pool, &returned).await?;
+    let foreign = seed_exiting_intent(&pool, "D:/athanor-wt/host-foreign", "kodo").await?;
+
+    let root = TempDir::new()?;
+    write_room_state(root.path());
+    let host = start_with_config(database_config(root.path(), database_url)).await;
+    let response = reqwest::Client::new()
+        .post(endpoint(&host, "/athanor/v1/insula/unverified-exit"))
+        .bearer_auth(TOKEN)
+        .json(&json!({ "limit": 10 }))
+        .send()
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = response.json().await?;
+
+    assert_eq!(body["queryName"], "insula.session.unverified_exit");
+    assert_eq!(
+        body["room"], "kintsu",
+        "the read names the room it was scoped to, from configuration"
+    );
+    assert_eq!(body["windowSecs"], 180);
+    let rows = body["rows"].as_array().expect("divergence rows");
+    let reported: Vec<&str> = rows
+        .iter()
+        .map(|row| row["intentId"].as_str().expect("row intent id"))
+        .collect();
+    assert_eq!(
+        reported,
+        vec![diverged.as_str()],
+        "one room's unreturned exit, and nothing else: a verified intent stays silent and another room's workspace never rides this read"
+    );
+    assert_eq!(rows[0]["workspace"], "D:/athanor-wt/host-diverged");
+    assert_eq!(rows[0]["requesterRoom"], "kintsu");
+    assert_eq!(rows[0]["state"], "exiting");
+    assert!(
+        !reported.contains(&foreign.as_str()),
+        "the other room's row exists and is still not this room's business"
+    );
+
+    host.stop().await;
+    sqlx::query("DROP SCHEMA restart CASCADE")
         .execute(&pool)
         .await?;
     Ok(())

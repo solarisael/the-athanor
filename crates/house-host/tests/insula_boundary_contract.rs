@@ -640,6 +640,63 @@ async fn insula_read_dtos_refuse_unknown_and_authority_fields_before_database_ac
     host.stop().await;
 }
 
+// Kills: an unverified-exit route that lets a bearer choose the room or the
+// workspace it reads. The scope belongs to the Host's own binding, because the
+// rows carry another room's workspace path and requester session.
+// red-proof: add a room or workspace field to UnverifiedExitRequest and pass it
+// to query_unverified_exit.
+#[tokio::test]
+async fn unverified_exit_route_takes_no_scope_from_the_caller() {
+    let root = TempDir::new().expect("temporary Host root");
+    write_room_state(root.path());
+    let host = start(root.path()).await;
+    let client = reqwest::Client::new();
+    let path = "/athanor/v1/insula/unverified-exit";
+
+    let unauthenticated = client
+        .post(endpoint(&host, path))
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("unauthenticated read completes");
+    error(unauthenticated, StatusCode::UNAUTHORIZED).await;
+
+    for (field, value) in [
+        ("room", json!("tuner")),
+        ("workspace", json!("D:/athanor-wt/somebody-else")),
+        ("requesterSession", json!("caller-session")),
+        ("houseId", json!("caller-house")),
+        ("unknownField", json!(true)),
+    ] {
+        let response = client
+            .post(endpoint(&host, path))
+            .bearer_auth(TOKEN)
+            .json(&json!({ field: value }))
+            .send()
+            .await
+            .expect("strict read request completes");
+        let body = error(response, StatusCode::BAD_REQUEST).await;
+        assert_eq!(
+            body["error"], "invalid_json",
+            "the divergence read must refuse field {field}"
+        );
+    }
+
+    // The empty body is the whole legal request: limit defaults, scope comes
+    // from configuration, and the read stops at the missing pool.
+    let accepted = client
+        .post(endpoint(&host, path))
+        .bearer_auth(TOKEN)
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("default read completes");
+    let body = error(accepted, StatusCode::SERVICE_UNAVAILABLE).await;
+    assert_eq!(body["error"], "insula_unavailable");
+
+    host.stop().await;
+}
+
 #[tokio::test]
 async fn insula_reads_refuse_out_of_range_limits_and_garbage_traces_before_database_access() {
     let root = TempDir::new().expect("temporary Host root");

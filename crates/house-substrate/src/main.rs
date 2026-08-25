@@ -1776,17 +1776,18 @@ mod tests {
     }
 
     // Kills: a restart method that decodes loose params, or a validation arm
-    // that lets the tokenless exit door carry a keeper token.
+    // that lets the exit door ride without the session and secret that
+    // authorize it.
     // red-proof: drop deny_unknown_fields from a restart params struct, or
     // remove the RestartTransition arm from main()'s validation table.
     #[test]
     fn restart_protocols_are_strict_and_camel_cased() {
         for line in [
-            r#"{"protocol":1,"id":"r1","method":"restart_request","params":{"harness":"omp","workspace":"D:/athanor-wt/restart-intent","mode":"resume","sessionId":"s-1","reason":"installed release is newer than the loaded one","consentSource":"operator-standing-policy","requesterRoom":"kodo","requesterSpirit":"Kodo","requesterSession":"service:kodo","idempotencyKey":"request-1"}}"#,
+            r#"{"protocol":1,"id":"r1","method":"restart_request","params":{"harness":"omp","workspace":"D:/athanor-wt/restart-intent","mode":"resume","sessionId":"s-1","reason":"installed release is newer than the loaded one","consentSource":"operator-standing-policy","requesterRoom":"kodo","requesterSpirit":"Kodo","requesterSession":"service:kodo","capability":"request-secret","idempotencyKey":"request-1"}}"#,
             r#"{"protocol":1,"id":"r2","method":"restart_claim","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimant":"omp-keeper","capability":"secret","idempotencyKey":"claim-1"}}"#,
-            r#"{"protocol":1,"id":"r3","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","to":"exiting","detail":"{\"session\":\"service:kodo\"}"}}"#,
+            r#"{"protocol":1,"id":"r3","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","to":"exiting","requesterSession":"service:kodo","capability":"exit-secret","detail":"installed release is newer"}}"#,
             r#"{"protocol":1,"id":"r4","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimToken":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","to":"relaunching"}}"#,
-            r#"{"protocol":1,"id":"r5","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo"}}"#,
+            r#"{"protocol":1,"id":"r5","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo","capability":"verify-secret"}}"#,
             r#"{"protocol":1,"id":"r6","method":"restart_status","params":{"workspace":"D:/athanor-wt/restart-intent"}}"#,
         ] {
             let (_, request) = decode_line(line);
@@ -1800,16 +1801,27 @@ mod tests {
             }
         }
         let (_, snake) = decode_line(
-            r#"{"protocol":1,"id":"r7","method":"restart_request","params":{"harness":"omp","workspace":"D:/w","mode":"resume","reason":"why","consentSource":"operator-approval","requester_room":"kodo","requesterSpirit":"Kodo","requesterSession":"service:kodo","idempotencyKey":"request-2"}}"#,
+            r#"{"protocol":1,"id":"r7","method":"restart_request","params":{"harness":"omp","workspace":"D:/w","mode":"resume","reason":"why","consentSource":"operator-approval","requester_room":"kodo","requesterSpirit":"Kodo","requesterSession":"service:kodo","capability":"request-secret","idempotencyKey":"request-2"}}"#,
         );
         assert!(matches!(snake, Err(ProtocolError::InvalidParams(_))));
         let (_, tokened_exit) = decode_line(
-            r#"{"protocol":1,"id":"r8","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimToken":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","to":"exiting","detail":"armed"}}"#,
+            r#"{"protocol":1,"id":"r8","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimToken":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","to":"exiting","requesterSession":"service:kodo","capability":"exit-secret","detail":"armed"}}"#,
         );
         match tokened_exit.expect("the tokened exit decodes: it is validation that refuses it") {
-            ProtocolRequest::RestartTransition(request) => {
-                assert!(request.validate().is_err(), "the exit door is tokenless")
-            }
+            ProtocolRequest::RestartTransition(request) => assert!(
+                request.validate().is_err(),
+                "the exit door takes no lease token"
+            ),
+            _ => panic!("expected restart transition"),
+        }
+        let (_, unfenced_exit) = decode_line(
+            r#"{"protocol":1,"id":"r9","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","to":"exiting","detail":"armed"}}"#,
+        );
+        match unfenced_exit.expect("the unfenced exit decodes: validation is what refuses it") {
+            ProtocolRequest::RestartTransition(request) => assert!(
+                request.validate().is_err(),
+                "naming the intent id is not authority to arm an exit"
+            ),
             _ => panic!("expected restart transition"),
         }
     }
@@ -1977,7 +1989,7 @@ mod tests {
                 "quest_report",
             ),
             (
-                r#"{"protocol":1,"id":"o8","method":"restart_request","params":{"harness":"omp","workspace":"D:/w","mode":"resume","reason":"newer release installed","consentSource":"operator-standing-policy","requesterRoom":"kodo","requesterSpirit":"Kodo","requesterSession":"service:kodo","idempotencyKey":"request-1"}}"#,
+                r#"{"protocol":1,"id":"o8","method":"restart_request","params":{"harness":"omp","workspace":"D:/w","mode":"resume","reason":"newer release installed","consentSource":"operator-standing-policy","requesterRoom":"kodo","requesterSpirit":"Kodo","requesterSession":"service:kodo","capability":"request-secret","idempotencyKey":"request-1"}}"#,
                 "restart_request",
             ),
             (
@@ -1985,11 +1997,11 @@ mod tests {
                 "restart_claim",
             ),
             (
-                r#"{"protocol":1,"id":"o10","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","to":"exiting","detail":"armed"}}"#,
+                r#"{"protocol":1,"id":"o10","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","to":"exiting","requesterSession":"service:kodo","capability":"exit-secret","detail":"armed"}}"#,
                 "restart_transition",
             ),
             (
-                r#"{"protocol":1,"id":"o11","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo"}}"#,
+                r#"{"protocol":1,"id":"o11","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo","capability":"verify-secret"}}"#,
                 "restart_verify",
             ),
             (
@@ -2029,7 +2041,7 @@ mod tests {
         // The restart plane's two identity-bearing doors: the requesting
         // session names itself, the successor names its new session.
         let (_, request) = decode_line(
-            r#"{"protocol":1,"id":"b5","method":"restart_request","params":{"harness":"omp","workspace":"D:/w","mode":"resume","reason":"newer release installed","consentSource":"operator-standing-policy","requesterRoom":"tuner","requesterSpirit":"Tuner","requesterSession":"service:tuner","idempotencyKey":"request-1"}}"#,
+            r#"{"protocol":1,"id":"b5","method":"restart_request","params":{"harness":"omp","workspace":"D:/w","mode":"resume","reason":"newer release installed","consentSource":"operator-standing-policy","requesterRoom":"tuner","requesterSpirit":"Tuner","requesterSession":"service:tuner","capability":"request-secret","idempotencyKey":"request-1"}}"#,
         );
         let binding = insula_binding(&request.expect("fixture decodes"));
         assert_eq!(binding.room, "tuner");
@@ -2037,7 +2049,7 @@ mod tests {
         assert_eq!(binding.session_id, "service:tuner");
 
         let (_, request) = decode_line(
-            r#"{"protocol":1,"id":"b6","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:tuner-2","room":"tuner","spirit":"Tuner"}}"#,
+            r#"{"protocol":1,"id":"b6","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:tuner-2","room":"tuner","spirit":"Tuner","capability":"verify-secret"}}"#,
         );
         let binding = insula_binding(&request.expect("fixture decodes"));
         assert_eq!(binding.session_id, "service:tuner-2");

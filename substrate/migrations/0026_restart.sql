@@ -267,13 +267,18 @@ CREATE TRIGGER restart_intent_events_append_only
     FOR EACH ROW EXECUTE FUNCTION restart.refuse_event_mutation();
 
 -- ---------------------------------------------------------------------------
--- principal_capabilities — the keeper's own authority row. The column is
--- named 'principal', not 'room', because the keeper owns the terminal and
+-- principal_capabilities — every authority this plane recognizes. The column
+-- is named 'principal', not 'room', because the keeper owns the terminal and
 -- impersonates no room; the check is the room-key shape so one slug law gates
 -- both (config.rs ROOM_KEY_RE). Provisioning is operator-side and offline,
 -- exactly like substrate/provision-room-capability.ps1: the ritual mints a
--- secret, writes only its sha256 here, and places the secret in the keeper's
+-- secret, writes only its sha256 here, and places the secret in the holder's
 -- runtime file. The secret rides no task packet and no tool grant.
+--
+-- Four classes, because the intent id is public: restart_status hands it out
+-- with no capability, so the room proves itself to ask (restart_request), to
+-- arm the exit (restart_exit), and to sign the successor (restart_verify),
+-- while the keeper proves itself to claim (restart_claim).
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS restart.principal_capabilities (
     principal       TEXT        NOT NULL,
@@ -285,12 +290,26 @@ CREATE TABLE IF NOT EXISTS restart.principal_capabilities (
     CONSTRAINT restart_principal_capabilities_pkey
         PRIMARY KEY (principal, operation_class),
     CONSTRAINT restart_principal_capabilities_class_check
-        CHECK (operation_class IN ('restart_claim')),
+        CHECK (operation_class IN (
+            'restart_request', 'restart_exit', 'restart_verify', 'restart_claim'
+        )),
     CONSTRAINT restart_principal_capabilities_principal_check
         CHECK (principal ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
     CONSTRAINT restart_principal_capabilities_hash_check
         CHECK (capability_hash ~ '^[0-9a-f]{64}$')
 );
+
+-- The class list widened after the first apply of this file (Kintsu's
+-- authority verdict), and 0026 is not released yet, so it is amended in place.
+-- A database that already has the one-class table converges here instead of
+-- refusing every new row.
+ALTER TABLE restart.principal_capabilities
+    DROP CONSTRAINT IF EXISTS restart_principal_capabilities_class_check;
+ALTER TABLE restart.principal_capabilities
+    ADD CONSTRAINT restart_principal_capabilities_class_check
+        CHECK (operation_class IN (
+            'restart_request', 'restart_exit', 'restart_verify', 'restart_claim'
+        ));
 
 -- ---------------------------------------------------------------------------
 -- Residual-free verification: after this migration, exactly these relations

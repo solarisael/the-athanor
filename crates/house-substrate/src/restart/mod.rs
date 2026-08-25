@@ -30,6 +30,18 @@
 //! here and drops the secret in the keeper's runtime file. Caller-supplied
 //! claimant text mints nothing; without a provisioned row a claim refuses.
 //!
+//! ## Authority
+//! Who may move an intent is its own concern and lives in [`authority`]: the
+//! intent id proves nothing here, because `restart_status` hands it out with no
+//! capability at all.
+//!
+//! `requester_session` is one identifier kind and one only: the **harness
+//! session id**, the exact string the adapter's `hostSessionIdentity` yields —
+//! never a principal like `kodo:Kodo` or `service:kodo` (Kodo's ruling,
+//! 2026-08-25). The exit fence compares it byte for byte, and
+//! `restart_verify` demands a successor session that differs from it, so both
+//! doors are only honest while both sides name the same kind of thing.
+//!
 //! ## Expiry is lazy
 //! An unclaimed request past its TTL is dead, and this plane runs no clock
 //! service. Whichever write door touches a lapsed request kills it and refuses;
@@ -39,7 +51,13 @@
 //! sweep is the upgrade path if the ledger ever needs an `expired` event for a
 //! row no door touched.
 
+mod authority;
+
 use crate::config::{AppError, ROOM_KEY_RE};
+use authority::{
+    EXIT_CLASS, KEEPER_CLAIM_CLASS, REQUEST_CLASS, VERIFY_CLASS, require_capability,
+    require_requester_session, require_successor,
+};
 use chrono::{DateTime, Utc};
 use house_protocol::restart::{
     RestartClaimParams, RestartClaimReceipt, RestartMode, RestartRequestParams,
@@ -70,9 +88,6 @@ pub const STORM_WINDOW_SECS: i64 = 3600;
 /// More than this many intents reaching `exiting` inside one window for one
 /// workspace is a restart storm.
 pub const STORM_MAX_EXITING_PER_WINDOW: i64 = 3;
-
-/// The operation class of the keeper's capability row.
-const KEEPER_OPERATION_CLASS: &str = "restart_claim";
 
 /// The principal for acts the House performs itself, with no spirit in the
 /// room: lazy expiry is the only one today.
@@ -145,8 +160,9 @@ fn stage_deadlines() -> RestartStageDeadlines {
     }
 }
 
-/// The guard bounds grants, not observations: with the window already full the
-/// next request refuses, so one workspace never exceeds the bound in an hour.
+/// The guard bounds arrivals at `exiting`, not requests: a request minted
+/// before the window filled must still refuse to arm, so both the request door
+/// and the exit door count and refuse.
 fn refuse_on_storm(reached_exiting_in_window: i64) -> Result<(), AppError> {
     if reached_exiting_in_window >= STORM_MAX_EXITING_PER_WINDOW {
         return Err(refusal(
@@ -155,6 +171,24 @@ fn refuse_on_storm(reached_exiting_in_window: i64) -> Result<(), AppError> {
         ));
     }
     Ok(())
+}
+
+/// How many intents reached `exiting` for this workspace inside the window. The
+/// caller holds the workspace advisory lock, so the count and the decision it
+/// feeds are one decision.
+async fn reached_exiting_in_window(
+    tx: &mut Transaction<'_, Postgres>,
+    workspace: &str,
+) -> Result<i64, AppError> {
+    let reached: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT event.intent_id) FROM restart.intent_events AS event JOIN restart.intents AS intent USING (intent_id) WHERE intent.workspace=$1 AND event.event_kind=$2 AND event.created_at > clock_timestamp() - ($3 * INTERVAL '1 second')",
+    )
+    .bind(workspace)
+    .bind(RestartState::Exiting.as_str())
+    .bind(STORM_WINDOW_SECS)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(reached)
 }
 
 async fn insert_event(
@@ -205,39 +239,28 @@ async fn expire_lapsed_request(
     .await
 }
 
+/// Read the expiry decision after the row lock is held. NOW() is the
+/// transaction's start, and a caller can sit behind `FOR UPDATE` long enough to
+/// cross the TTL while it waits, so this is the only clock the write doors may
+/// believe.
+async fn lapsed_after_lock(
+    tx: &mut Transaction<'_, Postgres>,
+    intent_id: &str,
+) -> Result<bool, AppError> {
+    let lapsed: bool = sqlx::query_scalar(
+        "SELECT expires_at <= clock_timestamp() FROM restart.intents WHERE intent_id=$1::text::uuid",
+    )
+    .bind(intent_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(lapsed)
+}
+
 fn refuse_expired() -> AppError {
     refusal(
         "intent_expired",
         "the intent passed its unclaimed deadline and never fires",
     )
-}
-
-/// Gate the claim door before any intent state is read or changed. The secret
-/// never leaves the keeper's runtime file: only its sha256 is stored, and the
-/// comparison is constant time.
-async fn require_keeper_capability(
-    pool: &PgPool,
-    claimant: &str,
-    capability: &str,
-) -> Result<(), AppError> {
-    let expected: Option<String> = sqlx::query_scalar(
-        "SELECT capability_hash FROM restart.principal_capabilities WHERE principal=$1 AND operation_class=$2",
-    )
-    .bind(claimant)
-    .bind(KEEPER_OPERATION_CLASS)
-    .fetch_optional(pool)
-    .await?;
-    let supplied = sha256_hex(capability.as_bytes());
-    if expected
-        .as_deref()
-        .is_none_or(|hash| !constant_time_equal(supplied.as_bytes(), hash.as_bytes()))
-    {
-        return Err(refusal(
-            "restart_capability",
-            "the presented capability does not authorize a restart claim",
-        ));
-    }
-    Ok(())
 }
 
 /// Request one restart. Idempotent by `(workspace, idempotencyKey)`: a replay
@@ -250,6 +273,13 @@ pub async fn restart_request(
 ) -> Result<RestartRequestReceipt, AppError> {
     request.validate().map_err(AppError::Invalid)?;
     validate_slug(&request.requester_room, "requesterRoom")?;
+    require_capability(
+        pool,
+        &request.requester_room,
+        REQUEST_CLASS,
+        &request.capability,
+    )
+    .await?;
 
     let mut tx = pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
@@ -258,33 +288,36 @@ pub async fn restart_request(
         .await?;
 
     if let Some(row) = sqlx::query(
-        "SELECT intent_id::text AS intent_id,state,expires_at FROM restart.intents WHERE workspace=$1 AND idempotency_key=$2",
+        "SELECT intent_id::text AS intent_id,state,expires_at FROM restart.intents WHERE workspace=$1 AND idempotency_key=$2 FOR UPDATE",
     )
     .bind(&request.workspace)
     .bind(&request.idempotency_key)
     .fetch_optional(&mut *tx)
     .await?
     {
-        let state: String = row.try_get("state")?;
+        let intent_id: String = row.try_get("intent_id")?;
+        let state = state_of(&row.try_get::<String, _>("state")?)?;
         let expires_at: DateTime<Utc> = row.try_get("expires_at")?;
+        // The adapter and the keeper both act on the state this replay returns,
+        // so a lapsed request must die here instead of reading alive again.
+        let lapsed = lapsed_after_lock(&mut tx, &intent_id).await?;
+        if state == RestartState::Expired || (state == RestartState::Requested && lapsed) {
+            if state == RestartState::Requested {
+                expire_lapsed_request(&mut tx, &intent_id).await?;
+            }
+            tx.commit().await?;
+            return Err(refuse_expired());
+        }
         let receipt = RestartRequestReceipt {
-            intent_id: row.try_get("intent_id")?,
-            state: state_of(&state)?,
+            intent_id,
+            state,
             expires_at: expires_at.to_rfc3339(),
         };
         tx.commit().await?;
         return Ok(receipt);
     }
 
-    let reached_exiting: i64 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT event.intent_id) FROM restart.intent_events AS event JOIN restart.intents AS intent USING (intent_id) WHERE intent.workspace=$1 AND event.event_kind=$2 AND event.created_at > NOW() - ($3 * INTERVAL '1 second')",
-    )
-    .bind(&request.workspace)
-    .bind(RestartState::Exiting.as_str())
-    .bind(STORM_WINDOW_SECS)
-    .fetch_one(&mut *tx)
-    .await?;
-    refuse_on_storm(reached_exiting)?;
+    refuse_on_storm(reached_exiting_in_window(&mut tx, &request.workspace).await?)?;
 
     let row = sqlx::query(
         "INSERT INTO restart.intents (harness,workspace,mode,session_id,reason,consent_source,requester_room,requester_spirit,requester_session,idempotency_key,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW()+($11 * INTERVAL '1 second')) RETURNING intent_id::text AS intent_id,state,expires_at",
@@ -343,18 +376,24 @@ pub async fn restart_claim(
     request.validate().map_err(AppError::Invalid)?;
     validate_intent_id(&request.intent_id)?;
     validate_slug(&request.claimant, "claimant")?;
-    require_keeper_capability(pool, &request.claimant, &request.capability).await?;
+    require_capability(
+        pool,
+        &request.claimant,
+        KEEPER_CLAIM_CLASS,
+        &request.capability,
+    )
+    .await?;
 
     let mut tx = pool.begin().await?;
     let intent = sqlx::query(
-        "SELECT state,claim_epoch,expires_at <= NOW() AS lapsed FROM restart.intents WHERE intent_id=$1::text::uuid FOR UPDATE",
+        "SELECT state,claim_epoch FROM restart.intents WHERE intent_id=$1::text::uuid FOR UPDATE",
     )
     .bind(&request.intent_id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| refusal("unknown_intent", "the requested restart intent does not exist"))?;
     let state = state_of(&intent.try_get::<String, _>("state")?)?;
-    let lapsed: bool = intent.try_get("lapsed")?;
+    let lapsed = lapsed_after_lock(&mut tx, &request.intent_id).await?;
 
     if state == RestartState::Requested && lapsed {
         expire_lapsed_request(&mut tx, &request.intent_id).await?;
@@ -403,10 +442,11 @@ pub async fn restart_claim(
 }
 
 /// Move one intent. Two doors share this method because they share the ledger:
-/// the adapter's tokenless `exiting` out of `requested`, and the keeper's
-/// token-fenced `relaunching` or `failed`. A refused exit must be sharp and
-/// named — the adapter stands down on it and keeps the session alive — so
-/// `exit_not_requested` never hides inside the lease refusal.
+/// the adapter's `exiting` out of `requested`, fenced by the requester's own
+/// session and room secret, and the keeper's token-fenced `relaunching` or
+/// `failed`. A refused exit must be sharp and named — the adapter stands down on
+/// it and keeps the session alive — so `exit_not_requested` never hides inside
+/// the lease refusal.
 pub async fn restart_transition(
     pool: &PgPool,
     request: RestartTransitionParams,
@@ -415,15 +455,32 @@ pub async fn restart_transition(
     validate_intent_id(&request.intent_id)?;
 
     let mut tx = pool.begin().await?;
+    // The exit arm is the storm-bearing one, so it decides under the same
+    // workspace lock restart_request takes: two arms racing cannot both pass a
+    // window with room for one.
+    if request.to == RestartTransitionTarget::Exiting {
+        let workspace: String = sqlx::query_scalar(
+            "SELECT workspace FROM restart.intents WHERE intent_id=$1::text::uuid",
+        )
+        .bind(&request.intent_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| refusal("unknown_intent", "the requested restart intent does not exist"))?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+            .bind(&workspace)
+            .execute(&mut *tx)
+            .await?;
+    }
+
     let intent = sqlx::query(
-        "SELECT state,claim_epoch,claimant,requester_room,requester_spirit,lease_token_hash,relaunch_attempts,expires_at <= NOW() AS lapsed FROM restart.intents WHERE intent_id=$1::text::uuid FOR UPDATE",
+        "SELECT state,claim_epoch,claimant,workspace,requester_room,requester_spirit,requester_session,lease_token_hash,relaunch_attempts FROM restart.intents WHERE intent_id=$1::text::uuid FOR UPDATE",
     )
     .bind(&request.intent_id)
     .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| refusal("unknown_intent", "the requested restart intent does not exist"))?;
     let state = state_of(&intent.try_get::<String, _>("state")?)?;
-    let lapsed: bool = intent.try_get("lapsed")?;
+    let lapsed = lapsed_after_lock(&mut tx, &request.intent_id).await?;
 
     if state == RestartState::Requested && lapsed {
         expire_lapsed_request(&mut tx, &request.intent_id).await?;
@@ -434,12 +491,30 @@ pub async fn restart_transition(
     let claim_epoch: i64 = intent.try_get("claim_epoch")?;
     let (reached, failed_stage, actor) = match request.to {
         RestartTransitionTarget::Exiting => {
+            let room: String = intent.try_get("requester_room")?;
+            let spirit: String = intent.try_get("requester_spirit")?;
+            let requester_session: String = intent.try_get("requester_session")?;
+            let workspace: String = intent.try_get("workspace")?;
+            // The room comes off the locked row and never off the caller, so
+            // reading an intent id buys no choice of which secret to hold.
+            require_capability(
+                &mut *tx,
+                &room,
+                EXIT_CLASS,
+                request.capability.as_deref().unwrap_or_default(),
+            )
+            .await?;
+            require_requester_session(
+                &requester_session,
+                request.requester_session.as_deref().unwrap_or_default(),
+            )?;
             if state != RestartState::Requested {
                 return Err(refusal(
                     "exit_not_requested",
                     "only a requested restart intent can be armed for exit",
                 ));
             }
+            refuse_on_storm(reached_exiting_in_window(&mut tx, &workspace).await?)?;
             sqlx::query(
                 "UPDATE restart.intents SET state=$2,exiting_deadline_at=NOW()+($3 * INTERVAL '1 second'),updated_at=NOW() WHERE intent_id=$1::text::uuid",
             )
@@ -448,8 +523,6 @@ pub async fn restart_transition(
             .bind(EXITING_DEADLINE_SECS)
             .execute(&mut *tx)
             .await?;
-            let room: String = intent.try_get("requester_room")?;
-            let spirit: String = intent.try_get("requester_spirit")?;
             (RestartState::Exiting, None, principal(&room, &spirit))
         }
         RestartTransitionTarget::Relaunching | RestartTransitionTarget::Failed => {
@@ -555,9 +628,10 @@ async fn keeper_move(
     Ok((RestartState::Failed, Some(stage)))
 }
 
-/// The successor session proves the restart worked. It carries no token: the
-/// intent id is the proof, because only the House ever handed it out. Legal
-/// from `relaunching` only, so the second verify of one intent refuses.
+/// The successor session proves the restart worked, and proves it with the
+/// asking room's `restart_verify` secret: the intent id is public, so a silent
+/// divergence must not be signable by anyone who can read one. Legal from
+/// `relaunching` only, so the second verify of one intent refuses.
 pub async fn restart_verify(
     pool: &PgPool,
     request: RestartVerifyParams,
@@ -568,7 +642,7 @@ pub async fn restart_verify(
 
     let mut tx = pool.begin().await?;
     let intent = sqlx::query(
-        "SELECT state,claim_epoch FROM restart.intents WHERE intent_id=$1::text::uuid FOR UPDATE",
+        "SELECT state,claim_epoch,requester_room,requester_session FROM restart.intents WHERE intent_id=$1::text::uuid FOR UPDATE",
     )
     .bind(&request.intent_id)
     .fetch_optional(&mut *tx)
@@ -581,6 +655,15 @@ pub async fn restart_verify(
     })?;
     let state = state_of(&intent.try_get::<String, _>("state")?)?;
     let claim_epoch: i64 = intent.try_get("claim_epoch")?;
+    let requester_room: String = intent.try_get("requester_room")?;
+    let requester_session: String = intent.try_get("requester_session")?;
+    require_capability(&mut *tx, &requester_room, VERIFY_CLASS, &request.capability).await?;
+    require_successor(
+        &requester_room,
+        &requester_session,
+        &request.room,
+        &request.successor_session,
+    )?;
     if state != RestartState::Relaunching {
         return Err(refusal(
             "not_verifiable",
@@ -616,8 +699,9 @@ pub async fn restart_verify(
 }
 
 /// Read the workspace's pending intent. No capability and no write: the adapter
-/// checks it before arming and the keeper polls it after a child exit. A lapsed
-/// unclaimed request is not pending, so it reads as none.
+/// checks it before arming and the keeper polls it after a child exit. The
+/// intent id it hands out authorizes nothing — see [`authority`] — so this read
+/// stays open. A lapsed unclaimed request is not pending, so it reads as none.
 pub async fn restart_status(
     pool: &PgPool,
     request: RestartStatusParams,
@@ -625,7 +709,7 @@ pub async fn restart_status(
     request.validate().map_err(AppError::Invalid)?;
 
     let row = sqlx::query(
-        "SELECT intent_id::text AS intent_id,state,mode,session_id,expires_at,exiting_deadline_at,relaunching_deadline_at FROM restart.intents WHERE workspace=$1 AND state IN ($2,$3,$4,$5) AND (state<>$2 OR expires_at>NOW()) ORDER BY created_at DESC LIMIT 1",
+        "SELECT intent_id::text AS intent_id,state,mode,session_id,expires_at,exiting_deadline_at,relaunching_deadline_at FROM restart.intents WHERE workspace=$1 AND state IN ($2,$3,$4,$5) AND (state<>$2 OR expires_at>clock_timestamp()) ORDER BY created_at DESC LIMIT 1",
     )
     .bind(&request.workspace)
     .bind(RestartState::Requested.as_str())

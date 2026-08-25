@@ -175,6 +175,7 @@ struct UnverifiedExitResponse<'a> {
     query_name: String,
     query_version: i16,
     house_id: &'a str,
+    room: &'a str,
     window_secs: i64,
     limit: u32,
     truncated: bool,
@@ -530,13 +531,15 @@ async fn read_unverified_exit(
         return error(StatusCode::SERVICE_UNAVAILABLE, "insula_unavailable");
     };
 
-    // A restart intent carries no house or room dimension: it is scoped by
-    // workspace, and this Host serves one House. The window and the row shape
-    // are the substrate's, so nothing here decides restart policy.
+    // A restart intent carries no house dimension: it is scoped by workspace,
+    // and the workspace belongs to a room. The room comes from this Host's
+    // binding, never from the caller, or one bearer would read another room's
+    // workspace path and requester session. The window and the row shape are
+    // the substrate's, so nothing here decides restart policy.
     let requested_limit = request.limit;
     substrate_response(
         &state,
-        query_unverified_exit(pool, requested_limit + 1)
+        query_unverified_exit(pool, state.binding.room.as_str(), requested_limit + 1)
             .await
             .map(|mut result| {
                 let truncated = result.rows.len() > requested_limit as usize;
@@ -546,6 +549,7 @@ async fn read_unverified_exit(
                     query_name: result.query_name,
                     query_version: result.query_version,
                     house_id: state.binding.house_id.as_str(),
+                    room: state.binding.room.as_str(),
                     window_secs: result.window_secs,
                     limit: requested_limit,
                     truncated,

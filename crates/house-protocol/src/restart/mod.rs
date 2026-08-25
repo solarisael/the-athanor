@@ -211,7 +211,15 @@ pub struct RestartRequestParams {
     pub consent_source: RestartConsentSource,
     pub requester_room: String,
     pub requester_spirit: String,
+    /// The harness session identity of the session that asks. The exiting
+    /// transition must present this same value, so a request path that writes
+    /// anything other than what the adapter's own binding reports arms nothing.
     pub requester_session: String,
+    /// The requester room's provisioned `restart_request` secret. consentSource
+    /// is a declared reason and never authority: Kintsu's door verdict named a
+    /// caller-asserted consent source unauthorized, so the room proves itself
+    /// the way a `docket_write` room does.
+    pub capability: String,
     pub idempotency_key: String,
 }
 
@@ -223,6 +231,7 @@ impl RestartRequestParams {
         bounded(&self.requester_room, "requesterRoom", MAX_IDENTIFIER)?;
         bounded(&self.requester_spirit, "requesterSpirit", MAX_IDENTIFIER)?;
         bounded(&self.requester_session, "requesterSession", MAX_IDENTIFIER)?;
+        bounded(&self.capability, "capability", MAX_IDENTIFIER)?;
         bounded(&self.idempotency_key, "idempotencyKey", MAX_IDENTIFIER)
     }
 }
@@ -256,6 +265,16 @@ pub struct RestartTransitionParams {
     /// token. Required by the keeper's own transitions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claim_token: Option<String>,
+    /// The exiting arm only: the harness session identity `restart_request`
+    /// recorded, compared byte for byte. The substrate reads no shape into it,
+    /// so a caller who only read the intent id off `restart_status` cannot arm
+    /// an exit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requester_session: Option<String>,
+    /// The exiting arm only: the requester room's provisioned `restart_exit`
+    /// secret. The keeper's own arms carry the minted claim token instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability: Option<String>,
     pub to: RestartTransitionTarget,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -265,20 +284,29 @@ impl RestartTransitionParams {
     pub fn validate(&self) -> Result<(), String> {
         uuid_shaped(&self.intent_id, "intentId")?;
         match self.to {
-            // The exit door proves itself with the intent id, which only the
-            // House hands out, and names the armed session in detail. A token
-            // here means the caller mistook this for a keeper transition.
+            // Two doors, two authorities: the adapter proves the session and
+            // the room secret, the keeper proves the lease. A token on the exit
+            // arm means the caller mistook one door for the other.
             RestartTransitionTarget::Exiting => {
                 if self.claim_token.is_some() {
                     return Err("claimToken is not valid for the exiting transition".into());
                 }
-                bounded(
-                    self.detail.as_deref().unwrap_or_default(),
-                    "detail",
-                    MAX_DETAIL,
-                )
+                let session = self.requester_session.as_deref().ok_or_else(|| {
+                    "requesterSession is required for the exiting transition".to_owned()
+                })?;
+                bounded(session, "requesterSession", MAX_IDENTIFIER)?;
+                let capability = self.capability.as_deref().ok_or_else(|| {
+                    "capability is required for the exiting transition".to_owned()
+                })?;
+                bounded(capability, "capability", MAX_IDENTIFIER)?;
+                bounded_option(self.detail.as_ref(), "detail", MAX_DETAIL)
             }
             RestartTransitionTarget::Relaunching | RestartTransitionTarget::Failed => {
+                if self.requester_session.is_some() || self.capability.is_some() {
+                    return Err(
+                        "requesterSession and capability belong to the exiting transition".into(),
+                    );
+                }
                 let token = self
                     .claim_token
                     .as_deref()
@@ -297,6 +325,10 @@ pub struct RestartVerifyParams {
     pub successor_session: String,
     pub room: String,
     pub spirit: String,
+    /// The successor room's provisioned `restart_verify` secret. The intent id
+    /// stopped being proof when `restart_status` began handing it out with no
+    /// capability at all.
+    pub capability: String,
 }
 
 impl RestartVerifyParams {
@@ -304,7 +336,8 @@ impl RestartVerifyParams {
         uuid_shaped(&self.intent_id, "intentId")?;
         bounded(&self.successor_session, "successorSession", MAX_IDENTIFIER)?;
         bounded(&self.room, "room", MAX_IDENTIFIER)?;
-        bounded(&self.spirit, "spirit", MAX_IDENTIFIER)
+        bounded(&self.spirit, "spirit", MAX_IDENTIFIER)?;
+        bounded(&self.capability, "capability", MAX_IDENTIFIER)
     }
 }
 
@@ -410,6 +443,7 @@ mod tests {
             "requesterRoom": "kodo",
             "requesterSpirit": "Kodo",
             "requesterSession": "service:kodo",
+            "capability": "request-secret",
             "idempotencyKey": "request-1"
         })
     }
@@ -516,22 +550,32 @@ mod tests {
         };
         claim.validate().unwrap();
 
-        // The two doors of one method: the adapter's exit carries no token and
-        // must name its session, the keeper's transitions carry the minted one.
+        // The two doors of one method: the adapter's exit proves a session and
+        // a room secret, the keeper's transitions prove the minted lease.
         let armed_exit = RestartTransitionParams {
             intent_id: INTENT.into(),
             claim_token: None,
+            requester_session: Some("service:kodo".into()),
+            capability: Some("exit-secret".into()),
             to: RestartTransitionTarget::Exiting,
-            detail: Some(r#"{"session":"service:kodo"}"#.into()),
+            detail: Some("installed release is newer".into()),
         };
         armed_exit.validate().unwrap();
-        let silent_exit = RestartTransitionParams {
-            detail: None,
+        let sessionless_exit = RestartTransitionParams {
+            requester_session: None,
             ..armed_exit.clone()
         };
         assert!(
-            silent_exit.validate().is_err(),
+            sessionless_exit.validate().is_err(),
             "an exit that names no session is not an armed exit"
+        );
+        let unfenced_exit = RestartTransitionParams {
+            capability: None,
+            ..armed_exit.clone()
+        };
+        assert!(
+            unfenced_exit.validate().is_err(),
+            "the intent id is not authority: the exit arm carries the room secret"
         );
         let tokened_exit = RestartTransitionParams {
             claim_token: Some(TOKEN.into()),
@@ -539,12 +583,14 @@ mod tests {
         };
         assert!(
             tokened_exit.validate().is_err(),
-            "the exit door is tokenless: a token means the caller took the wrong door"
+            "the exit door takes no lease token: a token means the caller took the wrong door"
         );
 
         let tokenless_relaunch = RestartTransitionParams {
             to: RestartTransitionTarget::Relaunching,
             claim_token: None,
+            requester_session: None,
+            capability: None,
             detail: None,
             ..armed_exit
         };
@@ -559,6 +605,15 @@ mod tests {
             ..tokenless_relaunch.clone()
         };
         relaunch.validate().unwrap();
+        let borrowed_exit_fence = RestartTransitionParams {
+            claim_token: Some(TOKEN.into()),
+            capability: Some("exit-secret".into()),
+            ..tokenless_relaunch.clone()
+        };
+        assert!(
+            borrowed_exit_fence.validate().is_err(),
+            "the keeper's arm proves its lease and never the room's exit secret"
+        );
         let upper = RestartTransitionParams {
             claim_token: Some(TOKEN.to_ascii_uppercase()),
             ..tokenless_relaunch
@@ -573,8 +628,18 @@ mod tests {
             successor_session: String::new(),
             room: "kodo".into(),
             spirit: "Kodo".into(),
+            capability: "verify-secret".into(),
         };
         assert!(verify.validate().is_err());
+        let unfenced_verify = RestartVerifyParams {
+            successor_session: "service:kodo-2".into(),
+            capability: String::new(),
+            ..verify
+        };
+        assert!(
+            unfenced_verify.validate().is_err(),
+            "naming the intent id is not proof that the successor came back"
+        );
     }
 
     // Kills: a receipt that stops naming its state, or a status receipt that

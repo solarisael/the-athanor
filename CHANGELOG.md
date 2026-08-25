@@ -30,14 +30,24 @@ the exact implementation record.
   `restart_claim`, `restart_transition`, `restart_verify`, and `restart_status`.
   `restart_status` is a read. It needs no capability.
 - `restart_request` refuses with the code `restart_storm` after three intents
-  reach the exit stage for one workspace in one hour. An unclaimed request
-  expires after 300 seconds. An expired intent never fires.
-- The keeper claims under its own capability row, never as a room. Provision the
-  keeper secret with `substrate/provision-restart-capability.ps1`.
+  reach the exit stage for one workspace in one hour. The cap now applies when
+  an intent reaches the exit stage, not only when a session asks, so requests
+  made before the hour filled cannot all arm. An unclaimed request expires after
+  300 seconds. An expired intent never fires, and an expired request refuses a
+  replay of its own idempotency key instead of answering with a live state.
+- Each restart door proves its authority with a provisioned secret, because
+  `restart_status` gives the intent id to any caller. The room holds three
+  secrets: `restart_request` to ask, `restart_exit` to arm the exit, and
+  `restart_verify` to sign the successor. The keeper holds `restart_claim`. The
+  exit also names the harness session that asked, and the substrate compares it
+  with the stored value. New refusal codes: `restart_capability`,
+  `exit_not_authorized`, and `verify_not_authorized`. Provision every secret
+  with `substrate/provision-restart-capability.ps1`.
 - The authenticated Host read surface gains one route:
   `/athanor/v1/insula/unverified-exit`. It reports sessions that armed an exit
-  and never returned verified inside the stage window. The route reads only and
-  commands nothing.
+  and never returned verified inside the stage window. The route reports only
+  the room in the Host configuration, so one bearer never reads another room's
+  workspace path or session. The route reads only and commands nothing.
 - The new `omp-keeper` program owns the console seam for a self-restart. It
   starts omp as a console-inheriting child, and it starts omp again after an
   armed exit. Exit code 87 is only a hint: the keeper asks `restart_status` for

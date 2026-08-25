@@ -26,8 +26,14 @@ impl SubstrateSession {
             .stderr(Stdio::inherit())
             .spawn()
             .with_context(|| format!("substrate could not start: {}", executable.display()))?;
-        let stdin = child.stdin.take().context("substrate stdin was not piped")?;
-        let stdout = child.stdout.take().context("substrate stdout was not piped")?;
+        let stdin = child
+            .stdin
+            .take()
+            .context("substrate stdin was not piped")?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("substrate stdout was not piped")?;
         Ok(Self {
             child,
             stdin,
@@ -51,7 +57,8 @@ impl SubstrateSession {
             params,
         })
         .with_context(|| format!("{method} request could not be encoded"))?;
-        writeln!(self.stdin, "{line}").with_context(|| format!("{method} request could not be written"))?;
+        writeln!(self.stdin, "{line}")
+            .with_context(|| format!("{method} request could not be written"))?;
         self.stdin
             .flush()
             .with_context(|| format!("{method} request could not be flushed"))?;
@@ -73,7 +80,10 @@ impl SubstrateSession {
         let envelope: ResponseEnvelope = serde_json::from_str(response.trim())
             .with_context(|| format!("{method} response was not a protocol envelope"))?;
         if envelope.id != id {
-            bail!("{method} response carried id {} instead of {id}", envelope.id);
+            bail!(
+                "{method} response carried id {} instead of {id}",
+                envelope.id
+            );
         }
         match (envelope.result, envelope.error) {
             (Some(result), None) => Ok(Answer::Ok(
@@ -87,7 +97,10 @@ impl SubstrateSession {
 
     pub fn close(mut self) -> Result<()> {
         drop(self.stdin);
-        self.child.wait().context("substrate did not exit")?;
+        let status = self.child.wait().context("substrate did not exit")?;
+        if !status.success() {
+            bail!("substrate exited unsuccessfully: {status}");
+        }
         Ok(())
     }
 }

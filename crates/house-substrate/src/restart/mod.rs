@@ -291,6 +291,27 @@ async fn lapsed_after_lock(
     .await?;
     Ok(lapsed)
 }
+/// The workspace lock makes this sweep and the replacement insert one act.
+/// Status hides a lapsed request, so a new key must retire that row before the
+/// one-live fence can decide whether the workspace is occupied.
+async fn expire_lapsed_requests_in_workspace(
+    tx: &mut Transaction<'_, Postgres>,
+    workspace: &str,
+) -> Result<(), AppError> {
+    let intent_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT intent_id::text FROM restart.intents WHERE workspace=$1 AND state=$2 FOR UPDATE",
+    )
+    .bind(workspace)
+    .bind(RestartState::Requested.as_str())
+    .fetch_all(&mut **tx)
+    .await?;
+    for intent_id in intent_ids {
+        if lapsed_after_lock(tx, &intent_id).await? {
+            expire_lapsed_request(tx, &intent_id).await?;
+        }
+    }
+    Ok(())
+}
 
 fn refuse_expired() -> AppError {
     refusal(
@@ -352,6 +373,7 @@ pub async fn restart_request(
         tx.commit().await?;
         return Ok(receipt);
     }
+    expire_lapsed_requests_in_workspace(&mut tx, &request.workspace).await?;
 
     refuse_on_live_intent(&mut tx, &request.workspace).await?;
     refuse_on_storm(reached_exiting_in_window(&mut tx, &request.workspace).await?)?;
@@ -428,7 +450,12 @@ pub async fn restart_claim(
     .bind(&request.intent_id)
     .fetch_optional(&mut *tx)
     .await?
-    .ok_or_else(|| refusal("unknown_intent", "the requested restart intent does not exist"))?;
+    .ok_or_else(|| {
+        refusal(
+            "unknown_intent",
+            "the requested restart intent does not exist",
+        )
+    })?;
     let state = state_of(&intent.try_get::<String, _>("state")?)?;
     let lapsed = lapsed_after_lock(&mut tx, &request.intent_id).await?;
 
@@ -502,7 +529,12 @@ pub async fn restart_transition(
         .bind(&request.intent_id)
         .fetch_optional(&mut *tx)
         .await?
-        .ok_or_else(|| refusal("unknown_intent", "the requested restart intent does not exist"))?;
+        .ok_or_else(|| {
+            refusal(
+                "unknown_intent",
+                "the requested restart intent does not exist",
+            )
+        })?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
             .bind(&workspace)
             .execute(&mut *tx)

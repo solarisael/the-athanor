@@ -109,13 +109,14 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
         );
 
         match relaunch(config, &mut session, &pending, &claim)? {
-            Relaunched::Verified(successor) => child = successor,
+            Relaunched::Verified(successor) => {
+                adopt_verified_successor(&mut child, successor, session.close());
+            }
             Relaunched::Stopped(outcome) => {
                 session.close()?;
                 return Ok(outcome);
             }
         }
-        session.close()?;
     }
 }
 
@@ -443,7 +444,10 @@ fn spawn_omp(config: &KeeperConfig) -> Result<Child> {
 fn watch_child(config: &KeeperConfig, child: &mut Child) -> Result<i32> {
     let mut last_poll = Instant::now();
     loop {
-        if let Some(status) = child.try_wait().context("omp child could not be inspected")? {
+        if let Some(status) = child
+            .try_wait()
+            .context("omp child could not be inspected")?
+        {
             return Ok(status.code().unwrap_or(UNKNOWN_EXIT_CODE));
         }
         std::thread::sleep(CHILD_POLL);
@@ -497,7 +501,9 @@ fn kill_child(child: &mut Child) -> Result<i32> {
             return Err(error).context("omp child could not be killed");
         }
     }
-    let status = child.wait().context("killed omp child could not be reaped")?;
+    let status = child
+        .wait()
+        .context("killed omp child could not be reaped")?;
     Ok(status.code().unwrap_or(UNKNOWN_EXIT_CODE))
 }
 
@@ -507,6 +513,17 @@ fn kill_child(child: &mut Child) -> Result<i32> {
 fn leave_no_child(child: &mut Child) {
     if let Err(error) = kill_child(child) {
         eprintln!("omp-keeper: the relaunched omp child could not be put down: {error:#}");
+    }
+}
+
+/// Transfer the verified child before cleaning up its disposable substrate.
+/// Cleanup failure stays visible without breaking the keeper's ownership.
+fn adopt_verified_successor<T>(current: &mut T, successor: T, close_result: Result<()>) {
+    *current = successor;
+    if let Err(error) = close_result {
+        eprintln!(
+            "omp-keeper: the restart is verified, but its substrate session did not close cleanly; continuing to supervise omp: {error:#}"
+        );
     }
 }
 

@@ -91,6 +91,14 @@ fn main() {
         writeln!(stdout, "{response}").expect("response line");
         stdout.flush().expect("response flush");
     }
+    // The close-error smoke needs a real failed child wait after verification.
+    // A later substrate session sees a different status count and closes cleanly.
+    if let Ok(expected) = std::env::var("FAKE_SUBSTRATE_CLOSE_ERROR_AT_STATUSES") {
+        let expected: u32 = expected.parse().expect("close-error status count");
+        if read_script(&script_path).statuses == expected {
+            std::process::exit(73);
+        }
+    }
 }
 
 /// The door's own strictness, borrowed. `deny_unknown_fields` catches an extra
@@ -144,9 +152,8 @@ fn answer(id: &str, method: &str, mode: &str, params: &Value, script: &mut Scrip
             // workspace question only ever reports live intents. Only the first can
             // ever say `verified`.
             let intent = match asked.intent_id.as_deref() {
-                Some(asked_id) => scripted.filter(|intent| {
-                    intent.intent_id == asked_id || mode == "stranger-intent"
-                }),
+                Some(asked_id) => scripted
+                    .filter(|intent| intent.intent_id == asked_id || mode == "stranger-intent"),
                 None => scripted.filter(|intent| is_live(intent.state)),
             };
             let receipt = RestartStatusReceipt {
@@ -282,9 +289,7 @@ fn relaunching_intent(script: &Script, deadlines: &RestartStageDeadlines) -> Res
         deadlines: RestartStatusDeadlines {
             expires_at: instant(REQUESTED_TTL_SECS),
             exiting_deadline_at: None,
-            relaunching_deadline_at: Some(
-                (anchor + span(deadlines.relaunching_secs)).to_rfc3339(),
-            ),
+            relaunching_deadline_at: Some((anchor + span(deadlines.relaunching_secs)).to_rfc3339()),
         },
     }
 }

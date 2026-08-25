@@ -148,12 +148,7 @@ fn requests(transcript: &Path) -> Vec<serde_json::Value> {
 fn methods(transcript: &Path) -> Vec<String> {
     requests(transcript)
         .iter()
-        .map(|request| {
-            request["method"]
-                .as_str()
-                .expect("method name")
-                .to_string()
-        })
+        .map(|request| request["method"].as_str().expect("method name").to_string())
         .collect()
 }
 
@@ -265,6 +260,37 @@ fn the_full_loop_runs_from_an_armed_exit_to_a_verified_successor() {
     );
 }
 
+/// A verified successor is already the keeper's child. Failure to close the
+/// disposable substrate must stay a warning, then supervision continues.
+#[test]
+fn a_verified_successor_stays_supervised_when_its_substrate_close_fails() {
+    let tree = tree();
+    let ran = run_keeper_timed(
+        &tree,
+        "full-loop",
+        &[("FAKE_SUBSTRATE_CLOSE_ERROR_AT_STATUSES", "3")],
+    );
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert!(
+        ran.output.status.success(),
+        "the keeper must outlive the failed close: {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        ran.output.status.code()
+    );
+    assert_eq!(
+        lines(&tree.runs).len(),
+        2,
+        "the verified successor remains the supervised child"
+    );
+    assert!(
+        stderr.contains("continuing to supervise omp"),
+        "the close failure stays visible: {stderr}"
+    );
+    assert!(
+        stdout.contains("no restart intent"),
+        "the keeper reached the successor's later exit and asked the House again: {stdout}"
+    );
+}
+
 /// Repair 1's proof: the intent's `exitingDeadlineAt` is an absolute instant. A
 /// keeper that starts its own 60-second stopwatch on first sight kills a minute
 /// late and never names the House's instant.
@@ -276,7 +302,10 @@ fn an_exiting_child_is_killed_on_the_house_deadline_not_a_keeper_stopwatch() {
     let ran = run_keeper_timed(
         &tree,
         "exiting-overrun",
-        &[("FAKE_OMP_SLEEP_SECS", "120"), ("FAKE_OMP_SLEEP_FROM_RUN", "1")],
+        &[
+            ("FAKE_OMP_SLEEP_SECS", "120"),
+            ("FAKE_OMP_SLEEP_FROM_RUN", "1"),
+        ],
     );
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
     assert!(
@@ -321,7 +350,10 @@ fn a_successor_that_never_verifies_is_retried_once_and_then_failed() {
     let ran = run_keeper_timed(
         &tree,
         "unverified",
-        &[("FAKE_OMP_SLEEP_SECS", "30"), ("FAKE_OMP_SLEEP_FROM_RUN", "2")],
+        &[
+            ("FAKE_OMP_SLEEP_SECS", "30"),
+            ("FAKE_OMP_SLEEP_FROM_RUN", "2"),
+        ],
     );
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
     assert_eq!(
@@ -358,7 +390,8 @@ fn a_successor_that_never_verifies_is_retried_once_and_then_failed() {
         "the armed exit, then two relaunch attempts: {stdout}"
     );
     assert!(
-        stderr.contains("relaunch attempt 1 failed") && stderr.contains("relaunch attempt 2 failed"),
+        stderr.contains("relaunch attempt 1 failed")
+            && stderr.contains("relaunch attempt 2 failed"),
         "one retry is reported before giving up: {stderr}"
     );
     assert!(
@@ -402,7 +435,8 @@ fn a_relaunch_that_cannot_start_retries_once_and_then_transitions_to_failed() {
     );
     assert_eq!(lines(&tree.runs).len(), 1, "omp never came back: {stdout}");
     assert!(
-        stderr.contains("relaunch attempt 1 failed") && stderr.contains("relaunch attempt 2 failed"),
+        stderr.contains("relaunch attempt 1 failed")
+            && stderr.contains("relaunch attempt 2 failed"),
         "one retry is reported before giving up: {stderr}"
     );
     assert!(
@@ -543,7 +577,10 @@ fn a_house_that_vanishes_after_the_spawn_leaves_no_orphaned_omp() {
     let ran = run_keeper_timed(
         &tree,
         "substrate-dies-mid-watch",
-        &[("FAKE_OMP_SLEEP_SECS", "6"), ("FAKE_OMP_SLEEP_FROM_RUN", "2")],
+        &[
+            ("FAKE_OMP_SLEEP_SECS", "6"),
+            ("FAKE_OMP_SLEEP_FROM_RUN", "2"),
+        ],
     );
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
     assert_ne!(
@@ -588,7 +625,10 @@ fn a_refused_window_read_keeps_the_last_house_deadline_and_never_mints_one() {
     let ran = run_keeper_timed(
         &tree,
         "window-read-refused",
-        &[("FAKE_OMP_SLEEP_SECS", "200"), ("FAKE_OMP_SLEEP_FROM_RUN", "2")],
+        &[
+            ("FAKE_OMP_SLEEP_SECS", "200"),
+            ("FAKE_OMP_SLEEP_FROM_RUN", "2"),
+        ],
     );
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
     assert_eq!(
@@ -649,7 +689,10 @@ fn a_stranger_intent_is_never_our_verify_even_if_the_live_intent_fence_relaxes()
     let ran = run_keeper_timed(
         &tree,
         "stranger-intent",
-        &[("FAKE_OMP_SLEEP_SECS", "30"), ("FAKE_OMP_SLEEP_FROM_RUN", "2")],
+        &[
+            ("FAKE_OMP_SLEEP_SECS", "30"),
+            ("FAKE_OMP_SLEEP_FROM_RUN", "2"),
+        ],
     );
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
     assert!(

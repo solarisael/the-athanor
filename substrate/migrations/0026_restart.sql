@@ -24,9 +24,9 @@
 -- (a second claim of one epoch and a replayed key both fail the insert).
 -- On the intent itself those pairs would be degenerate: intent_id is its key.
 --
--- enough: no structural fence limits a workspace to one live intent chain. The
--- storm guard bounds the hour and the status read reports the newest live
--- intent; a partial unique index over live states is the upgrade path.
+-- One live intent owns each workspace. The partial unique index below is the
+-- structural fence; restart_request names the same refusal before the insert.
+-- Expired requested rows are retired under the workspace lock before replacement.
 --
 -- Re-applicable against fresh state. A pre-existing restart relation must match
 -- the column contract below before creation statements proceed; a mismatched

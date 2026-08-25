@@ -340,8 +340,11 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
     .await?;
     assert_eq!(relaunching.state, RestartState::Relaunching);
 
-    let verified =
-        restart_verify(&pool, verify_params(&requested.intent_id, SUCCESSOR_SESSION)).await?;
+    let verified = restart_verify(
+        &pool,
+        verify_params(&requested.intent_id, SUCCESSOR_SESSION),
+    )
+    .await?;
     assert_eq!(verified.state, RestartState::Verified);
     assert_eq!(
         stored_state(&pool, &requested.intent_id).await?,
@@ -510,12 +513,9 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         retire(&pool, &done.intent_id).await?;
         retired.push(done.intent_id);
     }
-    let over_cap = restart_request(
-        &pool,
-        request_params(prefilled_workspace, "prefilled-live"),
-    )
-    .await?
-    .intent_id;
+    let over_cap = restart_request(&pool, request_params(prefilled_workspace, "prefilled-live"))
+        .await?
+        .intent_id;
     for intent_id in &retired {
         aged_exit_event(&pool, intent_id, "1 minute").await?;
     }
@@ -555,6 +555,44 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         .await
         .expect_err("an expired key stays expired");
     assert_eq!(refusal_code(&replayed_again), "intent_expired");
+
+    // 8b. Status hides an expired request. A genuinely new key must retire
+    // that hidden row before the one-live fence admits its replacement.
+    let rollover_workspace = "D:/athanor-wt/rollover";
+    let stranded =
+        restart_request(&pool, request_params(rollover_workspace, "rollover-old")).await?;
+    sqlx::query(
+        "UPDATE restart.intents SET expires_at=NOW()-INTERVAL '1 second' WHERE intent_id=$1::text::uuid",
+    )
+    .bind(&stranded.intent_id)
+    .execute(&pool)
+    .await?;
+    assert!(
+        restart_status(
+            &pool,
+            RestartStatusParams {
+                workspace: rollover_workspace.into(),
+                intent_id: None,
+            },
+        )
+        .await?
+        .intent
+        .is_none(),
+        "the lapsed row is already absent from the adapter's pending read"
+    );
+    let replacement =
+        restart_request(&pool, request_params(rollover_workspace, "rollover-new")).await?;
+    assert_ne!(replacement.intent_id, stranded.intent_id);
+    assert_eq!(replacement.state, RestartState::Requested);
+    assert_eq!(
+        stored_state(&pool, &stranded.intent_id).await?.0,
+        "expired",
+        "the new key retired the hidden row before taking the workspace"
+    );
+    assert_eq!(
+        ledger(&pool, &stranded.intent_id).await?,
+        vec!["requested".to_owned(), "expired".to_owned()]
+    );
 
     // 9. The lock-contention race: alive when the claim door opened its
     // transaction, dead by the time the row lock arrived. Both facts are

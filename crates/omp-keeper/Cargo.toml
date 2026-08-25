@@ -16,7 +16,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-# the restart wire shapes belong to this crate; src/protocol.rs mirrors them until the door merges
+# the restart wire vocabulary: states, params, receipts (src/protocol.rs adds only the keeper's JSONL envelope)
 house-protocol = { path = "../house-protocol" }
 
 [dev-dependencies]

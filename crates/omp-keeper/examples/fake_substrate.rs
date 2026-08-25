@@ -4,7 +4,16 @@ use std::io::{BufRead, Write};
 fn main() {
     let transcript = std::env::var("FAKE_SUBSTRATE_TRANSCRIPT").expect("transcript path");
     let mode = std::env::var("FAKE_SUBSTRATE_MODE").unwrap_or_else(|_| "relaunch-once".to_string());
-    let deadlines = json!({"requestedTtlSecs": 300, "exitingSecs": 60, "relaunchingSecs": 120});
+    let stage_deadlines = json!({
+        "requestedTtlSecs": 300,
+        "exitingSecs": 60,
+        "relaunchingSecs": 120,
+        "relaunchAttemptLimit": 2,
+    });
+    let status_deadlines = json!({
+        "expiresAt": "2026-08-25T00:05:00Z",
+        "exitingDeadlineAt": "2026-08-25T00:01:00Z",
+    });
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -25,15 +34,24 @@ fn main() {
             ),
             ("restart_status", _) if answered_statuses == 0 => result(
                 &id,
-                json!({"pending": {
-                    "intentId": "intent-1",
-                    "state": "requested",
-                    "mode": "resume",
-                    "sessionId": "session-1",
-                    "deadlines": deadlines,
-                }}),
+                json!({
+                    "workspace": request["params"]["workspace"].clone(),
+                    "intent": {
+                        "intentId": "intent-1",
+                        "state": "requested",
+                        "mode": "resume",
+                        "sessionId": "session-1",
+                        "deadlines": status_deadlines,
+                    },
+                }),
             ),
-            ("restart_status", _) => result(&id, json!({"pending": null})),
+            ("restart_status", _) => result(
+                &id,
+                json!({
+                    "workspace": request["params"]["workspace"].clone(),
+                    "intent": null,
+                }),
+            ),
             ("restart_claim", _) => {
                 if mode == "relaunch-broken" {
                     let program = std::env::var("FAKE_OMP_PROGRAM").expect("omp program path");
@@ -41,17 +59,14 @@ fn main() {
                 }
                 result(
                     &id,
-                    json!({"claimToken": "claim-token-1", "claimEpoch": 1, "stageDeadlines": deadlines}),
+                    json!({"claimToken": "claim-token-1", "claimEpoch": 1, "stageDeadlines": stage_deadlines}),
                 )
             }
             ("restart_transition", _) => {
+                // the state vocabulary has no compound: a failed relaunch reaches `failed`
+                // and the stage it failed in lives on the intent row, not on the wire
                 let to = request["params"]["to"].as_str().unwrap_or("relaunching");
-                let state = if to == "failed" {
-                    "failed:relaunching".to_string()
-                } else {
-                    to.to_string()
-                };
-                result(&id, json!({"state": state}))
+                result(&id, json!({"state": to}))
             }
             _ => refusal(&id, "unknown_method", &format!("unknown method {method}")),
         };

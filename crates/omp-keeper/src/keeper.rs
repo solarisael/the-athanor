@@ -1,9 +1,10 @@
 use crate::config::KeeperConfig;
 use crate::decide::{ExitingAction, RelaunchAction, StatusStep, armed_exit_hint, exiting_action, relaunch_action, status_step};
 use crate::protocol::{
-    METHOD_RESTART_CLAIM, METHOD_RESTART_STATUS, METHOD_RESTART_TRANSITION, PendingIntent,
-    ProtocolErrorBody, RestartClaimParams, RestartClaimResult, RestartStatusParams,
-    RestartStatusResult, RestartTransitionParams, RestartTransitionResult, TransitionTarget,
+    EXITING_DEADLINE_SECS, METHOD_RESTART_CLAIM, METHOD_RESTART_STATUS, METHOD_RESTART_TRANSITION,
+    ProtocolErrorBody, RestartClaimParams, RestartClaimReceipt, RestartState, RestartStatusIntent,
+    RestartStatusParams, RestartStatusReceipt, RestartTransitionParams, RestartTransitionReceipt,
+    RestartTransitionTarget,
 };
 use crate::resolve::resolve_substrate_exe;
 use crate::session::{Answer, SubstrateSession};
@@ -41,13 +42,13 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
             }
         };
         let pending = match pending {
-            Some(pending) if status_step(Some(&pending.state.wire())) == StatusStep::Claim => pending,
+            Some(pending) if status_step(Some(pending.state)) == StatusStep::Claim => pending,
             Some(pending) => {
                 session.close()?;
                 println!(
                     "omp-keeper: intent {} is {} for {}; nothing to relaunch",
                     pending.intent_id,
-                    pending.state.wire(),
+                    pending.state.as_str(),
                     config.workspace
                 );
                 return Ok(Outcome::Stopped { exit_code });
@@ -65,7 +66,7 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
         let capability = config
             .read_capability()
             .context("the keeper restart_claim capability could not be read")?;
-        let claim: RestartClaimResult = match session.call(
+        let claim: RestartClaimReceipt = match session.call(
             METHOD_RESTART_CLAIM,
             &RestartClaimParams {
                 intent_id: pending.intent_id.clone(),
@@ -89,13 +90,13 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
             &mut session,
             &pending,
             &claim.claim_token,
-            TransitionTarget::Relaunching,
+            RestartTransitionTarget::Relaunching,
             None,
         )? {
             Answer::Ok(result) => println!(
                 "omp-keeper: intent {} is {}",
                 pending.intent_id,
-                result.state.wire()
+                result.state.as_str()
             ),
             Answer::Refused(refusal) => {
                 session.close()?;
@@ -110,13 +111,15 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
                 Err(error) => {
                     failed_attempts += 1;
                     eprintln!("omp-keeper: relaunch attempt {failed_attempts} failed: {error:#}");
-                    if relaunch_action(failed_attempts) == RelaunchAction::Fail {
+                    if relaunch_action(failed_attempts, claim.stage_deadlines.relaunch_attempt_limit)
+                        == RelaunchAction::Fail
+                    {
                         let detail = format!("relaunch failed twice: {error:#}");
                         let refusal = transition(
                             &mut session,
                             &pending,
                             &claim.claim_token,
-                            TransitionTarget::Failed,
+                            RestartTransitionTarget::Failed,
                             Some(detail.clone()),
                         )?;
                         session.close()?;
@@ -167,16 +170,17 @@ fn claim_key(intent_id: &str, claimant: &str) -> String {
 
 fn transition(
     session: &mut SubstrateSession,
-    pending: &PendingIntent,
+    pending: &RestartStatusIntent,
     claim_token: &str,
-    to: TransitionTarget,
+    to: RestartTransitionTarget,
     detail: Option<String>,
-) -> Result<Answer<RestartTransitionResult>> {
+) -> Result<Answer<RestartTransitionReceipt>> {
     session.call(
         METHOD_RESTART_TRANSITION,
         &RestartTransitionParams {
             intent_id: pending.intent_id.clone(),
-            claim_token: claim_token.to_string(),
+            // the keeper's transitions always carry the minted token; only the adapter's exit is tokenless
+            claim_token: Some(claim_token.to_string()),
             to,
             detail,
         },
@@ -186,12 +190,12 @@ fn transition(
 fn ask_status(
     session: &mut SubstrateSession,
     config: &KeeperConfig,
-) -> Result<std::result::Result<Option<PendingIntent>, ProtocolErrorBody>> {
+) -> Result<std::result::Result<Option<RestartStatusIntent>, ProtocolErrorBody>> {
     let params = RestartStatusParams {
         workspace: config.workspace.clone(),
     };
-    match session.call::<_, RestartStatusResult>(METHOD_RESTART_STATUS, &params)? {
-        Answer::Ok(result) => Ok(Ok(result.pending)),
+    match session.call::<_, RestartStatusReceipt>(METHOD_RESTART_STATUS, &params)? {
+        Answer::Ok(receipt) => Ok(Ok(receipt.intent)),
         Answer::Refused(refusal) => Ok(Err(refusal)),
     }
 }
@@ -230,19 +234,17 @@ fn watch_child(config: &KeeperConfig, child: &mut Child) -> Result<i32> {
                 continue;
             }
         };
-        let state = watched.as_ref().map(|pending| pending.state.wire());
-        // deadline measured from the keeper's first sight of exiting: the status shape carries stage seconds, not an entered-at instant
-        if state.as_deref() == Some(crate::protocol::STATE_EXITING) {
+        let state = watched.as_ref().map(|pending| pending.state);
+        // deadline measured from the keeper's first sight of exiting: the status shape carries an
+        // absolute exitingDeadlineAt, and the keeper owns no clock that reads it, so the local grace stands
+        if state == Some(RestartState::Exiting) {
             exiting_since.get_or_insert_with(Instant::now);
         } else {
             exiting_since = None;
         }
         let elapsed = exiting_since.map(|since| since.elapsed().as_secs()).unwrap_or(0);
-        let deadline = watched
-            .as_ref()
-            .map(|pending| pending.deadlines.exiting_secs)
-            .unwrap_or(crate::protocol::EXITING_DEADLINE_SECS);
-        if exiting_action(state.as_deref(), elapsed, deadline) == ExitingAction::Kill {
+        let deadline = EXITING_DEADLINE_SECS;
+        if exiting_action(state, elapsed, deadline) == ExitingAction::Kill {
             println!(
                 "omp-keeper: omp did not leave within {deadline}s of its exiting intent; killing it"
             );
@@ -253,7 +255,7 @@ fn watch_child(config: &KeeperConfig, child: &mut Child) -> Result<i32> {
     }
 }
 
-fn watch_status(config: &KeeperConfig) -> Result<Option<PendingIntent>> {
+fn watch_status(config: &KeeperConfig) -> Result<Option<RestartStatusIntent>> {
     let executable = resolve_substrate_exe(&config.program_root)?;
     let mut session = SubstrateSession::start(&executable)?;
     let answer = ask_status(&mut session, config);

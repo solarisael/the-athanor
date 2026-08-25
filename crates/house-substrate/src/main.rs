@@ -1789,6 +1789,7 @@ mod tests {
             r#"{"protocol":1,"id":"r4","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimToken":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","to":"relaunching"}}"#,
             r#"{"protocol":1,"id":"r5","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo","capability":"verify-secret"}}"#,
             r#"{"protocol":1,"id":"r6","method":"restart_status","params":{"workspace":"D:/athanor-wt/restart-intent"}}"#,
+            r#"{"protocol":1,"id":"r7","method":"restart_status","params":{"workspace":"D:/athanor-wt/restart-intent","intentId":"00000000-0000-0000-0000-000000000001"}}"#,
         ] {
             let (_, request) = decode_line(line);
             match request.expect("restart fixture must decode") {

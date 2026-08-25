@@ -215,6 +215,15 @@ CREATE INDEX IF NOT EXISTS idx_restart_intents_expiry
     ON restart.intents (expires_at)
     WHERE state = 'requested';
 
+-- One live intent per workspace, structural. The keeper reads the newest live
+-- intent for a workspace and acts on it (omp-keeper decide.rs), so a second
+-- live row lets a newer request stand in for an unverified successor. This index
+-- makes that twin unconstructible; restart_request refuses it by name
+-- (intent_pending) before it ever reaches here.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_restart_intents_one_live_per_workspace
+    ON restart.intents (workspace)
+    WHERE state IN ('requested', 'exiting', 'claimed', 'relaunching');
+
 -- ---------------------------------------------------------------------------
 -- intent_events — append-only ledger. Every transition writes one row, and
 -- the two named claim fences live here (see the header).

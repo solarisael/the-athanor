@@ -160,6 +160,42 @@ fn stage_deadlines() -> RestartStageDeadlines {
     }
 }
 
+/// The states that hold a workspace, built from the vocabulary and never from
+/// literals. The same four sit in migration 0026's partial unique index and in
+/// the pending read the adapter arms against — one list, three readers.
+fn live_states() -> [&'static str; 4] {
+    [
+        RestartState::Requested.as_str(),
+        RestartState::Exiting.as_str(),
+        RestartState::Claimed.as_str(),
+        RestartState::Relaunching.as_str(),
+    ]
+}
+
+/// One live intent per workspace. The keeper acts on the newest live intent it
+/// can see, so a second one lets a fresh request pass for an unverified
+/// successor (Kintsu's keeper P1, 2026-08-25). The unique index refuses the
+/// twin structurally; this is the same refusal with a name the caller can read.
+async fn refuse_on_live_intent(
+    tx: &mut Transaction<'_, Postgres>,
+    workspace: &str,
+) -> Result<(), AppError> {
+    let live: Option<String> = sqlx::query_scalar(
+        "SELECT intent_id::text FROM restart.intents WHERE workspace=$1 AND state = ANY($2)",
+    )
+    .bind(workspace)
+    .bind(&live_states()[..])
+    .fetch_optional(&mut **tx)
+    .await?;
+    if live.is_some() {
+        return Err(refusal(
+            "intent_pending",
+            "this workspace already has a live restart intent",
+        ));
+    }
+    Ok(())
+}
+
 /// The guard bounds arrivals at `exiting`, not requests: a request minted
 /// before the window filled must still refuse to arm, so both the request door
 /// and the exit door count and refuse.
@@ -317,6 +353,7 @@ pub async fn restart_request(
         return Ok(receipt);
     }
 
+    refuse_on_live_intent(&mut tx, &request.workspace).await?;
     refuse_on_storm(reached_exiting_in_window(&mut tx, &request.workspace).await?)?;
 
     let row = sqlx::query(
@@ -698,26 +735,49 @@ pub async fn restart_verify(
     })
 }
 
-/// Read the workspace's pending intent. No capability and no write: the adapter
-/// checks it before arming and the keeper polls it after a child exit. The
-/// intent id it hands out authorizes nothing — see [`authority`] — so this read
-/// stays open. A lapsed unclaimed request is not pending, so it reads as none.
+/// The columns one status row carries. Both reads below project exactly this,
+/// so the receipt cannot depend on which question was asked.
+const STATUS_COLUMNS: &str = "intent_id::text AS intent_id,state,mode,session_id,expires_at,exiting_deadline_at,relaunching_deadline_at";
+
+/// Read one intent, and no capability either way: the id this hands out
+/// authorizes nothing (see [`authority`]).
+///
+/// Two questions, two reads. Without an id: the workspace's pending intent,
+/// which is what the adapter arms against, and a lapsed unclaimed request is
+/// not pending. With an id: that exact intent in whatever state it reached,
+/// terminal included, because the keeper's verify watch needs a positive
+/// sighting of `verified` and the pending read can structurally never show one
+/// (Kintsu's keeper P1, 2026-08-25).
 pub async fn restart_status(
     pool: &PgPool,
     request: RestartStatusParams,
 ) -> Result<RestartStatusReceipt, AppError> {
     request.validate().map_err(AppError::Invalid)?;
 
-    let row = sqlx::query(
-        "SELECT intent_id::text AS intent_id,state,mode,session_id,expires_at,exiting_deadline_at,relaunching_deadline_at FROM restart.intents WHERE workspace=$1 AND state IN ($2,$3,$4,$5) AND (state<>$2 OR expires_at>clock_timestamp()) ORDER BY created_at DESC LIMIT 1",
-    )
-    .bind(&request.workspace)
-    .bind(RestartState::Requested.as_str())
-    .bind(RestartState::Exiting.as_str())
-    .bind(RestartState::Claimed.as_str())
-    .bind(RestartState::Relaunching.as_str())
-    .fetch_optional(pool)
-    .await?;
+    let row = match request.intent_id.as_deref() {
+        Some(intent_id) => {
+            validate_intent_id(intent_id)?;
+            // The workspace still scopes the read, so naming an id buys no
+            // reach into another workspace's restart.
+            sqlx::query(&format!(
+                "SELECT {STATUS_COLUMNS} FROM restart.intents WHERE workspace=$1 AND intent_id=$2::text::uuid"
+            ))
+            .bind(&request.workspace)
+            .bind(intent_id)
+            .fetch_optional(pool)
+            .await?
+        }
+        None => {
+            sqlx::query(&format!(
+                "SELECT {STATUS_COLUMNS} FROM restart.intents WHERE workspace=$1 AND state = ANY($2) AND (state<>$3 OR expires_at>clock_timestamp()) ORDER BY created_at DESC LIMIT 1"
+            ))
+            .bind(&request.workspace)
+            .bind(&live_states()[..])
+            .bind(RestartState::Requested.as_str())
+            .fetch_optional(pool)
+            .await?
+        }
+    };
 
     let Some(row) = row else {
         return Ok(RestartStatusReceipt {

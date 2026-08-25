@@ -1,9 +1,10 @@
-//! The restart plane against a real PostgreSQL schema. One test, twelve phases:
-//! the full lifecycle, the storm guard's counting query, the exit fence, expiry
-//! of an unclaimed request, the stale-token refusal, one-verify-only, the storm
-//! cap at the moment of arming, a lapsed idempotent replay, an intent that
-//! crosses its TTL behind a row lock, the Insula divergence read, and the
-//! capability and session authority of each door. It is one test on purpose —
+//! The restart plane against a real PostgreSQL schema. One test, fourteen
+//! phases: the full lifecycle, the storm guard's counting query, the exit
+//! fence, expiry of an unclaimed request, the stale-token refusal,
+//! one-verify-only, the storm cap at the moment of arming, a lapsed idempotent
+//! replay, an intent that crosses its TTL behind a row lock, the Insula
+//! divergence read, the capability and session authority of each door, one live
+//! intent per workspace, and the exact-intent read. It is one test on purpose —
 //! it owns the whole `restart` schema and resets it, so it must not race a
 //! sibling that does the same.
 //!
@@ -170,6 +171,54 @@ async fn aged_exit_event(pool: &PgPool, intent_id: &str, age: &str) -> TestResul
     Ok(())
 }
 
+/// End an intent's hold on its workspace. A workspace carries one live intent,
+/// so any phase that wants a second restart has to finish the first one; this
+/// is the short way to say "that restart is over" without a whole lifecycle.
+async fn retire(pool: &PgPool, intent_id: &str) -> TestResult {
+    sqlx::query("UPDATE restart.intents SET state=$2 WHERE intent_id=$1::text::uuid")
+        .bind(intent_id)
+        .bind(RestartState::Expired.as_str())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// The claim is queued behind the row lock, not merely spawned. A blocked
+/// `FOR UPDATE` waits on the holding transaction, so the fact shows up as a
+/// backend of this database waiting on a Lock, not as an ungranted table lock.
+async fn wait_for_queued_claim(pool: &PgPool) -> TestResult {
+    for _ in 0..200 {
+        let queued: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'",
+        )
+        .fetch_one(pool)
+        .await?;
+        if queued > 0 {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("no claim ever queued behind the row lock");
+}
+
+/// The TTL has really passed, whatever the machine was doing. A plain read of
+/// the row does not block behind the FOR UPDATE that holds it.
+async fn wait_until_lapsed(pool: &PgPool, intent_id: &str) -> TestResult {
+    for _ in 0..200 {
+        let lapsed: bool = sqlx::query_scalar(
+            "SELECT expires_at <= clock_timestamp() FROM restart.intents WHERE intent_id=$1::text::uuid",
+        )
+        .bind(intent_id)
+        .fetch_one(pool)
+        .await?;
+        if lapsed {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("the intent never passed its TTL");
+}
+
 fn refusal_code(error: &AppError) -> &str {
     match error {
         AppError::Refusal { code, .. } => code,
@@ -222,6 +271,12 @@ async fn arm_and_exit(pool: &PgPool, workspace: &str, key: &str) -> TestResult<S
 // instead of clock_timestamp() after the lock; drop the requester_room
 // predicate from query_unverified_exit; skip require_capability or
 // require_requester_session on any door.
+// Cut two: a workspace that carries two live intents at once, so a fresh
+// request can stand in for the successor the keeper is still waiting on, and a
+// status read that can only ever speak about pending intents, so no watch can
+// see its own verified.
+// red-proof: drop refuse_on_live_intent from restart_request, or the partial
+// unique index from 0026; answer the exact-id read from the pending query.
 #[tokio::test]
 #[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated restart schema"]
 async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
@@ -242,6 +297,7 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         &pool,
         RestartStatusParams {
             workspace: workspace.into(),
+            intent_id: None,
         },
     )
     .await?
@@ -306,7 +362,8 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         restart_status(
             &pool,
             RestartStatusParams {
-                workspace: workspace.into()
+                workspace: workspace.into(),
+                intent_id: None,
             }
         )
         .await?
@@ -383,7 +440,8 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         restart_status(
             &pool,
             RestartStatusParams {
-                workspace: lapsed_workspace.into()
+                workspace: lapsed_workspace.into(),
+                intent_id: None,
             }
         )
         .await?
@@ -409,10 +467,13 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         .expect_err("an expired intent stays unclaimable");
     assert_eq!(refusal_code(&again), "not_claimable");
 
-    // 6. The storm guard counts exits per workspace inside the window.
+    // 6. The storm guard counts exits per workspace inside the window. One
+    // workspace carries one live intent, so each restart in the window has to
+    // finish before the next one can be asked for.
     let storm_workspace = "D:/athanor-wt/storm";
     for index in 0..STORM_MAX_EXITING_PER_WINDOW {
-        arm_and_exit(&pool, storm_workspace, &format!("storm-{index}")).await?;
+        let armed = arm_and_exit(&pool, storm_workspace, &format!("storm-{index}")).await?;
+        retire(&pool, &armed).await?;
     }
     let storm = restart_request(&pool, request_params(storm_workspace, "storm-next"))
         .await
@@ -429,54 +490,48 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
             request_params(aged_workspace, &format!("aged-{index}")),
         )
         .await?;
-        sqlx::query(
-            "INSERT INTO restart.intent_events (intent_id,event_kind,principal,created_at) VALUES ($1::text::uuid,$2,$3,NOW()-INTERVAL '2 hours')",
-        )
-        .bind(&aged.intent_id)
-        .bind(RestartState::Exiting.as_str())
-        .bind("kodo:Kodo")
-        .execute(&pool)
-        .await?;
+        aged_exit_event(&pool, &aged.intent_id, "2 hours").await?;
+        retire(&pool, &aged.intent_id).await?;
     }
     restart_request(&pool, request_params(aged_workspace, "aged-next")).await?;
 
-    // 7. The cap binds arrivals at exiting, not requests: four requests minted
-    // while the window was empty must not all arm.
+    // 7. The cap binds arrivals at exiting, not requests: an intent asked for
+    // while the window was empty must still refuse to arm once it fills. The
+    // one-live fence means the window fills from finished restarts, so the
+    // events are written for retired intents.
     let prefilled_workspace = "D:/athanor-wt/prefilled";
-    let mut prefilled = Vec::new();
-    for index in 0..=STORM_MAX_EXITING_PER_WINDOW {
-        prefilled.push(
-            restart_request(
-                &pool,
-                request_params(prefilled_workspace, &format!("prefilled-{index}")),
-            )
-            .await?
-            .intent_id,
-        );
-    }
-    for intent_id in prefilled
-        .iter()
-        .take(STORM_MAX_EXITING_PER_WINDOW as usize)
-    {
-        restart_transition(
+    let mut retired = Vec::new();
+    for index in 0..STORM_MAX_EXITING_PER_WINDOW {
+        let done = restart_request(
             &pool,
-            transition_params(intent_id, RestartTransitionTarget::Exiting, None),
+            request_params(prefilled_workspace, &format!("prefilled-done-{index}")),
         )
         .await?;
+        retire(&pool, &done.intent_id).await?;
+        retired.push(done.intent_id);
     }
-    let over_cap = prefilled.last().expect("the window plus one");
+    let over_cap = restart_request(
+        &pool,
+        request_params(prefilled_workspace, "prefilled-live"),
+    )
+    .await?
+    .intent_id;
+    for intent_id in &retired {
+        aged_exit_event(&pool, intent_id, "1 minute").await?;
+    }
     let stormed = restart_transition(
         &pool,
-        transition_params(over_cap, RestartTransitionTarget::Exiting, None),
+        transition_params(&over_cap, RestartTransitionTarget::Exiting, None),
     )
     .await
     .expect_err("a request minted before the storm must still refuse to arm");
     assert_eq!(refusal_code(&stormed), "restart_storm");
     assert_eq!(
-        stored_state(&pool, over_cap).await?.0,
+        stored_state(&pool, &over_cap).await?.0,
         "requested",
         "the refused arm left the intent where it was"
     );
+    retire(&pool, &over_cap).await?;
 
     // 8. A replay of a lapsed key never hands back a live-looking receipt.
     let replay_workspace = "D:/athanor-wt/replay";
@@ -502,10 +557,12 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
     assert_eq!(refusal_code(&replayed_again), "intent_expired");
 
     // 9. The lock-contention race: alive when the claim door opened its
-    // transaction, dead by the time the row lock arrived.
+    // transaction, dead by the time the row lock arrived. Both facts are
+    // observed before the lock is released, so the phase never rests on how
+    // long a sleep happened to take.
     let racing = restart_request(&pool, request_params("D:/athanor-wt/race", "race-1")).await?;
     sqlx::query(
-        "UPDATE restart.intents SET expires_at=clock_timestamp()+INTERVAL '2 seconds' WHERE intent_id=$1::text::uuid",
+        "UPDATE restart.intents SET expires_at=clock_timestamp()+INTERVAL '1 second' WHERE intent_id=$1::text::uuid",
     )
     .bind(&racing.intent_id)
     .execute(&pool)
@@ -520,7 +577,8 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         let params = claim_params(&racing.intent_id, "race-claim");
         async move { restart_claim(&pool, params).await }
     });
-    tokio::time::sleep(std::time::Duration::from_millis(4000)).await;
+    wait_for_queued_claim(&pool).await?;
+    wait_until_lapsed(&pool, &racing.intent_id).await?;
     blocker.rollback().await?;
     let raced = waiting_claim
         .await?
@@ -658,6 +716,114 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
             .state,
         RestartState::Verified,
         "the real successor still verifies once"
+    );
+
+    // 13. One live intent per workspace, so the keeper's newest-live read can
+    // never hand it a stranger while the one it watches is still running.
+    let one_live_workspace = "D:/athanor-wt/one-live";
+    let watched = restart_request(&pool, request_params(one_live_workspace, "one-live-1")).await?;
+    // The second ask is held, not answered, and the keeper's read is asked
+    // before the refusal is inspected: a minted twin would answer this read
+    // with a stranger while the watched intent is still running.
+    let twin = restart_request(&pool, request_params(one_live_workspace, "one-live-2")).await;
+    let pending = restart_status(
+        &pool,
+        RestartStatusParams {
+            workspace: one_live_workspace.into(),
+            intent_id: None,
+        },
+    )
+    .await?
+    .intent
+    .expect("the live intent is pending");
+    assert_eq!(
+        pending.intent_id, watched.intent_id,
+        "the pending read can only ever be the one live intent"
+    );
+    assert_eq!(
+        refusal_code(&twin.expect_err("a workspace with a live intent mints no second one")),
+        "intent_pending"
+    );
+    let live_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM restart.intents WHERE workspace=$1 AND state IN ('requested','exiting','claimed','relaunching')",
+    )
+    .bind(one_live_workspace)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(live_rows, 1, "one workspace, one live row");
+    // Below the door as well: the partial unique index refuses the twin.
+    let direct = sqlx::query(
+        "INSERT INTO restart.intents (harness,workspace,mode,reason,consent_source,requester_room,requester_spirit,requester_session,idempotency_key,expires_at) VALUES ('omp',$1,'resume','a twin the index must refuse','operator-standing-policy',$2,'Kodo',$3,'one-live-direct',NOW()+INTERVAL '300 seconds')",
+    )
+    .bind(one_live_workspace)
+    .bind(ROOM)
+    .bind(ROOM_SESSION)
+    .execute(&pool)
+    .await;
+    assert!(
+        direct.is_err(),
+        "a second live intent is unconstructible, not merely refused at the door"
+    );
+    retire(&pool, &watched.intent_id).await?;
+    restart_request(&pool, request_params(one_live_workspace, "one-live-3")).await?;
+
+    // 14. The exact-intent read: the keeper's verify watch needs a positive
+    // sighting of verified, and the pending read cannot give one.
+    let successor_workspace = "D:/athanor-wt/successor";
+    assert!(
+        restart_status(
+            &pool,
+            RestartStatusParams {
+                workspace: successor_workspace.into(),
+                intent_id: None,
+            },
+        )
+        .await?
+        .intent
+        .is_none(),
+        "a verified intent is finished, so it is not pending"
+    );
+    let exact = restart_status(
+        &pool,
+        RestartStatusParams {
+            workspace: successor_workspace.into(),
+            intent_id: Some(returning.clone()),
+        },
+    )
+    .await?
+    .intent
+    .expect("the exact read answers for a finished intent");
+    assert_eq!(exact.intent_id, returning);
+    assert_eq!(
+        exact.state,
+        RestartState::Verified,
+        "the watch can see its own successor arrive"
+    );
+    assert!(
+        restart_status(
+            &pool,
+            RestartStatusParams {
+                workspace: one_live_workspace.into(),
+                intent_id: Some(returning.clone()),
+            },
+        )
+        .await?
+        .intent
+        .is_none(),
+        "naming an id buys no reach into another workspace's restart"
+    );
+    assert!(
+        restart_status(
+            &pool,
+            RestartStatusParams {
+                workspace: successor_workspace.into(),
+                intent_id: Some("00000000-0000-0000-0000-000000000001".into()),
+            },
+        )
+        .await?
+        .intent
+        .is_none(),
+        "an unknown id reads as none, never as somebody else's intent"
     );
     Ok(())
 }

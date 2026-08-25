@@ -491,10 +491,10 @@ try {
     Assert-True ($Call.Extent.Text -match '"--release"') "every guarded deploy Cargo invocation must use Cargo's release profile"
     Assert-True ($Call.Extent.Text -match '"--target-dir"\s*,\s*\$stageTarget') "every guarded deploy Cargo invocation must use the reusable target/deploy cache"
   }
-  $ExpectedPackages = @("house-core", "house-protocol", "athanor-substrate", "house-host", "athanor-install")
+  $ExpectedPackages = @("house-core", "house-protocol", "athanor-substrate", "house-host", "athanor-install", "omp-keeper")
   foreach ($Call in @($TestCalls[0], $BuildCalls[0])) {
     $CallPackages = @([Regex]::Matches($Call.Extent.Text, '"-p"\s*,\s*"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
-    Assert-True (($CallPackages -join "|") -ceq ($ExpectedPackages -join "|")) "the guarded test and staged build must select the identical five packages"
+    Assert-True (($CallPackages -join "|") -ceq ($ExpectedPackages -join "|")) "the guarded test and staged build must select the identical six packages"
   }
   $DeploySource = Get-Content $DeployScript -Raw
   $DoctorCalls = @($DeployCalls | Where-Object { $_.Extent.Text -match '"doctor"' })
@@ -513,6 +513,36 @@ try {
   }
   Assert-True ($DeploySource -match '(?s)Move-Item\s+\$liveManagerExe\s+\$previousManagerExe.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe') "manager deployment must back up both manager copies"
   Assert-True ($DeploySource -match '(?s)Copy-Item\s+\$stagedManagerExe\s+\$liveManagerExe.*?Copy-Item\s+\$stagedManagerExe\s+\$stableManagerExe') "manager deployment must replace both manager copies"
+  foreach ($RequiredFragment in @("stagedKeeperExe", "liveKeeperExe", "stableKeeperExe", "previousKeeperExe", "bin/omp-keeper.exe", "provision-omp-keeper.ps1", "provision-restart-capability.ps1")) {
+    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "keeper deployment must retain $RequiredFragment"
+  }
+  Assert-True ($DeploySource -match '(?s)Move-Item\s+\$liveKeeperExe\s+\$previousKeeperExe.*?Copy-Item\s+\$stagedKeeperExe\s+\$liveKeeperExe') "keeper deployment must back up and replace the version binary"
+  Assert-True ($DeploySource -match '(?s)Copy-Item\s+\$stagedKeeperExe\s+\$stableKeeperExe') "keeper deployment must refresh the stable terminal owner"
+  Assert-True ($DeploySource -match '(?s)foreach\s*\(\$keeperPath\s+in\s+@\(\$liveKeeperExe,\s*\$stableKeeperExe\).*?Get-LiveWorkers\s+-ExecutablePath\s+\$keeperPath') "deployment must refuse both versioned and stable live keeper processes"
+  Assert-True ($DeploySource -match '(?s)if\s*\(Test-Path\s+\$liveManifest\s+-PathType\s+Leaf\)\s*\{.*?Move-Item\s+\$stableKeeperExe\s+\$previousStableKeeperExe.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe') "stable keeper backup must stay inside the installed-manifest transaction"
+  $KeeperProvisioner = Join-Path $PSScriptRoot "../crates/omp-keeper/scripts/provision-local.ps1"
+  $KeeperProvisionErrors = $null
+  $KeeperProvisionTokens = $null
+  [void][Management.Automation.Language.Parser]::ParseFile($KeeperProvisioner, [ref]$KeeperProvisionTokens, [ref]$KeeperProvisionErrors)
+  Assert-True ($KeeperProvisionErrors.Count -eq 0) "the keeper provisioner must remain valid PowerShell"
+  $KeeperProvisionSource = Get-Content $KeeperProvisioner -Raw
+  foreach ($RequiredFragment in @("restart_claim", "restart_request", "restart_exit", "restart_verify", "omp-keeper.json", "restart-capability", "watchIntervalSecs", "-Remove")) {
+    Assert-True ($KeeperProvisionSource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "keeper provisioner must retain $RequiredFragment"
+  }
+  $CapabilityProvisionSource = Get-Content (Join-Path $PSScriptRoot "../substrate/provision-restart-capability.ps1") -Raw
+  Assert-True ($CapabilityProvisionSource -match 'Remove-Item\s+\$secretPath\s+-Force\s+-ErrorAction\s+Stop') "capability removal must refuse a holder secret it cannot delete"
+  $SecretRemoval = $CapabilityProvisionSource.IndexOf('Remove-Item $secretPath', [StringComparison]::Ordinal)
+  $DatabaseRemoval = $CapabilityProvisionSource.IndexOf('DELETE FROM restart.principal_capabilities', [StringComparison]::Ordinal)
+  Assert-True ($SecretRemoval -ge 0 -and $SecretRemoval -lt $DatabaseRemoval) "capability rollback must remove plaintext before deleting its authority row"
+  & (Join-Path $PSScriptRoot "../crates/omp-keeper/scripts/provision-local.test.ps1")
+  $ReleaseBuilderSource = Get-Content (Join-Path $PSScriptRoot "build-native-release.ps1") -Raw
+  foreach ($RequiredFragment in @("-p omp-keeper", "omp-keeper.exe", "components/omp-keeper", '"omp-keeper"')) {
+    Assert-True ($ReleaseBuilderSource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "native release builder must package $RequiredFragment"
+  }
+  $InnoSource = Get-Content (Join-Path $PSScriptRoot "athanor.iss") -Raw
+  foreach ($ForbiddenFragment in @("payload\bin\omp-keeper.exe", "payload\components\omp-keeper\provision-omp-keeper.ps1", "payload\components\omp-keeper\provision-restart-capability.ps1")) {
+    Assert-True (-not $InnoSource.Contains($ForbiddenFragment, [StringComparison]::OrdinalIgnoreCase)) "native installer must not activate $ForbiddenFragment before the manager accepts the payload"
+  }
   $StableManagerAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\$stableManagerExe\s*=' })[0]
   Assert-True (([Regex]::Matches($StableManagerAssignment, 'GetDirectoryName')).Count -eq 4 -and $StableManagerAssignment -match '"bin\\athanor-manage\.exe"') "stable manager must resolve from the install root, not the versions root"
   $TransactionCatch = $DeploySource.LastIndexOf("} catch {", [StringComparison]::Ordinal)

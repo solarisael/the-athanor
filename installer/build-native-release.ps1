@@ -142,7 +142,7 @@ Invoke-NativeReleaseStage -Name "cargo-build" -OutDir $Out -Action {
   $env:RUSTC = $Toolchain.rustcPath
   Push-Location $Root
   try {
-    & $Toolchain.cargoPath build --release --locked -p athanor-install -p athanor-substrate -p house-host -p athanor-house-delivery -p athanor-godot
+    & $Toolchain.cargoPath build --release --locked -p athanor-install -p athanor-substrate -p house-host -p athanor-house-delivery -p athanor-godot -p omp-keeper
     if ($LASTEXITCODE -ne 0) { throw "Rust release build failed" }
   } finally {
     Pop-Location
@@ -166,6 +166,7 @@ Invoke-NativeReleaseStage -Name "payload-materialization" -OutDir $Out -Action {
   Copy-Item (Join-Path $ReleaseBin "athanor-substrate.exe") $Bin
   Copy-Item (Join-Path $ReleaseBin "house-host.exe") $Bin
   Copy-Item (Join-Path $ReleaseBin "athanor-house-delivery.exe") $Bin
+  Copy-Item (Join-Path $ReleaseBin "omp-keeper.exe") $Bin
   Copy-Item (Join-Path $Root "adapters/omp/installed-loader.ts") (Join-Path $Bin "athanor-omp-loader.ts")
   Copy-Item $GodotExe.FullName (Join-Path $Bin "athanor-gui.exe")
   $GodotSource = Join-Path $Root "gui"
@@ -180,6 +181,11 @@ Invoke-NativeReleaseStage -Name "payload-materialization" -OutDir $Out -Action {
   Copy-Item (Join-Path $ReleaseBin "athanor_godot.dll") (Join-Path $GodotProject "target/debug/athanor_godot.dll")
   Copy-Item (Join-Path $ReleaseBin "athanor_godot.dll") (Join-Path $GodotProject "target/release/athanor_godot.dll")
   Copy-Item (Join-Path $PgRoot "*") (Join-Path $Runtime "postgresql") -Recurse
+  $KeeperComponent = Join-Path $Stage "components/omp-keeper"
+  New-Item $KeeperComponent -ItemType Directory -Force | Out-Null
+  Copy-Item (Join-Path $Root "crates/omp-keeper/README.md") $KeeperComponent
+  Copy-Item (Join-Path $Root "crates/omp-keeper/scripts/provision-local.ps1") (Join-Path $KeeperComponent "provision-omp-keeper.ps1")
+  Copy-Item (Join-Path $Root "substrate/provision-restart-capability.ps1") $KeeperComponent
   Copy-Item $NatsExe.FullName (Join-Path $Runtime "nats/nats-server.exe")
   # The product ships a fallback OMP adapter component built by the one shared
   # component builder; adapter-only deployment builds the same shape.
@@ -206,6 +212,8 @@ Invoke-NativeReleaseStage -Name "manifest-hashing" -OutDir $Out -Action {
       elseif ($Relative -like "bin/house-host.exe") { "host" }
       elseif ($Relative -like "bin/athanor-house-delivery.exe") { "delivery" }
       elseif ($Relative -like "bin/athanor-substrate.exe") { "substrate" }
+      elseif ($Relative -like "bin/omp-keeper.exe") { "omp-keeper" }
+      elseif ($Relative -like "components/omp-keeper/*") { "omp-keeper" }
       elseif ($Relative -eq "bin/athanor-gui.exe" -or $Relative -like "runtime/godot/*") { "godot-client" }
       else { "omp-adapter" }
     $Artifacts += [ordered]@{

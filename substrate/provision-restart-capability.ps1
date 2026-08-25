@@ -33,7 +33,8 @@ param(
     [ValidateSet("restart_claim", "restart_request", "restart_exit", "restart_verify")]
     [string]$OperationClass = "restart_claim",
     [Parameter(Mandatory = $true)][string]$HolderDir,
-    [string]$SubstrateEnv = "C:/Solarisael/Obsidian/obsidian/house/state/substrate/.env"
+    [string]$SubstrateEnv = "C:/Solarisael/Obsidian/obsidian/house/state/substrate/.env",
+    [switch]$Remove
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,6 +57,25 @@ $fileName = if ($OperationClass -eq "restart_claim") {
     ($OperationClass -replace "_", "-") + "-capability"
 }
 
+$secretPath = Join-Path $HolderDir $fileName
+$envPathWsl = (wsl -e wslpath -a ($SubstrateEnv -replace "\\", "/")).Trim()
+if ($Remove) {
+    if (Test-Path $secretPath -PathType Leaf) {
+        Remove-Item $secretPath -Force -ErrorAction Stop
+    }
+    if (Test-Path $secretPath) {
+        throw "capability secret could not be removed: $secretPath"
+    }
+    $sql = "DELETE FROM restart.principal_capabilities WHERE principal = '$Principal' AND operation_class = '$OperationClass';"
+    $command = "PGPASSWORD=`$(grep '^PGPASSWORD=' '$envPathWsl' | cut -d= -f2 | tr -d '\r') psql -h 127.0.0.1 -p 5432 -U solarisael -d solarisael_memory -v ON_ERROR_STOP=1 -c `"$sql`""
+    wsl -e sh -lc $command | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "capability database removal failed for '$Principal' and '$OperationClass'; the holder secret is already absent"
+    }
+    Write-Host "principal '$Principal': $OperationClass capability removed"
+    return
+}
+
 # 1. Mint the secret.
 $bytes = [byte[]]::new(32)
 [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
@@ -67,7 +87,6 @@ $hash = -join ($hashBytes | ForEach-Object { $_.ToString("x2") })
 
 # 2. Upsert the hash. Credentials come from the substrate env file inside WSL;
 #    the CRLF strip is load-bearing (Windows-edited env file).
-$envPathWsl = (wsl -e wslpath -a ($SubstrateEnv -replace "\\", "/")).Trim()
 $sql = @"
 INSERT INTO restart.principal_capabilities (principal, operation_class, capability_hash)
 VALUES ('$Principal', '$OperationClass', '$hash')
@@ -81,7 +100,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 3. Deliver the secret to the holder, only after the hash landed.
-$secretPath = Join-Path $HolderDir $fileName
 Set-Content -Path $secretPath -Value $secret -NoNewline -Encoding ascii
 
 Write-Host "principal '$Principal': $OperationClass capability provisioned; secret at $secretPath"

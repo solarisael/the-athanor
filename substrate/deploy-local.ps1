@@ -43,6 +43,8 @@ $stageTarget = Join-Path $athanorRoot "target\deploy"
  $stagedHostExe = Join-Path $stageTarget "release\house-host.exe"
  $stagedHostPdb = [IO.Path]::ChangeExtension($stagedHostExe, ".pdb")
  $stagedManagerExe = Join-Path $stageTarget "release\athanor-manage.exe"
+ $stagedKeeperExe = Join-Path $stageTarget "release\omp-keeper.exe"
+ $stagedKeeperPdb = [IO.Path]::ChangeExtension($stagedKeeperExe, ".pdb")
 $configuredLiveExe = [string]$env:ATHANOR_SUBSTRATE_EXE
 $liveExe = if ([string]::IsNullOrWhiteSpace($configuredLiveExe)) {
     Join-Path $athanorRoot "target\release\athanor-substrate.exe"
@@ -56,6 +58,13 @@ $livePdb = [IO.Path]::ChangeExtension($liveExe, ".pdb")
 $liveHostExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "house-host.exe"
 $liveHostPdb = [IO.Path]::ChangeExtension($liveHostExe, ".pdb")
  $liveManagerExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "athanor-manage.exe"
+ $liveKeeperExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "omp-keeper.exe"
+ $liveKeeperPdb = [IO.Path]::ChangeExtension($liveKeeperExe, ".pdb")
+ $stableKeeperExe = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))))) "bin\omp-keeper.exe"
+ $sourceKeeperProvision = Join-Path $athanorRoot "crates\omp-keeper\scripts\provision-local.ps1"
+ $sourceRestartProvision = Join-Path $athanorRoot "substrate\provision-restart-capability.ps1"
+ $stableKeeperProvision = Join-Path ([IO.Path]::GetDirectoryName($stableKeeperExe)) "provision-omp-keeper.ps1"
+ $stableRestartProvision = Join-Path ([IO.Path]::GetDirectoryName($stableKeeperExe)) "provision-restart-capability.ps1"
 $stableManagerExe = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))))) "bin\athanor-manage.exe"
  $previousExe = Join-Path $stageTarget "previous\athanor-substrate.exe"
  $previousPdb = [IO.Path]::ChangeExtension($previousExe, ".pdb")
@@ -63,6 +72,11 @@ $stableManagerExe = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirecto
  $previousHostPdb = [IO.Path]::ChangeExtension($previousHostExe, ".pdb")
  $previousManagerExe = Join-Path $stageTarget "previous\athanor-manage.exe"
  $previousStableManagerExe = Join-Path $stageTarget "previous\athanor-manage-stable.exe"
+ $previousKeeperExe = Join-Path $stageTarget "previous\omp-keeper.exe"
+ $previousKeeperPdb = Join-Path $stageTarget "previous\omp-keeper.pdb"
+ $previousStableKeeperExe = Join-Path $stageTarget "previous\omp-keeper-stable.exe"
+ $previousKeeperProvision = Join-Path $stageTarget "previous\provision-omp-keeper.ps1"
+ $previousRestartProvision = Join-Path $stageTarget "previous\provision-restart-capability.ps1"
  $liveManifest = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))) "release-manifest.json"
  $previousManifest = Join-Path $stageTarget "previous\release-manifest.json"
 $nativeServiceName = "SolarisaelAthanor"
@@ -172,18 +186,27 @@ if (Test-Path $liveManifest -PathType Leaf) {
     }
 }
 
+$keeperWorkers = @()
+foreach ($keeperPath in @($liveKeeperExe, $stableKeeperExe) | Select-Object -Unique) {
+    $keeperWorkers += @(Get-LiveWorkers -ExecutablePath $keeperPath)
+}
+if ($keeperWorkers.Count -gt 0) {
+    $keeperSummary = ($keeperWorkers | ForEach-Object { "PID=$($_.ProcessId) parent=$($_.ParentProcessId) path=$($_.ExecutablePath)" }) -join ", "
+    throw "an installed omp-keeper is running ($keeperSummary); exit its child OMP and keeper before deployment so the terminal owner is never replaced underneath a live session"
+}
+
 
 
 if (-not $SkipTests) {
     Invoke-Checked -Label "Athanor core, protocol, substrate, and Host tests" -FilePath $Cargo -ArgumentList @(
         "test", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-        "-p", "house-core", "-p", "house-protocol", "-p", "athanor-substrate", "-p", "house-host", "-p", "athanor-install", "--release", "--target-dir", $stageTarget
+        "-p", "house-core", "-p", "house-protocol", "-p", "athanor-substrate", "-p", "house-host", "-p", "athanor-install", "-p", "omp-keeper", "--release", "--target-dir", $stageTarget
     )
 }
 
 Invoke-Checked -Label "staged release build" -FilePath $Cargo -ArgumentList @(
     "build", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-    "-p", "house-core", "-p", "house-protocol", "-p", "athanor-substrate", "-p", "house-host", "-p", "athanor-install", "--release", "--target-dir", $stageTarget
+    "-p", "house-core", "-p", "house-protocol", "-p", "athanor-substrate", "-p", "house-host", "-p", "athanor-install", "-p", "omp-keeper", "--release", "--target-dir", $stageTarget
 )
 if (-not (Test-Path $stagedExe -PathType Leaf)) {
     throw "staged executable was not produced at $stagedExe"
@@ -193,6 +216,14 @@ if (-not (Test-Path $stagedHostExe -PathType Leaf)) {
 }
 if (-not (Test-Path $stagedManagerExe -PathType Leaf)) {
     throw "staged manager executable was not produced at $stagedManagerExe"
+}
+if (-not (Test-Path $stagedKeeperExe -PathType Leaf)) {
+    throw "staged keeper executable was not produced at $stagedKeeperExe"
+}
+foreach ($provisioner in @($sourceKeeperProvision, $sourceRestartProvision)) {
+    if (-not (Test-Path $provisioner -PathType Leaf)) {
+        throw "keeper provisioner is missing: $provisioner"
+    }
 }
 
 if (-not $SkipBackup) {
@@ -276,9 +307,14 @@ try {
     $copiedHostPdb = $false
     $copiedManager = $false
     $copiedStableManager = $false
+    $copiedKeeperExe = $false
+    $copiedKeeperPdb = $false
+    $copiedStableKeeper = $false
+    $copiedKeeperProvision = $false
+    $copiedRestartProvision = $false
 New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($liveExe)) | Out-Null
 New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($previousExe)) | Out-Null
-foreach ($priorPath in @($previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousManifest)) {
+foreach ($priorPath in @($previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousKeeperExe, $previousKeeperPdb, $previousStableKeeperExe, $previousKeeperProvision, $previousRestartProvision, $previousManifest)) {
     if (Test-Path $priorPath -PathType Leaf) {
         Remove-Item $priorPath -Force -ErrorAction Stop
     }
@@ -295,7 +331,22 @@ if (Test-Path $liveHostExe -PathType Leaf) {
 if (Test-Path $liveHostPdb -PathType Leaf) {
     Move-Item $liveHostPdb $previousHostPdb -Force
 }
+if (Test-Path $liveKeeperExe -PathType Leaf) {
+    Move-Item $liveKeeperExe $previousKeeperExe -Force
+}
+if (Test-Path $liveKeeperPdb -PathType Leaf) {
+    Move-Item $liveKeeperPdb $previousKeeperPdb -Force
+}
 if (Test-Path $liveManifest -PathType Leaf) {
+    if (Test-Path $stableKeeperExe -PathType Leaf) {
+        Move-Item $stableKeeperExe $previousStableKeeperExe -Force
+    }
+    if (Test-Path $stableKeeperProvision -PathType Leaf) {
+        Move-Item $stableKeeperProvision $previousKeeperProvision -Force
+    }
+    if (Test-Path $stableRestartProvision -PathType Leaf) {
+        Move-Item $stableRestartProvision $previousRestartProvision -Force
+    }
     if (-not (Test-Path $liveManagerExe -PathType Leaf) -or -not (Test-Path $stableManagerExe -PathType Leaf)) {
         throw "installed manager paths are missing or ambiguous; recover both version and stable manager paths before deployment"
     }
@@ -318,18 +369,41 @@ if (Test-Path $liveManifest -PathType Leaf) {
         Copy-Item $stagedHostPdb $liveHostPdb -Force
         $copiedHostPdb = $true
     }
+    Copy-Item $stagedKeeperExe $liveKeeperExe -Force
+    $copiedKeeperExe = $true
+    if (Test-Path $stagedKeeperPdb -PathType Leaf) {
+        Copy-Item $stagedKeeperPdb $liveKeeperPdb -Force
+        $copiedKeeperPdb = $true
+    }
     if (Test-Path $liveManifest -PathType Leaf) {
         Copy-Item $stagedManagerExe $liveManagerExe -Force
         $copiedManager = $true
         Copy-Item $stagedManagerExe $stableManagerExe -Force
         $copiedStableManager = $true
+        Copy-Item $stagedKeeperExe $stableKeeperExe -Force
+        $copiedStableKeeper = $true
+        Copy-Item $sourceKeeperProvision $stableKeeperProvision -Force
+        $copiedKeeperProvision = $true
+        Copy-Item $sourceRestartProvision $stableRestartProvision -Force
+        $copiedRestartProvision = $true
     }
     if (Test-Path $liveManifest -PathType Leaf) {
         $manifest = Get-Content $liveManifest -Raw | ConvertFrom-Json
+        $keeperEntries = @($manifest.artifacts | Where-Object { [string]$_.path -eq "bin/omp-keeper.exe" })
+        if ($keeperEntries.Count -eq 0) {
+            $manifest.artifacts = @($manifest.artifacts) + [pscustomobject][ordered]@{
+                component = "omp-keeper"
+                path = "bin/omp-keeper.exe"
+                sha256 = ""
+                size = 0
+                executable = $true
+            }
+        }
         foreach ($binary in @(
             @{ Path = "bin/athanor-substrate.exe"; Source = $liveExe },
             @{ Path = "bin/house-host.exe"; Source = $liveHostExe },
-            @{ Path = "bin/athanor-manage.exe"; Source = $liveManagerExe }
+            @{ Path = "bin/athanor-manage.exe"; Source = $liveManagerExe },
+            @{ Path = "bin/omp-keeper.exe"; Source = $liveKeeperExe }
         )) {
             $entries = @($manifest.artifacts | Where-Object { [string]$_.path -eq $binary.Path })
             if ($entries.Count -ne 1) {
@@ -387,6 +461,11 @@ if (Test-Path $liveManifest -PathType Leaf) {
         @{ Live = $liveHostPdb; Previous = $previousHostPdb; Created = $copiedHostPdb },
         @{ Live = $liveManagerExe; Previous = $previousManagerExe; Created = $copiedManager },
         @{ Live = $stableManagerExe; Previous = $previousStableManagerExe; Created = $copiedStableManager },
+        @{ Live = $liveKeeperExe; Previous = $previousKeeperExe; Created = $copiedKeeperExe },
+        @{ Live = $liveKeeperPdb; Previous = $previousKeeperPdb; Created = $copiedKeeperPdb },
+        @{ Live = $stableKeeperExe; Previous = $previousStableKeeperExe; Created = $copiedStableKeeper },
+        @{ Live = $stableKeeperProvision; Previous = $previousKeeperProvision; Created = $copiedKeeperProvision },
+        @{ Live = $stableRestartProvision; Previous = $previousRestartProvision; Created = $copiedRestartProvision },
         @{ Live = $liveManifest; Previous = $previousManifest; Created = $false }
     )) {
         try {
@@ -418,7 +497,7 @@ if (Test-Path $liveManifest -PathType Leaf) {
     throw $deploymentFailure
 }
 
-Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousManifest -Force -ErrorAction SilentlyContinue
+Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousKeeperExe, $previousKeeperPdb, $previousStableKeeperExe, $previousKeeperProvision, $previousRestartProvision, $previousManifest -Force -ErrorAction SilentlyContinue
 
 # Sol's standing rule (2026-08-22): do not leave compile output behind.
 # Remove the dev build trees after a good deploy. Keep target\deploy:

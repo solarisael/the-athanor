@@ -50,10 +50,31 @@ Example:
 {
   "ompLaunch": ["C:/Users/Sol/AppData/Roaming/npm/omp.cmd", "--resume"],
   "workspace": "C:/Solarisael/Obsidian/obsidian/kodo",
-  "programRoot": "C:/Program Files/The Athanor",
-  "capabilityPath": "C:/ProgramData/The Athanor/restart-keeper.capability",
+  "programRoot": "C:/Program Files/Solarisael/Athanor",
+  "capabilityPath": "C:/Solarisael/Obsidian/obsidian/kodo/.omp/runtime/restart-capability",
   "watchIntervalSecs": 30
 }
+```
+
+For a local House, deploy the release first. Then provision one room:
+
+```powershell
+pwsh crates/omp-keeper/scripts/provision-local.ps1 `
+  -RoomDir C:/Solarisael/Obsidian/obsidian/kodo `
+  -OmpProgram C:/Users/Administrador/AppData/Roaming/npm/omp.cmd
+```
+
+The script provisions four operation secrets. It writes `omp-keeper.json` in
+the room runtime directory. Start the printed keeper command instead of `omp`.
+
+An installed release carries the same door in its keeper component:
+
+```powershell
+$root = "$env:ProgramFiles/Solarisael/Athanor"
+$version = (Get-Content "$root/current.json" -Raw | ConvertFrom-Json).version
+pwsh "$root/versions/$version/components/omp-keeper/provision-omp-keeper.ps1" `
+  -RoomDir C:/Solarisael/Obsidian/obsidian/kodo `
+  -OmpProgram C:/Users/Administrador/.bun/bin/omp.exe
 ```
 
 Give exactly one capability field. The operator provisions the secret into the

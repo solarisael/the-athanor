@@ -20,7 +20,12 @@ this work, because the terminal belongs to the operator, not to a service.
      `relaunching`, then start omp again with the same command.
    - Pending intent in another state: print one line and exit. Only `requested`
      and `exiting` accept a claim.
-6. Stop when the House refuses. A storm-guard refusal ends the loop with a plain
+6. Hold the relaunch open until the House has seen the successor verify. The
+   successor proves itself with `restart_verify`, so the keeper watches
+   `restart_status`: the intent leaving the pending set is the verify. A
+   successor that never verifies inside the intent's relaunching deadline is
+   killed, and the attempt counts as failed.
+7. Stop when the House refuses. A storm-guard refusal ends the loop with a plain
    message that says omp is not running.
 
 ## The config file
@@ -55,9 +60,13 @@ row `restart.principal_capabilities`, principal `omp-keeper`, operation class
 `restart_claim`. The keeper reads the secret at claim time. The secret stays out
 of every log line, every error message, and every debug print.
 
-Windows starts a program file, not a shell word. Write the full path with its
-extension in `ompLaunch`, or start the shell yourself, for example
-`["C:/Windows/System32/cmd.exe", "/c", "omp"]`.
+Name the program file with its extension in `ompLaunch`, not a bare shell word:
+the keeper starts a program, and no PATHEXT search happens for it. A `.cmd` or
+`.bat` shim — which is what an npm-installed `omp` is — is a valid entry and
+needs no shell of your own. Rust's process spawn hands a shim to the command
+processor for you and escapes the arguments for it, so a path with spaces and
+trailing flags both survive. `crates/omp-keeper/tests/smoke.rs` proves that with
+a real `.cmd` in a directory whose name has a space.
 
 The `claimant` name must be a lowercase slug. This shape is the shape the
 substrate accepts for a principal name.
@@ -83,10 +92,21 @@ session writes `verified`; the keeper never does.
 
 Deadlines and refusals:
 
+- Deadlines are instants, not stopwatches. `restart_status` publishes
+  `exitingDeadlineAt` and `relaunchingDeadlineAt` as absolute RFC3339 times, and
+  the keeper obeys those. A keeper that starts after the adapter already armed is
+  therefore late on its first look, and acts on it.
 - The keeper kills the omp child only when the intent says `exiting` and the
-  deadline passed. Default deadline: 60 seconds.
-- A relaunch that cannot start retries one time. A second failure transitions the
-  intent to `failed` and stops the keeper.
+  published instant has passed. The contract's stage length is 60 seconds; the
+  keeper's own 60 is only a net for an answer that carries no instant at all.
+- A relaunch attempt fails two ways: omp will not start, or omp starts and the
+  House never sees it verify before `relaunchingDeadlineAt`. Either way the
+  attempt retries one time and a second failure transitions the intent to
+  `failed` and stops the keeper.
+- Each attempt enters `relaunching` again, because the intent row counts
+  `relaunch_attempts` and mints a fresh `relaunchingDeadlineAt` on every
+  `relaunching` transition. The retry runs inside the House's new window; the
+  keeper never opens a second window of its own.
 - The idempotency key for a claim is `<claimant>:claim:<intentId>`. A repeated
   claim for one intent carries the same key.
 - `resume` mode and `fresh` mode start the same command. omp resumes its own
@@ -102,9 +122,11 @@ Deadlines and refusals:
   asks, and closes it. This keeps the resolution fresh and costs one process
   start for each ask.
 - The storm guard belongs to the House. The keeper holds no local restart count.
-- The keeper measures the `exiting` deadline from its own first sight of the
-  state, because `restart_status` reports stage seconds, not the instant the
-  intent entered the state.
+  It answers a `restart_storm` refusal, wherever in the loop it arrives, with one
+  operator sentence and no retry.
+- The keeper holds no stage clock. Every deadline it obeys is an instant read off
+  the intent; `src/clock.rs` is the only place that parses one and asks whether it
+  has passed.
 
 ## Tests
 
@@ -113,7 +135,10 @@ cargo test -p omp-keeper
 ```
 
 The unit tests cover the config file, the substrate resolution in temporary
-directories, and the decision functions. The smoke tests start the real keeper
-program with two fixtures: `examples/fake_omp.rs` exits 87, and
-`examples/fake_substrate.rs` answers canned JSONL. The smoke tests need no
-database.
+directories, the House clock, and the decision functions. The smoke tests start
+the real keeper program against two fixtures and need no database:
+`examples/fake_omp.rs` is the child (it arms an exit, or overstays on demand),
+and `examples/fake_substrate.rs` answers the wire. That fixture builds every
+answer from a real `house_protocol::restart` struct and validates every request
+with the real door's own `validate()`, so a request the House would refuse is
+refused in the smoke too.

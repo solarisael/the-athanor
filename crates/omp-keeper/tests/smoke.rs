@@ -1,13 +1,32 @@
+//! Smoke tests: the real keeper program, real child processes, real spawning,
+//! and a fake substrate that answers with real `house_protocol::restart` structs
+//! and refuses any request the real door would refuse.
+//!
+//! No database. What these defend is the keeper's own seam: what it launches,
+//! which clock it obeys, when it kills, when it retries, and what it says to Sol
+//! when it stops.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::{Duration, Instant};
 
 const RELEASE_VERSION: &str = "0.0.0-smoke";
 
+/// The wire values the fixture answers with. They mirror
+/// `examples/fake_substrate.rs` on purpose: a canonical UUID and 64 lowercase
+/// hex are the only shapes the real door's `validate()` accepts, and asserting
+/// them here is what catches a keeper that mangles what the House handed it.
+const INTENT_ID: &str = "3f6b9c2a-7d41-4e58-9a0b-1c8e5d2f4a67";
+const CLAIM_TOKEN: &str = "9f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d6035";
+
 struct Tree {
     _temp: tempfile::TempDir,
+    root: PathBuf,
     config: PathBuf,
     program: PathBuf,
+    program_root: PathBuf,
+    capability: PathBuf,
     runs: PathBuf,
     transcript: PathBuf,
 }
@@ -22,9 +41,8 @@ fn example(name: &str) -> PathBuf {
         .join("examples")
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     assert!(
-        path.is_file(),
-        "example fixture {name} must be built by cargo test: {}",
-        path.display()
+        path.exists(),
+        "the {name} fixture must be built first: cargo test -p omp-keeper builds examples"
     );
     path
 }
@@ -39,7 +57,7 @@ fn substrate_exe_name() -> &'static str {
 
 fn tree() -> Tree {
     let temp = tempfile::tempdir().expect("temp dir");
-    let root = temp.path();
+    let root = temp.path().to_path_buf();
     let program_root = root.join("program");
     let bin = program_root
         .join("versions")
@@ -53,8 +71,7 @@ fn tree() -> Tree {
     .expect("current pointer");
     fs::copy(example("fake_substrate"), bin.join(substrate_exe_name())).expect("fake substrate");
 
-    let workspace = root.join("workspace");
-    fs::create_dir_all(&workspace).expect("workspace");
+    fs::create_dir_all(root.join("workspace")).expect("workspace");
 
     let program = root.join(format!("omp-run{}", std::env::consts::EXE_SUFFIX));
     fs::copy(example("fake_omp"), &program).expect("omp program copy");
@@ -62,36 +79,50 @@ fn tree() -> Tree {
     let capability = root.join("keeper.capability");
     fs::write(&capability, "smoke-capability\n").expect("capability file");
 
-    let config = root.join("omp-keeper.json");
-    let launch = serde_json::json!({
-        "ompLaunch": [&program],
-        "workspace": workspace,
-        "programRoot": program_root,
-        "capabilityPath": capability,
-        "watchIntervalSecs": 0,
-    });
-    fs::write(&config, serde_json::to_vec_pretty(&launch).expect("config json"))
-        .expect("config file");
-
-    Tree {
-        config,
-        program,
+    let tree = Tree {
+        config: root.join("omp-keeper.json"),
+        program: program.clone(),
+        program_root,
+        capability,
         runs: root.join("omp-runs.log"),
         transcript: root.join("substrate-transcript.jsonl"),
+        root,
         _temp: temp,
-    }
+    };
+    write_config(&tree, &[program.display().to_string()], 0);
+    tree
 }
 
-fn run_keeper(tree: &Tree, mode: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_omp-keeper"))
+/// `watch_interval_secs` of 0 turns the child-watch status poll off, which is
+/// what every test that only cares about the exit path wants.
+fn write_config(tree: &Tree, launch: &[String], watch_interval_secs: u64) {
+    let config = serde_json::json!({
+        "ompLaunch": launch,
+        "workspace": tree.root.join("workspace"),
+        "programRoot": &tree.program_root,
+        "capabilityPath": &tree.capability,
+        "watchIntervalSecs": watch_interval_secs,
+    });
+    fs::write(
+        &tree.config,
+        serde_json::to_vec_pretty(&config).expect("config json"),
+    )
+    .expect("config file");
+}
+
+fn run_keeper_with(tree: &Tree, mode: &str, extra: &[(&str, &str)]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_omp-keeper"));
+    command
         .arg("--config")
         .arg(&tree.config)
         .env("FAKE_OMP_RUNS", &tree.runs)
         .env("FAKE_SUBSTRATE_TRANSCRIPT", &tree.transcript)
         .env("FAKE_SUBSTRATE_MODE", mode)
-        .env("FAKE_OMP_PROGRAM", &tree.program)
-        .output()
-        .expect("keeper runs")
+        .env("FAKE_OMP_PROGRAM", &tree.program);
+    for (name, value) in extra {
+        command.env(name, value);
+    }
+    command.output().expect("keeper runs")
 }
 
 fn lines(path: &Path) -> Vec<String> {
@@ -102,11 +133,18 @@ fn lines(path: &Path) -> Vec<String> {
         .collect()
 }
 
-fn methods(transcript: &Path) -> Vec<String> {
+fn requests(transcript: &Path) -> Vec<serde_json::Value> {
     lines(transcript)
         .iter()
-        .map(|line| {
-            serde_json::from_str::<serde_json::Value>(line).expect("request json")["method"]
+        .map(|line| serde_json::from_str(line).expect("request json"))
+        .collect()
+}
+
+fn methods(transcript: &Path) -> Vec<String> {
+    requests(transcript)
+        .iter()
+        .map(|request| {
+            request["method"]
                 .as_str()
                 .expect("method name")
                 .to_string()
@@ -114,65 +152,272 @@ fn methods(transcript: &Path) -> Vec<String> {
         .collect()
 }
 
+fn requests_for(transcript: &Path, method: &str) -> Vec<serde_json::Value> {
+    requests(transcript)
+        .into_iter()
+        .filter(|request| request["method"] == method)
+        .collect()
+}
+
+struct Ran {
+    stdout: String,
+    stderr: String,
+    output: Output,
+    elapsed: Duration,
+}
+
+fn run_keeper_timed(tree: &Tree, mode: &str, extra: &[(&str, &str)]) -> Ran {
+    let started = Instant::now();
+    let output = run_keeper_with(tree, mode, extra);
+    Ran {
+        elapsed: started.elapsed(),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        output,
+    }
+}
+
+/// Repair 4's proof: the whole loop, end to end, over shapes the real door
+/// accepts — armed exit, status, claim, relaunching transition, relaunch, and a
+/// successor the House saw verify.
 #[test]
-fn relaunches_omp_once_and_then_exits_on_an_empty_status() {
+fn the_full_loop_runs_from_an_armed_exit_to_a_verified_successor() {
     let tree = tree();
-    let output = run_keeper(&tree, "relaunch-once");
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let ran = run_keeper_timed(&tree, "full-loop", &[]);
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
     assert!(
-        output.status.success(),
-        "keeper must exit cleanly: {:?}\nstdout: {stdout}\nstderr: {stderr}",
-        output.status.code()
+        ran.output.status.success(),
+        "the loop must close cleanly: {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        ran.output.status.code()
     );
     assert_eq!(
         methods(&tree.transcript),
         [
+            // the 87 exit: the keeper asks the House what happened
             "restart_status",
             "restart_claim",
+            // -> relaunching, then omp is started again
             "restart_transition",
-            "restart_status"
+            // the House's own relaunching window for this attempt
+            "restart_status",
+            // the intent left the pending set: the successor verified
+            "restart_status",
+            // the successor's own exit, with nothing pending behind it
+            "restart_status",
         ],
-        "the keeper asks status for every exit, claims, transitions, then asks again"
+        "the full loop asks, claims, transitions, relaunches, watches for the verify, then stops"
     );
-    assert_eq!(lines(&tree.runs).len(), 2, "omp ran twice: {stdout}");
+    assert_eq!(
+        lines(&tree.runs).len(),
+        2,
+        "omp ran twice: the armed exit and the relaunch: {stdout}"
+    );
 
-    let transition = &lines(&tree.transcript)[2];
-    let transition: serde_json::Value = serde_json::from_str(transition).expect("transition json");
-    assert_eq!(transition["params"]["to"], "relaunching");
-    assert_eq!(transition["params"]["intentId"], "intent-1");
-    assert_eq!(transition["params"]["claimToken"], "claim-token-1");
-    assert_eq!(transition["protocol"], 1);
-
-    let claim = &lines(&tree.transcript)[1];
-    let claim: serde_json::Value = serde_json::from_str(claim).expect("claim json");
+    let claim = &requests_for(&tree.transcript, "restart_claim")[0];
+    assert_eq!(
+        claim["params"]["intentId"], INTENT_ID,
+        "the keeper echoes the House's own intent id, canonical UUID and all"
+    );
     assert_eq!(claim["params"]["claimant"], "omp-keeper");
-    assert_eq!(claim["params"]["idempotencyKey"], "omp-keeper:claim:intent-1");
+    assert_eq!(
+        claim["params"]["idempotencyKey"],
+        format!("omp-keeper:claim:{INTENT_ID}")
+    );
     assert_eq!(
         claim["params"]["capability"], "smoke-capability",
         "the claim carries the provisioned capability, trimmed, from its file"
     );
-    assert!(
-        !stdout.contains("smoke-capability") && !stderr.contains("smoke-capability"),
-        "the capability never reaches the console"
-    );
 
+    let transition = &requests_for(&tree.transcript, "restart_transition")[0];
+    assert_eq!(transition["params"]["to"], "relaunching");
+    assert_eq!(transition["params"]["intentId"], INTENT_ID);
+    assert_eq!(
+        transition["params"]["claimToken"], CLAIM_TOKEN,
+        "the token goes back exactly as minted: 64 lowercase hex"
+    );
+    assert_eq!(transition["protocol"], 1);
+
+    assert!(
+        !stdout.contains("invalid_params") && !stderr.contains("invalid_params"),
+        "the fixture validates every request with the real door's validate(); a \
+         refusal here means the keeper speaks a shape the House rejects:\n{stdout}\n{stderr}"
+    );
     assert!(
         stdout.contains("armed exit hint"),
         "the 87 hint is reported: {stdout}"
     );
     assert!(
+        stdout.contains("saw the successor verify"),
+        "the operator learns the House itself witnessed the verify: {stdout}"
+    );
+    assert!(
         stdout.contains("no restart intent"),
-        "the second cycle stops on an empty status: {stdout}"
+        "the loop ends on an empty status: {stdout}"
+    );
+    assert!(
+        !stdout.contains("smoke-capability") && !stderr.contains("smoke-capability"),
+        "the capability never reaches the console"
+    );
+}
+
+/// Repair 1's proof: the intent's `exitingDeadlineAt` is an absolute instant. A
+/// keeper that starts its own 60-second stopwatch on first sight kills a minute
+/// late and never names the House's instant.
+#[test]
+fn an_exiting_child_is_killed_on_the_house_deadline_not_a_keeper_stopwatch() {
+    let tree = tree();
+    write_config(&tree, &[tree.program.display().to_string()], 1);
+    // the child overstays; the House's exiting deadline is already in the past
+    let ran = run_keeper_timed(
+        &tree,
+        "exiting-overrun",
+        &[("FAKE_OMP_SLEEP_SECS", "120"), ("FAKE_OMP_SLEEP_FROM_RUN", "1")],
+    );
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert!(
+        ran.elapsed < Duration::from_secs(20),
+        "a deadline already past must be obeyed at once, not restarted as a local \
+         60s clock (took {:?}):\n{stdout}\n{stderr}",
+        ran.elapsed
+    );
+    assert!(
+        stdout.contains("did not leave by"),
+        "the kill names the instant it obeyed: {stdout}"
+    );
+    assert!(
+        stdout.contains("the House deadline"),
+        "the console says which clock it obeyed: {stdout}"
+    );
+    assert_eq!(
+        methods(&tree.transcript),
+        ["restart_status", "restart_status"],
+        "one poll saw the overrun, one asked what to do after the kill"
+    );
+    assert_eq!(
+        lines(&tree.runs).len(),
+        1,
+        "nothing pending after the kill, so omp is not relaunched: {stdout}"
+    );
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "a killed child leaves a nonzero code and the keeper reports it: {stdout}"
+    );
+}
+
+/// Repair 2's proof: a successor that starts but never verifies inside the
+/// House's relaunching window is retried exactly once, then the intent is
+/// failed. Before this repair only a spawn *error* could retry, so a silent
+/// successor was waited on forever and the intent was left relaunching.
+#[test]
+fn a_successor_that_never_verifies_is_retried_once_and_then_failed() {
+    let tree = tree();
+    // run 1 arms the exit; every successor stays alive and never verifies
+    let ran = run_keeper_timed(
+        &tree,
+        "unverified",
+        &[("FAKE_OMP_SLEEP_SECS", "30"), ("FAKE_OMP_SLEEP_FROM_RUN", "2")],
+    );
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "an unverified restart is a failure:\n{stdout}\n{stderr}"
+    );
+    let transitions = requests_for(&tree.transcript, "restart_transition");
+    assert_eq!(
+        transitions.len(),
+        3,
+        "two relaunch attempts, each asking the House for its own window, then \
+         failed:\n{stdout}\n{stderr}"
+    );
+    assert_eq!(transitions[0]["params"]["to"], "relaunching");
+    assert_eq!(
+        transitions[1]["params"]["to"], "relaunching",
+        "the retry re-enters relaunching so the House mints a fresh window \
+         instead of the keeper inventing a second clock"
+    );
+    assert_eq!(transitions[2]["params"]["to"], "failed");
+    assert_eq!(transitions[2]["params"]["claimToken"], CLAIM_TOKEN);
+    assert!(
+        transitions[2]["params"]["detail"]
+            .as_str()
+            .expect("failure detail")
+            .contains("did not verify"),
+        "the failure says the successor never verified: {}",
+        transitions[2]
+    );
+    assert_eq!(
+        lines(&tree.runs).len(),
+        3,
+        "the armed exit, then two relaunch attempts: {stdout}"
+    );
+    assert!(
+        stderr.contains("relaunch attempt 1 failed") && stderr.contains("relaunch attempt 2 failed"),
+        "one retry is reported before giving up: {stderr}"
+    );
+    assert!(
+        stdout.contains("failed:relaunching") && stdout.contains("omp is not running"),
+        "the operator learns omp is gone: {stdout}"
+    );
+    assert!(
+        ran.elapsed < Duration::from_secs(60),
+        "the published window is seconds, so the give-up is prompt: {:?}",
+        ran.elapsed
     );
 }
 
 #[test]
+fn a_relaunch_that_cannot_start_retries_once_and_then_transitions_to_failed() {
+    let tree = tree();
+    let ran = run_keeper_timed(&tree, "relaunch-broken", &[]);
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "a failed relaunch is not success"
+    );
+    let transitions = requests_for(&tree.transcript, "restart_transition");
+    assert_eq!(
+        transitions.len(),
+        3,
+        "each attempt enters relaunching, then the budget is spent:\n{stdout}\n{stderr}"
+    );
+    assert_eq!(transitions[0]["params"]["to"], "relaunching");
+    assert_eq!(transitions[1]["params"]["to"], "relaunching");
+    assert_eq!(transitions[2]["params"]["to"], "failed");
+    assert_eq!(transitions[2]["params"]["claimToken"], CLAIM_TOKEN);
+    assert!(
+        transitions[2]["params"]["detail"]
+            .as_str()
+            .expect("failure detail")
+            .contains("could not start"),
+        "the failure carries its detail: {}",
+        transitions[2]
+    );
+    assert_eq!(lines(&tree.runs).len(), 1, "omp never came back: {stdout}");
+    assert!(
+        stderr.contains("relaunch attempt 1 failed") && stderr.contains("relaunch attempt 2 failed"),
+        "one retry is reported before giving up: {stderr}"
+    );
+    assert!(
+        stdout.contains("failed:relaunching") && stdout.contains("omp is not running"),
+        "the operator learns omp is gone: {stdout}"
+    );
+}
+
+/// Repair 5's proof, first door: a storm refusal on the very first ask ends the
+/// loop with the operator's line and never relaunches.
+#[test]
 fn a_storm_refusal_ends_the_loop_with_one_plain_message() {
     let tree = tree();
-    let output = run_keeper(&tree, "storm");
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    assert_eq!(output.status.code(), Some(1), "a refusal is not success");
+    let ran = run_keeper_timed(&tree, "storm", &[]);
+    let stdout = &ran.stdout;
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "a refusal is not success"
+    );
     assert_eq!(methods(&tree.transcript), ["restart_status"]);
     assert_eq!(
         lines(&tree.runs).len(),
@@ -189,44 +434,93 @@ fn a_storm_refusal_ends_the_loop_with_one_plain_message() {
     );
 }
 
+/// Repair 5's proof, second door: the refusal can also arrive mid-loop, on the
+/// keeper's own claim, after the House already showed a pending intent. That
+/// path ends the same way and, above all, never starts omp again.
 #[test]
-fn a_relaunch_that_cannot_start_retries_once_and_then_transitions_to_failed() {
+fn a_storm_refusal_on_the_claim_ends_the_loop_before_any_relaunch() {
     let tree = tree();
-    let output = run_keeper(&tree, "relaunch-broken");
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    assert_eq!(output.status.code(), Some(1), "a failed relaunch is not success");
+    let ran = run_keeper_timed(&tree, "storm-on-claim", &[]);
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "a refusal is not success:\n{stdout}\n{stderr}"
+    );
     assert_eq!(
         methods(&tree.transcript),
-        [
-            "restart_status",
-            "restart_claim",
-            "restart_transition",
-            "restart_transition"
-        ],
-        "the keeper transitions once to relaunching and once to failed"
-    );
-    let transitions = lines(&tree.transcript);
-    let relaunching: serde_json::Value =
-        serde_json::from_str(&transitions[2]).expect("relaunching json");
-    let failed: serde_json::Value = serde_json::from_str(&transitions[3]).expect("failed json");
-    assert_eq!(relaunching["params"]["to"], "relaunching");
-    assert_eq!(failed["params"]["to"], "failed");
-    assert_eq!(failed["params"]["claimToken"], "claim-token-1");
-    assert!(
-        failed["params"]["detail"]
-            .as_str()
-            .expect("failure detail")
-            .contains("relaunch failed twice"),
-        "the failure carries its detail: {failed}"
-    );
-    assert_eq!(lines(&tree.runs).len(), 1, "omp never came back: {stdout}");
-    assert!(
-        stderr.contains("relaunch attempt 1 failed") && stderr.contains("relaunch attempt 2 failed"),
-        "one retry is reported before giving up: {stderr}"
+        ["restart_status", "restart_claim"],
+        "the keeper stops at the refusal: no transition, no relaunch"
     );
     assert!(
-        stdout.contains("failed:relaunching") && stdout.contains("omp is not running"),
-        "the operator learns omp is gone: {stdout}"
+        requests_for(&tree.transcript, "restart_transition").is_empty(),
+        "a refused claim never transitions the intent"
+    );
+    assert_eq!(
+        lines(&tree.runs).len(),
+        1,
+        "omp is not started again after a storm refusal: {stdout}"
+    );
+    assert!(
+        stdout.contains("refused another restart") && stdout.contains("start it yourself"),
+        "the operator gets the same plain line wherever the refusal arrives: {stdout}"
+    );
+}
+
+/// Repair 3's territory: Sol's documented invocation is an npm shim, `omp.cmd`,
+/// and the review read `Command::new` as unable to start one. This drives the
+/// real thing, in the hardest shape the documented config can take: a shim in a
+/// directory whose name has a space, launched with an argument, with the console
+/// inherited and the exit code carried back.
+#[cfg(windows)]
+#[test]
+fn a_cmd_shim_launch_starts_omp_with_its_console_and_arguments_intact() {
+    let tree = tree();
+    // a space in the path is the case that breaks hand-rolled `cmd.exe /c` quoting
+    let directory = tree.root.join("npm shim");
+    fs::create_dir_all(&directory).expect("shim directory");
+    let shim = directory.join("omp.cmd");
+    fs::write(
+        &shim,
+        "@echo off\r\n\
+         echo run>>\"%FAKE_OMP_RUNS%\"\r\n\
+         echo fake omp cmd: arming an exit %1\r\n\
+         exit /b 87\r\n",
+    )
+    .expect("cmd shim");
+    write_config(
+        &tree,
+        &[shim.display().to_string(), "--resume".to_string()],
+        0,
+    );
+
+    let ran = run_keeper_timed(&tree, "no-intent", &[]);
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert!(
+        ran.output.status.success(),
+        "the documented .cmd invocation must start: {:?}\nstdout: {stdout}\nstderr: {stderr}",
+        ran.output.status.code()
+    );
+    assert!(
+        stdout.contains("fake omp cmd: arming an exit"),
+        "the shim's own console output is inherited, not swallowed: {stdout}"
+    );
+    assert!(
+        stdout.contains("--resume"),
+        "the launch arguments reach the shim through the command processor: {stdout}"
+    );
+    assert!(
+        stdout.contains("omp exited 87"),
+        "the shim's exit code reaches the keeper: {stdout}"
+    );
+    assert_eq!(
+        lines(&tree.runs).len(),
+        1,
+        "the shim ran once, with the keeper's environment: {stdout}"
+    );
+    assert_eq!(
+        methods(&tree.transcript),
+        ["restart_status"],
+        "nothing pending, so the keeper asks once and stops"
     );
 }

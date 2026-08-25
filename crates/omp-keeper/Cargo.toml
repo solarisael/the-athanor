@@ -14,6 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+# absolute House instants: restart_status publishes RFC3339 text, the keeper compares it to now
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # the restart wire vocabulary: states, params, receipts (src/protocol.rs adds only the keeper's JSONL envelope)

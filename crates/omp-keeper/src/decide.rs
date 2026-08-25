@@ -1,4 +1,6 @@
-use crate::protocol::{ARMED_EXIT_CODE, RestartState};
+use crate::clock::Deadline;
+use crate::protocol::{ARMED_EXIT_CODE, RestartState, RestartStatusIntent};
+use chrono::{DateTime, Utc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusStep {
@@ -18,6 +20,13 @@ pub enum RelaunchAction {
     Fail,
 }
 
+/// Whether the House has seen the successor prove itself yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerifyWatch {
+    Waiting,
+    Verified,
+}
+
 /// The 87 exit is the fast-path hint only; the keeper asks restart_status for every exit code.
 pub fn armed_exit_hint(exit_code: Option<i32>) -> bool {
     exit_code == Some(ARMED_EXIT_CODE)
@@ -31,12 +40,20 @@ pub fn status_step(pending_state: Option<RestartState>) -> StatusStep {
     }
 }
 
+/// Kill an `exiting` child once the deadline carried on its intent has passed.
+///
+/// The deadline is an instant, never a stopwatch. A keeper that starts looking
+/// after the adapter already armed is late on its first look and must act on it,
+/// which is exactly what a fresh local clock hides.
 pub fn exiting_action(
     pending_state: Option<RestartState>,
-    elapsed_secs: u64,
-    deadline_secs: u64,
+    deadline: Option<Deadline>,
+    now: DateTime<Utc>,
 ) -> ExitingAction {
-    if pending_state == Some(RestartState::Exiting) && elapsed_secs > deadline_secs {
+    let Some(deadline) = deadline else {
+        return ExitingAction::Wait;
+    };
+    if pending_state == Some(RestartState::Exiting) && deadline.has_passed(now) {
         ExitingAction::Kill
     } else {
         ExitingAction::Wait
@@ -53,10 +70,45 @@ pub fn relaunch_action(failed_attempts: i32, attempt_limit: i32) -> RelaunchActi
     }
 }
 
+/// Has the successor verified?
+///
+/// `restart_status` reports only the pending states — requested, exiting,
+/// claimed, relaunching (house-substrate/src/restart/mod.rs:628-634) — so a
+/// verified intent reads as absent and never as the word `verified`. The keeper
+/// therefore observes verification as its own intent leaving the pending set.
+/// `failed` leaves that set too, but only the keeper writes `failed`, and while
+/// it is still waiting it has not.
+pub fn verify_watch(intent_id: &str, pending: Option<&RestartStatusIntent>) -> VerifyWatch {
+    match pending {
+        Some(pending) if pending.intent_id == intent_id => VerifyWatch::Waiting,
+        _ => VerifyWatch::Verified,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::EXITING_DEADLINE_SECS;
+    use crate::clock::house_instant;
+    use crate::protocol::{RestartStatusDeadlines, RestartStatusIntent};
+    use house_protocol::restart::RestartMode;
+
+    fn at(text: &str) -> DateTime<Utc> {
+        house_instant(text).expect("a readable instant")
+    }
+
+    fn intent(intent_id: &str, state: RestartState) -> RestartStatusIntent {
+        RestartStatusIntent {
+            intent_id: intent_id.to_string(),
+            state,
+            mode: RestartMode::Resume,
+            session_id: None,
+            deadlines: RestartStatusDeadlines {
+                expires_at: "2026-08-25T18:05:00+00:00".to_string(),
+                exiting_deadline_at: None,
+                relaunching_deadline_at: None,
+            },
+        }
+    }
 
     #[test]
     fn the_armed_exit_code_is_the_only_hint() {
@@ -91,21 +143,35 @@ mod tests {
         assert_eq!(status_step(None), StatusStep::Stop);
     }
 
+    /// The mutation this kills: measuring the stage from the keeper's first sight
+    /// of `exiting` instead of reading the instant on the intent. Under a
+    /// stopwatch every one of these deadlines is "just started".
     #[test]
-    fn only_an_exiting_intent_past_its_deadline_escalates_to_kill() {
-        let deadline = EXITING_DEADLINE_SECS;
+    fn an_exiting_intent_is_killed_by_the_instant_on_the_intent_not_by_elapsed_time() {
+        let deadline = Deadline::House(at("2026-08-25T18:01:00Z"));
         assert_eq!(
-            exiting_action(Some(RestartState::Exiting), deadline + 1, deadline),
+            exiting_action(Some(RestartState::Exiting), Some(deadline), at("2026-08-25T18:01:01Z")),
             ExitingAction::Kill
         );
+        // an hour late is still late, however long this keeper has been looking
         assert_eq!(
-            exiting_action(Some(RestartState::Exiting), deadline, deadline),
+            exiting_action(Some(RestartState::Exiting), Some(deadline), at("2026-08-25T19:00:00Z")),
+            ExitingAction::Kill
+        );
+        // standing exactly on the instant is not past it
+        assert_eq!(
+            exiting_action(Some(RestartState::Exiting), Some(deadline), at("2026-08-25T18:01:00Z")),
             ExitingAction::Wait
         );
         assert_eq!(
-            exiting_action(Some(RestartState::Exiting), 0, deadline),
+            exiting_action(Some(RestartState::Exiting), Some(deadline), at("2026-08-25T18:00:59Z")),
             ExitingAction::Wait
         );
+    }
+
+    #[test]
+    fn no_state_but_exiting_ever_escalates_to_kill() {
+        let long_past = Deadline::House(at("2020-01-01T00:00:00Z"));
         for state in [
             RestartState::Requested,
             RestartState::Claimed,
@@ -115,27 +181,21 @@ mod tests {
             RestartState::Failed,
         ] {
             assert_eq!(
-                exiting_action(Some(state), deadline + 600, deadline),
+                exiting_action(Some(state), Some(long_past), Utc::now()),
                 ExitingAction::Wait,
                 "state {} must never escalate to kill",
                 state.as_str()
             );
         }
         assert_eq!(
-            exiting_action(None, deadline + 600, deadline),
-            ExitingAction::Wait
-        );
-    }
-
-    #[test]
-    fn a_zero_deadline_still_needs_a_full_second_of_overrun() {
-        assert_eq!(
-            exiting_action(Some(RestartState::Exiting), 0, 0),
-            ExitingAction::Wait
+            exiting_action(None, Some(long_past), Utc::now()),
+            ExitingAction::Wait,
+            "no pending intent is no licence to kill Sol's session"
         );
         assert_eq!(
-            exiting_action(Some(RestartState::Exiting), 1, 0),
-            ExitingAction::Kill
+            exiting_action(Some(RestartState::Exiting), None, Utc::now()),
+            ExitingAction::Wait,
+            "no deadline in hand is no licence either"
         );
     }
 
@@ -151,5 +211,41 @@ mod tests {
         assert_eq!(relaunch_action(1, 1), RelaunchAction::Fail);
         assert_eq!(relaunch_action(0, 0), RelaunchAction::Fail);
         assert_eq!(relaunch_action(0, -1), RelaunchAction::Fail);
+    }
+
+    /// The mutation this kills: waiting for the literal word `verified` on the
+    /// wire, which `restart_status` never says, so the keeper would wait forever
+    /// on a successor that already proved itself.
+    #[test]
+    fn verification_is_the_intent_leaving_the_pending_set() {
+        let ours = "3f6b9c2a-7d41-4e58-9a0b-1c8e5d2f4a67";
+        assert_eq!(
+            verify_watch(ours, Some(&intent(ours, RestartState::Relaunching))),
+            VerifyWatch::Waiting,
+            "still relaunching means still unproven"
+        );
+        assert_eq!(
+            verify_watch(ours, None),
+            VerifyWatch::Verified,
+            "gone from the pending read is the only way a verify shows up"
+        );
+        assert_eq!(
+            verify_watch(ours, Some(&intent("8c1d0e4f-2a3b-4c5d-9e6f-7a8b9c0d1e2f", RestartState::Requested))),
+            VerifyWatch::Verified,
+            "a different intent is not ours to wait on"
+        );
+        // our own id in any pending state is still ours, and still unproven
+        for state in [
+            RestartState::Requested,
+            RestartState::Exiting,
+            RestartState::Claimed,
+        ] {
+            assert_eq!(
+                verify_watch(ours, Some(&intent(ours, state))),
+                VerifyWatch::Waiting,
+                "our intent still pending as {} is not a verify",
+                state.as_str()
+            );
+        }
     }
 }

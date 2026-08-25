@@ -23,22 +23,24 @@ the exact implementation record.
 ### Added
 
 - The OMP adapter now exposes `request_restart`, the exit door for its own
-  session. The tool refuses unless `restart_status` already reports a pending
-  consented intent for the workspace. The refusal names the missing prerequisite
-  and shows how to create the intent. Before it arms, the tool reports what dies
-  with the exit: every open Rust transport, and every hub job that does not
-  persist. The armed exit fires at `agent_end`, never inside a turn. It moves the
-  intent to `exiting`, then leaves omp with code 87 for the keeper. A refused
-  transition stands the exit down and keeps the session alive.
+  session. The tool refuses unless `restart_status` already reports a requested
+  intent for the workspace. The refusal names the missing prerequisite and shows
+  how to create the intent. A claimed intent also refuses, because only a
+  requested intent may exit. Before it arms, the tool reports what dies with the
+  exit: every open Rust transport, and every hub job that does not persist. The
+  armed exit fires at `agent_end`, never inside a turn. It moves the intent to
+  `exiting`, then leaves omp with code 87 for the keeper. A refused transition
+  stands the exit down, names the substrate's code, and keeps the session alive.
 - The installed loader now hands the resolved release to the adapter entry. The
   arm report names that loaded release, so a session can show `installed` against
   `loaded`.
+- The adapter holds no keeper claim token, and it needs none. The `requested` to
+  `exiting` transition is tokenless and adapter-initiated. The intent id is the
+  proof, because only the House hands one out. The adapter's identity rides as
+  JSON in `detail`, trimmed to the substrate's 2048-byte ceiling.
 
 ### Known ceilings
 
-- The adapter holds no keeper claim token. It requests the `exiting` transition
-  with the intent id and its own session identity instead. The substrate may
-  refuse that request while the token fence stands.
 - The adapter cannot enumerate hub jobs from inside the running session. The arm
   report names the casualty class and marks it as not enumerable.
 

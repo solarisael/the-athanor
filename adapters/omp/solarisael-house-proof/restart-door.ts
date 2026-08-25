@@ -15,8 +15,17 @@ export const ARMED_EXIT_CODE = 87;
 
 // A restart intent exists only because restart_request accepted a consentSource,
 // so a pending intent is a consented intent; the door needs no second consent
-// field. An intent already past claimed is spoken for and never arms again.
-const ARMABLE_STATES = new Set(["requested", "claimed"]);
+// field. Only a `requested` intent may reach exiting: the substrate refuses a
+// claimed one with exit_not_requested (Kodo's amendment, 2026-08-25), so arming
+// on claimed would buy a refusal at agent_end instead of a restart.
+// These spellings answer to house_protocol::restart, which no TypeScript door
+// can import; that crate stays the authority if the two ever disagree.
+const ARMABLE_STATES = new Set(["requested"]);
+
+// The substrate caps `detail` at 2048 bytes and requires it non-empty on
+// to="exiting". The identity rides as JSON inside it, so the reason is the only
+// free-text field and it is the field that gets trimmed.
+const DETAIL_LIMIT_BYTES = 2048;
 
 const MISSING_PREREQUISITE = "restart_status";
 
@@ -165,6 +174,28 @@ function loadedRelease(release: LoadedRelease) {
   };
 }
 
+// The adapter proves itself to the substrate by naming the intent id the House
+// handed out; this blob says who is leaving, and the substrate stores it as the
+// transition event's only account of the exit. It must stay inside the byte
+// ceiling, so the operator's reason yields before the identity does.
+function exitDetail(exit: ArmedExit): string {
+  const identity = {
+    source: "omp-adapter",
+    session: exit.session,
+    room: exit.room,
+    spirit: exit.spirit,
+    workspace: exit.workspace,
+    mode: exit.mode,
+    exitCode: ARMED_EXIT_CODE,
+  };
+  const budget = DETAIL_LIMIT_BYTES - Buffer.byteLength(JSON.stringify({ ...identity, reason: "" }));
+  let reason = exit.reason;
+  while (Buffer.byteLength(reason) > budget) {
+    reason = reason.slice(0, Math.max(0, Math.floor(reason.length * 0.9) - 1));
+  }
+  return JSON.stringify({ ...identity, reason });
+}
+
 export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
   const z = pi.zod;
   const exitProcess = deps.exit ?? ((code: number) => process.exit(code));
@@ -215,9 +246,12 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
 
       const state = text(intent.state);
       if (!ARMABLE_STATES.has(state)) {
+        // Refused here, at the tool, rather than at agent_end: the substrate
+        // would answer exit_not_requested long after the turn ended, where the
+        // operator can no longer see why nothing happened.
         return refuse(
           "intent_not_armable",
-          `request_restart refuses: the intent for this workspace is ${state || "in an unreported state"}, not pending`,
+          `request_restart refuses: the intent for this workspace is ${state || "in an unreported state"}, and only a requested intent may exit`,
           { missingPrerequisite: MISSING_PREREQUISITE, intentId: intentId(intent), state, workspace },
         );
       }
@@ -278,22 +312,23 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     // handshake cannot re-fire on the next agent_end.
     armed = null;
 
-    // DEVIATION (token fence): the contract fences restart_transition with the
-    // keeper's claimToken and this adapter never holds one, so the door names
-    // the intent and carries its own session identity inside `detail` — the
-    // params struct denies unknown fields, so a new identity param would be
-    // refused outright. The substrate may still refuse this unfenced request.
+    // No claimToken: requested -> exiting is tokenless and adapter-initiated,
+    // and the substrate refuses this transition if a token is present at all.
+    // The intent id is the proof, because only the House ever hands one out.
     const receipt = await deps.requestDomain("restart_transition", {
       intentId: exit.intentId,
       to: "exiting",
-      detail: `omp adapter armed exit; session=${exit.session}; room=${exit.room}; spirit=${exit.spirit}; mode=${exit.mode}; reason=${exit.reason}`,
+      detail: exitDetail(exit),
     }, undefined, true);
 
     if (receipt?.ok === false) {
       // A refused transition means the keeper never saw `exiting`, so the
       // session stays alive instead of dying on a substrate hiccup. The intent
-      // stays pending and the operator can arm again.
-      ctx?.ui?.notify?.("Athanor restart exit stood down: the intent never reached exiting.", "warning");
+      // stays pending and the operator can arm again. The substrate's own code
+      // travels into the notice: exit_not_requested, unknown_intent, and
+      // invalid_params each mean a different repair.
+      const code = text(receipt.code) || "refused";
+      ctx?.ui?.notify?.(`Athanor restart exit stood down (${code}): the intent never reached exiting.`, "warning");
       return;
     }
 

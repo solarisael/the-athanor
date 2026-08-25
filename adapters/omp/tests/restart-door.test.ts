@@ -63,7 +63,7 @@ const PENDING_INTENT = {
   ok: true,
   intent: {
     intentId: "intent-4711",
-    state: "claimed",
+    state: "requested",
     mode: "resume",
     sessionId: "session-under-restart",
     deadlines: { exiting: 60, relaunching: 120 },
@@ -174,6 +174,39 @@ describe("adapter exit door", () => {
     expect(result.details.state).toBe("exiting");
   });
 
+  // The keeper's claim is not an invitation to exit: the substrate answers
+  // exit_not_requested for a claimed intent, and it answers at agent_end, long
+  // after the operator could see why the session simply carried on.
+  test("refuses a claimed intent at the tool instead of arming a doomed exit", async () => {
+    const door = buildDoor({
+      status: { ok: true, intent: { intentId: "intent-9", state: "claimed", mode: "resume" } },
+    });
+
+    const result = await callTool(door);
+    await door.agentEnd();
+    await settle();
+
+    expect(result.details.code).toBe("intent_not_armable");
+    expect(result.details.error).toContain("only a requested intent may exit");
+    expect(door.calls.map((call) => call.method)).toEqual(["restart_status"]);
+    expect(door.exits).toEqual([]);
+  });
+
+  test("keeps detail inside the substrate byte ceiling without losing the identity", async () => {
+    const door = buildDoor();
+
+    await callTool(door, { mode: "resume", reason: "\u00e9".repeat(4000) });
+    await door.agentEnd();
+
+    const detail = String(door.calls[1]!.params.detail);
+    // Multi-byte on purpose: a length-based clamp would pass this and still
+    // hand the substrate an over-budget payload.
+    expect(Buffer.byteLength(detail)).toBeLessThanOrEqual(2048);
+    const parsed = JSON.parse(detail);
+    expect(parsed.session).toBe("session-under-restart");
+    expect(parsed.reason.length).toBeGreaterThan(0);
+  });
+
   test("refuses a mode the pending intent does not carry", async () => {
     const door = buildDoor();
 
@@ -210,7 +243,7 @@ describe("adapter exit door", () => {
     expect(result.details.armed).toBe(true);
     expect(result.details.firesAt).toBe("agent_end");
     expect(result.details.exitCode).toBe(ARMED_EXIT_CODE);
-    expect(result.details.intent).toMatchObject({ intentId: "intent-4711", state: "claimed", mode: "resume" });
+    expect(result.details.intent).toMatchObject({ intentId: "intent-4711", state: "requested", mode: "resume" });
     expect(result.details.loadedRelease).toEqual({ releaseId: "0.9.3-abc", previousReleaseId: "0.9.2-def" });
 
     expect(result.details.dies.hubJobs.enumerable).toBe(true);
@@ -247,7 +280,16 @@ describe("adapter exit door", () => {
     expect(transition.write).toBe(true);
     expect(transition.params.intentId).toBe("intent-4711");
     expect(transition.params.to).toBe("exiting");
-    expect(String(transition.params.detail)).toContain("session-under-restart");
+    // The identity rides as JSON in detail, and no claimToken may be present:
+    // the substrate refuses a tokenful requested -> exiting outright.
+    expect(transition.params.claimToken).toBeUndefined();
+    const detail = JSON.parse(String(transition.params.detail));
+    expect(detail).toMatchObject({
+      source: "omp-adapter",
+      session: "session-under-restart",
+      mode: "resume",
+      exitCode: ARMED_EXIT_CODE,
+    });
 
     await settle();
     expect(door.exits).toEqual([ARMED_EXIT_CODE]);

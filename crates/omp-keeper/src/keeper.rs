@@ -6,9 +6,9 @@ use crate::decide::{
 };
 use crate::protocol::{
     EXITING_DEADLINE_SECS, METHOD_RESTART_CLAIM, METHOD_RESTART_STATUS, METHOD_RESTART_TRANSITION,
-    ProtocolErrorBody, RestartClaimParams, RestartClaimReceipt, RestartState, RestartStatusIntent,
-    RestartStatusParams, RestartStatusReceipt, RestartTransitionParams, RestartTransitionReceipt,
-    RestartTransitionTarget,
+    ProtocolErrorBody, RestartClaimParams, RestartClaimReceipt, RestartMode, RestartState,
+    RestartStatusIntent, RestartStatusParams, RestartStatusReceipt, RestartTransitionParams,
+    RestartTransitionReceipt, RestartTransitionTarget,
 };
 use crate::resolve::resolve_substrate_exe;
 use crate::session::{Answer, SubstrateSession};
@@ -225,7 +225,7 @@ fn attempt_relaunch(
     pending: &RestartStatusIntent,
     last_window: &mut Option<Deadline>,
 ) -> Result<Attempt> {
-    let mut child = match spawn_omp(config, Some(&pending.intent_id)) {
+    let mut child = match spawn_omp(config, Some(pending)) {
         Ok(child) => child,
         Err(error) => return Ok(Attempt::Failed(format!("{error:#}"))),
     };
@@ -427,10 +427,10 @@ fn ask_status(
     }
 }
 
-fn spawn_omp(config: &KeeperConfig, restart_intent_id: Option<&str>) -> Result<Child> {
+fn spawn_omp(config: &KeeperConfig, restart: Option<&RestartStatusIntent>) -> Result<Child> {
     // Console-inheriting on purpose: Sol watches this child, so no detach and no
-    // hidden window. The relaunch carries the one intent the successor must
-    // verify; the initial child explicitly drops any stale inherited value.
+    // hidden window. The initial child drops stale restart state. A successor
+    // receives the exact intent and session selector the House recorded.
     let mut command = Command::new(config.program());
     command
         .env_remove(RESTART_INTENT_ENV)
@@ -439,8 +439,15 @@ fn spawn_omp(config: &KeeperConfig, restart_intent_id: Option<&str>) -> Result<C
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(intent_id) = restart_intent_id {
-        command.env(RESTART_INTENT_ENV, intent_id);
+    if let Some(intent) = restart {
+        command.env(RESTART_INTENT_ENV, &intent.intent_id);
+        if intent.mode == RestartMode::Resume {
+            if let Some(session_id) = intent.session_id.as_deref() {
+                command.arg("--resume").arg(session_id);
+            } else {
+                command.arg("--continue");
+            }
+        }
     }
     command
         .spawn()

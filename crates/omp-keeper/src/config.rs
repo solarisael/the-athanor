@@ -53,12 +53,18 @@ fn default_watch_interval_secs() -> u64 {
 
 impl KeeperConfig {
     pub fn validate(&self) -> Result<()> {
-        let (program, _) = self
+        let (program, arguments) = self
             .omp_launch
             .split_first()
             .context("ompLaunch must name the omp program and its arguments")?;
         if program.trim().is_empty() {
             bail!("ompLaunch first entry must name the omp program");
+        }
+        if arguments.iter().any(|argument| {
+            matches!(argument.as_str(), "--continue" | "-c" | "--resume" | "-r")
+                || argument.starts_with("--resume=")
+        }) {
+            bail!("ompLaunch must not select a session; the keeper applies resume or fresh mode");
         }
         if self.workspace.trim().is_empty() {
             bail!("workspace must name the omp workspace path");
@@ -189,7 +195,7 @@ mod tests {
     const CAPABILITY_LINE: &str = "\"capabilityPath\": \"D:/ProgramData/keeper.capability\"";
 
     const MINIMAL: &str = r#"{
-        "ompLaunch": ["C:/Program Files/omp/omp.exe", "--resume"],
+        "ompLaunch": ["C:/Program Files/omp/omp.exe"],
         "workspace": "C:/Solarisael/Obsidian/obsidian/kodo",
         "programRoot": "C:/Program Files/The Athanor",
         "stateRoot": "C:/Solarisael/Obsidian/obsidian/house/state",
@@ -204,7 +210,7 @@ mod tests {
     fn parses_the_minimal_config_and_applies_defaults() {
         let config = parse(MINIMAL).expect("minimal config parses");
         assert_eq!(config.program(), "C:/Program Files/omp/omp.exe");
-        assert_eq!(config.program_args(), ["--resume"]);
+        assert!(config.program_args().is_empty());
         assert_eq!(config.workspace, "C:/Solarisael/Obsidian/obsidian/kodo");
         assert_eq!(
             config.program_root,
@@ -235,6 +241,18 @@ mod tests {
         let text = MINIMAL.replace("\"workspace\"", "\"workSpace\"");
         let error = parse(&text).expect_err("unknown field refuses");
         assert!(format!("{error:#}").contains("not valid keeper JSON"));
+    }
+
+    #[test]
+    fn refuses_session_selection_in_the_base_launch() {
+        for selector in ["--continue", "-c", "--resume", "-r", "--resume=session"] {
+            let text = MINIMAL.replace(
+                "[\"C:/Program Files/omp/omp.exe\"]",
+                &format!("[\"C:/Program Files/omp/omp.exe\", \"{selector}\"]"),
+            );
+            let error = parse(&text).expect_err("keeper owns the session selector");
+            assert!(format!("{error:#}").contains("must not select a session"));
+        }
     }
 
     #[test]
@@ -296,7 +314,7 @@ mod tests {
 
     #[test]
     fn refuses_an_empty_launch_and_a_blank_program() {
-        let empty = MINIMAL.replace("[\"C:/Program Files/omp/omp.exe\", \"--resume\"]", "[]");
+        let empty = MINIMAL.replace("[\"C:/Program Files/omp/omp.exe\"]", "[]");
         let error = parse(&empty).expect_err("empty ompLaunch refuses");
         assert!(format!("{error:#}").contains("ompLaunch must name"));
 

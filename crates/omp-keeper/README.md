@@ -49,7 +49,7 @@ Example:
 
 ```json
 {
-  "ompLaunch": ["C:/Users/Sol/AppData/Roaming/npm/omp.cmd", "--resume"],
+  "ompLaunch": ["C:/Users/Administrador/.bun/bin/omp.exe"],
   "workspace": "C:/Solarisael/Obsidian/obsidian/kodo",
   "programRoot": "C:/Program Files/Solarisael/Athanor",
   "stateRoot": "C:/Solarisael/Obsidian/obsidian/house/state",
@@ -138,8 +138,9 @@ Deadlines and refusals:
   window the keeper invents is time the House never granted.
 - The idempotency key for a claim is `<claimant>:claim:<intentId>`. A repeated
   claim for one intent carries the same key.
-- `resume` mode and `fresh` mode start the same command. omp resumes its own
-  sessions. The House owns the paper-boat condition for `fresh` mode.
+- `ompLaunch` is the base command and carries no session selector.
+- `resume` appends `--resume <sessionId>` from the intent.
+- `fresh` adds no selector after the adapter confirms a paper boat.
 
 ## The ceilings
 

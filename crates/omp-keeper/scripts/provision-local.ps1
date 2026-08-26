@@ -30,6 +30,11 @@ if (-not (Test-Path $RoomDir -PathType Container)) {
 if (-not (Test-Path $OmpProgram -PathType Leaf)) {
     throw "OMP program does not exist: $OmpProgram"
 }
+foreach ($argument in $OmpArgs) {
+    if ($argument -in @("--continue", "-c", "--resume", "-r") -or $argument.StartsWith("--resume=")) {
+        throw "OmpArgs must not select a session; the keeper applies resume or fresh mode"
+    }
+}
 $keeper = Join-Path $ProgramRoot "bin/omp-keeper.exe"
 if (-not (Test-Path $keeper -PathType Leaf)) {
     $currentPath = Join-Path $ProgramRoot "current.json"

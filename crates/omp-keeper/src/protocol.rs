@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 pub use house_protocol::PROTOCOL_VERSION;
 pub use house_protocol::restart::{
-    RestartClaimParams, RestartClaimReceipt, RestartState, RestartStatusDeadlines,
+    RestartClaimParams, RestartClaimReceipt, RestartMode, RestartState, RestartStatusDeadlines,
     RestartStatusIntent, RestartStatusParams, RestartStatusReceipt, RestartTransitionParams,
     RestartTransitionReceipt, RestartTransitionTarget,
 };

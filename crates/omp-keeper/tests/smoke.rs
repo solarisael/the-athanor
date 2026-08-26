@@ -18,6 +18,7 @@ const RELEASE_VERSION: &str = "0.0.0-smoke";
 /// hex are the only shapes the real door's `validate()` accepts, and asserting
 /// them here is what catches a keeper that mangles what the House handed it.
 const INTENT_ID: &str = "3f6b9c2a-7d41-4e58-9a0b-1c8e5d2f4a67";
+const SESSION_ID: &str = "session-1";
 const CLAIM_TOKEN: &str = "9f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d6035";
 
 struct Tree {
@@ -225,13 +226,13 @@ fn the_full_loop_runs_from_an_armed_exit_to_a_verified_successor() {
     );
     let launches = lines(&tree.runs);
     assert_eq!(
-        launches[0], "run none",
-        "the initial child carries no stale intent"
+        launches[0], "run none args none",
+        "the initial child carries no stale intent or session selector"
     );
     assert_eq!(
         launches[1],
-        format!("run {INTENT_ID}"),
-        "the relaunched successor receives the exact intent it must verify"
+        format!("run {INTENT_ID} args --resume|{SESSION_ID}"),
+        "the relaunched successor receives the exact intent and session it must verify"
     );
 
     let claim = &requests_for(&tree.transcript, "restart_claim")[0];
@@ -550,7 +551,7 @@ fn a_cmd_shim_launch_starts_omp_with_its_console_and_arguments_intact() {
     .expect("cmd shim");
     write_config(
         &tree,
-        &[shim.display().to_string(), "--resume".to_string()],
+        &[shim.display().to_string(), "--no-prewalk".to_string()],
         0,
     );
 
@@ -566,7 +567,7 @@ fn a_cmd_shim_launch_starts_omp_with_its_console_and_arguments_intact() {
         "the shim's own console output is inherited, not swallowed: {stdout}"
     );
     assert!(
-        stdout.contains("--resume"),
+        stdout.contains("--no-prewalk"),
         "the launch arguments reach the shim through the command processor: {stdout}"
     );
     assert!(

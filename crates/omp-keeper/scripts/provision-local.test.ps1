@@ -44,6 +44,14 @@ Set-Content (Join-Path $HolderDir $file) "fixture-secret"
 '@ | Set-Content $mock
 
     $provision = Join-Path $PSScriptRoot "provision-local.ps1"
+    $selectorFailure = $null
+    try {
+        & $provision -RoomDir $room -OmpProgram $omp -OmpArgs "--resume" -ProgramRoot $programRoot -SubstrateEnv $substrateEnv -CapabilityScript $mock
+    } catch {
+        $selectorFailure = $_.Exception.Message
+    }
+    Assert-True ($selectorFailure -like "*must not select a session*") "provisioning must refuse a caller-owned resume selector"
+    Assert-True (-not (Test-Path $log)) "selector refusal must happen before any capability write"
     $failure = $null
     try {
         & $provision -RoomDir $room -OmpProgram $omp -ProgramRoot $programRoot -SubstrateEnv $substrateEnv -CapabilityScript $mock

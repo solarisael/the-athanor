@@ -36,11 +36,10 @@
 //! capability at all.
 //!
 //! `requester_session` is one identifier kind and one only: the **harness
-//! session id**, the exact string the adapter's `hostSessionIdentity` yields —
-//! never a principal like `kodo:Kodo` or `service:kodo` (Kodo's ruling,
-//! 2026-08-25). The exit fence compares it byte for byte, and
-//! `restart_verify` demands a successor session that differs from it, so both
-//! doors are only honest while both sides name the same kind of thing.
+//! session id**, the exact string the adapter's `hostSessionIdentity` yields.
+//! Resume keeps that logical session id while the keeper creates a new process;
+//! fresh mode creates a different session. An attempt-scoped proof, minted only
+//! after the predecessor exits, distinguishes the process incarnation.
 //!
 //! ## Expiry is lazy
 //! An unclaimed request past its TTL is dead, and this plane runs no clock
@@ -52,11 +51,12 @@
 //! row no door touched.
 
 mod authority;
+mod proof;
 
 use crate::config::{AppError, ROOM_KEY_RE};
 use authority::{
     EXIT_CLASS, KEEPER_CLAIM_CLASS, REQUEST_CLASS, VERIFY_CLASS, require_capability,
-    require_requester_session, require_successor,
+    require_requester_session, require_successor_identity,
 };
 use chrono::{DateTime, Utc};
 use house_protocol::restart::{
@@ -64,6 +64,10 @@ use house_protocol::restart::{
     RestartRequestReceipt, RestartStageDeadlines, RestartState, RestartStatusDeadlines,
     RestartStatusIntent, RestartStatusParams, RestartStatusReceipt, RestartTransitionParams,
     RestartTransitionReceipt, RestartTransitionTarget, RestartVerifyParams, RestartVerifyReceipt,
+};
+use proof::{
+    clear as clear_successor_proof, require_current as require_successor_proof,
+    rotate as rotate_successor_proof,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -558,6 +562,7 @@ pub async fn restart_transition(
     }
 
     let claim_epoch: i64 = intent.try_get("claim_epoch")?;
+    let relaunch_attempts: i32 = intent.try_get("relaunch_attempts")?;
     let (reached, failed_stage, actor) = match request.to {
         RestartTransitionTarget::Exiting => {
             let room: String = intent.try_get("requester_room")?;
@@ -617,11 +622,26 @@ pub async fn restart_transition(
                 ));
             }
             let claimant: String = intent.try_get("claimant")?;
-            let relaunch_attempts: i32 = intent.try_get("relaunch_attempts")?;
             let (reached, failed_stage) =
                 keeper_move(&mut tx, &request, state, relaunch_attempts).await?;
             (reached, failed_stage, claimant)
         }
+    };
+    let successor_proof = match reached {
+        RestartState::Relaunching => Some(
+            rotate_successor_proof(
+                &mut tx,
+                &request.intent_id,
+                claim_epoch,
+                relaunch_attempts + 1,
+            )
+            .await?,
+        ),
+        RestartState::Failed => {
+            clear_successor_proof(&mut tx, &request.intent_id).await?;
+            None
+        }
+        _ => None,
     };
 
     insert_event(
@@ -640,7 +660,10 @@ pub async fn restart_transition(
     .await?;
     tx.commit().await?;
 
-    Ok(RestartTransitionReceipt { state: reached })
+    Ok(RestartTransitionReceipt {
+        state: reached,
+        successor_proof,
+    })
 }
 
 /// The keeper's half of a transition, after the lease fence passed. It writes
@@ -697,10 +720,10 @@ async fn keeper_move(
     Ok((RestartState::Failed, Some(stage)))
 }
 
-/// The successor session proves the restart worked, and proves it with the
-/// asking room's `restart_verify` secret: the intent id is public, so a silent
-/// divergence must not be signable by anyone who can read one. Legal from
-/// `relaunching` only, so the second verify of one intent refuses.
+/// The successor proves both parts of its return: the room capability names the
+/// room, and the current relaunch attempt's keeper-minted proof names the new
+/// process incarnation. Resume may therefore keep the logical session id
+/// without letting the predecessor sign its own return.
 pub async fn restart_verify(
     pool: &PgPool,
     request: RestartVerifyParams,
@@ -711,7 +734,8 @@ pub async fn restart_verify(
 
     let mut tx = pool.begin().await?;
     let intent = sqlx::query(
-        "SELECT state,claim_epoch,requester_room,requester_session FROM restart.intents WHERE intent_id=$1::text::uuid FOR UPDATE",
+        "SELECT state,claim_epoch,requester_room,requester_session,mode,session_id,relaunch_attempts,relaunching_deadline_at \
+         FROM restart.intents WHERE intent_id=$1::text::uuid FOR UPDATE",
     )
     .bind(&request.intent_id)
     .fetch_optional(&mut *tx)
@@ -726,19 +750,43 @@ pub async fn restart_verify(
     let claim_epoch: i64 = intent.try_get("claim_epoch")?;
     let requester_room: String = intent.try_get("requester_room")?;
     let requester_session: String = intent.try_get("requester_session")?;
+    let mode = mode_of(&intent.try_get::<String, _>("mode")?)?;
+    let recorded_session: Option<String> = intent.try_get("session_id")?;
+    let relaunch_attempt: i32 = intent.try_get("relaunch_attempts")?;
+    let relaunching_deadline: Option<DateTime<Utc>> = intent.try_get("relaunching_deadline_at")?;
+
     require_capability(&mut *tx, &requester_room, VERIFY_CLASS, &request.capability).await?;
-    require_successor(
-        &requester_room,
-        &requester_session,
-        &request.room,
-        &request.successor_session,
-    )?;
     if state != RestartState::Relaunching {
         return Err(refusal(
             "not_verifiable",
             "only a relaunching restart intent can be verified",
         ));
     }
+    let observed_at: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&mut *tx)
+        .await?;
+    if relaunching_deadline.is_none_or(|deadline| observed_at >= deadline) {
+        return Err(refusal(
+            "verify_expired",
+            "the relaunching window ended before the successor verified",
+        ));
+    }
+    require_successor_identity(
+        mode,
+        &requester_room,
+        &requester_session,
+        recorded_session.as_deref(),
+        &request.room,
+        &request.successor_session,
+    )?;
+    require_successor_proof(
+        &mut tx,
+        &request.intent_id,
+        claim_epoch,
+        relaunch_attempt,
+        &request.successor_proof,
+    )
+    .await?;
 
     sqlx::query(
         "UPDATE restart.intents SET state=$2,successor_session=$3,successor_room=$4,successor_spirit=$5,verified_at=NOW(),updated_at=NOW() WHERE intent_id=$1::text::uuid",
@@ -750,6 +798,7 @@ pub async fn restart_verify(
     .bind(&request.spirit)
     .execute(&mut *tx)
     .await?;
+    clear_successor_proof(&mut tx, &request.intent_id).await?;
     insert_event(
         &mut tx,
         &request.intent_id,

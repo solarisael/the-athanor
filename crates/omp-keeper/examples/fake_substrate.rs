@@ -36,9 +36,13 @@ use std::io::{BufRead, Write};
 const INTENT_ID: &str = "3f6b9c2a-7d41-4e58-9a0b-1c8e5d2f4a67";
 /// Another intent's id, for the mid-watch stranger.
 const STRANGER_INTENT_ID: &str = "8c1d0e4f-2a3b-4c5d-9e6f-7a8b9c0d1e2f";
+const SESSION_ID: &str = "session-1";
 /// 64 lowercase hex, because `hex_token` refuses anything else.
 const CLAIM_TOKEN: &str = "9f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d6035";
-const SESSION_ID: &str = "session-1";
+const SUCCESSOR_PROOF_ONE: &str =
+    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const SUCCESSOR_PROOF_TWO: &str =
+    "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
 // The contract's stage numbers, mirroring house-substrate's restart consts.
 const REQUESTED_TTL_SECS: i64 = 300;
@@ -198,7 +202,20 @@ fn answer(id: &str, method: &str, mode: &str, params: &Value, script: &mut Scrip
                 RestartTransitionTarget::Relaunching => RestartState::Relaunching,
                 RestartTransitionTarget::Failed => RestartState::Failed,
             };
-            result(id, &RestartTransitionReceipt { state: reached })
+            let successor_proof = (reached == RestartState::Relaunching).then(|| {
+                if script.relaunch_transitions == 1 {
+                    SUCCESSOR_PROOF_ONE.to_string()
+                } else {
+                    SUCCESSOR_PROOF_TWO.to_string()
+                }
+            });
+            result(
+                id,
+                &RestartTransitionReceipt {
+                    state: reached,
+                    successor_proof,
+                },
+            )
         }
         _ => refusal(id, "unknown_method", &format!("unknown method {method}")),
     }

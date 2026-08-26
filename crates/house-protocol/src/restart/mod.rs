@@ -22,7 +22,7 @@ const MAX_IDENTIFIER: usize = 256;
 const MAX_WORKSPACE: usize = 1024;
 const MAX_REASON: usize = 2048;
 const MAX_DETAIL: usize = 2048;
-/// A claim token is 32 random bytes, lowercase hex.
+/// A keeper lease or successor proof is 32 random bytes, lowercase hex.
 const CLAIM_TOKEN_HEX: usize = 64;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -323,6 +323,9 @@ impl RestartTransitionParams {
 pub struct RestartVerifyParams {
     pub intent_id: String,
     pub successor_session: String,
+    /// Minted for this relaunch attempt after the predecessor exited. The
+    /// successor presents it once; PostgreSQL stores only its sha256.
+    pub successor_proof: String,
     pub room: String,
     pub spirit: String,
     /// The successor room's provisioned `restart_verify` secret. The intent id
@@ -335,6 +338,7 @@ impl RestartVerifyParams {
     pub fn validate(&self) -> Result<(), String> {
         uuid_shaped(&self.intent_id, "intentId")?;
         bounded(&self.successor_session, "successorSession", MAX_IDENTIFIER)?;
+        hex_token(&self.successor_proof, "successorProof")?;
         bounded(&self.room, "room", MAX_IDENTIFIER)?;
         bounded(&self.spirit, "spirit", MAX_IDENTIFIER)?;
         bounded(&self.capability, "capability", MAX_IDENTIFIER)
@@ -395,6 +399,9 @@ pub struct RestartClaimReceipt {
 #[serde(rename_all = "camelCase")]
 pub struct RestartTransitionReceipt {
     pub state: RestartState,
+    /// Present only when this transition opened a relaunch attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successor_proof: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -441,6 +448,8 @@ mod tests {
 
     const INTENT: &str = "00000000-0000-0000-0000-000000000001";
     const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const SUCCESSOR_PROOF: &str =
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
     fn request_json() -> serde_json::Value {
         json!({
@@ -486,6 +495,13 @@ mod tests {
                 r#"{"intentId":"00000000-0000-0000-0000-000000000001","claimant":"omp-keeper","capability":"secret","idempotencyKey":"claim-1","extra":1}"#
             )
             .is_err()
+        );
+        assert!(
+            from_str::<RestartVerifyParams>(
+                r#"{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo","capability":"verify-secret"}"#
+            )
+            .is_err(),
+            "successor verification must carry its one-time proof"
         );
         assert!(
             from_str::<RestartStatusParams>(r#"{"workspace":"D:/w","limit":5}"#).is_err(),
@@ -636,6 +652,7 @@ mod tests {
         let verify = RestartVerifyParams {
             intent_id: INTENT.into(),
             successor_session: String::new(),
+            successor_proof: SUCCESSOR_PROOF.into(),
             room: "kodo".into(),
             spirit: "Kodo".into(),
             capability: "verify-secret".into(),
@@ -644,12 +661,54 @@ mod tests {
         let unfenced_verify = RestartVerifyParams {
             successor_session: "service:kodo-2".into(),
             capability: String::new(),
-            ..verify
+            ..verify.clone()
         };
         assert!(
             unfenced_verify.validate().is_err(),
-            "naming the intent id is not proof that the successor came back"
+            "naming the intent id and proof is not authority without the room capability"
         );
+        let short_proof = RestartVerifyParams {
+            successor_proof: "short".into(),
+            ..unfenced_verify.clone()
+        };
+        assert!(short_proof.validate().is_err());
+        let uppercase_proof = RestartVerifyParams {
+            successor_proof: SUCCESSOR_PROOF.to_ascii_uppercase(),
+            capability: "verify-secret".into(),
+            ..unfenced_verify
+        };
+        assert!(
+            uppercase_proof.validate().is_err(),
+            "a successor proof is canonical lowercase 64-hex"
+        );
+        let valid_verify = RestartVerifyParams {
+            successor_session: "service:kodo-2".into(),
+            capability: "verify-secret".into(),
+            ..verify
+        };
+        valid_verify.validate().unwrap();
+    }
+
+    #[test]
+    fn successor_proof_is_required_and_bounded_on_the_verify_wire() {
+        let mut value = json!({
+            "intentId": INTENT,
+            "successorSession": "service:kodo-2",
+            "successorProof": SUCCESSOR_PROOF,
+            "room": "kodo",
+            "spirit": "Kodo",
+            "capability": "verify-secret"
+        });
+        let parsed: RestartVerifyParams = serde_json::from_value(value.clone()).unwrap();
+        parsed.validate().unwrap();
+
+        value["successorProof"] = json!("f".repeat(65));
+        let oversized: RestartVerifyParams = serde_json::from_value(value.clone()).unwrap();
+        assert!(oversized.validate().is_err());
+
+        value["successorProof"] = json!(SUCCESSOR_PROOF.to_ascii_uppercase());
+        let uppercase: RestartVerifyParams = serde_json::from_value(value).unwrap();
+        assert!(uppercase.validate().is_err());
     }
 
     // Kills: a receipt that stops naming its state, or a status receipt that
@@ -679,6 +738,22 @@ mod tests {
                     "relaunchAttemptLimit": 2
                 }
             })
+        );
+        assert_eq!(
+            to_value(RestartTransitionReceipt {
+                state: RestartState::Relaunching,
+                successor_proof: Some(SUCCESSOR_PROOF.into()),
+            })
+            .unwrap(),
+            json!({"state": "relaunching", "successorProof": SUCCESSOR_PROOF})
+        );
+        assert_eq!(
+            to_value(RestartTransitionReceipt {
+                state: RestartState::Verified,
+                successor_proof: None,
+            })
+            .unwrap(),
+            json!({"state": "verified"})
         );
 
         let empty = RestartStatusReceipt {

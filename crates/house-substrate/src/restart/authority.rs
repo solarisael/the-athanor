@@ -16,6 +16,7 @@
 
 use super::{constant_time_equal, refusal, sha256_hex};
 use crate::config::AppError;
+use house_protocol::restart::RestartMode;
 use sqlx::{Executor, Postgres};
 
 /// The keeper's own principal row: it owns the terminal and impersonates no
@@ -77,19 +78,32 @@ pub(super) fn require_requester_session(
     }
 }
 
-/// The verify door's second fence: the successor belongs to the room that asked
-/// and is not the session that left. A restart nobody came back from must stay
-/// visible to Insula, so the predecessor cannot sign its own return.
-pub(super) fn require_successor(
+/// The successor's logical session identity depends on launch mode. Resume is
+/// the same harness session in a new process incarnation, so the requested,
+/// requesting, and returning session ids must agree. Fresh creates a different
+/// logical session. The attempt-scoped proof is checked separately after the
+/// intent row is locked.
+pub(super) fn require_successor_identity(
+    mode: RestartMode,
     requester_room: &str,
     requester_session: &str,
+    recorded_session: Option<&str>,
     request_room: &str,
     successor_session: &str,
 ) -> Result<(), AppError> {
-    if requester_room != request_room || requester_session == successor_session {
+    let session_matches_mode = match mode {
+        RestartMode::Resume => recorded_session.is_some_and(|recorded| {
+            constant_time_equal(recorded.as_bytes(), requester_session.as_bytes())
+                && constant_time_equal(recorded.as_bytes(), successor_session.as_bytes())
+        }),
+        RestartMode::Fresh => {
+            !constant_time_equal(requester_session.as_bytes(), successor_session.as_bytes())
+        }
+    };
+    if requester_room != request_room || !session_matches_mode {
         return Err(refusal(
             "verify_not_authorized",
-            "only a new session of the requesting room can verify this intent",
+            "the successor identity does not match this restart intent",
         ));
     }
     Ok(())
@@ -98,7 +112,7 @@ pub(super) fn require_successor(
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use house_protocol::restart::RestartMode;
     fn code(error: &AppError) -> &str {
         match error {
             AppError::Refusal { code, .. } => code,
@@ -120,18 +134,83 @@ mod tests {
         );
     }
 
-    // Kills: a verify door that lets a foreign room, or the very session that
-    // exited, sign the return — which would hide a real divergence from Insula.
-    // red-proof: drop either clause of the require_successor condition.
+    // Resume keeps the logical session identity, so the recorded session is
+    // required and must match exactly. Fresh mode must instead prove a new
+    // session; the room fence remains independent of that mode choice.
     #[test]
-    fn the_verify_fence_demands_a_new_session_of_the_asking_room() {
-        require_successor("kodo", "service:kodo", "kodo", "service:kodo-2").unwrap();
+    fn the_verify_fence_matches_mode_specific_session_identity() {
+        require_successor_identity(
+            RestartMode::Resume,
+            "kodo",
+            "service:kodo",
+            Some("service:kodo"),
+            "kodo",
+            "service:kodo",
+        )
+        .unwrap();
         assert_eq!(
-            code(&require_successor("kodo", "service:kodo", "tuner", "service:tuner").unwrap_err()),
+            code(
+                &require_successor_identity(
+                    RestartMode::Resume,
+                    "kodo",
+                    "service:kodo",
+                    Some("service:kodo"),
+                    "kodo",
+                    "service:kodo-2",
+                )
+                .unwrap_err()
+            ),
             "verify_not_authorized"
         );
         assert_eq!(
-            code(&require_successor("kodo", "service:kodo", "kodo", "service:kodo").unwrap_err()),
+            code(
+                &require_successor_identity(
+                    RestartMode::Resume,
+                    "kodo",
+                    "service:kodo",
+                    None,
+                    "kodo",
+                    "service:kodo",
+                )
+                .unwrap_err()
+            ),
+            "verify_not_authorized"
+        );
+        require_successor_identity(
+            RestartMode::Fresh,
+            "kodo",
+            "service:kodo",
+            None,
+            "kodo",
+            "service:kodo-2",
+        )
+        .unwrap();
+        assert_eq!(
+            code(
+                &require_successor_identity(
+                    RestartMode::Fresh,
+                    "kodo",
+                    "service:kodo",
+                    None,
+                    "kodo",
+                    "service:kodo",
+                )
+                .unwrap_err()
+            ),
+            "verify_not_authorized"
+        );
+        assert_eq!(
+            code(
+                &require_successor_identity(
+                    RestartMode::Fresh,
+                    "kodo",
+                    "service:kodo",
+                    None,
+                    "tuner",
+                    "service:tuner",
+                )
+                .unwrap_err()
+            ),
             "verify_not_authorized"
         );
     }

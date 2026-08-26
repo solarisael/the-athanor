@@ -1787,7 +1787,7 @@ mod tests {
             r#"{"protocol":1,"id":"r2","method":"restart_claim","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimant":"omp-keeper","capability":"secret","idempotencyKey":"claim-1"}}"#,
             r#"{"protocol":1,"id":"r3","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","to":"exiting","requesterSession":"service:kodo","capability":"exit-secret","detail":"installed release is newer"}}"#,
             r#"{"protocol":1,"id":"r4","method":"restart_transition","params":{"intentId":"00000000-0000-0000-0000-000000000001","claimToken":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","to":"relaunching"}}"#,
-            r#"{"protocol":1,"id":"r5","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo","capability":"verify-secret"}}"#,
+            r#"{"protocol":1,"id":"r5","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","successorProof":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","room":"kodo","spirit":"Kodo","capability":"verify-secret"}}"#,
             r#"{"protocol":1,"id":"r6","method":"restart_status","params":{"workspace":"D:/athanor-wt/restart-intent"}}"#,
             r#"{"protocol":1,"id":"r7","method":"restart_status","params":{"workspace":"D:/athanor-wt/restart-intent","intentId":"00000000-0000-0000-0000-000000000001"}}"#,
         ] {
@@ -2002,7 +2002,7 @@ mod tests {
                 "restart_transition",
             ),
             (
-                r#"{"protocol":1,"id":"o11","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","room":"kodo","spirit":"Kodo","capability":"verify-secret"}}"#,
+                r#"{"protocol":1,"id":"o11","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:kodo-2","successorProof":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","room":"kodo","spirit":"Kodo","capability":"verify-secret"}}"#,
                 "restart_verify",
             ),
             (
@@ -2050,7 +2050,7 @@ mod tests {
         assert_eq!(binding.session_id, "service:tuner");
 
         let (_, request) = decode_line(
-            r#"{"protocol":1,"id":"b6","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:tuner-2","room":"tuner","spirit":"Tuner","capability":"verify-secret"}}"#,
+            r#"{"protocol":1,"id":"b6","method":"restart_verify","params":{"intentId":"00000000-0000-0000-0000-000000000001","successorSession":"service:tuner-2","successorProof":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789","room":"tuner","spirit":"Tuner","capability":"verify-secret"}}"#,
         );
         let binding = insula_binding(&request.expect("fixture decodes"));
         assert_eq!(binding.session_id, "service:tuner-2");

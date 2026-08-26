@@ -20,6 +20,7 @@ const RELEASE_VERSION: &str = "0.0.0-smoke";
 const INTENT_ID: &str = "3f6b9c2a-7d41-4e58-9a0b-1c8e5d2f4a67";
 const SESSION_ID: &str = "session-1";
 const CLAIM_TOKEN: &str = "9f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d60359f2c7a1e4b8d6035";
+const SUCCESSOR_PROOF: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
 struct Tree {
     _temp: tempfile::TempDir,
@@ -193,6 +194,7 @@ fn the_full_loop_runs_from_an_armed_exit_to_a_verified_successor() {
         &[
             ("ATHANOR_STATE_DIR", "D:/wrong-inherited-state"),
             ("ATHANOR_RESTART_INTENT_ID", "stale-inherited-intent"),
+            ("ATHANOR_RESTART_SUCCESSOR_PROOF", "stale-inherited-proof"),
             ("FAKE_SUBSTRATE_EXPECT_STATE_ROOT", &state_root),
         ],
     );
@@ -226,13 +228,13 @@ fn the_full_loop_runs_from_an_armed_exit_to_a_verified_successor() {
     );
     let launches = lines(&tree.runs);
     assert_eq!(
-        launches[0], "run none args none",
-        "the initial child carries no stale intent or session selector"
+        launches[0], "run none proof none args none",
+        "the initial child clears stale intent and proof, with no session selector"
     );
     assert_eq!(
         launches[1],
-        format!("run {INTENT_ID} args --resume|{SESSION_ID}"),
-        "the relaunched successor receives the exact intent and session it must verify"
+        format!("run {INTENT_ID} proof {SUCCESSOR_PROOF} args --resume|{SESSION_ID}"),
+        "the relaunch passes only the current proof with the exact intent and session"
     );
 
     let claim = &requests_for(&tree.transcript, "restart_claim")[0];

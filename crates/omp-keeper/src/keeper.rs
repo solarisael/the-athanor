@@ -23,6 +23,7 @@ const CHILD_POLL: Duration = Duration::from_millis(200);
 const VERIFY_POLL: Duration = Duration::from_secs(1);
 const UNKNOWN_EXIT_CODE: i32 = -1;
 const RESTART_INTENT_ENV: &str = "ATHANOR_RESTART_INTENT_ID";
+const RESTART_SUCCESSOR_PROOF_ENV: &str = "ATHANOR_RESTART_SUCCESSOR_PROOF";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -43,6 +44,10 @@ enum Relaunched {
 enum Attempt {
     Verified(Child),
     Failed(String),
+}
+struct RestartLaunch<'a> {
+    intent: &'a RestartStatusIntent,
+    successor_proof: &'a str,
 }
 
 pub fn run(config: &KeeperConfig) -> Result<Outcome> {
@@ -143,7 +148,7 @@ fn relaunch(
         // so a retry runs inside the House's own new window instead of a second
         // clock invented here.
         let detail = (attempts > 1).then(|| format!("relaunch attempt {attempts}"));
-        match transition(
+        let successor_proof = match transition(
             session,
             pending,
             &claim.claim_token,
@@ -151,10 +156,13 @@ fn relaunch(
             detail,
         )? {
             Answer::Ok(receipt) => match receipt.state {
-                RestartState::Relaunching => println!(
-                    "omp-keeper: intent {} is relaunching (attempt {attempts})",
-                    pending.intent_id
-                ),
+                RestartState::Relaunching => {
+                    println!(
+                        "omp-keeper: intent {} is relaunching (attempt {attempts})",
+                        pending.intent_id
+                    );
+                    receipt.successor_proof
+                }
                 // the House spends the budget itself when a keeper asks once too often
                 RestartState::Failed => {
                     return Ok(Relaunched::Stopped(Outcome::Failed {
@@ -169,18 +177,25 @@ fn relaunch(
                     other.as_str()
                 ),
             },
-            Answer::Refused(refusal) => return Ok(Relaunched::Stopped(refusal_outcome(&refusal))),
-        }
-
-        let failure = match attempt_relaunch(config, session, pending, &mut last_window)? {
-            Attempt::Verified(child) => {
-                println!(
-                    "omp-keeper: the House saw the successor verify intent {}",
-                    pending.intent_id
-                );
-                return Ok(Relaunched::Verified(child));
+            Answer::Refused(refusal) => {
+                return Ok(Relaunched::Stopped(refusal_outcome(&refusal)));
             }
-            Attempt::Failed(failure) => failure,
+        };
+
+        let failure = match successor_proof {
+            Some(ref proof) => {
+                match attempt_relaunch(config, session, pending, proof, &mut last_window)? {
+                    Attempt::Verified(child) => {
+                        println!(
+                            "omp-keeper: the House saw the successor verify intent {}",
+                            pending.intent_id
+                        );
+                        return Ok(Relaunched::Verified(child));
+                    }
+                    Attempt::Failed(failure) => failure,
+                }
+            }
+            None => "the relaunching transition returned no successor proof".to_owned(),
         };
         eprintln!("omp-keeper: relaunch attempt {attempts} failed: {failure}");
 
@@ -223,9 +238,16 @@ fn attempt_relaunch(
     config: &KeeperConfig,
     session: &mut SubstrateSession,
     pending: &RestartStatusIntent,
+    successor_proof: &str,
     last_window: &mut Option<Deadline>,
 ) -> Result<Attempt> {
-    let mut child = match spawn_omp(config, Some(pending)) {
+    let mut child = match spawn_omp(
+        config,
+        Some(RestartLaunch {
+            intent: pending,
+            successor_proof,
+        }),
+    ) {
         Ok(child) => child,
         Err(error) => return Ok(Attempt::Failed(format!("{error:#}"))),
     };
@@ -427,26 +449,32 @@ fn ask_status(
     }
 }
 
-fn spawn_omp(config: &KeeperConfig, restart: Option<&RestartStatusIntent>) -> Result<Child> {
+fn spawn_omp(config: &KeeperConfig, restart: Option<RestartLaunch<'_>>) -> Result<Child> {
     // Console-inheriting on purpose: Sol watches this child, so no detach and no
     // hidden window. The initial child drops stale restart state. A successor
-    // receives the exact intent and session selector the House recorded.
+    // receives the exact attempt proof, intent, and session selector the House
+    // recorded.
     let mut command = Command::new(config.program());
     command
         .env_remove(RESTART_INTENT_ENV)
+        .env_remove(RESTART_SUCCESSOR_PROOF_ENV)
         .args(config.program_args())
         .current_dir(&config.workspace)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(intent) = restart {
-        command.env(RESTART_INTENT_ENV, &intent.intent_id);
-        if intent.mode == RestartMode::Resume {
-            if let Some(session_id) = intent.session_id.as_deref() {
-                command.arg("--resume").arg(session_id);
-            } else {
-                command.arg("--continue");
-            }
+    if let Some(restart) = restart {
+        command
+            .env(RESTART_INTENT_ENV, &restart.intent.intent_id)
+            .env(RESTART_SUCCESSOR_PROOF_ENV, restart.successor_proof);
+        if restart.intent.mode == RestartMode::Resume {
+            let session_id = restart.intent.session_id.as_deref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "resume intent {} carries no session id",
+                    restart.intent.intent_id
+                )
+            })?;
+            command.arg("--resume").arg(session_id);
         }
     }
     command

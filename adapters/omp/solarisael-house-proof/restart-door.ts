@@ -52,6 +52,7 @@ const REQUEST_CAPABILITY_FILENAME = "restart-request-capability";
 const VERIFY_CAPABILITY_ENV = "ATHANOR_RESTART_VERIFY_CAPABILITY";
 const VERIFY_CAPABILITY_FILENAME = "restart-verify-capability";
 const RESTART_INTENT_ENV = "ATHANOR_RESTART_INTENT_ID";
+const RESTART_SUCCESSOR_PROOF_ENV = "ATHANOR_RESTART_SUCCESSOR_PROOF";
 
 // The House records an intent because the room is provisioned to ask for one,
 // and the operator's standing policy is what that provisioning means. The door
@@ -109,6 +110,7 @@ export type RestartDoorDeps = {
   requestCapability?: (effectiveRoomDir: string) => string | null;
   verifyCapability?: (effectiveRoomDir: string) => string | null;
   restartIntentId?: () => string | null;
+  restartSuccessorProof?: () => string | null;
   isEmbodied?: (room: string, session: string) => boolean;
   exit?: (code: number) => void;
 };
@@ -413,6 +415,8 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     ?? ((roomDir: string) => readCapability(roomDir, VERIFY_CAPABILITY_ENV, VERIFY_CAPABILITY_FILENAME));
   const resolveRestartIntent = deps.restartIntentId
     ?? (() => text(process.env[RESTART_INTENT_ENV]));
+  const resolveRestartSuccessorProof = deps.restartSuccessorProof
+    ?? (() => text(process.env[RESTART_SUCCESSOR_PROOF_ENV]));
   const isEmbodied = deps.isEmbodied
     ?? ((room: string, session: string) => embodiedSession(room) === session);
   // Armed state is closure-local: one door, one pending exit, no process-wide
@@ -429,6 +433,14 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx?.cwd);
     const session = hostSessionIdentity(ctx, effectiveRoomDir);
     if (ctx?.mode !== "tui" || !isEmbodied(room, session)) return;
+    const successorProof = text(resolveRestartSuccessorProof());
+    if (!successorProof) {
+      ctx?.ui?.notify?.(
+        "Athanor restart successor could not verify: the keeper supplied no successor proof.",
+        "warning",
+      );
+      return;
+    }
     const capability = text(resolveVerifyCapability(effectiveRoomDir));
     if (!capability) {
       ctx?.ui?.notify?.(
@@ -441,6 +453,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     try {
       const receipt = await deps.requestDomain("restart_verify", {
         intentId,
+        successorProof,
         successorSession: session,
         room,
         spirit,
@@ -453,6 +466,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       }
       verifiedIntent = intentId;
       delete process.env[RESTART_INTENT_ENV];
+      delete process.env[RESTART_SUCCESSOR_PROOF_ENV];
       ctx?.ui?.notify?.("Athanor restart successor verified.", "info");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

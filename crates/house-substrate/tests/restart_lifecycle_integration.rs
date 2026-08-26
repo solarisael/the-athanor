@@ -29,6 +29,8 @@ use sqlx::postgres::PgPoolOptions;
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 const RESTART_MIGRATION: &str = include_str!("../../../substrate/migrations/0026_restart.sql");
+const RESTART_PROOF_MIGRATION: &str =
+    include_str!("../../../substrate/migrations/0027_restart_successor_proof.sql");
 const KEEPER: &str = "omp-keeper";
 const KEEPER_SECRET: &str = "keeper-capability-secret";
 const ROOM: &str = "kodo";
@@ -68,11 +70,16 @@ async fn fresh_restart() -> TestResult<PgPool> {
         .execute(&pool)
         .await?;
     sqlx::raw_sql(RESTART_MIGRATION).execute(&pool).await?;
-    // Applied twice on purpose: the migration must be re-applicable over its
-    // own completed schema, and its column contract must accept it.
+    sqlx::raw_sql(RESTART_PROOF_MIGRATION)
+        .execute(&pool)
+        .await?;
+    // Applied twice on purpose: both restart migrations must re-apply cleanly.
     sqlx::raw_sql(RESTART_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(RESTART_PROOF_MIGRATION)
+        .execute(&pool)
+        .await?;
     let residuals: Vec<String> = sqlx::query_scalar(
-        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='restart' AND c.relkind='r' AND c.relname NOT IN ('intents','intent_events','principal_capabilities')",
+        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='restart' AND c.relkind='r' AND c.relname NOT IN ('intents','intent_events','principal_capabilities','successor_proofs')",
     )
     .fetch_all(&pool)
     .await?;
@@ -118,6 +125,13 @@ fn room_request_params(room: &str, workspace: &str, key: &str) -> RestartRequest
         idempotency_key: key.into(),
     }
 }
+fn fresh_request_params(workspace: &str, key: &str) -> RestartRequestParams {
+    RestartRequestParams {
+        mode: RestartMode::Fresh,
+        session_id: None,
+        ..request_params(workspace, key)
+    }
+}
 
 fn claim_params(intent_id: &str, key: &str) -> RestartClaimParams {
     RestartClaimParams {
@@ -146,10 +160,11 @@ fn transition_params(
     }
 }
 
-fn verify_params(intent_id: &str, session: &str) -> RestartVerifyParams {
+fn verify_params(intent_id: &str, session: &str, proof: &str) -> RestartVerifyParams {
     RestartVerifyParams {
         intent_id: intent_id.into(),
         successor_session: session.into(),
+        successor_proof: proof.into(),
         room: ROOM.into(),
         spirit: "Kodo".into(),
         capability: VERIFY_SECRET.into(),
@@ -323,11 +338,7 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         claim.stage_deadlines.relaunching_secs,
         RELAUNCHING_DEADLINE_SECS
     );
-    assert_eq!(
-        claim.claim_token.len(),
-        64,
-        "the minted token is 32 bytes of lowercase hex"
-    );
+    assert_eq!(claim.claim_token.len(), 64);
 
     let relaunching = restart_transition(
         &pool,
@@ -339,10 +350,14 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
     )
     .await?;
     assert_eq!(relaunching.state, RestartState::Relaunching);
+    let successor_proof = relaunching
+        .successor_proof
+        .as_deref()
+        .expect("each relaunching transition returns its proof exactly once");
 
     let verified = restart_verify(
         &pool,
-        verify_params(&requested.intent_id, SUCCESSOR_SESSION),
+        verify_params(&requested.intent_id, ROOM_SESSION, successor_proof),
     )
     .await?;
     assert_eq!(verified.state, RestartState::Verified);
@@ -350,6 +365,13 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         stored_state(&pool, &requested.intent_id).await?,
         ("verified".to_owned(), None)
     );
+    let proof_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM restart.successor_proofs WHERE intent_id=$1::text::uuid",
+    )
+    .bind(&requested.intent_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(proof_rows, 0, "verification consumes the current proof row");
     assert_eq!(
         ledger(&pool, &requested.intent_id).await?,
         vec![
@@ -375,10 +397,13 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         "a verified intent is finished, not pending"
     );
 
-    // 2. One verify per intent.
-    let second = restart_verify(&pool, verify_params(&requested.intent_id, OTHER_SESSION))
-        .await
-        .expect_err("a verified intent cannot verify again");
+    // 2. One verify per intent and no replay after proof cleanup.
+    let second = restart_verify(
+        &pool,
+        verify_params(&requested.intent_id, ROOM_SESSION, successor_proof),
+    )
+    .await
+    .expect_err("a verified intent cannot verify again");
     assert_eq!(refusal_code(&second), "not_verifiable");
     let successor: String = sqlx::query_scalar(
         "SELECT successor_session FROM restart.intents WHERE intent_id=$1::text::uuid",
@@ -387,8 +412,8 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
     .fetch_one(&pool)
     .await?;
     assert_eq!(
-        successor, SUCCESSOR_SESSION,
-        "the refused second verify left the first successor untouched"
+        successor, ROOM_SESSION,
+        "the resume successor keeps the exact logical session identity"
     );
 
     // 3. The exit door is legal only from requested.
@@ -711,11 +736,11 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
     .expect_err("a declared consent source is not authority");
     assert_eq!(refusal_code(&unfenced_request), "restart_capability");
 
-    // 12. The successor proves itself too: the room's verify secret, a room
-    // that owns the intent, and a session that is not the one that left.
+    // 12. Proofs rotate per relaunch attempt and only the current proof can
+    // verify. Resume accepts the recorded session; room authority stays strict.
     let returning = arm_and_exit(&pool, "D:/athanor-wt/successor", "successor-1").await?;
     let successor_claim = restart_claim(&pool, claim_params(&returning, "successor-claim")).await?;
-    restart_transition(
+    let first = restart_transition(
         &pool,
         transition_params(
             &returning,
@@ -724,37 +749,157 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         ),
     )
     .await?;
+    let first_proof = first
+        .successor_proof
+        .as_deref()
+        .expect("the first relaunch attempt returns a proof");
+    let second = restart_transition(
+        &pool,
+        transition_params(
+            &returning,
+            RestartTransitionTarget::Relaunching,
+            Some(&successor_claim.claim_token),
+        ),
+    )
+    .await?;
+    let second_proof = second
+        .successor_proof
+        .as_deref()
+        .expect("the retry returns a rotated proof");
+    assert_ne!(
+        first_proof, second_proof,
+        "retry rotates the successor proof"
+    );
+    let stored_hash: String = sqlx::query_scalar(
+        "SELECT proof_hash FROM restart.successor_proofs WHERE intent_id=$1::text::uuid",
+    )
+    .bind(&returning)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        stored_hash,
+        format!("{:x}", Sha256::digest(second_proof.as_bytes()))
+    );
+    assert_ne!(
+        stored_hash, second_proof,
+        "the database stores only the proof hash"
+    );
+
+    let stale_verify = restart_verify(&pool, verify_params(&returning, ROOM_SESSION, first_proof))
+        .await
+        .expect_err("the prior attempt proof cannot replay");
+    assert_eq!(refusal_code(&stale_verify), "verify_not_authorized");
     let unfenced_verify = restart_verify(
         &pool,
         RestartVerifyParams {
             capability: "not-the-room-secret".into(),
-            ..verify_params(&returning, SUCCESSOR_SESSION)
+            ..verify_params(&returning, ROOM_SESSION, second_proof)
         },
     )
     .await
-    .expect_err("naming the intent id is not proof that the successor came back");
+    .expect_err("the proof does not replace the room capability");
     assert_eq!(refusal_code(&unfenced_verify), "restart_capability");
     let foreign_verify = restart_verify(
         &pool,
         RestartVerifyParams {
             room: OTHER_ROOM.into(),
-            ..verify_params(&returning, OTHER_SESSION)
+            ..verify_params(&returning, OTHER_SESSION, second_proof)
         },
     )
     .await
     .expect_err("a foreign room cannot sign this room's return");
     assert_eq!(refusal_code(&foreign_verify), "verify_not_authorized");
-    let self_verify = restart_verify(&pool, verify_params(&returning, ROOM_SESSION))
-        .await
-        .expect_err("the session that left cannot sign its own return");
-    assert_eq!(refusal_code(&self_verify), "verify_not_authorized");
     assert_eq!(
-        restart_verify(&pool, verify_params(&returning, SUCCESSOR_SESSION))
+        restart_verify(&pool, verify_params(&returning, ROOM_SESSION, second_proof))
             .await?
             .state,
         RestartState::Verified,
-        "the real successor still verifies once"
+        "resume verifies with the exact recorded session"
     );
+    let proof_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM restart.successor_proofs WHERE intent_id=$1::text::uuid",
+    )
+    .bind(&returning)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(proof_rows, 0, "verification deletes the consumed proof");
+
+    // Fresh mode requires a distinct successor session.
+    let fresh = restart_request(
+        &pool,
+        fresh_request_params("D:/athanor-wt/fresh-successor", "fresh-successor-1"),
+    )
+    .await?;
+    restart_transition(
+        &pool,
+        transition_params(&fresh.intent_id, RestartTransitionTarget::Exiting, None),
+    )
+    .await?;
+    let fresh_claim = restart_claim(&pool, claim_params(&fresh.intent_id, "fresh-claim")).await?;
+    let fresh_transition = restart_transition(
+        &pool,
+        transition_params(
+            &fresh.intent_id,
+            RestartTransitionTarget::Relaunching,
+            Some(&fresh_claim.claim_token),
+        ),
+    )
+    .await?;
+    let fresh_proof = fresh_transition.successor_proof.as_deref().unwrap();
+    assert_eq!(
+        restart_verify(
+            &pool,
+            verify_params(&fresh.intent_id, SUCCESSOR_SESSION, fresh_proof),
+        )
+        .await?
+        .state,
+        RestartState::Verified
+    );
+
+    // A valid proof cannot cross the live House deadline.
+    let late = arm_and_exit(&pool, "D:/athanor-wt/late-proof", "late-proof-1").await?;
+    let late_claim = restart_claim(&pool, claim_params(&late, "late-proof-claim")).await?;
+    let late_transition = restart_transition(
+        &pool,
+        transition_params(
+            &late,
+            RestartTransitionTarget::Relaunching,
+            Some(&late_claim.claim_token),
+        ),
+    )
+    .await?;
+    let late_proof = late_transition.successor_proof.as_deref().unwrap();
+    sqlx::query(
+        "UPDATE restart.intents SET relaunching_deadline_at=NOW()-INTERVAL '1 second' WHERE intent_id=$1::text::uuid",
+    )
+    .bind(&late)
+    .execute(&pool)
+    .await?;
+    let expired = restart_verify(&pool, verify_params(&late, ROOM_SESSION, late_proof))
+        .await
+        .expect_err("verification after the live relaunching deadline must fail");
+    assert_eq!(refusal_code(&expired), "verify_expired");
+    let failed = restart_transition(
+        &pool,
+        transition_params(
+            &late,
+            RestartTransitionTarget::Failed,
+            Some(&late_claim.claim_token),
+        ),
+    )
+    .await?;
+    assert_eq!(failed.state, RestartState::Failed);
+    assert!(
+        failed.successor_proof.is_none(),
+        "a terminal transition returns no launch credential"
+    );
+    let proof_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM restart.successor_proofs WHERE intent_id=$1::text::uuid",
+    )
+    .bind(&late)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(proof_rows, 0, "failed transitions delete the current proof");
 
     // 13. One live intent per workspace, so the keeper's newest-live read can
     // never hand it a stranger while the one it watches is still running.

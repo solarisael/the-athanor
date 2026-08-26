@@ -66,11 +66,11 @@ const FAKE_EXECUTABLE = "C:/fake/versions/0.10.1/bin/athanor-substrate.exe";
 // parameter and must never appear in a receipt.
 const EXIT_CAPABILITY = "restart-exit-secret-0e6c";
 const CAPABILITY_ENV = "ATHANOR_RESTART_EXIT_CAPABILITY";
-// The room's provisioned restart_request secret: the right to have the House
-// record an intent at all. Separate class, separate secret.
 const REQUEST_CAPABILITY = "restart-request-secret-4711";
 const REQUEST_CAPABILITY_ENV = "ATHANOR_RESTART_REQUEST_CAPABILITY";
 const VERIFY_CAPABILITY = "restart-verify-secret-159";
+const SUCCESSOR_PROOF = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+const SUCCESSOR_PROOF_ENV = "ATHANOR_RESTART_SUCCESSOR_PROOF";
 const SUCCESSOR_INTENT = "06f33aab-fdca-489b-8dd9-1020e2efc384";
 
 // The real harness shape: AsyncJobSnapshotItem is Pick<AsyncJob, "id" | "type" |
@@ -107,6 +107,7 @@ function buildDoor(options: {
   latestBoat?: (room: string, options?: unknown) => Promise<Record<string, unknown>>;
   verifyCapability?: (roomDir: string) => string | null;
   restartIntentId?: () => string | null;
+  restartSuccessorProof?: () => string | null;
   isEmbodied?: (room: string, session: string) => boolean;
 } = {}): DoorHarness {
   const hooks: DoorHarness["hooks"] = [];
@@ -144,6 +145,7 @@ function buildDoor(options: {
     ...("latestBoat" in options ? { latestBoat: options.latestBoat } : {}),
     ...("verifyCapability" in options ? { verifyCapability: options.verifyCapability } : {}),
     ...("restartIntentId" in options ? { restartIntentId: options.restartIntentId } : {}),
+    ...("restartSuccessorProof" in options ? { restartSuccessorProof: options.restartSuccessorProof } : {}),
     ...("isEmbodied" in options ? { isEmbodied: options.isEmbodied } : {}),
     exit(code) {
       exits.push(code);
@@ -205,6 +207,7 @@ function withCapability(options: Parameters<typeof buildDoor>[0] = {}) {
 
 afterEach(() => {
   delete process.env[CAPABILITY_ENV];
+  delete process.env[SUCCESSOR_PROOF_ENV];
   delete process.env[REQUEST_CAPABILITY_ENV];
 });
 
@@ -223,10 +226,11 @@ describe("adapter exit door", () => {
     expect(door.hookNames()).toEqual(["session_start", "session_switch", "agent_end"]);
   });
 
-  test("a keeper-launched embodied successor verifies its exact intent on session start", async () => {
+  test("a keeper-launched embodied successor verifies its exact intent and proof on session start", async () => {
     const door = buildDoor({
       verifyCapability: () => VERIFY_CAPABILITY,
       restartIntentId: () => SUCCESSOR_INTENT,
+      restartSuccessorProof: () => SUCCESSOR_PROOF,
       isEmbodied: () => true,
     });
     await door.sessionStart();
@@ -238,10 +242,22 @@ describe("adapter exit door", () => {
       params: {
         intentId: SUCCESSOR_INTENT,
         successorSession: "session-under-restart",
+        successorProof: SUCCESSOR_PROOF,
         capability: VERIFY_CAPABILITY,
       },
     });
     expect(door.notices.join(" ")).toContain("successor verified");
+  });
+  test("refuses loudly when the keeper gives an intent without its successor proof", async () => {
+    const door = buildDoor({
+      verifyCapability: () => VERIFY_CAPABILITY,
+      restartIntentId: () => SUCCESSOR_INTENT,
+      restartSuccessorProof: () => null,
+      isEmbodied: () => true,
+    });
+    await door.sessionStart();
+    expect(door.calls.filter((call) => call.method === "restart_verify")).toHaveLength(0);
+    expect(door.notices.join(" ")).toContain("successor proof");
   });
 
   test("a non-TUI worker session cannot verify the keeper intent", async () => {

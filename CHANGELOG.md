@@ -52,6 +52,13 @@ the exact implementation record.
   with the stored value. New refusal codes: `restart_capability`,
   `exit_not_authorized`, and `verify_not_authorized`. Provision every secret
   with `substrate/provision-restart-capability.ps1`.
+- Schema migration 27 adds one hash-only successor proof for the current
+  relaunch attempt. The keeper receives a fresh proof from each successful
+  `relaunching` transition and passes it only to that child. This lets `resume`
+  preserve the logical OMP session id while PostgreSQL still distinguishes the
+  new process from its predecessor. Retries rotate the proof; verified and
+  failed intents delete it. Verification after the House deadline refuses with
+  `verify_expired`.
 - The authenticated Host read surface gains one route:
   `/athanor/v1/insula/unverified-exit`. It reports sessions that armed an exit
   and never returned verified inside the stage window. The route reports only

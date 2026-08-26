@@ -141,6 +141,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0026_restart.sql",
         sql: include_str!("../../../substrate/migrations/0026_restart.sql"),
     },
+    Migration {
+        version: 27,
+        name: "0027_restart_successor_proof.sql",
+        sql: include_str!("../../../substrate/migrations/0027_restart_successor_proof.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

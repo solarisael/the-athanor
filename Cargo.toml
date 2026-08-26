@@ -8,6 +8,7 @@ members = [
     "crates/house-delivery",
     "crates/house-vault",
     "crates/athanor-install",
+    "crates/interactive-process",
     "crates/omp-keeper",
     "gui",
 ]

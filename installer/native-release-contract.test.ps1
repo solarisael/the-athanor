@@ -513,6 +513,14 @@ try {
   }
   Assert-True ($DeploySource -match '(?s)Move-Item\s+\$liveManagerExe\s+\$previousManagerExe.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe') "manager deployment must back up both manager copies"
   Assert-True ($DeploySource -match '(?s)Copy-Item\s+\$stagedManagerExe\s+\$liveManagerExe.*?Copy-Item\s+\$stagedManagerExe\s+\$stableManagerExe') "manager deployment must replace both manager copies"
+  foreach ($RequiredFragment in @("athanor.exe", "stagedAppExe", "liveAppExe", "stableAppExe", "previousAppExe", "previousStableAppExe", "bin/athanor.exe")) {
+    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "app deployment must retain $RequiredFragment"
+  }
+  Assert-True ($DeploySource -match '(?s)Move-Item\s+\$liveAppExe\s+\$previousAppExe.*?Move-Item\s+\$stableAppExe\s+\$previousStableAppExe') "app deployment must back up both app copies"
+  Assert-True ($DeploySource -match '(?s)Copy-Item\s+\$stagedAppExe\s+\$liveAppExe.*?Copy-Item\s+\$stagedAppExe\s+\$stableAppExe') "app deployment must replace both app copies"
+  Assert-True ($DeploySource -match '(?s)foreach\s*\(\$appPath\s+in\s+@\(\$liveAppExe,\s*\$stableAppExe\).*?Get-LiveWorkers\s+-ExecutablePath\s+\$appPath') "deployment must refuse a running installed app by exact executable path"
+  Assert-True ($DeploySource -match '(?s)if\s*\(Test-Path\s+\$liveManifest\s+-PathType\s+Leaf\)\s*\{.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe.*?Move-Item\s+\$stableAppExe\s+\$previousStableAppExe') "stable app backup must stay inside the installed-manifest transaction"
+  Assert-True ($DeploySource -match '(?s)@\{\s*Path\s*=\s*"bin/athanor\.exe";\s*Source\s*=\s*\$liveAppExe\s*\}') "the installed release manifest must be rehashed for the deployed app"
   foreach ($RequiredFragment in @("stagedKeeperExe", "liveKeeperExe", "stableKeeperExe", "previousKeeperExe", "bin/omp-keeper.exe", "provision-omp-keeper.ps1", "provision-restart-capability.ps1")) {
     Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "keeper deployment must retain $RequiredFragment"
   }
@@ -536,17 +544,24 @@ try {
   Assert-True ($SecretRemoval -ge 0 -and $SecretRemoval -lt $DatabaseRemoval) "capability rollback must remove plaintext before deleting its authority row"
   & (Join-Path $PSScriptRoot "../crates/omp-keeper/scripts/provision-local.test.ps1")
   $ReleaseBuilderSource = Get-Content (Join-Path $PSScriptRoot "build-native-release.ps1") -Raw
-  foreach ($RequiredFragment in @("-p omp-keeper", "omp-keeper.exe", "components/omp-keeper", '"omp-keeper"')) {
+  foreach ($RequiredFragment in @("-p omp-keeper", "omp-keeper.exe", "components/omp-keeper", '"omp-keeper"', "-p athanor-install", "athanor.exe", "bin/athanor.exe", '"app"')) {
     Assert-True ($ReleaseBuilderSource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "native release builder must package $RequiredFragment"
   }
   $InnoSource = Get-Content (Join-Path $PSScriptRoot "athanor.iss") -Raw
   foreach ($ForbiddenFragment in @("payload\bin\omp-keeper.exe", "payload\components\omp-keeper\provision-omp-keeper.ps1", "payload\components\omp-keeper\provision-restart-capability.ps1")) {
     Assert-True (-not $InnoSource.Contains($ForbiddenFragment, [StringComparison]::OrdinalIgnoreCase)) "native installer must not activate $ForbiddenFragment before the manager accepts the payload"
   }
+  foreach ($RequiredFragment in @('payload\bin\athanor.exe', '{app}\bin\athanor.exe', '{app}\bin\athanor-manage.exe')) {
+    Assert-True ($InnoSource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "native installer must ship $RequiredFragment"
+  }
+  Assert-True ($InnoSource -match '(?m)^Name:\s*"\{group\}\\The Athanor";\s*Filename:\s*"\{app\}\\bin\\athanor\.exe"') "the Start Menu entry must launch the canonical app"
+  Assert-True ($InnoSource -match '(?m)^Filename:\s*"\{app\}\\bin\\athanor-manage\.exe";\s*Parameters:\s*"uninstall"') "athanor-manage must remain the installer authority the uninstaller calls"
   $StableManagerAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\$stableManagerExe\s*=' })[0]
   Assert-True (([Regex]::Matches($StableManagerAssignment, 'GetDirectoryName')).Count -eq 4 -and $StableManagerAssignment -match '"bin\\athanor-manage\.exe"') "stable manager must resolve from the install root, not the versions root"
+  $StableAppAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\$stableAppExe\s*=' })[0]
+  Assert-True (([Regex]::Matches($StableAppAssignment, 'GetDirectoryName')).Count -eq 4 -and $StableAppAssignment -match '"bin\\athanor\.exe"') "stable app must resolve from the install root, not the versions root"
   $TransactionCatch = $DeploySource.LastIndexOf("} catch {", [StringComparison]::Ordinal)
-  foreach ($RequiredFragment in @('$copiedExe = $false', '$copiedManager = $false', 'elseif ($artifact.Created', 'Test-Path $artifact.Previous', '$restoreFailures = @()', 'Get-Service -Name $nativeServiceName', 'native service stop before rollback failed')) {
+  foreach ($RequiredFragment in @('$copiedExe = $false', '$copiedManager = $false', '$copiedAppExe = $false', '$copiedStableApp = $false', 'elseif ($artifact.Created', 'Test-Path $artifact.Previous', '$restoreFailures = @()', 'Get-Service -Name $nativeServiceName', 'native service stop before rollback failed')) {
     Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "rollback must preserve untouched files, stop a running recovered service, and aggregate failures"
   }
   Assert-True ($DeploySource -match '(?s)Get-Service\s+-Name\s+\$nativeServiceName.*?Stop-Service\s+-Name\s+\$nativeServiceName.*?foreach\s+\(\$artifact') "rollback must stop the managed service before restoring artifacts"

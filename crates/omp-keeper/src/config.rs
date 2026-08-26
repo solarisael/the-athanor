@@ -9,6 +9,13 @@ pub const DEFAULT_WATCH_INTERVAL_SECS: u64 = 30;
 pub const MAX_WATCH_INTERVAL_SECS: u64 = 3600;
 pub const USAGE: &str = "usage: omp-keeper [--config <path>]";
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ConsoleMode {
+    #[default]
+    Inherit,
+    NewWindow,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct KeeperConfig {

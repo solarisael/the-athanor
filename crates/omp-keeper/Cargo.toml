@@ -20,6 +20,8 @@ serde.workspace = true
 serde_json.workspace = true
 # the restart wire vocabulary: states, params, receipts (src/protocol.rs adds only the keeper's JSONL envelope)
 house-protocol = { path = "../house-protocol" }
+interactive-process = { path = "../interactive-process" }
+
 
 [dev-dependencies]
 tempfile = "3"

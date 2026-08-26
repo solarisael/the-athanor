@@ -22,8 +22,16 @@ the exact implementation record.
 
 ### Added
 
+- `athanor.exe` is the canonical desktop owner. It keeps the existing Godot GUI
+  and every managed harness process alive under one application lifetime.
+- A strict registry describes each harness program, workspace, console mode,
+  and driver. The first drivers are a plain process and OMP.
+- The new Harnesses screen lists process state and sends Start, Stop, and
+  Restart requests to the owner through an authenticated loopback socket.
+- OMP runs as a direct child of `athanor.exe`. The existing `request_restart`
+  signal now resumes OMP without an `omp-keeper.exe` sidecar process.
 - The House now records a restart intent. A session asks for a harness restart.
-  The adapter arms the exit. A keeper claims the exit and relaunches. The
+  The adapter arms the exit. Athanor claims the exit and relaunches OMP. The
   successor session proves the return.
 - Schema `restart` (migration 26) holds the intents and an append-only event
   ledger. Five substrate methods carry the plane: `restart_request`,
@@ -31,13 +39,13 @@ the exact implementation record.
   `restart_status` is a read. It needs no capability.
 - One workspace carries one live restart intent. The schema refuses a second
   live row, and `restart_request` refuses with the code `intent_pending` before
-  it makes one. The keeper reads the newest live intent for a workspace, so a
-  second one lets a new request stand in for a successor that never came back.
+  it makes one. Athanor reads the newest live intent for a workspace, so a
+  second intent cannot stand in for the successor.
 - `restart_status` answers two questions. Without an intent id it reports the
   pending intent for the workspace, as before. With an intent id it reports that
-  one intent in every state, terminal states included, so a keeper can see its
-  own successor reach `verified`. The workspace still scopes the read: an
-  intent id from another workspace reports nothing.
+  one intent in every state, including terminal states. Athanor can therefore
+  confirm that its own successor reached `verified`.
+  The workspace still scopes the read; an id from another workspace reports nothing.
 - `restart_request` refuses with the code `restart_storm` after three intents
   reach the exit stage for one workspace in one hour. The cap now applies when
   an intent reaches the exit stage, not only when a session asks, so requests
@@ -47,13 +55,13 @@ the exact implementation record.
 - Each restart door proves its authority with a provisioned secret, because
   `restart_status` gives the intent id to any caller. The room holds three
   secrets: `restart_request` to ask, `restart_exit` to arm the exit, and
-  `restart_verify` to sign the successor. The keeper holds `restart_claim`. The
+  `restart_verify` to sign the successor. Athanor holds `restart_claim`. The
   exit also names the harness session that asked, and the substrate compares it
   with the stored value. New refusal codes: `restart_capability`,
   `exit_not_authorized`, and `verify_not_authorized`. Provision every secret
   with `substrate/provision-restart-capability.ps1`.
 - Schema migration 27 adds one hash-only successor proof for the current
-  relaunch attempt. The keeper receives a fresh proof from each successful
+  relaunch attempt. Athanor receives a fresh proof from each successful
   `relaunching` transition and passes it only to that child. This lets `resume`
   preserve the logical OMP session id while PostgreSQL still distinguishes the
   new process from its predecessor. Retries rotate the proof; verified and
@@ -64,20 +72,11 @@ the exact implementation record.
   and never returned verified inside the stage window. The route reports only
   the room in the Host configuration, so one bearer never reads another room's
   workspace path or session. The route reads only and commands nothing.
-- The new `omp-keeper` program owns the console seam for a self-restart. It
-  starts omp as a console-inheriting child, and it starts omp again after an
-  armed exit. Exit code 87 is only a hint: the keeper asks `restart_status` for
-  every exit code. The keeper resolves the substrate through
-  `<programRoot>/current.json` before every ask, so a release change during a
-  session takes effect. The keeper claims a pending intent from `requested` or
-  `exiting`, transitions it to `relaunching`, and starts omp with the same
-  command. The keeper kills the omp child only when the intent says `exiting`
-  and the deadline passes. A relaunch that cannot start retries one time, then
-  transitions the intent to `failed`. A storm-guard refusal ends the loop with a
-  plain operator message. A config file beside the program holds the omp
-  command, the workspace, the program root, and the door to the keeper
-  capability secret. The crate carries its own README and its own tests, and the
-  tests need no database.
+- Athanor owns the OMP process and console. Its internal OMP driver checks every
+  child exit against `restart_status`; exit code 87 is only a fast signal. The
+  driver claims a pending intent, starts `omp --resume <sessionId>`, waits for
+  successor verification, and retries one failed start. The standalone
+  `omp-keeper` binary remains compatible during migration to the canonical app.
 - The OMP adapter now exposes `request_restart`, the exit door for its own
   session. The tool records the intent itself when the House holds none. It then
   arms that intent in the same call. The room must hold the `restart_request`
@@ -89,10 +88,10 @@ the exact implementation record.
   boat and never consumes it. Before it arms, the tool reports what dies with
   the exit: this session's async jobs, buffered GIGA turns, and every open
   substrate transport. It names each casualty class it cannot see, and it claims
-  nothing about that class. The armed exit fires at `agent_end`, never inside a
-  turn. It moves the intent to `exiting`, then leaves omp with code 87 for the
-  keeper. A refused transition stands the exit down, names the substrate's code,
-  and keeps the session alive.
+  nothing about that class. The armed exit fires at `agent_end`, never inside
+  a turn. It moves the intent to `exiting`, then leaves OMP with code 87 for
+  the Athanor owner. A refused transition keeps the session alive and names
+  the substrate code.
 - The installed loader now hands the resolved release to the adapter entry. The
   arm report names that loaded release, so a session can show `installed` against
   `loaded`.

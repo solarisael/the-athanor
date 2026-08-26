@@ -1,17 +1,15 @@
 use anyhow::{Context, Result, bail};
 use athanor_install::{
+    app,
     boundaries::{NativeFileSystem, OsSecrets, ScServiceManager},
     doctor,
-    installer::{
-        CurrentRelease, HouseInstallConfig, InstallRequest, Installer, OperatorIntegration,
-    },
+    installer::{HouseInstallConfig, InstallRequest, Installer, OperatorIntegration},
     layout::InstallLayout,
     manifest::ReleaseManifest,
     native_runtime::NativeRuntimeControl,
-    omp::ClientProjection,
     service,
 };
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{env, fs, path::PathBuf};
 
 fn value(arguments: &[String], flag: &str) -> Result<String> {
     let index = arguments
@@ -38,11 +36,7 @@ fn optional_value(arguments: &[String], flag: &str) -> Result<Option<String>> {
 }
 
 fn layout() -> Result<InstallLayout> {
-    let program_files =
-        PathBuf::from(env::var_os("ProgramFiles").context("ProgramFiles is unavailable")?);
-    let program_data =
-        PathBuf::from(env::var_os("ProgramData").context("ProgramData is unavailable")?);
-    Ok(InstallLayout::new(&program_files, &program_data))
+    InstallLayout::from_environment()
 }
 
 fn main() -> Result<()> {
@@ -154,38 +148,7 @@ fn main() -> Result<()> {
             );
         }
         "gui" => {
-            let user_profile =
-                PathBuf::from(env::var_os("USERPROFILE").context("USERPROFILE is unavailable")?);
-            let client_path = user_profile.join(".omp/agent/athanor/client.json");
-            let client: ClientProjection = serde_json::from_slice(
-                &fs::read(&client_path)
-                    .with_context(|| format!("read {}", client_path.display()))?,
-            )?;
-            client.validate()?;
-            let room = optional_value(&arguments, "--room")?
-                .unwrap_or_else(|| client.default_room.clone());
-            let endpoint = client
-                .endpoints
-                .get(&room)
-                .with_context(|| format!("installed Athanor has no endpoint for room {room:?}"))?;
-            let current: CurrentRelease = serde_json::from_slice(&fs::read(layout.current())?)?;
-            let version_root = layout.version(&current.version);
-            let child = Command::new(version_root.join("bin/athanor-gui.exe"))
-                .args([
-                    "--path",
-                    &version_root.join("runtime/godot").display().to_string(),
-                ])
-                .env("ATHANOR_HOST_TOKEN", &client.host_token)
-                .env("ATHANOR_HOST_HOUSE_ID", &client.house_id)
-                .env("ATHANOR_HOST_WS_URL", &endpoint.url)
-                .env("ATHANOR_HOST_ROOM", &room)
-                .env("ATHANOR_HOST_SPIRIT", &endpoint.spirit)
-                .spawn()
-                .context("launch installed Godot client")?;
-            println!(
-                "{}",
-                serde_json::json!({"ok": true, "room": room, "pid": child.id()})
-            );
+            app::run(optional_value(&arguments, "--room")?)?;
         }
         "doctor" => {
             let report = doctor(&fs_boundary, &services, &layout)?;

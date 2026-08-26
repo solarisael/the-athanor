@@ -123,17 +123,26 @@ workflow begins on S02 under the Recall Policy instrument record below.
 - **Identity:** `operator-shell`; group `composition`.
 - **Meaning:** Keep navigation, the active conversation, contextual inspection, and live system state legible without making the client a second authority.
 - **Refusal:** Do not merge authority, ranking, chronology, proposal state, dispatch state, subsystem health, or placeholder presentation with real Host data.
-- **Fixed copy:** Per-screen data-origin disclosures remain visible until the Host supplies real contracts. The operator inventory is S01, S02, S07, S08, S09, S14, and Worker Lanes; dead archived routes were deleted by operator decision on 2026-08-14, with newest intent prevailing over archive fidelity.
-- **Anatomy:** 15.25 rem left rail with Athanor identity, effective-profile slot, rooms slot, grouped navigation for S01, S02, S07, S08, S09, S14, and Worker Lanes, and domains; one center instrument viewport; 20 rem right contextual evidence panel with nested local preferences; one-row status rail. Responsive drawers apply only below desktop width.
+- **Fixed copy:** The numbered operator inventory remains S01, S02, S07, S08,
+  S09, and S14. Worker Lanes and Harnesses are additional instruments.
+- **Anatomy:** The left rail groups numbered screens and additional instruments.
+  One center viewport owns the active screen. The right panel keeps context.
 - **Variants:** Wide at 1200 px and above docks both side columns. Compact from 800–1199 px keeps navigation docked and opens context/settings over the center with a scrim. Narrow below 800 px keeps the center primary and opens either side as an exclusive drawer.
 - **States:** Active screen, responsive class, optional local layout override, open drawer, and an independent pane stack for each side. These are local presentation states owned by `AthanorProbe` and `AthanorReliquaryNavigator`, never Host state.
 - **Accessibility:** Every destination is a real Button. Back pops exactly one pane and restores focus to its trigger. First Escape returns a nested pane toward its root; the next closes an overlay drawer. Inactive panes are hidden and inert. One center `ScrollContainer` owns vertical wheel and focus-follow scrolling.
 - **Composition:** The active screen owns the center. The right column holds contextual evidence/settings instead of becoming generic decoration. The bottom rail exposes only Host binding and compact identity; detail belongs in the right panel.
 - **Archive authority:** `C:\Users\Administrador\Desktop\The Athanor Design Restart.zip` remains composition evidence only. Its S01–S14/R01 inventory is superseded by the operator's 2026-08-14 decision: retain only S01, S02, S07, S08, S09, S14, and Worker Lanes; delete dead routes. `The Athanor.dc.html` still supplies `SolarisaelUI.OrnamentFrame` with `corners={false}` and `sigils={false}` around screen headers.
 - **Ornament mapping:** `design-system/ornament_rule.tscn` ports only that enabled rule: the archived `reliquary-divider-flourish` SVG at 42×14, a 1 px bar, and the same flourish mirrored on the right with the archived −10 px overlap. No corner glyph or inferred frame treatment is allowed.
-- **Godot mapping:** `navigation/reliquary_navigator.gd` is reusable pane-stack technology driven by `pane_target` and `action_id` metadata. `AthanorProbe` owns screen routing, viewport classes, center margins, exclusive drawers, local layout overrides, and Escape delegation. Worker Lanes remains an additional implemented Host instrument.
-- **Proof:** `navigation/tests/reliquary_contract.gd` proves the exact S01, S02, S07, S08, S09, and S14 inventory, absence of invented corner ornament, use of the archived flourish asset, nested panes, focus restoration, Escape grammar, wide geometry, compact context overlay, narrow drawers, and the 42 px status rail.
-- **Open gaps:** S01 remains an honest active-conversation placeholder until its Host contract exists. S02, S07, S08, S09, S14, and the additional Worker Lanes Host instrument are the living operator inventory; dead archived routes are deleted. Motion is not authored, so reduced-motion control remains absent rather than decorative.
+- **Godot mapping:** `AthanorProbe` owns screen routing and responsive layout.
+  `AthanorHarnessControl` sends strict commands to the local Athanor owner.
+- **Harness authority:** The GUI never starts or kills a process. `athanor.exe`
+  owns each process handle and returns its state through authenticated loopback.
+- **Managed console:** The first slice uses a separate Windows console. Athanor
+  owns its process. An embedded terminal remains a later presentation change.
+- **Proof:** A live drive opened Harnesses, started OMP, sent `request_restart`,
+  and resumed the same session. The process tree stayed `athanor.exe -> omp.exe`.
+- **Open gaps:** S01 still has no conversation contract. Harness registration
+  still uses a strict file. The GUI has no harness editor or embedded terminal.
 
 ## Record: recall policy instrument
 

@@ -1,5 +1,6 @@
 mod dispatch;
 mod familiar_status;
+mod harness_control;
 mod health;
 mod host_link;
 mod host_session;

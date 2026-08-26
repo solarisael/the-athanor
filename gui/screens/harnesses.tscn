@@ -1,0 +1,93 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://screens/harnesses.gd" id="1_harnesses"]
+[ext_resource type="PackedScene" path="res://design-system/components/page_header.tscn" id="2_header"]
+
+[node name="HarnessesPage" type="VBoxContainer"]
+layout_mode = 2
+theme_type_variation = &"AthanorContentColumn"
+script = ExtResource("1_harnesses")
+
+[node name="Header" parent="." instance=ExtResource("2_header")]
+layout_mode = 2
+kicker_text = "SYSTEM · MANAGED CONSOLE"
+title_text = "Harnesses"
+lead_text = "View and control the managed harness registry. The parent owner keeps process authority; this screen sends requests over loopback."
+
+[node name="Instrument" type="PanelContainer" parent="."]
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorVessel"
+
+[node name="Margin" type="MarginContainer" parent="Instrument"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusMargin"
+
+[node name="Column" type="VBoxContainer" parent="Instrument/Margin"]
+layout_mode = 2
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="Disclosure" type="Label" parent="Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorKicker"
+text = "MANAGED CONSOLE · LOOPBACK CONTROL · NO EMBEDDED TERMINAL · THE PARENT OWNER STARTS, STOPS, AND RESTARTS PROCESSES"
+autowrap_mode = 2
+
+[node name="State" type="Label" parent="Instrument/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorStatusValue"
+text = "UNAVAILABLE"
+autowrap_mode = 2
+
+[node name="Detail" type="Label" parent="Instrument/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorMeta"
+text = ""
+autowrap_mode = 2
+
+[node name="HarnessList" type="VBoxContainer" parent="Instrument/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+theme_type_variation = &"AthanorInstrumentColumn"
+
+[node name="Selected" type="Label" parent="Instrument/Margin/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorStatusLabel"
+text = "SELECTED HARNESS · NONE"
+
+[node name="Actions" type="HFlowContainer" parent="Instrument/Margin/Column"]
+layout_mode = 2
+theme_type_variation = &"AthanorStatusRow"
+
+[node name="Refresh" type="Button" parent="Instrument/Margin/Column/Actions"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorTabActive"
+text = "REFRESH"
+
+[node name="Start" type="Button" parent="Instrument/Margin/Column/Actions"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "START"
+disabled = true
+
+[node name="Stop" type="Button" parent="Instrument/Margin/Column/Actions"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "STOP"
+disabled = true
+
+[node name="Restart" type="Button" parent="Instrument/Margin/Column/Actions"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"AthanorTab"
+text = "RESTART"
+disabled = true
+
+[node name="HarnessControl" type="AthanorHarnessControl" parent="."]

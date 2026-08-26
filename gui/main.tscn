@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Theme" path="res://theme/athanor_theme.tres" id="1_theme"]
 [ext_resource type="Script" path="res://navigation/reliquary_navigator.gd" id="2_reliquary"]
@@ -6,6 +6,7 @@
 [ext_resource type="Texture2D" path="res://assets/ornaments/athanor-brand-glyph.svg" id="4_brand_glyph"]
 [ext_resource type="PackedScene" path="res://design-system/components/reliquary_panel.tscn" id="5_reliquary_panel"]
 [ext_resource type="PackedScene" path="res://screens/s01_chat_center.tscn" id="6_s01_chat_center"]
+[ext_resource type="PackedScene" path="res://screens/harnesses.tscn" id="7_harnesses"]
 
 [node name="AthanorProbe" type="AthanorProbe"]
 layout_mode = 3
@@ -22,6 +23,7 @@ routing_page = NodePath("ApplicationShell/ContentViewport/RoutingPage")
 familiars_page = NodePath("ApplicationShell/ContentViewport/FamiliarsPage")
 dispatch_page = NodePath("ApplicationShell/ContentViewport/DispatchPage")
 health_page = NodePath("ApplicationShell/ContentViewport/HealthPage")
+harnesses_page = NodePath("ApplicationShell/ContentViewport/HarnessesPage")
 left_navigator = NodePath("ApplicationShell/Workspace/LeftReliquary")
 right_navigator = NodePath("ApplicationShell/Workspace/RightReliquary")
 center_frame = NodePath("ApplicationShell/Workspace/CenterFrame")
@@ -282,6 +284,13 @@ theme_type_variation = &"AthanorTab"
 text = "S09  saúde"
 metadata/action_id = &"screen:health"
 metadata/screen_id = &"S09"
+
+[node name="Harnesses" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root/System/Content"]
+layout_mode = 2
+clip_text = true
+theme_type_variation = &"AthanorTab"
+text = "managed console · harnesses"
+metadata/action_id = &"screen:harnesses"
 
 [node name="S14" type="Button" parent="ApplicationShell/Workspace/LeftReliquary/Margin/Column/PaneHost/Root/System/Content"]
 layout_mode = 2
@@ -1487,3 +1496,8 @@ layout_mode = 2
 theme_type_variation = &"AthanorTabActive"
 text = "⚙"
 tooltip_text = "Open nested settings"
+
+[node name="HarnessesPage" parent="ApplicationShell/ContentViewport" instance=ExtResource("7_harnesses")]
+visible = false
+layout_mode = 2
+size_flags_vertical = 3

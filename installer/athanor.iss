@@ -24,6 +24,7 @@ UninstallDisplayIcon={app}\bin\athanor-manage.exe
 DisableProgramGroupPage=yes
 
 [Files]
+Source: "{#SourceRoot}\payload\bin\athanor.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#SourceRoot}\payload\bin\athanor-manage.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#SourceRoot}\payload\bin\athanor-omp-loader.ts"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#SourceRoot}\payload\*"; DestDir: "{tmp}\athanor-payload"; Flags: recursesubdirs createallsubdirs deleteafterinstall
@@ -33,7 +34,7 @@ Source: "{#SourceRoot}\payload\*"; DestDir: "{tmp}\athanor-payload"; Flags: recu
 Filename: "{app}\bin\athanor-manage.exe"; Parameters: "uninstall"; RunOnceId: "AthanorPreserveDataUninstall"; Flags: runhidden waituntilterminated
 
 [Icons]
-Name: "{group}\The Athanor"; Filename: "{app}\bin\athanor-manage.exe"; Parameters: "gui"; WorkingDir: "{app}\bin"
+Name: "{group}\The Athanor"; Filename: "{app}\bin\athanor.exe"; WorkingDir: "{app}\bin"
 Name: "{group}\Athanor Doctor"; Filename: "{app}\bin\athanor-manage.exe"; Parameters: "doctor"
 
 [Code]

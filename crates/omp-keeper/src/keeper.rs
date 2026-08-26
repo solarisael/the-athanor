@@ -1,5 +1,6 @@
 use crate::clock::{Deadline, deadline, house_deadline};
-use crate::config::KeeperConfig;
+use crate::config::{ConsoleMode, KeeperConfig};
+use crate::control::{KeeperObserver, NoopObserver, StopControl};
 use crate::decide::{
     ExitingAction, RelaunchAction, StatusStep, VerifyWatch, armed_exit_hint, exiting_action,
     relaunch_action, status_step, verify_watch,
@@ -14,7 +15,9 @@ use crate::resolve::resolve_substrate_exe;
 use crate::session::{Answer, SubstrateSession};
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use std::process::{Child, Command, Stdio};
+use interactive_process::{InteractiveChild, InteractiveCommand};
+use std::io;
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 const CHILD_POLL: Duration = Duration::from_millis(200);
@@ -32,18 +35,65 @@ pub enum Outcome {
     Failed { message: String },
 }
 
-/// Where one relaunch stage ended.
-enum Relaunched {
-    /// The successor is running and the House saw it verify.
-    Verified(Child),
-    /// The loop is over: a refusal, or the retry budget spent.
-    Stopped(Outcome),
+#[derive(Debug, PartialEq, Eq)]
+pub enum ControlledOutcome {
+    Completed(Outcome),
+    Stopped,
 }
 
-/// Why one relaunch attempt produced no verified successor.
+struct Runtime<'a> {
+    control: &'a StopControl,
+    observer: &'a dyn KeeperObserver,
+    console: ConsoleMode,
+}
+
+enum OmpChild {
+    Inherited(Child),
+    Interactive(InteractiveChild),
+}
+
+impl OmpChild {
+    fn id(&self) -> u32 {
+        match self {
+            Self::Inherited(child) => child.id(),
+            Self::Interactive(child) => child.id(),
+        }
+    }
+
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        match self {
+            Self::Inherited(child) => child.try_wait(),
+            Self::Interactive(child) => child.try_wait(),
+        }
+    }
+
+    fn wait(&mut self) -> io::Result<ExitStatus> {
+        match self {
+            Self::Inherited(child) => child.wait(),
+            Self::Interactive(child) => child.wait(),
+        }
+    }
+
+    fn kill(&mut self) -> io::Result<()> {
+        match self {
+            Self::Inherited(child) => child.kill(),
+            Self::Interactive(child) => child.terminate(),
+        }
+    }
+}
+
+enum Relaunched {
+    /// The successor is running and the House saw it verify.
+    Verified(OmpChild),
+    /// The loop is over: a refusal, or the retry budget spent.
+    Completed(Outcome),
+    Stopped,
+}
+
 enum Attempt {
-    Verified(Child),
+    Verified(OmpChild),
     Failed(String),
+    Stopped,
 }
 struct RestartLaunch<'a> {
     intent: &'a RestartStatusIntent,
@@ -51,11 +101,36 @@ struct RestartLaunch<'a> {
 }
 
 pub fn run(config: &KeeperConfig) -> Result<Outcome> {
+    let control = StopControl::new();
+    let observer = NoopObserver;
+    match run_controlled(config, ConsoleMode::Inherit, &control, &observer)? {
+        ControlledOutcome::Completed(outcome) => Ok(outcome),
+        ControlledOutcome::Stopped => unreachable!("the standalone keeper has no stop requester"),
+    }
+}
+
+pub fn run_controlled(
+    config: &KeeperConfig,
+    console: ConsoleMode,
+    control: &StopControl,
+    observer: &dyn KeeperObserver,
+) -> Result<ControlledOutcome> {
     config.validate()?;
-    let mut child = spawn_omp(config, None).context("omp could not start")?;
+    let runtime = Runtime {
+        control,
+        observer,
+        console,
+    };
+    let mut child = spawn_omp(config, None, &runtime).context("omp could not start")?;
     loop {
-        let exit_code = watch_child(config, &mut child)?;
+        let exit_code = match watch_child(config, &mut child, &runtime)? {
+            Some(exit_code) => exit_code,
+            None => return Ok(ControlledOutcome::Stopped),
+        };
         report_exit(exit_code);
+        if control.is_stop_requested() {
+            return Ok(ControlledOutcome::Stopped);
+        }
 
         // # enough: one substrate child for each ask; it keeps the release pointer fresh (census 1.9)
         let executable = resolve_substrate_exe(&config.program_root)
@@ -66,7 +141,7 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
             Ok(pending) => pending,
             Err(refusal) => {
                 session.close()?;
-                return Ok(refusal_outcome(&refusal));
+                return Ok(ControlledOutcome::Completed(refusal_outcome(&refusal)));
             }
         };
         let pending = match pending {
@@ -79,7 +154,7 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
                     pending.state.as_str(),
                     config.workspace
                 );
-                return Ok(Outcome::Stopped { exit_code });
+                return Ok(ControlledOutcome::Completed(Outcome::Stopped { exit_code }));
             }
             None => {
                 session.close()?;
@@ -87,9 +162,13 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
                     "omp-keeper: no restart intent for {}; the keeper exits",
                     config.workspace
                 );
-                return Ok(Outcome::Stopped { exit_code });
+                return Ok(ControlledOutcome::Completed(Outcome::Stopped { exit_code }));
             }
         };
+        if control.is_stop_requested() {
+            session.close()?;
+            return Ok(ControlledOutcome::Stopped);
+        }
 
         let capability = config
             .read_capability()
@@ -106,7 +185,7 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
             Answer::Ok(result) => result,
             Answer::Refused(refusal) => {
                 session.close()?;
-                return Ok(refusal_outcome(&refusal));
+                return Ok(ControlledOutcome::Completed(refusal_outcome(&refusal)));
             }
         };
         println!(
@@ -114,13 +193,17 @@ pub fn run(config: &KeeperConfig) -> Result<Outcome> {
             pending.intent_id, claim.claim_epoch
         );
 
-        match relaunch(config, &mut session, &pending, &claim)? {
+        match relaunch(config, &mut session, &pending, &claim, &runtime)? {
             Relaunched::Verified(successor) => {
                 adopt_verified_successor(&mut child, successor, session.close());
             }
-            Relaunched::Stopped(outcome) => {
+            Relaunched::Completed(outcome) => {
                 session.close()?;
-                return Ok(outcome);
+                return Ok(ControlledOutcome::Completed(outcome));
+            }
+            Relaunched::Stopped => {
+                session.close()?;
+                return Ok(ControlledOutcome::Stopped);
             }
         }
     }
@@ -135,12 +218,16 @@ fn relaunch(
     session: &mut SubstrateSession,
     pending: &RestartStatusIntent,
     claim: &RestartClaimReceipt,
+    runtime: &Runtime<'_>,
 ) -> Result<Relaunched> {
     let mut attempts = 0;
     // The House's own relaunching deadline, carried across attempts so a read
     // that fails cannot quietly widen the window a silent successor gets.
     let mut last_window: Option<Deadline> = None;
     loop {
+        if runtime.control.is_stop_requested() {
+            return Ok(Relaunched::Stopped);
+        }
         attempts += 1;
         // One relaunching transition per attempt. The intent row counts
         // relaunch_attempts and mints a fresh relaunching_deadline_at on every
@@ -165,7 +252,7 @@ fn relaunch(
                 }
                 // the House spends the budget itself when a keeper asks once too often
                 RestartState::Failed => {
-                    return Ok(Relaunched::Stopped(Outcome::Failed {
+                    return Ok(Relaunched::Completed(Outcome::Failed {
                         message: format!(
                             "omp-keeper: the House spent the relaunch budget for intent {}; it is failed:relaunching and omp is not running",
                             pending.intent_id
@@ -178,13 +265,17 @@ fn relaunch(
                 ),
             },
             Answer::Refused(refusal) => {
-                return Ok(Relaunched::Stopped(refusal_outcome(&refusal)));
+                return Ok(Relaunched::Completed(refusal_outcome(&refusal)));
             }
         };
 
+        if runtime.control.is_stop_requested() {
+            return Ok(Relaunched::Stopped);
+        }
         let failure = match successor_proof {
             Some(ref proof) => {
-                match attempt_relaunch(config, session, pending, proof, &mut last_window)? {
+                match attempt_relaunch(config, session, pending, proof, &mut last_window, runtime)?
+                {
                     Attempt::Verified(child) => {
                         println!(
                             "omp-keeper: the House saw the successor verify intent {}",
@@ -193,6 +284,7 @@ fn relaunch(
                         return Ok(Relaunched::Verified(child));
                     }
                     Attempt::Failed(failure) => failure,
+                    Attempt::Stopped => return Ok(Relaunched::Stopped),
                 }
             }
             None => "the relaunching transition returned no successor proof".to_owned(),
@@ -211,9 +303,9 @@ fn relaunch(
                 Some(detail.clone()),
             )?;
             if let Answer::Refused(refusal) = answer {
-                return Ok(Relaunched::Stopped(refusal_outcome(&refusal)));
+                return Ok(Relaunched::Completed(refusal_outcome(&refusal)));
             }
-            return Ok(Relaunched::Stopped(Outcome::Failed {
+            return Ok(Relaunched::Completed(Outcome::Failed {
                 message: format!(
                     "omp-keeper: {detail}; intent {} is failed:relaunching and omp is not running",
                     pending.intent_id
@@ -229,6 +321,7 @@ enum Watched {
     /// The child is running or gone, but the House never proved it. Carries the
     /// sentence the operator and the intent's `failed` detail both get.
     Unproven(String),
+    Stopped,
 }
 
 /// One attempt: start omp, then hold it against the House's relaunching window
@@ -240,6 +333,7 @@ fn attempt_relaunch(
     pending: &RestartStatusIntent,
     successor_proof: &str,
     last_window: &mut Option<Deadline>,
+    runtime: &Runtime<'_>,
 ) -> Result<Attempt> {
     let mut child = match spawn_omp(
         config,
@@ -247,6 +341,7 @@ fn attempt_relaunch(
             intent: pending,
             successor_proof,
         }),
+        runtime,
     ) {
         Ok(child) => child,
         Err(error) => return Ok(Attempt::Failed(format!("{error:#}"))),
@@ -256,14 +351,18 @@ fn attempt_relaunch(
     // that leaves Sol's omp running with nothing watching it and the intent
     // stuck in relaunching, which is the one shape the House cannot clean up.
     // Every sad path below reaches the same kill and reports a failed attempt.
-    match watch_relaunched(session, config, pending, &mut child, last_window) {
+    match watch_relaunched(session, config, pending, &mut child, last_window, runtime) {
         Ok(Watched::Verified) => Ok(Attempt::Verified(child)),
         Ok(Watched::Unproven(reason)) => {
-            leave_no_child(&mut child);
+            leave_no_child(&mut child, runtime);
             Ok(Attempt::Failed(reason))
         }
+        Ok(Watched::Stopped) => {
+            leave_no_child(&mut child, runtime);
+            Ok(Attempt::Stopped)
+        }
         Err(error) => {
-            leave_no_child(&mut child);
+            leave_no_child(&mut child, runtime);
             Ok(Attempt::Failed(format!(
                 "the keeper lost the House mid-relaunch: {error:#}"
             )))
@@ -275,9 +374,13 @@ fn watch_relaunched(
     session: &mut SubstrateSession,
     config: &KeeperConfig,
     pending: &RestartStatusIntent,
-    child: &mut Child,
+    child: &mut OmpChild,
     last_window: &mut Option<Deadline>,
+    runtime: &Runtime<'_>,
 ) -> Result<Watched> {
+    if runtime.control.is_stop_requested() {
+        return Ok(Watched::Stopped);
+    }
     let Some(window) = relaunching_window(session, config, pending, last_window)? else {
         return Ok(Watched::Unproven(format!(
             "the House has named no relaunching deadline for intent {}, so there is no window to wait inside",
@@ -285,6 +388,9 @@ fn watch_relaunched(
         )));
     };
     loop {
+        if runtime.control.is_stop_requested() {
+            return Ok(Watched::Stopped);
+        }
         match observe(session, config, pending)? {
             VerifyWatch::Verified => return Ok(Watched::Verified),
             // Finished, but the House never said verified. Which end it reached
@@ -449,49 +555,83 @@ fn ask_status(
     }
 }
 
-fn spawn_omp(config: &KeeperConfig, restart: Option<RestartLaunch<'_>>) -> Result<Child> {
-    // Console-inheriting on purpose: Sol watches this child, so no detach and no
-    // hidden window. The initial child drops stale restart state. A successor
-    // receives the exact attempt proof, intent, and session selector the House
-    // recorded.
-    let mut command = Command::new(config.program());
-    command
-        .env_remove(RESTART_INTENT_ENV)
-        .env_remove(RESTART_SUCCESSOR_PROOF_ENV)
-        .args(config.program_args())
-        .current_dir(&config.workspace)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    if let Some(restart) = restart {
-        command
-            .env(RESTART_INTENT_ENV, &restart.intent.intent_id)
-            .env(RESTART_SUCCESSOR_PROOF_ENV, restart.successor_proof);
-        if restart.intent.mode == RestartMode::Resume {
-            let session_id = restart.intent.session_id.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "resume intent {} carries no session id",
-                    restart.intent.intent_id
-                )
-            })?;
-            command.arg("--resume").arg(session_id);
+fn spawn_omp(
+    config: &KeeperConfig,
+    restart: Option<RestartLaunch<'_>>,
+    runtime: &Runtime<'_>,
+) -> Result<OmpChild> {
+    let mut arguments: Vec<&str> = config.program_args().iter().map(String::as_str).collect();
+    if let Some(restart) = &restart
+        && restart.intent.mode == RestartMode::Resume
+    {
+        let session_id = restart.intent.session_id.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "resume intent {} carries no session id",
+                restart.intent.intent_id
+            )
+        })?;
+        arguments.extend(["--resume", session_id]);
+    }
+
+    let child = match runtime.console {
+        ConsoleMode::Inherit => {
+            let mut command = Command::new(config.program());
+            command
+                .env_remove(RESTART_INTENT_ENV)
+                .env_remove(RESTART_SUCCESSOR_PROOF_ENV)
+                .args(&arguments)
+                .current_dir(&config.workspace)
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit());
+            if let Some(restart) = &restart {
+                command
+                    .env(RESTART_INTENT_ENV, &restart.intent.intent_id)
+                    .env(RESTART_SUCCESSOR_PROOF_ENV, restart.successor_proof);
+            }
+            command.spawn().map(OmpChild::Inherited)
+        }
+        ConsoleMode::NewWindow => {
+            let mut command = InteractiveCommand::new(config.program());
+            command
+                .env_remove(RESTART_INTENT_ENV)
+                .env_remove(RESTART_SUCCESSOR_PROOF_ENV)
+                .args(&arguments)
+                .current_dir(&config.workspace);
+            if let Some(restart) = &restart {
+                command
+                    .env(RESTART_INTENT_ENV, &restart.intent.intent_id)
+                    .env(RESTART_SUCCESSOR_PROOF_ENV, restart.successor_proof);
+            }
+            command.spawn().map(OmpChild::Interactive)
         }
     }
-    command
-        .spawn()
-        .with_context(|| format!("omp could not start: {}", config.program()))
+    .with_context(|| format!("omp could not start: {}", config.program()))?;
+    runtime.observer.child_started(child.id());
+    Ok(child)
 }
 
-fn watch_child(config: &KeeperConfig, child: &mut Child) -> Result<i32> {
+fn watch_child(
+    config: &KeeperConfig,
+    child: &mut OmpChild,
+    runtime: &Runtime<'_>,
+) -> Result<Option<i32>> {
     let mut last_poll = Instant::now();
     loop {
+        if runtime.control.is_stop_requested() {
+            return kill_child(child, runtime).map(|_| None);
+        }
         if let Some(status) = child
             .try_wait()
             .context("omp child could not be inspected")?
         {
-            return Ok(status.code().unwrap_or(UNKNOWN_EXIT_CODE));
+            runtime.observer.child_stopped(child.id());
+            return Ok(Some(status.code().unwrap_or(UNKNOWN_EXIT_CODE)));
         }
         std::thread::sleep(CHILD_POLL);
+        if runtime.control.is_stop_requested() {
+            return kill_child(child, runtime).map(|_| None);
+        }
         if config.watch_interval_secs == 0
             || last_poll.elapsed() < Duration::from_secs(config.watch_interval_secs)
         {
@@ -525,14 +665,14 @@ fn watch_child(config: &KeeperConfig, child: &mut Child) -> Result<i32> {
                 passed.at().to_rfc3339(),
                 passed.source()
             );
-            return kill_child(child);
+            return kill_child(child, runtime).map(Some);
         }
     }
 }
 
 /// Kill and reap. An unreaped child is a handle the keeper would hold forever,
 /// and a child that died between the look and the kill is already what we wanted.
-fn kill_child(child: &mut Child) -> Result<i32> {
+fn kill_child(child: &mut OmpChild, runtime: &Runtime<'_>) -> Result<i32> {
     if let Err(error) = child.kill() {
         if child
             .try_wait()
@@ -545,14 +685,15 @@ fn kill_child(child: &mut Child) -> Result<i32> {
     let status = child
         .wait()
         .context("killed omp child could not be reaped")?;
+    runtime.observer.child_stopped(child.id());
     Ok(status.code().unwrap_or(UNKNOWN_EXIT_CODE))
 }
 
 /// Make sure no omp survives a failed attempt. This is already the sad path, so
 /// a kill the keeper cannot even report must not stop it from reaching `failed`:
 /// that transition is what the House and the next keeper are waiting on.
-fn leave_no_child(child: &mut Child) {
-    if let Err(error) = kill_child(child) {
+fn leave_no_child(child: &mut OmpChild, runtime: &Runtime<'_>) {
+    if let Err(error) = kill_child(child, runtime) {
         eprintln!("omp-keeper: the relaunched omp child could not be put down: {error:#}");
     }
 }

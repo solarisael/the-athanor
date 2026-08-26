@@ -43,6 +43,7 @@ $stageTarget = Join-Path $athanorRoot "target\deploy"
  $stagedHostExe = Join-Path $stageTarget "release\house-host.exe"
  $stagedHostPdb = [IO.Path]::ChangeExtension($stagedHostExe, ".pdb")
  $stagedManagerExe = Join-Path $stageTarget "release\athanor-manage.exe"
+ $stagedAppExe = Join-Path $stageTarget "release\athanor.exe"
  $stagedKeeperExe = Join-Path $stageTarget "release\omp-keeper.exe"
  $stagedKeeperPdb = [IO.Path]::ChangeExtension($stagedKeeperExe, ".pdb")
 $configuredLiveExe = [string]$env:ATHANOR_SUBSTRATE_EXE
@@ -58,6 +59,7 @@ $livePdb = [IO.Path]::ChangeExtension($liveExe, ".pdb")
 $liveHostExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "house-host.exe"
 $liveHostPdb = [IO.Path]::ChangeExtension($liveHostExe, ".pdb")
  $liveManagerExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "athanor-manage.exe"
+ $liveAppExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "athanor.exe"
  $liveKeeperExe = Join-Path ([IO.Path]::GetDirectoryName($liveExe)) "omp-keeper.exe"
  $liveKeeperPdb = [IO.Path]::ChangeExtension($liveKeeperExe, ".pdb")
  $stableKeeperExe = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))))) "bin\omp-keeper.exe"
@@ -66,12 +68,15 @@ $liveHostPdb = [IO.Path]::ChangeExtension($liveHostExe, ".pdb")
  $stableKeeperProvision = Join-Path ([IO.Path]::GetDirectoryName($stableKeeperExe)) "provision-omp-keeper.ps1"
  $stableRestartProvision = Join-Path ([IO.Path]::GetDirectoryName($stableKeeperExe)) "provision-restart-capability.ps1"
 $stableManagerExe = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))))) "bin\athanor-manage.exe"
+$stableAppExe = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))))) "bin\athanor.exe"
  $previousExe = Join-Path $stageTarget "previous\athanor-substrate.exe"
  $previousPdb = [IO.Path]::ChangeExtension($previousExe, ".pdb")
  $previousHostExe = Join-Path $stageTarget "previous\house-host.exe"
  $previousHostPdb = [IO.Path]::ChangeExtension($previousHostExe, ".pdb")
  $previousManagerExe = Join-Path $stageTarget "previous\athanor-manage.exe"
  $previousStableManagerExe = Join-Path $stageTarget "previous\athanor-manage-stable.exe"
+ $previousAppExe = Join-Path $stageTarget "previous\athanor.exe"
+ $previousStableAppExe = Join-Path $stageTarget "previous\athanor-stable.exe"
  $previousKeeperExe = Join-Path $stageTarget "previous\omp-keeper.exe"
  $previousKeeperPdb = Join-Path $stageTarget "previous\omp-keeper.pdb"
  $previousStableKeeperExe = Join-Path $stageTarget "previous\omp-keeper-stable.exe"
@@ -195,6 +200,17 @@ if ($keeperWorkers.Count -gt 0) {
     throw "an installed omp-keeper is running ($keeperSummary); exit its child OMP and keeper before deployment so the terminal owner is never replaced underneath a live session"
 }
 
+# The app owns the operator's own window. Replacing its executable while it is
+# running is refused by exact executable path, the same way the keeper is.
+$appWorkers = @()
+foreach ($appPath in @($liveAppExe, $stableAppExe) | Select-Object -Unique) {
+    $appWorkers += @(Get-LiveWorkers -ExecutablePath $appPath)
+}
+if ($appWorkers.Count -gt 0) {
+    $appSummary = ($appWorkers | ForEach-Object { "PID=$($_.ProcessId) parent=$($_.ParentProcessId) path=$($_.ExecutablePath)" }) -join ", "
+    throw "an installed athanor.exe is running ($appSummary); exit the app before deployment so its executable is never replaced underneath a live session"
+}
+
 
 
 if (-not $SkipTests) {
@@ -219,6 +235,9 @@ if (-not (Test-Path $stagedManagerExe -PathType Leaf)) {
 }
 if (-not (Test-Path $stagedKeeperExe -PathType Leaf)) {
     throw "staged keeper executable was not produced at $stagedKeeperExe"
+}
+if (-not (Test-Path $stagedAppExe -PathType Leaf)) {
+    throw "staged app executable was not produced at $stagedAppExe"
 }
 foreach ($provisioner in @($sourceKeeperProvision, $sourceRestartProvision)) {
     if (-not (Test-Path $provisioner -PathType Leaf)) {
@@ -307,6 +326,8 @@ try {
     $copiedHostPdb = $false
     $copiedManager = $false
     $copiedStableManager = $false
+    $copiedAppExe = $false
+    $copiedStableApp = $false
     $copiedKeeperExe = $false
     $copiedKeeperPdb = $false
     $copiedStableKeeper = $false
@@ -314,7 +335,7 @@ try {
     $copiedRestartProvision = $false
 New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($liveExe)) | Out-Null
 New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($previousExe)) | Out-Null
-foreach ($priorPath in @($previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousKeeperExe, $previousKeeperPdb, $previousStableKeeperExe, $previousKeeperProvision, $previousRestartProvision, $previousManifest)) {
+foreach ($priorPath in @($previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousAppExe, $previousStableAppExe, $previousKeeperExe, $previousKeeperPdb, $previousStableKeeperExe, $previousKeeperProvision, $previousRestartProvision, $previousManifest)) {
     if (Test-Path $priorPath -PathType Leaf) {
         Remove-Item $priorPath -Force -ErrorAction Stop
     }
@@ -352,6 +373,12 @@ if (Test-Path $liveManifest -PathType Leaf) {
     }
     Move-Item $liveManagerExe $previousManagerExe -Force
     Move-Item $stableManagerExe $previousStableManagerExe -Force
+    if (Test-Path $liveAppExe -PathType Leaf) {
+        Move-Item $liveAppExe $previousAppExe -Force
+    }
+    if (Test-Path $stableAppExe -PathType Leaf) {
+        Move-Item $stableAppExe $previousStableAppExe -Force
+    }
 }
 if (Test-Path $liveManifest -PathType Leaf) {
     Copy-Item $liveManifest $previousManifest -Force
@@ -380,6 +407,10 @@ if (Test-Path $liveManifest -PathType Leaf) {
         $copiedManager = $true
         Copy-Item $stagedManagerExe $stableManagerExe -Force
         $copiedStableManager = $true
+        Copy-Item $stagedAppExe $liveAppExe -Force
+        $copiedAppExe = $true
+        Copy-Item $stagedAppExe $stableAppExe -Force
+        $copiedStableApp = $true
         Copy-Item $stagedKeeperExe $stableKeeperExe -Force
         $copiedStableKeeper = $true
         Copy-Item $sourceKeeperProvision $stableKeeperProvision -Force
@@ -399,11 +430,22 @@ if (Test-Path $liveManifest -PathType Leaf) {
                 executable = $true
             }
         }
+        $appEntries = @($manifest.artifacts | Where-Object { [string]$_.path -eq "bin/athanor.exe" })
+        if ($appEntries.Count -eq 0) {
+            $manifest.artifacts = @($manifest.artifacts) + [pscustomobject][ordered]@{
+                component = "app"
+                path = "bin/athanor.exe"
+                sha256 = ""
+                size = 0
+                executable = $true
+            }
+        }
         foreach ($binary in @(
             @{ Path = "bin/athanor-substrate.exe"; Source = $liveExe },
             @{ Path = "bin/house-host.exe"; Source = $liveHostExe },
             @{ Path = "bin/athanor-manage.exe"; Source = $liveManagerExe },
-            @{ Path = "bin/omp-keeper.exe"; Source = $liveKeeperExe }
+            @{ Path = "bin/omp-keeper.exe"; Source = $liveKeeperExe },
+            @{ Path = "bin/athanor.exe"; Source = $liveAppExe }
         )) {
             $entries = @($manifest.artifacts | Where-Object { [string]$_.path -eq $binary.Path })
             if ($entries.Count -ne 1) {
@@ -461,6 +503,8 @@ if (Test-Path $liveManifest -PathType Leaf) {
         @{ Live = $liveHostPdb; Previous = $previousHostPdb; Created = $copiedHostPdb },
         @{ Live = $liveManagerExe; Previous = $previousManagerExe; Created = $copiedManager },
         @{ Live = $stableManagerExe; Previous = $previousStableManagerExe; Created = $copiedStableManager },
+        @{ Live = $liveAppExe; Previous = $previousAppExe; Created = $copiedAppExe },
+        @{ Live = $stableAppExe; Previous = $previousStableAppExe; Created = $copiedStableApp },
         @{ Live = $liveKeeperExe; Previous = $previousKeeperExe; Created = $copiedKeeperExe },
         @{ Live = $liveKeeperPdb; Previous = $previousKeeperPdb; Created = $copiedKeeperPdb },
         @{ Live = $stableKeeperExe; Previous = $previousStableKeeperExe; Created = $copiedStableKeeper },
@@ -497,7 +541,7 @@ if (Test-Path $liveManifest -PathType Leaf) {
     throw $deploymentFailure
 }
 
-Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousKeeperExe, $previousKeeperPdb, $previousStableKeeperExe, $previousKeeperProvision, $previousRestartProvision, $previousManifest -Force -ErrorAction SilentlyContinue
+Remove-Item $previousExe, $previousPdb, $previousHostExe, $previousHostPdb, $previousManagerExe, $previousStableManagerExe, $previousAppExe, $previousStableAppExe, $previousKeeperExe, $previousKeeperPdb, $previousStableKeeperExe, $previousKeeperProvision, $previousRestartProvision, $previousManifest -Force -ErrorAction SilentlyContinue
 
 # Sol's standing rule (2026-08-22): do not leave compile output behind.
 # Remove the dev build trees after a good deploy. Keep target\deploy:

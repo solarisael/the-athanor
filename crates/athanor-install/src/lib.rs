@@ -1,5 +1,7 @@
+pub mod app;
 pub mod boundaries;
 pub mod component;
+pub mod harness;
 pub mod installer;
 pub mod layout;
 pub mod manifest;

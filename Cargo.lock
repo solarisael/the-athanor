@@ -101,6 +101,7 @@ dependencies = [
  "chrono",
  "godot",
  "house-protocol",
+ "serde_json",
  "uuid",
 ]
 
@@ -131,6 +132,9 @@ dependencies = [
  "anyhow",
  "getrandom 0.3.4",
  "hex",
+ "house-protocol",
+ "interactive-process",
+ "omp-keeper",
  "serde",
  "serde_json",
  "sha2",
@@ -1262,6 +1266,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "interactive-process"
+version = "0.1.0"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1496,6 +1507,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "house-protocol",
+ "interactive-process",
  "serde",
  "serde_json",
  "tempfile",

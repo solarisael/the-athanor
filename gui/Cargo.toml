@@ -11,4 +11,5 @@ crate-type = ["cdylib"]
 chrono.workspace = true
 godot = { version = "=0.5.5", features = ["api-4-7"] }
 house-protocol = { path = "../crates/house-protocol" }
+serde_json.workspace = true
 uuid.workspace = true

@@ -9,12 +9,19 @@ name = "athanor_install"
 path = "src/lib.rs"
 
 [[bin]]
+name = "athanor"
+path = "src/bin/athanor.rs"
+
+[[bin]]
 name = "athanor-manage"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
 hex.workspace = true
+house-protocol = { path = "../house-protocol" }
+interactive-process = { path = "../interactive-process" }
+omp-keeper = { path = "../omp-keeper" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

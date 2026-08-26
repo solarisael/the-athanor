@@ -36,6 +36,7 @@ enum Screen {
     Familiars,
     Dispatch,
     Health,
+    Harnesses,
 }
 
 impl Screen {
@@ -47,6 +48,7 @@ impl Screen {
             Self::Familiars => "screen:familiars",
             Self::Dispatch => "screen:dispatch",
             Self::Health => "screen:health",
+            Self::Harnesses => "screen:harnesses",
         }
     }
 
@@ -58,6 +60,7 @@ impl Screen {
             Self::Familiars => "S07 · FAMILIARS / SPELLBOOK",
             Self::Dispatch => "S08 · FAMILIARS / DISPATCH",
             Self::Health => "S09 · SISTEMA / SAÚDE",
+            Self::Harnesses => "SYSTEM / MANAGED CONSOLE · HARNESSES",
         }
     }
 }
@@ -104,6 +107,8 @@ pub struct AthanorProbe {
     dispatch_page: NodePath,
     #[export]
     health_page: NodePath,
+    #[export]
+    harnesses_page: NodePath,
     #[export]
     left_navigator: NodePath,
     #[export]
@@ -155,6 +160,7 @@ struct Shell {
     familiars_page: Gd<Control>,
     dispatch_page: Gd<Control>,
     health_page: Gd<Control>,
+    harnesses_page: Gd<Control>,
     left_navigator: Gd<Control>,
     right_navigator: Gd<Control>,
     center_frame: Gd<MarginContainer>,
@@ -182,6 +188,7 @@ impl IControl for AthanorProbe {
             familiars_page: NodePath::default(),
             dispatch_page: NodePath::default(),
             health_page: NodePath::default(),
+            harnesses_page: NodePath::default(),
             left_navigator: NodePath::default(),
             right_navigator: NodePath::default(),
             center_frame: NodePath::default(),
@@ -308,6 +315,7 @@ impl IControl for AthanorProbe {
             Some("familiars" | "spellbook" | "s07") => Screen::Familiars,
             Some("dispatch" | "s08") => Screen::Dispatch,
             Some("health" | "saude" | "saúde" | "s09") => Screen::Health,
+            Some("harnesses" | "managed-console") => Screen::Harnesses,
             Some("resume" | "conversation" | "chat" | "s01") | None => Screen::Resume,
             Some(other) => {
                 godot_warn!("unknown {INITIAL_SCREEN_ENV} ({other}); using S01");
@@ -459,6 +467,7 @@ impl AthanorProbe {
             familiars_page: self.base().try_get_node_as(&self.familiars_page)?,
             dispatch_page: self.base().try_get_node_as(&self.dispatch_page)?,
             health_page: self.base().try_get_node_as(&self.health_page)?,
+            harnesses_page: self.base().try_get_node_as(&self.harnesses_page)?,
             left_navigator: self.base().try_get_node_as(&self.left_navigator)?,
             right_navigator: self.base().try_get_node_as(&self.right_navigator)?,
             center_frame: self.base().try_get_node_as(&self.center_frame)?,
@@ -562,6 +571,7 @@ impl AthanorProbe {
             (Screen::Familiars, &mut shell.familiars_page),
             (Screen::Dispatch, &mut shell.dispatch_page),
             (Screen::Health, &mut shell.health_page),
+            (Screen::Harnesses, &mut shell.harnesses_page),
         ] {
             page.set_visible(screen == active);
         }

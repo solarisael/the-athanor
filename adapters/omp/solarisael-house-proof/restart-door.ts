@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { roomContext } from "./room.ts";
-import { hostSessionIdentity } from "./host.ts";
+import { embodiedSession, hostSessionIdentity } from "./host.ts";
 import { catchBoat } from "./substrate.ts";
 
 // omp exit code 87 means "armed exit, restart me" (keeper handshake, frozen
@@ -49,6 +49,9 @@ const EXIT_CAPABILITY_ENV = "ATHANOR_RESTART_EXIT_CAPABILITY";
 const EXIT_CAPABILITY_FILENAME = "restart-exit-capability";
 const REQUEST_CAPABILITY_ENV = "ATHANOR_RESTART_REQUEST_CAPABILITY";
 const REQUEST_CAPABILITY_FILENAME = "restart-request-capability";
+const VERIFY_CAPABILITY_ENV = "ATHANOR_RESTART_VERIFY_CAPABILITY";
+const VERIFY_CAPABILITY_FILENAME = "restart-verify-capability";
+const RESTART_INTENT_ENV = "ATHANOR_RESTART_INTENT_ID";
 
 // The House records an intent because the room is provisioned to ask for one,
 // and the operator's standing policy is what that provisioning means. The door
@@ -104,6 +107,9 @@ export type RestartDoorDeps = {
   // seam; a read, never a consume.
   latestBoat?: (room: string, options?: { signal?: AbortSignal }) => Promise<Record<string, unknown>>;
   requestCapability?: (effectiveRoomDir: string) => string | null;
+  verifyCapability?: (effectiveRoomDir: string) => string | null;
+  restartIntentId?: () => string | null;
+  isEmbodied?: (room: string, session: string) => boolean;
   exit?: (code: number) => void;
 };
 
@@ -403,9 +409,60 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
   const resolveRequestCapability = deps.requestCapability
     ?? ((roomDir: string) => readCapability(roomDir, REQUEST_CAPABILITY_ENV, REQUEST_CAPABILITY_FILENAME));
   const resolveLatestBoat = deps.latestBoat ?? catchBoat;
+  const resolveVerifyCapability = deps.verifyCapability
+    ?? ((roomDir: string) => readCapability(roomDir, VERIFY_CAPABILITY_ENV, VERIFY_CAPABILITY_FILENAME));
+  const resolveRestartIntent = deps.restartIntentId
+    ?? (() => text(process.env[RESTART_INTENT_ENV]));
+  const isEmbodied = deps.isEmbodied
+    ?? ((room: string, session: string) => embodiedSession(room) === session);
   // Armed state is closure-local: one door, one pending exit, no process-wide
   // flag another registration could inherit.
   let armed: ArmedExit | null = null;
+  let verifiedIntent = "";
+  let verifyingIntent = "";
+
+  // The keeper gives only a relaunched OMP the intent id. Verify on startup,
+  // after the earlier session_start hook has established the embodied session.
+  const verifySuccessor = async (_event: unknown, ctx: any) => {
+    const intentId = text(resolveRestartIntent());
+    if (!intentId || verifiedIntent === intentId || verifyingIntent === intentId) return;
+    const { room, spirit, effectiveRoomDir } = roomContext(ctx?.cwd);
+    const session = hostSessionIdentity(ctx, effectiveRoomDir);
+    if (ctx?.mode !== "tui" || !isEmbodied(room, session)) return;
+    const capability = text(resolveVerifyCapability(effectiveRoomDir));
+    if (!capability) {
+      ctx?.ui?.notify?.(
+        "Athanor restart successor could not verify: this room holds no restart_verify capability.",
+        "warning",
+      );
+      return;
+    }
+    verifyingIntent = intentId;
+    try {
+      const receipt = await deps.requestDomain("restart_verify", {
+        intentId,
+        successorSession: session,
+        room,
+        spirit,
+        capability,
+      }, undefined, true);
+      if (receipt?.ok === false || text(receipt?.state) !== "verified") {
+        const code = text(receipt?.code) || "not_verified";
+        ctx?.ui?.notify?.(`Athanor restart successor verification failed (${code}).`, "warning");
+        return;
+      }
+      verifiedIntent = intentId;
+      delete process.env[RESTART_INTENT_ENV];
+      ctx?.ui?.notify?.("Athanor restart successor verified.", "info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx?.ui?.notify?.(`Athanor restart successor verification failed: ${message}`, "warning");
+    } finally {
+      verifyingIntent = "";
+    }
+  };
+  pi.on("session_start", verifySuccessor);
+  pi.on("session_switch", verifySuccessor);
 
   deps.registerTool({
     name: "request_restart",

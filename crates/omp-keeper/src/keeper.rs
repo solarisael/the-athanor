@@ -22,6 +22,7 @@ const CHILD_POLL: Duration = Duration::from_millis(200);
 /// the successor's verify often, on the substrate session it already holds open.
 const VERIFY_POLL: Duration = Duration::from_secs(1);
 const UNKNOWN_EXIT_CODE: i32 = -1;
+const RESTART_INTENT_ENV: &str = "ATHANOR_RESTART_INTENT_ID";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -46,7 +47,7 @@ enum Attempt {
 
 pub fn run(config: &KeeperConfig) -> Result<Outcome> {
     config.validate()?;
-    let mut child = spawn_omp(config).context("omp could not start")?;
+    let mut child = spawn_omp(config, None).context("omp could not start")?;
     loop {
         let exit_code = watch_child(config, &mut child)?;
         report_exit(exit_code);
@@ -224,7 +225,7 @@ fn attempt_relaunch(
     pending: &RestartStatusIntent,
     last_window: &mut Option<Deadline>,
 ) -> Result<Attempt> {
-    let mut child = match spawn_omp(config) {
+    let mut child = match spawn_omp(config, Some(&pending.intent_id)) {
         Ok(child) => child,
         Err(error) => return Ok(Attempt::Failed(format!("{error:#}"))),
     };
@@ -426,17 +427,22 @@ fn ask_status(
     }
 }
 
-fn spawn_omp(config: &KeeperConfig) -> Result<Child> {
+fn spawn_omp(config: &KeeperConfig, restart_intent_id: Option<&str>) -> Result<Child> {
     // Console-inheriting on purpose: Sol watches this child, so no detach and no
-    // hidden window. A `.cmd`/`.bat` shim — which is what Sol's npm-installed omp
-    // is — is started by std through the command processor, arguments escaped for
-    // it, so the documented invocation needs no shell of our own here.
-    Command::new(config.program())
+    // hidden window. The relaunch carries the one intent the successor must
+    // verify; the initial child explicitly drops any stale inherited value.
+    let mut command = Command::new(config.program());
+    command
+        .env_remove(RESTART_INTENT_ENV)
         .args(config.program_args())
         .current_dir(&config.workspace)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if let Some(intent_id) = restart_intent_id {
+        command.env(RESTART_INTENT_ENV, intent_id);
+    }
+    command
         .spawn()
         .with_context(|| format!("omp could not start: {}", config.program()))
 }

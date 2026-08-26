@@ -320,6 +320,10 @@ describe("OMP adapter registration", () => {
       "tool_result",
       "shutdown",
       "agent_end",
+      // The restart door verifies a keeper-launched successor after the main
+      // session_start hook establishes the embodied session.
+      "session_start",
+      "session_switch",
       // The exit door's own agent_end tap, registered last so every other
       // agent_end write settles before it can fire an exit.
       "agent_end",

@@ -191,6 +191,7 @@ fn the_full_loop_runs_from_an_armed_exit_to_a_verified_successor() {
         "full-loop",
         &[
             ("ATHANOR_STATE_DIR", "D:/wrong-inherited-state"),
+            ("ATHANOR_RESTART_INTENT_ID", "stale-inherited-intent"),
             ("FAKE_SUBSTRATE_EXPECT_STATE_ROOT", &state_root),
         ],
     );
@@ -221,6 +222,16 @@ fn the_full_loop_runs_from_an_armed_exit_to_a_verified_successor() {
         lines(&tree.runs).len(),
         2,
         "omp ran twice: the armed exit and the relaunch: {stdout}"
+    );
+    let launches = lines(&tree.runs);
+    assert_eq!(
+        launches[0], "run none",
+        "the initial child carries no stale intent"
+    );
+    assert_eq!(
+        launches[1],
+        format!("run {INTENT_ID}"),
+        "the relaunched successor receives the exact intent it must verify"
     );
 
     let claim = &requests_for(&tree.transcript, "restart_claim")[0];

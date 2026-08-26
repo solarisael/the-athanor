@@ -45,7 +45,8 @@ fn record_run() -> u64 {
         .append(true)
         .open(&path)
         .expect("fake omp run log");
-    writeln!(file, "run").expect("fake omp run line");
+    let intent = std::env::var("ATHANOR_RESTART_INTENT_ID").unwrap_or_else(|_| "none".to_string());
+    writeln!(file, "run {intent}").expect("fake omp run line");
     std::fs::read_to_string(&path)
         .unwrap_or_default()
         .lines()

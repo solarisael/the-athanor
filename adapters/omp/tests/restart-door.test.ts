@@ -58,6 +58,7 @@ type DoorHarness = {
   notices: string[];
   agentEnd: () => Promise<unknown>;
   hookNames: () => string[];
+  sessionStart: (ctx?: unknown) => Promise<unknown>;
 };
 
 const FAKE_EXECUTABLE = "C:/fake/versions/0.10.1/bin/athanor-substrate.exe";
@@ -69,6 +70,8 @@ const CAPABILITY_ENV = "ATHANOR_RESTART_EXIT_CAPABILITY";
 // record an intent at all. Separate class, separate secret.
 const REQUEST_CAPABILITY = "restart-request-secret-4711";
 const REQUEST_CAPABILITY_ENV = "ATHANOR_RESTART_REQUEST_CAPABILITY";
+const VERIFY_CAPABILITY = "restart-verify-secret-159";
+const SUCCESSOR_INTENT = "06f33aab-fdca-489b-8dd9-1020e2efc384";
 
 // The real harness shape: AsyncJobSnapshotItem is Pick<AsyncJob, "id" | "type" |
 // "status" | "label" | "startTime"> and AsyncJob carries no persist or detached
@@ -94,6 +97,7 @@ function buildDoor(options: {
   request?: Record<string, unknown>;
   transition?: Record<string, unknown>;
   release?: { releaseId?: string | null; previousReleaseId?: string | null } | null;
+  verify?: Record<string, unknown>;
   transports?: Map<string, { usable: boolean }>;
   gigaBuffers?: () => Array<{ session: string; cwd: string; turns: number }> | null;
   // Omitted entirely (not set to a stub) when a test wants the module's own
@@ -101,6 +105,9 @@ function buildDoor(options: {
   exitCapability?: (roomDir: string) => string | null;
   requestCapability?: (roomDir: string) => string | null;
   latestBoat?: (room: string, options?: unknown) => Promise<Record<string, unknown>>;
+  verifyCapability?: (roomDir: string) => string | null;
+  restartIntentId?: () => string | null;
+  isEmbodied?: (room: string, session: string) => boolean;
 } = {}): DoorHarness {
   const hooks: DoorHarness["hooks"] = [];
   const tools: CapturedTool[] = [];
@@ -123,6 +130,7 @@ function buildDoor(options: {
         return options.request ?? { ok: true, intentId: "intent-fresh-91", state: "requested", expiresAt: "2026-08-25T18:00:00Z" };
       }
       if (method === "restart_transition") return options.transition ?? { ok: true, state: "exiting" };
+      if (method === "restart_verify") return options.verify ?? { ok: true, state: "verified" };
       return { ok: false, error: `unexpected method ${method}` };
     },
     transports: (options.transports ?? new Map([[FAKE_EXECUTABLE, { usable: true }]])) as any,
@@ -134,6 +142,9 @@ function buildDoor(options: {
     ...("exitCapability" in options ? { exitCapability: options.exitCapability } : {}),
     ...("requestCapability" in options ? { requestCapability: options.requestCapability } : {}),
     ...("latestBoat" in options ? { latestBoat: options.latestBoat } : {}),
+    ...("verifyCapability" in options ? { verifyCapability: options.verifyCapability } : {}),
+    ...("restartIntentId" in options ? { restartIntentId: options.restartIntentId } : {}),
+    ...("isEmbodied" in options ? { isEmbodied: options.isEmbodied } : {}),
     exit(code) {
       exits.push(code);
     },
@@ -141,6 +152,8 @@ function buildDoor(options: {
 
   const agentEnd = hooks.find((hook) => hook.name === "agent_end");
   if (!agentEnd) throw new Error("the door registered no agent_end hook");
+  const sessionStart = hooks.find((hook) => hook.name === "session_start");
+  if (!sessionStart) throw new Error("the door registered no session_start hook");
   if (tools.length !== 1) throw new Error(`the door registered ${tools.length} tools`);
 
   return {
@@ -151,6 +164,10 @@ function buildDoor(options: {
     notices,
     hookNames: () => hooks.map((hook) => hook.name),
     agentEnd: () => agentEnd.handler({ messages: [] }, { ui: { notify: (text: string) => notices.push(text) } }),
+    sessionStart: (ctx: any = toolContext()) => sessionStart.handler(
+      {},
+      { ...ctx, ui: { notify: (text: string) => notices.push(text) } },
+    ),
   };
 }
 
@@ -160,6 +177,7 @@ function toolContext(options: { cwd?: string; jobs?: unknown; withJobDoor?: bool
   const ctx: Record<string, unknown> = {
     cwd: options.cwd ?? process.cwd(),
     sessionId: "session-under-restart",
+    mode: "tui",
   };
   if (options.withJobDoor !== false) {
     ctx.getAsyncJobSnapshot = () => options.jobs ?? null;
@@ -202,7 +220,38 @@ describe("adapter exit door", () => {
     expect(door.tool.parameters.shape?.mode?.values).toEqual(["resume", "fresh"]);
     // The fence itself: this door owns no turn_end tap, because turn_end fires
     // mid-tool-loop and an exit there would kill a turn in progress.
-    expect(door.hookNames()).toEqual(["agent_end"]);
+    expect(door.hookNames()).toEqual(["session_start", "session_switch", "agent_end"]);
+  });
+
+  test("a keeper-launched embodied successor verifies its exact intent on session start", async () => {
+    const door = buildDoor({
+      verifyCapability: () => VERIFY_CAPABILITY,
+      restartIntentId: () => SUCCESSOR_INTENT,
+      isEmbodied: () => true,
+    });
+    await door.sessionStart();
+    await door.sessionStart();
+    const verifies = door.calls.filter((call) => call.method === "restart_verify");
+    expect(verifies).toHaveLength(1);
+    expect(verifies[0]).toMatchObject({
+      write: true,
+      params: {
+        intentId: SUCCESSOR_INTENT,
+        successorSession: "session-under-restart",
+        capability: VERIFY_CAPABILITY,
+      },
+    });
+    expect(door.notices.join(" ")).toContain("successor verified");
+  });
+
+  test("a non-TUI worker session cannot verify the keeper intent", async () => {
+    const door = buildDoor({
+      verifyCapability: () => VERIFY_CAPABILITY,
+      restartIntentId: () => SUCCESSOR_INTENT,
+      isEmbodied: () => true,
+    });
+    await door.sessionStart({ ...toolContext(), mode: "print" });
+    expect(door.calls).toEqual([]);
   });
 
   // An unprovisioned room simply cannot self-restart: it can neither record an

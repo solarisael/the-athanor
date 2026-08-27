@@ -129,19 +129,27 @@ function rowsFrom(result: unknown): LessonRow[] {
     row.tags?.includes("ttsr-approved") && ((row.condition?.length ?? 0) > 0 || (row.astCondition?.length ?? 0) > 0));
 }
 
+export type TtsrLesson = { id: number; body: string };
+
 export async function syncLessonTtsr(args: {
   ctx: any; roomDir: string; room: string; activeProject: string | null;
-}): Promise<{ active: number; added: number; warnings: string[] }> {
+}): Promise<{ active: number; added: number; warnings: string[]; lessons: TtsrLesson[] }> {
   args.ctx.getContextUsage?.();
   const sessionId = String(args.ctx.sessionManager?.getSessionId?.() ?? args.ctx.sessionID ?? "").trim();
   const record = state().sessions.get(sessionId);
-  if (!record) return { active: 0, added: 0, warnings: ["native OMP TTSR manager unavailable"] };
+  if (!record) return { active: 0, added: 0, warnings: ["native OMP TTSR manager unavailable"], lessons: [] };
 
   const queries = FAMILIES.map((family) => runLessonQuery(args.roomDir, args.room, { type: family, limit: 50 }));
   if (args.activeProject) queries.push(runLessonQuery(args.roomDir, args.room, { type: "project", project: args.activeProject, limit: 50 }));
   const results = await Promise.all(queries);
   const rows = results.flatMap(rowsFrom);
-  const rules = rows.map((row) => nativeRule(row, args.activeProject)).filter((rule): rule is Record<string, unknown> => rule !== null);
+  // Armed rows are the selection Presence is fed: one lesson set, one authority,
+  // so a guard the session cannot see is never quoted as a rule to it either.
+  const armed = rows.flatMap((row) => {
+    const rule = nativeRule(row, args.activeProject);
+    return rule ? [{ row, rule }] : [];
+  });
+  const rules = armed.map((entry) => entry.rule);
   const next = new Set(rules.map((rule) => String(rule.name)));
   let added = 0;
   const warnings: string[] = [];
@@ -156,5 +164,10 @@ export async function syncLessonTtsr(args: {
     }
   }
   record.active = next;
-  return { active: next.size, added, warnings };
+  return {
+    active: next.size,
+    added,
+    warnings,
+    lessons: armed.map(({ row }) => ({ id: row.id, body: row.lesson })),
+  };
 }

@@ -12,7 +12,9 @@ import {
   writeActiveSpiritSnapshot,
 } from "./room.ts";
 import { RecallPolicyHostClient } from "./recall-policy.ts";
-import { embodiedSession, hostHouseId, hostSessionIdentity } from "./host.ts";
+import { hostHouseId, hostSessionIdentity } from "./host.ts";
+import { topLevelSession } from "./top-level-session-fence.ts";
+import { closePresence, responseDigest } from "./presence.ts";
 import { applyRecallViewport } from "./context.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./anamnesis.ts";
@@ -75,28 +77,50 @@ function docketWriteBinding(ctx: any) {
   return { binding, capability: roomCapability(effectiveRoomDir) };
 }
 
-// Worker-rejecting fence at the organ door (guild-hall #144, settled NOT_MET
-// against M1 criterion 4 before this cut existed). A docket write must come
-// from the room's embodied session; a worker spawned by the task tool carries
-// its own session identity and refuses here, typed, before any capability or
-// substrate work. Worker output enters receipts through the spirit's hand.
+// Docket accepts writes only from the authenticated top-level OMP session.
 function refuseWorkerHands(gate: string) {
   return refuseDocket(
     "worker_hands_off",
     gate,
-    "docket writes require the room's embodied session; worker evidence enters through the spirit's hand",
+    "docket writes require the top-level session; worker evidence enters through the spirit's hand",
   );
 }
 
 export function workerAtTheDoor(
-    _ctx: any,
-    binding: { room: string; session: string },
+  _ctx: any,
+  binding: { room: string; session: string },
 ): boolean {
-  const embodied = embodiedSession(binding.room);
-  // No registered embodiment means no session_start has run in this process;
-  // fail closed. A fence that opens when unsure is not a fence.
-  if (!embodied) return true;
-  return binding.session !== embodied;
+  const holder = topLevelSession(binding.room);
+  if (!holder) return true;
+  return binding.session !== holder;
+}
+
+export async function closePresenceAndSleep(
+  binding: { room: string; spirit: string; session: string },
+  body: string,
+  signal: AbortSignal | undefined,
+  close = closePresence,
+  writeBoat = sleepBoat,
+) {
+  let closedBody = body;
+  try {
+    const closed = await close(
+      binding,
+      {
+        frameId: "",
+        body,
+        // The Host owns the ledger this boat is sealed against. All the
+        // caller asserts is the Presence frame version it was built for.
+        frameVersion: 1,
+      },
+      `presence-close:${responseDigest(body)}`,
+      signal,
+    );
+    closedBody = String(closed.body ?? body);
+  } catch (error) {
+    console.warn(`[athanor] Presence close degraded: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return writeBoat(binding.room, closedBody, { signal });
 }
 
 function refuseDocket(code: string, gate: string, error: string) {
@@ -933,11 +957,16 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      const session = hostSessionIdentity(ctx, effectiveRoomDir);
       // Sleep is the deliberate session boundary: classify whatever the buffer still holds
       // so the closing batch is not stranded until the next session's shutdown.
       flushGigaTurnsDetached(ctx);
-      const result = await sleepBoat(room, params.body, { signal });
+      const result = await closePresenceAndSleep(
+        { room, spirit, session },
+        params.body,
+        signal,
+      );
       return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });

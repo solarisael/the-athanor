@@ -21,6 +21,7 @@ export async function receiveAutomaticWake(
         letter: "",
         title: null,
         source: null,
+        memoryId: null,
         warning: `paper boat unavailable${code ? ` (${code})` : ""}`,
       };
     }
@@ -29,6 +30,7 @@ export async function receiveAutomaticWake(
       letter: boat?.found ? String(boat.wake_context || "") : "",
       title: boat?.found && boat.title ? String(boat.title) : null,
       source: boat?.found && boat.source_path ? String(boat.source_path) : null,
+      memoryId: boat?.found && boat.id ? String(boat.id) : null,
       warning: null,
     };
   } catch {
@@ -37,6 +39,7 @@ export async function receiveAutomaticWake(
       letter: "",
       title: null,
       source: null,
+      memoryId: null,
       warning: "paper boat unavailable",
     };
   }

@@ -87,8 +87,12 @@ function toggleMemoryBody(row) {
   return true;
 }
 
+function shelfKey(item) {
+  return item.kind === "house" ? "house" : `room:${item.id}`;
+}
+
 function shelfFor(item) {
-  const key = item.kind === "house" ? "house" : `room:${item.id}`;
+  const key = shelfKey(item);
   const held = shelves.get(key);
   if (held) return held;
 
@@ -331,6 +335,7 @@ function memoryBodyMarkup(key) {
   }
 
   const payload = read.data ?? {};
+  const record = payload.memory ?? payload;
   const body = fieldText(payload.body) || fieldText(payload.memory?.body);
   const threads = Array.isArray(payload.threads) ? payload.threads : null;
   const threadLine = threads
@@ -339,7 +344,24 @@ function memoryBodyMarkup(key) {
 
   if (!body) return absence("The memory door answered without a body for this row.");
 
-  return `<p>${escapeHtml(body)}</p>${threadLine}`;
+  return `${authorityBanner(record)}<p>${escapeHtml(body)}</p>${threadLine}`;
+}
+
+// The read door carries supersededBy and archivedAt so that a body can never be
+// read as the current record when it is not. The banner stands before the first
+// line, because after the first line the operator has already read it as
+// current.
+function authorityBanner(record) {
+  const superseded = Number.isInteger(record.supersededBy) ? record.supersededBy : null;
+  const archived = fieldText(record.archivedAt);
+  if (superseded === null && archived === "") return "";
+
+  const authority = [
+    superseded === null ? "" : `Superseded by memory #${superseded}`,
+    archived === "" ? "" : `Archived ${stampLabel(record.archivedAt)}`
+  ].filter(Boolean).join(" · ");
+
+  return `<p class="sediment-authority">${escapeHtml(`${authority} · this row is history, not the current record.`)}</p>`;
 }
 
 // Live rows are collapsed first and carry only what the timeline door sends.
@@ -434,6 +456,17 @@ function renderColumn(shelf, column) {
 
 function liveRowsFlow(shelf) {
   return shelf.columns.some(column => column.rows.length > 0);
+}
+
+// The House overview card counts its rows from here, so the card retires its
+// fixture count on the round the shelf below it retires the fixture rows: one
+// retire rule, never two numbers disagreeing on one page. Nothing is built by
+// asking — a card must not open a door.
+export function liveShelfCounts(item) {
+  const shelf = shelves.get(shelfKey(item));
+  if (!shelf || !liveRowsFlow(shelf)) return null;
+
+  return Object.fromEntries(shelf.columns.map(column => [column.id, column.rows.length]));
 }
 
 // The fixture shelf is the operator's existing surface and it keeps its search,

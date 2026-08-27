@@ -24,11 +24,26 @@ import {
 import {
   hostHouseId,
   hostSessionIdentity,
-  adoptEmbodiedSession,
-  registerEmbodiedSession,
-  retireEmbodiedSession,
   type HostBinding,
 } from "./solarisael-house-proof/host.ts";
+import {
+  adoptTopLevelSession,
+  registerTopLevelSession,
+  retireTopLevelSession,
+  topLevelSession,
+} from "./solarisael-house-proof/top-level-session-fence.ts";
+import {
+  compilePresenceContext,
+  responseDigest,
+  settlePresence,
+  type PresenceMaterial,
+} from "./solarisael-house-proof/presence.ts";
+import {
+  anamnesisMaterial,
+  lessonMaterials,
+  paperBoatMaterial,
+  recallMaterials,
+} from "./solarisael-house-proof/presence-materials.ts";
 
 import {
   logConversationWindow,
@@ -95,6 +110,10 @@ const kittenQuestProgress = new Map<string, KittenQuestProgress>();
 const kittenRoomsByToolCallId = new Map<string, string>();
 const kittenRoomsByAgentId = new Map<string, string>();
 const kittenBindingsByToolCallId = new Map<string, HostBinding>();
+const pendingPresenceContracts = new Map<
+  string,
+  { contractId: string; directiveIds: string[]; nonemptyGuardId: string | null }
+>();
 // Insula correlation. The main turn lifecycle opens one provider request per
 // room and session; side-stream provider hooks carry no turn event and never
 // enter this map. Tool spans hang from the request that asked for them. Both
@@ -597,10 +616,9 @@ export default function solarisaelHouseProof(pi, release) {
       spirit,
       session: hostSessionIdentity(ctx, effectiveRoomDir),
     };
-    // session_start fires for task-tool workers too and OMP exposes no worker
-    // flag here, so the start path adopts first-wins; only session_switch may
-    // displace a live embodiment (host.ts carries the full discipline).
-    adoptEmbodiedSession(room, binding.session);
+    // Worker sessions share session_start, so first-wins adoption protects the
+    // current top-level holder. Only an explicit session switch replaces it.
+    adoptTopLevelSession(room, binding.session);
     showHouseContextFeedback(ctx, { room, spirit, activities: [] });
     startHallwayKnockDoorman(pi, ctx, binding);
   };
@@ -609,14 +627,14 @@ export default function solarisaelHouseProof(pi, release) {
     const { room, effectiveRoomDir } = roomContext(ctx.cwd);
     const session = hostSessionIdentity(ctx, effectiveRoomDir);
     retireStaleInsulaSessions(room, session);
-    registerEmbodiedSession(room, session);
+    registerTopLevelSession(room, session);
     return showReadyFeedback(event, ctx);
   });
   pi.on("session_shutdown", async (_event, ctx) => {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
     const session = hostSessionIdentity(ctx, effectiveRoomDir);
     retireInsulaSession(room, session);
-    retireEmbodiedSession(room, session);
+    retireTopLevelSession(room, session);
     await stopHallwayKnockDoorman({ room, spirit, session });
   });
 
@@ -700,22 +718,59 @@ export default function solarisaelHouseProof(pi, release) {
   });
 
   pi.on("turn_end", async (event, ctx) => {
+    const response = messageText(event?.message);
     try {
-      // A gate stop can end a turn without an assistant, and a turn with no
-      // open request settles nothing.
       const settlement = insulaAssistantSettlement(event?.message);
-      if (!settlement) return;
-      const { room, session } = insulaSessionBinding(ctx);
-      const key = insulaRequestKey(room, session);
-      noteInsulaProviderRequestId(insulaRequestSpans.get(key), event?.message?.responseId);
-      settleInsulaRequest(
-        key,
-        settlement.outcomeClass,
-        settlement.errorClass,
-        settlement,
-      );
+      if (settlement) {
+        const { room, session } = insulaSessionBinding(ctx);
+        const key = insulaRequestKey(room, session);
+        noteInsulaProviderRequestId(insulaRequestSpans.get(key), event?.message?.responseId);
+        settleInsulaRequest(
+          key,
+          settlement.outcomeClass,
+          settlement.errorClass,
+          settlement,
+        );
+      }
     } catch {
       // Observation is never load-bearing.
+    }
+    // An empty assistant turn is exactly what the nonempty hard guard exists
+    // to catch, so it must produce a receipt rather than a quiet return. The
+    // old early exit left the contract pending and unsettled, which is the
+    // one outcome the guard was supposed to make impossible.
+    // `emitted` decides whether anything was said; the digest still covers the
+    // response exactly as the provider returned it.
+    const emitted = Boolean(response.trim());
+    try {
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const key = `${room}\0${session}`;
+      const pending = pendingPresenceContracts.get(key);
+      if (!pending) return;
+      if (!emitted && !pending.nonemptyGuardId) {
+        console.warn("[athanor] Presence refusal cites no guard: the contract carried no hard nonempty-response guard");
+      }
+      await settlePresence(
+        { room, spirit, session },
+        {
+          contractId: pending.contractId,
+          attempt: 1,
+          evaluatedDirectives: pending.directiveIds,
+          violations: emitted || !pending.nonemptyGuardId ? [] : [{
+            directiveId: pending.nonemptyGuardId,
+            reason: "The assistant turn emitted no text.",
+          }],
+          decision: emitted ? "accept" : "refuse",
+          responseDigest: emitted ? responseDigest(response) : null,
+        },
+        `${pending.contractId}:settle:1`,
+      );
+      // Only a settled contract may be forgotten. Clearing before the Host
+      // answers would lose the one receipt that says what happened.
+      pendingPresenceContracts.delete(key);
+    } catch (error) {
+      console.warn(`[athanor] Presence settlement degraded: ${error instanceof Error ? error.message : String(error)}`);
     }
   });
 
@@ -859,6 +914,10 @@ export default function solarisaelHouseProof(pi, release) {
     const additions = [];
     const activities: string[] = [];
     const warnings: string[] = [];
+    let presenceBoat: PresenceMaterial | null = null;
+    let presenceAnamnesis: PresenceMaterial[] = [];
+    let presenceLessons: PresenceMaterial[] = [];
+    let presenceRecalled: PresenceMaterial[] = [];
     let houseState = null;
 
     try {
@@ -899,6 +958,9 @@ export default function solarisaelHouseProof(pi, release) {
     });
     for (const warning of lessonTtsr.warnings) warnings.push(warning);
     if (lessonTtsr.active > 0) activities.push(`${lessonTtsr.active} native lesson guard${lessonTtsr.active === 1 ? "" : "s"}`);
+    // Presence is handed the same rules the native guards were armed with, so
+    // the lived middle never quotes a lesson the session is not actually under.
+    presenceLessons = lessonMaterials(lessonTtsr.lessons);
     let conversation: ConversationCapture | null = null;
     try {
       conversation = await logConversationWindow(
@@ -983,6 +1045,8 @@ export default function solarisaelHouseProof(pi, release) {
       letter = wake.letter;
       boatTitle = wake.title;
       boatSource = wake.source;
+      const boatMemoryId = Number(wake.memoryId);
+      presenceBoat = paperBoatMaterial(wake);
       if (wake.warning) warnings.push(wake.warning);
       if (wake.answered) wokenSessions.add(wakeKey);
       // The board is board state, never a summons. A silent transport, an
@@ -1007,7 +1071,12 @@ export default function solarisaelHouseProof(pi, release) {
           customType: "solarisael-wake-context",
           content,
           display: false,
-          details: { title: boatTitle, source_path: boatSource, quest_board: board.length > 0 },
+          details: {
+            title: boatTitle,
+            source_path: boatSource,
+            memory_id: Number.isSafeInteger(boatMemoryId) ? boatMemoryId : null,
+            quest_board: board.length > 0,
+          },
           attribution: "agent",
           timestamp,
         });
@@ -1024,6 +1093,7 @@ export default function solarisaelHouseProof(pi, release) {
         if (result?.ok) {
           const content = formatAnamnesisContext(result, { automatic: true });
           if (content) {
+            presenceAnamnesis = anamnesisMaterial(content);
             additions.push({
               role: "custom",
               customType: "solarisael-anamnesis-wake",
@@ -1173,6 +1243,7 @@ export default function solarisaelHouseProof(pi, release) {
         decision = evaluation.decision;
         policyState = evaluation.snapshot.recallPolicy;
 
+
         if (decision.shouldRecall && decision.refreshReason) {
           const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, {
             temporalDecay: true,
@@ -1187,6 +1258,7 @@ export default function solarisaelHouseProof(pi, release) {
             );
             const automaticCompact = viewport.presentation;
             const recallWarnings = Array.isArray(automaticCompact.warnings) ? automaticCompact.warnings : [];
+            presenceRecalled = recallMaterials(automaticCompact);
             const recallMessage = automaticCompact.found || recallWarnings.length
               ? {
                 role: "custom",
@@ -1307,6 +1379,54 @@ export default function solarisaelHouseProof(pi, release) {
         }).catch(() => undefined);
         warnings.push("Recall Policy Host degraded");
         // Host owns policy. Degraded automatic Recall never writes or evaluates a fallback owner.
+      }
+    }
+
+    if (topLevelSession(room) === hostSession) {
+      try {
+        const binding = { room, spirit, session: hostSession };
+        const priorPresence = [...messages].reverse().find((message) =>
+          message?.customType === "solarisael-presence-context"
+          && typeof message?.details?.frameId === "string"
+        );
+        const turnId = currentTurnKey || `turn:${responseDigest(prompt).slice(0, 24)}`;
+        const compiled = await compilePresenceContext({
+          binding,
+          operator: houseState?.operator || operator,
+          prompt,
+          turnId,
+          roomReminder: contextAnalysis?.roomReminder,
+          priorFrameId: String(priorPresence?.details?.frameId ?? ""),
+          priorFrameRendered: String(priorPresence?.details?.frameRendered ?? ""),
+          previousBoat: presenceBoat,
+          anamnesis: presenceAnamnesis,
+          recalled: presenceRecalled,
+          lessons: presenceLessons,
+        });
+        pendingPresenceContracts.set(`${room}\0${hostSession}`, {
+          contractId: compiled.contractId,
+          directiveIds: compiled.directiveIds,
+          nonemptyGuardId: compiled.nonemptyGuardId,
+        });
+        additions.push({
+          role: "custom",
+          customType: "solarisael-presence-context",
+          content: compiled.rendered,
+          display: false,
+          details: {
+            frameId: compiled.frameId,
+            frameVersion: compiled.frameVersion,
+            frameRendered: compiled.frameRendered,
+            contractId: compiled.contractId,
+            turnId: compiled.turnId,
+          },
+          attribution: "agent",
+          timestamp,
+        });
+        activities.push(`Presence loaded: ${compiled.frameId}/v${compiled.frameVersion}`);
+      } catch (error) {
+        console.warn(`[athanor] Presence degraded: ${error instanceof Error ? error.message : String(error)}`);
+        warnings.push("Presence unavailable");
       }
     }
 

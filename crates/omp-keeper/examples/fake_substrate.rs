@@ -3,7 +3,7 @@
 //! The concern: script one substrate without a database and without drifting
 //! from the real door. Two rules keep it honest:
 //!
-//! 1. Every answer is a real `house_protocol::restart` struct, serialized. The
+//! 1. Every answer is a real `protocol::restart` struct, serialized. The
 //!    fixture cannot invent a field the door lacks, cannot omit one it has, and
 //!    cannot spell a state its own way.
 //! 2. Every request is parsed back into the real params struct and `validate()`d
@@ -19,8 +19,8 @@
 //! more than one substrate session per run and each session is a fresh process.
 
 use chrono::{DateTime, TimeDelta, Utc};
-use house_protocol::PROTOCOL_VERSION;
-use house_protocol::restart::{
+use ::protocol::PROTOCOL_VERSION;
+use ::protocol::restart::{
     RestartClaimParams, RestartClaimReceipt, RestartMode, RestartStageDeadlines, RestartState,
     RestartStatusDeadlines, RestartStatusIntent, RestartStatusParams, RestartStatusReceipt,
     RestartTransitionParams, RestartTransitionReceipt, RestartTransitionTarget,

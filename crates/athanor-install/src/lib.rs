@@ -1,6 +1,8 @@
 pub mod app;
 pub mod boundaries;
 pub mod component;
+pub mod contract;
+pub mod endpoints;
 pub mod harness;
 pub mod installer;
 pub mod layout;

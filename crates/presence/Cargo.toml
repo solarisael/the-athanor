@@ -1,0 +1,15 @@
+[package]
+name = "presence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+hearth = { path = "../hearth" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[lib]
+name = "presence"
+path = "src/lib.rs"

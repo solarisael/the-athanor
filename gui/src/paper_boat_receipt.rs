@@ -8,9 +8,8 @@
 
 use godot::prelude::*;
 
+use crate::disclosure::ABSENT;
 use crate::protocol::{PaperBoatReceipt, PaperBoatReceiptSnapshot, ReceiptStatus};
-
-const ABSENT: &str = "—";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReceiptFeed {

@@ -1,5 +1,5 @@
 //! Smoke tests: the real keeper program, real child processes, real spawning,
-//! and a fake substrate that answers with real `house_protocol::restart` structs
+//! and a fake substrate that answers with real `protocol::restart` structs
 //! and refuses any request the real door would refuse.
 //!
 //! No database. What these defend is the keeper's own seam: what it launches,

@@ -19,7 +19,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 hex.workspace = true
-house-protocol = { path = "../house-protocol" }
+protocol = { path = "../protocol" }
 interactive-process = { path = "../interactive-process" }
 omp-keeper = { path = "../omp-keeper" }
 serde.workspace = true

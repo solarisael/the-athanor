@@ -95,7 +95,7 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 
 ## The two waists (machinery, out of the graphs)
 
-1. **Subject/slot changes** — rows, tabs, number keys, inspector doors, header badge, switcher results, and Bell inbox results all resolve to `openSubjectView(view)` or `navigateToSubjectView(id, view)`; the Bell route uses the same waist through `routeHallwayInbox(id)`. No door repaints the center directly.
+1. **Subject/slot changes** — rows, tabs, number keys, inspector doors, header badge, switcher results, and Bell rows all resolve to `openSubjectView(view)` or `navigateToSubjectView(id, view)`; the Bell row uses the same waist through `openBoardFromBell()`. No door repaints the center directly.
 2. **Visual changes** — every transition writes `state` and calls `render()`; one coordinated repaint of list, header, subject view, and inspector. The one-mantle rule (project lesson #405) lives here.
 
 ## Transition owners
@@ -112,7 +112,7 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 | presence profile | `renderPresenceProfile`, `closePresenceProfile` |
 | durable views | `renderRoomMemories`, `renderHallwayRecordView`, `renderDurableEntry`, `durableControls`, `durableEntries`, `renderDurableResults` |
 | switcher | `openSwitcher`, `closeSwitcher`, `executeSwitcherCommand`, `switcherCommandRegistry` |
-| Hallway Bell | `renderBellToggle`, `renderHallwayInbox`, `openBell`, `closeBell`, `routeHallwayInbox`, `acknowledgeHallwayThread` |
+| Hallway Bell | `renderBellToggle`, `renderHallwayInbox`, `openBell`, `closeBell`, `openBoardFromBell`; rows come from `board/index.js` — `hallwayInboxRound` |
 | House mechanics | `mechanics.js` — `openHouseMechanics` (shell door), `renderHouseMechanics`, `mechanicsEntries`, `renderMechanicsResults`, `handleMechanicsClick`, `handleMechanicsInput` |
 | Insula Pulse | `pulse.js` — `renderHousePulse`, `queryPulseHost` via `ensurePulseQueried` (slot waists) and `handlePulseClick` (Query Host) |
 | composer | `updateComposerState`, `composerBlockReason`, `beginLocalResponse` |

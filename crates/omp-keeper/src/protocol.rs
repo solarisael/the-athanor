@@ -1,7 +1,7 @@
 //! The keeper's side of the restart wire.
 //!
 //! The vocabulary — states, params, receipts — belongs to
-//! `house_protocol::restart` and is re-exported here so the keeper's modules
+//! `protocol::restart` and is re-exported here so the keeper's modules
 //! keep one import path. What this module declares itself is only what that
 //! door does not own: the JSONL client envelope the keeper speaks to a
 //! substrate child over stdio, the three method names the substrate dispatches
@@ -9,8 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use house_protocol::PROTOCOL_VERSION;
-pub use house_protocol::restart::{
+pub use ::protocol::PROTOCOL_VERSION;
+pub use ::protocol::restart::{
     RestartClaimParams, RestartClaimReceipt, RestartMode, RestartState, RestartStatusDeadlines,
     RestartStatusIntent, RestartStatusParams, RestartStatusReceipt, RestartTransitionParams,
     RestartTransitionReceipt, RestartTransitionTarget,
@@ -73,7 +73,7 @@ impl ProtocolErrorBody {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use house_protocol::restart::RestartMode;
+    use ::protocol::restart::RestartMode;
 
     #[test]
     fn a_status_answer_carries_its_intent_or_says_there_is_none() {

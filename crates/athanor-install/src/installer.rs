@@ -4,6 +4,8 @@ use crate::{
         COMPONENT_FORMAT, COMPONENT_MANIFEST, ComponentManifest, ComponentPointer,
         read_verified_component, valid_release_id,
     },
+    contract::LOOPBACK_HOST,
+    endpoints::{MANAGED_DATABASE_PORT, MANAGED_NATS_PORT},
     layout::{InstallLayout, LEGACY_NAMES, SERVICE_DISPLAY_NAME, SERVICE_NAME, safe_version},
     manifest::ReleaseManifest,
     omp::{ClientEndpoint, ClientProjection, register_extension, unregister_extension},
@@ -1152,11 +1154,11 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             .context("default room is not configured")?;
         let config = RuntimeConfig {
             database_mode: if external { "external" } else { "managed" }.into(),
-            database_host: "127.0.0.1".into(),
-            database_port: 5432,
-            nats_host: "127.0.0.1".into(),
-            nats_port: 4222,
-            host_health: format!("http://127.0.0.1:{default_port}/health"),
+            database_host: LOOPBACK_HOST.into(),
+            database_port: MANAGED_DATABASE_PORT,
+            nats_host: LOOPBACK_HOST.into(),
+            nats_port: MANAGED_NATS_PORT,
+            host_health: format!("http://{LOOPBACK_HOST}:{default_port}/health"),
             schema_version: request.manifest.schema_version,
             house_id: house.house_id.clone(),
             rooms_root: house.rooms_root.clone(),
@@ -1232,7 +1234,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                 (
                     room.room.clone(),
                     ClientEndpoint {
-                        url: format!("ws://127.0.0.1:{}/athanor/v1/ws", room.port),
+                        url: crate::endpoints::host_ws_url(room.port),
                         spirit: room.spirit.clone(),
                     },
                 )

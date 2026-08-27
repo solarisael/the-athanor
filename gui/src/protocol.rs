@@ -5,12 +5,12 @@
 //! being marked as wire values.
 //!
 //! Envelope fields follow `docs/RUNTIME_ARCHITECTURE.md` sections 4.1 and 4.5.
-//! Wire names are imported from `house-protocol`, the same crate used by the
+//! Wire names are imported from `protocol`, the same crate used by the
 //! Host, so the native client cannot drift onto a guessed path or type.
 
 use godot::classes::Time;
 use godot::prelude::*;
-use house_protocol::{
+use protocol::{
     DEFAULT_HOST_WS_URL, FAMILIAR_STATUS, HOST_SCHEMA_VERSION, PAPER_BOAT_RECEIPT_PROJECTION_ID,
     PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE, RECALL_POLICY_ACKNOWLEDGE,
     RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED,

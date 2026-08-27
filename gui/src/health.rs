@@ -5,15 +5,13 @@ use godot::classes::{Button, IPanelContainer, Label, Node, PanelContainer};
 use godot::obj::Inherits;
 use godot::prelude::*;
 
+use crate::disclosure::{ABSENT, HEALTH_DISCLOSURE};
 use crate::host_link::LinkPhase;
 use crate::host_session::AthanorHostSession;
 use crate::protocol::{
     self, CommandIdentity, HostBinding, Inbound, PaperBoatReceiptSnapshot, ProjectionCursor,
     RecallPolicyProjection, ReceiptStatus,
 };
-
-const DISCLOSURE: &str = "OBSERVATION ONLY · EACH CHANNEL REPORTS ITS OWN REAL HOST EVENT · TRANSPORT, BINDING, RECALL HEALTH, PAPER BOAT DELIVERY, AND PROTOCOL REFUSAL ARE NEVER COLLAPSED INTO ONE VERDICT";
-const ABSENT: &str = "—";
 
 struct Bound {
     disclosure: Gd<Label>,
@@ -258,7 +256,7 @@ impl AthanorHealth {
         let Some(bound) = &mut self.bound else {
             return;
         };
-        bound.disclosure.set_text(DISCLOSURE);
+        bound.disclosure.set_text(HEALTH_DISCLOSURE);
         bound.transport.set_text(match phase {
             Some(LinkPhase::Closed) => "◇ TRANSPORT · CLOSED",
             Some(LinkPhase::Connecting) => "◇ TRANSPORT · CONNECTING",
@@ -433,9 +431,9 @@ impl AthanorHealth {
         let projection = protocol::event_projection_id(&envelope);
         let correlation = protocol::event_correlation_id(&envelope).ok();
         match projection.as_deref() {
-            Ok(house_protocol::RECALL_POLICY_PROJECTION_ID) => self.apply_recall(&envelope),
-            Ok(house_protocol::PAPER_BOAT_RECEIPT_PROJECTION_ID) => self.apply_boat(&envelope),
-            Ok(house_protocol::ROUTING_PROJECTION_ID) => self.apply_routing(&envelope),
+            Ok(::protocol::RECALL_POLICY_PROJECTION_ID) => self.apply_recall(&envelope),
+            Ok(::protocol::PAPER_BOAT_RECEIPT_PROJECTION_ID) => self.apply_boat(&envelope),
+            Ok(::protocol::ROUTING_PROJECTION_ID) => self.apply_routing(&envelope),
             Ok(_) => {}
             Err(reason) => self.last_refusal = Some(format!("EventMeta refused: {reason}")),
         }

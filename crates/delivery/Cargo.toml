@@ -1,0 +1,30 @@
+[package]
+name = "delivery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-nats.workspace = true
+chrono.workspace = true
+futures-util.workspace = true
+protocol = { path = "../protocol" }
+origami = { path = "../origami" }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[lib]
+name = "delivery"
+path = "src/lib.rs"
+
+[[bin]]
+# enough: bin keeps the shipped exe name; deploy-local.ps1, the installer manifest,
+# and the live service all address it. Renaming the exe is a deploy-day migration.
+name = "athanor-house-delivery"
+path = "src/main.rs"

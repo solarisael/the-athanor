@@ -80,7 +80,7 @@ pub fn relaunch_action(failed_attempts: i32, attempt_limit: i32) -> RelaunchActi
 /// Answer the exact-id read, never the workspace read. The workspace read
 /// reports live states only, so it can never say `verified` and its silence
 /// means nothing about which end our intent reached; asking by id is what makes
-/// a positive sighting possible at all (house-protocol restart: intentId
+/// a positive sighting possible at all (protocol restart: intentId
 /// present returns that intent in whatever state, terminal included).
 ///
 /// Only `verified` for our own id is proof. Absent, or some other intent, is
@@ -109,7 +109,7 @@ mod tests {
     use super::*;
     use crate::clock::house_instant;
     use crate::protocol::{RestartStatusDeadlines, RestartStatusIntent};
-    use house_protocol::restart::RestartMode;
+    use ::protocol::restart::RestartMode;
 
     fn at(text: &str) -> DateTime<Utc> {
         house_instant(text).expect("a readable instant")

@@ -5,7 +5,7 @@
 
 use super::{config::detail, owner::HarnessOwner};
 use anyhow::{Context, Result};
-use house_protocol::harness::{HarnessControlRequest, HarnessControlResponse};
+use ::protocol::harness::{HarnessControlRequest, HarnessControlResponse};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream},

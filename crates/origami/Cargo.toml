@@ -1,0 +1,31 @@
+[package]
+name = "origami"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# The shapes speak core's request and receipt vocabulary, digest
+# with sha2, and read and write PostgreSQL directly. Origami never
+# depends on akasha or delivery: the arrows point here.
+anyhow.workspace = true
+async-nats.workspace = true
+chrono.workspace = true
+hex.workspace = true
+hearth = { path = "../hearth" }
+# The sanitized boat-receipt stream and subject are protocol vocabulary
+# shared with host, and protocol is their one declaration
+# (coding#446 rule 4). Origami names them from there rather than minting a
+# second copy. protocol depends only on core, so no cycle: the
+# dependency arrow from every implementation crate still points at origami.
+protocol = { path = "../protocol" }
+summoning = { path = "../summoning" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+
+[lib]
+name = "origami"
+path = "src/lib.rs"

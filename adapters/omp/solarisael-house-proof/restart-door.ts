@@ -10,7 +10,8 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { roomContext } from "./room.ts";
-import { embodiedSession, hostSessionIdentity } from "./host.ts";
+import { hostSessionIdentity } from "./host.ts";
+import { topLevelSession } from "./top-level-session-fence.ts";
 import { catchBoat } from "./substrate.ts";
 
 // omp exit code 87 means "armed exit, restart me" (keeper handshake, frozen
@@ -418,7 +419,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
   const resolveRestartSuccessorProof = deps.restartSuccessorProof
     ?? (() => text(process.env[RESTART_SUCCESSOR_PROOF_ENV]));
   const isEmbodied = deps.isEmbodied
-    ?? ((room: string, session: string) => embodiedSession(room) === session);
+    ?? ((room: string, session: string) => topLevelSession(room) === session);
   // Armed state is closure-local: one door, one pending exit, no process-wide
   // flag another registration could inherit.
   let armed: ArmedExit | null = null;

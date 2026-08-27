@@ -18,7 +18,7 @@ if (-not $IsWindows) {
 $substrateRoot = [IO.Path]::GetFullPath($PSScriptRoot)
 $athanorRoot = [IO.Path]::GetFullPath((Join-Path $substrateRoot ".."))
 # Mutable state lives outside the immutable product tree. This mirrors
-# state_paths.sh and crates/house-substrate/src/state.rs:
+# state_paths.sh and crates/akasha/src/state.rs:
 # ATHANOR_STATE_DIR wins and must be absolute, then an existing
 # <install-root>/state, then a development checkout. Never a guess.
 $configuredStateRoot = [string]$env:ATHANOR_STATE_DIR
@@ -171,8 +171,8 @@ function Start-NativeRuntimeAndWaitForHosts {
 if (-not (Test-Path (Join-Path $athanorRoot "Cargo.toml") -PathType Leaf)) {
     throw "The Athanor workspace Cargo.toml is missing at $athanorRoot"
 }
-if (-not (Test-Path (Join-Path $athanorRoot "crates\house-substrate\Cargo.toml") -PathType Leaf)) {
-    throw "substrate crate Cargo.toml is missing at $athanorRoot\crates\house-substrate"
+if (-not (Test-Path (Join-Path $athanorRoot "crates\akasha\Cargo.toml") -PathType Leaf)) {
+    throw "substrate crate Cargo.toml is missing at $athanorRoot\crates\akasha"
 }
 
 New-Item -ItemType Directory -Force -Path $stageTarget | Out-Null
@@ -214,15 +214,15 @@ if ($appWorkers.Count -gt 0) {
 
 
 if (-not $SkipTests) {
-    Invoke-Checked -Label "Athanor core, protocol, substrate, and Host tests" -FilePath $Cargo -ArgumentList @(
+    Invoke-Checked -Label "Athanor Hearth, protocol, substrate, and Host tests" -FilePath $Cargo -ArgumentList @(
         "test", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-        "-p", "house-core", "-p", "house-protocol", "-p", "athanor-substrate", "-p", "house-host", "-p", "athanor-install", "-p", "omp-keeper", "--release", "--target-dir", $stageTarget
+        "-p", "hearth", "-p", "protocol", "-p", "akasha", "-p", "host", "-p", "athanor-install", "-p", "omp-keeper", "--release", "--target-dir", $stageTarget
     )
 }
 
 Invoke-Checked -Label "staged release build" -FilePath $Cargo -ArgumentList @(
     "build", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-    "-p", "house-core", "-p", "house-protocol", "-p", "athanor-substrate", "-p", "house-host", "-p", "athanor-install", "-p", "omp-keeper", "--release", "--target-dir", $stageTarget
+    "-p", "hearth", "-p", "protocol", "-p", "akasha", "-p", "host", "-p", "athanor-install", "-p", "omp-keeper", "--release", "--target-dir", $stageTarget
 )
 if (-not (Test-Path $stagedExe -PathType Leaf)) {
     throw "staged executable was not produced at $stagedExe"

@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use godot::prelude::*;
-use house_protocol::harness::{
+use ::protocol::harness::{
     HARNESS_CONTROL_FORMAT, HarnessCommand, HarnessControlRequest, HarnessControlResponse,
 };
 

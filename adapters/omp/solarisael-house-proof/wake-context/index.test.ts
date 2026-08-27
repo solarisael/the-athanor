@@ -13,6 +13,7 @@ describe("automatic wake", () => {
         wake_context: "letter",
         title: "paper boat",
         source_path: "db-only/paper-boat",
+        id: "42",
       };
     });
 
@@ -22,6 +23,7 @@ describe("automatic wake", () => {
       letter: "letter",
       title: "paper boat",
       source: "db-only/paper-boat",
+      memoryId: "42",
       warning: null,
     });
   });
@@ -38,6 +40,7 @@ describe("automatic wake", () => {
       letter: "",
       title: null,
       source: null,
+      memoryId: null,
       warning: "paper boat unavailable (timeout)",
     });
   });
@@ -52,6 +55,7 @@ describe("automatic wake", () => {
       letter: "",
       title: null,
       source: null,
+      memoryId: null,
       warning: "paper boat unavailable",
     });
   });

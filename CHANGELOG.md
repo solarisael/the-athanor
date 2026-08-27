@@ -23,6 +23,8 @@ the exact implementation record.
 ### Changed
 
 - Summoning now owns the Anamnesis and Paper Boat domain vocabulary.
+- Presence now opens one Host-owned session frame and compiles one cited contract for each user turn.
+  The OMP adapter injects the contract, settles a response receipt, and feeds close material to the existing Paper Boat writer.
 - The authenticated Host read surface now carries the House data needed by
   operator panels: room-bound Docket board and evidence, Hallway inbox,
   newest-first memory and lesson timelines, full memory reads, and bounded

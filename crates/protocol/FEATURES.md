@@ -18,7 +18,7 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - Recovery state is typed. A pending recovery carries its terms.
 - A delta lists only the fields that changed between two states.
 - Eleven policy fields can change. Each change becomes one field update mutation.
-- `parse_client_command` turns one JSON value into one of 22 typed commands.
+- `parse_client_command` turns one JSON value into one of 26 typed commands.
 - A parse failure keeps the message identifier and the idempotency key, so the Host can still answer.
 - Command metadata carries the sender room, the sender spirit, the sender session, the correlation chain, the scope, the visibility, and the authority class.
 - Event metadata adds the sequence and the state hash.

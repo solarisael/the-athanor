@@ -3,6 +3,9 @@ resolver = "2"
 members = [
     "crates/hearth",
     "crates/summoning",
+    "crates/presence",
+    "crates/presence-frame",
+    "crates/presence-turn",
     "crates/protocol",
     "crates/host",
     "crates/akasha",

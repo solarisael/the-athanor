@@ -970,6 +970,9 @@ dependencies = [
  "futures-util",
  "hearth",
  "hex",
+ "presence",
+ "presence-frame",
+ "presence-turn",
  "protocol",
  "reqwest",
  "serde",
@@ -1635,6 +1638,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "presence"
+version = "0.1.0"
+dependencies = [
+ "hearth",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "presence-frame"
+version = "0.1.0"
+dependencies = [
+ "presence",
+]
+
+[[package]]
+name = "presence-turn"
+version = "0.1.0"
+dependencies = [
+ "presence",
+ "presence-frame",
+ "summoning",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1657,6 +1686,7 @@ name = "protocol"
 version = "0.1.0"
 dependencies = [
  "hearth",
+ "presence",
  "serde",
  "serde_json",
  "summoning",

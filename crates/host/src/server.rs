@@ -2,6 +2,7 @@ use crate::config::HostConfig;
 use crate::insula::InsulaHost;
 use crate::panel::PanelHost;
 use crate::policy::{RecallPolicySession, apply_requested_mode};
+use crate::presence::PresenceRuntime;
 use crate::receipt::{ReceiptIngest, ReceiptTracker};
 use crate::store::{
     DurableReceipt, HostDurableStore, ProjectionCursor, RoomStateStore, body_hash, state_hash,
@@ -29,15 +30,17 @@ use hearth::conversation::{
     source_ledger_directory, source_ledger_entry, source_ledger_path, transcript_debug_path,
     transcript_entry, transcript_path, turn_key, turn_label, turn_marker,
 };
-use hearth::hallway::{
-    HallwayInboxRequest, HallwayKnockClaimRequest, HallwayKnockSettleRequest,
-};
+use hearth::hallway::{HallwayInboxRequest, HallwayKnockClaimRequest, HallwayKnockSettleRequest};
 use hearth::lineage::{QuestLifecycle, normalize_lifecycle_memory, normalize_quest_memories};
 use hearth::routing::{
     DispatchRequest, LoadedSpellbook, SpellbookRead, familiar_status, house_dispatch, lane_status,
     load_spellbook,
 };
 use hearth::triggers::{process_lesson_plan, process_lesson_reminder};
+use presence::{
+    PresenceCloseRequest, PresenceOpenRequest, PresenceResult, PresenceSettleRequest,
+    PresenceTurnRequest,
+};
 use protocol::{
     AKASHA_COMMAND_FAILED, AKASHA_LESSON_RESULT, AKASHA_PROJECTION_ID, AKASHA_RECALL_RESULT,
     AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent,
@@ -49,14 +52,15 @@ use protocol::{
     HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
     HallwayKnockClaimedEvent, HallwayKnockSettledEvent, JETSTREAM_ACK_WAIT,
     JETSTREAM_MAX_ACK_PENDING, JETSTREAM_MAX_BATCH, JETSTREAM_MAX_DELIVER, JETSTREAM_MAX_EXPIRES,
-    JETSTREAM_NUM_REPLICAS, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID,
-    LineageResultEvent, PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT,
-    PAPER_BOAT_RECEIPT_SUBSCRIBE, PaperBoatReceiptEvent, PaperBoatReceiptState,
-    RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED,
-    RECALL_POLICY_DELTA, RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT,
-    RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallPolicyDecision,
-    RecallPolicyMutation, RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT,
-    ShellResultEvent, SnapshotEvent, parse_client_command,
+    JETSTREAM_NUM_REPLICAS, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
+    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
+    PRESENCE_CLOSED, PRESENCE_COMMAND_REFUSED, PRESENCE_COMPILED, PRESENCE_OPENED,
+    PRESENCE_PROJECTION_ID, PRESENCE_SETTLED, PaperBoatReceiptEvent, PaperBoatReceiptState,
+    PresenceResultEvent, RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED,
+    RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA, RECALL_POLICY_PROJECTION_ID,
+    RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT,
+    RecallPolicyDecision, RecallPolicyMutation, RecallPolicyState, RoutingResultEvent,
+    SHELL_PROJECTION_ID, SHELL_RESULT, ShellResultEvent, SnapshotEvent, parse_client_command,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -74,6 +78,7 @@ use uuid::Uuid;
 struct RuntimeState {
     projection: RecallPolicyState,
     sessions: HashMap<String, RecallPolicySession>,
+    presence: PresenceRuntime,
     viewport_sessions: HashMap<String, ViewportSession>,
     hallway_inbox_fingerprints: HashMap<String, String>,
     cursor: ProjectionCursor,
@@ -156,6 +161,7 @@ impl Host {
                 runtime: Arc::new(Mutex::new(RuntimeState {
                     projection,
                     sessions,
+                    presence: PresenceRuntime::default(),
                     viewport_sessions: HashMap::new(),
                     hallway_inbox_fingerprints: HashMap::new(),
                     cursor,
@@ -675,6 +681,18 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
         ClientCommand::AkashaLessonQuery { meta, payload } => {
             query_akasha_lessons(state, meta, payload).await
         }
+        ClientCommand::PresenceOpen { meta, request } => {
+            open_presence_frame(state, meta, request).await
+        }
+        ClientCommand::PresenceCompile { meta, request } => {
+            compile_presence_turn(state, meta, request).await
+        }
+        ClientCommand::PresenceSettle { meta, request } => {
+            settle_presence_turn(state, meta, request).await
+        }
+        ClientCommand::PresenceClose { meta, request } => {
+            close_presence_frame(state, meta, request).await
+        }
         ClientCommand::RoutingStatus { meta } => {
             routing_response(
                 state,
@@ -734,6 +752,156 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             let reminder = process_lesson_reminder(request.trigger.as_deref(), &request.lessons);
             shell_response(state, meta, json!({ "reminder": reminder })).await
         }
+    }
+}
+
+async fn open_presence_frame(
+    state: &AppState,
+    meta: CommandMeta,
+    request: PresenceOpenRequest,
+) -> Responses {
+    if request.binding.room != meta.sender_room
+        || request.binding.spirit != meta.sender_spirit
+        || request.binding.session != meta.sender_session
+    {
+        return presence_refusal(state, &meta, "Presence binding does not match the command").await;
+    }
+    let mut runtime = state.runtime.lock().await;
+    let result = runtime
+        .presence
+        .open(&meta.sender_session, &meta.idempotency_key, request)
+        .map(PresenceResult::Open);
+    presence_response(
+        state,
+        &meta,
+        PRESENCE_OPENED,
+        result,
+        runtime.cursor.sequence,
+    )
+}
+
+async fn compile_presence_turn(
+    state: &AppState,
+    meta: CommandMeta,
+    request: PresenceTurnRequest,
+) -> Responses {
+    let mut runtime = state.runtime.lock().await;
+    let result = runtime
+        .presence
+        .compile(&meta.sender_session, request)
+        .map(PresenceResult::Compile);
+    presence_response(
+        state,
+        &meta,
+        PRESENCE_COMPILED,
+        result,
+        runtime.cursor.sequence,
+    )
+}
+
+async fn settle_presence_turn(
+    state: &AppState,
+    meta: CommandMeta,
+    request: PresenceSettleRequest,
+) -> Responses {
+    let mut runtime = state.runtime.lock().await;
+    let result = runtime
+        .presence
+        .settle(&meta.sender_session, request)
+        .map(PresenceResult::Settle);
+    presence_response(
+        state,
+        &meta,
+        PRESENCE_SETTLED,
+        result,
+        runtime.cursor.sequence,
+    )
+}
+
+async fn close_presence_frame(
+    state: &AppState,
+    meta: CommandMeta,
+    request: PresenceCloseRequest,
+) -> Responses {
+    let mut runtime = state.runtime.lock().await;
+    let result = runtime
+        .presence
+        .close(&meta.sender_session, request)
+        .map(PresenceResult::Close);
+    presence_response(
+        state,
+        &meta,
+        PRESENCE_CLOSED,
+        result,
+        runtime.cursor.sequence,
+    )
+}
+
+fn presence_response(
+    state: &AppState,
+    meta: &CommandMeta,
+    event_type: &str,
+    result: Result<PresenceResult, impl ToString>,
+    sequence: u64,
+) -> Responses {
+    match result {
+        Ok(result) => {
+            let value = serde_json::to_value(&result).expect("Presence result serializes");
+            let event = PresenceResultEvent {
+                meta: event_meta_for_projection(
+                    state,
+                    Some(meta),
+                    &meta.message_id,
+                    &meta.idempotency_key,
+                    event_type,
+                    PRESENCE_PROJECTION_ID,
+                    sequence,
+                    body_hash(&value).expect("Presence result hashes"),
+                    new_id(),
+                ),
+                result,
+            };
+            Responses {
+                direct: vec![serialize(&event)],
+                delta: None,
+            }
+        }
+        Err(error) => presence_refusal_sync(state, meta, error.to_string(), sequence),
+    }
+}
+
+async fn presence_refusal(state: &AppState, meta: &CommandMeta, reason: &str) -> Responses {
+    let runtime = state.runtime.lock().await;
+    presence_refusal_sync(state, meta, reason.to_owned(), runtime.cursor.sequence)
+}
+
+fn presence_refusal_sync(
+    state: &AppState,
+    meta: &CommandMeta,
+    reason: String,
+    sequence: u64,
+) -> Responses {
+    let reason_hash = body_hash(&json!({ "reason": reason })).expect("Presence refusal hashes");
+    let event = CommandOutcomeEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            PRESENCE_COMMAND_REFUSED,
+            PRESENCE_PROJECTION_ID,
+            sequence,
+            reason_hash,
+            new_id(),
+        ),
+        reason: Some(reason),
+        version: 0,
+        state: None,
+        decision: None,
+    };
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
     }
 }
 
@@ -998,12 +1166,7 @@ async fn query_akasha_lessons(
 }
 
 async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
-    let span = start_span(
-        state.insula_binding.as_ref(),
-        "host",
-        "host",
-        "knock_claim",
-    );
+    let span = start_span(state.insula_binding.as_ref(), "host", "host", "knock_claim");
     if let Err(error) = knock_authority(&state.config, &meta) {
         end_span(span, app_error_outcome(&error), Some("app_error"));
         return hallway_knock_error(state, &meta, "claim", error).await;

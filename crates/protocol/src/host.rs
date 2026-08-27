@@ -3,6 +3,10 @@ use hearth::conversation::VisibleMessage;
 use hearth::hallway::HallwayInboxReceipt;
 use hearth::lineage::{QuestBatch, QuestLifecycle, QuestMemory};
 use hearth::triggers::ProcessLesson;
+use presence::{
+    PresenceCloseRequest, PresenceOpenRequest, PresenceResult, PresenceSettleRequest,
+    PresenceTurnRequest,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
@@ -50,6 +54,16 @@ pub const AKASHA_RECALL_RESULT: &str = "athanor.akasha.recall_result";
 pub const AKASHA_LESSON_QUERY: &str = "athanor.akasha.lesson_query";
 pub const AKASHA_LESSON_RESULT: &str = "athanor.akasha.lesson_result";
 pub const AKASHA_COMMAND_FAILED: &str = "athanor.akasha.command_failed";
+pub const PRESENCE_PROJECTION_ID: &str = "presence";
+pub const PRESENCE_OPEN: &str = "athanor.presence.open";
+pub const PRESENCE_COMPILE: &str = "athanor.presence.compile";
+pub const PRESENCE_SETTLE: &str = "athanor.presence.settle";
+pub const PRESENCE_CLOSE: &str = "athanor.presence.close";
+pub const PRESENCE_OPENED: &str = "athanor.presence.opened";
+pub const PRESENCE_COMPILED: &str = "athanor.presence.compiled";
+pub const PRESENCE_SETTLED: &str = "athanor.presence.settled";
+pub const PRESENCE_CLOSED: &str = "athanor.presence.closed";
+pub const PRESENCE_COMMAND_REFUSED: &str = "athanor.presence.command_refused";
 pub const ROUTING_PROJECTION_ID: &str = "routing";
 pub const ROUTING_STATUS: &str = "athanor.routing.status";
 pub const ROUTING_DISPATCH: &str = "athanor.routing.dispatch";
@@ -554,6 +568,14 @@ struct RawClientCommand {
     akasha_recall_query: Option<AkashaRecallQueryPayload>,
     #[serde(default)]
     akasha_lesson_query: Option<AkashaLessonQueryPayload>,
+    #[serde(default)]
+    presence_open: Option<PresenceOpenRequest>,
+    #[serde(default)]
+    presence_compile: Option<PresenceTurnRequest>,
+    #[serde(default)]
+    presence_settle: Option<PresenceSettleRequest>,
+    #[serde(default)]
+    presence_close: Option<PresenceCloseRequest>,
 }
 
 /// One conversation-capture request: the visible window as the harness renders
@@ -653,6 +675,9 @@ impl RawClientCommand {
                 HALLWAY_PROJECTION_ID
             }
             AKASHA_RECALL_QUERY | AKASHA_LESSON_QUERY => AKASHA_PROJECTION_ID,
+            PRESENCE_OPEN | PRESENCE_COMPILE | PRESENCE_SETTLE | PRESENCE_CLOSE => {
+                PRESENCE_PROJECTION_ID
+            }
             ROUTING_STATUS | ROUTING_DISPATCH | FAMILIAR_STATUS => ROUTING_PROJECTION_ID,
             LINEAGE_NORMALIZE | LINEAGE_LIFECYCLE => LINEAGE_PROJECTION_ID,
             SHELL_CONVERSATION_LOG | SHELL_LESSON_PLAN | SHELL_PROCESS_LESSONS => {
@@ -779,6 +804,22 @@ pub enum ClientCommand {
         meta: CommandMeta,
         payload: AkashaLessonQueryPayload,
     },
+    PresenceOpen {
+        meta: CommandMeta,
+        request: PresenceOpenRequest,
+    },
+    PresenceCompile {
+        meta: CommandMeta,
+        request: PresenceTurnRequest,
+    },
+    PresenceSettle {
+        meta: CommandMeta,
+        request: PresenceSettleRequest,
+    },
+    PresenceClose {
+        meta: CommandMeta,
+        request: PresenceCloseRequest,
+    },
     RoutingStatus {
         meta: CommandMeta,
     },
@@ -837,6 +878,10 @@ impl ClientCommand {
             | Self::SettleHallwayKnock { meta, .. }
             | Self::AkashaRecallQuery { meta, .. }
             | Self::AkashaLessonQuery { meta, .. }
+            | Self::PresenceOpen { meta, .. }
+            | Self::PresenceCompile { meta, .. }
+            | Self::PresenceSettle { meta, .. }
+            | Self::PresenceClose { meta, .. }
             | Self::RoutingStatus { meta }
             | Self::RoutingDispatch { meta, .. }
             | Self::FamiliarStatus { meta, .. }
@@ -913,6 +958,42 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
             "akasha lesson query payload belongs only to its command",
         ));
     }
+    let presence_payloads = [
+        (raw.presence_open.is_some(), PRESENCE_OPEN, "presence_open"),
+        (
+            raw.presence_compile.is_some(),
+            PRESENCE_COMPILE,
+            "presence_compile",
+        ),
+        (
+            raw.presence_settle.is_some(),
+            PRESENCE_SETTLE,
+            "presence_settle",
+        ),
+        (
+            raw.presence_close.is_some(),
+            PRESENCE_CLOSE,
+            "presence_close",
+        ),
+    ];
+    let active_presence = presence_payloads
+        .iter()
+        .filter(|(present, _, _)| *present)
+        .collect::<Vec<_>>();
+    if active_presence.len() > 1 {
+        return Err(CommandParseError::from_meta(
+            &meta,
+            "Presence command carries more than one operation payload",
+        ));
+    }
+    if let Some((_, expected, field)) = active_presence.first()
+        && raw.command_or_event_type != *expected
+    {
+        return Err(CommandParseError::from_meta(
+            &meta,
+            format!("{field} belongs only to {expected}"),
+        ));
+    }
     match raw.command_or_event_type.as_str() {
         PAPER_BOAT_RECEIPT_SUBSCRIBE => {
             raw.no_command_payload(&meta)?;
@@ -951,6 +1032,34 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
                 .normalize()
                 .map_err(|reason| CommandParseError::from_meta(&meta, reason))?;
             Ok(ClientCommand::AkashaLessonQuery { meta, payload })
+        }
+        PRESENCE_OPEN => {
+            raw.no_command_payload(&meta)?;
+            let request = raw.presence_open.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "Presence open requires presence_open")
+            })?;
+            Ok(ClientCommand::PresenceOpen { meta, request })
+        }
+        PRESENCE_COMPILE => {
+            raw.no_command_payload(&meta)?;
+            let request = raw.presence_compile.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "Presence compile requires presence_compile")
+            })?;
+            Ok(ClientCommand::PresenceCompile { meta, request })
+        }
+        PRESENCE_SETTLE => {
+            raw.no_command_payload(&meta)?;
+            let request = raw.presence_settle.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "Presence settle requires presence_settle")
+            })?;
+            Ok(ClientCommand::PresenceSettle { meta, request })
+        }
+        PRESENCE_CLOSE => {
+            raw.no_command_payload(&meta)?;
+            let request = raw.presence_close.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "Presence close requires presence_close")
+            })?;
+            Ok(ClientCommand::PresenceClose { meta, request })
         }
         HALLWAY_KNOCK_SETTLE => {
             let request = raw.hallway_knock_settle.clone().ok_or_else(|| {
@@ -1308,6 +1417,13 @@ pub struct AkashaLessonResultEvent {
     #[serde(flatten)]
     pub meta: EventMeta,
     pub result: Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PresenceResultEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub result: PresenceResult,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1792,6 +1908,98 @@ mod receipt_tests {
         assert_eq!(
             error.reason,
             "akasha lesson query payload belongs only to its command"
+        );
+    }
+
+    #[test]
+    fn presence_open_parses_one_typed_payload_and_refuses_crossed_operations() {
+        let mut command = akasha_envelope(PRESENCE_OPEN, "presence-open");
+        command["projection_id"] = json!(PRESENCE_PROJECTION_ID);
+        command["presence_open"] = json!({
+            "binding": {
+                "room": "kintsu",
+                "spirit": "Kintsu",
+                "operator": "Sol",
+                "session": "session-1"
+            },
+            "identity": [{
+                "id": "identity:kintsu",
+                "authority": {
+                    "kind": "identity",
+                    "source": "active_spirit.md",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "role": "identity",
+                "body": "Kintsu meets Sol directly.",
+                "salience": 1000
+            }],
+            "relationship": [],
+            "continuity": [],
+            "anamnesis": [],
+            "previousBoat": null,
+            "uncertainties": []
+        });
+        assert!(matches!(
+            parse_client_command(command.clone()),
+            Ok(ClientCommand::PresenceOpen { .. })
+        ));
+
+        let mut compile = akasha_envelope(PRESENCE_COMPILE, "presence-compile");
+        compile["projection_id"] = json!(PRESENCE_PROJECTION_ID);
+        compile["presence_compile"] = json!({
+            "frameId": "frame",
+            "turnId": "turn",
+            "userText": "hello",
+            "recalled": [],
+            "lessons": [],
+            "directives": [],
+            "sessionLedger": { "frameVersion": 1, "contractVersion": 1 }
+        });
+        assert!(matches!(
+            parse_client_command(compile),
+            Ok(ClientCommand::PresenceCompile { .. })
+        ));
+
+        let mut settle = akasha_envelope(PRESENCE_SETTLE, "presence-settle");
+        settle["projection_id"] = json!(PRESENCE_PROJECTION_ID);
+        settle["presence_settle"] = json!({
+            "contractId": "contract",
+            "attempt": 1,
+            "evaluatedDirectives": [],
+            "violations": [],
+            "decision": "accept",
+            "responseDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        });
+        assert!(matches!(
+            parse_client_command(settle),
+            Ok(ClientCommand::PresenceSettle { .. })
+        ));
+
+        let mut close = akasha_envelope(PRESENCE_CLOSE, "presence-close");
+        close["projection_id"] = json!(PRESENCE_PROJECTION_ID);
+        close["presence_close"] = json!({
+            "frameId": "",
+            "body": "letter",
+            "sessionLedger": { "frameVersion": 1, "contractVersion": 1 }
+        });
+        assert!(matches!(
+            parse_client_command(close),
+            Ok(ClientCommand::PresenceClose { .. })
+        ));
+
+        command["presence_compile"] = json!({
+            "frameId": "frame",
+            "turnId": "turn",
+            "userText": "hello",
+            "recalled": [],
+            "lessons": [],
+            "directives": [],
+            "sessionLedger": { "frameVersion": 1, "contractVersion": 1 }
+        });
+        let error = parse_client_command(command).expect_err("crossed Presence payloads refuse");
+        assert_eq!(
+            error.reason,
+            "Presence command carries more than one operation payload"
         );
     }
 }

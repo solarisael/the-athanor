@@ -14,6 +14,7 @@ import {
 import { RecallPolicyHostClient } from "./recall-policy.ts";
 import { hostHouseId, hostSessionIdentity } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
+import { closePresence, responseDigest } from "./presence.ts";
 import { applyRecallViewport } from "./context.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./anamnesis.ts";
@@ -90,6 +91,32 @@ export function workerAtTheDoor(
   const holder = topLevelSession(binding.room);
   if (!holder) return true;
   return binding.session !== holder;
+}
+
+export async function closePresenceAndSleep(
+  binding: { room: string; spirit: string; session: string },
+  body: string,
+  signal: AbortSignal | undefined,
+  close = closePresence,
+  writeBoat = sleepBoat,
+) {
+  let closedBody = body;
+  try {
+    const closed = await close(
+      binding,
+      {
+        frameId: "",
+        body,
+        sessionLedger: { frameVersion: 1, contractVersion: 1 },
+      },
+      `presence-close:${responseDigest(body)}`,
+      signal,
+    );
+    closedBody = String(closed.body ?? body);
+  } catch (error) {
+    console.warn(`[athanor] Presence close degraded: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return writeBoat(binding.room, closedBody, { signal });
 }
 
 function refuseDocket(code: string, gate: string, error: string) {
@@ -936,11 +963,16 @@ export function registerSolarisaelTools(pi) {
     }),
     approval: "write",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      const session = hostSessionIdentity(ctx, effectiveRoomDir);
       // Sleep is the deliberate session boundary: classify whatever the buffer still holds
       // so the closing batch is not stranded until the next session's shutdown.
       flushGigaTurnsDetached(ctx);
-      const result = await sleepBoat(room, params.body, { signal });
+      const result = await closePresenceAndSleep(
+        { room, spirit, session },
+        params.body,
+        signal,
+      );
       return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });

@@ -2,6 +2,7 @@ mod config;
 mod insula;
 mod panel;
 mod policy;
+mod presence;
 mod receipt;
 mod server;
 mod store;

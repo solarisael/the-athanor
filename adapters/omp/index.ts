@@ -30,7 +30,20 @@ import {
   adoptTopLevelSession,
   registerTopLevelSession,
   retireTopLevelSession,
+  topLevelSession,
 } from "./solarisael-house-proof/top-level-session-fence.ts";
+import {
+  compilePresenceContext,
+  responseDigest,
+  settlePresence,
+  type PresenceMaterial,
+} from "./solarisael-house-proof/presence.ts";
+import {
+  anamnesisMaterial,
+  lessonMaterials,
+  paperBoatMaterial,
+  recallMaterials,
+} from "./solarisael-house-proof/presence-materials.ts";
 
 import {
   logConversationWindow,
@@ -110,6 +123,7 @@ const kittenQuestProgress = new Map<string, KittenQuestProgress>();
 const kittenRoomsByToolCallId = new Map<string, string>();
 const kittenRoomsByAgentId = new Map<string, string>();
 const kittenBindingsByToolCallId = new Map<string, HostBinding>();
+const pendingPresenceContracts = new Map<string, { contractId: string; directiveIds: string[] }>();
 // Insula correlation. The main turn lifecycle opens one provider request per
 // room and session; side-stream provider hooks carry no turn event and never
 // enter this map. Tool spans hang from the request that asked for them. Both
@@ -716,22 +730,45 @@ export default function solarisaelHouseProof(pi) {
   });
 
   pi.on("turn_end", async (event, ctx) => {
+    const response = messageText(event?.message);
     try {
-      // A gate stop can end a turn without an assistant, and a turn with no
-      // open request settles nothing.
       const settlement = insulaAssistantSettlement(event?.message);
-      if (!settlement) return;
-      const { room, session } = insulaSessionBinding(ctx);
-      const key = insulaRequestKey(room, session);
-      noteInsulaProviderRequestId(insulaRequestSpans.get(key), event?.message?.responseId);
-      settleInsulaRequest(
-        key,
-        settlement.outcomeClass,
-        settlement.errorClass,
-        settlement,
-      );
+      if (settlement) {
+        const { room, session } = insulaSessionBinding(ctx);
+        const key = insulaRequestKey(room, session);
+        noteInsulaProviderRequestId(insulaRequestSpans.get(key), event?.message?.responseId);
+        settleInsulaRequest(
+          key,
+          settlement.outcomeClass,
+          settlement.errorClass,
+          settlement,
+        );
+      }
     } catch {
       // Observation is never load-bearing.
+    }
+    if (!response.trim()) return;
+    try {
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const key = `${room}\0${session}`;
+      const pending = pendingPresenceContracts.get(key);
+      if (!pending) return;
+      await settlePresence(
+        { room, spirit, session },
+        {
+          contractId: pending.contractId,
+          attempt: 1,
+          evaluatedDirectives: pending.directiveIds,
+          violations: [],
+          decision: "accept",
+          responseDigest: responseDigest(response),
+        },
+        `${pending.contractId}:settle:1`,
+      );
+      pendingPresenceContracts.delete(key);
+    } catch (error) {
+      console.warn(`[athanor] Presence settlement degraded: ${error instanceof Error ? error.message : String(error)}`);
     }
   });
 
@@ -896,6 +933,10 @@ export default function solarisaelHouseProof(pi) {
     const additions = [];
     const activities: string[] = [];
     const warnings: string[] = [];
+    let presenceBoat: PresenceMaterial | null = null;
+    let presenceAnamnesis: PresenceMaterial[] = [];
+    let presenceLessons: PresenceMaterial[] = [];
+    let presenceRecalled: PresenceMaterial[] = [];
     let houseState = null;
 
     try {
@@ -1012,6 +1053,8 @@ export default function solarisaelHouseProof(pi) {
       letter = wake.letter;
       boatTitle = wake.title;
       boatSource = wake.source;
+      const boatMemoryId = Number(wake.memoryId);
+      presenceBoat = paperBoatMaterial(wake);
       if (wake.warning) warnings.push(wake.warning);
       if (wake.answered) wokenSessions.add(wakeKey);
       // The board is board state, never a summons. A silent transport, an
@@ -1036,7 +1079,12 @@ export default function solarisaelHouseProof(pi) {
           customType: "solarisael-wake-context",
           content,
           display: false,
-          details: { title: boatTitle, source_path: boatSource, quest_board: board.length > 0 },
+          details: {
+            title: boatTitle,
+            source_path: boatSource,
+            memory_id: Number.isSafeInteger(boatMemoryId) ? boatMemoryId : null,
+            quest_board: board.length > 0,
+          },
           attribution: "agent",
           timestamp,
         });
@@ -1053,6 +1101,7 @@ export default function solarisaelHouseProof(pi) {
         if (result?.ok) {
           const content = formatAnamnesisContext(result, { automatic: true });
           if (content) {
+            presenceAnamnesis = anamnesisMaterial(content);
             additions.push({
               role: "custom",
               customType: "solarisael-anamnesis-wake",
@@ -1278,10 +1327,12 @@ export default function solarisaelHouseProof(pi) {
               const title = String(lesson.title ?? "").trim();
               const body = String(lesson.lesson ?? "").trim();
               const proofPattern = String(lesson.proofPattern ?? "").trim();
+              const version = String(lesson.updatedAt ?? lesson.updated_at ?? "current").trim();
               if (!family || !Number.isInteger(id) || id <= 0 || !title || !body) return [];
-              return [{ family, id, title, body, proofPattern }];
+              return [{ family, id, title, body, proofPattern, version }];
             });
             if (packetLessons.length) {
+              presenceLessons = lessonMaterials(packetLessons);
               additions.push({
                 role: "custom",
                 customType: "solarisael-lesson-packet",
@@ -1326,6 +1377,7 @@ export default function solarisaelHouseProof(pi) {
             );
             const automaticCompact = viewport.presentation;
             const recallWarnings = Array.isArray(automaticCompact.warnings) ? automaticCompact.warnings : [];
+            presenceRecalled = recallMaterials(automaticCompact);
             const recallMessage = automaticCompact.found || recallWarnings.length
               ? {
                 role: "custom",
@@ -1446,6 +1498,53 @@ export default function solarisaelHouseProof(pi) {
         }).catch(() => undefined);
         warnings.push("Recall Policy Host degraded");
         // Host owns policy. Degraded automatic Recall never writes or evaluates a fallback owner.
+      }
+    }
+
+    if (topLevelSession(room) === hostSession) {
+      try {
+        const binding = { room, spirit, session: hostSession };
+        const priorPresence = [...messages].reverse().find((message) =>
+          message?.customType === "solarisael-presence-context"
+          && typeof message?.details?.frameId === "string"
+        );
+        const turnId = currentTurnKey || `turn:${responseDigest(prompt).slice(0, 24)}`;
+        const compiled = await compilePresenceContext({
+          binding,
+          operator: houseState?.operator || operator,
+          prompt,
+          turnId,
+          roomReminder: contextAnalysis?.roomReminder,
+          priorFrameId: String(priorPresence?.details?.frameId ?? ""),
+          priorFrameRendered: String(priorPresence?.details?.frameRendered ?? ""),
+          previousBoat: presenceBoat,
+          anamnesis: presenceAnamnesis,
+          recalled: presenceRecalled,
+          lessons: presenceLessons,
+        });
+        pendingPresenceContracts.set(`${room}\0${hostSession}`, {
+          contractId: compiled.contractId,
+          directiveIds: compiled.directiveIds,
+        });
+        additions.push({
+          role: "custom",
+          customType: "solarisael-presence-context",
+          content: compiled.rendered,
+          display: false,
+          details: {
+            frameId: compiled.frameId,
+            frameVersion: compiled.frameVersion,
+            frameRendered: compiled.frameRendered,
+            contractId: compiled.contractId,
+            turnId: compiled.turnId,
+          },
+          attribution: "agent",
+          timestamp,
+        });
+        activities.push(`Presence loaded: ${compiled.frameId}/v${compiled.frameVersion}`);
+      } catch (error) {
+        console.warn(`[athanor] Presence degraded: ${error instanceof Error ? error.message : String(error)}`);
+        warnings.push("Presence unavailable");
       }
     }
 

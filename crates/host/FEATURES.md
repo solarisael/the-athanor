@@ -4,10 +4,11 @@ The Athanor Host. One loopback server that serves one room over WebSocket and HT
 
 ### server
 
-`src/server.rs`, 2232 lines. The largest module in the crate. It holds every concern below.
+`src/server.rs`, about 2560 lines. The largest module in the crate. It holds every concern below.
 
-- **The `process_text` dispatcher.** Lines 387 to 726, about 340 lines. It parses one JSON envelope, hashes the command body, parses the typed command, validates the binding, then routes to one of 21 command arms.
-- **Command vocabulary.** The dispatcher serves `Subscribe`, `Resync`, `Acknowledge`, `SetRequestedMode`, `Evaluate`, `CompleteRefresh`, `FailRefresh`, `InvalidateAfterCompaction`, `AnalyzeContext`, `ApplyRecallViewport`, `ProjectHallwayInbox`, `ClaimHallwayKnock`, `SettleHallwayKnock`, `RoutingStatus`, `RoutingDispatch`, `FamiliarStatus`, `NormalizeLineage`, `SettleLineage`, `LogConversation`, `PlanTriggerLessons`, and `BraidTriggerLessons`.
+- **The `process_text` dispatcher.** It parses, authenticates, and routes 26 typed command variants.
+- **Command vocabulary.** The Host serves Recall Policy, Context, Hallway, AKASHA, Routing, Lineage, Shell, Paper Boat receipt, and Presence commands.
+- **Presence lifecycle.** `PresenceRuntime` owns session frames, turn contracts, enforcement receipts, and close material. The adapter owns no Presence state.
 - **WebSocket transport.** The Host upgrades the configured path, splits the socket, then selects between the cancellation token, the delta broadcast, the receipt broadcast, and the next client frame.
 - **Subscription gates.** The socket forwards deltas only after a subscribe command returns a snapshot. Receipts follow the same rule.
 - **Transport refusals.** A lagged broadcast returns `projection delta stream lagged; resync required`. A binary frame returns `binary WebSocket messages are not accepted`. A ping returns a pong. A close ends the socket.

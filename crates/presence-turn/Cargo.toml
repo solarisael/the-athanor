@@ -1,12 +1,16 @@
 [package]
-name = "protocol"
+name = "presence-turn"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-hearth = { path = "../hearth" }
 presence = { path = "../presence" }
 summoning = { path = "../summoning" }
-serde.workspace = true
-serde_json.workspace = true
+
+[dev-dependencies]
+presence-frame = { path = "../presence-frame" }
+
+[lib]
+name = "presence_turn"
+path = "src/lib.rs"

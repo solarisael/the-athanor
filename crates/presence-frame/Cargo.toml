@@ -1,0 +1,12 @@
+[package]
+name = "presence-frame"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+presence = { path = "../presence" }
+
+[lib]
+name = "presence_frame"
+path = "src/lib.rs"

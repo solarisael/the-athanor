@@ -1,6 +1,6 @@
 # summoning
 
-Summoning owns the domain vocabulary for continuity across sessions. Akasha and Origami keep the database and delivery work.
+Summoning owns continuity across sessions. Presence owns the live frame and turn contracts. Akasha and Origami keep storage and delivery.
 
 ### anamnesis
 

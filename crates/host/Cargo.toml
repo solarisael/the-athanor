@@ -24,6 +24,9 @@ futures-util.workspace = true
 hex.workspace = true
 hearth = { path = "../hearth" }
 protocol = { path = "../protocol" }
+presence = { path = "../presence" }
+presence-frame = { path = "../presence-frame" }
+presence-turn = { path = "../presence-turn" }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

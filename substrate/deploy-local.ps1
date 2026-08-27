@@ -175,15 +175,15 @@ if (Test-Path $liveManifest -PathType Leaf) {
 
 
 if (-not $SkipTests) {
-    Invoke-Checked -Label "Athanor core, protocol, substrate, and Host tests" -FilePath $Cargo -ArgumentList @(
+    Invoke-Checked -Label "Athanor Hearth, protocol, substrate, and Host tests" -FilePath $Cargo -ArgumentList @(
         "test", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-        "-p", "core", "-p", "protocol", "-p", "akasha", "-p", "host", "-p", "athanor-install", "--release", "--target-dir", $stageTarget
+        "-p", "hearth", "-p", "protocol", "-p", "akasha", "-p", "host", "-p", "athanor-install", "--release", "--target-dir", $stageTarget
     )
 }
 
 Invoke-Checked -Label "staged release build" -FilePath $Cargo -ArgumentList @(
     "build", "--manifest-path", (Join-Path $athanorRoot "Cargo.toml"),
-    "-p", "core", "-p", "protocol", "-p", "akasha", "-p", "host", "-p", "athanor-install", "--release", "--target-dir", $stageTarget
+    "-p", "hearth", "-p", "protocol", "-p", "akasha", "-p", "host", "-p", "athanor-install", "--release", "--target-dir", $stageTarget
 )
 if (-not (Test-Path $stagedExe -PathType Leaf)) {
     throw "staged executable was not produced at $stagedExe"

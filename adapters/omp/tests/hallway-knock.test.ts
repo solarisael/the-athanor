@@ -12,8 +12,24 @@ let failEveryStart = false;
 let failEveryCompletion = false;
 let failEveryClaim = false;
 
+// Bun keeps a module mock for the whole process and honours the first
+// registration for a path, so this stand-in is what every later test file in
+// the run sees. That makes it a trap unless it owns only its own doors:
+// replacing host.ts wholesale deleted `hostSessionIdentity` and the rest of
+// the surface, so `bun test hallway-knock presence-settlement` died on
+// `Export named 'hostSessionIdentity' not found` before a test ran, and
+// `bun test hallway-knock presence-client` fed Presence commands to the Knock
+// fake until it read `command.hallway_knock_settle.knockId` off undefined.
+// `mock.restore()` does not undo a module mock and a later re-registration is
+// ignored, so the victim cannot defend itself; the fix belongs here. The
+// `?real` specifier resolves past the mock registry to the file itself, the
+// same trick this file already uses for knock.ts below.
+const realHost = await import("../solarisael-house-proof/host.ts?real");
+
+const KNOCK_COMMAND_PREFIX = "athanor.hallway.knock_";
+
 mock.module("../solarisael-house-proof/host.ts", () => ({
-  HostUnavailable: class HostUnavailable extends Error {},
+  ...realHost,
   hostCommand(
     binding: Record<string, unknown>,
     commandType: string,
@@ -21,6 +37,15 @@ mock.module("../solarisael-house-proof/host.ts", () => ({
     payload: Record<string, unknown> = {},
     idempotencyKey?: string,
   ) {
+    if (!commandType.startsWith(KNOCK_COMMAND_PREFIX)) {
+      return realHost.hostCommand(
+        binding as Parameters<typeof realHost.hostCommand>[0],
+        commandType,
+        projectionId,
+        payload,
+        idempotencyKey,
+      );
+    }
     return {
       ...binding,
       ...payload,
@@ -31,10 +56,16 @@ mock.module("../solarisael-house-proof/host.ts", () => ({
   },
   async sendHostCommand(
     command: Record<string, any>,
-    _acceptedTypes?: ReadonlySet<string>,
-    _signal?: AbortSignal,
+    acceptedTypes?: ReadonlySet<string>,
+    signal?: AbortSignal,
     timeoutMs?: number,
   ) {
+    if (
+      !String(command.command_or_event_type ?? "").startsWith(KNOCK_COMMAND_PREFIX)
+      && !command.hallway_knock_settle
+    ) {
+      return realHost.sendHostCommand(command, acceptedTypes, signal, timeoutMs);
+    }
     commands.push(command);
     hostTimeouts.push(timeoutMs ?? -1);
     if (command.command_or_event_type === "athanor.hallway.knock_claim") {

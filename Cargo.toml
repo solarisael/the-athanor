@@ -1,12 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/house-core",
-    "crates/house-protocol",
-    "crates/house-host",
-    "crates/house-substrate",
-    "crates/house-delivery",
-    "crates/house-vault",
+    "crates/hearth",
+    "crates/presence",
+    "crates/summoning",
+    "crates/protocol",
+    "crates/host",
+    "crates/akasha",
+    "crates/delivery",
+    "crates/origami",
+    "crates/vault",
     "crates/athanor-install",
     "gui",
 ]

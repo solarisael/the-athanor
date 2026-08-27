@@ -142,7 +142,7 @@ Invoke-NativeReleaseStage -Name "cargo-build" -OutDir $Out -Action {
   $env:RUSTC = $Toolchain.rustcPath
   Push-Location $Root
   try {
-    & $Toolchain.cargoPath build --release --locked -p athanor-install -p athanor-substrate -p house-host -p athanor-house-delivery -p athanor-godot
+    & $Toolchain.cargoPath build --release --locked -p athanor-install -p akasha -p host -p delivery -p athanor-godot
     if ($LASTEXITCODE -ne 0) { throw "Rust release build failed" }
   } finally {
     Pop-Location

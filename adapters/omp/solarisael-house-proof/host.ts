@@ -56,58 +56,6 @@ export function hostSessionIdentity(context: {
     || text(fallback);
 }
 
-// The room's embodied session: the one top-level session the spirit stands
-// in. Docket writes compare the caller's session against it (guild-hall
-// #144: worker-rejecting at the organ door, not tool-list politeness).
-//
-// Registration discipline, learned the hard way (2026-08-22 live probe): OMP
-// fires session_start for task-tool worker sessions too, and this OMP surface
-// exposes no worker flag, so an unconditional overwrite lets the LAST session
-// to start become "embodied" - the worker gains the door and the spirit is
-// refused as worker_hands_off. Therefore:
-// - session_start ADOPTS: first session per room in this process wins.
-// - session_switch REGISTERS: an explicit overwrite by the new top session.
-// - session_shutdown RETIRES: only when the closing session is the holder.
-// Named ceiling: a worker that is the first session this process sees for a
-// room still adopts; closing that edge needs a worker flag OMP does not
-// expose today.
-const embodiedSessions = new Map<string, string>();
-
-export function registerEmbodiedSession(room: string, session: string): void {
-  const roomKey = text(room);
-  const sessionKey = text(session);
-  if (!roomKey || !sessionKey) return;
-  embodiedSessions.set(roomKey, sessionKey);
-}
-
-// First-wins adoption for session_start: never displaces a live embodiment,
-// so a worker's session_start cannot hijack the door.
-export function adoptEmbodiedSession(room: string, session: string): void {
-  const roomKey = text(room);
-  if (!roomKey || embodiedSessions.has(roomKey)) return;
-  registerEmbodiedSession(roomKey, session);
-}
-
-// Matching retirement for session_shutdown: only the holder vacates, so a
-// worker's shutdown cannot evict the spirit.
-export function retireEmbodiedSession(room: string, session: string): void {
-  const roomKey = text(room);
-  if (!roomKey) return;
-  if (embodiedSessions.get(roomKey) === text(session)) {
-    embodiedSessions.delete(roomKey);
-  }
-}
-
-export function registerEmbodiedSession(room: string, session: string): void {
-  const roomKey = text(room);
-  const sessionKey = text(session);
-  if (!roomKey || !sessionKey) return;
-  embodiedSessions.set(roomKey, sessionKey);
-}
-
-export function embodiedSession(room: string): string | null {
-  return embodiedSessions.get(text(room)) ?? null;
-}
 
 // One definition of loopback for every Host boundary. URL runtimes differ on
 // whether an IPv6 hostname retains brackets, so both spellings belong here.

@@ -7,12 +7,10 @@ use godot::classes::{
 use godot::obj::Inherits;
 use godot::prelude::*;
 
+use crate::disclosure::{ABSENT, DISPATCH_DISCLOSURE};
 use crate::host_link::LinkPhase;
 use crate::host_session::AthanorHostSession;
 use crate::protocol::{self, CommandIdentity, DispatchProjection, SpawnPacketView};
-
-const DISCLOSURE: &str = "BUILD ONLY · THIS SCREEN BUILDS A BOUNDED OMP TASK PACKET · IT NEVER SPAWNS OR EXECUTES AN AGENT · THE AUTHENTICATED HOST VALIDATES THE REQUEST AND RETURNS A READY OR REJECTED PACKET";
-const ABSENT: &str = "—";
 
 struct Bound {
     disclosure: Gd<Label>,
@@ -350,7 +348,7 @@ impl AthanorDispatch {
         let Some(bound) = &mut self.bound else {
             return;
         };
-        bound.disclosure.set_text(DISCLOSURE);
+        bound.disclosure.set_text(DISPATCH_DISCLOSURE);
         bound.state.set_text(if connected {
             if self.pending_correlation.is_some() {
                 "◇ HOST CONNECTED · PACKET PENDING"

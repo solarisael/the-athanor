@@ -56,10 +56,7 @@ impl NativeRuntimeControl {
     fn database_url(&self) -> Result<String> {
         let secrets = self.secrets()?;
         Ok(secrets.external_database_url.unwrap_or_else(|| {
-            format!(
-                "postgresql://athanor:{}@127.0.0.1:5432/athanor",
-                secrets.postgres_password
-            )
+            crate::endpoints::managed_database_url(&secrets.postgres_password)
         }))
     }
     fn run(&self, arguments: &[&str]) -> Result<String> {

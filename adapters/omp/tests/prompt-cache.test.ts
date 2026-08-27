@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 const evaluations: Array<{ session: string; workingSetPresent: boolean }> = [];
 const evaluationCount = new Map<string, number>();
 let effectiveRoomDir = "";
+let topLevelSessionId = "";
 let omitViewportWarnings = false;
 const completedRefreshWarnings: Array<string | undefined> = [];
 let freshConversation = false;
@@ -15,6 +16,8 @@ const automaticRecallOptions: unknown[] = [];
 const automaticWakeOptions: unknown[] = [];
 const automaticAnamnesisOptions: unknown[] = [];
 const automaticEntityInputs: unknown[] = [];
+const presenceOpens: unknown[] = [];
+const presenceCompiles: unknown[] = [];
 let hallwayProjection: {
   changed: boolean;
   inbox: { ok: boolean; hallways: Array<Record<string, any>> };
@@ -45,6 +48,15 @@ mock.module("../solarisael-house-proof/room.ts", () => ({
   writeActiveSpiritSnapshot: async () => undefined,
 }));
 
+mock.module("../solarisael-house-proof/top-level-session-fence.ts", () => ({
+  adoptTopLevelSession: (_room: string, session: string) => { topLevelSessionId ||= session; },
+  registerTopLevelSession: (_room: string, session: string) => { topLevelSessionId = session; },
+  retireTopLevelSession: (_room: string, session: string) => {
+    if (topLevelSessionId === session) topLevelSessionId = "";
+  },
+  topLevelSession: () => topLevelSessionId || null,
+}));
+
 mock.module("../solarisael-house-proof/conversation-log.ts", () => ({
   logConversationWindow: async () => ({ fresh: freshConversation, loggedTurns: [] }),
 }));
@@ -69,6 +81,23 @@ mock.module("../solarisael-house-proof/tools.ts", () => ({
   closeRustRememberTransports: () => undefined,
   registerSolarisaelTools: () => undefined,
   writeRustMemory: async () => undefined,
+}));
+mock.module("../solarisael-house-proof/presence.ts", () => ({
+  compilePresenceContext: async (request: any) => {
+    presenceOpens.push(request);
+    presenceCompiles.push(request);
+    return {
+      frameId: "frame-1",
+      frameVersion: 1,
+      frameRendered: "Presence frame",
+      contractId: "contract-1",
+      turnId: request.turnId,
+      directiveIds: ["presence:active-spirit"],
+      rendered: "Presence frame\n\nPresence contract",
+    };
+  },
+  settlePresence: async () => ({ contractId: "contract-1" }),
+  responseDigest: () => "d".repeat(64),
 }));
 mock.module("../solarisael-house-proof/hallway.ts", () => ({
   projectHallwayInbox: async () => hallwayProjection,
@@ -220,6 +249,7 @@ function user(id: string, content: string) {
 }
 
 function context(sessionID: string) {
+  topLevelSessionId = sessionID;
   return { cwd: "C:/test/kodo", sessionID };
 }
 
@@ -232,11 +262,14 @@ beforeEach(async () => {
   omitViewportWarnings = false;
   completedRefreshWarnings.length = 0;
   freshConversation = false;
+  topLevelSessionId = "";
   entityResolutionSuggested = false;
   automaticRecallOptions.length = 0;
   automaticWakeOptions.length = 0;
   automaticAnamnesisOptions.length = 0;
   automaticEntityInputs.length = 0;
+  presenceOpens.length = 0;
+  presenceCompiles.length = 0;
   hallwayProjection = { changed: false, inbox: { ok: true, hallways: [] } };
 });
 
@@ -265,7 +298,7 @@ describe("OMP prompt-cache history", () => {
     expect(blocks).toHaveLength(2);
     expect(JSON.stringify(blocks[0])).toBe(firstBytes);
     expect(second.messages[1]).toEqual(firstBlock);
-    expect(second.messages.at(-1)).toEqual(blocks[1]);
+    expect(second.messages).toContainEqual(blocks[1]);
     expect(blocks[1].content).toContain(
       "This working set supersedes every earlier Athanor Recall working set in this conversation; use this copy as current.",
     );
@@ -295,6 +328,25 @@ describe("OMP prompt-cache history", () => {
       temporalDecay: true,
       timeoutMs: 2_000,
     }]);
+  });
+
+  test("injects one Host-compiled Presence contract for the current turn", async () => {
+    const result = await contextHandler()({
+      messages: [user("presence-turn", "stay with me")],
+    }, context("presence-session"));
+    if (!result) throw new Error("Presence context returned no additions");
+    const presence = result.messages.find((message) =>
+      message.customType === "solarisael-presence-context"
+    );
+
+    expect(presence?.content).toBe("Presence frame\n\nPresence contract");
+    expect(presence?.details).toMatchObject({
+      frameId: "frame-1",
+      contractId: "contract-1",
+      turnId: "id:presence-turn",
+    });
+    expect(presenceOpens).toHaveLength(1);
+    expect(presenceCompiles).toHaveLength(1);
   });
 
   test("keeps peer Hallway prose outside the trusted Bell reminder", async () => {

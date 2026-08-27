@@ -1,3 +1,4 @@
+mod disclosure;
 mod dispatch;
 mod familiar_status;
 mod health;
@@ -8,6 +9,7 @@ mod protocol;
 mod recall_policy;
 mod routing;
 mod shell;
+mod tokens;
 
 use godot::prelude::*;
 

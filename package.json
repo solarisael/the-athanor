@@ -17,7 +17,7 @@
     "test:installer": "pwsh -NoProfile -File installer/native-release-contract.test.ps1 && pwsh -NoProfile -File installer/omp-adapter-component.test.ps1",
     "deploy:omp-adapter": "pwsh -NoProfile -File adapters/omp/deploy-local.ps1",
     "build:pages": "node scripts/build-pages.mjs",
-    "build:substrate": "cargo build --release -p athanor-substrate",
+    "build:substrate": "cargo build --release -p akasha",
     "build:godot": "cargo build -p athanor-godot --target-dir gui/target",
     "build:native": "pwsh -File installer/build-native-release.ps1 -OutDir dist/native"
   },

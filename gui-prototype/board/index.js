@@ -7,8 +7,14 @@
 // when a door refuses, the surface names which door refused and why, and
 // renders no rows at all.
 // An empty board is an empty board; a missing door is a missing door.
+//
+// Two doors hang off this module rather than inside it: hallway-messages.js
+// renders the drawer under each Hallway row, and the mantle Bell in app.js
+// renders from this module's inbox round. One fetch, no second door to
+// disagree with it.
 
 import { escapeHtml } from "../text.js";
+import { initHallwayMessages, handleHallwayMessagesClick, renderHallwayDrawer } from "./hallway-messages.js";
 
 const BOARD_ROUTE = "/live/docket/board";
 const INBOX_ROUTE = "/live/hallway/inbox";
@@ -37,6 +43,22 @@ const openDrawers = new Set();
 
 export function initBoard(options) {
   requestRender = options.requestRender;
+  initHallwayMessages({ askDoor, absence, countedNoun, ledgerStamp });
+}
+
+// The Bell in the mantle renders from this: the inbox round this module already
+// asked for. It carries only what the door sent, so a Bell with nothing to show
+// names its own absence instead of borrowing a shape from here.
+export function hallwayInboxRound() {
+  if (source.status !== "answered") return { status: source.status };
+
+  return {
+    status: "answered",
+    queriedAt: source.queriedAt,
+    refusal: source.hallways.refusal,
+    room: source.hallways.data?.room,
+    hallways: source.hallways.data?.hallways
+  };
 }
 
 // Slot entry asks again rather than checking a cache: the board moves under
@@ -54,6 +76,8 @@ export function handleBoardClick(event) {
 
   const drawerToggle = event.target.closest("[data-evidence-toggle]");
   if (drawerToggle) return toggleEvidenceDrawer(drawerToggle.closest("[data-evidence-drawer]"));
+
+  if (handleHallwayMessagesClick(event)) return true;
 
   return false;
 }
@@ -474,6 +498,7 @@ function renderHallwayChannel(entry) {
       <span>${escapeHtml(entry.hallway)}</span>
       <strong>${escapeHtml(counts)}</strong>
       <p>${escapeHtml(excerpt)}</p>
+      ${renderHallwayDrawer(entry.hallway)}
     </article>`;
 }
 

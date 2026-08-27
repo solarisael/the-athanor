@@ -491,7 +491,7 @@ try {
     Assert-True ($Call.Extent.Text -match '"--release"') "every guarded deploy Cargo invocation must use Cargo's release profile"
     Assert-True ($Call.Extent.Text -match '"--target-dir"\s*,\s*\$stageTarget') "every guarded deploy Cargo invocation must use the reusable target/deploy cache"
   }
-  $ExpectedPackages = @("house-core", "house-protocol", "athanor-substrate", "house-host", "athanor-install")
+  $ExpectedPackages = @("core", "protocol", "akasha", "host", "athanor-install")
   foreach ($Call in @($TestCalls[0], $BuildCalls[0])) {
     $CallPackages = @([Regex]::Matches($Call.Extent.Text, '"-p"\s*,\s*"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
     Assert-True (($CallPackages -join "|") -ceq ($ExpectedPackages -join "|")) "the guarded test and staged build must select the identical five packages"

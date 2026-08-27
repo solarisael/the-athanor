@@ -3357,6 +3357,21 @@ input:focus-visible {
   color: var(--fg-dim);
 }
 
+/* A superseded or archived body wears this before its first line: after the
+   first line, the operator has already read it as the current record. */
+.sediment-authority {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--bd-active);
+  border-radius: 8px;
+
+  font-size: 11px;
+  font-weight: 700;
+
+  background: var(--bg-active);
+  color: var(--fg-active);
+}
+
 /* Memories and lessons stand beside each other where there is room for both,
    and a shelf with one door takes the whole width rather than half of it. */
 .sediment-shelves {
@@ -3420,6 +3435,55 @@ input:focus-visible {
   gap: 12px;
 
   padding-bottom: 4px;
+}
+
+/* One message inside a Hallway drawer. The body is another room's own prose, so
+   it wears no House chrome that could let it read as panel copy. */
+.hallway-message {
+  display: grid;
+
+  gap: 4px;
+
+  padding: 8px 2px;
+  border-top: 1px solid var(--bd-section);
+}
+
+.hallway-message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+
+  gap: 8px;
+  margin: 0;
+
+  font-size: 11px;
+
+  color: var(--fg-ghost);
+}
+
+.hallway-message-meta strong {
+  font-size: 12px;
+
+  color: var(--fg-soft);
+}
+
+.hallway-message-body {
+  margin: 0;
+
+  font-size: 12px;
+  line-height: 1.45;
+
+  color: var(--fg-dim);
+}
+
+/* Chips ride a line that already exists here — the drawer's summary and the
+   message's own metadata row — instead of taking one of their own. */
+.hallway-drawer > summary .mechanics-row-flags,
+.hallway-message .mechanics-row-flags {
+  display: inline-flex;
+  justify-content: start;
+
+  vertical-align: baseline;
 }
 
 .mechanics-row.evidence-row > summary {

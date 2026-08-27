@@ -12,7 +12,7 @@ use athanor_install::{
         CurrentRelease, HouseInstallConfig, InstallRequest, Installer, OperatorIntegration,
     },
     layout::{InstallLayout, SERVICE_NAME, safe_version},
-    manifest::{Artifact, Compatibility, ReleaseManifest, RollbackContract},
+    manifest::{Artifact, Compatibility, REQUIRED_SCHEMA, ReleaseManifest, RollbackContract},
     supervisor::HostRoomConfig,
 };
 use sha2::{Digest, Sha256};
@@ -211,7 +211,7 @@ fn component(bytes: &[u8]) -> ComponentManifest {
             host_api: 1,
             substrate_api: 1,
             delivery_api: 1,
-            schema_version: 18,
+            schema_version: REQUIRED_SCHEMA,
         },
         artifacts: vec![ComponentArtifact {
             path: "index.ts".into(),
@@ -231,7 +231,7 @@ fn release(version: &str, bytes: &[u8]) -> ReleaseManifest {
         product: "the-athanor".into(),
         version: version.into(),
         platform: "windows-x64".into(),
-        schema_version: 18,
+        schema_version: REQUIRED_SCHEMA,
         compatibility: Compatibility {
             host_api: 1,
             substrate_api: 1,
@@ -1078,7 +1078,7 @@ fn adapter_install_and_rollback_use_independent_real_releases() -> Result<()> {
     );
 
     let mut incompatible = component(b"incompatible");
-    incompatible.compatibility.schema_version = 17;
+    incompatible.compatibility.schema_version = REQUIRED_SCHEMA - 1;
     incompatible.release_id = incompatible.computed_release_id();
     write_component_root(
         &layout.omp_adapter_version(&incompatible.release_id),
@@ -1143,7 +1143,7 @@ fn native_activation_restores_both_pointers_after_component_write_failure() -> R
     })?;
 
     let mut incompatible = component(b"old adapter");
-    incompatible.compatibility.schema_version = 17;
+    incompatible.compatibility.schema_version = REQUIRED_SCHEMA - 1;
     incompatible.release_id = incompatible.computed_release_id();
     let incompatible_root = layout.omp_adapter_version(&incompatible.release_id);
     fs.files

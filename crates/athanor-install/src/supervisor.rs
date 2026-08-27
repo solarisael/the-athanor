@@ -1,3 +1,4 @@
+use crate::contract::LOOPBACK_HOST;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 #[cfg(windows)]
@@ -336,7 +337,7 @@ pub fn runtime_plan(
         {
             bail!("Host port {} is duplicate or reserved", room.port);
         }
-        loopback("127.0.0.1", room.port)?;
+        loopback(LOOPBACK_HOST, room.port)?;
     }
 
     let mut specs = Vec::new();
@@ -348,7 +349,7 @@ pub fn runtime_plan(
                 "-D".into(),
                 data_root.join("data/postgresql").into_os_string(),
                 "-h".into(),
-                "127.0.0.1".into(),
+                LOOPBACK_HOST.into(),
                 "-p".into(),
                 config.database_port.to_string().into(),
             ],
@@ -364,7 +365,7 @@ pub fn runtime_plan(
         arguments: vec![
             "-js".into(),
             "-a".into(),
-            "127.0.0.1".into(),
+            LOOPBACK_HOST.into(),
             "-p".into(),
             config.nats_port.to_string().into(),
             "-sd".into(),
@@ -377,7 +378,7 @@ pub fn runtime_plan(
         ("DATABASE_URL".into(), database_url.into()),
         (
             "SOLARISAEL_NATS_URL".into(),
-            format!("nats://127.0.0.1:{}", config.nats_port),
+            format!("nats://{LOOPBACK_HOST}:{}", config.nats_port),
         ),
     ]);
     let delivery_executable = version_root.join("bin/athanor-house-delivery.exe");
@@ -418,14 +419,14 @@ pub fn runtime_plan(
         );
         host_env.insert(
             "ATHANOR_HOST_BIND".into(),
-            format!("127.0.0.1:{}", room.port),
+            format!("{LOOPBACK_HOST}:{}", room.port),
         );
         specs.push(ProcessSpec {
             name: format!("host:{}", room.room),
             executable: version_root.join("bin/house-host.exe"),
             arguments: Vec::new(),
             environment: host_env,
-            readiness: Readiness::Tcp(loopback("127.0.0.1", room.port)?),
+            readiness: Readiness::Tcp(loopback(LOOPBACK_HOST, room.port)?),
         });
     }
     Ok(specs)

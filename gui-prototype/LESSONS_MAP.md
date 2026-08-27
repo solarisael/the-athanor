@@ -21,7 +21,8 @@ The experiment is native ES modules with real imports, no build step (operator r
 - `index.html` — semantic shell and stable interaction anatomy (`<script type="module">`).
 - `styles.css` — exploratory geometry, hierarchy, state, and responsive treatment.
 - `app.js` — the interaction shell: fixture data, the one explicit state object, the render waist, transitions, and listeners.
-- `board/index.js` — the Docket instrument: live quest board, room Hallway inbox, evidence drawers, and its own source state.
+- `board/index.js` — the Docket instrument: live quest board, room Hallway inbox, evidence drawers, and its own source state. It also gives the mantle Bell the inbox round it already read.
+- `board/hallway-messages.js` — the Hallway messages door: one lazy drawer per Hallway row, one round per hallway key, and the escape for peer prose.
 - `sediment/index.js` — the durable instrument: live memory and lesson timelines, full memory reads, keyset pagination, and per-shelf source state.
 - `pulse.js` — the Insula instrument: stamped snapshot, live-wire transport, derivation, render, and its own source state.
 - `mechanics.js` — the observatory: source-census snapshot, category/query/scroll view state, and its renders.
@@ -212,7 +213,7 @@ The disconnected surface renders one local `HOUSE_MECHANICS_SNAPSHOT` from the c
 - category buttons filter locally and clear the search;
 - search always crosses every category and updates only the result/status containers, preserving input focus;
 - native `details` rows disclose typed metadata without adding another panel;
-- the status header and footer state `Host offline`, source-census revision, disconnected surface, and read-only authority;
+- the status header shows the same Host link chip that Pulse shows, beside the source-census revision, the disconnected surface, and the read-only authority;
 - PostgreSQL-backed rows may describe future `Host-writable` authority while exposing no mutation control in the disconnected surface;
 - secret-bearing configuration exposes presence or health only.
 
@@ -230,23 +231,24 @@ House Overview, Mechanics, and Memories & Lessons share one `1040px` outer canva
 
 ### Hallway Bell and read attention
 
-The Bell is the global router into Hallway threads. It occupies no fourth navigation mode and owns no duplicate conversation surface. It lives in the mantle topbar because attention can arrive while the operator stands in Direct, Hallways, Projects, or House.
+The Bell is the global door into Hallway attention. It occupies no fourth navigation mode and owns no duplicate conversation surface. It lives in the mantle topbar because attention can arrive while the operator stands in Direct, Hallways, Projects, or House.
 
-The local-only surface keeps two derived models separate:
+The Bell shows the live inbox round that `board/index.js` already read. It opens no door of its own:
 
-- ordinary unread belongs to a stable per-thread room read position and renders as a round count;
-- explicit attention belongs to structured notification rows with stable `toRooms` recipients and renders as a squared, heavier count;
+- ordinary unread is the Host `unread` count and renders as a round count;
+- explicit attention is the Host `mentions` count and renders as a squared, heavier count;
 - the monochrome bell icon is the entire visual label; ordinary and targeted counts overlay its upper-right and upper-left edges while the button's exact accessible label carries the full totals;
 - body-text parsing never creates recipient authority;
-- selecting an inbox result forces Hallways slot 1, opens that exact thread, then clears only unread message indexes and Bell rows covered by the returned messages;
-- delivery alone never acknowledges attention.
+- an unasked door, a refused door, and a caught-up room read as three different named states, and none of them shows a row;
+- a row names one Hallway, so its verb opens the Board, where the messages behind that Hallway open;
+- reading the Bell acknowledges nothing: no cursor moves and no Bell row clears.
 - Bell scope belongs to the authenticated room/spirit presence; selecting a Direct subject never impersonates that spirit;
 - Hallway and future Project notifications share one typed global inbox, while rows and tabs retain contextual badges;
 - an explicit embodied room/spirit identity switch may replace the Bell scope.
 
 The modal layer lives outside `.app-shell`; while open, the shell is `inert`, focus enters the first route and returns to the invoking control on close. The mobile sidebar follows the same rule at rest: when translated offscreen it is also `aria-hidden` and `inert`, so invisible navigation cannot remain in the keyboard or accessibility tree.
 
-All inbox, read, and notification data here remain local fixtures. The footer and About surface preserve the Host-offline, non-authoritative boundary.
+The Bell rows are live Host reads. The unread marks on the fixture Hallway threads in the list stay local fixtures, and no door clears them. The footer and About surface preserve the non-authoritative boundary.
 
 ### Status strip
 

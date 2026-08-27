@@ -6,7 +6,6 @@ license.workspace = true
 
 [dependencies]
 hearth = { path = "../hearth" }
-presence = { path = "../presence" }
 summoning = { path = "../summoning" }
 serde.workspace = true
 serde_json.workspace = true

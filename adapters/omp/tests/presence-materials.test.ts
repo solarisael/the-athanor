@@ -29,4 +29,22 @@ describe("Presence material mapping", () => {
       expect.objectContaining({ id: "canon:3", authority: { kind: "canon", entity_id: "3" } }),
     ]);
   });
+
+  test("bounds wake materials without changing their provenance", () => {
+    const paperBoat = paperBoatMaterial({ memoryId: "42", letter: "p".repeat(5000) });
+    const anamnesis = anamnesisMaterial("a".repeat(5000))[0];
+
+    expect(paperBoat).toMatchObject({
+      id: "paper-boat:42",
+      authority: { kind: "paper_boat", memory_id: 42 },
+    });
+    expect(paperBoat?.body).toBe("p".repeat(4096));
+    expect(paperBoat?.body.length).toBeLessThanOrEqual(4096);
+    expect(anamnesis).toMatchObject({
+      id: "anamnesis:wake",
+      authority: { kind: "anamnesis", source: "anamnesis:wake" },
+    });
+    expect(anamnesis?.body).toBe("a".repeat(4096));
+    expect(anamnesis?.body.length).toBeLessThanOrEqual(4096);
+  });
 });

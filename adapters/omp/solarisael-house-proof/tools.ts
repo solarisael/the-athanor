@@ -107,7 +107,9 @@ export async function closePresenceAndSleep(
       {
         frameId: "",
         body,
-        sessionLedger: { frameVersion: 1, contractVersion: 1 },
+        // The Host owns the ledger this boat is sealed against. All the
+        // caller asserts is the Presence frame version it was built for.
+        frameVersion: 1,
       },
       `presence-close:${responseDigest(body)}`,
       signal,

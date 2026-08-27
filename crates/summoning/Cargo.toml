@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 hearth = { path = "../hearth" }
+presence = { path = "../presence" }
 
 [lib]
 name = "summoning"

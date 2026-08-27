@@ -8,7 +8,9 @@ The Athanor Host. One loopback server that serves one room over WebSocket and HT
 
 - **The `process_text` dispatcher.** It parses, authenticates, and routes 26 typed command variants.
 - **Command vocabulary.** The Host serves Recall Policy, Context, Hallway, AKASHA, Routing, Lineage, Shell, Paper Boat receipt, and Presence commands.
-- **Presence lifecycle.** `PresenceRuntime` owns session frames, turn contracts, enforcement receipts, and close material. The adapter owns no Presence state.
+- **Presence lifecycle.** `PresenceRuntime` owns the one live session frame, the one active turn contract, the bounded settlement receipts, the authoritative `PresenceLedger`, and the close material. The adapter owns no Presence state and authors no ledger.
+- **Presence replay ledger.** Every Presence door is keyed by authenticated session plus idempotency key, and replay is checked before any lifecycle lookup. An exact retry returns the prior typed outcome; the same key with a changed body, or reused across two operations, refuses by name. Retained entries are bounded, so a successful close replays after its session is removed while a stale compile replay answers without reactivating an expired contract.
+- **Presence authentication.** `authenticate_presence` derives the binding from the authenticated envelope and the room's own `embodiedSpirit` and `operator`. A caller's claimed binding is checked against it, never used in its place. Capabilities are projected from configuration the Host already resolved — room state, an AKASHA pool, a receipt bridge — and never read from the wire.
 - **WebSocket transport.** The Host upgrades the configured path, splits the socket, then selects between the cancellation token, the delta broadcast, the receipt broadcast, and the next client frame.
 - **Subscription gates.** The socket forwards deltas only after a subscribe command returns a snapshot. Receipts follow the same rule.
 - **Transport refusals.** A lagged broadcast returns `projection delta stream lagged; resync required`. A binary frame returns `binary WebSocket messages are not accepted`. A ping returns a pong. A close ends the socket.

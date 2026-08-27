@@ -1,6 +1,8 @@
 # summoning
 
-Summoning owns continuity across sessions. Presence owns the live frame and turn contracts. Akasha and Origami keep storage and delivery.
+Summoning owns the whole session cycle: Anamnesis wakes a spirit, Presence keeps it itself for the length of a session, and the Paper Boat carries it across sleep. Akasha and Origami keep storage and delivery. Everything here is pure.
+
+The `presence` crate owns the Presence domain, and Summoning is the boundary consumers reach it through: `summoning::presence` re-exports it, so the cycle names its own middle without absorbing the branch weight of frame and turn assembly. A compile-time assertion pins `PRESENCE_MAX_CLOSE_BODY_BYTES` to `PAPER_BOAT_MAX_BODY_BYTES`, because close material becomes a boat body and the two bounds are one bound.
 
 ### anamnesis
 

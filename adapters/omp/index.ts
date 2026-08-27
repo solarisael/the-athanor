@@ -123,7 +123,10 @@ const kittenQuestProgress = new Map<string, KittenQuestProgress>();
 const kittenRoomsByToolCallId = new Map<string, string>();
 const kittenRoomsByAgentId = new Map<string, string>();
 const kittenBindingsByToolCallId = new Map<string, HostBinding>();
-const pendingPresenceContracts = new Map<string, { contractId: string; directiveIds: string[] }>();
+const pendingPresenceContracts = new Map<
+  string,
+  { contractId: string; directiveIds: string[]; nonemptyGuardId: string | null }
+>();
 // Insula correlation. The main turn lifecycle opens one provider request per
 // room and session; side-stream provider hooks carry no turn event and never
 // enter this map. Tool spans hang from the request that asked for them. Both
@@ -747,25 +750,39 @@ export default function solarisaelHouseProof(pi) {
     } catch {
       // Observation is never load-bearing.
     }
-    if (!response.trim()) return;
+    // An empty assistant turn is exactly what the nonempty hard guard exists
+    // to catch, so it must produce a receipt rather than a quiet return. The
+    // old early exit left the contract pending and unsettled, which is the
+    // one outcome the guard was supposed to make impossible.
+    // `emitted` decides whether anything was said; the digest still covers the
+    // response exactly as the provider returned it.
+    const emitted = Boolean(response.trim());
     try {
       const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
       const session = hostSessionIdentity(ctx, effectiveRoomDir);
       const key = `${room}\0${session}`;
       const pending = pendingPresenceContracts.get(key);
       if (!pending) return;
+      if (!emitted && !pending.nonemptyGuardId) {
+        console.warn("[athanor] Presence refusal cites no guard: the contract carried no hard nonempty-response guard");
+      }
       await settlePresence(
         { room, spirit, session },
         {
           contractId: pending.contractId,
           attempt: 1,
           evaluatedDirectives: pending.directiveIds,
-          violations: [],
-          decision: "accept",
-          responseDigest: responseDigest(response),
+          violations: emitted || !pending.nonemptyGuardId ? [] : [{
+            directiveId: pending.nonemptyGuardId,
+            reason: "The assistant turn emitted no text.",
+          }],
+          decision: emitted ? "accept" : "refuse",
+          responseDigest: emitted ? responseDigest(response) : null,
         },
         `${pending.contractId}:settle:1`,
       );
+      // Only a settled contract may be forgotten. Clearing before the Host
+      // answers would lose the one receipt that says what happened.
       pendingPresenceContracts.delete(key);
     } catch (error) {
       console.warn(`[athanor] Presence settlement degraded: ${error instanceof Error ? error.message : String(error)}`);
@@ -1525,6 +1542,7 @@ export default function solarisaelHouseProof(pi) {
         pendingPresenceContracts.set(`${room}\0${hostSession}`, {
           contractId: compiled.contractId,
           directiveIds: compiled.directiveIds,
+          nonemptyGuardId: compiled.nonemptyGuardId,
         });
         additions.push({
           role: "custom",

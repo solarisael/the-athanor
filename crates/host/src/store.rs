@@ -14,6 +14,15 @@ use std::path::{Path, PathBuf};
 
 const RECEIPT_LIMIT: usize = 512;
 
+/// The room's own answer to who is present, read from room state rather than
+/// asserted by a caller.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoomIdentity {
+    pub room: String,
+    pub spirit: String,
+    pub operator: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct RoomStateStore {
     path: PathBuf,
@@ -28,6 +37,41 @@ impl RoomStateStore {
     pub fn load(&self) -> Result<RecallPolicyState, String> {
         let root = self.read_root()?;
         projection_from_root(&root, &self.room)
+    }
+
+    /// The spirit and operator this room actually belongs to.
+    ///
+    /// enough: Presence identity used to be whatever the caller typed into an
+    /// open request. This is the room's own record, the same file
+    /// `set_room_state` writes and `active_spirit.md` mirrors, so a claimed
+    /// operator can be checked instead of believed. `embodiedSpirit` is the
+    /// live field; `agentName` is the older spelling the installer still
+    /// stamps, and it is read only as a fallback so an unmigrated room
+    /// authenticates rather than locking its spirit out.
+    pub fn identity(&self) -> Result<RoomIdentity, String> {
+        let root = self.read_root()?;
+        let object = root
+            .as_object()
+            .ok_or_else(|| "room state root must be a JSON object".to_owned())?;
+        let room = required_string(object, "room")?;
+        if room != self.room {
+            return Err(format!(
+                "room state belongs to foreign room {room}; configured room is {}",
+                self.room
+            ));
+        }
+        let spirit = required_string(object, "embodiedSpirit")
+            .or_else(|_| required_string(object, "agentName"))
+            .map_err(|_| {
+                "room state must name the embodied spirit before Presence opens".to_owned()
+            })?;
+        let operator = required_string(object, "operator")
+            .map_err(|_| "room state must name the operator before Presence opens".to_owned())?;
+        Ok(RoomIdentity {
+            room: room.to_owned(),
+            spirit: spirit.trim().to_owned(),
+            operator: operator.trim().to_owned(),
+        })
     }
 
     pub fn write_policy(&self, state: &RecallPolicyState) -> Result<(), String> {

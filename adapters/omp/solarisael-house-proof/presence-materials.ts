@@ -2,7 +2,7 @@ import type { PresenceMaterial } from "./presence.ts";
 
 export function paperBoatMaterial(wake: Record<string, any>): PresenceMaterial | null {
   const memoryId = Number(wake.memoryId);
-  const body = String(wake.letter ?? "").trim();
+  const body = String(wake.letter ?? "").trim().slice(0, 4096);
   if (!Number.isSafeInteger(memoryId) || memoryId <= 0 || !body) return null;
   return {
     id: `paper-boat:${memoryId}`,
@@ -15,11 +15,12 @@ export function paperBoatMaterial(wake: Record<string, any>): PresenceMaterial |
 
 export function anamnesisMaterial(content: string): PresenceMaterial[] {
   if (!content.trim()) return [];
+  const body = content.slice(0, 4096);
   return [{
     id: "anamnesis:wake",
     authority: { kind: "anamnesis", source: "anamnesis:wake" },
     role: "counsel",
-    body: content,
+    body,
     salience: 800,
   }];
 }

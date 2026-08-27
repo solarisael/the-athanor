@@ -3,7 +3,7 @@ use hearth::conversation::VisibleMessage;
 use hearth::hallway::HallwayInboxReceipt;
 use hearth::lineage::{QuestBatch, QuestLifecycle, QuestMemory};
 use hearth::triggers::ProcessLesson;
-use presence::{
+use summoning::presence::{
     PresenceCloseRequest, PresenceOpenRequest, PresenceResult, PresenceSettleRequest,
     PresenceTurnRequest,
 };
@@ -1953,7 +1953,7 @@ mod receipt_tests {
             "recalled": [],
             "lessons": [],
             "directives": [],
-            "sessionLedger": { "frameVersion": 1, "contractVersion": 1 }
+            "frameVersion": 1
         });
         assert!(matches!(
             parse_client_command(compile),
@@ -1980,7 +1980,7 @@ mod receipt_tests {
         close["presence_close"] = json!({
             "frameId": "",
             "body": "letter",
-            "sessionLedger": { "frameVersion": 1, "contractVersion": 1 }
+            "frameVersion": 1
         });
         assert!(matches!(
             parse_client_command(close),
@@ -1994,7 +1994,7 @@ mod receipt_tests {
             "recalled": [],
             "lessons": [],
             "directives": [],
-            "sessionLedger": { "frameVersion": 1, "contractVersion": 1 }
+            "frameVersion": 1
         });
         let error = parse_client_command(command).expect_err("crossed Presence payloads refuse");
         assert_eq!(

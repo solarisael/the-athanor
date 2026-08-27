@@ -30,15 +30,9 @@ export type PresenceDirective = {
   triggerScope?: string[];
 };
 
-export type PresenceLedger = {
-  recentRegisters?: string[];
-  formsOfAddress?: string[];
-  repairRuleIds?: string[];
-  unresolvedThreads?: string[];
-  relationshipClaims?: PresenceMaterial[];
-  frameVersion: number;
-  contractVersion: number;
-};
+// enough: there is no PresenceLedger on the wire any more. The Host owns the
+// session's ledger and injects it into the pure functions itself, so a client
+// asserts only which frame version it believes it is talking to.
 
 export type PresenceOpenInput = {
   binding: { room: string; spirit: string; operator: string; session: string };
@@ -57,7 +51,7 @@ export type PresenceCompileInput = {
   recalled?: PresenceMaterial[];
   lessons?: PresenceMaterial[];
   directives?: PresenceDirective[];
-  sessionLedger: PresenceLedger;
+  frameVersion: number;
 };
 export type PresenceContextInput = {
   binding: HostBinding;
@@ -86,7 +80,7 @@ export async function compilePresenceContext(input: PresenceContextInput) {
       recalled,
       lessons,
       directives: presenceDirectives(input, lessons),
-      sessionLedger: { frameVersion: 1, contractVersion: 1 },
+      frameVersion: frame.version,
     },
     `presence-compile:${input.turnId}`,
   );
@@ -94,10 +88,11 @@ export async function compilePresenceContext(input: PresenceContextInput) {
   return {
     frameId: frame.id,
     frameRendered: frame.rendered,
-    frameVersion: Number(contract.version ?? 1),
+    frameVersion: frame.version,
     contractId,
     turnId: input.turnId,
-    directiveIds: contractDirectiveIds(contract),
+    directiveIds: hardDirectiveIds(contract),
+    nonemptyGuardId: nonemptyGuardId(contract),
     rendered: [frame.rendered, String(contract.rendered ?? "")].filter(Boolean).join("\n\n"),
   };
 }
@@ -105,9 +100,9 @@ export async function compilePresenceContext(input: PresenceContextInput) {
 async function resolveFrame(
   input: PresenceContextInput,
   recalled: PresenceMaterial[],
-): Promise<{ id: string; rendered: string }> {
+): Promise<{ id: string; rendered: string; version: number }> {
   if (input.priorFrameId) {
-    return { id: input.priorFrameId, rendered: input.priorFrameRendered ?? "" };
+    return { id: input.priorFrameId, rendered: input.priorFrameRendered ?? "", version: 1 };
   }
   const opened = await openPresence(
     input.binding,
@@ -133,6 +128,7 @@ async function resolveFrame(
   return {
     id: requiredResultId(opened.frameId, "open", "frame"),
     rendered: String(opened.rendered ?? ""),
+    version: Number(opened.version ?? 1),
   };
 }
 
@@ -168,7 +164,7 @@ function presenceDirectives(
       triggerScope: ["text"],
     },
     {
-      id: "presence:nonempty-response",
+      id: PRESENCE_NONEMPTY_GUARD_ID,
       kind: "guard",
       severity: "hard",
       instruction: "The response must contain text.",
@@ -186,13 +182,26 @@ function presenceDirectives(
   ];
 }
 
-function contractDirectiveIds(contract: Record<string, any>): string[] {
-  return (Array.isArray(contract.guards) ? contract.guards : [])
-    .filter((directive: any) =>
-      directive?.id === "presence:nonempty-response"
-      && directive?.severity === "hard"
-    )
-    .map((directive: any) => directive.id);
+export const PRESENCE_NONEMPTY_GUARD_ID = "presence:nonempty-response";
+
+// enough: acceptance has to answer for every hard directive the Host issued,
+// across mustEnact, mustAvoid, and guards. Reading back only the guard group
+// left a hard enact or avoid rule unevaluated while the settlement still said
+// Accept, which is a receipt that means nothing.
+function hardDirectiveIds(contract: Record<string, any>): string[] {
+  const groups = ["mustEnact", "mustAvoid", "guards"];
+  const ids = groups
+    .flatMap((group) => (Array.isArray(contract[group]) ? contract[group] : []))
+    .filter((directive: any) => directive?.severity === "hard" && directive?.id)
+    .map((directive: any) => String(directive.id));
+  return [...new Set(ids)];
+}
+
+function nonemptyGuardId(contract: Record<string, any>): string | null {
+  const guard = (Array.isArray(contract.guards) ? contract.guards : []).find((directive: any) =>
+    directive?.id === PRESENCE_NONEMPTY_GUARD_ID && directive?.severity === "hard"
+  );
+  return guard ? String(guard.id) : null;
 }
 
 function requiredResultId(value: unknown, operation: string, kind: string): string {

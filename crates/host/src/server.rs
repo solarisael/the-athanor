@@ -2,11 +2,11 @@ use crate::config::HostConfig;
 use crate::insula::InsulaHost;
 use crate::panel::PanelHost;
 use crate::policy::{RecallPolicySession, apply_requested_mode};
-use crate::presence::PresenceRuntime;
+use crate::presence::{PresenceRuntime, host_capabilities};
 use crate::receipt::{ReceiptIngest, ReceiptTracker};
 use crate::store::{
-    DurableReceipt, HostDurableStore, ProjectionCursor, RoomStateStore, body_hash, state_hash,
-    timestamp,
+    DurableReceipt, HostDurableStore, ProjectionCursor, RoomIdentity, RoomStateStore, body_hash,
+    state_hash, timestamp,
 };
 use crate::viewport::{ViewportSession, apply_viewport};
 use akasha::insula_writer::{
@@ -37,9 +37,9 @@ use hearth::routing::{
     load_spellbook,
 };
 use hearth::triggers::{process_lesson_plan, process_lesson_reminder};
-use presence::{
-    PresenceCloseRequest, PresenceOpenRequest, PresenceResult, PresenceSettleRequest,
-    PresenceTurnRequest,
+use summoning::presence::{
+    PresenceAuthentication, PresenceBinding, PresenceCloseRequest, PresenceOpenRequest,
+    PresenceResult, PresenceSettleRequest, PresenceTurnRequest,
 };
 use protocol::{
     AKASHA_COMMAND_FAILED, AKASHA_LESSON_RESULT, AKASHA_PROJECTION_ID, AKASHA_RECALL_RESULT,
@@ -760,16 +760,14 @@ async fn open_presence_frame(
     meta: CommandMeta,
     request: PresenceOpenRequest,
 ) -> Responses {
-    if request.binding.room != meta.sender_room
-        || request.binding.spirit != meta.sender_spirit
-        || request.binding.session != meta.sender_session
-    {
-        return presence_refusal(state, &meta, "Presence binding does not match the command").await;
-    }
+    let authentication = match authenticate_presence(state, &meta) {
+        Ok(authentication) => authentication,
+        Err(reason) => return presence_refusal(state, &meta, &reason).await,
+    };
     let mut runtime = state.runtime.lock().await;
     let result = runtime
         .presence
-        .open(&meta.sender_session, &meta.idempotency_key, request)
+        .open(&authentication, &meta.idempotency_key, request)
         .map(PresenceResult::Open);
     presence_response(
         state,
@@ -780,6 +778,45 @@ async fn open_presence_frame(
     )
 }
 
+/// Derive who is present from the authenticated command and the room's own
+/// state, and project the capabilities the Host can actually stand behind.
+///
+/// enough: the open request still carries a binding, but it is a claim. The
+/// session comes from the authenticated envelope, the spirit and operator come
+/// from room state, and a sender whose spirit disagrees with the room is
+/// refused here rather than opening a frame under a name the House does not
+/// recognise. Capabilities are never read from the wire.
+fn authenticate_presence(
+    state: &AppState,
+    meta: &CommandMeta,
+) -> Result<PresenceAuthentication, String> {
+    let identity: RoomIdentity = state.room_store.identity()?;
+    if identity.room != meta.sender_room {
+        return Err(format!(
+            "Presence sender room {} is not this room",
+            meta.sender_room
+        ));
+    }
+    if identity.spirit != meta.sender_spirit {
+        return Err(format!(
+            "Presence sender spirit {} is not the embodied spirit {}",
+            meta.sender_spirit, identity.spirit
+        ));
+    }
+    Ok(PresenceAuthentication {
+        binding: PresenceBinding {
+            room: identity.room,
+            spirit: identity.spirit,
+            operator: identity.operator,
+            session: meta.sender_session.clone(),
+        },
+        capabilities: host_capabilities(
+            state.config.akasha_enabled && state.config.database_url.is_some(),
+            state.config.nats_url.is_some(),
+        ),
+    })
+}
+
 async fn compile_presence_turn(
     state: &AppState,
     meta: CommandMeta,
@@ -788,7 +825,7 @@ async fn compile_presence_turn(
     let mut runtime = state.runtime.lock().await;
     let result = runtime
         .presence
-        .compile(&meta.sender_session, request)
+        .compile(&meta.sender_session, &meta.idempotency_key, request)
         .map(PresenceResult::Compile);
     presence_response(
         state,
@@ -807,7 +844,7 @@ async fn settle_presence_turn(
     let mut runtime = state.runtime.lock().await;
     let result = runtime
         .presence
-        .settle(&meta.sender_session, request)
+        .settle(&meta.sender_session, &meta.idempotency_key, request)
         .map(PresenceResult::Settle);
     presence_response(
         state,
@@ -826,7 +863,7 @@ async fn close_presence_frame(
     let mut runtime = state.runtime.lock().await;
     let result = runtime
         .presence
-        .close(&meta.sender_session, request)
+        .close(&meta.sender_session, &meta.idempotency_key, request)
         .map(PresenceResult::Close);
     presence_response(
         state,

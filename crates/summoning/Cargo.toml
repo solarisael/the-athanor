@@ -1,11 +1,12 @@
 [package]
-name = "protocol"
+name = "summoning"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 hearth = { path = "../hearth" }
-summoning = { path = "../summoning" }
-serde.workspace = true
-serde_json.workspace = true
+
+[lib]
+name = "summoning"
+path = "src/lib.rs"

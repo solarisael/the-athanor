@@ -5,9 +5,10 @@ use crate::config::{AppError, Config};
 use crate::remember::{prepare_memory_write, write_memory_tx};
 use crate::settings::RoomSettings;
 use chrono::Utc;
-use hearth::{
+use hearth::RoomKey;
+use summoning::{
     PaperBoatBackupStatus, PaperBoatSleepReceipt, PaperBoatSleepRequest, PaperBoatWakeReceipt,
-    PaperBoatWakeRequest, RoomKey,
+    PaperBoatWakeRequest,
 };
 use origami::boats;
 use origami::boats::error::BoatError;

@@ -22,6 +22,7 @@ the exact implementation record.
 
 ### Changed
 
+- Summoning now owns the Anamnesis and Paper Boat domain vocabulary.
 - The authenticated Host read surface now carries the House data needed by
   operator panels: room-bound Docket board and evidence, Hallway inbox,
   newest-first memory and lesson timelines, full memory reads, and bounded

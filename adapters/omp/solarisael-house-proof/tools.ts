@@ -12,7 +12,8 @@ import {
   writeActiveSpiritSnapshot,
 } from "./room.ts";
 import { RecallPolicyHostClient } from "./recall-policy.ts";
-import { embodiedSession, hostHouseId, hostSessionIdentity } from "./host.ts";
+import { hostHouseId, hostSessionIdentity } from "./host.ts";
+import { topLevelSession } from "./top-level-session-fence.ts";
 import { applyRecallViewport } from "./context.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./anamnesis.ts";
@@ -73,28 +74,22 @@ function docketWriteBinding(ctx: any) {
   return { binding, capability: roomCapability(effectiveRoomDir) };
 }
 
-// Worker-rejecting fence at the organ door (guild-hall #144, settled NOT_MET
-// against M1 criterion 4 before this cut existed). A docket write must come
-// from the room's embodied session; a worker spawned by the task tool carries
-// its own session identity and refuses here, typed, before any capability or
-// substrate work. Worker output enters receipts through the spirit's hand.
+// Docket accepts writes only from the authenticated top-level OMP session.
 function refuseWorkerHands(gate: string) {
   return refuseDocket(
     "worker_hands_off",
     gate,
-    "docket writes require the room's embodied session; worker evidence enters through the spirit's hand",
+    "docket writes require the top-level session; worker evidence enters through the spirit's hand",
   );
 }
 
 export function workerAtTheDoor(
-    _ctx: any,
-    binding: { room: string; session: string },
+  _ctx: any,
+  binding: { room: string; session: string },
 ): boolean {
-  const embodied = embodiedSession(binding.room);
-  // No registered embodiment means no session_start has run in this process;
-  // fail closed. A fence that opens when unsure is not a fence.
-  if (!embodied) return true;
-  return binding.session !== embodied;
+  const holder = topLevelSession(binding.room);
+  if (!holder) return true;
+  return binding.session !== holder;
 }
 
 function refuseDocket(code: string, gate: string, error: string) {

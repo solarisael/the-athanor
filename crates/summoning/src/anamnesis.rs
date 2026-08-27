@@ -1,5 +1,4 @@
-use crate::error::DomainError;
-use crate::room::RoomKey;
+use hearth::{DomainError, RoomKey};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AnamnesisReadMode {

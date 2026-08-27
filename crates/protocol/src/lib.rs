@@ -6,11 +6,8 @@ pub use contract::*;
 pub use host::*;
 
 use hearth::{
-    AnamnesisActivation, AnamnesisAddDetails, AnamnesisAddRequest, AnamnesisAppendReceipt,
-    AnamnesisAppendRequest, AnamnesisFidelity, AnamnesisKind, AnamnesisReadMode,
-    AnamnesisReadRequest, AnamnesisReceipt, AnamnesisSeedRep, CanonAttribution, CanonPointer,
-    CanonReadRequest, CanonWriteReceipt, CanonWriteRequest, ClusterExecution,
-    ClusterFreshnessPolicy, ClusterMaintenanceOutcome, ClusterMaintenanceRequest,
+    CanonAttribution, CanonPointer, CanonReadRequest, CanonWriteReceipt, CanonWriteRequest,
+    ClusterExecution, ClusterFreshnessPolicy, ClusterMaintenanceOutcome, ClusterMaintenanceRequest,
     ClusterMaintenanceStatus, ClusterStaleness, ClusterSummary, GigaAuthority, GigaCandidate,
     GigaCandidateKind, GigaClassifierIdentity, GigaCodingLessonPromotionPayload, GigaEvent,
     GigaEventClaimReceipt, GigaEventClaimRequest, GigaEventFinishOutcome, GigaEventFinishReceipt,
@@ -20,10 +17,9 @@ use hearth::{
     GigaPublicationConsent, GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest,
     GigaQueueMaintenanceScope, GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState,
     GigaRisk, GigaScope, GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType,
-    GigaVisibility, PaperBoatRecord, PaperBoatSleepReceipt, PaperBoatSleepRequest,
-    PaperBoatWakeReceipt, PaperBoatWakeRequest, RecallRequest, RememberKind, RememberLessonDetails,
-    RememberMemoryDetails, RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
-    UnboatedMemory, lesson_triggers::LessonTriggerSpec,
+    GigaVisibility, RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails,
+    RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
+    lesson_triggers::LessonTriggerSpec,
 };
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -32,6 +28,13 @@ use serde::{
 };
 use serde_json::{Map, Value};
 use std::fmt;
+use summoning::{
+    AnamnesisActivation, AnamnesisAddDetails, AnamnesisAddRequest, AnamnesisAppendReceipt,
+    AnamnesisAppendRequest, AnamnesisFidelity, AnamnesisKind, AnamnesisReadMode,
+    AnamnesisReadRequest, AnamnesisReceipt, AnamnesisSeedRep, PaperBoatRecord,
+    PaperBoatSleepReceipt, PaperBoatSleepRequest, PaperBoatWakeReceipt, PaperBoatWakeRequest,
+    UnboatedMemory,
+};
 
 pub const PROTOCOL_VERSION: u8 = 1;
 
@@ -4150,10 +4153,7 @@ mod tests {
 
     #[test]
     fn diagnostic_details_round_trip_with_machine_actions() {
-        let target = DiagnosticTarget::new(
-            DiagnosticTargetKind::File,
-            "crates/akasha/src/lib.rs",
-        );
+        let target = DiagnosticTarget::new(DiagnosticTargetKind::File, "crates/akasha/src/lib.rs");
         let details =
             DiagnosticDetails::new(DiagnosticCategory::Database, DiagnosticStage::Transaction)
                 .operation("remember")

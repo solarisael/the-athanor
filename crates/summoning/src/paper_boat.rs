@@ -1,6 +1,4 @@
-use crate::authority::Authority;
-use crate::error::DomainError;
-use crate::room::RoomKey;
+use hearth::{Authority, DomainError, RoomKey};
 
 pub const PAPER_BOAT_MAX_BODY_BYTES: usize = 64 * 1024;
 pub const PAPER_BOAT_MAX_UNBOATED: usize = 64;

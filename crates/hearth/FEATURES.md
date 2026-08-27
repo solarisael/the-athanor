@@ -4,6 +4,8 @@ Domain rules and invariants for the House. This crate holds no input and no outp
 
 Each section names one concern. A section that points at `src/lib.rs` names a concern that still waits for its own module.
 
+Anamnesis and Paper Boat live in `summoning`.
+
 ### authority (src/authority.rs)
 
 - `authorize` gives full authority only when the House runs in full mode and health is healthy.
@@ -64,31 +66,6 @@ Each section names one concern. A section that points at `src/lib.rs` names a co
 - Each list field holds at most 64 unique values.
 - A summary date must use the `YYYY-MM-DD` shape.
 - The receipt reports the new entity identifier, the superseded identifiers, and the attribution.
-
-### anamnesis (src/anamnesis.rs)
-
-- Two read modes exist: wake and consult. A consult needs a query. A wake does not.
-- A read limit must be between 1 and 50.
-- Two kinds exist: pillar and cycle.
-- Two fidelity values exist: record and raw material.
-- Two activation points exist: wake and fork.
-- A pillar refuses a seed repetition.
-- A cycle needs a seed repetition, unless the caller allows an empty cycle.
-- A title and a ramp must both carry text.
-- A repetition carries a number, an optional date, and three fields: how it went, portal pull, and lighter.
-- Add and append are separate operations. Each has its own receipt.
-- An append refuses a blank source path.
-- Anamnesis writes may reach the commons.
-
-### paper_boat (src/paper_boat.rs)
-
-- A boat body must carry text, and must stay at or below 65536 bytes.
-- The sleep receipt reports the memory identifier, the source path, the outbox event identifier, and an inserted flag.
-- A zero memory identifier refuses.
-- Backup status has three values: not requested, completed, and failed.
-- A wake returns at most one boat record.
-- A boat record must carry a positive identifier and a body with text.
-- A boat record lists at most 64 unboated memories, and says when the list truncates.
 
 ### cluster (src/cluster.rs)
 

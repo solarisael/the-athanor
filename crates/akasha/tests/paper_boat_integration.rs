@@ -1,5 +1,5 @@
 use akasha::{Config, EmbeddingMode, paper_boat_sleep, paper_boat_wake};
-use hearth::{PaperBoatSleepRequest, PaperBoatWakeRequest};
+use summoning::{PaperBoatSleepRequest, PaperBoatWakeRequest};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
 use uuid::Uuid;

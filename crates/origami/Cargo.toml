@@ -19,6 +19,7 @@ hearth = { path = "../hearth" }
 # second copy. protocol depends only on core, so no cycle: the
 # dependency arrow from every implementation crate still points at origami.
 protocol = { path = "../protocol" }
+summoning = { path = "../summoning" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

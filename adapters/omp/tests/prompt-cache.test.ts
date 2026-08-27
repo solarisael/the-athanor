@@ -105,9 +105,6 @@ mock.module("../solarisael-house-proof/recall-telemetry.ts", () => ({
   recordRecallTelemetry: async () => true,
 }));
 
-mock.module("../solarisael-house-proof/triggers.ts", () => ({
-  processLessonsReminder: async () => null,
-}));
 
 mock.module("../solarisael-house-proof/context.ts", () => ({
   analyzeContext: async () => ({
@@ -174,10 +171,11 @@ mock.module("../solarisael-house-proof/recall-policy.ts", () => ({
       return undefined;
     }
   },
+  activeProjectFromEvidence: () => null,
   isMutateTool: () => false,
   markToolEvidence: () => undefined,
+  mutateToolPaths: () => [],
   hasToolEvidence: () => false,
-  workContextEvidence: () => ({ languageKeys: [], technologyKeys: [], families: ["coding"], project: null }),
 }));
 
 const { default: registerAdapter } = await import("../index.ts");

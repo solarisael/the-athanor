@@ -125,6 +125,10 @@ the exact implementation record.
 
 ### Changed
 
+- The OMP adapter no longer injects lesson packets, process reminders, or asynchronous Athanor corrections. Use explicit retrieval for ordinary lessons.
+- Lessons tagged `ttsr-approved` now register as versioned rules in OMP’s native `TtsrManager`. OMP owns matching, interruption, retry, and reminders.
+- Trigger authoring fields remain in `remember` and `update_lesson`. Untagged trigger rows stay dormant.
+
 - `update_lesson` now accepts the routing eligibility fields for writing and
   design lessons: both kinds take `alwaysOn`, and writing lessons additionally
   take `languageKeys`/`technologyKeys` (design already accepted keys). The

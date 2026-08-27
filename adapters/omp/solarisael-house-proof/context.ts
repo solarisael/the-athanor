@@ -27,7 +27,6 @@ export type ContextAnalysis = {
   route: QueryRoute;
   keywordDirectives: Array<{ keyword: string; directive: string }>;
   keywordReminder: { keywords: string[]; text: string } | null;
-  processTrigger: string | null;
   nudge: { band: number; pct: number; tokens: number; text: string } | null;
   roomReminder: string;
   routingReminder: string | null;

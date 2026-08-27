@@ -59,34 +59,20 @@ import {
   readQuestBoard,
 } from "./solarisael-house-proof/substrate.ts";
 import { receiveAutomaticWake } from "./solarisael-house-proof/wake-context/index.ts";
-import { conversationText, messageText } from "./solarisael-house-proof/text.ts";
+import { messageText } from "./solarisael-house-proof/text.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./solarisael-house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./solarisael-house-proof/tools.ts";
-import { processLessonsReminder } from "./solarisael-house-proof/triggers.ts";
+import { installLessonTtsrBridge, syncLessonTtsr } from "./solarisael-house-proof/lesson-ttsr.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./solarisael-house-proof/context.ts";
 import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./solarisael-house-proof/constants.ts";
 import { showHouseContextFeedback } from "./solarisael-house-proof/feedback.ts";
 import {
-  closeLessonTriggerTransports,
-  extractToolSurfaces,
-  filterInterruptedLessonProse,
-  lessonTriggerMessageRenderer,
-  lessonTriggerProseAddition,
-  lessonTriggerProseStreamUpdate,
-  lessonTriggerToolCall,
-  prependLessonReminder,
-  processLessonsMessageRenderer,
-  resetLessonTriggerProseStream,
-  takeLessonReminder,
-  toolLessonCard,
-} from "./solarisael-house-proof/lesson-triggers.ts";
-import { collectLessonPacket, lessonPacketMessageRenderer } from "./solarisael-house-proof/lesson-packet.ts";
-import {
+  activeProjectFromEvidence,
   RecallPolicyHostClient,
   hasToolEvidence,
   isMutateTool,
   markToolEvidence,
-  workContextEvidence,
+  mutateToolPaths,
   type PersistedRecallPolicy,
   type RecallPolicyDecision,
 } from "./solarisael-house-proof/recall-policy.ts";
@@ -556,9 +542,7 @@ function automaticContextDiagnostic({
       ? sourceExecution.retry
       : sourceRetryable === true ? "safe_now" : "after_change",
   };
-  const target = operation === "automatic_process_lessons"
-    ? "solarisael-house-proof/triggers.ts:processLessonsReminder"
-    : "solarisael-house-proof/recall.ts:recallWithRouting";
+  const target = "solarisael-house-proof/recall.ts:recallWithRouting";
 
   return {
     ...inherited,
@@ -601,9 +585,7 @@ async function recordAutomaticContextTelemetry(
 // report loadedRelease as derived state instead of re-resolving the pointer.
 export default function solarisaelHouseProof(pi, release) {
   pi.setLabel("The Athanor");
-  pi.registerMessageRenderer?.("solarisael-lesson-trigger", lessonTriggerMessageRenderer);
-  pi.registerMessageRenderer?.("solarisael-process-lessons", processLessonsMessageRenderer);
-  pi.registerMessageRenderer?.("solarisael-lesson-packet", lessonPacketMessageRenderer);
+  const lessonTtsrInstallWarning = installLessonTtsrBridge(pi);
   pi.registerCommand?.("insula", {
     description: "Show the Host's Insula Vitals for the last 15m, 1h, or 24h",
     handler: (args, ctx) => showInsulaCockpit(args, ctx),
@@ -825,37 +807,18 @@ export default function solarisaelHouseProof(pi, release) {
     cacheKittenTaskRoom(room, event.toolCallId, event.input, binding);
   });
 
-  // Mutate-tool lesson triggers. Extraction, transport, verdict and card
-  // composition, and fail-open live in lesson-triggers.ts; this tap forwards
-  // the verdict and drops a visible receipt when a block fires.
   pi.on("tool_call", async (event, ctx) => {
-    // Hands on files are evidence for the Recall Policy no matter what the
-    // lesson lane decides below, and the mark never blocks the tool path.
-    if (isMutateTool(event?.toolName)) {
-      try {
-        const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-        const surfaces = extractToolSurfaces(String(event?.toolName ?? ""), event?.input);
-        markToolEvidence({ room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) }, {
-          paths: surfaces.flatMap((surface) => (surface.path ? [surface.path] : [])),
-          cwd: String(ctx?.cwd ?? ""),
-        });
-      } catch {
-        // An unreadable room costs the hint, never the tool call.
-      }
+    if (!isMutateTool(event?.toolName)) return;
+    try {
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      markToolEvidence({ room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) }, {
+        paths: mutateToolPaths(event.toolName, event.input),
+        cwd: String(ctx?.cwd ?? ""),
+      });
+    } catch {
+      // An unreadable room costs the work hint, never the tool call.
     }
-    const verdict = await lessonTriggerToolCall(event, ctx);
-    if (!verdict) return undefined;
-    const card = toolLessonCard(verdict.lessons, String(event?.toolName ?? "tool"), "block");
-    if (card) {
-      try {
-        pi.sendMessage(card.message, card.options);
-      } catch {
-        // A lost card never blocks the verdict.
-      }
-    }
-    return { block: verdict.block, reason: verdict.reason };
   });
-  pi.on("message_start", (event, ctx) => resetLessonTriggerProseStream(event, ctx, pi));
   pi.on("message_start", async (event, ctx) => {
     if (event?.message?.customType !== "solarisael-hallway-knock") return;
     const knockId = String(event?.message?.details?.knockId ?? "").trim();
@@ -866,12 +829,6 @@ export default function solarisaelHouseProof(pi, release) {
       spirit,
       session: hostSessionIdentity(ctx, effectiveRoomDir),
     }, knockId);
-  });
-  pi.on("message_update", (event, ctx) => {
-    // OMP publishes message_update to the UI before extension observers. Keep
-    // this tap detached so streamed deltas coalesce while Rust decides; a block
-    // still aborts the live provider and schedules a corrected continuation.
-    void lessonTriggerProseStreamUpdate(event, ctx, pi);
   });
   // Provider-request preparation. The observation is a bystander: the wrapper
   // below returns this body's own value and rethrows this body's own error, and
@@ -932,8 +889,16 @@ export default function solarisaelHouseProof(pi, release) {
     }
 
     const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
-    messages = filterInterruptedLessonProse(messages, room, hostSession);
     const shellBinding = { room, spirit, session: hostSession };
+    if (lessonTtsrInstallWarning) warnings.push(lessonTtsrInstallWarning);
+    const lessonTtsr = await syncLessonTtsr({
+      ctx,
+      roomDir: effectiveRoomDir,
+      room,
+      activeProject: activeProjectFromEvidence(shellBinding),
+    });
+    for (const warning of lessonTtsr.warnings) warnings.push(warning);
+    if (lessonTtsr.active > 0) activities.push(`${lessonTtsr.active} native lesson guard${lessonTtsr.active === 1 ? "" : "s"}`);
     let conversation: ConversationCapture | null = null;
     try {
       conversation = await logConversationWindow(
@@ -1157,65 +1122,6 @@ export default function solarisaelHouseProof(pi, release) {
       // The Bell is fail-open: a silent Bell must never block a turn.
     }
 
-    if (!existingTypes.has("solarisael-process-lessons")) {
-      try {
-        const processLessons = await processLessonsReminder(
-          shellBinding,
-          contextAnalysis?.processTrigger,
-          effectiveRoomDir,
-          room,
-        );
-        if (processLessons) {
-          additions.push({
-            role: "custom",
-            customType: "solarisael-process-lessons",
-            content: processLessons.text,
-            display: true,
-            details: { trigger: processLessons.trigger, lessons: processLessons.lessons },
-            attribution: "agent",
-            timestamp,
-          });
-          const lessonCount = Number(processLessons.lessons) || 1;
-          activities.push(`${lessonCount} process lesson${lessonCount === 1 ? "" : "s"}`);
-        }
-      } catch (error) {
-        await recordAutomaticContextTelemetry({
-          effectiveRoomDir,
-          sessionId: hostSession,
-          room,
-          prompt,
-          route: null,
-          status: "error",
-          error: redactDiagnosticText(error),
-          diagnostic: automaticContextDiagnostic({
-            operation: "automatic_process_lessons",
-            stage: "request_parse",
-            error,
-            requestDispatched: true,
-          }),
-        }).catch(() => undefined);
-        warnings.push("process lesson lookup degraded");
-        // Process-shape lessons are advisory only. Tooling must fail open.
-      }
-    }
-
-    if (!existingTypes.has("solarisael-lesson-trigger")) {
-      const lastAssistant = [...messages].reverse().find((message) => message?.role === "assistant");
-      const proseTriggers = await lessonTriggerProseAddition({
-        room,
-        roomDir: effectiveRoomDir,
-        session: hostSession,
-        text: conversationText(lastAssistant),
-        timestamp,
-        cwd: ctx.cwd,
-      });
-      // Anchored at the current turn with every other addition below; no code
-      // path here touches an earlier turn's anchor.
-      if (proseTriggers) {
-        additions.push(proseTriggers);
-        activities.push("lesson correction queued");
-      }
-    }
 
     if (
       !existingTypes.has("solarisael-recall-context")
@@ -1254,8 +1160,7 @@ export default function solarisaelHouseProof(pi, release) {
           );
         }
         queryRoute = contextAnalysis.route;
-        const workContext = workContextEvidence({ room, spirit, session: hostSession });
-        const activeProject = workContext.project;
+        const activeProject = activeProjectFromEvidence({ room, spirit, session: hostSession });
         const evaluation = await policyClient.evaluate({
           queryRoute,
           conversationTokens: conversationTokenEstimate(messages),
@@ -1267,46 +1172,6 @@ export default function solarisaelHouseProof(pi, release) {
         });
         decision = evaluation.decision;
         policyState = evaluation.snapshot.recallPolicy;
-
-        const resolvedMode = decision?.resolvedMode ?? policyState?.resolvedMode;
-        if (resolvedMode === "work" && !existingTypes.has("solarisael-lesson-packet")) {
-          const packet = await collectLessonPacket(effectiveRoomDir, room, workContext);
-          for (const warning of packet.warnings) warnings.push(warning);
-          if (packet.lessons.length) {
-            const detected = [
-              `families: ${workContext.families.join("+")}`,
-              ...(workContext.languageKeys.length ? [`languages: ${workContext.languageKeys.join(", ")}`] : []),
-              ...(workContext.technologyKeys.length ? [`technologies: ${workContext.technologyKeys.join(", ")}`] : []),
-            ].join("; ");
-            additions.push({
-              role: "custom",
-              customType: "solarisael-lesson-packet",
-              content: [
-                "<system-reminder>",
-                `Work-mode lesson packet (${detected}) — always-on and evidence-keyed lessons; this packet supersedes earlier copies.`,
-                ...packet.lessons.flatMap((lesson) => [
-                  "",
-                  `${lesson.family}#${lesson.id} — ${lesson.title}`,
-                  lesson.body,
-                  ...(lesson.proofPattern ? [`proof: ${lesson.proofPattern}`] : []),
-                ]),
-                "</system-reminder>",
-              ].join("\n"),
-              display: true,
-              details: {
-                lessons: packet.lessons.map(({ family, id, title }) => ({ family, id, title })),
-                count: packet.lessons.length,
-                families: workContext.families,
-                languageKeys: workContext.languageKeys,
-                technologyKeys: workContext.technologyKeys,
-              },
-              attribution: "agent",
-              timestamp,
-            });
-          } else {
-            warnings.push("work-mode lesson packet unavailable");
-          }
-        }
 
         if (decision.shouldRecall && decision.refreshReason) {
           const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, {
@@ -1524,20 +1389,6 @@ export default function solarisaelHouseProof(pi, release) {
     }
   });
 
-  pi.on("tool_result", async (event) => {
-    // Consumed unconditionally so a failed tool never leaks its stash entry.
-    const stashed = takeLessonReminder(event?.toolCallId);
-    if (!stashed || event?.isError) return;
-    const card = toolLessonCard(stashed.lessons, String(event?.toolName ?? "tool"), "remind");
-    if (card) {
-      try {
-        pi.sendMessage(card.message, card.options);
-      } catch {
-        // A lost card never blocks the reminder.
-      }
-    }
-    return { content: prependLessonReminder(event.content, stashed.reminder) };
-  });
 
   pi.on("shutdown", async () => {
     closeRustRecallTransports();
@@ -1545,7 +1396,6 @@ export default function solarisaelHouseProof(pi, release) {
     closePaperBoatTransports();
     closeRustAnamnesisTransports();
     await closeGigaTransports();
-    closeLessonTriggerTransports();
     // Close every still-open observation before the bounded writer flush, so a
     // request settles with its usage point and an unfinished tool becomes an
     // explicit cancellation instead of a dangling start.

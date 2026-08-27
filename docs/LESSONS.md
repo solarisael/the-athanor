@@ -31,7 +31,7 @@ Write coding lessons through `remember` with `kind: "coding-lesson"`.
 | `scope` | `shared` or one room key; omitted scope defaults to `shared` |
 | `project` | Optional project label or provenance; it does not make a coding lesson project-exclusive |
 | `proofPattern` | Observable evidence that the rule was followed |
-| `triggerContext` | The operation, uncertainty, or decision boundary that should surface the lesson |
+| `triggerContext` | The operation, uncertainty, or decision boundary used to retrieve the lesson |
 | `voice` | Optional originating craft voice; not model selection |
 | `tags` | A few specific technologies, operations, or failure modes |
 
@@ -73,7 +73,7 @@ A coding lesson with `project` set remains a coding lesson. The project label im
 
 ## Writing, design, and audio lessons
 
-Writing lessons preserve a specific prose decision and when it should fire. Avoid vague instructions such as “write better.” Name the register, sentence behavior, humor mechanism, or prohibited shape.
+Writing lessons preserve a specific prose decision and its retrieval context. Avoid vague instructions such as “write better.” Name the register, sentence behavior, humor mechanism, or prohibited shape.
 
 Design lessons preserve reusable design-system taste: why a token, component, contract, or guideline is shaped the way it is, and when the rule should govern new work. Bind each one to a named design system. The catalogue itself is read through the `design_doc` organ and written through `design_doc_write`; a design lesson refers to those entries rather than replacing them.
 
@@ -85,7 +85,7 @@ The Athanor can absorb `SKILL.md` files, agent rules, postmortems, snippets, gov
 
 For each source rule, determine:
 
-1. when it should fire;
+1. when it applies and should be retrieved;
 2. what the agent should do or avoid;
 3. what evidence proves compliance;
 4. whether it is transferable, room-specific, or project-bound;
@@ -93,7 +93,7 @@ For each source rule, determine:
 
 A good import prompt is:
 
-> Read these skill and governance files. Extract only rules that still apply to the current tools and environment. Split compound instructions into independently retrievable lessons, preserve important boundaries, reject obsolete or contradictory advice, and show the proposed lessons, projects, scopes, triggers, proof patterns, and sources before storing them.
+> Read these skill and governance files. Extract only rules that still apply to the current tools and environment. Split compound instructions into independently retrievable lessons, preserve important boundaries, reject obsolete or contradictory advice, and show the proposed lessons, projects, scopes, retrieval contexts, proof patterns, and sources before storing them.
 
 Import in bounded batches. Deduplicate by meaning, preserve source provenance, and test representative retrieval before continuing. A smaller set of atomic lessons retrieves better than copied documents with overlapping language.
 
@@ -108,15 +108,15 @@ Generic workspace import profiles can map:
 
 The original source remains available for exact evidence unless the operator performs a verified authority cutover.
 
-## Automatic coding preflight
+## Retrieve and enforce lessons
 
-The OMP hygiene extension observes successful path-bearing exploration tools such as `read`, `grep`, `glob`, and `lsp`.
+Use the `lessons` organ when durable guidance matters to the current decision. Apply the smallest useful filter for the task.
 
-The first repository path establishes the active project independently of OMP's working directory. The adapter retrieves a small cached packet of shared or room coding lessons and exact-project lessons. Repeated tools in the same project reuse the packet; moving to another repository refreshes it.
+Trigger fields are reviewed TTSR authoring data. A lesson enters native OMP enforcement only when its tags include `ttsr-approved`.
 
-A direct mutation can establish the same preflight from its target path. An unavailable substrate fails open and does not block work.
+The Athanor adapter loads approved rules into the active native `TtsrManager`. OMP owns matching, interruption, reminder injection, and retry.
 
-Lesson retrieval is a task boundary, not an every-turn ritual. Refresh when the project or operation changes.
+Use OMP `/omfg <complaint>` to author a new guard from an observed offense. Review positive and ordinary negative examples before approval.
 
 ## Updating lessons
 
@@ -128,9 +128,11 @@ The request envelope is `{ kind, id, expectedTitle, patch }`. The guard requires
 - the exact current title in `expectedTitle`;
 - at least one explicit replacement field inside `patch`.
 
-Omitted patch fields remain unchanged, and the row ID remains stable. For coding, writing, and design lessons, `alwaysOn` changes eligibility without replacing the row. Coding and project lessons accept `project`; use `clearProject: true` instead to write SQL `NULL`. `project` and `clearProject` are mutually exclusive, and lesson kinds without a project field refuse `clearProject`.
+Omitted patch fields remain unchanged. The row ID remains stable. `alwaysOn` changes stored eligibility metadata; it does not inject the lesson into OMP.
 
-Update a lesson when its rule remains the same identity but wording, trigger, or typed metadata changes. Coding lessons also accept voice, scope, proof pattern, language and technology keys, and negation fields; project lessons accept proof-pattern and eligibility-key fields; writing lessons accept voice, registers, example text, writers, negation, and eligibility-key fields; design lessons accept voice, registers, proof pattern, example text, and eligibility-key fields. Cross-store fields are refused rather than silently discarded.
+Coding and project lessons accept `project`. Use `clearProject: true` to write SQL `NULL`. The fields are mutually exclusive.
+
+Update a lesson when its rule keeps the same identity but its wording or typed metadata changes. Cross-store fields are refused.
 
 ## Deleting lessons
 

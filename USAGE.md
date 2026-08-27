@@ -95,7 +95,9 @@ Examples:
 
 > Keep this as a writing lesson for my voice.
 
-Read [`docs/LESSONS.md`](./docs/LESSONS.md) for fields, scopes, proof patterns, workspace imports, automatic coding preflight, guarded updates, and deletion. The `lessons` organ queries the typed registry; `design_doc` and `design_doc_write` read and write the design-system catalogue that design lessons refer to.
+Read [`docs/LESSONS.md`](./docs/LESSONS.md) for fields, scopes, proof patterns, imports, updates, and deletion. Use the `lessons` organ for typed retrieval.
+
+Use OMP `/omfg <complaint>` when a specific assistant behavior repeats. Add `ttsr-approved` only after positive and negative review.
 
 ## Sleep with a paper boat
 
@@ -172,7 +174,6 @@ Depending on mode and adapter, House handles:
 - conversation logging;
 - bounded relevant-context injection;
 - paper-boat recovery near session start;
-- project-aware coding lesson preflight;
 - native attributed Vault retrieval when AKASHA is not configured;
 
 Use explicit recall for load-bearing old decisions, names, promises, corrections, or important memories.

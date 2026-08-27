@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
   HostUnavailable,
   hostCommand,
@@ -92,72 +92,19 @@ function snapshot(event: SnapshotEvent): RecallPolicyHostSnapshot {
   };
 }
 
-// --- hands-on-files evidence -------------------------------------------------
-// A session that has edited or written is working, whatever the prompt sounds
-// like. This module remembers the fact plus the touched files' vocabulary; the
-// fact rides to the Host on the next evaluate, the vocabulary keys the
-// work-mode lesson packet. Resolution itself stays the Host's judgment.
+// A mutate tool marks work mode and records only enough path state to name the
+// active repository. Lesson selection no longer rides this evidence.
 //
-// enough: evidence holds for the session's lifetime; a decay window is the door if work mode overstays casual evenings.
+// enough: evidence holds for the session's lifetime; add decay if work mode overstays casual use.
 
 const TOOL_EVIDENCE_SESSION_LIMIT = 256;
-const EVIDENCE_EXTENSION_LIMIT = 32;
 const EVIDENCE_DIR_LIMIT = 8;
 const MUTATE_TOOLS = new Set(["edit", "write"]);
+const EDIT_SECTION_HEADER = /^\[([^#\r\n]+)#[0-9A-F]{4}\]$/;
+const INTERNAL_URI = /^[a-z][a-z0-9+.-]*:\/\//i;
 
-type SessionWorkEvidence = { extensions: Set<string>; dirs: Set<string> };
+type SessionWorkEvidence = { dirs: Set<string> };
 const toolEvidenceSessions = new Map<string, SessionWorkEvidence>();
-
-// The lesson registry keys rows by lowercase language/technology slugs; this
-// table is the one translation from touched files into that vocabulary, so a
-// new slug in the registry needs a row here before evidence can summon it.
-const EXTENSION_VOCABULARY: Record<string, { language?: string; technology?: string; family?: "design" | "writing" }> = {
-  rs: { language: "rust" },
-  ts: { language: "typescript" },
-  tsx: { language: "typescript" },
-  mts: { language: "typescript" },
-  cts: { language: "typescript" },
-  js: { language: "javascript" },
-  jsx: { language: "javascript" },
-  mjs: { language: "javascript" },
-  cjs: { language: "javascript" },
-  py: { language: "python" },
-  ps1: { language: "powershell" },
-  psm1: { language: "powershell" },
-  psd1: { language: "powershell" },
-  sh: { language: "shell" },
-  bash: { language: "shell" },
-  sql: { technology: "postgresql" },
-  css: { language: "css", family: "design" },
-  scss: { language: "css", family: "design" },
-  sass: { language: "css", family: "design" },
-  less: { language: "css", family: "design" },
-  html: { language: "html", family: "design" },
-  htm: { language: "html", family: "design" },
-  svelte: { language: "svelte", family: "design" },
-  vue: { language: "vue", family: "design" },
-  md: { language: "markdown", family: "writing" },
-  mdx: { language: "markdown", family: "writing" },
-  go: { language: "go" },
-  rb: { language: "ruby" },
-  java: { language: "java" },
-  c: { language: "c" },
-  h: { language: "c" },
-  cc: { language: "cpp" },
-  cpp: { language: "cpp" },
-  hpp: { language: "cpp" },
-  cs: { language: "csharp" },
-  lua: { language: "lua" },
-  zig: { language: "zig" },
-};
-
-export type WorkContext = {
-  languageKeys: string[];
-  technologyKeys: string[];
-  /** Lesson families the evidence summons; "coding" always rides in work mode. */
-  families: string[];
-  project: string | null;
-};
 
 export type ToolTouch = { paths?: string[]; cwd?: string };
 
@@ -172,13 +119,29 @@ export function isMutateTool(toolName: unknown): boolean {
   return MUTATE_TOOLS.has(String(toolName ?? "").trim());
 }
 
+export function mutateToolPaths(toolName: unknown, input: unknown): string[] {
+  const name = String(toolName ?? "").trim();
+  const args = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  if (name === "write") {
+    const filePath = String(args.path ?? "").trim();
+    if (!filePath || (INTERNAL_URI.test(filePath) && !/^[A-Za-z]:[\\/]/.test(filePath))) return [];
+    return [filePath];
+  }
+  if (name !== "edit" || typeof args.input !== "string") return [];
+  const paths: string[] = [];
+  for (const line of args.input.split(/\r?\n/)) {
+    const match = EDIT_SECTION_HEADER.exec(line.trim());
+    if (match && !paths.includes(match[1])) paths.push(match[1]);
+  }
+  return paths;
+}
+
 export function markToolEvidence(binding: HostBinding, touch?: ToolTouch): void {
   const key = evidenceKey(binding);
   if (!key) return;
-  // Re-marking refreshes recency, so the session actually working is the last
-  // one this bound stash forgets.
-  const evidence = toolEvidenceSessions.get(key)
-    ?? { extensions: new Set<string>(), dirs: new Set<string>() };
+  const evidence = toolEvidenceSessions.get(key) ?? { dirs: new Set<string>() };
   toolEvidenceSessions.delete(key);
   toolEvidenceSessions.set(key, evidence);
   if (toolEvidenceSessions.size > TOOL_EVIDENCE_SESSION_LIMIT) {
@@ -189,12 +152,6 @@ export function markToolEvidence(binding: HostBinding, touch?: ToolTouch): void 
   for (const raw of touch?.paths ?? []) {
     const filePath = String(raw ?? "").trim();
     if (!filePath) continue;
-    const extension = extname(filePath).replace(/^\./, "").toLowerCase();
-    if (extension && EXTENSION_VOCABULARY[extension] && evidence.extensions.size < EVIDENCE_EXTENSION_LIMIT) {
-      evidence.extensions.add(extension);
-    }
-    // A relative path without a cwd hint has no honest directory; skip it
-    // rather than guess from this adapter process's own cwd.
     if ((isAbsolute(filePath) || cwd) && evidence.dirs.size < EVIDENCE_DIR_LIMIT) {
       evidence.dirs.add(dirname(resolve(cwd || ".", filePath)));
     }
@@ -228,32 +185,15 @@ function repoName(startDir: string): string | null {
   return name;
 }
 
-/** What this session's hands are actually touching, in lesson vocabulary. */
-export function workContextEvidence(binding: HostBinding): WorkContext {
-  const context: WorkContext = { languageKeys: [], technologyKeys: [], families: ["coding"], project: null };
+export function activeProjectFromEvidence(binding: HostBinding): string | null {
   const key = evidenceKey(binding);
   const evidence = key ? toolEvidenceSessions.get(key) : undefined;
-  if (!evidence) return context;
-  const languages = new Set<string>();
-  const technologies = new Set<string>();
-  const families = new Set<string>();
-  for (const extension of evidence.extensions) {
-    const entry = EXTENSION_VOCABULARY[extension];
-    if (!entry) continue;
-    if (entry.language) languages.add(entry.language);
-    if (entry.technology) technologies.add(entry.technology);
-    if (entry.family) families.add(entry.family);
-  }
-  context.languageKeys = [...languages].sort();
-  context.technologyKeys = [...technologies].sort();
-  for (const family of ["design", "writing"]) {
-    if (families.has(family)) context.families.push(family);
-  }
+  if (!evidence) return null;
   for (const dir of [...evidence.dirs].reverse()) {
-    context.project = repoName(dir);
-    if (context.project) break;
+    const project = repoName(dir);
+    if (project) return project;
   }
-  return context;
+  return null;
 }
 
 export class RecallPolicyHostClient {

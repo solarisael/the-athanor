@@ -317,13 +317,14 @@ stable harness + room contract
         ├── fresh-session paper boat
         ├── fresh-session Anamnesis wake counsel
         ├── routing-mode and exact keyword directives
-        ├── Striatum lessons or deterministic process lessons
         ├── automatic Vault / AKASHA recall evidence
         └── context-growth nudge
         │
         ▼
 hidden attributed context for the active model turn
 ```
+
+Approved trigger-bearing lessons enter OMP’s native TTSR manager. Other typed lessons enter only through explicit `lessons` queries.
 
 Each organ has its own eligibility check, output cap, source attribution, and
 fail-open behavior. Fresh-session surfaces are injected once. Automatic recall

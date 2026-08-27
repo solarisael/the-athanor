@@ -727,14 +727,14 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 | `athanor-install` (10) | `lib`, `main`, `layout`, `manifest`, `boundaries`, `installer`, `native_runtime`, `omp`, `service`, `supervisor` | Installed layout, release validation, transactional update/rollback, runtime planning, Windows service, OMP integration |
 | `athanor-godot` (11) | `lib`, `host_link`, `host_session`, `protocol`, `shell`, `recall_policy`, `routing`, `familiar_status`, `dispatch`, `health`, `paper_boat_receipt` | Thin native client transport, exact Host wire contract, projections, shell routes, and Paper Boat receipt state |
 
-### OMP adapter modules: 27
+### OMP adapter modules: 26
 
 | Area | Modules | Boundary |
 |---|---|---|
 | Adapter entry and loading | `index.ts`, `athanor-root.ts`, `installed-loader.ts`, `discovery.ts` | OMP registration, installed-source resolution, room discovery, lifecycle hooks |
 | Transport and capture | `rust-transport.ts`, `giga.ts`, `kitten-lineage.ts` | Long-lived substrate child, transcript/source-ledger ingestion, task lifecycle bridge |
 | Standalone guard | `hygiene.ts` | Repository/packaging hygiene check; not a session runtime import |
-| House proof runtime | `tools.ts`, `host.ts`, `context.ts`, `recall-policy.ts`, `recall.ts`, `substrate.ts`, `room.ts`, `conversation-log.ts`, `lesson-triggers.ts`, `lesson-context.ts`, `triggers.ts`, `routing.ts`, `lineage.ts`, `entity-resolution.ts`, `anamnesis.ts`, `recall-telemetry.ts`, `feedback.ts`, `text.ts`, `constants.ts` | Tool registration, Host clients, context assembly, retrieval routing, room files, lessons, lineage, entity handling, telemetry, and shared text/constants |
+| House proof runtime | `tools.ts`, `host.ts`, `context.ts`, `recall-policy.ts`, `recall.ts`, `substrate.ts`, `room.ts`, `conversation-log.ts`, `lesson-context.ts`, `lesson-ttsr.ts`, `routing.ts`, `lineage.ts`, `entity-resolution.ts`, `anamnesis.ts`, `recall-telemetry.ts`, `feedback.ts`, `text.ts`, `constants.ts` | Tool registration, Host clients, context assembly, retrieval routing, room files, native lesson guards, lineage, entity handling, telemetry, and shared text/constants |
 ### Authored Godot GDScript
 
 | Area | Modules | Boundary |

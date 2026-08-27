@@ -489,11 +489,11 @@ Policy decides whether stronger evidence, a changed baseline, or repeated
 recurrence returns it to review. A Curio remains a deliberate separate state;
 recurrence alone cannot promote either a dismissal or a Curio.
 
-### 6.6 Selective becoming and executable lesson triggers
+### 6.6 Selective becoming and native behavior guards
 
-Continuity is governed selection, not maximum retention. The runtime preserves
-provenance while allowing authority and active influence to change. Review
-surfaces and receipts distinguish:
+Continuity uses governed selection, not maximum retention. The runtime preserves provenance while authority and active influence change.
+
+Review surfaces and receipts distinguish:
 
 - **never mine** — considered but refused as part of the lineage;
 - **once true** — formerly authoritative, now historical;
@@ -501,42 +501,15 @@ surfaces and receipts distinguish:
 - **not now** — dormant outside the current task or lifecycle state;
 - **superseded** — replaced by a named newer authority.
 
-Striatum derives an inspectable state vector from trusted room, project,
-language, technology, work-kind, task-shape, phase, register, and lifecycle
-facts. Eligibility is a hard boundary before ranking. It does not fill a quota:
-an empty active set below the calibrated confidence floor is correct.
+Striatum derives an inspectable state vector from trusted context. Eligibility is a hard boundary before ranking. An empty eligible set is valid.
 
-An eligible lesson can declare one of four intervention modes:
+Athanor lessons remain typed authorities in PostgreSQL. Their trigger fields are dormant until review adds the `ttsr-approved` tag.
 
-```text
-advisory
-deferred_reminder
-interrupt_and_retry
-proof_gated
-```
+The adapter captures the active native OMP `TtsrManager` through a guarded compatibility seam. It registers versioned approved lessons as native rules.
 
-Task-shaped lessons may also carry a versioned executable trigger contract.
-Cheap deterministic gates run first over event type, tool, path, glob, and AST
-shape. A semantic trigger uses a bounded local model only after state has
-reduced the set, and receives one lesson contract plus exact current evidence.
-It returns a structured match or silence, exact evidence references,
-confidence, and proposed intervention. The model cannot grant authority,
-install a trigger, or choose a harder intervention than the reviewed lesson
-permits.
+OMP owns stream matching, interruption, retry, and reminders. The adapter filters superseded Athanor rule versions before they can match.
 
-The trigger lifecycle follows the proven TTSR anatomy where the harness
-supports it: scoped stream observation, optional interruption, removal of an
-invalid partial continuation, hidden rule injection, clean retry, repeat
-suppression, and persisted firing history. Matching is not limited to regex;
-path, tool, AST, semantic, boundary-test, and later formal adapters share one
-receipt contract.
-
-Every firing records the lesson and specification version, active state,
-matched condition, source/tool/path, evidence references, intervention,
-dismissal or override, recurrence, expected evidence, observed evidence,
-outcome, and reviewed false-positive or false-negative status. These receipts
-are the maturation path from human guidance to Cingulate obligations and
-selected Lean proofs.
+The seam checks every required OMP method. It fails open with a visible warning when an OMP update changes the compatible surface.
 
 Resident local-model prompts are worker contracts. The reference House writes
 them in the A Squall quest register: bracketed system frame, precise role and

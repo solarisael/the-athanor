@@ -312,11 +312,8 @@ describe("OMP adapter registration", () => {
       "tool_call",
       "tool_call",
       "message_start",
-      "message_start",
-      "message_update",
       "context",
       "session_compact",
-      "tool_result",
       "tool_result",
       "shutdown",
       "agent_end",
@@ -330,13 +327,7 @@ describe("OMP adapter registration", () => {
     ]);
     expect(hooks.every((hook) => typeof hook.handler === "function")).toBe(true);
     expect(eventChannels).toEqual(["task:subagent:progress", "task:subagent:lifecycle"]);
-    expect(messageRenderers).toHaveLength(3);
-    expect(messageRenderers.map((entry) => entry.customType)).toEqual([
-      "solarisael-lesson-trigger",
-      "solarisael-process-lessons",
-      "solarisael-lesson-packet",
-    ]);
-    expect(messageRenderers.every((entry) => typeof entry.renderer === "function")).toBe(true);
+    expect(messageRenderers).toEqual([]);
   });
 
   test("observes the tool lifecycle without answering for the tools it watches", async () => {

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import {
+  activeProjectFromEvidence,
   RecallPolicyHostClient,
   RecallPolicyHostUnavailable,
   hasToolEvidence,
   isMutateTool,
-  workContextEvidence,
 } from "../solarisael-house-proof/recall-policy.ts";
 import { hostCommand, hostSessionIdentity } from "../solarisael-house-proof/host.ts";
 import { roomContext } from "../solarisael-house-proof/room.ts";
@@ -298,41 +298,32 @@ describe("hands-on-files evidence", () => {
   }
 
   // Kills: the mark dropped at the tool tap, or marked and then never carried
-  // on the evaluate wire — either break leaves auto mode resolving from prompt
-  // vocabulary while the operator is elbow-deep in files. The lesson lane is
-  // switched off here on purpose: evidence is independent of its verdict.
-  // red-proof: delete the markToolEvidence call in the index.ts tool_call tap,
-  // or drop the `tool_evidence` spread from the evaluate facts.
+  // on the evaluate wire. Either break leaves auto mode blind to active work.
+  // red-proof: delete markToolEvidence from the tool_call tap, or drop
+  // tool_evidence from the evaluate facts.
   test("an edit tool_call marks the session and the next evaluate carries the flag", async () => {
-    const killSwitch = process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
-    process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = "1";
-    try {
-      const binding = bindingFor("evidence-marked-session");
-      expect(hasToolEvidence(binding)).toBe(false);
-      await runToolCall(
-        {
-          toolName: "edit",
-          toolCallId: "evidence-call-1",
-          input: { input: "[src/a.ts#1A2B]\nPUT 1.=1:\n+const a = 1;\n" },
-        },
-        { cwd: process.cwd(), sessionID: binding.session },
-      );
-      expect(hasToolEvidence(binding)).toBe(true);
+    const binding = bindingFor("evidence-marked-session");
+    expect(hasToolEvidence(binding)).toBe(false);
+    await runToolCall(
+      {
+        toolName: "edit",
+        toolCallId: "evidence-call-1",
+        input: { input: "[src/a.ts#1A2B]\nPUT 1.=1:\n+const a = 1;\n" },
+      },
+      { cwd: process.cwd(), sessionID: binding.session },
+    );
+    expect(hasToolEvidence(binding)).toBe(true);
 
-      const commands = installFakeHost();
-      await new RecallPolicyHostClient(binding).evaluate({
-        queryRoute: casualRoute,
-        workingSetPresent: false,
-        toolEvidence: hasToolEvidence(binding),
-      });
-      expect(commands.at(-1)).toMatchObject({
-        command_or_event_type: "athanor.recall_policy.evaluate",
-        facts: { tool_evidence: true },
-      });
-    } finally {
-      if (killSwitch === undefined) delete process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
-      else process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = killSwitch;
-    }
+    const commands = installFakeHost();
+    await new RecallPolicyHostClient(binding).evaluate({
+      queryRoute: casualRoute,
+      workingSetPresent: false,
+      toolEvidence: hasToolEvidence(binding),
+    });
+    expect(commands.at(-1)).toMatchObject({
+      command_or_event_type: "athanor.recall_policy.evaluate",
+      facts: { tool_evidence: true },
+    });
   });
 
   // Kills: evidence claimed by any tool at all (a read counts), and a clean
@@ -358,79 +349,43 @@ describe("hands-on-files evidence", () => {
     expect(commands.at(-1)!.facts).toMatchObject({ working_set_present: false });
   });
 
-  // Kills: fail-closed regression. OMP treats a throwing tool_call handler as a
-  // BLOCK, so an unreadable room would lock every edit in the session for the
-  // sake of a hint the Host can live without.
+  // Kills: fail-closed regression. An unreadable room must cost the work hint,
+  // never the tool call.
   // red-proof: remove the try/catch around markToolEvidence in index.ts.
   test("an unreadable room costs the hint, never the tool call", async () => {
-    const killSwitch = process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
-    process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = "1";
-    try {
-      const hostile = {
-        get cwd(): string {
-          throw new Error("room directory is unreadable");
-        },
-        sessionID: "evidence-hostile-session",
-      };
-      await runToolCall({ toolName: "write", toolCallId: "evidence-call-2", input: { path: "a.ts", content: "const a = 1;\n" } }, hostile);
-      expect(hasToolEvidence(bindingFor("evidence-hostile-session"))).toBe(false);
-    } finally {
-      if (killSwitch === undefined) delete process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
-      else process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = killSwitch;
-    }
+    const hostile = {
+      get cwd(): string {
+        throw new Error("room directory is unreadable");
+      },
+      sessionID: "evidence-hostile-session",
+    };
+    await runToolCall(
+      { toolName: "write", toolCallId: "evidence-call-2", input: { path: "a.ts", content: "const a = 1;\n" } },
+      hostile,
+    );
+    expect(hasToolEvidence(bindingFor("evidence-hostile-session"))).toBe(false);
   });
 
-  // Kills: the tap dropping surface paths on the floor, or the vocabulary
-  // table losing the css→design summons the lesson packet rides on.
-  // red-proof: remove the `paths` field from the markToolEvidence call in the
-  // index.ts tool_call tap.
-  test("touched css files summon the design family with css keys", async () => {
-    const killSwitch = process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
-    process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = "1";
-    try {
-      const binding = bindingFor("evidence-css-session");
-      await runToolCall(
-        {
-          toolName: "edit",
-          toolCallId: "evidence-css-1",
-          input: { input: "[styles/site.css#1A2B]\nPUT 1.=1:\n+.door { color: red; }\n" },
-        },
-        { cwd: process.cwd(), sessionID: binding.session },
-      );
-      const work = workContextEvidence(binding);
-      expect(work.languageKeys).toContain("css");
-      expect(work.families).toEqual(["coding", "design"]);
-    } finally {
-      if (killSwitch === undefined) delete process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
-      else process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = killSwitch;
-    }
-  });
-
-  // Kills: losing the repo walk that names the active project — the evaluate
-  // wire would fall back to the hardcoded null the Host can never act on.
-  // red-proof: return null unconditionally from repoName.
-  test("an absolute touch inside a repo names the active project", async () => {
-    const killSwitch = process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
-    process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = "1";
+  // Kills: losing the repo walk or the edit-path parser. Either break drops the
+  // active project before the Host can apply project-aware Recall policy.
+  // red-proof: return null from activeProjectFromEvidence.
+  test("an absolute edit inside a repo names the active project", async () => {
     const repo = mkdtempSync(join(tmpdir(), "athanor-evidence-repo-"));
     try {
       mkdirSync(join(repo, ".git"));
       const binding = bindingFor("evidence-project-session");
+      const target = join(repo, "src", "main.rs");
       await runToolCall(
         {
-          toolName: "write",
+          toolName: "edit",
           toolCallId: "evidence-project-1",
-          input: { path: join(repo, "src", "main.rs"), content: "fn main() {}\n" },
+          input: { input: `[${target}#1A2B]\nPUT 1.=1:\n+fn main() {}\n` },
         },
         { cwd: process.cwd(), sessionID: binding.session },
       );
-      const work = workContextEvidence(binding);
-      expect(work.languageKeys).toContain("rust");
-      expect(work.project).toBe(basename(repo).toLowerCase());
+      expect(activeProjectFromEvidence(binding)).toBe(basename(repo).toLowerCase());
     } finally {
       rmSync(repo, { recursive: true, force: true });
-      if (killSwitch === undefined) delete process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS;
-      else process.env.SOLARISAEL_DISABLE_LESSON_TRIGGERS = killSwitch;
     }
   });
 });

@@ -511,6 +511,8 @@ OMP owns stream matching, interruption, retry, and reminders. The adapter filter
 
 The seam checks every required OMP method. It fails open with a visible warning when an OMP update changes the compatible surface.
 
+Native synchronization uses OMP’s once-per-session repeat policy. Athanor keeps second-based cooldown metadata, but the bridge does not emulate it.
+
 Resident local-model prompts are worker contracts. The reference House writes
 them in the A Squall quest register: bracketed system frame, precise role and
 target, voiced objectives, animated responsibilities that encode real

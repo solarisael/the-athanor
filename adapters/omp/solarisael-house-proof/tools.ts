@@ -612,7 +612,7 @@ export function registerSolarisaelTools(pi, release) {
       astCondition: z.array(z.string()).optional().describe("lesson kinds: native OMP TTSR ast-grep patterns."),
       triggerScope: z.array(z.string()).optional().describe("lesson kinds: native OMP scopes (text | tool | tool:<name>)."),
       interruptMode: z.enum(["block", "remind"]).optional().describe("lesson kinds: block interrupts; remind injects without interruption."),
-      repeatCooldownSecs: z.number().optional().describe("lesson kinds: positive seconds between native rule versions; omit for once per session."),
+      repeatCooldownSecs: z.number().optional().describe("lesson kinds: stored cooldown metadata; native bridge currently fires each version once per session."),
     }),
     approval: "write",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -728,7 +728,7 @@ export function registerSolarisaelTools(pi, release) {
         astCondition: z.array(z.string()).optional().describe("Replacement native OMP ast-grep patterns; [] disarms AST matching."),
         triggerScope: z.array(z.string()).optional().describe("Replacement native OMP scopes."),
         interruptMode: z.enum(["block", "remind"]).optional().describe("Replacement native OMP intervention."),
-        repeatCooldownSecs: z.number().optional().describe("Replacement positive cooldown in seconds."),
+        repeatCooldownSecs: z.number().optional().describe("Replacement stored cooldown metadata; native bridge currently fires each version once per session."),
       }).describe("Typed replacement fields for the selected lesson kind."),
     }),
     approval: "write",

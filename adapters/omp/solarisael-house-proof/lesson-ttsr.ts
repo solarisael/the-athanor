@@ -108,9 +108,7 @@ function nativeRule(row: LessonRow, activeProject: string | null): Record<string
 
   const identity = JSON.stringify({ condition, astCondition, scope, project: row.project, languageKeys: row.languageKeys, mode: row.interruptMode, body: row.lesson });
   const digest = createHash("sha256").update(identity).digest("hex").slice(0, 12);
-  const cooldown = Number(row.repeatCooldownSecs);
-  const bucket = Number.isFinite(cooldown) && cooldown > 0 ? `-${Math.floor(Date.now() / (cooldown * 1000))}` : "";
-  const name = `athanor-${row.type}-${row.id}-${digest}${bucket}`;
+  const name = `athanor-${row.type}-${row.id}-${digest}`;
   return {
     name,
     path: `athanor://lessons/${row.type}/${row.id}`,

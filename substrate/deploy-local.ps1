@@ -103,6 +103,53 @@ function Invoke-Checked {
     }
 }
 
+function Import-DeploymentDatabaseEnvironment {
+    param([Parameter(Mandatory)] [string]$SubstrateStateDir)
+
+    $requiredPg = @("PGHOST", "PGPORT", "PGDATABASE", "PGUSER")
+    $hasDatabase = {
+        -not [string]::IsNullOrWhiteSpace(
+            [Environment]::GetEnvironmentVariable("DATABASE_URL", "Process")
+        ) -or -not ($requiredPg | Where-Object {
+            [string]::IsNullOrWhiteSpace(
+                [Environment]::GetEnvironmentVariable($_, "Process")
+            )
+        })
+    }
+    if (& $hasDatabase) {
+        return
+    }
+
+    $dotenv = Join-Path $SubstrateStateDir ".env"
+    if (-not (Test-Path $dotenv -PathType Leaf)) {
+        throw "database configuration is absent and the substrate environment file is missing at $dotenv"
+    }
+    $allowed = @("DATABASE_URL", "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD")
+    foreach ($line in Get-Content $dotenv) {
+        if ($line -notmatch '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$') {
+            continue
+        }
+        $name = $Matches[1]
+        if ($name -notin $allowed -or -not [string]::IsNullOrWhiteSpace(
+            [Environment]::GetEnvironmentVariable($name, "Process")
+        )) {
+            continue
+        }
+        $value = $Matches[2].Trim()
+        if ($value.Length -ge 2 -and (
+            ($value.StartsWith('"') -and $value.EndsWith('"')) -or
+            ($value.StartsWith("'") -and $value.EndsWith("'"))
+        )) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        [Environment]::SetEnvironmentVariable($name, $value, "Process")
+    }
+    if (-not (& $hasDatabase)) {
+        throw "database configuration in $dotenv does not provide DATABASE_URL or complete PG* variables"
+    }
+}
+
+
 
 function Get-LiveWorkers {
     param([Parameter(Mandatory)] [string]$ExecutablePath)
@@ -244,6 +291,8 @@ foreach ($provisioner in @($sourceKeeperProvision, $sourceRestartProvision)) {
         throw "keeper provisioner is missing: $provisioner"
     }
 }
+
+Import-DeploymentDatabaseEnvironment -SubstrateStateDir $substrateStateDir
 
 if (-not $SkipBackup) {
     $priorPgWsl = $env:SOLARISAEL_PG_WSL

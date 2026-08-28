@@ -18,7 +18,7 @@ use std::str::FromStr;
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -109,7 +109,7 @@ fn timeline_params(value: serde_json::Value) -> MemoryTimelineParams {
 // red-proof: drop any one WHERE arm (archived, superseded, paper-boat, room
 // filter, cursor) or flip the ORDER BY and an assertion below goes red.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; tables are session-temporary"]
 async fn memory_timeline_scrolls_active_rows_newest_first_with_keyset() -> TestResult {
     let pool = temp_timeline_pool().await?;
     let base = Utc::now() - Duration::hours(10);
@@ -251,7 +251,7 @@ async fn memory_timeline_scrolls_active_rows_newest_first_with_keyset() -> TestR
 // red-proof: return the excerpt instead of the body, hide superseded_by, or
 // invent a row for an unknown id and this proof goes red.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; tables are session-temporary"]
 async fn memory_read_returns_history_with_authority_visible() -> TestResult {
     let pool = temp_timeline_pool().await?;
     let base = Utc::now() - Duration::hours(2);
@@ -311,7 +311,7 @@ async fn memory_read_returns_history_with_authority_visible() -> TestResult {
 // red-proof: order by created_at (lessons do not honestly carry one), drop
 // the lesson_key filter, or accept an unknown family and this goes red.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; tables are session-temporary"]
 async fn lesson_timeline_orders_by_updated_at_with_family_filter() -> TestResult {
     let pool = temp_timeline_pool().await?;
     let base = Utc::now() - Duration::hours(5);

@@ -377,7 +377,7 @@ pub fn runtime_plan(
     let common = BTreeMap::from([
         ("DATABASE_URL".into(), database_url.into()),
         (
-            "SOLARISAEL_NATS_URL".into(),
+            "ATHANOR_NATS_URL".into(),
             format!("nats://{LOOPBACK_HOST}:{}", config.nats_port),
         ),
     ]);

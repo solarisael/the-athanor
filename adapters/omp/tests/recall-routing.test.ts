@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { RustJsonlTransport, RustTransportError } from "../rust-transport.ts";
-import { closeRustRecallTransports, recallWithRouting } from "../solarisael-house-proof/recall.ts";
+import { closeRustRecallTransports, recallWithRouting } from "../house-proof/recall.ts";
 
 const originalRust = process.env.ATHANOR_SUBSTRATE_EXE;
 const originalSubstrateRoot = process.env.ATHANOR_SUBSTRATE_ROOT;

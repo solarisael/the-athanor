@@ -92,9 +92,9 @@ pub struct Config {
     pub house_tz: String,
 }
 
-const DOTENV_PATH_OVERRIDE: &str = "SOLARISAEL_SUBSTRATE_DOTENV_PATH";
+const DOTENV_PATH_OVERRIDE: &str = "ATHANOR_SUBSTRATE_DOTENV_PATH";
 const DATABASE_ENV_KEYS: &[&str] = &[
-    "SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL",
+    "ATHANOR_SUBSTRATE_TEST_DATABASE_URL",
     "DATABASE_URL",
     "PGHOST",
     "PGPORT",
@@ -103,18 +103,18 @@ const DATABASE_ENV_KEYS: &[&str] = &[
     "PGDATABASE",
 ];
 const EMBEDDING_ENV_KEYS: &[&str] = &[
-    "SOLARISAEL_EMBED_URL",
-    "SOLARISAEL_EMBED_MODEL",
-    "SOLARISAEL_EMBED_DIMENSION",
-    "SOLARISAEL_DISABLE_EMBEDDING",
-    "SOLARISAEL_TEST_DISABLE_EMBEDDING",
+    "ATHANOR_EMBED_URL",
+    "ATHANOR_EMBED_MODEL",
+    "ATHANOR_EMBED_DIMENSION",
+    "ATHANOR_DISABLE_EMBEDDING",
+    "ATHANOR_TEST_DISABLE_EMBEDDING",
     "EMBEDDING_MODEL_TIMEOUT",
 ];
 const GIGA_ENV_KEYS: &[&str] = &["GIGA_MODEL_TIMEOUT", "GIGA_KEEP_ALIVE", "GIGA_NUM_CTX"];
-const HOUSE_ENV_KEYS: &[&str] = &["SOLARISAEL_HOUSE_TZ"];
+const HOUSE_ENV_KEYS: &[&str] = &["ATHANOR_HOUSE_TZ"];
 const GIGA_SOURCE_ENV_KEYS: &[&str] = &[
-    "SOLARISAEL_GIGA_SOURCE_LEDGER_DIR",
-    "SOLARISAEL_GIGA_SOURCE_ROOM",
+    "ATHANOR_GIGA_SOURCE_LEDGER_DIR",
+    "ATHANOR_GIGA_SOURCE_ROOM",
 ];
 
 struct Dotenv {
@@ -381,7 +381,7 @@ fn embedding_owner(operation: &str) -> (&'static str, &'static str) {
 fn config_reason(message: &str) -> &'static str {
     if message.contains("DATABASE_URL") || message.contains("PG*") {
         "database_environment_missing_or_incomplete"
-    } else if message.contains("SOLARISAEL_EMBED_DIMENSION") {
+    } else if message.contains("ATHANOR_EMBED_DIMENSION") {
         "embedding_dimension_not_an_integer"
     } else if message.contains("cluster embedding dimension") {
         "cluster_embedding_schema_incompatible"
@@ -511,7 +511,7 @@ impl AppError {
                     "embedding_dimension_not_an_integer" | "embedding_dimension_incompatible" => {
                         DiagnosticTarget::new(
                             DiagnosticTargetKind::RequestField,
-                            "SOLARISAEL_EMBED_DIMENSION",
+                            "ATHANOR_EMBED_DIMENSION",
                         )
                     }
                     _ => DiagnosticTarget::new(DiagnosticTargetKind::File, dotenv.display_path()),
@@ -527,17 +527,17 @@ impl AppError {
                         "database_environment_missing_or_incomplete" => json!({
                             "database_configuration": {
                                 "accepted_sources": [
-                                    "SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL",
+                                    "ATHANOR_SUBSTRATE_TEST_DATABASE_URL",
                                     "DATABASE_URL",
                                     "complete PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE",
                                 ],
                             },
                         }),
                         "embedding_dimension_not_an_integer" => {
-                            json!({"SOLARISAEL_EMBED_DIMENSION": "integer"})
+                            json!({"ATHANOR_EMBED_DIMENSION": "integer"})
                         }
                         "embedding_dimension_incompatible" => {
-                            json!({"SOLARISAEL_EMBED_DIMENSION": "2048"})
+                            json!({"ATHANOR_EMBED_DIMENSION": "2048"})
                         }
                         "embedding_column_missing"
                         | "embedding_schema_incompatible"
@@ -692,7 +692,7 @@ impl AppError {
                 .evidence(
                     DiagnosticEvidence::new("embedding_failure")
                         .summary("Embedding service failure was redacted before serialization")
-                        .data(json!({"endpoint_configuration": "SOLARISAEL_EMBED_URL"})),
+                        .data(json!({"endpoint_configuration": "ATHANOR_EMBED_URL"})),
                 )
                 .target(DiagnosticTarget::new(
                     DiagnosticTargetKind::Service,
@@ -700,7 +700,7 @@ impl AppError {
                 ))
                 .target(DiagnosticTarget::new(
                     DiagnosticTargetKind::RequestField,
-                    "SOLARISAEL_EMBED_URL",
+                    "ATHANOR_EMBED_URL",
                 ))
                 .next_check(
                     DiagnosticNextCheck::new("check_embedding_service")
@@ -810,7 +810,7 @@ impl AppError {
             Self::Config(message) if message.contains("embedding dimension") => {
                 "configuration error: embedding dimension is incompatible"
             }
-            Self::Config(message) if message.contains("SOLARISAEL_EMBED_DIMENSION") => {
+            Self::Config(message) if message.contains("ATHANOR_EMBED_DIMENSION") => {
                 "configuration error: embedding dimension is invalid"
             }
             Self::Config(_) => "configuration error",
@@ -834,7 +834,7 @@ impl Config {
     }
 
     fn from_dotenv(dotenv: Dotenv) -> Result<Self, AppError> {
-        let database_url = env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+        let database_url = env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
             .ok()
             .or_else(|| configured_value("DATABASE_URL", &dotenv))
             .or_else(|| {
@@ -858,14 +858,14 @@ impl Config {
                 AppError::Config("DATABASE_URL or complete PG* variables required".into())
             })?;
         let embed_url = Some(
-            configured_value("SOLARISAEL_EMBED_URL", &dotenv)
+            configured_value("ATHANOR_EMBED_URL", &dotenv)
                 .unwrap_or_else(|| DEFAULT_EMBED_URL.into()),
         );
-        let embed_dimension = configured_value("SOLARISAEL_EMBED_DIMENSION", &dotenv)
+        let embed_dimension = configured_value("ATHANOR_EMBED_DIMENSION", &dotenv)
             .unwrap_or_else(|| EMBED_DIMENSION.to_string())
             .parse()
             .map_err(|_| {
-                AppError::Config("SOLARISAEL_EMBED_DIMENSION must be an integer".into())
+                AppError::Config("ATHANOR_EMBED_DIMENSION must be an integer".into())
             })?;
         if embed_dimension != EMBED_DIMENSION {
             return Err(AppError::Config(
@@ -873,9 +873,9 @@ impl Config {
             ));
         }
         let embedding_mode =
-            if configured_value("SOLARISAEL_DISABLE_EMBEDDING", &dotenv).as_deref() == Some("1") {
+            if configured_value("ATHANOR_DISABLE_EMBEDDING", &dotenv).as_deref() == Some("1") {
                 EmbeddingMode::Disabled
-            } else if configured_value("SOLARISAEL_TEST_DISABLE_EMBEDDING", &dotenv).as_deref()
+            } else if configured_value("ATHANOR_TEST_DISABLE_EMBEDDING", &dotenv).as_deref()
                 == Some("1")
             {
                 EmbeddingMode::DisabledForTest
@@ -884,20 +884,20 @@ impl Config {
             };
         Ok(Self {
             database_url,
-            embed_model: configured_value("SOLARISAEL_EMBED_MODEL", &dotenv)
+            embed_model: configured_value("ATHANOR_EMBED_MODEL", &dotenv)
                 .unwrap_or_else(|| DEFAULT_EMBED_MODEL.into()),
             embed_dimension,
             embedding_mode,
             embed_url,
-            giga_source_ledger_dir: configured_value("SOLARISAEL_GIGA_SOURCE_LEDGER_DIR", &dotenv)
+            giga_source_ledger_dir: configured_value("ATHANOR_GIGA_SOURCE_LEDGER_DIR", &dotenv)
                 .map(PathBuf::from)
                 .or_else(|| {
                     env::current_dir()
                         .ok()
                         .map(|room| source_ledger_directory_path(&room))
                 }),
-            giga_source_room: configured_value("SOLARISAEL_GIGA_SOURCE_ROOM", &dotenv),
-            house_tz: configured_value("SOLARISAEL_HOUSE_TZ", &dotenv).unwrap_or_default(),
+            giga_source_room: configured_value("ATHANOR_GIGA_SOURCE_ROOM", &dotenv),
+            house_tz: configured_value("ATHANOR_HOUSE_TZ", &dotenv).unwrap_or_default(),
         })
     }
 

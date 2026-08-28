@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { closePresenceAndSleep } from "../solarisael-house-proof/tools.ts";
+import { closePresenceAndSleep } from "../house-proof/tools.ts";
 
 describe("Presence close", () => {
   test("feeds the sealed body through the existing Paper Boat writer", async () => {

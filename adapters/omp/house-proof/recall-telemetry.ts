@@ -10,11 +10,11 @@ function enabledValue(value: unknown): boolean {
 }
 
 export async function recallTelemetryEnabled(effectiveRoomDir: string): Promise<boolean> {
-  if (process.env.SOLARISAEL_RECALL_TELEMETRY !== undefined) {
-    return enabledValue(process.env.SOLARISAEL_RECALL_TELEMETRY);
+  if (process.env.ATHANOR_RECALL_TELEMETRY !== undefined) {
+    return enabledValue(process.env.ATHANOR_RECALL_TELEMETRY);
   }
   try {
-    const marker = JSON.parse(await readFile(path.join(effectiveRoomDir, ".solarisael-room.json"), "utf8"));
+    const marker = JSON.parse(await readFile(path.join(effectiveRoomDir, ".athanor-room.json"), "utf8"));
     return marker?.recallTelemetry === true;
   } catch {
     return false;

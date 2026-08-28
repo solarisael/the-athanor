@@ -32,7 +32,7 @@ function Get-OmpAdapterComponentRuntimeAllowlist {
       "kitten-lineage.ts", "rust-transport.ts", "package.json", "bunfig.toml",
       "README.md", "LICENSE", "NOTICE"
     )
-    directories = @("solarisael-house-proof", "starter-room")
+    directories = @("house-proof", "starter-room")
   }
 }
 

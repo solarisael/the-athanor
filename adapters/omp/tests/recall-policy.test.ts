@@ -5,9 +5,9 @@ import {
   RecallPolicyHostUnavailable,
   hasToolEvidence,
   isMutateTool,
-} from "../solarisael-house-proof/recall-policy.ts";
-import { hostCommand, hostSessionIdentity } from "../solarisael-house-proof/host.ts";
-import { roomContext } from "../solarisael-house-proof/room.ts";
+} from "../house-proof/recall-policy.ts";
+import { hostCommand, hostSessionIdentity } from "../house-proof/host.ts";
+import { roomContext } from "../house-proof/room.ts";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -15,7 +15,7 @@ import { basename, join } from "node:path";
 // The adapter's own tool registration needs OMP's zod surface, which a test pi
 // does not have. Everything else in the graph stays real: the evidence must
 // travel the product's own tap.
-mock.module("../solarisael-house-proof/tools.ts", () => ({
+mock.module("../house-proof/tools.ts", () => ({
   closeRustRememberTransports: () => undefined,
   registerSolarisaelTools: () => undefined,
   writeRustMemory: async () => undefined,

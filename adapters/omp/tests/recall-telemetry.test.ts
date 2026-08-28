@@ -6,21 +6,21 @@ import {
   recallTelemetryEnabled,
   recallTelemetryPath,
   recordRecallTelemetry,
-} from "../solarisael-house-proof/recall-telemetry.ts";
+} from "../house-proof/recall-telemetry.ts";
 
 const roots: string[] = [];
-const originalEnv = process.env.SOLARISAEL_RECALL_TELEMETRY;
+const originalEnv = process.env.ATHANOR_RECALL_TELEMETRY;
 
 afterEach(async () => {
-  if (originalEnv === undefined) delete process.env.SOLARISAEL_RECALL_TELEMETRY;
-  else process.env.SOLARISAEL_RECALL_TELEMETRY = originalEnv;
+  if (originalEnv === undefined) delete process.env.ATHANOR_RECALL_TELEMETRY;
+  else process.env.ATHANOR_RECALL_TELEMETRY = originalEnv;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 async function room(marker: Record<string, unknown> = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), "solarisael-recall-telemetry-"));
+  const root = await mkdtemp(path.join(tmpdir(), "athanor-recall-telemetry-"));
   roots.push(root);
-  await writeFile(path.join(root, ".solarisael-room.json"), JSON.stringify({ version: 1, room: "test", ...marker }), "utf8");
+  await writeFile(path.join(root, ".athanor-room.json"), JSON.stringify({ version: 1, room: "test", ...marker }), "utf8");
   return root;
 }
 
@@ -34,9 +34,9 @@ describe("recall telemetry", () => {
 
   test("an explicit environment setting overrides the marker", async () => {
     const root = await room({ recallTelemetry: true });
-    process.env.SOLARISAEL_RECALL_TELEMETRY = "0";
+    process.env.ATHANOR_RECALL_TELEMETRY = "0";
     expect(await recallTelemetryEnabled(root)).toBe(false);
-    process.env.SOLARISAEL_RECALL_TELEMETRY = "1";
+    process.env.ATHANOR_RECALL_TELEMETRY = "1";
     expect(await recallTelemetryEnabled(root)).toBe(true);
   });
 

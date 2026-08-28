@@ -1,8 +1,8 @@
 import type { PresenceMaterial } from "./presence.ts";
 
 // enough: the wake letter and the Anamnesis counsel already ride this same
-// session as their own full-body reminders (solarisael-wake-context and
-// solarisael-anamnesis-wake). Re-embedding them verbatim in the Presence
+// session as their own full-body reminders (athanor-wake-context and
+// athanor-anamnesis-wake). Re-embedding them verbatim in the Presence
 // frame doubled 4-6k tokens of context for the whole session, because the
 // opened frame's rendered text is reused every turn. The frame's job here is
 // recognition and authority, so these materials carry a bounded excerpt and
@@ -20,7 +20,7 @@ function wakeExcerpt(text: string, carrier: string): string {
 
 export function paperBoatMaterial(wake: Record<string, any>): PresenceMaterial | null {
   const memoryId = Number(wake.memoryId);
-  const body = wakeExcerpt(String(wake.letter ?? ""), "solarisael-wake-context");
+  const body = wakeExcerpt(String(wake.letter ?? ""), "athanor-wake-context");
   if (!Number.isSafeInteger(memoryId) || memoryId <= 0 || !body) return null;
   return {
     id: `paper-boat:${memoryId}`,
@@ -33,7 +33,7 @@ export function paperBoatMaterial(wake: Record<string, any>): PresenceMaterial |
 
 export function anamnesisMaterial(content: string): PresenceMaterial[] {
   if (!content.trim()) return [];
-  const body = wakeExcerpt(content, "solarisael-anamnesis-wake");
+  const body = wakeExcerpt(content, "athanor-anamnesis-wake");
   return [{
     id: "anamnesis:wake",
     authority: { kind: "anamnesis", source: "anamnesis:wake" },

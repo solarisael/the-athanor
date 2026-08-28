@@ -20,7 +20,7 @@ const INSULA_MIGRATION: &str = include_str!("../../../substrate/migrations/0022_
 const RESTART_MIGRATION: &str = include_str!("../../../substrate/migrations/0026_restart.sql");
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("Host Insula proof requires a dedicated PostgreSQL URL");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -87,7 +87,7 @@ fn write_room_state(root: &Path) {
     let runtime = root.join("room").join(".omp").join("runtime");
     std::fs::create_dir_all(&runtime).expect("create room runtime");
     std::fs::write(
-        runtime.join("solarisael-house-state.json"),
+        runtime.join("athanor-house-state.json"),
         serde_json::to_vec(&json!({
             "version": 1,
             "room": "kintsu",
@@ -430,7 +430,7 @@ async fn health_reports_insula_unavailable_without_degrading_the_existing_host_s
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
 async fn insula_ingest_and_vitals_stamp_only_host_config_identity()
 -> Result<(), Box<dyn std::error::Error>> {
     let database_url = isolated_database_url();
@@ -773,7 +773,7 @@ async fn insula_reads_report_an_unavailable_pool_after_accepting_the_default_lim
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
 async fn insula_trace_and_retention_reads_return_ingested_rows()
 -> Result<(), Box<dyn std::error::Error>> {
     let database_url = isolated_database_url();
@@ -975,7 +975,7 @@ async fn mark_verified(
 // red-proof: drop the requester_room predicate from query_unverified_exit, or
 // pass a caller-supplied room instead of state.binding.room.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated restart schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated restart schema"]
 async fn unverified_exit_route_reports_this_rooms_divergence_over_http()
 -> Result<(), Box<dyn std::error::Error>> {
     let database_url = isolated_database_url();

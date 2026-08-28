@@ -28,7 +28,7 @@ The body begins with:
 # SPIRIT: TRUE NAME
 ```
 
-The true name is free-form display text. The room key is the folder name and belongs in `.solarisael-room.json`; do not force the true name to obey filename rules.
+The true name is free-form display text. The room key is the folder name and belongs in `.athanor-room.json`; do not force the true name to obey filename rules.
 
 ## A useful prose shape
 

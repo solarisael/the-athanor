@@ -109,5 +109,5 @@ export function kittenLineageDiagnostics(): KittenLineageDiagnostics {
 }
 
 export function kittenLineageDisabled(environ: Record<string, string | undefined> = process.env): boolean {
-  return environ.SOLARISAEL_REPLAY_MODE === "1" || environ.ATHANOR_DISABLE_KITTEN_LINEAGE === "1";
+  return environ.ATHANOR_REPLAY_MODE === "1" || environ.ATHANOR_DISABLE_KITTEN_LINEAGE === "1";
 }

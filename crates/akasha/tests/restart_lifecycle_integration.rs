@@ -9,7 +9,7 @@
 //! sibling that does the same.
 //!
 //! Run it against a scratch database only:
-//!   SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL=postgres://.../restart_intent_scratch \
+//!   ATHANOR_SUBSTRATE_TEST_DATABASE_URL=postgres://.../restart_intent_scratch \
 //!     cargo test -p akasha --test restart_lifecycle_integration -- --ignored
 
 use akasha::{
@@ -47,7 +47,7 @@ const VERIFY_SECRET: &str = "room-verify-secret";
 const OTHER_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("the restart proof requires a dedicated PostgreSQL URL");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -293,7 +293,7 @@ async fn arm_and_exit(pool: &PgPool, workspace: &str, key: &str) -> TestResult<S
 // red-proof: drop refuse_on_live_intent from restart_request, or the partial
 // unique index from 0026; answer the exact-id read from the pending query.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated restart schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated restart schema"]
 async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
     let pool = fresh_restart().await?;
 

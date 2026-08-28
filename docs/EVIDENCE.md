@@ -93,7 +93,7 @@ pytest. This baseline includes the corrected bounded-warning compactor contract
 and schema-version-14 release pins.
 
 The ignored PostgreSQL integration suites were not run because no isolated
-`SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL` was configured. The counts above prove
+`ATHANOR_SUBSTRATE_TEST_DATABASE_URL` was configured. The counts above prove
 only the ordinary repository contracts; they do not establish database parity,
 clean installation, retrieval quality, latency, final-answer grounding, or
 end-to-end task improvement.
@@ -174,7 +174,7 @@ a real 0.10.x upgrade/rollback, or signing.
 ### Installed RC3 core-resolution proof — 2026-08-11
 
 The first OMP restart against RC2 exposed one packaging omission:
-`solarisael-house-proof/core.ts` correctly resolved the product core through
+`house-proof/core.ts` correctly resolved the product core through
 `ATHANOR_ROOT`, but the release payload had not staged root `index.ts` or its
 TypeScript dependencies under `src/`.
 

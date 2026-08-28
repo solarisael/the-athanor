@@ -9,8 +9,8 @@ import { ATHANOR_ROOT } from "../athanor-root.ts";
 import { RustJsonlTransport, RustTransportError, RustTransportOutcomeUnknownError } from "../rust-transport.ts";
 
 const DIAGNOSTIC_OWNER = {
-  component: "solarisael-house-omp",
-  path: "solarisael-house-proof/substrate.ts",
+  component: "athanor-omp",
+  path: "house-proof/substrate.ts",
   symbol: "substrateHealth",
 };
 
@@ -313,7 +313,7 @@ export async function substrateHealth(timeoutMs = DIAGNOSTIC_TIMEOUT_MS) {
   const argv = ["health", "--substrate-dir", dir, "--skip-embedding"];
   const stateDotenv = healthDotenvPath();
   if (stateDotenv) argv.push("--env-file", stateDotenv);
-  const fixture = String(process.env.SOLARISAEL_TEST_SUBSTRATE_HEALTH_SCRIPT || "").trim();
+  const fixture = String(process.env.ATHANOR_TEST_SUBSTRATE_HEALTH_SCRIPT || "").trim();
   const command = fixture ? process.execPath : executable;
   const commandArgs = fixture ? [fixture, ...argv] : argv;
   let probe;

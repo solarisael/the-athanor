@@ -503,7 +503,7 @@ let processWriter: InsulaWriter | null = null;
 export function insulaDisabled(
   environ: Record<string, string | undefined> = process.env,
 ): boolean {
-  return environ.ATHANOR_DISABLE_INSULA === "1" || environ.SOLARISAEL_REPLAY_MODE === "1";
+  return environ.ATHANOR_DISABLE_INSULA === "1" || environ.ATHANOR_REPLAY_MODE === "1";
 }
 
 function processInsulaWriter(): InsulaWriter | null {

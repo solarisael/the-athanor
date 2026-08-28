@@ -10,7 +10,7 @@ pub(crate) fn giga_classifier_health(
     last_error_at: Option<String>,
     consecutive_failures: u64,
 ) -> GigaClassifierHealthResult {
-    let raw = env::var("SOLARISAEL_HIPPOCAMPUS_OLLAMA_ENDPOINT")
+    let raw = env::var("ATHANOR_HIPPOCAMPUS_OLLAMA_ENDPOINT")
         .unwrap_or_else(|_| GIGA_DEFAULT_OLLAMA_ENDPOINT.into());
     let endpoint_scope = Url::parse(&raw)
         .ok()

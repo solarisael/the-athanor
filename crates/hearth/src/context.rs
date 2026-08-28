@@ -689,7 +689,7 @@ fn process_trigger(prompt: &str) -> Option<String> {
     const TRIGGERS: &[(&str, &str)] = &[
         (
             "process-lesson-smoke",
-            r"(?i)\bsolarisael-process-lesson-smoke\b",
+            r"(?i)\bathanor-process-lesson-smoke\b",
         ),
         (
             "dev-server",

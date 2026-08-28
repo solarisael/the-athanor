@@ -26,7 +26,7 @@ const BELL_MIGRATION: &str = include_str!("../../../substrate/migrations/0020_ha
 const TOKEN: &str = "test-only-panel-host-token";
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("Host panel proof requires a dedicated PostgreSQL URL");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -57,7 +57,7 @@ fn write_room_state(root: &Path) {
     let runtime = root.join("room").join(".omp").join("runtime");
     std::fs::create_dir_all(&runtime).expect("create room runtime");
     std::fs::write(
-        runtime.join("solarisael-house-state.json"),
+        runtime.join("athanor-house-state.json"),
         serde_json::to_vec(&json!({
             "version": 1,
             "room": "test-room",
@@ -261,7 +261,7 @@ async fn panel_messages_door_refuses_bearerless_get_and_unknown_fields() {
 // red-proof: route the board handler past the bearer layer, or return an
 // empty board instead of 503 when the pool is absent.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn panel_reads_board_inbox_and_evidence_read_only() {
     let url = isolated_database_url();
     let pool = PgPoolOptions::new()
@@ -369,7 +369,7 @@ async fn panel_reads_board_inbox_and_evidence_read_only() {
 // red-proof: point a timeline route at the wrong table, return the excerpt
 // as the body, or invent a memory for an unknown id and this goes red.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL with base migrations applied (memories, lessons); cleans up its own rows"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL with base migrations applied (memories, lessons); cleans up its own rows"]
 async fn panel_reads_memory_and_lesson_timelines_read_only() {
     let url = isolated_database_url();
     let pool = PgPoolOptions::new()
@@ -490,7 +490,7 @@ async fn panel_reads_memory_and_lesson_timelines_read_only() {
 // cursor, Bell acknowledgement) and the read-only counts below go red; invent
 // a page for a hallway that does not exist and the refusal check goes red.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; creates and removes its own hallway"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; creates and removes its own hallway"]
 async fn panel_messages_door_pages_an_empty_hallway_without_touching_cursors() {
     let url = isolated_database_url();
     let pool = PgPoolOptions::new()

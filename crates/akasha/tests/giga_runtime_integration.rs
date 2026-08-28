@@ -62,7 +62,7 @@ fn require(condition: bool, message: impl Into<String>) -> TestResult {
 }
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -1647,7 +1647,7 @@ async fn promotion_contracts(pool: &PgPool, cfg: &Config) -> TestResult {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL database"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL database"]
 async fn queue_and_atomic_promotion_contracts() {
     let url = isolated_database_url();
     let options = PgConnectOptions::from_str(&url).expect("dedicated test URL must be valid");

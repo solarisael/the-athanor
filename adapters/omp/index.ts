@@ -3,7 +3,7 @@ export const ADAPTER_API_VERSION = 1;
 // The Athanor — OMP adapter entrypoint.
 //
 // This file stays where OMP config expects it. The implementation is split into
-// shaped modules under ./solarisael-house-proof/ so this door only wires hooks.
+// shaped modules under ./house-proof/ so this door only wires hooks.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -20,67 +20,67 @@ import {
   normalizeQuestMemories,
   settleQuestLifecycle,
   type QuestMemory,
-} from "./solarisael-house-proof/lineage.ts";
+} from "./house-proof/lineage.ts";
 import {
   hostHouseId,
   hostSessionIdentity,
   type HostBinding,
-} from "./solarisael-house-proof/host.ts";
+} from "./house-proof/host.ts";
 import {
   adoptTopLevelSession,
   registerTopLevelSession,
   retireTopLevelSession,
   topLevelSession,
-} from "./solarisael-house-proof/top-level-session-fence.ts";
+} from "./house-proof/top-level-session-fence.ts";
 import {
   compilePresenceContext,
   responseDigest,
   settlePresence,
   type PresenceMaterial,
-} from "./solarisael-house-proof/presence.ts";
+} from "./house-proof/presence.ts";
 import {
   anamnesisMaterial,
   lessonMaterials,
   paperBoatMaterial,
   recallMaterials,
-} from "./solarisael-house-proof/presence-materials.ts";
+} from "./house-proof/presence-materials.ts";
 
 import {
   logConversationWindow,
   type ConversationCapture,
-} from "./solarisael-house-proof/conversation-log.ts";
+} from "./house-proof/conversation-log.ts";
 import { closeGigaTransports, ingestGigaLoggedTurnsDetached } from "./giga.ts";
-import { closeRustRecallTransports, recallWithRouting } from "./solarisael-house-proof/recall.ts";
-import { closeRustRememberTransports, writeRustMemory } from "./solarisael-house-proof/tools.ts";
-import { closeRustAnamnesisTransports } from "./solarisael-house-proof/anamnesis.ts";
-import { projectHallwayInbox } from "./solarisael-house-proof/hallway.ts";
+import { closeRustRecallTransports, recallWithRouting } from "./house-proof/recall.ts";
+import { closeRustRememberTransports, writeRustMemory } from "./house-proof/tools.ts";
+import { closeRustAnamnesisTransports } from "./house-proof/anamnesis.ts";
+import { projectHallwayInbox } from "./house-proof/hallway.ts";
 import {
   noteHallwayKnockTurnEnd,
   noteHallwayKnockTurnStart,
   startHallwayKnockDoorman,
   stopHallwayKnockDoorman,
-} from "./solarisael-house-proof/knock.ts";
-import { resolveEntities } from "./solarisael-house-proof/entity-resolution.ts";
-import { recordRecallTelemetry } from "./solarisael-house-proof/recall-telemetry.ts";
+} from "./house-proof/knock.ts";
+import { resolveEntities } from "./house-proof/entity-resolution.ts";
+import { recordRecallTelemetry } from "./house-proof/recall-telemetry.ts";
 import {
   applyPromptDirectives,
   roomContext,
   writeActiveSpiritSnapshot,
-} from "./solarisael-house-proof/room.ts";
+} from "./house-proof/room.ts";
 import {
   catchBoat,
   closePaperBoatTransports,
   formatQuestBoardSection,
   readQuestBoard,
-} from "./solarisael-house-proof/substrate.ts";
-import { receiveAutomaticWake } from "./solarisael-house-proof/wake-context/index.ts";
-import { messageText } from "./solarisael-house-proof/text.ts";
-import { queryAnamnesis, formatAnamnesisContext } from "./solarisael-house-proof/anamnesis.ts";
-import { registerSolarisaelTools } from "./solarisael-house-proof/tools.ts";
-import { installLessonTtsrBridge, syncLessonTtsr } from "./solarisael-house-proof/lesson-ttsr.ts";
-import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./solarisael-house-proof/context.ts";
-import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./solarisael-house-proof/constants.ts";
-import { showHouseContextFeedback } from "./solarisael-house-proof/feedback.ts";
+} from "./house-proof/substrate.ts";
+import { receiveAutomaticWake } from "./house-proof/wake-context/index.ts";
+import { messageText } from "./house-proof/text.ts";
+import { queryAnamnesis, formatAnamnesisContext } from "./house-proof/anamnesis.ts";
+import { registerSolarisaelTools } from "./house-proof/tools.ts";
+import { installLessonTtsrBridge, syncLessonTtsr } from "./house-proof/lesson-ttsr.ts";
+import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./house-proof/context.ts";
+import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./house-proof/constants.ts";
+import { showHouseContextFeedback } from "./house-proof/feedback.ts";
 import {
   activeProjectFromEvidence,
   RecallPolicyHostClient,
@@ -90,7 +90,7 @@ import {
   mutateToolPaths,
   type PersistedRecallPolicy,
   type RecallPolicyDecision,
-} from "./solarisael-house-proof/recall-policy.ts";
+} from "./house-proof/recall-policy.ts";
 import {
   closeInsulaWriter,
   endInsulaSpan,
@@ -100,8 +100,8 @@ import {
   startInsulaSpan,
   type InsulaOutcome,
   type InsulaSpan,
-} from "./solarisael-house-proof/insula.ts";
-import { showInsulaCockpit } from "./solarisael-house-proof/vitals.ts";
+} from "./house-proof/insula.ts";
+import { showInsulaCockpit } from "./house-proof/vitals.ts";
 
 const wokenSessions = new Set();
 const modelDefaultsApplied = new Set();
@@ -445,10 +445,10 @@ function anchorTurnAdditions(messages: any[], turnKeys: Map<any, string>, memo: 
 }
 
 const STABLE_CONTEXT_TYPES = new Set([
-  "solarisael-room-context",
-  "solarisael-routing-mode",
-  "solarisael-wake-context",
-  "solarisael-anamnesis-wake",
+  "athanor-room-context",
+  "athanor-routing-mode",
+  "athanor-wake-context",
+  "athanor-anamnesis-wake",
 ]);
 
 function pruneTurnAdditionMemo(memo: Map<string, Array<Record<string, any>>>, visibleKeys: Set<string>): void {
@@ -561,7 +561,7 @@ function automaticContextDiagnostic({
       ? sourceExecution.retry
       : sourceRetryable === true ? "safe_now" : "after_change",
   };
-  const target = "solarisael-house-proof/recall.ts:recallWithRouting";
+  const target = "house-proof/recall.ts:recallWithRouting";
 
   return {
     ...inherited,
@@ -875,7 +875,7 @@ export default function solarisaelHouseProof(pi, release) {
     }
   });
   pi.on("message_start", async (event, ctx) => {
-    if (event?.message?.customType !== "solarisael-hallway-knock") return;
+    if (event?.message?.customType !== "athanor-hallway-knock") return;
     const knockId = String(event?.message?.details?.knockId ?? "").trim();
     if (!knockId) return;
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
@@ -971,7 +971,7 @@ export default function solarisaelHouseProof(pi, release) {
         "context",
         houseState?.operator || operator,
         houseState?.embodiedSpirit || spirit,
-        process.env.SOLARISAEL_REPLAY_MODE !== "1",
+        process.env.ATHANOR_REPLAY_MODE !== "1",
       );
       ingestGigaLoggedTurnsDetached(ctx, conversation.loggedTurns);
     } catch (error) {
@@ -1011,10 +1011,10 @@ export default function solarisaelHouseProof(pi, release) {
       warnings.push("Context Host degraded");
     }
 
-    if (!existingTypes.has("solarisael-room-context") && contextAnalysis?.roomReminder) {
+    if (!existingTypes.has("athanor-room-context") && contextAnalysis?.roomReminder) {
       additions.push({
         role: "custom",
-        customType: "solarisael-room-context",
+        customType: "athanor-room-context",
         content: contextAnalysis.roomReminder,
         display: false,
         attribution: "agent",
@@ -1023,10 +1023,10 @@ export default function solarisaelHouseProof(pi, release) {
       activities.push("room context loaded");
     }
 
-    if (!existingTypes.has("solarisael-routing-mode") && contextAnalysis?.routingReminder) {
+    if (!existingTypes.has("athanor-routing-mode") && contextAnalysis?.routingReminder) {
       additions.push({
         role: "custom",
-        customType: "solarisael-routing-mode",
+        customType: "athanor-routing-mode",
         content: contextAnalysis.routingReminder,
         display: false,
         details: { enabled: true },
@@ -1037,7 +1037,7 @@ export default function solarisaelHouseProof(pi, release) {
     }
     const wakeKey = `${room}:${hostSession}`;
     const freshWake = conversation?.fresh === true && !wokenSessions.has(wakeKey);
-    if (freshWake && !existingTypes.has("solarisael-wake-context")) {
+    if (freshWake && !existingTypes.has("athanor-wake-context")) {
       let letter = "";
       let boatTitle: string | null = null;
       let boatSource: string | null = null;
@@ -1068,7 +1068,7 @@ export default function solarisaelHouseProof(pi, release) {
       if (content) {
         additions.push({
           role: "custom",
-          customType: "solarisael-wake-context",
+          customType: "athanor-wake-context",
           content,
           display: false,
           details: {
@@ -1084,7 +1084,7 @@ export default function solarisaelHouseProof(pi, release) {
         if (board) activities.push("quest board received");
       }
     }
-    if (freshWake && !existingTypes.has("solarisael-anamnesis-wake")) {
+    if (freshWake && !existingTypes.has("athanor-anamnesis-wake")) {
       try {
         const result = await queryAnamnesis(effectiveRoomDir, room, {
           mode: "wake",
@@ -1096,7 +1096,7 @@ export default function solarisaelHouseProof(pi, release) {
             presenceAnamnesis = anamnesisMaterial(content);
             additions.push({
               role: "custom",
-              customType: "solarisael-anamnesis-wake",
+              customType: "athanor-anamnesis-wake",
               content,
               display: false,
               details: { mode: "wake", warnings: result.warnings || [] },
@@ -1113,10 +1113,10 @@ export default function solarisaelHouseProof(pi, release) {
     }
 
     const keyword = contextAnalysis?.keywordReminder;
-    if (keyword && !existingTypes.has("solarisael-keyword-directive")) {
+    if (keyword && !existingTypes.has("athanor-keyword-directive")) {
       additions.push({
         role: "custom",
-        customType: "solarisael-keyword-directive",
+        customType: "athanor-keyword-directive",
         content: keyword.text,
         display: false,
         details: { keywords: keyword.keywords },
@@ -1172,7 +1172,7 @@ export default function solarisaelHouseProof(pi, release) {
         }));
         additions.push({
           role: "custom",
-          customType: "solarisael-hallway-bell",
+          customType: "athanor-hallway-bell",
           content,
           display: false,
           details: { hallways },
@@ -1194,8 +1194,8 @@ export default function solarisaelHouseProof(pi, release) {
 
 
     if (
-      !existingTypes.has("solarisael-recall-context")
-      && process.env.SOLARISAEL_DISABLE_AUTO_RECALL !== "1"
+      !existingTypes.has("athanor-recall-context")
+      && process.env.ATHANOR_DISABLE_AUTO_RECALL !== "1"
       && contextAnalysis?.route
     ) {
       const policyClient = new RecallPolicyHostClient({ room, spirit, session: hostSession });
@@ -1235,8 +1235,8 @@ export default function solarisaelHouseProof(pi, release) {
           queryRoute,
           conversationTokens: conversationTokenEstimate(messages),
           activeProject,
-          workingSetPresent: existingTypes.has("solarisael-recall-context")
-            || memoHasCustomType(turnMemo, "solarisael-recall-context"),
+          workingSetPresent: existingTypes.has("athanor-recall-context")
+            || memoHasCustomType(turnMemo, "athanor-recall-context"),
           toolEvidence: hasToolEvidence({ room, spirit, session: hostSession }),
           idempotencyKey: currentTurnKey ? `${currentTurnKey}:evaluate` : undefined,
         });
@@ -1262,7 +1262,7 @@ export default function solarisaelHouseProof(pi, release) {
             const recallMessage = automaticCompact.found || recallWarnings.length
               ? {
                 role: "custom",
-                customType: "solarisael-recall-context",
+                customType: "athanor-recall-context",
                 content: [
                   "<system-reminder>",
                   `Room-local Athanor Recall working set (${decision.resolvedMode}; ${decision.refreshReason}).`,
@@ -1386,7 +1386,7 @@ export default function solarisaelHouseProof(pi, release) {
       try {
         const binding = { room, spirit, session: hostSession };
         const priorPresence = [...messages].reverse().find((message) =>
-          message?.customType === "solarisael-presence-context"
+          message?.customType === "athanor-presence-context"
           && typeof message?.details?.frameId === "string"
         );
         // The fallback key must not collide when the operator repeats the
@@ -1416,7 +1416,7 @@ export default function solarisaelHouseProof(pi, release) {
         });
         additions.push({
           role: "custom",
-          customType: "solarisael-presence-context",
+          customType: "athanor-presence-context",
           content: compiled.rendered,
           display: false,
           details: {
@@ -1472,7 +1472,7 @@ export default function solarisaelHouseProof(pi, release) {
     const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
     const memoSessionKey = `${room}:${hostSession}`;
     const turnMemo = turnAdditionMemo(memoSessionKey, effectiveRoomDir);
-    removeMemoCustomType(turnMemo, "solarisael-recall-context");
+    removeMemoCustomType(turnMemo, "athanor-recall-context");
     persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);
     const summary = event?.compactionEntry?.summary ?? event?.summary;
     try {
@@ -1547,7 +1547,7 @@ export default function solarisaelHouseProof(pi, release) {
         "agent_end",
         operator,
         spirit,
-        process.env.SOLARISAEL_REPLAY_MODE !== "1",
+        process.env.ATHANOR_REPLAY_MODE !== "1",
       );
       ingestGigaLoggedTurnsDetached(ctx, capture.loggedTurns);
     } catch {

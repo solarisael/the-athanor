@@ -161,7 +161,7 @@ A room is a writable directory with one stable lowercase key. Display names may 
 
 The Vault room contract includes:
 
-- `.solarisael-room.json` for machine-readable room identity;
+- `.athanor-room.json` for machine-readable room identity;
 - `AGENTS.md` as the host context entrypoint;
 - `active_spirit.md` as the active identity and voice contract;
 - `room_summary.md` as compact continuity;
@@ -232,7 +232,7 @@ Vault uses operator-controlled files and the harness adapter. It provides:
 Vault requires no database, vector index, embedding service, or GPU. Vault also
 requires no substrate binary, no PostgreSQL, no WSL, and no Rust runtime. Its
 in-memory index is derived and rebuildable from authoritative files. Recall
-defaults to the room directory; `.solarisael-room.json` may name one or more
+defaults to the room directory; `.athanor-room.json` may name one or more
 operator-controlled `vaultRoots`, additional `vaultIgnore` patterns, and bounded
 `vaultMaxFileBytes` or `vaultMaxFiles` limits. The scanner does not follow
 symlinks, skips common generated and secret-bearing paths, and honors each

@@ -8,7 +8,7 @@ use std::path::Path;
 
 // One chunk is what a room can hand a reader in one breath: large enough that a
 // whole section of prose stays together, small enough that a match points at a
-// place rather than at a file. A room may override both in .solarisael-room.json.
+// place rather than at a file. A room may override both in .athanor-room.json.
 pub(crate) const DEFAULT_CHUNK_CHARS: usize = 6_000;
 // Overlap keeps a sentence that straddles a chunk edge findable from both sides;
 // load_config holds it at or under half a chunk so the walk always advances.

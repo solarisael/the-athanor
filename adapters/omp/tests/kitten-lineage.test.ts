@@ -20,7 +20,7 @@ describe("kitten quest lineage", () => {
 
   test("disables writes during replay or by explicit operator switch", () => {
     expect(kittenLineageDisabled({})).toBe(false);
-    expect(kittenLineageDisabled({ SOLARISAEL_REPLAY_MODE: "1" })).toBe(true);
+    expect(kittenLineageDisabled({ ATHANOR_REPLAY_MODE: "1" })).toBe(true);
     expect(kittenLineageDisabled({ ATHANOR_DISABLE_KITTEN_LINEAGE: "1" })).toBe(true);
   });
 });

@@ -37,7 +37,7 @@ const CANON_AUTHORITY: &str = migration!("0015_canon_authority.sql");
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -52,8 +52,8 @@ fn isolated_database_url() -> String {
 }
 
 async fn isolated_schema() -> TestResult<(String, String, PgPool)> {
-    let schema = std::env::var("SOLARISAEL_SUBSTRATE_TEST_SCHEMA")
-        .expect("canon proof requires SOLARISAEL_SUBSTRATE_TEST_SCHEMA");
+    let schema = std::env::var("ATHANOR_SUBSTRATE_TEST_SCHEMA")
+        .expect("canon proof requires ATHANOR_SUBSTRATE_TEST_SCHEMA");
     assert!(schema.starts_with("solarisael_tuner_test_"));
     assert!(
         schema
@@ -93,7 +93,7 @@ fn write_request(room: &str, name: &str, summary: &str, supersedes: Vec<u64>) ->
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
 async fn canon_write_correction_history_and_active_recall_are_postgres_authoritative() -> TestResult
 {
     let (url, schema, pool) = isolated_schema().await?;

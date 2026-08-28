@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-pub const TRANSCRIPT_DEBUG_LOG: &str = "solarisael-house-transcript-debug.jsonl";
+pub const TRANSCRIPT_DEBUG_LOG: &str = "athanor-transcript-debug.jsonl";
 pub const TRANSCRIPT_LOG_DIRECTORY: &str = "logs";
-pub const TURN_MARKER_PREFIX: &str = "solarisael-turn-key";
+pub const TURN_MARKER_PREFIX: &str = "athanor-turn-key";
 
 pub const GIGA_SOURCE_LEDGER_DIRECTORY: &str = "giga-sources";
 /// One visible harness message, already reduced to text by the adapter that

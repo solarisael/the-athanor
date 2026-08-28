@@ -239,8 +239,8 @@ persistent data.
 ## Legacy pre-install door
 
 The native installer recognizes only the bounded legacy directory names
-`solarisael-house`, `solarisael-house-omp`, and
-`solarisael-house-substrate`. Before first activation it copies a bounded,
+`solarisael-house`, `athanor-omp`, and
+`athanor-substrate`. Before first activation it copies a bounded,
 cache-excluding backup under
 `%ProgramData%\Solarisael\Athanor\backups\legacy-preinstall` and records a
 one-time marker. Legacy code is never used as a runtime fallback. Database

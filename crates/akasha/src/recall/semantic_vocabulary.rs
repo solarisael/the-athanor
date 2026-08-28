@@ -90,7 +90,7 @@ pub async fn refresh_semantic_vocabulary(pool: &PgPool, cfg: &Config) -> Result<
         }
     }
     let url = cfg.embed_url.as_deref().ok_or_else(|| {
-        AppError::Config("semantic vocabulary refresh requires SOLARISAEL_EMBED_URL".into())
+        AppError::Config("semantic vocabulary refresh requires ATHANOR_EMBED_URL".into())
     })?;
     sqlx::query("SELECT substrate_refresh_semantic_vocabulary_sources()")
         .execute(pool)

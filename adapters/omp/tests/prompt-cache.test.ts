@@ -37,7 +37,7 @@ const recallPolicy = {
   updatedAt: "2026-08-14T00:00:00.000Z",
 };
 
-mock.module("../solarisael-house-proof/room.ts", () => ({
+mock.module("../house-proof/room.ts", () => ({
   applyPromptDirectives: async () => ({ state: { operator: "Sol", embodiedSpirit: "Kodo" } }),
   roomContext: () => ({
     room: "kodo",
@@ -48,7 +48,7 @@ mock.module("../solarisael-house-proof/room.ts", () => ({
   writeActiveSpiritSnapshot: async () => undefined,
 }));
 
-mock.module("../solarisael-house-proof/top-level-session-fence.ts", () => ({
+mock.module("../house-proof/top-level-session-fence.ts", () => ({
   adoptTopLevelSession: (_room: string, session: string) => { topLevelSessionId ||= session; },
   registerTopLevelSession: (_room: string, session: string) => { topLevelSessionId = session; },
   retireTopLevelSession: (_room: string, session: string) => {
@@ -57,7 +57,7 @@ mock.module("../solarisael-house-proof/top-level-session-fence.ts", () => ({
   topLevelSession: () => topLevelSessionId || null,
 }));
 
-mock.module("../solarisael-house-proof/conversation-log.ts", () => ({
+mock.module("../house-proof/conversation-log.ts", () => ({
   logConversationWindow: async () => ({ fresh: freshConversation, loggedTurns: [] }),
 }));
 
@@ -66,7 +66,7 @@ mock.module("../giga.ts", () => ({
   ingestGigaLoggedTurnsDetached: () => undefined,
 }));
 
-mock.module("../solarisael-house-proof/recall.ts", () => ({
+mock.module("../house-proof/recall.ts", () => ({
   closeRustRecallTransports: () => undefined,
   recallWithRouting: async (_roomDir: string, _room: string, query: string, options: unknown) => {
     automaticRecallOptions.push(options);
@@ -77,12 +77,12 @@ mock.module("../solarisael-house-proof/recall.ts", () => ({
   },
 }));
 
-mock.module("../solarisael-house-proof/tools.ts", () => ({
+mock.module("../house-proof/tools.ts", () => ({
   closeRustRememberTransports: () => undefined,
   registerSolarisaelTools: () => undefined,
   writeRustMemory: async () => undefined,
 }));
-mock.module("../solarisael-house-proof/presence.ts", () => ({
+mock.module("../house-proof/presence.ts", () => ({
   compilePresenceContext: async (request: any) => {
     presenceOpens.push(request);
     presenceCompiles.push(request);
@@ -99,11 +99,11 @@ mock.module("../solarisael-house-proof/presence.ts", () => ({
   settlePresence: async () => ({ contractId: "contract-1" }),
   responseDigest: () => "d".repeat(64),
 }));
-mock.module("../solarisael-house-proof/hallway.ts", () => ({
+mock.module("../house-proof/hallway.ts", () => ({
   projectHallwayInbox: async () => hallwayProjection,
 }));
 
-mock.module("../solarisael-house-proof/anamnesis.ts", () => ({
+mock.module("../house-proof/anamnesis.ts", () => ({
   closeRustAnamnesisTransports: () => undefined,
   formatAnamnesisContext: () => "",
   queryAnamnesis: async (_roomDir: string, _room: string, options: unknown) => {
@@ -112,7 +112,7 @@ mock.module("../solarisael-house-proof/anamnesis.ts", () => ({
   },
 }));
 
-mock.module("../solarisael-house-proof/substrate.ts", () => ({
+mock.module("../house-proof/substrate.ts", () => ({
   catchBoat: async (_room: string, options: unknown) => {
     automaticWakeOptions.push(options);
     return { ok: true, found: false };
@@ -123,19 +123,19 @@ mock.module("../solarisael-house-proof/substrate.ts", () => ({
   formatQuestBoardSection: () => "",
 }));
 
-mock.module("../solarisael-house-proof/entity-resolution.ts", () => ({
+mock.module("../house-proof/entity-resolution.ts", () => ({
   resolveEntities: async (input: unknown) => {
     automaticEntityInputs.push(input);
     return { ok: true, matches: [] };
   },
 }));
 
-mock.module("../solarisael-house-proof/recall-telemetry.ts", () => ({
+mock.module("../house-proof/recall-telemetry.ts", () => ({
   recordRecallTelemetry: async () => true,
 }));
 
 
-mock.module("../solarisael-house-proof/context.ts", () => ({
+mock.module("../house-proof/context.ts", () => ({
   analyzeContext: async () => ({
     route: {
       entityResolutionSuggested,
@@ -157,7 +157,7 @@ mock.module("../solarisael-house-proof/context.ts", () => ({
   }),
 }));
 
-mock.module("../solarisael-house-proof/recall-policy.ts", () => ({
+mock.module("../house-proof/recall-policy.ts", () => ({
   RecallPolicyHostClient: class {
     session: string;
 
@@ -252,7 +252,7 @@ function context(sessionID: string) {
 }
 
 function recallBlocks(messages: Array<Record<string, any>>) {
-  return messages.filter((message) => message.customType === "solarisael-recall-context");
+  return messages.filter((message) => message.customType === "athanor-recall-context");
 }
 
 beforeEach(async () => {
@@ -334,7 +334,7 @@ describe("OMP prompt-cache history", () => {
     }, context("presence-session"));
     if (!result) throw new Error("Presence context returned no additions");
     const presence = result.messages.find((message) =>
-      message.customType === "solarisael-presence-context"
+      message.customType === "athanor-presence-context"
     );
 
     expect(presence?.content).toBe("Presence frame\n\nPresence contract");
@@ -370,7 +370,7 @@ describe("OMP prompt-cache history", () => {
     }, context("hallway-bell"));
     if (!result) throw new Error("Bell context event returned no additions");
     const bell = result.messages.find(
-      (message) => message.customType === "solarisael-hallway-bell",
+      (message) => message.customType === "athanor-hallway-bell",
     );
 
     expect(bell?.content).toContain("family-hallway: 1 unread; 1 mention pending for kodo");

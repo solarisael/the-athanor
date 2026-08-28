@@ -249,7 +249,7 @@ flowchart LR
 ```
 
 Sources: `adapters/omp/index.ts`, `adapters/omp/giga.ts`,
-`adapters/omp/kitten-lineage.ts`, and `adapters/omp/solarisael-house-proof/`.
+`adapters/omp/kitten-lineage.ts`, and `adapters/omp/house-proof/`.
 
 ## 5. OMP tool ownership and transport
 
@@ -333,9 +333,9 @@ Hallway message through the ordinary untrusted social path.
 Started/completed/failed settlement returns through Host; claiming never
 advances a Hallway read cursor or clears a Bell row.
 
-Sources: `adapters/omp/solarisael-house-proof/tools.ts`,
-`adapters/omp/rust-transport.ts`, `adapters/omp/solarisael-house-proof/host.ts`,
-`adapters/omp/solarisael-house-proof/knock.ts`.
+Sources: `adapters/omp/house-proof/tools.ts`,
+`adapters/omp/rust-transport.ts`, `adapters/omp/house-proof/host.ts`,
+`adapters/omp/house-proof/knock.ts`.
 
 ## 6. Substrate request router
 
@@ -416,7 +416,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Q["vault_recall request"] --> Marker["load .solarisael-room.json"]
+    Q["vault_recall request"] --> Marker["load .athanor-room.json"]
     Marker --> Collect["collect eligible attributed files<br/>respect ignores and limits"]
     Collect --> Parse["parse Markdown / JSON / JSONL / text"]
     Parse --> Docs["in-memory documents"]

@@ -50,10 +50,10 @@ function New-SandboxRepository([string]$Root, [string]$Version) {
   Write-SandboxFile (Join-Path $Adapter "README.md") "# adapter`n"
   Write-SandboxFile (Join-Path $Adapter "LICENSE") "Apache-2.0`n"
   Write-SandboxFile (Join-Path $Adapter "NOTICE") "notice`n"
-  Write-SandboxFile (Join-Path $Adapter "solarisael-house-proof/host.ts") "export const host = 1;`n"
-  Write-SandboxFile (Join-Path $Adapter "solarisael-house-proof/room.ts") "export const room = 2;`n"
+  Write-SandboxFile (Join-Path $Adapter "house-proof/host.ts") "export const host = 1;`n"
+  Write-SandboxFile (Join-Path $Adapter "house-proof/room.ts") "export const room = 2;`n"
   Write-SandboxFile (Join-Path $Adapter "starter-room/example/AGENTS.md") "# room`n"
-  Write-SandboxFile (Join-Path $Adapter "starter-room/example/.solarisael-room.json") "{`"room`":`"example`"}"
+  Write-SandboxFile (Join-Path $Adapter "starter-room/example/.athanor-room.json") "{`"room`":`"example`"}"
   # Present in the source tree, deliberately outside the runtime allowlist.
   Write-SandboxFile (Join-Path $Adapter "installed-loader.ts") "export const loader = 3;`n"
   Write-SandboxFile (Join-Path $Adapter "tests/adapter.test.ts") "export const test = 4;`n"
@@ -109,7 +109,7 @@ try {
   Assert-True ([string]$Manifest.version -ceq "7.8.9") "the manifest must publish the adapter version authority"
   Assert-True ($Manifest.compatibility.hostApi -eq 2 -and $Manifest.compatibility.schemaVersion -eq 19) "the manifest must publish the compatibility authority"
   Assert-True ($Paths.Count -eq $First.ArtifactCount) "the build result must report the manifest artifact count"
-  Assert-True ($Paths -ccontains "index.ts" -and $Paths -ccontains "solarisael-house-proof/host.ts" -and $Paths -ccontains "starter-room/example/AGENTS.md") "the component root must be flat relative to adapters/omp"
+  Assert-True ($Paths -ccontains "index.ts" -and $Paths -ccontains "house-proof/host.ts" -and $Paths -ccontains "starter-room/example/AGENTS.md") "the component root must be flat relative to adapters/omp"
   Assert-True (-not ($Paths -ccontains "installed-loader.ts")) "installed-loader.ts must stay product-owned and out of the component"
   Assert-True (-not ($Paths | Where-Object { $_ -clike "tests/*" })) "adapter tests must stay out of the component"
   Assert-True (-not ($Paths | Where-Object { $_ -clike "adapters/omp/*" })) "component artifact paths must carry no adapters/omp prefix"
@@ -165,10 +165,10 @@ try {
   Assert-True ([string]$UnchangedAfter -ceq [string]$UnchangedBefore) "untouched artifacts must keep their hashes"
 
   # --- unsafe artifact paths are refused, matching the installed validator ---
-  foreach ($Unsafe in @("", ".", "..", "./index.ts", "a/../b.ts", "a/./b.ts", "/index.ts", "C:/index.ts", "c:\index.ts", "a\b.ts", "a//b.ts", "index:ts", "solarisael-house-proof/", ("hygi" + [char]0x00E8 + "ne.ts"), ("index" + [char]0x0009 + ".ts"))) {
+  foreach ($Unsafe in @("", ".", "..", "./index.ts", "a/../b.ts", "a/./b.ts", "/index.ts", "C:/index.ts", "c:\index.ts", "a\b.ts", "a//b.ts", "index:ts", "house-proof/", ("hygi" + [char]0x00E8 + "ne.ts"), ("index" + [char]0x0009 + ".ts"))) {
     Assert-Refused { Assert-OmpAdapterComponentArtifactPath -Path $Unsafe } "an unsafe artifact path must be refused: '$Unsafe'"
   }
-  foreach ($Safe in @("index.ts", "solarisael-house-proof/host.ts", "starter-room/example/.solarisael-room.json")) {
+  foreach ($Safe in @("index.ts", "house-proof/host.ts", "starter-room/example/.athanor-room.json")) {
     Assert-OmpAdapterComponentArtifactPath -Path $Safe
   }
 
@@ -262,10 +262,10 @@ try {
 
     $LinkedProofRepository = Join-Path $Sandbox "repo-symlinked-proof"
     New-SandboxRepository -Root $LinkedProofRepository -Version "7.8.9" | Out-Null
-    New-Item -ItemType SymbolicLink -Path (Join-Path $LinkedProofRepository "adapters/omp/solarisael-house-proof/smuggled.ts") -Target (Join-Path $External "smuggled.ts") | Out-Null
+    New-Item -ItemType SymbolicLink -Path (Join-Path $LinkedProofRepository "adapters/omp/house-proof/smuggled.ts") -Target (Join-Path $External "smuggled.ts") | Out-Null
     $ProofRefusal = Get-Refusal { New-OmpAdapterComponentBundle -RepositoryRoot $LinkedProofRepository -Destination (Join-Path $Sandbox "bundle-symlinked-proof") }
     Assert-True ($ProofRefusal -clike "*crosses a Windows reparse point*") "a symlinked file discovered under an allowlisted directory must be refused"
-    Assert-True ($ProofRefusal -clike "*solarisael-house-proof/smuggled.ts*") "the refusal must name the smuggled artifact path"
+    Assert-True ($ProofRefusal -clike "*house-proof/smuggled.ts*") "the refusal must name the smuggled artifact path"
   }
 
   Write-Host "omp-adapter component contract: all assertions passed"

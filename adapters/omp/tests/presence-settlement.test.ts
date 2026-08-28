@@ -24,13 +24,13 @@ const recallPolicy = {
   updatedAt: "2026-08-27T00:00:00.000Z",
 };
 
-mock.module("../solarisael-house-proof/room.ts", () => ({
+mock.module("../house-proof/room.ts", () => ({
   applyPromptDirectives: async () => ({ state: { operator: "Sol", embodiedSpirit: "Kintsu" } }),
   roomContext: () => ({ room: "kintsu", spirit: "Kintsu", operator: "Sol", effectiveRoomDir }),
   writeActiveSpiritSnapshot: async () => undefined,
 }));
 
-mock.module("../solarisael-house-proof/top-level-session-fence.ts", () => ({
+mock.module("../house-proof/top-level-session-fence.ts", () => ({
   adoptTopLevelSession: (_room: string, session: string) => { topLevelSessionId ||= session; },
   registerTopLevelSession: (_room: string, session: string) => { topLevelSessionId = session; },
   retireTopLevelSession: (_room: string, session: string) => {
@@ -39,7 +39,7 @@ mock.module("../solarisael-house-proof/top-level-session-fence.ts", () => ({
   topLevelSession: () => topLevelSessionId || null,
 }));
 
-mock.module("../solarisael-house-proof/conversation-log.ts", () => ({
+mock.module("../house-proof/conversation-log.ts", () => ({
   logConversationWindow: async () => ({ fresh: false, loggedTurns: [] }),
 }));
 
@@ -48,18 +48,18 @@ mock.module("../giga.ts", () => ({
   ingestGigaLoggedTurnsDetached: () => undefined,
 }));
 
-mock.module("../solarisael-house-proof/recall.ts", () => ({
+mock.module("../house-proof/recall.ts", () => ({
   closeRustRecallTransports: () => undefined,
   recallWithRouting: async () => ({ ok: true, result: { query: "" } }),
 }));
 
-mock.module("../solarisael-house-proof/tools.ts", () => ({
+mock.module("../house-proof/tools.ts", () => ({
   closeRustRememberTransports: () => undefined,
   registerSolarisaelTools: () => undefined,
   writeRustMemory: async () => undefined,
 }));
 
-mock.module("../solarisael-house-proof/presence.ts", () => ({
+mock.module("../house-proof/presence.ts", () => ({
   compilePresenceContext: async (request: any) => ({
     frameId: "frame-1",
     frameVersion: 1,
@@ -78,32 +78,32 @@ mock.module("../solarisael-house-proof/presence.ts", () => ({
   responseDigest: (text: string) => `digest:${text}`,
 }));
 
-mock.module("../solarisael-house-proof/hallway.ts", () => ({
+mock.module("../house-proof/hallway.ts", () => ({
   projectHallwayInbox: async () => ({ changed: false, inbox: { ok: true, hallways: [] } }),
 }));
 
-mock.module("../solarisael-house-proof/anamnesis.ts", () => ({
+mock.module("../house-proof/anamnesis.ts", () => ({
   closeRustAnamnesisTransports: () => undefined,
   formatAnamnesisContext: () => "",
   queryAnamnesis: async () => ({ ok: true }),
 }));
 
-mock.module("../solarisael-house-proof/substrate.ts", () => ({
+mock.module("../house-proof/substrate.ts", () => ({
   catchBoat: async () => ({ ok: true, found: false }),
   closePaperBoatTransports: () => undefined,
   readQuestBoard: async () => ({ ok: true, quests: [] }),
   formatQuestBoardSection: () => "",
 }));
 
-mock.module("../solarisael-house-proof/entity-resolution.ts", () => ({
+mock.module("../house-proof/entity-resolution.ts", () => ({
   resolveEntities: async () => ({ ok: true, matches: [] }),
 }));
 
-mock.module("../solarisael-house-proof/recall-telemetry.ts", () => ({
+mock.module("../house-proof/recall-telemetry.ts", () => ({
   recordRecallTelemetry: async () => true,
 }));
 
-mock.module("../solarisael-house-proof/context.ts", () => ({
+mock.module("../house-proof/context.ts", () => ({
   analyzeContext: async () => ({
     route: {
       entityResolutionSuggested: false,
@@ -119,7 +119,7 @@ mock.module("../solarisael-house-proof/context.ts", () => ({
   }),
 }));
 
-mock.module("../solarisael-house-proof/recall-policy.ts", () => ({
+mock.module("../house-proof/recall-policy.ts", () => ({
   RecallPolicyHostClient: class {
     async inspect() {
       return { recallPolicy };
@@ -190,7 +190,7 @@ async function openPendingContract(hooks: { context: Hook }, sessionID: string) 
     session(sessionID),
   );
   const compiled = result?.messages?.find((message: any) =>
-    message.customType === "solarisael-presence-context"
+    message.customType === "athanor-presence-context"
   );
   if (!compiled) throw new Error("the context hook compiled no Presence contract");
 }

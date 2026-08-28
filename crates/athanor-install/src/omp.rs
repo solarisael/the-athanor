@@ -72,7 +72,7 @@ fn is_athanor_extension(value: &str) -> bool {
     let value = normalized(value);
     let adapter_entry = value.ends_with("/index.ts") || value.ends_with("/hygiene.ts");
     let owned_adapter = value.contains("/the-athanor/adapters/omp/")
-        || value.contains("/solarisael-house-omp/")
+        || value.contains("/athanor-omp/")
         || value.contains("/solarisael/athanor/components/omp-adapter/versions/")
         || (value.contains("/solarisael/athanor/versions/") && value.contains("/adapters/omp/"));
     (owned_adapter && adapter_entry)

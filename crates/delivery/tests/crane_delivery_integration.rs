@@ -46,7 +46,7 @@ const CRANE_MIGRATION: usize = 16;
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL is required");
     let lower = url.to_ascii_lowercase();
     assert!(!lower.contains("solarisael_memory"));
@@ -55,7 +55,7 @@ fn isolated_database_url() -> String {
 }
 
 fn nats_url() -> String {
-    std::env::var("SOLARISAEL_DELIVERY_TEST_NATS_URL")
+    std::env::var("ATHANOR_DELIVERY_TEST_NATS_URL")
         .expect("a test-owned NATS 2.14.4 JetStream endpoint is required")
 }
 

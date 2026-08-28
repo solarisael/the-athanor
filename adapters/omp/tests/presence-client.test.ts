@@ -6,13 +6,13 @@ import {
   compilePresenceContext,
   openPresence,
   settlePresence,
-} from "../solarisael-house-proof/presence.ts";
-import { anamnesisMaterial, paperBoatMaterial } from "../solarisael-house-proof/presence-materials.ts";
+} from "../house-proof/presence.ts";
+import { anamnesisMaterial, paperBoatMaterial } from "../house-proof/presence-materials.ts";
 import {
   registerTopLevelSession,
   retireTopLevelSession,
   topLevelSession,
-} from "../solarisael-house-proof/top-level-session-fence.ts";
+} from "../house-proof/top-level-session-fence.ts";
 
 const originalWebSocket = globalThis.WebSocket;
 const originalToken = process.env.ATHANOR_HOST_TOKEN;
@@ -199,9 +199,9 @@ describe("Presence client session fence", () => {
     });
     const openCommand = commands.find((command) => command.command_or_event_type === "athanor.presence.open");
     expect(openCommand?.presence_open.anamnesis[0].body).toStartWith("a".repeat(700));
-    expect(openCommand?.presence_open.anamnesis[0].body).toContain("solarisael-anamnesis-wake");
+    expect(openCommand?.presence_open.anamnesis[0].body).toContain("athanor-anamnesis-wake");
     expect(openCommand?.presence_open.previousBoat.body).toStartWith("p".repeat(700));
-    expect(openCommand?.presence_open.previousBoat.body).toContain("solarisael-wake-context");
+    expect(openCommand?.presence_open.previousBoat.body).toContain("athanor-wake-context");
     expect(openCommand?.presence_open.anamnesis[0].authority).toEqual({
       kind: "anamnesis",
       source: "anamnesis:wake",

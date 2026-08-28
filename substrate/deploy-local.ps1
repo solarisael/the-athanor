@@ -325,9 +325,9 @@ foreach ($provisioner in @($sourceKeeperProvision, $sourceRestartProvision)) {
 Import-DeploymentDatabaseEnvironment -SubstrateStateDir $substrateStateDir
 
 if (-not $SkipBackup) {
-    $priorPgWsl = $env:SOLARISAEL_PG_WSL
+    $priorPgWsl = $env:ATHANOR_PG_WSL
     try {
-        $env:SOLARISAEL_PG_WSL = "1"
+        $env:ATHANOR_PG_WSL = "1"
         # The WSL pg_dump path fails intermittently on a cold WSL VM (observed
         # twice on 2026-08-22, both times immediately after other WSL work;
         # every manual re-run succeeds). A backup is idempotent, so retry once
@@ -347,9 +347,9 @@ if (-not $SkipBackup) {
         }
     } finally {
         if ($null -eq $priorPgWsl) {
-            Remove-Item Env:SOLARISAEL_PG_WSL -ErrorAction SilentlyContinue
+            Remove-Item Env:ATHANOR_PG_WSL -ErrorAction SilentlyContinue
         } else {
-            $env:SOLARISAEL_PG_WSL = $priorPgWsl
+            $env:ATHANOR_PG_WSL = $priorPgWsl
         }
     }
 }

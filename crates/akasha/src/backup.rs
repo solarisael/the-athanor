@@ -186,7 +186,7 @@ pub struct BackupHealth {
 }
 
 fn use_wsl_pg() -> bool {
-    cfg!(windows) && env::var("SOLARISAEL_PG_WSL").as_deref() == Ok("1")
+    cfg!(windows) && env::var("ATHANOR_PG_WSL").as_deref() == Ok("1")
 }
 
 fn pg_command(name: &str) -> Command {
@@ -621,11 +621,11 @@ pub fn restore(database_url: &str, manifest_path: &Path, confirm: &str) -> Resul
     run(c).map(|_| ())
 }
 /// PostgreSQL dumps are mutable state, so they land under the Athanor state
-/// directory unless `SOLARISAEL_BACKUP_DIR` names somewhere else. With neither
+/// directory unless `ATHANOR_BACKUP_DIR` names somewhere else. With neither
 /// available there is no safe place to write, and that is an error rather than
 /// a dump dropped into a guessed directory.
 pub fn default_backup_dir() -> Result<PathBuf, BackupError> {
-    if let Some(dir) = env::var_os("SOLARISAEL_BACKUP_DIR").filter(|dir| !dir.is_empty()) {
+    if let Some(dir) = env::var_os("ATHANOR_BACKUP_DIR").filter(|dir| !dir.is_empty()) {
         return Ok(PathBuf::from(dir));
     }
     Ok(crate::state::substrate_state_dir()?.join("backups"))
@@ -705,7 +705,7 @@ pub async fn run_post_write(
     database_url: &str,
     room_keep: usize,
 ) -> Result<(), BackupError> {
-    let keep = env::var("SOLARISAEL_BACKUP_KEEP")
+    let keep = env::var("ATHANOR_BACKUP_KEEP")
         .ok()
         .and_then(|x| x.parse().ok())
         .unwrap_or(room_keep);

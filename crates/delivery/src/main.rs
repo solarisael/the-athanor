@@ -24,11 +24,11 @@ async fn main() -> Result<()> {
     }
 
     let database_url = env::var("DATABASE_URL").context("DATABASE_URL is required")?;
-    let nats_url = env::var("SOLARISAEL_NATS_URL").unwrap_or_else(|_| DEFAULT_NATS_URL.to_owned());
-    let lease_owner = match env::var("SOLARISAEL_DELIVERY_INSTANCE_ID") {
+    let nats_url = env::var("ATHANOR_NATS_URL").unwrap_or_else(|_| DEFAULT_NATS_URL.to_owned());
+    let lease_owner = match env::var("ATHANOR_DELIVERY_INSTANCE_ID") {
         Ok(value) => value
             .parse::<Uuid>()
-            .context("SOLARISAEL_DELIVERY_INSTANCE_ID must be a UUID")?,
+            .context("ATHANOR_DELIVERY_INSTANCE_ID must be a UUID")?,
         Err(env::VarError::NotPresent) => Uuid::new_v4(),
         Err(error) => return Err(error.into()),
     };

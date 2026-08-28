@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import solarisaelHouseProof from "../index.ts";
 import { RustJsonlTransport } from "../rust-transport.ts";
 import { __gigaTest, ingestGigaLoggedTurnsDetached } from "../giga.ts";
-import { closeRustRememberTransports } from "../solarisael-house-proof/tools.ts";
+import { closeRustRememberTransports } from "../house-proof/tools.ts";
 
 type CapturedTool = {
   name: string;
@@ -53,7 +53,7 @@ const zodStub = {
 
 const SUBSTRATE_EXE_ENV = "ATHANOR_SUBSTRATE_EXE";
 const EXIT_CAPABILITY_ENV = "ATHANOR_RESTART_EXIT_CAPABILITY";
-const GIGA_ENV = "SOLARISAEL_GIGA_ENABLED";
+const GIGA_ENV = "ATHANOR_GIGA_ENABLED";
 
 const PENDING_INTENT = {
   ok: true,

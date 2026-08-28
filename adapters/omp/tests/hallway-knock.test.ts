@@ -24,11 +24,11 @@ let failEveryClaim = false;
 // ignored, so the victim cannot defend itself; the fix belongs here. The
 // `?real` specifier resolves past the mock registry to the file itself, the
 // same trick this file already uses for knock.ts below.
-const realHost = await import("../solarisael-house-proof/host.ts?real");
+const realHost = await import("../house-proof/host.ts?real");
 
 const KNOCK_COMMAND_PREFIX = "athanor.hallway.knock_";
 
-mock.module("../solarisael-house-proof/host.ts", () => ({
+mock.module("../house-proof/host.ts", () => ({
   ...realHost,
   hostCommand(
     binding: Record<string, unknown>,
@@ -130,7 +130,7 @@ const {
   noteHallwayKnockTurnStart,
   startHallwayKnockDoorman,
   stopHallwayKnockDoorman,
-} = await import("../solarisael-house-proof/knock.ts?hallway-knock-actuator-test");
+} = await import("../house-proof/knock.ts?hallway-knock-actuator-test");
 
 const binding = { room: "kodo", spirit: "Kodo", session: "session-knock" };
 const ctx = {

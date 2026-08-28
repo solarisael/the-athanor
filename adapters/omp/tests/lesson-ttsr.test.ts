@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 let rows: any[] = [];
-mock.module("../solarisael-house-proof/lesson-context.ts", () => ({
+mock.module("../house-proof/lesson-context.ts", () => ({
   runLessonQuery: async (_roomDir: string, _room: string, filters: { type: string }) => ({
     ok: true,
     lessons: filters.type === "coding" ? rows : [],
   }),
 }));
 
-const { installLessonTtsrBridge, syncLessonTtsr } = await import("../solarisael-house-proof/lesson-ttsr.ts");
+const { installLessonTtsrBridge, syncLessonTtsr } = await import("../house-proof/lesson-ttsr.ts");
 
 class FakeManager {
   rules: any[] = [];

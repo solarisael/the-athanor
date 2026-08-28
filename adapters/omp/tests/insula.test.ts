@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { HostUnavailable, hostHttpEndpoint } from "../solarisael-house-proof/host.ts";
+import { HostUnavailable, hostHttpEndpoint } from "../house-proof/host.ts";
 import {
   INSULA_EVENTS_PATH,
   InsulaWriter,
@@ -8,7 +8,7 @@ import {
   noteInsulaProviderRequestId,
   type InsulaObservation,
   type InsulaTransport,
-} from "../solarisael-house-proof/insula.ts";
+} from "../house-proof/insula.ts";
 import {
   INSULA_VITALS_PATH,
   insulaCockpitLines,
@@ -17,7 +17,7 @@ import {
   parseInsulaVitalsRange,
   readInsulaVitals,
   summarizeInsulaVitals,
-} from "../solarisael-house-proof/vitals.ts";
+} from "../house-proof/vitals.ts";
 
 // The strict public DTO, in wire order. Authority (house/room/spirit/session)
 // and derived fields (idempotency key, semantic hash) are the Host's to stamp:

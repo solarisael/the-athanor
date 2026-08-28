@@ -25,8 +25,8 @@ The walking loop of the crane. Every crane mechanic lives in `origami::cranes`. 
 ### the command line (main.rs)
 
 - The commands are `configure`, `publish-once`, `consume-once`, `once`, `run`, `health`, and `help`.
-- `DATABASE_URL` is required. `SOLARISAEL_NATS_URL` defaults to `nats://127.0.0.1:4222`.
-- `SOLARISAEL_DELIVERY_INSTANCE_ID` sets the lease owner. Without it, each start mints a new UUID.
+- `DATABASE_URL` is required. `ATHANOR_NATS_URL` defaults to `nats://127.0.0.1:4222`.
+- `ATHANOR_DELIVERY_INSTANCE_ID` sets the lease owner. Without it, each start mints a new UUID.
 - `configure` prints the two lanes: the stream, the subject, and the consumer of each.
 - `run` writes a readiness file when `ATHANOR_DELIVERY_READY_FILE` is set. It writes a temporary file, then renames it.
 - `run` stops on ctrl-c, removes the readiness file, and drains the connection.

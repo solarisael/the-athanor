@@ -12,7 +12,7 @@ fn missing_dotenv_path(case: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time is after the Unix epoch")
         .as_nanos();
-    std::env::temp_dir().join(format!("solarisael-substrate-{case}-{nonce}.env"))
+    std::env::temp_dir().join(format!("athanor-substrate-{case}-{nonce}.env"))
 }
 
 fn jsonl_with_environment(
@@ -23,7 +23,7 @@ fn jsonl_with_environment(
     let mut command = Command::new(env!("CARGO_BIN_EXE_athanor-substrate"));
     command
         .env_clear()
-        .env("SOLARISAEL_SUBSTRATE_DOTENV_PATH", &dotenv_path)
+        .env("ATHANOR_SUBSTRATE_DOTENV_PATH", &dotenv_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -123,10 +123,10 @@ fn invalid_embedding_dimension_reports_configuration_without_environment_values(
     let (responses, _) = jsonl_with_environment(
         &[
             (
-                "SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL",
+                "ATHANOR_SUBSTRATE_TEST_DATABASE_URL",
                 "postgres://localhost/substrate",
             ),
-            ("SOLARISAEL_EMBED_DIMENSION", "1024"),
+            ("ATHANOR_EMBED_DIMENSION", "1024"),
         ],
         &[request],
     );
@@ -135,7 +135,7 @@ fn invalid_embedding_dimension_reports_configuration_without_environment_values(
     let details = error_details(response);
     assert_eq!(details["category"], "configuration");
     assert_eq!(details["stage"], "configuration_load");
-    assert_eq!(details["expected"]["SOLARISAEL_EMBED_DIMENSION"], "2048");
+    assert_eq!(details["expected"]["ATHANOR_EMBED_DIMENSION"], "2048");
     assert_eq!(
         details["observed"]["reason"],
         "embedding_dimension_incompatible"

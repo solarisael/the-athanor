@@ -50,7 +50,7 @@ fn write_room_state(root: &Path) {
     let runtime = root.join("room").join(".omp").join("runtime");
     std::fs::create_dir_all(&runtime).expect("create room runtime");
     std::fs::write(
-        runtime.join("solarisael-house-state.json"),
+        runtime.join("athanor-house-state.json"),
         serde_json::to_vec_pretty(&json!({
             "version": 1,
             "room": "kintsu",
@@ -618,7 +618,7 @@ async fn missing_broker_is_degraded_and_receipt_projection_never_invents_content
 #[tokio::test]
 #[ignore = "requires the test-owned NATS endpoint"]
 async fn nats_receipts_are_strict_room_scoped_and_ordered_on_the_host_socket() {
-    let nats_url = std::env::var("SOLARISAEL_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
+    let nats_url = std::env::var("ATHANOR_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
     let root = TempDir::new().expect("tempdir");
     write_room_state(root.path());
     let mut host_config = config(root.path());
@@ -703,7 +703,7 @@ async fn nats_receipts_are_strict_room_scoped_and_ordered_on_the_host_socket() {
 #[tokio::test]
 #[ignore = "requires the test-owned NATS endpoint"]
 async fn retained_receipt_published_before_host_is_replayed_to_the_room_projection() {
-    let nats_url = std::env::var("SOLARISAEL_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
+    let nats_url = std::env::var("ATHANOR_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
     let broker = Broker::connect(&nats_url).await.expect("delivery broker");
     broker.configure().await.expect("exact delivery streams");
     let event_id = uuid::Uuid::new_v4();
@@ -905,7 +905,7 @@ async fn set_retry_conflict_refusals_and_resync_preserve_authority() {
     let persisted: Value = serde_json::from_slice(
         &std::fs::read(
             root.path()
-                .join("room/.omp/runtime/solarisael-house-state.json"),
+                .join("room/.omp/runtime/athanor-house-state.json"),
         )
         .expect("persisted room state"),
     )
@@ -991,7 +991,7 @@ async fn resync_reloads_external_room_state_and_makes_old_versions_stale() {
 
     let state_path = root
         .path()
-        .join("room/.omp/runtime/solarisael-house-state.json");
+        .join("room/.omp/runtime/athanor-house-state.json");
     let mut persisted: Value =
         serde_json::from_slice(&std::fs::read(&state_path).expect("read external room state"))
             .expect("external room JSON");

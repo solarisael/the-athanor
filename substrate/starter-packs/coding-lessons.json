@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "pack": {
-    "id": "solarisael-house-craft-starter",
+    "id": "athanor-house-craft-starter",
     "version": 2,
     "title": "The Athanor coding lesson library",
     "description": "A privacy-safe library of 117 reusable engineering lessons from the reference House.",

@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { ADAPTER_API_VERSION } from "../index.ts";
-import { analyzeContext, parseContextAnalysisResponse } from "../solarisael-house-proof/context.ts";
-import { dispatchHouse, familiarStatus, laneStatus } from "../solarisael-house-proof/routing.ts";
-import { roomContext, supportedRoom } from "../solarisael-house-proof/room.ts";
+import { analyzeContext, parseContextAnalysisResponse } from "../house-proof/context.ts";
+import { dispatchHouse, familiarStatus, laneStatus } from "../house-proof/routing.ts";
+import { roomContext, supportedRoom } from "../house-proof/room.ts";
 
 describe("OMP adapter contract", () => {
   test("exports a thin adapter API without loading a sibling TypeScript core", () => {
@@ -41,7 +41,7 @@ describe("OMP adapter contract", () => {
       const cwd = path.join(root, "example");
       await mkdir(cwd);
       await writeFile(
-        path.join(cwd, ".solarisael-room.json"),
+        path.join(cwd, ".athanor-room.json"),
         `${JSON.stringify({ version: 1, room: "house", trueName: "Example Room", operator: "Example Operator" })}\n`,
         "utf8",
       );
@@ -58,7 +58,7 @@ describe("OMP adapter contract", () => {
       const cwd = path.join(root, "example");
       await mkdir(cwd);
       await writeFile(
-        path.join(cwd, ".solarisael-room.json"),
+        path.join(cwd, ".athanor-room.json"),
         `${JSON.stringify({ version: 1, room: "example", trueName: "Example Room" })}\n`,
         "utf8",
       );
@@ -79,7 +79,7 @@ describe("OMP adapter contract", () => {
       const cwd = path.join(root, "example");
       await mkdir(cwd);
       await writeFile(
-        path.join(cwd, ".solarisael-room.json"),
+        path.join(cwd, ".athanor-room.json"),
         `${JSON.stringify({ version: 1, room: "custom-room", trueName: "Example Room", operator: "Example Operator" })}\n`,
         "utf8",
       );

@@ -711,7 +711,7 @@ fn custom_house_config_preserves_real_room_identity_and_rejects_missing_state() 
         fs.files.borrow_mut().insert(
             rooms_root
                 .join(room)
-                .join(".omp/runtime/solarisael-house-state.json"),
+                .join(".omp/runtime/athanor-house-state.json"),
             format!(r#"{{"version":1,"room":"{room}"}}"#).into_bytes(),
         );
     }

@@ -7,8 +7,8 @@ import {
   topLevelSession,
   registerTopLevelSession,
   retireTopLevelSession,
-} from "../solarisael-house-proof/top-level-session-fence.ts";
-import { workerAtTheDoor } from "../solarisael-house-proof/tools.ts";
+} from "../house-proof/top-level-session-fence.ts";
+import { workerAtTheDoor } from "../house-proof/tools.ts";
 
 describe("docket worker fence", () => {
   test("fails closed before a top-level session is registered", () => {

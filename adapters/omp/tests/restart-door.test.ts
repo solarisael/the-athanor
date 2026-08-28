@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { exitDetailFor, registerRestartDoor } from "../solarisael-house-proof/restart-door.ts";
+import { exitDetailFor, registerRestartDoor } from "../house-proof/restart-door.ts";
 
 // 87 is the keeper handshake code in the frozen wire contract, so it is pinned
 // here as a literal. Asserting the module's own constant would defend nothing.

@@ -246,7 +246,7 @@ pub async fn flush_insula_emitter() {
 }
 
 fn disabled_by_environment() -> bool {
-    ["ATHANOR_DISABLE_INSULA", "SOLARISAEL_REPLAY_MODE"]
+    ["ATHANOR_DISABLE_INSULA", "ATHANOR_REPLAY_MODE"]
         .into_iter()
         .any(|name| std::env::var(name).is_ok_and(|value| value == "1"))
 }
@@ -517,7 +517,7 @@ mod tests {
     }
 
     fn isolated_database_url() -> String {
-        let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+        let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
             .expect("Insula writer proof requires a dedicated PostgreSQL URL");
         let lower = url.to_ascii_lowercase();
         assert!(
@@ -540,7 +540,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+    #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
     async fn postgres_writer_contract_persists_span_and_receipt_point() -> TestResult {
         let pool = fresh_insula().await?;
         let binding = system_binding();

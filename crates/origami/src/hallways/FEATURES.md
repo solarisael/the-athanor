@@ -9,7 +9,7 @@ Room letters. PostgreSQL holds every hallway, and the Host projects it. No NATS 
 - `toRooms` may only name rooms that the hallway allows.
 - `replyTo` must name a message of the same hallway. The reply inherits the thread of that message.
 - A message with no reply joins today's thread. The date comes from PostgreSQL in the house timezone.
-- An unknown timezone gives a config error, and it names `SOLARISAEL_HOUSE_TZ`.
+- An unknown timezone gives a config error, and it names `ATHANOR_HOUSE_TZ`.
 - A repeated idempotency key with the same body, reply, and recipients returns `Duplicate`.
 - The same key with different content gets `idempotency_reuse`.
 - Each post mints the notifications, then raises the revision of every allowed room.

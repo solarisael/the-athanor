@@ -20,6 +20,27 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Changed
+
+- The Presence open door now adopts. When a session already holds a live
+  frame, a reopen with the same authenticated binding receives that frame
+  instead of an idempotency refusal. Before this change, a session that lost
+  its context through compaction or restart reopened with fresh materials
+  under its stable key, received `ReplayBodyConflict`, and lost Presence for
+  the rest of the session. An impostor binding still refuses, a moved binding
+  still refuses, and operation conflicts always refuse. The compile fallback
+  key now carries the user-turn ordinal, so a repeated prompt text cannot
+  collide.
+- The naming cutover: every plugin-internal `solarisael-*` identifier is now
+  `athanor-*`. This covers the adapter library directory (`house-proof/`),
+  all `SOLARISAEL_*` runtime environment variables, context marker types,
+  Insula component ids, and the room state file names. The adapter renames
+  `.solarisael-room.json` and `solarisael-house-state.json` to their new
+  names on first read. The test fence and deploy guard now report every
+  pre-cutover variable by name. The name Solarisael remains only where it
+  names the installation: install paths, the Windows service, the database,
+  and the legacy pre-install door.
+
 ### Added
 
 - `athanor.exe` is the canonical desktop owner. It keeps the existing Godot GUI

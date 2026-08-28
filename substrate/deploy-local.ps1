@@ -17,12 +17,21 @@ if (-not $IsWindows) {
 
 $substrateRoot = [IO.Path]::GetFullPath($PSScriptRoot)
 $athanorRoot = [IO.Path]::GetFullPath((Join-Path $substrateRoot ".."))
-# Mutable state lives outside the immutable product tree. This mirrors
-# state_paths.sh and crates/akasha/src/state.rs:
-# ATHANOR_STATE_DIR wins and must be absolute, then an existing
-# <install-root>/state, then a development checkout. Never a guess.
+# Mutable state lives outside the immutable product tree. ATHANOR_STATE_DIR
+# wins, then an adjacent installed state root, then the installed runtime
+# contract, then a development checkout.
+$runtimeConfigPath = Join-Path ([Environment]::GetFolderPath("CommonApplicationData")) "Solarisael\Athanor\config\runtime.json"
 $configuredStateRoot = [string]$env:ATHANOR_STATE_DIR
 $installedStateRoot = Join-Path ([IO.Path]::GetDirectoryName($athanorRoot)) "state"
+$runtimeStateRoot = if (Test-Path $runtimeConfigPath -PathType Leaf) {
+    $runtime = Get-Content $runtimeConfigPath -Raw | ConvertFrom-Json
+    $candidate = [string]$runtime.operatorStateRoot
+    if (-not [string]::IsNullOrWhiteSpace($candidate) -and
+        [IO.Path]::IsPathRooted($candidate) -and
+        (Test-Path $candidate -PathType Container)) {
+        $candidate
+    }
+}
 $stateRoot = if (-not [string]::IsNullOrWhiteSpace($configuredStateRoot)) {
     if (-not [IO.Path]::IsPathRooted($configuredStateRoot)) {
         throw "ATHANOR_STATE_DIR must be an absolute path (got $configuredStateRoot)"
@@ -30,6 +39,8 @@ $stateRoot = if (-not [string]::IsNullOrWhiteSpace($configuredStateRoot)) {
     $configuredStateRoot
 } elseif (Test-Path $installedStateRoot -PathType Container) {
     $installedStateRoot
+} elseif (-not [string]::IsNullOrWhiteSpace($runtimeStateRoot)) {
+    $runtimeStateRoot
 } elseif ((Test-Path (Join-Path $athanorRoot "Cargo.toml") -PathType Leaf) -and
           (Test-Path (Join-Path $athanorRoot "crates") -PathType Container)) {
     Join-Path $athanorRoot "state"
@@ -85,7 +96,6 @@ $stableAppExe = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryNa
  $liveManifest = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($liveExe))) "release-manifest.json"
  $previousManifest = Join-Path $stageTarget "previous\release-manifest.json"
 $nativeServiceName = "SolarisaelAthanor"
-$runtimeConfigPath = Join-Path ([Environment]::GetFolderPath("CommonApplicationData")) "Solarisael\Athanor\config\runtime.json"
 $restartNativeService = $false
 
 

@@ -60,6 +60,11 @@ import {
   startHallwayKnockDoorman,
   stopHallwayKnockDoorman,
 } from "./house-proof/knock.ts";
+import {
+  noteChatTurnEnd,
+  startChatDoorman,
+  stopChatDoorman,
+} from "./house-proof/chat.ts";
 import { resolveEntities } from "./house-proof/entity-resolution.ts";
 import { recordRecallTelemetry } from "./house-proof/recall-telemetry.ts";
 import {
@@ -631,6 +636,7 @@ export default function solarisaelHouseProof(pi, release) {
     adoptTopLevelSession(room, binding.session);
     showHouseContextFeedback(ctx, { room, spirit, activities: [] });
     startHallwayKnockDoorman(pi, ctx, binding);
+    startChatDoorman(pi, ctx, binding);
   };
   pi.on("session_start", showReadyFeedback);
   pi.on("session_switch", (event, ctx) => {
@@ -646,6 +652,7 @@ export default function solarisaelHouseProof(pi, release) {
     retireInsulaSession(room, session);
     retireTopLevelSession(room, session);
     await stopHallwayKnockDoorman({ room, spirit, session });
+    stopChatDoorman({ room, spirit, session });
   });
 
   // Insula tool lifecycle. These two taps observe and nothing else: they read
@@ -752,6 +759,15 @@ export default function solarisaelHouseProof(pi, release) {
     // `emitted` decides whether anything was said; the digest still covers the
     // response exactly as the provider returned it.
     const emitted = Boolean(response.trim());
+    // The chat doorman reports the settled turn before the presence block's
+    // early return can skip it; the report is a no-op without a pending say.
+    try {
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      await noteChatTurnEnd({ room, spirit, session }, response);
+    } catch {
+      // The doorman degrades on its own warning cadence.
+    }
     try {
       const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
       const session = hostSessionIdentity(ctx, effectiveRoomDir);

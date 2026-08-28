@@ -16,6 +16,10 @@ path = "src/bin/athanor.rs"
 name = "athanor-manage"
 path = "src/main.rs"
 
+[[bin]]
+name = "athanor-chat"
+path = "src/bin/athanor-chat.rs"
+
 [dependencies]
 anyhow.workspace = true
 hex.workspace = true
@@ -28,6 +32,11 @@ sha2.workspace = true
 thiserror = "2"
 getrandom = "0.3"
 url = "2"
+chrono.workspace = true
+futures-util.workspace = true
+tokio = { workspace = true }
+tokio-tungstenite = "0.28"
+uuid.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Services", "Win32_System_Threading"] }

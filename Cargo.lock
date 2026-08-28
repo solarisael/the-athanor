@@ -134,6 +134,8 @@ name = "athanor-install"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "futures-util",
  "getrandom 0.3.4",
  "hex",
  "interactive-process",
@@ -144,7 +146,10 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+ "tokio",
+ "tokio-tungstenite 0.28.0",
  "url",
+ "uuid",
  "windows-sys 0.61.2",
  "winresource",
 ]

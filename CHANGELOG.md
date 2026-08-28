@@ -20,8 +20,23 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Added
+
+- The chat projection: an operator surface can now talk through the Host.
+  A subscribe answers the room's conversation ring and opens a live delta
+  stream. A say appends the operator line. The room's chat doorman polls
+  the ring, injects each unanswered say as a real OMP turn, and reports
+  the settled response as the spirit line. Repeated say and turn ids are
+  retries and append nothing. The Host stamps names from room state.
+- `athanor-chat`, a terminal client for the chat projection. It prints the
+  ring, streams deltas, and turns each input line into a say. The binary
+  builds with the workspace; the installer and deploy ladder do not ship
+  it yet.
+
 ### Changed
 
+- The lesson registry query now matches any term instead of every term, so
+  a natural multi-word query finds its lessons.
 - The Presence open door now adopts. When a session already holds a live
   frame, a reopen with the same authenticated binding receives that frame
   instead of an idempotency refusal. Before this change, a session that lost

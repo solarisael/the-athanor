@@ -1559,6 +1559,15 @@ pub struct ShellResultEvent {
     pub meta: EventMeta,
     pub result: Value,
 }
+
+/// One chat frame: the whole ring for a snapshot, the new lines for a delta.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ChatEvent {
+    #[serde(flatten)]
+    pub meta: EventMeta,
+    pub room: String,
+    pub messages: Vec<ChatMessage>,
+}
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct EventMeta {
     pub schema_version: u8,

@@ -58,12 +58,30 @@ $stageTarget = Join-Path $athanorRoot "target\deploy"
  $stagedKeeperExe = Join-Path $stageTarget "release\omp-keeper.exe"
  $stagedKeeperPdb = [IO.Path]::ChangeExtension($stagedKeeperExe, ".pdb")
 $configuredLiveExe = [string]$env:ATHANOR_SUBSTRATE_EXE
-$liveExe = if ([string]::IsNullOrWhiteSpace($configuredLiveExe)) {
-    Join-Path $athanorRoot "target\release\athanor-substrate.exe"
-} elseif ([IO.Path]::IsPathRooted($configuredLiveExe)) {
-    $configuredLiveExe
+$programRoot = Join-Path $env:ProgramFiles "Solarisael\Athanor"
+$currentPointer = Join-Path $programRoot "current.json"
+$installedLiveExe = if (Test-Path $currentPointer -PathType Leaf) {
+    $current = Get-Content $currentPointer -Raw | ConvertFrom-Json
+    $version = [string]$current.version
+    if ($version -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+        throw "installed Athanor current.json carries an invalid version"
+    }
+    $candidate = Join-Path $programRoot "versions\$version\bin\athanor-substrate.exe"
+    if (-not (Test-Path $candidate -PathType Leaf)) {
+        throw "installed Athanor current version is missing its substrate executable at $candidate"
+    }
+    $candidate
+}
+$liveExe = if (-not [string]::IsNullOrWhiteSpace($configuredLiveExe)) {
+    if ([IO.Path]::IsPathRooted($configuredLiveExe)) {
+        $configuredLiveExe
+    } else {
+        Join-Path $athanorRoot $configuredLiveExe
+    }
+} elseif (-not [string]::IsNullOrWhiteSpace($installedLiveExe)) {
+    $installedLiveExe
 } else {
-    Join-Path $athanorRoot $configuredLiveExe
+    Join-Path $athanorRoot "target\release\athanor-substrate.exe"
 }
 $liveExe = [IO.Path]::GetFullPath($liveExe)
 $livePdb = [IO.Path]::ChangeExtension($liveExe, ".pdb")

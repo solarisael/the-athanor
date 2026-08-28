@@ -191,8 +191,10 @@ describe("Presence client session fence", () => {
       contractId: "contract-top",
     });
     const openCommand = commands.find((command) => command.command_or_event_type === "athanor.presence.open");
-    expect(openCommand?.presence_open.anamnesis[0].body).toBe("a".repeat(4096));
-    expect(openCommand?.presence_open.previousBoat.body).toBe("p".repeat(4096));
+    expect(openCommand?.presence_open.anamnesis[0].body).toStartWith("a".repeat(700));
+    expect(openCommand?.presence_open.anamnesis[0].body).toContain("solarisael-anamnesis-wake");
+    expect(openCommand?.presence_open.previousBoat.body).toStartWith("p".repeat(700));
+    expect(openCommand?.presence_open.previousBoat.body).toContain("solarisael-wake-context");
     expect(openCommand?.presence_open.anamnesis[0].authority).toEqual({
       kind: "anamnesis",
       source: "anamnesis:wake",

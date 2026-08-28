@@ -30,7 +30,7 @@ describe("Presence material mapping", () => {
     ]);
   });
 
-  test("bounds wake materials without changing their provenance", () => {
+  test("excerpts wake materials and points at the full-body carrier", () => {
     const paperBoat = paperBoatMaterial({ memoryId: "42", letter: "p".repeat(5000) });
     const anamnesis = anamnesisMaterial("a".repeat(5000))[0];
 
@@ -38,13 +38,23 @@ describe("Presence material mapping", () => {
       id: "paper-boat:42",
       authority: { kind: "paper_boat", memory_id: 42 },
     });
-    expect(paperBoat?.body).toBe("p".repeat(4096));
-    expect(paperBoat?.body.length).toBeLessThanOrEqual(4096);
+    expect(paperBoat?.body.startsWith("p".repeat(700))).toBe(true);
+    expect(paperBoat?.body).toContain("solarisael-wake-context");
+    expect(paperBoat?.body.length).toBeLessThan(900);
     expect(anamnesis).toMatchObject({
       id: "anamnesis:wake",
       authority: { kind: "anamnesis", source: "anamnesis:wake" },
     });
-    expect(anamnesis?.body).toBe("a".repeat(4096));
-    expect(anamnesis?.body.length).toBeLessThanOrEqual(4096);
+    expect(anamnesis?.body.startsWith("a".repeat(700))).toBe(true);
+    expect(anamnesis?.body).toContain("solarisael-anamnesis-wake");
+    expect(anamnesis?.body.length).toBeLessThan(900);
+  });
+
+  test("passes short wake materials through whole, without a pointer", () => {
+    const paperBoat = paperBoatMaterial({ memoryId: "42", letter: "short letter" });
+    const anamnesis = anamnesisMaterial("short counsel")[0];
+
+    expect(paperBoat?.body).toBe("short letter");
+    expect(anamnesis?.body).toBe("short counsel");
   });
 });

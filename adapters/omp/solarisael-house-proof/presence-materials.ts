@@ -1,8 +1,26 @@
 import type { PresenceMaterial } from "./presence.ts";
 
+// enough: the wake letter and the Anamnesis counsel already ride this same
+// session as their own full-body reminders (solarisael-wake-context and
+// solarisael-anamnesis-wake). Re-embedding them verbatim in the Presence
+// frame doubled 4-6k tokens of context for the whole session, because the
+// opened frame's rendered text is reused every turn. The frame's job here is
+// recognition and authority, so these materials carry a bounded excerpt and
+// point back at the full-body carrier — the same shape lessons already use
+// (full bodies stay native, the Presence packet stays small).
+export const PRESENCE_WAKE_EXCERPT_CHARS = 700;
+
+function wakeExcerpt(text: string, carrier: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= PRESENCE_WAKE_EXCERPT_CHARS) return trimmed;
+  const hard = trimmed.slice(0, PRESENCE_WAKE_EXCERPT_CHARS);
+  const soft = hard.slice(0, hard.lastIndexOf(" ") > 0 ? hard.lastIndexOf(" ") : hard.length);
+  return `${soft}\n[excerpt; the full text rides this session's ${carrier} reminder]`;
+}
+
 export function paperBoatMaterial(wake: Record<string, any>): PresenceMaterial | null {
   const memoryId = Number(wake.memoryId);
-  const body = String(wake.letter ?? "").trim().slice(0, 4096);
+  const body = wakeExcerpt(String(wake.letter ?? ""), "solarisael-wake-context");
   if (!Number.isSafeInteger(memoryId) || memoryId <= 0 || !body) return null;
   return {
     id: `paper-boat:${memoryId}`,
@@ -15,7 +33,7 @@ export function paperBoatMaterial(wake: Record<string, any>): PresenceMaterial |
 
 export function anamnesisMaterial(content: string): PresenceMaterial[] {
   if (!content.trim()) return [];
-  const body = content.slice(0, 4096);
+  const body = wakeExcerpt(content, "solarisael-anamnesis-wake");
   return [{
     id: "anamnesis:wake",
     authority: { kind: "anamnesis", source: "anamnesis:wake" },

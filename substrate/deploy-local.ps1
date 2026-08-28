@@ -49,6 +49,8 @@ $stateRoot = if (-not [string]::IsNullOrWhiteSpace($configuredStateRoot)) {
 }
 $substrateStateDir = [IO.Path]::GetFullPath((Join-Path $stateRoot "substrate"))
 $stageTarget = Join-Path $athanorRoot "target\deploy"
+$releaseDependenciesPath = Join-Path $athanorRoot "installer\dependencies.json"
+$adapterDeployPath = Join-Path $athanorRoot "adapters\omp\deploy-local.ps1"
  $stagedExe = Join-Path $stageTarget "release\athanor-substrate.exe"
  $stagedPdb = [IO.Path]::ChangeExtension($stagedExe, ".pdb")
  $stagedHostExe = Join-Path $stageTarget "release\house-host.exe"
@@ -497,6 +499,8 @@ if (Test-Path $liveManifest -PathType Leaf) {
     }
     if (Test-Path $liveManifest -PathType Leaf) {
         $manifest = Get-Content $liveManifest -Raw | ConvertFrom-Json
+        $releaseDependencies = Get-Content $releaseDependenciesPath -Raw | ConvertFrom-Json
+        $manifest.schemaVersion = [int]$releaseDependencies.schemaVersion
         $keeperEntries = @($manifest.artifacts | Where-Object { [string]$_.path -eq "bin/omp-keeper.exe" })
         if ($keeperEntries.Count -eq 0) {
             $manifest.artifacts = @($manifest.artifacts) + [pscustomobject][ordered]@{
@@ -546,6 +550,9 @@ if (Test-Path $liveManifest -PathType Leaf) {
             -ServiceName $nativeServiceName `
             -RuntimeConfigPath $runtimeConfigPath
     }
+    Invoke-Checked -Label "OMP adapter deployment" -FilePath "pwsh" -ArgumentList @(
+        "-NoProfile", "-File", $adapterDeployPath
+    )
     Invoke-Checked -Label "Full-mode health proof" -FilePath $liveExe -ArgumentList @(
         "health", "--substrate-dir", $substrateRoot
     )

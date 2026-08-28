@@ -1389,7 +1389,13 @@ export default function solarisaelHouseProof(pi, release) {
           message?.customType === "solarisael-presence-context"
           && typeof message?.details?.frameId === "string"
         );
-        const turnId = currentTurnKey || `turn:${responseDigest(prompt).slice(0, 24)}`;
+        // The fallback key must not collide when the operator repeats the
+        // same prompt text later in the session, so it carries the user-turn
+        // ordinal alongside the digest; retries within one turn recompute
+        // both identically.
+        const userTurnOrdinal = messages.filter((message: any) => message?.role === "user").length;
+        const turnId = currentTurnKey
+          || `turn:${userTurnOrdinal}:${responseDigest(prompt).slice(0, 24)}`;
         const compiled = await compilePresenceContext({
           binding,
           operator: houseState?.operator || operator,

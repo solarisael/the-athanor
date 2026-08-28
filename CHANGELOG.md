@@ -131,6 +131,10 @@ the exact implementation record.
 
 ### Changed
 
+- Accepted product direction (Sol, 2026-08-28): the web client at
+  `gui-prototype/` is the House's main operator surface. The Godot client
+  under `gui/` is parked, not removed — `athanor.exe` remains the canonical
+  desktop owner of harness processes; the face it fronts is the web prototype.
 - The OMP adapter no longer injects lesson packets, process reminders, or asynchronous Athanor corrections. Use explicit retrieval for ordinary lessons.
 - Lessons tagged `ttsr-approved` now register as versioned rules in OMP’s native `TtsrManager`. OMP owns matching, interruption, retry, and reminders.
 - Trigger authoring fields remain in `remember` and `update_lesson`. Untagged trigger rows stay dormant.

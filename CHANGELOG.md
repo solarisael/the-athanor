@@ -131,6 +131,9 @@ the exact implementation record.
 
 ### Changed
 
+- `athanor.exe` and `athanor-manage.exe` now carry the House icon (the wooly
+  black godling render, embedded as a multi-size Windows resource from
+  `crates/athanor-install/assets/athanor.ico`).
 - Accepted product direction (Sol, 2026-08-28): the web client at
   `gui-prototype/` is the House's main operator surface. The Godot client
   under `gui/` is parked, not removed — `athanor.exe` remains the canonical

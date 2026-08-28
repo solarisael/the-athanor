@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { hostCommand, sendHostCommand, type HostBinding, type HostResponse } from "./host.ts";
+import { HostUnavailable, hostCommand, sendHostCommand, type HostBinding, type HostResponse } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 
 export const PRESENCE_PROJECTION_ID = "presence";
@@ -65,7 +65,23 @@ export type PresenceContextInput = {
   anamnesis?: PresenceMaterial[];
   recalled?: PresenceMaterial[];
   lessons?: PresenceMaterial[];
+  openRetry?: { delaysMs?: number[]; deadlineMs?: number };
 };
+
+// enough: on a House restart the keeper launches OMP and the substrate
+// together, so the session's first presence open races the room Hosts binding
+// their ports. That first turn is the wake turn — the one carrying the paper
+// boat and Anamnesis into the frame — and it used to degrade on a single
+// connection refusal. The open is idempotent (presence-open:<session>), so a
+// startup-shaped HostUnavailable is retried on a short bounded schedule and a
+// hard deadline. Mid-session commands keep their single attempt: they already
+// self-heal on the next turn.
+export const PRESENCE_OPEN_RETRY_DELAYS_MS = [500, 1000, 2000, 3000];
+export const PRESENCE_OPEN_RETRY_DEADLINE_MS = 15_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export async function compilePresenceContext(input: PresenceContextInput) {
   const recalled = input.recalled ?? [];
@@ -104,27 +120,46 @@ async function resolveFrame(
   if (input.priorFrameId) {
     return { id: input.priorFrameId, rendered: input.priorFrameRendered ?? "", version: 1 };
   }
-  const opened = await openPresence(
-    input.binding,
-    {
-      binding: {
-        room: input.binding.room,
-        spirit: input.binding.spirit,
-        operator: input.operator,
-        session: input.binding.session,
-      },
-      identity: [
-        identityMaterial(input),
-        ...recalled.filter((material) => material.role === "identity"),
-      ],
-      relationship: [],
-      continuity: recalled.filter((material) => material.role !== "identity"),
-      anamnesis: input.anamnesis ?? [],
-      previousBoat: input.previousBoat ?? null,
-      uncertainties: [],
+  const delays = input.openRetry?.delaysMs ?? PRESENCE_OPEN_RETRY_DELAYS_MS;
+  const deadline = Date.now() + (input.openRetry?.deadlineMs ?? PRESENCE_OPEN_RETRY_DEADLINE_MS);
+  const request: PresenceOpenInput = {
+    binding: {
+      room: input.binding.room,
+      spirit: input.binding.spirit,
+      operator: input.operator,
+      session: input.binding.session,
     },
-    `presence-open:${input.binding.session}`,
-  );
+    identity: [
+      identityMaterial(input),
+      ...recalled.filter((material) => material.role === "identity"),
+    ],
+    relationship: [],
+    continuity: recalled.filter((material) => material.role !== "identity"),
+    anamnesis: input.anamnesis ?? [],
+    previousBoat: input.previousBoat ?? null,
+    uncertainties: [],
+  };
+  const idempotencyKey = `presence-open:${input.binding.session}`;
+  let opened: Record<string, any>;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      opened = await openPresence(input.binding, request, idempotencyKey);
+      break;
+    } catch (error) {
+      const delay = delays[attempt];
+      if (
+        !(error instanceof HostUnavailable)
+        || delay === undefined
+        || Date.now() + delay > deadline
+      ) {
+        throw error;
+      }
+      console.warn(
+        `[athanor] Presence open retrying in ${delay}ms (attempt ${attempt + 1}): ${error.message}`,
+      );
+      await sleep(delay);
+    }
+  }
   return {
     id: requiredResultId(opened.frameId, "open", "frame"),
     rendered: String(opened.rendered ?? ""),

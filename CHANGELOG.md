@@ -114,6 +114,12 @@ the exact implementation record.
 
 ### Fixed
 
+- Presence no longer degrades on the wake turn after a harness restart. The
+  session's first `presence open` used to race the room Hosts binding their
+  ports and gave up on one connection refusal, so the restarted session ran
+  without a frame. The open now retries a startup-shaped `HostUnavailable` on
+  a short bounded schedule (0.5s/1s/2s/3s, 15s deadline) under its existing
+  idempotency key. Mid-session commands keep their single attempt.
 - GIGA conversation ingest was dead in production. `giga.ts` called
   `path.dirname` without importing `path`. The `ReferenceError` fell into a
   `catch` that answers "this is a subagent session". Every session therefore

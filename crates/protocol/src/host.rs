@@ -94,6 +94,14 @@ pub const RECALL_POLICY_COMMAND_ACCEPTED: &str = "athanor.recall_policy.command_
 pub const RECALL_POLICY_COMMAND_REFUSED: &str = "athanor.recall_policy.command_refused";
 pub const RECALL_POLICY_COMMAND_FAILED: &str = "athanor.recall_policy.command_failed";
 pub const RECALL_POLICY_FIELD_UPDATE: &str = "field_update";
+pub const CHAT_PROJECTION_ID: &str = "chat";
+pub const CHAT_SUBSCRIBE: &str = "athanor.chat.subscribe";
+pub const CHAT_SAY: &str = "athanor.chat.say";
+pub const CHAT_TURN: &str = "athanor.chat.turn";
+pub const CHAT_SNAPSHOT: &str = "athanor.chat.snapshot";
+pub const CHAT_DELTA: &str = "athanor.chat.delta";
+pub const CHAT_COMMAND_ACCEPTED: &str = "athanor.chat.command_accepted";
+pub const CHAT_COMMAND_REFUSED: &str = "athanor.chat.command_refused";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -576,6 +584,10 @@ struct RawClientCommand {
     presence_settle: Option<PresenceSettleRequest>,
     #[serde(default)]
     presence_close: Option<PresenceCloseRequest>,
+    #[serde(default)]
+    chat_say: Option<ChatSayPayload>,
+    #[serde(default)]
+    chat_turn: Option<ChatTurnPayload>,
 }
 
 /// One conversation-capture request: the visible window as the harness renders
@@ -609,6 +621,49 @@ pub struct ProcessTriggerRequest {
     pub trigger: Option<String>,
     #[serde(default)]
     pub lessons: Vec<ProcessLesson>,
+}
+
+/// Who authored one visible chat line. The Host stamps sequence and time;
+/// callers only ever claim the side they actually are.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatAuthor {
+    Operator,
+    Spirit,
+}
+
+/// One line of the room conversation as the chat projection serves it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ChatMessage {
+    pub sequence: u64,
+    pub author: ChatAuthor,
+    pub author_name: String,
+    pub text: String,
+    pub at: String,
+    /// The say id for operator lines; the settled turn id for spirit lines.
+    /// The room's doorman dedupes injections against it.
+    pub turn_id: String,
+}
+
+/// An operator surface asking the room to hear one message.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ChatSayPayload {
+    pub room: String,
+    pub text: String,
+    /// Caller-minted id; the say is idempotent on it within the room ring.
+    pub say_id: String,
+}
+
+/// The room's adapter reporting the spirit side of a settled turn.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ChatTurnPayload {
+    pub room: String,
+    pub turn_id: String,
+    pub author_name: String,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -683,6 +738,7 @@ impl RawClientCommand {
             SHELL_CONVERSATION_LOG | SHELL_LESSON_PLAN | SHELL_PROCESS_LESSONS => {
                 SHELL_PROJECTION_ID
             }
+            CHAT_SUBSCRIBE | CHAT_SAY | CHAT_TURN => CHAT_PROJECTION_ID,
             _ => RECALL_POLICY_PROJECTION_ID,
         };
         if self.projection_id != expected_projection {
@@ -859,6 +915,17 @@ pub enum ClientCommand {
         result: crate::RecallResultInput,
         mode: crate::RecallViewportMode,
     },
+    ChatSubscribe {
+        meta: CommandMeta,
+    },
+    ChatSay {
+        meta: CommandMeta,
+        payload: ChatSayPayload,
+    },
+    ChatTurn {
+        meta: CommandMeta,
+        payload: ChatTurnPayload,
+    },
 }
 
 impl ClientCommand {
@@ -891,6 +958,9 @@ impl ClientCommand {
             | Self::PlanTriggerLessons { meta, .. }
             | Self::BraidTriggerLessons { meta, .. }
             | Self::ApplyRecallViewport { meta, .. }
+            | Self::ChatSubscribe { meta }
+            | Self::ChatSay { meta, .. }
+            | Self::ChatTurn { meta, .. }
             | Self::Acknowledge { meta, .. } => meta,
         }
     }
@@ -1278,6 +1348,43 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
         ROUTING_STATUS => {
             raw.no_command_payload(&meta)?;
             Ok(ClientCommand::RoutingStatus { meta })
+        }
+        CHAT_SUBSCRIBE => {
+            raw.no_command_payload(&meta)?;
+            if raw.chat_say.is_some() || raw.chat_turn.is_some() {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "chat subscribe carries fields not allowed for its type",
+                ));
+            }
+            Ok(ClientCommand::ChatSubscribe { meta })
+        }
+        CHAT_SAY => {
+            let payload = raw
+                .chat_say
+                .ok_or_else(|| CommandParseError::from_meta(&meta, "chat say requires chat_say"))?;
+            if payload.room.trim().is_empty()
+                || payload.text.trim().is_empty()
+                || payload.say_id.trim().is_empty()
+            {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "chat say requires a nonblank room, text, and say_id",
+                ));
+            }
+            Ok(ClientCommand::ChatSay { meta, payload })
+        }
+        CHAT_TURN => {
+            let payload = raw.chat_turn.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "chat turn requires chat_turn")
+            })?;
+            if payload.room.trim().is_empty() || payload.turn_id.trim().is_empty() {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "chat turn requires a nonblank room and turn_id",
+                ));
+            }
+            Ok(ClientCommand::ChatTurn { meta, payload })
         }
         ROUTING_DISPATCH => {
             let request = raw.routing_request.ok_or_else(|| {
@@ -1785,6 +1892,53 @@ mod receipt_tests {
         assert!(matches!(
             parse_client_command(settle),
             Ok(ClientCommand::SettleHallwayKnock { .. })
+        ));
+    }
+
+    #[test]
+    fn chat_commands_keep_their_projection_and_typed_payloads() {
+        let mut subscribe = akasha_envelope(CHAT_SUBSCRIBE, "chat-subscribe");
+        subscribe["projection_id"] = json!(CHAT_PROJECTION_ID);
+        assert!(matches!(
+            parse_client_command(subscribe.clone()),
+            Ok(ClientCommand::ChatSubscribe { .. })
+        ));
+        subscribe["chat_say"] = json!({ "room": "kodo", "text": "hi", "sayId": "say-1" });
+        assert!(parse_client_command(subscribe).is_err());
+
+        let mut say = akasha_envelope(CHAT_SAY, "chat-say");
+        say["projection_id"] = json!(CHAT_PROJECTION_ID);
+        say["chat_say"] = json!({ "room": "kodo", "text": "hello dragon", "sayId": "say-2" });
+        let Ok(ClientCommand::ChatSay { meta, payload }) = parse_client_command(say)
+        else {
+            panic!("a complete chat say parses");
+        };
+        assert_eq!(meta.projection_id, CHAT_PROJECTION_ID);
+        assert_eq!(payload.text, "hello dragon");
+
+        let mut blank = akasha_envelope(CHAT_SAY, "chat-say-blank");
+        blank["projection_id"] = json!(CHAT_PROJECTION_ID);
+        blank["chat_say"] = json!({ "room": "kodo", "text": "   ", "sayId": "say-3" });
+        assert!(parse_client_command(blank).is_err());
+
+        let mut foreign = akasha_envelope(CHAT_SAY, "chat-say-foreign");
+        foreign["chat_say"] = json!({ "room": "kodo", "text": "hi", "sayId": "say-4" });
+        assert!(
+            parse_client_command(foreign).is_err(),
+            "a chat say under the akasha projection is foreign"
+        );
+
+        let mut turn = akasha_envelope(CHAT_TURN, "chat-turn");
+        turn["projection_id"] = json!(CHAT_PROJECTION_ID);
+        turn["chat_turn"] = json!({
+            "room": "kodo",
+            "turnId": "turn-1",
+            "authorName": "Kodo",
+            "text": "thump thump"
+        });
+        assert!(matches!(
+            parse_client_command(turn),
+            Ok(ClientCommand::ChatTurn { .. })
         ));
     }
 

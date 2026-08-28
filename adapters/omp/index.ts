@@ -365,6 +365,16 @@ function hydrateTurnAdditionMemo(effectiveRoomDir: string, sessionKey: string): 
     }
     for (const [turnKey, additions] of Object.entries(persisted.turns)) {
       if (!Array.isArray(additions)) throw new Error("invalid turn-addition memo");
+      // A memo persisted before the athanor-* naming cutover carries the old
+      // customType spellings; every read path compares the new ones, so a
+      // stale entry would double-inject its context block. Rewrite on load;
+      // the next persist writes the new names to disk.
+      for (const addition of additions as TurnAddition[]) {
+        const customType = (addition as { customType?: unknown }).customType;
+        if (typeof customType === "string" && customType.startsWith("solarisael-")) {
+          (addition as { customType: string }).customType = `athanor-${customType.slice("solarisael-".length)}`;
+        }
+      }
       memo.set(turnKey, additions as TurnAddition[]);
     }
   } catch (error) {

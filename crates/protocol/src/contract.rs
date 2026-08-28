@@ -28,7 +28,7 @@
 /// checks. The ceiling: derive this from the migration registry the way
 /// `akasha::migrations::consolidated_version_labels` already derives the backup
 /// allowlist, once a crate that both readers may depend on owns that registry.
-pub const SUBSTRATE_SCHEMA_VERSION: u32 = 25;
+pub const SUBSTRATE_SCHEMA_VERSION: u32 = 28;
 
 macro_rules! loopback_host_literal {
     () => {

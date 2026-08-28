@@ -37,131 +37,210 @@ const recallPolicy = {
   updatedAt: "2026-08-14T00:00:00.000Z",
 };
 
+// Bun keeps a module mock for the whole process, so every later test file in
+// the run sees these stand-ins. Each mock therefore spreads the real module
+// and the fakes answer only while this file's own fixture is live; the
+// fixture flag is `effectiveRoomDir`, set by beforeEach and cleared by
+// afterEach. Downstream files get the genuine surface.
+const realRoom = await import("../house-proof/room.ts?real");
+const realFence = await import("../house-proof/top-level-session-fence.ts?real");
+const realConversationLog = await import("../house-proof/conversation-log.ts?real");
+const realGiga = await import("../giga.ts?real");
+const realRecall = await import("../house-proof/recall.ts?real");
+const realTools = await import("../house-proof/tools.ts?real");
+const realPresence = await import("../house-proof/presence.ts?real");
+const realHallway = await import("../house-proof/hallway.ts?real");
+const realAnamnesis = await import("../house-proof/anamnesis.ts?real");
+const realSubstrate = await import("../house-proof/substrate.ts?real");
+const realEntities = await import("../house-proof/entity-resolution.ts?real");
+const realTelemetry = await import("../house-proof/recall-telemetry.ts?real");
+const realContext = await import("../house-proof/context.ts?real");
+const realPolicy = await import("../house-proof/recall-policy.ts?real");
+
+const live = () => effectiveRoomDir !== "";
+function gated<F extends (...args: any[]) => any>(fake: F, genuine: F): F {
+  return ((...args: any[]) => (live() ? fake(...args) : genuine(...args))) as F;
+}
+
 mock.module("../house-proof/room.ts", () => ({
-  applyPromptDirectives: async () => ({ state: { operator: "Sol", embodiedSpirit: "Kodo" } }),
-  roomContext: () => ({
-    room: "kodo",
-    spirit: "Kodo",
-    operator: "Sol",
-    effectiveRoomDir,
-  }),
-  writeActiveSpiritSnapshot: async () => undefined,
+  ...realRoom,
+  applyPromptDirectives: gated(
+    async () => ({ state: { operator: "Sol", embodiedSpirit: "Kodo" } }),
+    realRoom.applyPromptDirectives,
+  ),
+  roomContext: gated(
+    () => ({ room: "kodo", spirit: "Kodo", operator: "Sol", effectiveRoomDir }),
+    realRoom.roomContext,
+  ),
+  writeActiveSpiritSnapshot: gated(async () => undefined, realRoom.writeActiveSpiritSnapshot),
 }));
 
 mock.module("../house-proof/top-level-session-fence.ts", () => ({
-  adoptTopLevelSession: (_room: string, session: string) => { topLevelSessionId ||= session; },
-  registerTopLevelSession: (_room: string, session: string) => { topLevelSessionId = session; },
-  retireTopLevelSession: (_room: string, session: string) => {
-    if (topLevelSessionId === session) topLevelSessionId = "";
-  },
-  topLevelSession: () => topLevelSessionId || null,
+  ...realFence,
+  adoptTopLevelSession: gated(
+    (_room: string, session: string) => { topLevelSessionId ||= session; },
+    realFence.adoptTopLevelSession,
+  ),
+  registerTopLevelSession: gated(
+    (_room: string, session: string) => { topLevelSessionId = session; },
+    realFence.registerTopLevelSession,
+  ),
+  retireTopLevelSession: gated(
+    (_room: string, session: string) => {
+      if (topLevelSessionId === session) topLevelSessionId = "";
+    },
+    realFence.retireTopLevelSession,
+  ),
+  topLevelSession: gated(() => topLevelSessionId || null, realFence.topLevelSession),
 }));
 
 mock.module("../house-proof/conversation-log.ts", () => ({
-  logConversationWindow: async () => ({ fresh: freshConversation, loggedTurns: [] }),
+  ...realConversationLog,
+  logConversationWindow: gated(
+    async () => ({ fresh: freshConversation, loggedTurns: [] }),
+    realConversationLog.logConversationWindow,
+  ),
 }));
 
 mock.module("../giga.ts", () => ({
-  closeGigaTransports: async () => undefined,
-  ingestGigaLoggedTurnsDetached: () => undefined,
+  ...realGiga,
+  closeGigaTransports: gated(async () => undefined, realGiga.closeGigaTransports),
+  ingestGigaLoggedTurnsDetached: gated(() => undefined, realGiga.ingestGigaLoggedTurnsDetached),
 }));
 
 mock.module("../house-proof/recall.ts", () => ({
-  closeRustRecallTransports: () => undefined,
-  recallWithRouting: async (_roomDir: string, _room: string, query: string, options: unknown) => {
-    automaticRecallOptions.push(options);
-    return {
-      ok: true,
-      result: { query },
-    };
-  },
+  ...realRecall,
+  closeRustRecallTransports: gated(() => undefined, realRecall.closeRustRecallTransports),
+  recallWithRouting: gated(
+    (async (_roomDir: string, _room: string, query: string, options: unknown) => {
+      automaticRecallOptions.push(options);
+      return {
+        ok: true,
+        result: { query },
+      };
+    }) as typeof realRecall.recallWithRouting,
+    realRecall.recallWithRouting,
+  ),
 }));
 
 mock.module("../house-proof/tools.ts", () => ({
-  closeRustRememberTransports: () => undefined,
-  registerSolarisaelTools: () => undefined,
-  writeRustMemory: async () => undefined,
+  ...realTools,
+  closeRustRememberTransports: gated(() => undefined, realTools.closeRustRememberTransports),
+  registerSolarisaelTools: gated(() => undefined, realTools.registerSolarisaelTools),
+  writeRustMemory: gated(async () => undefined, realTools.writeRustMemory),
 }));
 mock.module("../house-proof/presence.ts", () => ({
-  compilePresenceContext: async (request: any) => {
-    presenceOpens.push(request);
-    presenceCompiles.push(request);
-    return {
-      frameId: "frame-1",
-      frameVersion: 1,
-      frameRendered: "Presence frame",
-      contractId: "contract-1",
-      turnId: request.turnId,
-      directiveIds: ["presence:active-spirit"],
-      rendered: "Presence frame\n\nPresence contract",
-    };
-  },
-  settlePresence: async () => ({ contractId: "contract-1" }),
-  responseDigest: () => "d".repeat(64),
+  ...realPresence,
+  compilePresenceContext: gated(
+    async (request: any) => {
+      presenceOpens.push(request);
+      presenceCompiles.push(request);
+      return {
+        frameId: "frame-1",
+        frameVersion: 1,
+        frameRendered: "Presence frame",
+        contractId: "contract-1",
+        turnId: request.turnId,
+        directiveIds: ["presence:active-spirit"],
+        rendered: "Presence frame\n\nPresence contract",
+      };
+    },
+    realPresence.compilePresenceContext,
+  ),
+  settlePresence: gated(
+    (async () => ({ contractId: "contract-1" })) as typeof realPresence.settlePresence,
+    realPresence.settlePresence,
+  ),
+  responseDigest: gated(() => "d".repeat(64), realPresence.responseDigest),
 }));
 mock.module("../house-proof/hallway.ts", () => ({
-  projectHallwayInbox: async () => hallwayProjection,
+  ...realHallway,
+  projectHallwayInbox: gated(async () => hallwayProjection, realHallway.projectHallwayInbox),
 }));
 
 mock.module("../house-proof/anamnesis.ts", () => ({
-  closeRustAnamnesisTransports: () => undefined,
-  formatAnamnesisContext: () => "",
-  queryAnamnesis: async (_roomDir: string, _room: string, options: unknown) => {
-    automaticAnamnesisOptions.push(options);
-    return { ok: true };
-  },
+  ...realAnamnesis,
+  closeRustAnamnesisTransports: gated(() => undefined, realAnamnesis.closeRustAnamnesisTransports),
+  formatAnamnesisContext: gated(() => "", realAnamnesis.formatAnamnesisContext),
+  queryAnamnesis: gated(
+    (async (_roomDir: string, _room: string, options: unknown) => {
+      automaticAnamnesisOptions.push(options);
+      return { ok: true };
+    }) as typeof realAnamnesis.queryAnamnesis,
+    realAnamnesis.queryAnamnesis,
+  ),
 }));
 
 mock.module("../house-proof/substrate.ts", () => ({
-  catchBoat: async (_room: string, options: unknown) => {
-    automaticWakeOptions.push(options);
-    return { ok: true, found: false };
-  },
-  closePaperBoatTransports: () => undefined,
+  ...realSubstrate,
+  catchBoat: gated(
+    (async (_room: string, options: unknown) => {
+      automaticWakeOptions.push(options);
+      return { ok: true, found: false };
+    }) as typeof realSubstrate.catchBoat,
+    realSubstrate.catchBoat,
+  ),
+  closePaperBoatTransports: gated(() => undefined, realSubstrate.closePaperBoatTransports),
   // An answered, empty board: the wake letter must stay unchanged.
-  readQuestBoard: async () => ({ ok: true, quests: [] }),
-  formatQuestBoardSection: () => "",
+  readQuestBoard: gated(async () => ({ ok: true, quests: [] }), realSubstrate.readQuestBoard),
+  formatQuestBoardSection: gated(() => "", realSubstrate.formatQuestBoardSection),
 }));
 
 mock.module("../house-proof/entity-resolution.ts", () => ({
-  resolveEntities: async (input: unknown) => {
-    automaticEntityInputs.push(input);
-    return { ok: true, matches: [] };
-  },
+  ...realEntities,
+  resolveEntities: gated(
+    (async (input: unknown) => {
+      automaticEntityInputs.push(input);
+      return { ok: true, matches: [] };
+    }) as typeof realEntities.resolveEntities,
+    realEntities.resolveEntities,
+  ),
 }));
 
 mock.module("../house-proof/recall-telemetry.ts", () => ({
-  recordRecallTelemetry: async () => true,
+  ...realTelemetry,
+  recordRecallTelemetry: gated(async () => true, realTelemetry.recordRecallTelemetry),
 }));
 
 
 mock.module("../house-proof/context.ts", () => ({
-  analyzeContext: async () => ({
-    route: {
-      entityResolutionSuggested,
-      intent: "technical_project",
-      terms: ["cache"],
-      requiredTerms: [],
-      recognizedEntities: [],
-    },
-  }),
-  applyRecallViewport: async (_binding: unknown, recalled: { query: string }) => ({
-    presentation: {
-      found: [{ id: recalled.query }],
-      ...(omitViewportWarnings ? {} : { warnings: [] }),
-      retrievalCandidates: [{ id: recalled.query }],
-      canonMatches: [],
-      dateMatches: [],
-    },
-    diagnostics: {},
-  }),
+  ...realContext,
+  analyzeContext: gated(
+    async () => ({
+      route: {
+        entityResolutionSuggested,
+        intent: "technical_project",
+        terms: ["cache"],
+        requiredTerms: [],
+        recognizedEntities: [],
+      },
+    }),
+    realContext.analyzeContext,
+  ),
+  applyRecallViewport: gated(
+    (async (_binding: unknown, recalled: { query: string }) => ({
+      presentation: {
+        found: [{ id: recalled.query }],
+        ...(omitViewportWarnings ? {} : { warnings: [] }),
+        retrievalCandidates: [{ id: recalled.query }],
+        canonMatches: [],
+        dateMatches: [],
+      },
+      diagnostics: {},
+    })) as typeof realContext.applyRecallViewport,
+    realContext.applyRecallViewport,
+  ),
 }));
 
 mock.module("../house-proof/recall-policy.ts", () => ({
+  ...realPolicy,
   RecallPolicyHostClient: class {
     session: string;
 
     constructor(binding: { session: string }) {
+      if (!live()) {
+        return new (realPolicy.RecallPolicyHostClient as any)(binding);
+      }
       this.session = binding.session;
     }
 
@@ -200,11 +279,11 @@ mock.module("../house-proof/recall-policy.ts", () => ({
       return undefined;
     }
   },
-  activeProjectFromEvidence: () => null,
-  isMutateTool: () => false,
-  markToolEvidence: () => undefined,
-  mutateToolPaths: () => [],
-  hasToolEvidence: () => false,
+  activeProjectFromEvidence: gated(() => null, realPolicy.activeProjectFromEvidence),
+  isMutateTool: gated(() => false, realPolicy.isMutateTool),
+  markToolEvidence: gated(() => undefined, realPolicy.markToolEvidence),
+  mutateToolPaths: gated(() => [], realPolicy.mutateToolPaths),
+  hasToolEvidence: gated(() => false, realPolicy.hasToolEvidence),
 }));
 
 const { default: registerAdapter } = await import("../index.ts");

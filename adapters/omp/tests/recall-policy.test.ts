@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import {
   activeProjectFromEvidence,
   RecallPolicyHostClient,
@@ -14,11 +14,22 @@ import { basename, join } from "node:path";
 
 // The adapter's own tool registration needs OMP's zod surface, which a test pi
 // does not have. Everything else in the graph stays real: the evidence must
-// travel the product's own tap.
+// travel the product's own tap. Bun keeps this mock for the whole process, so
+// the fakes answer only while this file runs; later files get the genuine
+// tools surface, whose GIGA census the production-seam test reads.
+const realTools = await import("../house-proof/tools.ts?real");
+let toolsFixtureLive = true;
+afterAll(() => {
+  toolsFixtureLive = false;
+});
 mock.module("../house-proof/tools.ts", () => ({
-  closeRustRememberTransports: () => undefined,
-  registerSolarisaelTools: () => undefined,
-  writeRustMemory: async () => undefined,
+  ...realTools,
+  closeRustRememberTransports: () =>
+    toolsFixtureLive ? undefined : realTools.closeRustRememberTransports(),
+  registerSolarisaelTools: ((...args: any[]) =>
+    toolsFixtureLive ? undefined : (realTools.registerSolarisaelTools as any)(...args)) as any,
+  writeRustMemory: (async (...args: any[]) =>
+    toolsFixtureLive ? undefined : (realTools.writeRustMemory as any)(...args)) as any,
 }));
 
 const originalWebSocket = globalThis.WebSocket;

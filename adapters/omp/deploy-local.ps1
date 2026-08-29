@@ -32,9 +32,13 @@ Write-Host "==> OMP adapter tests"
 $GuardedEnvironment = @(
   "ATHANOR_SUBSTRATE_EXE", "ATHANOR_SUBSTRATE_ROOT", "ATHANOR_STATE_DIR", "ATHANOR_AUTO",
   "ATHANOR_GIGA_ENABLED", "ATHANOR_SUBSTRATE_TEST_DATABASE_URL", "DATABASE_URL",
-  "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "SOLARISAEL_HOUSE_RUST",
-  "SOLARISAEL_HOUSE_RUST_AUTO", "SOLARISAEL_HOUSE_AUTO", "SOLARISAEL_SUBSTRATE",
-  "SOLARISAEL_STATE_DIR", "SOLARISAEL_HOUSE_CORE", "SOLARISAEL_GIGA_ENABLED", "SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL"
+  "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"
+)
+# Every pre-cutover SOLARISAEL_* export is scrubbed by prefix: the test fence
+# refuses each one by name, and a deploy shell may carry any of them.
+$GuardedEnvironment += @(
+  [Environment]::GetEnvironmentVariables("Process").Keys |
+    Where-Object { $_ -like "SOLARISAEL_*" }
 )
 $SavedEnvironment = @{}
 foreach ($Name in $GuardedEnvironment) {

@@ -4,6 +4,8 @@ This map supports The Athanor 1.0 convergence: the planned fixes, one behavioral
 
 PostgreSQL remains the authority for every memory and lesson body. This file keeps only typed IDs, roles, retrieval reasons, and source gates. `Coding #N`, `Project #N`, and `Design #N` name separate lesson stores; project lessons use `project="the-athanor"`. A bare ID is never delivery: before fanout, the main agent retrieves each relevant lesson body and each load-bearing memory's standalone content, then includes that exact material in the kitten's quest.
 
+Every lesson in the matching section is mandatory. Before dispatch, query the typed registry and put each complete lesson body into every relevant kitten packet. IDs, titles, summaries, and this map are not delivery. A packet with a missing required body is invalid and must not spawn. The main agent owns the completeness check. Deferred lessons become mandatory when their named trigger matches; they are never silently skipped.
+
 ## Recovery anchors
 
 - **Memory #3383 — Accepted 1.0 boundary.** This is the newest intent for the program.
@@ -142,6 +144,9 @@ The release gate includes clean installation, Vault-to-AKASHA migration, restart
 
 - **Coding #188 — Use ASD-STE100 Simplified Technical English.** Keep project documents plain, direct, and bounded.
 - **Coding #337 — Comments point to project lessons.** Keep long reasoning in PostgreSQL rather than copying it into source comments.
+- **Coding #151 — A keep-in-sync comment admits a structural crack.** Put shared truth in one enforced source.
+- **Coding #194 — Comments preserve intent and connection, never code mechanics.** Explain why the seam exists, what feeds it, and what depends on it.
+- **Coding #453 — Score code against its job sentence and platform owner.** Existing callers do not prove that a function, module, or crate earns its size.
 - **Project #76 — Preserve the public documentation spine.** Keep the canonical entry surfaces consistent.
 - **Project #129 — Use the Athanor's own vocabulary.** Prefer current House nouns in human- and model-visible text while preserving wire contracts deliberately.
 - **Project #116 — Claims follow repository ownership.** A map or audit is evidence, never newer implementation authority by proximity.
@@ -184,6 +189,14 @@ The main agent owns integration, caller migration, the cross-repository orphan s
 ## Verification order
 
 - **Coding #329 and #346 — Real proof precedes regression seals.** Exercise the production-shaped boundary first; add the smallest stable guard only after the repair is observed.
+- **Coding #155 — Tests are safety nets, not coverage theatre.** Keep only guards that defend a plausible drift.
+- **Coding #161 — Uncontrolled green is not a pass.** Isolate the variable that the proof claims to measure.
+- **Coding #162 — Test the real user path, not a proxy signal.** Exercise the observable route that can actually fail.
+- **Coding #190 — Registration is not execution proof.** Invoke at least one bounded case through every destination branch.
+- **Coding #456 — A test changed with its asserted constant is not a test.** Tests encode contracts, never the current knob value.
+- **Coding #447 — A green probe proves only its exact probe.** Exercise the real macro, runtime, or integration stack before generalizing.
+- **Coding #458 — Map, cut, two knives, proof, repeat.** Independent adversarial review blocks integration until every rejection is resolved.
+- **Coding #463 — Parallel work is unlanded until the merged tree passes its real gate.** Run the actual production-shaped boundary after integration.
 - **Coding #257 and #240 — Fake-backed boundary tests are theatre.** A fixture that fabricates the boundary's answer can hide a completely broken integration.
 - **Coding #215 — Integration proof crosses the real boundary.** Exercise the actual process, database, transport, or rendered surface.
 - **Coding #126 and #127 — Green output is not intention proof.** Load the positive rule and its stop-at-green anti-pattern together; compare the result and execution path with the selected authority and contract.
@@ -221,6 +234,15 @@ These lessons remain authoritative but do not drive every 1.0 quest.
 
 - **Project #70** applies only to the old WSL path during maintenance or migration.
 - **Project #123, #125, #126, #127, and #130** load when work enters their exact retrieval, source-identity, embedding, novelty, or ingest surfaces.
+- **Coding #96** loads when promoting test behavior or configuration into production.
+- **Coding #101, #354, #377, and #461** load for media, browser-state, temporal-rendering, or static-remake work.
+- **Coding #112** loads for stress, capacity, or operating-band work.
+- **Coding #118 and #464** load for JavaScript helper boundaries or Bun module-mock work.
+- **Coding #171 and #363** load for visible-result or consequence/friction work.
+- **Coding #222** loads before changing retrieval thresholds.
+- **Coding #350** loads when writing values into an existing formatted namespace.
+- **Coding #352, #356, #370, and #374** load only for PHP, Apache, or Go work.
+- **Coding #369** loads for JetStream diagnosis or repair.
 - **Coding #165, #166, #167, and #331** load only for Godot implementation slices.
 - **Coding #214** loads for pgvector dimension, type, operator-class, or HNSW work.
 - **Coding #216** is disposable transition-test data, not a routing lesson. Remove it from PostgreSQL after its Rust write, read, restart, and reread proof is accepted.

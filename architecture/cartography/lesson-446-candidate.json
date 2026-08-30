@@ -1,0 +1,8 @@
+{
+  "type": "coding",
+  "title": "Every concern owns one boundary and one clean door",
+  "supersedes_lesson_id": 446,
+  "lesson": "Name the concern before you add work. Give one concern one owned boundary. The boundary can be a folder, module, package, service, schema, artifact family, or another form that fits the medium. Keep its contract, implementation, tests, and evidence together when those parts exist. Give consumers one clean public door. Make cost, state, authority, and failure visible at that door. Keep internal details behind it. Put shared vocabulary under one owner when two or more concerns use it. Do not extend a grab-bag boundary with unrelated work. Create a new boundary only when the concern has distinct purpose, authority, state, lifecycle, or change pressure. Do not split one concern into ceremonial layers. Apply this rule to source code, data work, tools, documentation systems, generated artifacts, and runtime services. Language-specific modules and packages are examples, not the scope of the rule.",
+  "trigger_context": "When new work needs a home or an existing boundary starts to collect unrelated responsibilities.",
+  "proof_pattern": "Name the concern in one sentence. Name its owner and public door. List the state, authority, lifecycle, and failures that stay inside. List each consumer. Reject direct access to internals. Remove the proposed boundary and identify the contract that leaks. Merge it when no contract leaks. Split an existing boundary when unrelated purposes or change pressures share the same door."
+}

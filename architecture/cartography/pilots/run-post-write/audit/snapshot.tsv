@@ -1,0 +1,2 @@
+audit_id	map_snapshot_id	expectation_count	pass_count	fail_count	unknown_count	map_gap_count	runtime_evidence	status
+run-post-write-audit-v1	run-post-write-e803723	8	4	1	3	0	none	accepted_trial_audit

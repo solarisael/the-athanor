@@ -1,0 +1,3 @@
+chunk	map_state	coverage_state	publication_state	audit_state	result
+paper-boat-source-path	mapping_complete	cancelled_time_limit	not_published	not_started	blocked_before_parallel_wave
+bounded-utf8	not_started	not_started	not_published	not_started	time_limit_reached

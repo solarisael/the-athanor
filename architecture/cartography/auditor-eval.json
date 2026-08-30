@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "purpose": "Reject unsupported or incomplete audit judgments.",
+  "checks": [
+    "Each expectation ID has one judgment.",
+    "No undeclared expectation or subject ID appears.",
+    "Each pass and fail cites sufficient map IDs.",
+    "Each unknown names the missing authority or evidence plane.",
+    "Each map_gap has one gap row with a bounded closure request.",
+    "No judgment cites repository source or comments.",
+    "No audit output changes a map row."
+  ],
+  "accept": "All checks pass and every expectation has one supported verdict."
+}

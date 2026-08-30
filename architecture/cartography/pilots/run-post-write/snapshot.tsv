@@ -1,0 +1,2 @@
+snapshot_id	repo_commit	root_symbol_id	closure_rule	source_file_count	function_count	state_count	relation_count	runtime_evidence	status
+run-post-write-e803723	e803723fb55b794c5c4732d3a05f6e0731504f1e	F01	root, direct repository callers and callees, in-scope relations, and behavior-bearing state	4	9	12	23	none; source-only pilot	accepted_source_map

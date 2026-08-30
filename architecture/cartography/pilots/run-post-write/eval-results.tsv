@@ -1,0 +1,6 @@
+run	reader	correct_questions	unsupported_claims	blocking_ambiguities	direct_misses	read_search_calls	contamination	verdict	notes
+01	map-only-clean	5	0	0	0	4	no	partial	Answered all questions; reported twelve detail ambiguities and exposed weak relation coverage.
+02	source-only	5	0	3	0	9	yes	invalid_comparison	The first repository search exposed map filenames before all claims were re-derived from source.
+03	repaired-map	5	2	1	1	5	yes	fail	Reader opened the hidden answer key; it still found missing F07-to-F08 delegation and unresolved V08 default.
+final	comparison	5	0	1	1	4	no	rejected	The clean map reader used fewer calls, but the repaired map did not earn a clean passing run inside the task limit.
+v1.1-final	map-only-clean	5	0	0	0	5	no	accepted	One bounded repair produced a clean pass with honest negative space and no forbidden reads.

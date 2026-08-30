@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { runLessonQuery } from "./lesson-context.ts";
 
 const BRIDGE_STATE = Symbol.for("solarisael.athanor.lesson-ttsr.v1");
+const STREAMING_TEXT_STATE = Symbol.for("solarisael.athanor.streaming-text-scrollback.v1");
 const PROVIDER = "athanor-lessons";
 const FAMILIES = ["coding", "writing", "design", "audio"] as const;
 
@@ -19,48 +20,45 @@ type LessonRow = {
   interruptMode?: "block" | "remind" | null; repeatCooldownSecs?: number | null;
 };
 
-type ManagerRecord = { manager: any; active: Set<string>; known: Set<string>; patched: boolean };
-type BridgeState = { sessions: Map<string, ManagerRecord>; patchedPrototype?: object };
+type ManagerRecord = { manager: any; known: Set<string> };
+type BridgeState = {
+  sessions: Map<string, ManagerRecord[]>;
+  desired: Map<string, Record<string, unknown>[]>;
+  patchedPrototype?: object;
+};
+type StreamingTextSnapshot = { key: string; text: string; gapRows: number };
+type StreamingTextState = {
+  activeText: string | null;
+  markdown: any | null;
+  nativeKeys: string[] | null;
+  snapshots: StreamingTextSnapshot[];
+  stableRows: Array<{ key: string }>;
+  colorTransform?: (text: string) => string;
+};
 
 function state(): BridgeState {
   const root = globalThis as typeof globalThis & { [BRIDGE_STATE]?: BridgeState };
-  return root[BRIDGE_STATE] ??= { sessions: new Map() };
+  return root[BRIDGE_STATE] ??= { sessions: new Map(), desired: new Map() };
 }
 
-function filterAthanor(record: ManagerRecord, rules: unknown): unknown {
-  if (!Array.isArray(rules)) return rules;
-  return rules.filter((rule) => rule?._source?.provider !== PROVIDER || record.active.has(String(rule?.name ?? "")));
-}
-
-function patchManager(record: ManagerRecord): void {
-  if (record.patched) return;
-  for (const method of ["checkDelta", "checkSnapshot", "checkAstSnapshot"]) {
-    const original = record.manager?.[method];
-    if (typeof original !== "function") throw new Error(`OMP TTSR manager has no ${method} method`);
-    Object.defineProperty(record.manager, method, {
-      configurable: true,
-      value: (...args: unknown[]) => {
-        const result = original.apply(record.manager, args);
-        return result && typeof result.then === "function"
-          ? result.then((rules: unknown) => filterAthanor(record, rules))
-          : filterAthanor(record, result);
-      },
-    });
-  }
-  record.patched = true;
-}
 
 function captureSession(session: any): void {
   const sessionId = String(session?.sessionManager?.getSessionId?.() ?? "").trim();
   const manager = session?.ttsrManager;
   if (!sessionId || !manager || typeof manager.addRule !== "function") return;
   const bridge = state();
-  let record = bridge.sessions.get(sessionId);
-  if (!record || record.manager !== manager) {
-    record = { manager, active: new Set(), known: new Set(), patched: false };
-    bridge.sessions.set(sessionId, record);
+  const records = bridge.sessions.get(sessionId) ?? [];
+  let record = records.find((candidate) => candidate.manager === manager);
+  if (!record) {
+    record = { manager, known: new Set() };
+    records.push(record);
+    bridge.sessions.set(sessionId, records);
   }
-  patchManager(record);
+  const desired = bridge.desired.get(sessionId) ?? [];
+  for (const rule of desired) {
+    const name = String(rule.name);
+    if (!record.known.has(name) && record.manager.addRule(rule)) record.known.add(name);
+  }
 }
 
 export function installLessonTtsrBridge(pi: any): string | null {
@@ -78,6 +76,228 @@ export function installLessonTtsrBridge(pi: any): string | null {
     },
   });
   bridge.patchedPrototype = prototype;
+  return null;
+}
+
+function trimBlankRows(rows: readonly string[]): readonly string[] {
+  let start = 0;
+  let end = rows.length;
+  while (start < end && !/\S/.test(rows[start] ?? "")) start += 1;
+  while (end > start && !/\S/.test(rows[end - 1] ?? "")) end -= 1;
+  return rows.slice(start, end);
+}
+
+function isRenderedPrefix(prefix: readonly string[], rows: readonly string[]): boolean {
+  return prefix.length <= rows.length && prefix.every((row, index) => row === rows[index]);
+}
+
+function singleStreamingText(message: any, transient: boolean): string | null {
+  if (!transient || !Array.isArray(message?.content)) return null;
+  const textIndex = message.content.findIndex((block: any) => block?.type === "text");
+  if (textIndex < 0 || textIndex !== message.content.length - 1) return null;
+  if (!message.content.slice(0, textIndex).every((block: any) =>
+    block?.type === "thinking" || block?.type === "redactedThinking"
+  )) return null;
+  const text = String(message.content[textIndex]?.text ?? "").trim();
+  return text.length > 0 ? text : null;
+}
+
+function stableKeys(rows: readonly any[]): string[] {
+  return rows.map((row) => String(row?.key ?? ""));
+}
+
+function sameKeys(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((key, index) => key === right[index]);
+}
+
+export function installStreamingTranscriptBridge(pi: any): string | null {
+  const AssistantMessageComponent = pi?.pi?.AssistantMessageComponent;
+  const Markdown = pi?.pi?.Markdown;
+  const getMarkdownTheme = pi?.pi?.getMarkdownTheme;
+  const prototype = AssistantMessageComponent?.prototype;
+  if (!prototype || typeof Markdown !== "function" || typeof getMarkdownTheme !== "function") {
+    return "OMP does not expose the streaming transcript bridge";
+  }
+  if (prototype[STREAMING_TEXT_STATE]) return null;
+
+  const originalUpdateContent = prototype.updateContent;
+  const originalRender = prototype.render;
+  const originalGetStableRows = prototype.getTranscriptStableRows;
+  const originalRenderStableRows = prototype.renderTranscriptStableRows;
+  const originalSetTextColorTransform = prototype.setTextColorTransform;
+  if (
+    typeof originalUpdateContent !== "function"
+    || typeof originalRender !== "function"
+    || typeof originalGetStableRows !== "function"
+    || typeof originalRenderStableRows !== "function"
+  ) {
+    return "OMP streaming transcript API is incomplete";
+  }
+
+  const states = new WeakMap<object, StreamingTextState>();
+  const stateFor = (component: object): StreamingTextState => {
+    let record = states.get(component);
+    if (!record) {
+      record = { activeText: null, markdown: null, nativeKeys: null, snapshots: [], stableRows: [] };
+      states.set(component, record);
+    }
+    return record;
+  };
+  const renderTextSnapshot = (
+    record: StreamingTextState,
+    snapshot: StreamingTextSnapshot,
+    width: number,
+  ): readonly string[] => {
+    const options = record.colorTransform ? { color: record.colorTransform } : undefined;
+    return new Markdown(snapshot.text, 1, 0, getMarkdownTheme(), options, 0).render(width);
+  };
+  const renderCombinedSnapshot = (
+    component: object,
+    record: StreamingTextState,
+    snapshot: StreamingTextSnapshot,
+    width: number,
+  ): readonly string[] => {
+    const nativeCount = record.nativeKeys?.length ?? 0;
+    const nativeRender = nativeCount > 0
+      ? originalRenderStableRows.call(component, nativeCount, width)
+      : [];
+    return [
+      ...nativeRender,
+      ...new Array(snapshot.gapRows).fill(""),
+      ...renderTextSnapshot(record, snapshot, width),
+    ];
+  };
+
+  Object.defineProperty(prototype, "updateContent", {
+    configurable: true,
+    value: function (message: any, opts?: { transient?: boolean }) {
+      const result = originalUpdateContent.apply(this, arguments);
+      const record = stateFor(this);
+      const text = singleStreamingText(message, opts?.transient === true);
+      if (text === null) {
+        record.activeText = null;
+        record.markdown = null;
+        return result;
+      }
+      if (record.activeText !== null && !text.startsWith(record.activeText)) {
+        if (record.snapshots.length > 0) {
+          record.activeText = null;
+          record.markdown = null;
+          return result;
+        }
+        record.markdown = null;
+        record.nativeKeys = null;
+      }
+      const options = record.colorTransform ? { color: record.colorTransform } : undefined;
+      if (!record.markdown) {
+        record.markdown = new Markdown(text, 1, 0, getMarkdownTheme(), options, 0);
+      } else {
+        record.markdown.setText(text);
+      }
+      record.markdown.transientRenderCache = true;
+      record.activeText = text;
+      return result;
+    },
+  });
+
+  Object.defineProperty(prototype, "render", {
+    configurable: true,
+    value: function (width: number) {
+      const rendered = originalRender.apply(this, arguments);
+      const record = states.get(this);
+      if (!record?.markdown || record.activeText === null) return rendered;
+
+      const nativeRows = originalGetStableRows.call(this);
+      const currentNativeKeys = stableKeys(nativeRows);
+      if (record.nativeKeys === null) {
+        record.nativeKeys = currentNativeKeys;
+      } else if (!sameKeys(record.nativeKeys, currentNativeKeys)) {
+        if (record.snapshots.length > 0) {
+          record.activeText = null;
+          record.markdown = null;
+          return rendered;
+        }
+        record.nativeKeys = currentNativeKeys;
+      }
+
+      record.markdown.render(width);
+      const stableText = String(record.markdown.getLastRenderStableText?.() ?? "");
+      if (stableText.length === 0 || !/\S/.test(record.activeText.slice(stableText.length))) return rendered;
+      const previous = record.snapshots.at(-1);
+      if (previous?.text === stableText || (previous && !stableText.startsWith(previous.text))) return rendered;
+
+      const textRender = renderTextSnapshot(record, { key: "", text: stableText, gapRows: 0 }, width);
+      const liveRender = trimBlankRows(rendered);
+      const nativeRender = currentNativeKeys.length > 0
+        ? originalRenderStableRows.call(this, currentNativeKeys.length, width)
+        : [];
+      if (!isRenderedPrefix(nativeRender, liveRender)) return rendered;
+      let textStart = -1;
+      for (let start = nativeRender.length; start + textRender.length <= liveRender.length; start += 1) {
+        if (!liveRender.slice(nativeRender.length, start).every((row) => !/\S/.test(row))) break;
+        if (isRenderedPrefix(textRender, liveRender.slice(start))) {
+          textStart = start;
+          break;
+        }
+      }
+      if (textStart < 0) return rendered;
+
+      const snapshot = {
+        key: createHash("sha256").update(stableText).digest("hex"),
+        text: stableText,
+        gapRows: textStart - nativeRender.length,
+      };
+      const stableRender = renderCombinedSnapshot(this, record, snapshot, width);
+      if (!isRenderedPrefix(stableRender, liveRender)) return rendered;
+      const previousRender = previous ? renderCombinedSnapshot(this, record, previous, width) : nativeRender;
+      if (!isRenderedPrefix(previousRender, stableRender) || previousRender.length === stableRender.length) return rendered;
+      record.snapshots.push(snapshot);
+      record.stableRows.push({ key: snapshot.key });
+      return rendered;
+    },
+  });
+
+  Object.defineProperty(prototype, "getTranscriptStableRows", {
+    configurable: true,
+    value: function () {
+      const nativeRows = originalGetStableRows.apply(this, arguments);
+      const record = states.get(this);
+      if (!record?.stableRows.length || !sameKeys(record.nativeKeys ?? [], stableKeys(nativeRows))) return nativeRows;
+      return [...nativeRows, ...record.stableRows];
+    },
+  });
+
+  Object.defineProperty(prototype, "renderTranscriptStableRows", {
+    configurable: true,
+    value: function (count: number, width: number) {
+      const nativeRows = originalGetStableRows.call(this);
+      const record = states.get(this);
+      if (!record?.snapshots.length || !sameKeys(record.nativeKeys ?? [], stableKeys(nativeRows))) {
+        return originalRenderStableRows.apply(this, arguments);
+      }
+      const nativeCount = nativeRows.length;
+      if (count <= nativeCount) return originalRenderStableRows.call(this, count, width);
+      const index = Math.min(Math.trunc(count) - nativeCount, record.snapshots.length);
+      return index <= 0 ? [] : renderCombinedSnapshot(this, record, record.snapshots[index - 1]!, width);
+    },
+  });
+
+  if (typeof originalSetTextColorTransform === "function") {
+    Object.defineProperty(prototype, "setTextColorTransform", {
+      configurable: true,
+      value: function (transform?: (text: string) => string) {
+        const record = stateFor(this);
+        if (record.snapshots.length > 0 && record.colorTransform !== transform) {
+          record.activeText = null;
+          record.markdown = null;
+        }
+        record.colorTransform = transform;
+        return originalSetTextColorTransform.apply(this, arguments);
+      },
+    });
+  }
+
+  Object.defineProperty(prototype, STREAMING_TEXT_STATE, { value: true });
   return null;
 }
 
@@ -134,27 +354,55 @@ export async function syncLessonTtsr(args: {
 }): Promise<{ active: number; added: number; warnings: string[] }> {
   args.ctx.getContextUsage?.();
   const sessionId = String(args.ctx.sessionManager?.getSessionId?.() ?? args.ctx.sessionID ?? "").trim();
-  const record = state().sessions.get(sessionId);
-  if (!record) return { active: 0, added: 0, warnings: ["native OMP TTSR manager unavailable"] };
+  const bridge = state();
+  const records = bridge.sessions.get(sessionId) ?? [];
+  if (records.length === 0) {
+    return { active: 0, added: 0, warnings: ["native OMP TTSR manager unavailable"] };
+  }
 
-  const queries = FAMILIES.map((family) => runLessonQuery(args.roomDir, args.room, { type: family, limit: 50 }));
-  if (args.activeProject) queries.push(runLessonQuery(args.roomDir, args.room, { type: "project", project: args.activeProject, limit: 50 }));
+  const queries = FAMILIES.map((family) =>
+    runLessonQuery(args.roomDir, args.room, { type: family, limit: 50 }));
+  if (args.activeProject) {
+    queries.push(runLessonQuery(args.roomDir, args.room, {
+      type: "project",
+      project: args.activeProject,
+      limit: 50,
+    }));
+  }
   const results = await Promise.all(queries);
+  const queryFailures = results.filter((result: any) => result?.ok !== true);
+  if (queryFailures.length > 0) {
+    const warnings = queryFailures.map((result: any) =>
+      `native lesson query failed: ${String(result?.error ?? "unknown refusal")}`);
+    return { active: bridge.desired.get(sessionId)?.length ?? 0, added: 0, warnings };
+  }
+
   const rows = results.flatMap(rowsFrom);
-  const rules = rows.map((row) => nativeRule(row, args.activeProject)).filter((rule): rule is Record<string, unknown> => rule !== null);
+  const queriedRules = rows.map((row) => nativeRule(row, args.activeProject))
+    .filter((rule): rule is Record<string, unknown> => rule !== null);
+  const desired = bridge.desired.get(sessionId);
+  const changed = desired !== undefined
+    && JSON.stringify(desired.map((rule) => rule.name)) !== JSON.stringify(queriedRules.map((rule) => rule.name));
+  const rules = desired ?? queriedRules;
+  if (!desired) bridge.desired.set(sessionId, rules);
   const next = new Set(rules.map((rule) => String(rule.name)));
   let added = 0;
-  const warnings: string[] = [];
+  const warnings: string[] = changed
+    ? ["native lesson rules changed; restart OMP to apply the new set"]
+    : [];
   for (const rule of rules) {
     const name = String(rule.name);
-    if (record.known.has(name)) continue;
-    if (record.manager.addRule(rule)) {
-      record.known.add(name);
-      added += 1;
-    } else {
-      warnings.push(`native OMP rejected ${name}`);
+    let ruleAdded = false;
+    for (const record of records) {
+      if (record.known.has(name)) continue;
+      if (record.manager.addRule(rule)) {
+        record.known.add(name);
+        ruleAdded = true;
+      } else {
+        warnings.push(`native OMP rejected ${name}`);
+      }
     }
+    if (ruleAdded) added += 1;
   }
-  record.active = next;
   return { active: next.size, added, warnings };
 }

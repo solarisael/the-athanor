@@ -1,0 +1,100 @@
+{
+  "version": "1.2.0",
+  "purpose": "Create a snapshot-bound factual behavior map for one enumerable source closure.",
+  "input": {
+    "required": [
+      "repository_commit",
+      "root_symbol",
+      "closure_rule"
+    ],
+    "closure_rule": "Include the root, each direct repository caller and callee, each in-scope function relation, and each behavior-bearing state dependency."
+  },
+  "output": {
+    "snapshot.tsv": [
+      "snapshot_id",
+      "repo_commit",
+      "root_symbol_id",
+      "closure_rule",
+      "source_file_count",
+      "function_count",
+      "state_count",
+      "relation_count",
+      "runtime_evidence",
+      "status"
+    ],
+    "relations.tsv": [
+      "relation_id",
+      "from_symbol_id",
+      "relation",
+      "to_symbol_id",
+      "source_file",
+      "start_line",
+      "end_line",
+      "source_sha256",
+      "condition",
+      "success_effect",
+      "error_effect",
+      "confidence"
+    ],
+    "questions.tsv": [
+      "question_id",
+      "question",
+      "answer",
+      "supporting_ids"
+    ],
+    "functions.tsv": [
+      "function_id",
+      "qualified_name",
+      "source_file",
+      "start_line",
+      "end_line",
+      "source_sha256",
+      "behavior",
+      "inputs",
+      "outputs",
+      "reads",
+      "writes",
+      "guarantees",
+      "failures",
+      "confidence"
+    ],
+    "state.tsv": [
+      "state_id",
+      "kind",
+      "qualified_name",
+      "declared_type",
+      "source_file",
+      "start_line",
+      "end_line",
+      "source_sha256",
+      "behavior",
+      "valid_states",
+      "mutation",
+      "lifetime",
+      "sensitive",
+      "confidence"
+    ]
+  },
+  "rules": [
+    "Map executable facts only.",
+    "Use one function row for each mapped function.",
+    "Use one state row only when state changes behavior, crosses a boundary, persists, owns a resource, or carries a secret.",
+    "Exclude ordinary locals and syntax that source tools recover without semantic judgment.",
+    "Use one relation row for every call, delegation, read, write, and default dependency between declared IDs.",
+    "Never hide a missing relation in prose.",
+    "Use source_confirmed, runtime_confirmed, disputed, or unknown for confidence.",
+    "Give each source claim an exact file span and whole-file SHA-256.",
+    "Mark unsupported detail as unknown outside closure.",
+    "Do not decide whether mapped behavior is good, safe, or desirable.",
+    "Use one independent coverage checker to find omissions, extras, duplicate IDs, stale hashes, bad spans, and mislinked relations.",
+    "Do not create a graph database."
+  ],
+  "done": [
+    "Each function and state ID exists once.",
+    "Each relation endpoint resolves to one declared ID.",
+    "Each in-scope call and delegation has one relation row.",
+    "Each direct repository caller and callee of the root appears.",
+    "Each source hash matches the repository snapshot.",
+    "One independent coverage check reports no omission, extra row, duplicate ID, stale hash, bad span, or mislinked relation."
+  ]
+}

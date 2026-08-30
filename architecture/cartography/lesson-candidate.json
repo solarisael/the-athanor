@@ -1,0 +1,8 @@
+{
+  "type": "coding",
+  "title": "Separate factual cartography from behavioral audit",
+  "supersedes_lesson_id": 459,
+  "lesson": "Use two layers. The cartographer records executable facts for one enumerable snapshot. It maps functions, behavior-bearing state, relations, evidence planes, and explicit unknowns. It makes no quality verdict. One coverage checker independently enumerates the same closure and reports only omissions, extras, duplicate IDs, stale hashes, bad spans, unsupported claims, and mislinked relations. The auditor receives an immutable accepted map plus explicit expectations with named authority. It judges each expectation exactly once as pass, fail, unknown, or map_gap. Pass and fail require map evidence. Unknown preserves missing runtime or authority evidence. Map_gap requests one bounded cartography expansion. The auditor never rewrites the map. Semantic adversarial review belongs to the audit layer when risk justifies it.",
+  "trigger_context": "Before codebase cartography, ownership mapping, impact analysis, or a broad worker fanout.",
+  "proof_pattern": "Map one closed source slice. Run one independent coverage comparison. Freeze the accepted map. Supply explicit expectations and their authority to a separate auditor. Require one verdict per expectation and exact map IDs. Return map_gap for missing facts. Reject any cartographer quality verdict or auditor map rewrite."
+}

@@ -1,0 +1,45 @@
+{
+  "version": "1.0.0",
+  "purpose": "Judge an accepted immutable map against explicit expectations.",
+  "input": [
+    "accepted snapshot.tsv",
+    "functions.tsv",
+    "state.tsv",
+    "relations.tsv",
+    "expectations.tsv"
+  ],
+  "output": {
+    "judgments.tsv": [
+      "judgment_id",
+      "expectation_id",
+      "subject_ids",
+      "verdict",
+      "rationale",
+      "map_evidence_ids",
+      "consequence",
+      "gap_id",
+      "confidence"
+    ],
+    "gaps.tsv": [
+      "gap_id",
+      "expectation_id",
+      "missing_subject",
+      "required_closure",
+      "reason",
+      "status"
+    ]
+  },
+  "verdicts": ["pass", "fail", "unknown", "map_gap"],
+  "rules": [
+    "Judge each expectation exactly once.",
+    "Require a named authority for each expectation.",
+    "Use only map IDs as behavioral evidence.",
+    "Use pass or fail only when the map supports the verdict.",
+    "Use unknown when authority or required runtime evidence is absent.",
+    "Use map_gap when one bounded map expansion can resolve the question.",
+    "Do not read repository source.",
+    "Do not rewrite the map.",
+    "Do not invent quality standards.",
+    "Keep recommendations outside the audit."
+  ]
+}

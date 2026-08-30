@@ -1,0 +1,9 @@
+expectation_id	subject_ids	expectation	authority	required_plane	failure_consequence
+A01	F05,F06,F07,F08,R01,R02,R03,R04	A post-write backup failure must not undo the committed primary write.	House PostgreSQL authority and trial requirement	source	Loss or false rollback of authoritative data.
+A02	F05,F06,F07,F08,R01,R02,R03,R04	Each caller must expose an automatic backup failure in its returned result.	coding#195 visible cost and state	source	Operators cannot distinguish backup success from failure.
+A03	F01,F02,F03,F04,R05,R06,R07	The root must resolve prerequisites before F04 starts and must propagate prerequisite failures.	coding#9 sharp refusal	source	A backup starts with incomplete configuration or lineage.
+A04	V02,F04	Database credentials must not enter arguments, filenames, manifests, warnings, or durable receipts.	security trial requirement	source and runtime	Credential disclosure.
+A05	F04	Backup child processes must have bounded timeout, cancellation, and parent-crash cleanup.	operations safety trial requirement	source and runtime	Hung or orphaned backup processes.
+A06	F04	Published backup files must remain complete, path-confined, and retention-safe during malformed input and partial failure.	filesystem safety trial requirement	source and runtime	Data loss, unsafe deletion, or durable partial artifacts.
+A07	F01,F04,R07	An automatic backup caller must receive enough identity to locate or reconcile the produced backup.	coding#195 visible cost and state	source	A successful backup cannot be traced from its caller.
+A08	F05,F06,F07,F08,F09,V08,V09,V10,V11,R15,R16,R17	Every omitted or explicit backup gate must have deterministic behavior.	API determinism trial requirement	source	Equivalent requests produce unclear backup behavior.

@@ -1,0 +1,9 @@
+judgment_id	expectation_id	subject_ids	verdict	rationale	map_evidence_ids	consequence	gap_id	confidence
+J01	A01	F05,F06,F07,F08,R01,R02,R03,R04	pass	Each caller commits first, then keeps the committed write when F01 fails.	R01,R02,R03,R04	The authoritative primary write survives backup failure.	\N	map_supported
+J02	A02	F05,F06,F07,F08,R01,R02,R03,R04	pass	Each returned result carries a warning or Failed status when F01 fails.	F05,F06,F07,F08,R01,R02,R03,R04	Operators can observe automatic backup failure.	\N	map_supported
+J03	A03	F01,F02,F03,F04,R05,R06,R07	pass	F01 runs F02, then F03, then F04, and returns prerequisite errors before F04 starts.	R05,R06,R07	Incomplete prerequisites do not start F04.	\N	map_supported
+J04	A04	V02,F04	unknown	The map shows the sensitive URL entering F04, while F04 sinks and runtime evidence remain outside the map.	V02,R12,F04	Credential disclosure cannot be accepted or refuted.	\N	unknown
+J05	A05	F04	unknown	F04 child-process lifecycle is outside the closure and the required runtime plane is absent.	F04	Hung or orphaned process risk remains unresolved.	\N	unknown
+J06	A06	F04	unknown	F04 publication, confinement, retention, and partial-failure behavior is outside the closure and runtime evidence is absent.	F04	Data loss, unsafe deletion, and partial artifacts remain unresolved.	\N	unknown
+J07	A07	F01,F04,R07	fail	F04 returns a Manifest, and R07 states that F01 discards it before returning Ok.	F01,F04,R07	Automatic callers cannot identify or reconcile the produced backup.	\N	map_supported
+J08	A08	F05,F06,F07,F08,F09,V08,V09,V10,V11,R15,R16,R17	pass	Explicit gates, true defaults, delegation, and lesson-kind selection produce deterministic call behavior.	F09,V08,V09,V10,V11,R15,R16,R17,R18,R19,R20,R21,R22	Equivalent request states choose the same backup path.	\N	map_supported

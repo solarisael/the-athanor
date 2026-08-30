@@ -1,0 +1,27 @@
+{
+  "version": "1.0.0",
+  "purpose": "Check cartography coverage without judging behavior.",
+  "input": [
+    "cartographer.json",
+    "snapshot.tsv",
+    "functions.tsv",
+    "state.tsv",
+    "relations.tsv",
+    "immutable repository snapshot"
+  ],
+  "checks": [
+    "Enumerate the declared closure independently.",
+    "Compare every function and state ID.",
+    "Compare every in-scope relation.",
+    "Reject missing, extra, or duplicate IDs.",
+    "Reject stale hashes, incorrect spans, and unresolved endpoints.",
+    "Reject executable claims with no source span.",
+    "Ignore whether behavior is good, safe, or desirable."
+  ],
+  "verdicts": [
+    "pass",
+    "coverage_gap",
+    "invalid_map"
+  ],
+  "done": "Pass only when the independent enumeration matches the map exactly."
+}

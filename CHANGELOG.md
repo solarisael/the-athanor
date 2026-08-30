@@ -114,6 +114,16 @@ the exact implementation record.
 
 ### Fixed
 
+- Long assistant responses now compose OMP's native thinking prefix with
+  complete Markdown response paragraphs and retire both into terminal
+  scrollback while streaming. The Athanor adapter installs the bounded runtime
+  bridge; the upstream OMP package remains unchanged.
+
+- Native lesson guards register on every OMP `TtsrManager` observed for one
+  session without wrapping OMP's match methods. The first synchronized rule set
+  stays fixed for that OMP process; lesson edits require a restart. A transient
+  query failure preserves the last good set.
+
 - GIGA conversation ingest was dead in production. `giga.ts` called
   `path.dirname` without importing `path`. The `ReferenceError` fell into a
   `catch` that answers "this is a subagent session". Every session therefore

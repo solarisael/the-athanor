@@ -1,0 +1,10 @@
+relation_id	from_symbol_id	relation	to_symbol_id	source_file	start_line	end_line	source_sha256	condition	success_effect	error_effect	confidence
+R01	F02	calls	F01	crates/house-substrate/src/paper_boat.rs	25	25	4a8c44ad0558d9cf128c9927f0eb42e1ca562b510b62ca1ee90b8e16e6fbeb19	always	V04 receives the generated path.	none	source_confirmed
+R02	F02	passes	V01	crates/house-substrate/src/paper_boat.rs	23	25	4a8c44ad0558d9cf128c9927f0eb42e1ca562b510b62ca1ee90b8e16e6fbeb19	always	F01 receives request room text.	none	source_confirmed
+R03	F02	passes	V02	crates/house-substrate/src/paper_boat.rs	24	25	4a8c44ad0558d9cf128c9927f0eb42e1ca562b510b62ca1ee90b8e16e6fbeb19	always	F01 receives request body text.	none	source_confirmed
+R04	F01	reads	V01	crates/house-substrate/src/paper_boat.rs	206	208	4a8c44ad0558d9cf128c9927f0eb42e1ca562b510b62ca1ee90b8e16e6fbeb19	always	Room bytes enter V03.	none	source_confirmed
+R05	F01	reads	V02	crates/house-substrate/src/paper_boat.rs	208	209	4a8c44ad0558d9cf128c9927f0eb42e1ca562b510b62ca1ee90b8e16e6fbeb19	always	Body bytes enter V03.	none	source_confirmed
+R06	F01	writes	V03	crates/house-substrate/src/paper_boat.rs	205	210	4a8c44ad0558d9cf128c9927f0eb42e1ca562b510b62ca1ee90b8e16e6fbeb19	always	V03 becomes the finalized digest.	none	source_confirmed
+R07	F01	writes	V04	crates/house-substrate/src/paper_boat.rs	210	210	4a8c44ad0558d9cf128c9927f0eb42e1ca562b510b62ca1ee90b8e16e6fbeb19	always	Return the formatted source path.	none	source_confirmed
+R08	F02	reads	V04	crates/house-substrate/src/paper_boat.rs	26	29	4a8c44ad0558d9cf128c9927f0eb42e1ca562b510b62ca1ee90b8e16e6fbeb19	after F01	Strip the fixed prefix and suffix.	Use an empty identity when the shape differs.	source_confirmed
+R09	F02	writes	V05	crates/house-substrate/src/paper_boat.rs	26	29	4a8c44ad0558d9cf128c9927f0eb42e1ca562b510b62ca1ee90b8e16e6fbeb19	after F01	V05 receives digest text.	V05 becomes empty when the shape differs.	source_confirmed

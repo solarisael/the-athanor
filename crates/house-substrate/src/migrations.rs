@@ -146,6 +146,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0027_restart_successor_proof.sql",
         sql: include_str!("../../../substrate/migrations/0027_restart_successor_proof.sql"),
     },
+    Migration {
+        version: 28,
+        name: "0028_room_settings.sql",
+        sql: include_str!("../../../substrate/migrations/0028_room_settings.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version
@@ -358,6 +363,39 @@ mod tests {
         assert!(state_from(vec![1, 2, 3]).is_ok());
         assert!(state_from(vec![1, 3]).is_err());
         assert!(state_from(vec![1, 2, 99]).is_err());
+    }
+
+    /// The restored laptop database carries `schema_migrations` 1..=28, applied by
+    /// the shipped 0.9.7.2 substrate. This binary must own that whole lineage and
+    /// accept it as complete — no unowned version, no partial-prefix refusal, and
+    /// nothing left pending that would tempt a reapplication of 28.
+    #[test]
+    fn the_owned_lineage_accepts_a_database_already_at_twenty_eight() {
+        let versions: Vec<i32> = MIGRATIONS.iter().map(|m| m.version).collect();
+        assert_eq!(versions, (1..=28).collect::<Vec<i32>>());
+
+        let state = state_from(versions.clone()).expect("lineage 1..=28 must be owned");
+        assert_eq!(state.current_version, 28);
+        assert_eq!(state.target_version, 28);
+        assert!(state.complete);
+        assert!(state.pending.is_empty());
+        assert_eq!(state.applied, versions);
+
+        // A database one migration ahead of this binary is still refused by name.
+        let err = state_from((1..=29).collect()).expect_err("29 is not owned here");
+        assert!(format!("{err}").contains("not owned by this substrate"));
+    }
+
+    #[test]
+    fn every_registered_migration_names_its_own_numbered_file() {
+        for migration in MIGRATIONS {
+            assert!(
+                migration.name.starts_with(&format!("{:04}_", migration.version)),
+                "{} does not carry version {}",
+                migration.name,
+                migration.version
+            );
+        }
     }
 
     #[test]

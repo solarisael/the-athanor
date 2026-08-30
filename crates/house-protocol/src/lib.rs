@@ -3372,7 +3372,8 @@ pub struct GigaClassifierHealthResult {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GigaHealthResult {
-    pub enabled: bool,
+    pub capture_enabled: bool,
+    pub classifier_enabled: bool,
     pub store_healthy: bool,
     pub queue_depth: u64,
     pub oldest_queue_age_seconds: Option<u64>,
@@ -5250,6 +5251,47 @@ mod tests {
             .giga_health_request()
             .is_err()
         );
+    }
+
+    #[test]
+    fn giga_health_wire_keeps_capture_and_classifier_state_independent() {
+        let result = GigaHealthResult {
+            capture_enabled: true,
+            classifier_enabled: false,
+            store_healthy: true,
+            queue_depth: 2,
+            oldest_queue_age_seconds: Some(17),
+            processed_count: 11,
+            failed_count: 3,
+            candidates_by_kind_state: vec![],
+            classifier: GigaClassifierHealthResult {
+                provider_type: "ollama".into(),
+                model: "model".into(),
+                model_digest: "digest".into(),
+                prompt_version: "prompt".into(),
+                endpoint_scope: "loopback".into(),
+                last_error_class: RequiredNullable(Some("classifier_unavailable".into())),
+                last_error_at: RequiredNullable(Some("2026-08-30T12:00:00Z".into())),
+                consecutive_failures: 4,
+            },
+        };
+        let wire = serde_json::to_value(&result).unwrap();
+
+        assert_eq!(wire["capture_enabled"], true);
+        assert_eq!(wire["classifier_enabled"], false);
+        assert_eq!(wire["store_healthy"], true);
+        assert_eq!(wire["classifier"]["consecutive_failures"], 4);
+        assert_eq!(
+            serde_json::from_value::<GigaHealthResult>(wire.clone()).unwrap(),
+            result
+        );
+
+        let mut legacy = wire;
+        let object = legacy.as_object_mut().unwrap();
+        object.remove("capture_enabled");
+        object.remove("classifier_enabled");
+        object.insert("enabled".into(), serde_json::Value::Bool(false));
+        assert!(serde_json::from_value::<GigaHealthResult>(legacy).is_err());
     }
 
     #[test]

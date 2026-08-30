@@ -44,6 +44,7 @@ import {
   requestGigaPromote,
   requestGigaReview,
   type GigaPromotionTarget,
+  type GigaHealthResult,
   type GigaSafeReviewState,
 } from "../giga.ts";
 import { registerRestartDoor } from "./restart-door.ts";
@@ -410,6 +411,18 @@ function gigaToolFailure(error) {
     isError: true,
     content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     details: result,
+  };
+}
+
+export function normalizeGigaHealth(result: GigaHealthResult) {
+  const output = {
+    ok: result.capture_enabled && result.store_healthy,
+    ...result,
+  };
+  return {
+    isError: !output.ok,
+    content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+    details: output,
   };
 }
 
@@ -1341,13 +1354,7 @@ export function registerSolarisaelTools(pi, release) {
       const { room } = roomContext(ctx.cwd);
       try {
         const result = await requestGigaHealth(room, { signal: _signal });
-        const healthy = result.enabled && result.store_healthy;
-        const output = { ok: healthy, ...result };
-        return {
-          isError: !healthy,
-          content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
-          details: output,
-        };
+        return normalizeGigaHealth(result);
       } catch (error) {
         return gigaToolFailure(error);
       }

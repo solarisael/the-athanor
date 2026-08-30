@@ -308,18 +308,43 @@ fn domain_failure() -> WorkerFailure {
     WorkerFailure::new(WorkerFailureKind::ClassifierOutput)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct GigaCapabilityState {
+    pub capture_enabled: bool,
+    pub classifier_enabled: bool,
+}
+
+fn giga_capability_state_from_flags(
+    giga_enabled: Option<&str>,
+    hippocampus_enabled: Option<&str>,
+    replay_mode: Option<&str>,
+) -> GigaCapabilityState {
+    let capture_enabled = giga_enabled == Some("1");
+    GigaCapabilityState {
+        capture_enabled,
+        classifier_enabled: capture_enabled
+            && hippocampus_enabled == Some("1")
+            && replay_mode != Some("1"),
+    }
+}
+
+pub(crate) fn giga_capability_state() -> GigaCapabilityState {
+    let giga_enabled = env::var("SOLARISAEL_GIGA_ENABLED").ok();
+    let hippocampus_enabled = env::var("SOLARISAEL_HIPPOCAMPUS_ENABLED").ok();
+    let replay_mode = env::var("SOLARISAEL_REPLAY_MODE").ok();
+    giga_capability_state_from_flags(
+        giga_enabled.as_deref(),
+        hippocampus_enabled.as_deref(),
+        replay_mode.as_deref(),
+    )
+}
+
 fn classifier_enabled() -> bool {
-    env::var("SOLARISAEL_GIGA_ENABLED").ok().as_deref() == Some("1")
-        && env::var("SOLARISAEL_HIPPOCAMPUS_ENABLED").ok().as_deref() == Some("1")
-        && env::var("SOLARISAEL_REPLAY_MODE").ok().as_deref() != Some("1")
+    giga_capability_state().classifier_enabled
 }
 
 fn claim_owner_enabled() -> bool {
     classifier_enabled() && env::var("SOLARISAEL_GIGA_CLAIM_OWNER").ok().as_deref() == Some("1")
-}
-
-pub(crate) fn giga_classifier_enabled() -> bool {
-    classifier_enabled()
 }
 
 pub(crate) fn giga_classifier_health(
@@ -1577,6 +1602,28 @@ mod tests {
             "spirit": "Lab",
             "text": text
         })
+    }
+
+    #[test]
+    fn giga_capability_state_keeps_capture_independent_from_classifier_policy() {
+        assert_eq!(
+            giga_capability_state_from_flags(Some("1"), Some("0"), Some("0")),
+            GigaCapabilityState {
+                capture_enabled: true,
+                classifier_enabled: false,
+            }
+        );
+    }
+
+    #[test]
+    fn giga_capability_state_disables_both_when_capture_is_off() {
+        assert_eq!(
+            giga_capability_state_from_flags(Some("0"), Some("1"), Some("0")),
+            GigaCapabilityState {
+                capture_enabled: false,
+                classifier_enabled: false,
+            }
+        );
     }
 
     #[test]

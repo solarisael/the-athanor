@@ -51,7 +51,12 @@ export type GigaPromotionRequest = {
   target: GigaPromotionTarget;
 };
 export type GigaPromotionResult = JsonObject;
-export type GigaHealthResult = JsonObject & { enabled: boolean; store_healthy: boolean };
+export type GigaHealthResult = JsonObject & {
+  capture_enabled: boolean;
+  classifier_enabled: boolean;
+  store_healthy: boolean;
+  classifier: JsonObject & { consecutive_failures: number };
+};
 export type GigaQueueMaintenanceOperation = "check" | "purge_stuck";
 export type GigaQueueMaintenanceResult = JsonObject;
 export type GigaReviewRequest = {

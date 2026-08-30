@@ -1,7 +1,7 @@
 use crate::{
     AppError,
     config::Config,
-    giga_worker::{giga_classifier_enabled, giga_classifier_health, verify_promotion_sources},
+    giga_worker::{giga_capability_state, giga_classifier_health, verify_promotion_sources},
     remember::{
         prepare_memory_write, write_coding_lesson_tx, write_memory_tx, write_project_lesson_tx,
     },
@@ -1116,8 +1116,10 @@ pub async fn giga_health(
     let last_error: Option<String> = event.try_get("last_error")?;
     let last_error_at: Option<DateTime<Utc>> = event.try_get("last_error_at")?;
     let consecutive_failures: u64 = event.try_get::<i64, _>("consecutive_failures")? as u64;
+    let capabilities = giga_capability_state();
     Ok(GigaHealthResult {
-        enabled: giga_classifier_enabled(),
+        capture_enabled: capabilities.capture_enabled,
+        classifier_enabled: capabilities.classifier_enabled,
         store_healthy: true,
         queue_depth: event.try_get::<i64, _>("queue_depth")? as u64,
         oldest_queue_age_seconds: oldest.map(|age| age.max(0) as u64),

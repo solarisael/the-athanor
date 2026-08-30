@@ -62,7 +62,11 @@ import { receiveAutomaticWake } from "./solarisael-house-proof/wake-context/inde
 import { messageText } from "./solarisael-house-proof/text.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./solarisael-house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./solarisael-house-proof/tools.ts";
-import { installLessonTtsrBridge, syncLessonTtsr } from "./solarisael-house-proof/lesson-ttsr.ts";
+import {
+  installLessonTtsrBridge,
+  installStreamingTranscriptBridge,
+  syncLessonTtsr,
+} from "./solarisael-house-proof/lesson-ttsr.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./solarisael-house-proof/context.ts";
 import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./solarisael-house-proof/constants.ts";
 import { showHouseContextFeedback } from "./solarisael-house-proof/feedback.ts";
@@ -586,6 +590,7 @@ async function recordAutomaticContextTelemetry(
 export default function solarisaelHouseProof(pi, release) {
   pi.setLabel("The Athanor");
   const lessonTtsrInstallWarning = installLessonTtsrBridge(pi);
+  const streamingTranscriptInstallWarning = installStreamingTranscriptBridge(pi);
   pi.registerCommand?.("insula", {
     description: "Show the Host's Insula Vitals for the last 15m, 1h, or 24h",
     handler: (args, ctx) => showInsulaCockpit(args, ctx),
@@ -891,6 +896,7 @@ export default function solarisaelHouseProof(pi, release) {
     const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
     const shellBinding = { room, spirit, session: hostSession };
     if (lessonTtsrInstallWarning) warnings.push(lessonTtsrInstallWarning);
+    if (streamingTranscriptInstallWarning) warnings.push(streamingTranscriptInstallWarning);
     const lessonTtsr = await syncLessonTtsr({
       ctx,
       roomDir: effectiveRoomDir,
@@ -1218,7 +1224,9 @@ export default function solarisaelHouseProof(pi, release) {
               refreshReason: decision.refreshReason,
               entries: recallEntries,
               hasWorkingSet: Boolean(recallMessage),
-              warning: recallWarnings[0],
+              // "semantic lane empty" is an honest low-similarity verdict, not ill
+              // health; only infrastructure warnings may mark the room degraded.
+              warning: recallWarnings.find((w) => !String(w).startsWith("semantic lane empty")),
               idempotencyKey: currentTurnKey ? `${currentTurnKey}:complete` : undefined,
             });
             policyState = completed.recallPolicy;

@@ -1290,7 +1290,9 @@ export default function solarisaelHouseProof(pi, release) {
               refreshReason: decision.refreshReason,
               entries: recallEntries,
               hasWorkingSet: Boolean(recallMessage),
-              warning: recallWarnings[0],
+              warning: recallWarnings.find((warning) =>
+                !String(warning).startsWith("semantic lane empty")
+              ),
               idempotencyKey: currentTurnKey ? `${currentTurnKey}:complete` : undefined,
             });
             policyState = completed.recallPolicy;

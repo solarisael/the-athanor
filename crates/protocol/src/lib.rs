@@ -3377,7 +3377,8 @@ pub struct GigaClassifierHealthResult {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GigaHealthResult {
-    pub enabled: bool,
+    pub capture_enabled: bool,
+    pub classifier_enabled: bool,
     pub store_healthy: bool,
     pub queue_depth: u64,
     pub oldest_queue_age_seconds: Option<u64>,

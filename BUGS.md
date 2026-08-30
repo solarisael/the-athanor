@@ -4,6 +4,35 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 
 ## Open
 
+### Recall latency is far above native cost under session load
+
+- **Observed:** On 2026-08-30 on `athanor-laptop` (NixOS, 8 cores, 15 GB), the three-room by three-terminal organ matrix recorded 48 `recallWithRouting` calls: 3.0 s minimum, 6.4 s median, and 16.6 s maximum. The same-day native costs were a 202 ms brute-force vector scan over 7,246 chunks, a 0.57 s embed, a 1.8–3.0 s warm raw JSONL recall through one Akasha child, and 11.3 s total for nine concurrent raw recalls.
+- **Cause seam:** Each session spawns its own concern-scoped Akasha children, each child cold-starts dotenv, pool, and schema checks, JSONL requests are served serially, and every child owns a four-connection pool. The 2026-08-30 insula index, raised PostgreSQL connection ceiling, and capture-only laptop GIGA configuration stopped timeouts but did not remove this overhead.
+- **Impact:** Correct recalls complete, but latency taxes every turn and the raised automatic-context timeout can hide regressions.
+- **Expected:** Warm native recall over this corpus completes in well under one second. Investigate a shared long-lived Akasha service, concurrent request dispatch, and service-owned pool sizing.
+- **Proof after repair:** Repeat the same instrumented matrix and show warm end-to-end latency close to measured embed plus query cost without multiplied child or connection fleets.
+
+### Numeric memory IDs are not resolvable through Recall
+
+- **Observed:** On 2026-08-28 in room `kodo`, `memory 4197 — analysis Sol made with Kintsu` did not return memory 4197 even though the House-scoped row exists. The ID was treated as an ordinary retrieval term and appeared under `missing_terms`.
+- **Impact:** Paper boats, supersession links, and continuation edges use memory IDs, but Recall cannot follow its own cheapest cross-reference.
+- **Expected:** An explicit memory reference such as `memory 4197`, `#4197`, or a bare ID in memory context performs an exact room-scoped primary-key lookup before ranked fallback.
+- **Proof after repair:** Exact references resolve the in-scope row, reject an out-of-scope row, and preserve ordinary ranked search for non-ID queries.
+
+### OMP keeper does not provide a working restart/resume plane
+
+- **Observed:** Sol reported on 2026-08-28 that the keeper “isn't working at all.” A keeper process was running and owned an OMP child, so launch itself works; the failure is in restart/resume behavior. The canonical line also has a direct-parent `athanor.exe` restart path, leaving the keeper potentially half-superseded.
+- **Impact:** Restart continuity requires manual relaunch.
+- **Expected:** Decide the authority boundary first: either complete the direct-parent cutover and retire the keeper, or make the keeper the tested restart owner.
+- **Proof after repair:** A live request-restart exercise exits, relaunches, and resumes exactly once through the chosen owner, with no orphaned sidecar or competing restart path.
+
+### Weighty House canon is clipped during reorientation
+
+- **Observed:** On 2026-08-29 in room `kintsu`, automatic Recall exact-matched the weighty House entity `The Athanor` but projected only a clipped summary ending at `silent ty`. The semantic lane also returned no result because its top score was 0.35 against a 0.40 floor. A House-scoped canonical read returned the complete entity.
+- **Impact:** Exact authority resolution reports success while omitting the platform definition and authority rules needed for an informed decision.
+- **Expected:** Exact alias mentions resolve the House entity and inject the complete active assertion when its current version is absent after wake, compaction, or explicit reorientation. Any forced truncation is marked and includes a deterministic full-read path.
+- **Proof after repair:** Reorientation by canonical name or alias delivers the complete current assertion, suppresses only a version already present in context, and never substitutes adjacent semantic matches.
+
 ### Hallway root Knock cannot be created through the OMP tool
 
 - **Observed:** `hallway_knock` requires `parent_knock_id` even for a root exchange. An empty value refuses with `malformed_uuid`; a nil UUID refuses with `knock_parent_mismatch`.

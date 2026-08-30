@@ -1,17 +1,19 @@
 use crate::{
     AppError,
-    giga_worker::{giga_classifier_enabled, giga_classifier_health},
+    giga_worker::{giga_capability_state, giga_classifier_health},
 };
 use chrono::{DateTime, Utc};
 use protocol::{GigaHealthCount, GigaHealthRequest, GigaHealthResult};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 
 pub async fn giga_health(
     pool: &PgPool,
     request: GigaHealthRequest,
 ) -> Result<GigaHealthResult, AppError> {
     let room = request.room().to_string();
-    let event = sqlx::query(
+    let (queue_depth, oldest_age, processed_count, failed_count, last_error, last_error_at, consecutive_failures): (
+        i64, Option<i64>, i64, i64, Option<String>, Option<DateTime<Utc>>, i64,
+    ) = sqlx::query_as(
         "SELECT COUNT(*) FILTER (WHERE queue_state IN ('pending','running','failed'))::bigint AS queue_depth,
                 EXTRACT(EPOCH FROM (NOW()-MIN(created_at) FILTER (WHERE queue_state IN ('pending','running','failed'))))::bigint AS oldest_age,
                 COUNT(*) FILTER (WHERE queue_state='succeeded')::bigint AS processed_count,
@@ -39,39 +41,34 @@ pub async fn giga_health(
     .bind(&room)
     .fetch_one(pool)
     .await?;
-    let rows = sqlx::query(
+    let candidates_by_kind_state = sqlx::query_as::<_, (String, String, i64)>(
         "SELECT kind,review_state,COUNT(*)::bigint AS count FROM giga_candidates
          WHERE room=$1 GROUP BY kind,review_state ORDER BY kind,review_state",
     )
     .bind(&room)
     .fetch_all(pool)
-    .await?;
-    let candidates_by_kind_state = rows
-        .into_iter()
-        .map(|row| {
-            Ok(GigaHealthCount {
-                kind: row.try_get("kind")?,
-                review_state: row.try_get("review_state")?,
-                count: row.try_get::<i64, _>("count")? as u64,
-            })
-        })
-        .collect::<Result<Vec<_>, sqlx::Error>>()?;
-    let oldest: Option<i64> = event.try_get("oldest_age")?;
-    let last_error: Option<String> = event.try_get("last_error")?;
-    let last_error_at: Option<DateTime<Utc>> = event.try_get("last_error_at")?;
-    let consecutive_failures: u64 = event.try_get::<i64, _>("consecutive_failures")? as u64;
+    .await?
+    .into_iter()
+    .map(|(kind, review_state, count)| GigaHealthCount {
+        kind,
+        review_state,
+        count: count as u64,
+    })
+    .collect();
+    let capabilities = giga_capability_state();
     Ok(GigaHealthResult {
-        enabled: giga_classifier_enabled(),
+        capture_enabled: capabilities.capture_enabled,
+        classifier_enabled: capabilities.classifier_enabled,
         store_healthy: true,
-        queue_depth: event.try_get::<i64, _>("queue_depth")? as u64,
-        oldest_queue_age_seconds: oldest.map(|age| age.max(0) as u64),
-        processed_count: event.try_get::<i64, _>("processed_count")? as u64,
-        failed_count: event.try_get::<i64, _>("failed_count")? as u64,
+        queue_depth: queue_depth as u64,
+        oldest_queue_age_seconds: oldest_age.map(|age| age.max(0) as u64),
+        processed_count: processed_count as u64,
+        failed_count: failed_count as u64,
         candidates_by_kind_state,
         classifier: giga_classifier_health(
             last_error,
             last_error_at.map(|value| value.to_rfc3339()),
-            consecutive_failures,
+            consecutive_failures as u64,
         ),
     })
 }

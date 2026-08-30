@@ -47,6 +47,7 @@ import {
   requestGigaReview,
   type GigaPromotionTarget,
   type GigaSafeReviewState,
+  type GigaHealthResult,
 } from "../giga.ts";
 import { registerRestartDoor } from "./restart-door.ts";
 
@@ -408,6 +409,18 @@ export function closeRustRememberTransports() {
     rustRememberTransports.delete(executable);
     void transport.close().catch(() => {});
   }
+}
+
+function normalizeGigaHealth(result: GigaHealthResult) {
+  const output = {
+    ok: result.capture_enabled && result.store_healthy,
+    ...result,
+  };
+  return {
+    isError: !output.ok,
+    content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+    details: output,
+  };
 }
 
 function refuseToolResult(error) {
@@ -1370,13 +1383,7 @@ export function registerSolarisaelTools(pi, release) {
       const { room } = roomContext(ctx.cwd);
       try {
         const result = await requestGigaHealth(room, { signal: _signal });
-        const healthy = result.enabled && result.store_healthy;
-        const output = { ok: healthy, ...result };
-        return {
-          isError: !healthy,
-          content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
-          details: output,
-        };
+        return normalizeGigaHealth(result);
       } catch (error) {
         return gigaToolFailure(error);
       }

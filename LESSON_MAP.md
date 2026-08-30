@@ -47,6 +47,8 @@ The 1.0 boundary is Rust, narrow NATS delivery, planned correctness fixes, harde
 - **Coding #158, #159, and #160 — Use the smallest honest native shape.** Minimize concepts and name every deliberate shortcut's ceiling and upgrade path.
 - **Coding #330 — Prove Rust ownership and concurrency.** Encode real lifetimes, cancellation, shutdown, error disposition, and unsafe invariants; reject blanket no-clone, no-unwrap, mandatory-crate, or abstraction rules.
 
+- **Coding #460 — Complexity budgets apply to functions, modules, and crates.** Functions target CCN 6 or below; 7–15 is a ratcheted warning, and anything above 15 requires immediate rewrite or refactor. A split needs a distinct owner, lifecycle, and public door; never split only to reset a counter.
+
 **Coding #315 governs this replacement.** Do not read the legacy TypeScript or Python implementation to design its Rust successor. Use current specifications, accepted contracts, external observation, and focused parity probes to build Coding #184's behavior inventory. Legacy source may be inspected only after the independent contract exists, to find callers and orphaned behavior during cutover; it is evidence, never the replacement design.
 
 ## Vault, AKASHA, and retrieval

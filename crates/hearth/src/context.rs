@@ -814,9 +814,10 @@ fn routing_reminder(enabled: bool) -> Option<String> {
             "Default modus operandi for delegable work:",
             "1. Main model owns intent, inference, and final judgment.",
             "2. Use house_lane_status/house_dispatch before spawning task/subagents when work is bounded and delegable.",
-            "3. Before dispatch, query coding lessons once for the fanout and pass relevant verbatim braided bodies in lessonBodies; bare lesson IDs are not delivery.",
-            "4. Do not route casual contact, high-level judgment, or exact-sensitive work without exact/retrieve-only context.",
-            "5. Advisor is a separate review channel, not a dispatch lane.",
+            "3. When work targets The Athanor, read the project-root LESSON_MAP.md before implementation or fanout; every lesson in each matching section is mandatory.",
+            "4. Before dispatch, query the typed registries once for the fanout and pass every required complete body in lessonBodies; bare IDs and summaries are not delivery, and a missing body forbids spawn.",
+            "5. Do not route casual contact, high-level judgment, or exact-sensitive work without exact/retrieve-only context.",
+            "6. Advisor is a separate review channel, not a dispatch lane.",
             "</system-reminder>",
         ]
         .join("\n")

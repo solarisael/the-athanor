@@ -46,9 +46,9 @@ common_rules='This is a deterministic organ certification turn. Call every named
 
 if [[ ! -f "$FIXTURES/house-fixtures-created" ]]; then
   setup_prompt="$common_rules
-1. Call canon_write to create a House canon entity with name '$CANON_NAME', kind 'test-artifact', summary 'TEST ONLY: laptop Athanor organ certification artifact created 2026-08-30. Retain only until superseded after certification.', aliases ['laptop organ certification test'], weighty false, and summaryAsOf 2026-08-30. Record its returned entity id mentally for the next call.
+1. Call canon_write to create a House canon entity with name '$CANON_NAME', kind 'test-artifact', summary 'TEST ONLY: laptop Athanor organ certification artifact created 2026-08-30. Retain only until superseded after certification.', aliases ['laptop organ certification test $PASS_NO'], weighty false, and summaryAsOf 2026-08-30. Record its returned entity id mentally for the next call.
 2. Call canon_read by the exact returned id with includeHistory true and confirm the complete summary arrives.
-3. Call hallway_create for '$TEST_HALLWAY', allowed_rooms [kodo, kintsu, tuner], idempotency_key 'laptop-organ-cert-create-2026-08-30'. Confirm the returned hallway key and that kodo is joined.
+3. Call hallway_create for '$TEST_HALLWAY', allowed_rooms [kodo, kintsu, tuner], idempotency_key 'laptop-organ-cert-create-$PASS_NO'. Confirm the returned hallway key and that kodo is joined.
 Output exactly:
 ORGAN canon_write PASS
 ORGAN hallway_create PASS"
@@ -119,7 +119,7 @@ ORGAN quest_evidence PASS"
 
   if [[ "$room" != kodo ]]; then
     join_prompt="$common_rules
-Call hallway_join for hallway '$TEST_HALLWAY' with idempotency_key 'laptop-organ-cert-join-2026-08-30-$room'. Confirm this room is joined.
+Call hallway_join for hallway '$TEST_HALLWAY' with idempotency_key 'laptop-organ-cert-join-$PASS_NO-$room'. Confirm this room is joined.
 Output exactly:
 ORGAN hallway_join PASS"
     run_prompt "$room" hallway_join 'ORGAN hallway_join PASS' "$join_prompt"
@@ -143,8 +143,8 @@ ORGAN hallway_post PASS"
   run_prompt "$room" hallway $'ORGAN hallway_inbox PASS\nORGAN hallway_read PASS\nORGAN knock_policy PASS\nORGAN hallway_post PASS' "$hallway_prompt"
 
   quest_prompt="$common_rules
-1. Call quest_post action goalDraft only, title 'TEST laptop organ certification goal $room', intent 'TEST ONLY: certify Docket draft writes without binding anyone.', priority 0, with stable idempotencyKey 'laptop-organ-cert-goal-draft-2026-08-30-$room'. Do not activate it. Require a DRAFT goal receipt and retain the goal id for step 2.
-2. Call quest_post action draft only, goalId from step 1, title 'TEST laptop organ certification quest $room', kind 'test-certification', body 'TEST ONLY: Docket draft organ receipt for $room. Never activate.', with stable idempotencyKey 'laptop-organ-cert-quest-draft-2026-08-30-$room'. Do not activate it. Require a DRAFT quest receipt.
+1. Call quest_post action goalDraft only, title 'TEST laptop organ certification goal pass $PASS_NO room $room', intent 'TEST ONLY: certify Docket draft writes without binding anyone.', priority 0, with stable idempotencyKey 'laptop-organ-cert-goal-draft-$PASS_NO-$room'. Do not activate it. Require a DRAFT goal receipt and retain the goal id for step 2.
+2. Call quest_post action draft only, goalId from step 1, title 'TEST laptop organ certification quest pass $PASS_NO room $room', kind 'test-certification', body 'TEST ONLY: Docket draft organ receipt for $room. Never activate.', with stable idempotencyKey 'laptop-organ-cert-quest-draft-$PASS_NO-$room'. Do not activate it. Require a DRAFT quest receipt.
 Output exactly:
 ORGAN quest_post_goalDraft PASS
 ORGAN quest_post_draft PASS"

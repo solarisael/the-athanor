@@ -150,10 +150,45 @@ ORGAN quest_post_goalDraft PASS
 ORGAN quest_post_draft PASS"
   run_prompt "$room" quest_write $'ORGAN quest_post_goalDraft PASS\nORGAN quest_post_draft PASS' "$quest_prompt"
 
-  restart_prompt="$common_rules
-Certify the restart door without arming it. Do not call request_restart under any circumstance because that tool is an arming write. Use the bash tool for one read-only raw protocol request: source /home/solarisael/Projects/the-athanor/state/substrate/.env with export enabled, then pipe one JSONL request to /home/solarisael/Projects/the-athanor/target/release/athanor-substrate. The request must have protocol 1, id cert-restart-$PASS_NO-$room, method restart_status, and params workspace /home/solarisael/Solarisael/$room. Require exit 0, matching response id, matching workspace, and either an absent intent or a fully formed status intent. Output exactly:
-ORGAN restart_status PASS"
-  run_prompt "$room" restart_status 'ORGAN restart_status PASS' "$restart_prompt"
+  restart_id="cert-restart-$PASS_NO-$room"
+  restart_workspace="/home/solarisael/Solarisael/$room"
+  restart_stdout="$RAW/${room}_restart_status.stdout"
+  restart_stderr="$RAW/${room}_restart_status.stderr"
+  restart_rc_file="$RAW/${room}_restart_status.rc"
+  restart_request=$(printf '{"protocol":1,"id":"%s","method":"restart_status","params":{"workspace":"%s"}}' "$restart_id" "$restart_workspace")
+  set +e
+  (
+    set -a
+    source /home/solarisael/Projects/the-athanor/state/substrate/.env
+    set +a
+    printf '%s\n' "$restart_request" |
+      /home/solarisael/Projects/the-athanor/target/release/athanor-substrate
+  ) > "$restart_stdout" 2> "$restart_stderr"
+  restart_rc=$?
+  set -e
+  printf '%s\n' "$restart_rc" > "$restart_rc_file"
+  if [[ "$restart_rc" -ne 0 ]]; then
+    gate_failed=1
+    printf 'ORGAN restart_status FAIL: substrate exited %s\n' "$restart_rc" | tee -a "$SUMMARY"
+  elif jq -e --arg id "$restart_id" --arg workspace "$restart_workspace" '
+    .protocol == 1
+    and .id == $id
+    and .result.workspace == $workspace
+    and (
+      .result.intent == null
+      or (
+        (.result.intent.intentId | type) == "string"
+        and (.result.intent.state | type) == "string"
+        and (.result.intent.mode | type) == "string"
+        and (.result.intent.deadlines.expiresAt | type) == "string"
+      )
+    )
+  ' "$restart_stdout" > /dev/null; then
+    printf 'ORGAN restart_status PASS\n' | tee -a "$SUMMARY"
+  else
+    gate_failed=1
+    printf 'ORGAN restart_status FAIL: response did not match the status contract\n' | tee -a "$SUMMARY"
+  fi
 done
 
 for recipient in "${rooms[@]}"; do

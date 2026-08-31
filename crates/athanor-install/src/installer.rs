@@ -187,7 +187,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.fs.restrict_acl(&self.layout.data)?;
             for room in &house.rooms {
                 let room_dir = house.rooms_root.join(&room.room);
-                let state_path = room_dir.join(".omp/runtime/solarisael-house-state.json");
+                let state_path = room_dir.join(".omp/runtime/athanor-house-state.json");
                 if !self.fs.exists(&state_path) {
                     if house.rooms_root != self.layout.rooms() {
                         bail!(
@@ -819,7 +819,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             house
                 .rooms_root
                 .join(&room.room)
-                .join(".omp/runtime/solarisael-house-state.json")
+                .join(".omp/runtime/athanor-house-state.json")
         }));
         if let Some(integration) = &request.operator_integration {
             paths.push(integration.omp_config_path.clone());
@@ -1036,7 +1036,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                 let state = house
                     .rooms_root
                     .join(&room.room)
-                    .join(".omp/runtime/solarisael-house-state.json");
+                    .join(".omp/runtime/athanor-house-state.json");
                 if !self.fs.exists(&state) {
                     bail!(
                         "configured room {:?} has no room-state file at {}",

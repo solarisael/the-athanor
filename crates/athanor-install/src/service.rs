@@ -12,7 +12,8 @@ mod windows {
     use std::{
         env,
         ffi::c_void,
-        fs,
+        fs::{self, OpenOptions},
+        io::Write,
         path::PathBuf,
         ptr,
         sync::{Mutex, OnceLock, mpsc},
@@ -77,8 +78,44 @@ mod windows {
 
     unsafe extern "system" fn service_main(_: u32, _: *mut *mut u16) {
         if let Err(error) = run() {
+            write_service_error(&error);
             eprintln!("Athanor service failed: {error:#}");
         }
+    }
+
+    fn service_log_path(name: &str) -> Option<PathBuf> {
+        roots()
+            .ok()
+            .map(|layout| layout.data.join("logs").join(name))
+    }
+
+    fn reset_service_trace() {
+        let Some(path) = service_log_path("service-startup-trace.log") else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(path, "");
+    }
+
+    fn trace_service_start(message: &str) {
+        let Some(path) = service_log_path("service-startup-trace.log") else {
+            return;
+        };
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(file, "{message}");
+        }
+    }
+
+    fn write_service_error(error: &anyhow::Error) {
+        let Some(path) = service_log_path("service-startup-error.log") else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(path, format!("{error:#}\n{error:?}\n"));
     }
 
     fn set_status(handle: SERVICE_STATUS_HANDLE, state: u32, checkpoint: u32) -> Result<()> {
@@ -120,20 +157,37 @@ mod windows {
                 GetLastError()
             });
         }
+        reset_service_trace();
+        trace_service_start("control handler registered");
         set_status(handle, SERVICE_START_PENDING, 1)?;
+        trace_service_start("start pending reported");
+        let result = run_registered(handle);
+        if result.is_err() {
+            let _ = set_status(handle, SERVICE_STOPPED, 0);
+        }
+        result
+    }
+
+    fn run_registered(handle: SERVICE_STATUS_HANDLE) -> Result<()> {
         let (stop_tx, stop_rx) = mpsc::channel();
         STOP_SENDER
             .set(Mutex::new(stop_tx))
             .map_err(|_| anyhow::anyhow!("service control channel already initialized"))?;
+        trace_service_start("stop channel registered");
         prepare_service_console()?;
+        trace_service_start("service console ready");
 
         let layout = roots()?;
+        trace_service_start("install roots resolved");
         let current: CurrentRelease = serde_json::from_slice(&fs::read(layout.current())?)?;
+        trace_service_start("current release read");
         let config: SupervisorConfig = serde_json::from_slice(&fs::read(layout.config())?)?;
+        trace_service_start("runtime config read");
         let secrets: Secrets = serde_json::from_slice(&fs::read(layout.secrets())?)?;
-        let database_url = secrets.external_database_url.unwrap_or_else(|| {
-            crate::endpoints::managed_database_url(&secrets.postgres_password)
-        });
+        trace_service_start("runtime secrets read");
+        let database_url = secrets
+            .external_database_url
+            .unwrap_or_else(|| crate::endpoints::managed_database_url(&secrets.postgres_password));
         let specs = runtime_plan(
             &layout.version(&current.version),
             &layout.data,
@@ -141,13 +195,18 @@ mod windows {
             &database_url,
             &secrets.host_token,
         )?;
+        trace_service_start(&format!("runtime plan built: {} children", specs.len()));
         let supervisor = Supervisor {
             processes: NativeProcesses::default(),
         };
-        supervisor.run(&specs, |checkpoint, _| {
+        supervisor.run(&specs, |checkpoint, name| {
+            trace_service_start(&format!("managed child spawned: {name}"));
             set_status(handle, SERVICE_START_PENDING, checkpoint + 1)
         })?;
+        trace_service_start("all managed children ready");
         set_status(handle, SERVICE_RUNNING, 0)?;
+        trace_service_start("running reported");
+        let _ = fs::remove_file(layout.data.join("logs/service-startup-error.log"));
         stop_rx
             .recv()
             .context("service stop channel disconnected")?;

@@ -128,7 +128,7 @@ impl HostConfig {
         self.room_dir
             .join(".omp")
             .join("runtime")
-            .join("solarisael-house-state.json")
+            .join("athanor-house-state.json")
     }
 
     pub fn scope(&self) -> String {

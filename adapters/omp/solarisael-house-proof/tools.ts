@@ -855,13 +855,25 @@ export function registerSolarisaelTools(pi, release) {
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
-      if (params.type === "project" && !params.project?.trim()) {
+      const project = params.project?.trim();
+      if (params.type === "project" && !project) {
         return refuseToolResult("project lessons require project");
       }
       if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 50) {
         return refuseToolResult("limit must be an integer from 1 through 50");
       }
-      const result = await requestRustDomain("lesson_query", { room, ...params }, signal);
+      const result = await requestRustDomain("lesson_query", {
+        room,
+        type: params.type,
+        limit: params.limit,
+        ...(params.shape?.trim() ? { shape: params.shape.trim() } : {}),
+        ...(project ? { project } : {}),
+        ...(params.register?.trim() ? { register: params.register.trim() } : {}),
+        ...(params.stage?.trim() ? { stage: params.stage.trim() } : {}),
+        ...(params.languageKeys?.length ? { languageKeys: params.languageKeys } : {}),
+        ...(params.technologyKeys?.length ? { technologyKeys: params.technologyKeys } : {}),
+        ...(params.query?.trim() ? { query: params.query.trim() } : {}),
+      }, signal);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

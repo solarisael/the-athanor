@@ -87,7 +87,7 @@ fn write_room_state(root: &Path) {
     let runtime = root.join("room").join(".omp").join("runtime");
     std::fs::create_dir_all(&runtime).expect("create room runtime");
     std::fs::write(
-        runtime.join("solarisael-house-state.json"),
+        runtime.join("athanor-house-state.json"),
         serde_json::to_vec(&json!({
             "version": 1,
             "room": "kintsu",

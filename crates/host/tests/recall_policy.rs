@@ -1,5 +1,5 @@
-use delivery::broker::Broker;
 use chrono::{Duration, SecondsFormat, Utc};
+use delivery::broker::Broker;
 use futures_util::{SinkExt, StreamExt};
 use host::{Host, HostConfig, KnockAutonomy};
 use protocol::{
@@ -50,7 +50,7 @@ fn write_room_state(root: &Path) {
     let runtime = root.join("room").join(".omp").join("runtime");
     std::fs::create_dir_all(&runtime).expect("create room runtime");
     std::fs::write(
-        runtime.join("solarisael-house-state.json"),
+        runtime.join("athanor-house-state.json"),
         serde_json::to_vec_pretty(&json!({
             "version": 1,
             "room": "kintsu",
@@ -905,7 +905,7 @@ async fn set_retry_conflict_refusals_and_resync_preserve_authority() {
     let persisted: Value = serde_json::from_slice(
         &std::fs::read(
             root.path()
-                .join("room/.omp/runtime/solarisael-house-state.json"),
+                .join("room/.omp/runtime/athanor-house-state.json"),
         )
         .expect("persisted room state"),
     )
@@ -991,7 +991,7 @@ async fn resync_reloads_external_room_state_and_makes_old_versions_stale() {
 
     let state_path = root
         .path()
-        .join("room/.omp/runtime/solarisael-house-state.json");
+        .join("room/.omp/runtime/athanor-house-state.json");
     let mut persisted: Value =
         serde_json::from_slice(&std::fs::read(&state_path).expect("read external room state"))
             .expect("external room JSON");

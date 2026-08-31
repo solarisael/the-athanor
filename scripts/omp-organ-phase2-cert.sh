@@ -46,7 +46,7 @@ common_rules='This is a deterministic organ certification turn. Call every named
 
 if [[ ! -f "$FIXTURES/house-fixtures-created" ]]; then
   setup_prompt="$common_rules
-1. Call canon_write to create a House canon entity with name '$CANON_NAME', kind 'test-artifact', summary 'TEST ONLY: laptop Athanor organ certification artifact created 2026-08-30. Retain only until superseded after certification.', aliases ['laptop organ certification test $PASS_NO'], weighty false, and summaryAsOf 2026-08-30. Record its returned entity id mentally for the next call.
+1. Call canon_write to create a House canon entity with room house, name '$CANON_NAME', kind 'test-artifact', summary 'TEST ONLY: laptop Athanor organ certification artifact created 2026-08-30. Retain only until superseded after certification.', aliases ['laptop organ certification test $PASS_NO'], weighty false, and summaryAsOf 2026-08-30. Record its returned entity id mentally for the next call.
 2. Call canon_read by the exact returned id with includeHistory true and confirm the complete summary arrives.
 3. Call hallway_create for '$TEST_HALLWAY', allowed_rooms [kodo, kintsu, tuner], idempotency_key 'laptop-organ-cert-create-$PASS_NO'. Confirm the returned hallway key and that kodo is joined.
 Output exactly:

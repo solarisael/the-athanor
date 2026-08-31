@@ -20,6 +20,10 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Changed
+
+- Automatic context now releases a Windows turn after five seconds. A slow or unavailable organ degrades the context instead of holding the handler for 30 seconds.
+
 ## [0.5.2] - 2026-08-31
 
 ### Changed

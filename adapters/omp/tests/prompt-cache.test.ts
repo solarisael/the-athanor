@@ -315,16 +315,16 @@ describe("OMP prompt-cache history", () => {
     }, context("automatic-context-budget"));
 
     expect(automaticWakeOptions).toEqual([{ timeoutMs: 15_000 }]);
-    expect(automaticAnamnesisOptions).toEqual([{ mode: "wake", timeoutMs: process.platform === "win32" ? 30_000 : 2_000 }]);
+    expect(automaticAnamnesisOptions).toEqual([{ mode: "wake", timeoutMs: process.platform === "win32" ? 5_000 : 2_000 }]);
     expect(automaticEntityInputs).toEqual([{
       room: "kodo",
       roomDir: effectiveRoomDir,
       query: "recall this bounded technical thread",
-      timeoutMs: process.platform === "win32" ? 30_000 : 2_000,
+      timeoutMs: process.platform === "win32" ? 5_000 : 2_000,
     }]);
     expect(automaticRecallOptions).toEqual([{
       temporalDecay: true,
-      timeoutMs: process.platform === "win32" ? 30_000 : 2_000,
+      timeoutMs: process.platform === "win32" ? 5_000 : 2_000,
     }]);
   });
 

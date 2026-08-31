@@ -103,6 +103,28 @@ import {
   type InsulaSpan,
 } from "./solarisael-house-proof/insula.ts";
 import { showInsulaCockpit } from "./solarisael-house-proof/vitals.ts";
+type AutomaticContextBudgetResult<T> =
+  | { status: "settled"; value: T }
+  | { status: "failed"; error: unknown }
+  | { status: "timeout" };
+
+export async function settleAutomaticContextWithinBudget<T>(
+  work: Promise<T>,
+  timeoutMs = AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
+): Promise<AutomaticContextBudgetResult<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const observed = work.then<AutomaticContextBudgetResult<T>>(
+    (value) => ({ status: "settled", value }),
+    (error) => ({ status: "failed", error }),
+  );
+  const timeout = new Promise<AutomaticContextBudgetResult<T>>((resolve) => {
+    timer = setTimeout(() => resolve({ status: "timeout" }), timeoutMs);
+  });
+  const result = await Promise.race([observed, timeout]);
+  if (timer) clearTimeout(timer);
+  return result;
+}
+
 
 const wokenSessions = new Set();
 const modelDefaultsApplied = new Set();
@@ -1458,12 +1480,19 @@ export default function solarisaelHouseProof(pi, release) {
 
   pi.on("context", async (event, ctx) => {
     const observed: { span: InsulaSpan | null } = { span: null };
-    try {
-      return await composeContextAdditions(event, ctx, observed);
-    } catch (error) {
-      endInsulaSpan(observed.span, "error", insulaErrorClass(error));
-      throw error;
+    const result = await settleAutomaticContextWithinBudget(
+      composeContextAdditions(event, ctx, observed),
+    );
+    if (result.status === "settled") return result.value;
+    const span = observed.span;
+    observed.span = null;
+    if (result.status === "timeout") {
+      endInsulaSpan(span, "degraded", "automatic_context_timeout");
+      console.warn(`[athanor] Automatic context stopped after ${AUTOMATIC_CONTEXT_IO_TIMEOUT_MS}ms`);
+      return;
     }
+    endInsulaSpan(span, "error", insulaErrorClass(result.error));
+    console.warn(`[athanor] Automatic context degraded: ${result.error instanceof Error ? result.error.message : String(result.error)}`);
   });
 
 

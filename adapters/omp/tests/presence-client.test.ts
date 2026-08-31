@@ -176,6 +176,13 @@ describe("Presence client session fence", () => {
     const commands = installFakeHost({ frameVersion: 17, contractVersion: 3 });
     const previousBoat = paperBoatMaterial({ memoryId: "42", letter: "p".repeat(5000) });
     const anamnesis = anamnesisMaterial("a".repeat(5000));
+    const relationship = [{
+      id: "relationship:presence-pulse",
+      authority: { kind: "identity", source: "presence-pulse.md", sha256: "a".repeat(64) },
+      role: "relationship",
+      body: "operator letter",
+      salience: 975,
+    }];
     const compiled = await compilePresenceContext({
       binding: binding(room, top),
       operator: "Sol",
@@ -183,6 +190,7 @@ describe("Presence client session fence", () => {
       turnId: "turn-1",
       previousBoat,
       anamnesis,
+      relationship,
     });
 
     expect(compiled).toMatchObject({
@@ -203,6 +211,7 @@ describe("Presence client session fence", () => {
       kind: "paper_boat",
       memory_id: 42,
     });
+    expect(openCommand?.presence_open.relationship).toEqual(relationship);
     const compileCommand = commands.find((command) => command.command_or_event_type === "athanor.presence.compile");
     expect(compileCommand?.presence_compile.frameVersion).toBe(17);
     expect(compileCommand?.presence_compile.sessionLedger).toBeUndefined();

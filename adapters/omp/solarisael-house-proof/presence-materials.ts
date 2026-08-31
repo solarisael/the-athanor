@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import type { PresenceMaterial } from "./presence.ts";
 
 // enough: the wake letter and the Anamnesis counsel already ride this same
@@ -9,6 +13,33 @@ import type { PresenceMaterial } from "./presence.ts";
 // point back at the full-body carrier — the same shape lessons already use
 // (full bodies stay native, the Presence packet stays small).
 export const PRESENCE_WAKE_EXCERPT_CHARS = 700;
+export const PRESENCE_PULSE_MAX_CHARS = 4096;
+
+export function presencePulseMaterial(roomDir: string): PresenceMaterial | null {
+  const source = path.join(roomDir, "presence-pulse.md");
+  let body: string;
+  try {
+    body = readFileSync(source, "utf8").trim();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  if (!body) return null;
+  const bounded = body.length <= PRESENCE_PULSE_MAX_CHARS
+    ? body
+    : `${body.slice(0, PRESENCE_PULSE_MAX_CHARS)}\n[truncated at ${PRESENCE_PULSE_MAX_CHARS} characters]`;
+  return {
+    id: "relationship:presence-pulse",
+    authority: {
+      kind: "identity",
+      source: "presence-pulse.md",
+      sha256: createHash("sha256").update(body).digest("hex"),
+    },
+    role: "relationship",
+    body: bounded,
+    salience: 975,
+  };
+}
 
 function wakeExcerpt(text: string, carrier: string): string {
   const trimmed = text.trim();

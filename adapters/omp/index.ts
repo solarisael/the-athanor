@@ -42,6 +42,7 @@ import {
   anamnesisMaterial,
   lessonMaterials,
   paperBoatMaterial,
+  presencePulseMaterial,
   recallMaterials,
 } from "./solarisael-house-proof/presence-materials.ts";
 
@@ -1392,6 +1393,7 @@ export default function solarisaelHouseProof(pi, release) {
           && typeof message?.details?.frameId === "string"
         );
         const turnId = currentTurnKey || `turn:${responseDigest(prompt).slice(0, 24)}`;
+        const presencePulse = presencePulseMaterial(effectiveRoomDir);
         const compiled = await compilePresenceContext({
           binding,
           operator: houseState?.operator || operator,
@@ -1401,6 +1403,7 @@ export default function solarisaelHouseProof(pi, release) {
           priorFrameId: String(priorPresence?.details?.frameId ?? ""),
           priorFrameRendered: String(priorPresence?.details?.frameRendered ?? ""),
           previousBoat: presenceBoat,
+          relationship: presencePulse ? [presencePulse] : [],
           anamnesis: presenceAnamnesis,
           recalled: presenceRecalled,
           lessons: presenceLessons,
@@ -1426,6 +1429,7 @@ export default function solarisaelHouseProof(pi, release) {
           timestamp,
         });
         activities.push(`Presence loaded: ${compiled.frameId}/v${compiled.frameVersion}`);
+        if (presencePulse) activities.push("Presence pulse loaded");
       } catch (error) {
         console.warn(`[athanor] Presence degraded: ${error instanceof Error ? error.message : String(error)}`);
         warnings.push("Presence unavailable");

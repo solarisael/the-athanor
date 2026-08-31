@@ -62,6 +62,7 @@ export type PresenceContextInput = {
   priorFrameId?: string;
   priorFrameRendered?: string;
   previousBoat?: PresenceMaterial | null;
+  relationship?: PresenceMaterial[];
   anamnesis?: PresenceMaterial[];
   recalled?: PresenceMaterial[];
   lessons?: PresenceMaterial[];
@@ -117,7 +118,7 @@ async function resolveFrame(
         identityMaterial(input),
         ...recalled.filter((material) => material.role === "identity"),
       ],
-      relationship: [],
+      relationship: input.relationship ?? [],
       continuity: recalled.filter((material) => material.role !== "identity"),
       anamnesis: input.anamnesis ?? [],
       previousBoat: input.previousBoat ?? null,

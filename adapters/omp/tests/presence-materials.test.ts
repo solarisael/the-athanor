@@ -1,9 +1,14 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, test } from "bun:test";
 
 import {
   anamnesisMaterial,
   lessonMaterials,
   paperBoatMaterial,
+  presencePulseMaterial,
   recallMaterials,
 } from "../solarisael-house-proof/presence-materials.ts";
 
@@ -28,6 +33,24 @@ describe("Presence material mapping", () => {
       expect.objectContaining({ id: "memory:9", authority: { kind: "memory", memory_id: 9 } }),
       expect.objectContaining({ id: "canon:3", authority: { kind: "canon", entity_id: "3" } }),
     ]);
+  });
+
+  test("loads the room pulse as relationship authority", () => {
+    const room = mkdtempSync(path.join(tmpdir(), "presence-pulse-"));
+    try {
+      writeFileSync(path.join(room, "presence-pulse.md"), "operator letter\n");
+      const pulse = presencePulseMaterial(room);
+      expect(pulse).toMatchObject({
+        id: "relationship:presence-pulse",
+        authority: { kind: "identity", source: "presence-pulse.md" },
+        role: "relationship",
+        body: "operator letter",
+        salience: 975,
+      });
+      expect(String(pulse?.authority.sha256)).toHaveLength(64);
+    } finally {
+      rmSync(room, { recursive: true, force: true });
+    }
   });
 
   test("excerpts wake materials and points at the full-body carrier", () => {

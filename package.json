@@ -1,6 +1,6 @@
 {
   "name": "the-athanor",
-  "version": "0.9.7.2",
+  "version": "0.5.0",
   "description": "A persistent identity, continuity, and memory platform for AI agents and collaborators.",
   "author": "Sol",
   "license": "Apache-2.0",

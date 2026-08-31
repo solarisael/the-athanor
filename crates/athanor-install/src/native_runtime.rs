@@ -58,9 +58,9 @@ impl NativeRuntimeControl {
     }
     fn database_url(&self) -> Result<String> {
         let secrets = self.secrets()?;
-        Ok(secrets.external_database_url.unwrap_or_else(|| {
-            crate::endpoints::managed_database_url(&secrets.postgres_password)
-        }))
+        Ok(secrets
+            .external_database_url
+            .unwrap_or_else(|| crate::endpoints::managed_database_url(&secrets.postgres_password)))
     }
     fn run(&self, arguments: &[&str]) -> Result<String> {
         let root = self.maintenance_root()?;

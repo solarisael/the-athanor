@@ -20,6 +20,12 @@ the exact implementation record.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-31
+
+### Changed
+
+- A locked stale release now produces an install warning after successful activation. It no longer converts a healthy update into a false failure.
+
 ## [0.5.1] - 2026-08-31
 
 ### Changed

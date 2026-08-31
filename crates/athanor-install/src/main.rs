@@ -127,7 +127,7 @@ fn main() -> Result<()> {
             println!(
                 "{}",
                 serde_json::to_string(
-                    &serde_json::json!({"ok": true, "version": outcome.version, "upgradedFrom": outcome.upgraded_from, "legacyImported": outcome.legacy_imported, "ompRegistered": outcome.omp_registered})
+                    &serde_json::json!({"ok": true, "version": outcome.version, "upgradedFrom": outcome.upgraded_from, "legacyImported": outcome.legacy_imported, "ompRegistered": outcome.omp_registered, "warnings": outcome.warnings})
                 )?
             );
         }

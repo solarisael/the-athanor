@@ -125,6 +125,7 @@ pub struct InstallOutcome {
     pub upgraded_from: Option<String>,
     pub legacy_imported: bool,
     pub omp_registered: bool,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -297,17 +298,26 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                 upgraded_from: current.as_ref().map(|value| value.version.clone()),
                 legacy_imported,
                 omp_registered,
+                warnings: Vec::new(),
             })
         })();
 
         match attempted {
-            Ok(outcome) => {
+            Ok(mut outcome) => {
                 let active = self
                     .read_current()?
                     .context("successful install did not retain a native release pointer")?;
-                self.prune_native_releases(&active)?;
-                if let Some(component) = self.read_component_pointer()? {
-                    self.prune_component_releases(&component)?;
+                if let Err(error) = self.prune_native_releases(&active) {
+                    outcome
+                        .warnings
+                        .push(format!("native release cleanup deferred: {error:#}"));
+                }
+                if let Some(component) = self.read_component_pointer()?
+                    && let Err(error) = self.prune_component_releases(&component)
+                {
+                    outcome
+                        .warnings
+                        .push(format!("OMP adapter cleanup deferred: {error:#}"));
                 }
                 Ok(outcome)
             }

@@ -511,7 +511,7 @@ fn native_retention_waits_for_activation_and_catches_up_to_the_pointer_pair() ->
 }
 
 #[test]
-fn native_cleanup_failure_is_reported_without_reverting_durable_pointers() -> Result<()> {
+fn native_cleanup_failure_warns_without_reverting_durable_pointers() -> Result<()> {
     let fs = FakeFs::default();
     let services = FakeServices::default();
     let runtime = FakeRuntime::default();
@@ -545,16 +545,15 @@ fn native_cleanup_failure_is_reported_without_reverting_durable_pointers() -> Re
     }
 
     *fs.fail_remove_tree_once.borrow_mut() = Some(layout.version("1.0.0"));
-    let error = installer
-        .install(InstallRequest {
-            staging: stages[2].clone(),
-            manifest: release("3.0.0", b"three"),
-            external_database_url: None,
-            house_config: None,
-            operator_integration: None,
-        })
-        .expect_err("stale release cleanup failure must be surfaced");
-    assert!(format!("{error:#}").contains("failed to prune stale native releases"));
+    let outcome = installer.install(InstallRequest {
+        staging: stages[2].clone(),
+        manifest: release("3.0.0", b"three"),
+        external_database_url: None,
+        house_config: None,
+        operator_integration: None,
+    })?;
+    assert_eq!(outcome.warnings.len(), 1);
+    assert!(outcome.warnings[0].contains("failed to prune stale native releases"));
     let pointer: CurrentRelease = serde_json::from_slice(&fs.read(&layout.current())?)?;
     assert_eq!(pointer.version, "3.0.0");
     assert_eq!(pointer.previous_version.as_deref(), Some("2.0.0"));

@@ -163,7 +163,11 @@ for recipient in "${rooms[@]}"; do
     tuner) sender=kintsu ;;
   esac
   bell_prompt="$common_rules
-Call hallway_inbox. Require a pending targeted Bell row for hallway '$TEST_HALLWAY' whose message body or exact routing metadata identifies pass=$PASS_NO, sender=$sender, recipient=$recipient, and whose to_rooms includes this room. Do not clear or acknowledge it. Output exactly:
+1. Call hallway_inbox and find the pending targeted Bell notification for hallway '$TEST_HALLWAY'. Record its message id and thread.
+2. Call hallway_read on '$TEST_HALLWAY', after 0, no thread filter, limit 200, advance_cursor false.
+3. Join the notification to the exact Hallway message by message id. Require the joined message thread to match the notification thread.
+4. Require that exact message to have body 'TEST ONLY laptop-organ-cert bell pass=$PASS_NO sender=$sender recipient=$recipient', sender room '$sender', and toRooms containing '$recipient'.
+Do not clear or acknowledge the notification. Output exactly:
 ORGAN bell PASS"
   run_prompt "$recipient" bell 'ORGAN bell PASS' "$bell_prompt"
 done

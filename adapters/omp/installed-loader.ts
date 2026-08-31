@@ -549,6 +549,7 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
   setUnlessConfigured(env, "ATHANOR_STATE_DIR", client.stateRoot);
   setUnlessConfigured(env, "ATHANOR_SUBSTRATE_ROOT", nativeRoot.logical);
   setUnlessConfigured(env, "ATHANOR_SUBSTRATE_EXE", path.join(nativeRoot.logical, "bin", "athanor-substrate.exe"));
+  setUnlessConfigured(env, "PG_BIN_DIR", path.join(nativeRoot.logical, "runtime", "postgresql", "bin"));
   setUnlessConfigured(env, "ATHANOR_HOST_HOUSE_ID", client.houseId);
   setUnlessConfigured(env, "ATHANOR_HOST_TOKEN", client.hostToken);
   setUnlessConfigured(env, "ATHANOR_HOST_ENDPOINTS", JSON.stringify(client.endpoints));

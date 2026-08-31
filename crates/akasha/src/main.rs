@@ -902,7 +902,7 @@ fn keepalive_requested(is_windows: bool, flag: Option<&str>) -> bool {
 
 impl WslKeepalive<ChildKeepalive> {
     fn start() -> Result<Self, std::io::Error> {
-        let flag = env::var("SOLARISAEL_PG_WSL").ok();
+        let flag = env::var("ATHANOR_PG_WSL").ok();
         Self::start_with(cfg!(windows), flag.as_deref(), || {
             Command::new("wsl.exe")
                 .args(["--exec", "sleep", "infinity"])

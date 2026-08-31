@@ -186,7 +186,7 @@ pub struct BackupHealth {
 }
 
 fn use_wsl_pg() -> bool {
-    cfg!(windows) && env::var("SOLARISAEL_PG_WSL").as_deref() == Ok("1")
+    cfg!(windows) && env::var("ATHANOR_PG_WSL").as_deref() == Ok("1")
 }
 
 fn pg_command(name: &str) -> Command {

@@ -69,7 +69,7 @@ The native installer and the managed runtime for Windows. It builds the `athanor
 - **`with_database`.** In managed mode it initializes the data directory when needed, starts PostgreSQL, creates the database on first use, runs the action, then always stops PostgreSQL. External mode runs the action directly.
 - **`initialize_postgres`.** It runs `initdb` with the `scram-sha-256` method and UTF-8 encoding. The password file is removed straight after use.
 - **Address.** An external address wins. Otherwise the managed loopback address is built from the stored password.
-- **Staging override.** `ATHANOR_INSTALL_STAGING_BIN` points the pre-upgrade backup at the staged substrate, because the installed one may not know the current lineage.
+- **Staging override.** `ATHANOR_INSTALL_STAGING_BIN` selects the staged substrate for pre-upgrade backup. `PG_BIN_DIR` selects PostgreSQL tools from that same release root.
 
 ### component
 

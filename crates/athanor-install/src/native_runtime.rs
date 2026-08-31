@@ -27,21 +27,24 @@ impl NativeRuntimeControl {
         let current: CurrentRelease = serde_json::from_slice(&fs::read(self.layout.current())?)?;
         Ok(self.layout.version(&current.version))
     }
-    fn substrate(&self) -> Result<PathBuf> {
+    fn maintenance_root(&self) -> Result<PathBuf> {
         // During install/update the pre-upgrade backup must run BEFORE the new
         // version activates, but the currently installed substrate only knows
         // migrations up to its own release. A database migrated ahead of the
         // installed binaries (developer migration, live proof) would make the
         // upgrade permanently impossible. main sets this process-local staging
-        // path for the install command only; the staged substrate always knows
-        // at least the current lineage, and pg_dump does the actual work.
+        // path for the install command only; the staged substrate and bundled
+        // PostgreSQL tools always come from the same release root.
         if let Some(staged) = std::env::var_os("ATHANOR_INSTALL_STAGING_BIN") {
-            let candidate = PathBuf::from(staged).join("athanor-substrate.exe");
-            if candidate.exists() {
-                return Ok(candidate);
+            let bin = PathBuf::from(staged);
+            if bin.join("athanor-substrate.exe").exists() {
+                return bin
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .context("staged Athanor bin directory has no release root");
             }
         }
-        Ok(self.current_root()?.join("bin/athanor-substrate.exe"))
+        self.current_root()
     }
     fn secrets(&self) -> Result<Secrets> {
         Ok(serde_json::from_slice(
@@ -60,9 +63,11 @@ impl NativeRuntimeControl {
         }))
     }
     fn run(&self, arguments: &[&str]) -> Result<String> {
-        let output = Command::new(self.substrate()?)
+        let root = self.maintenance_root()?;
+        let output = Command::new(root.join("bin/athanor-substrate.exe"))
             .args(arguments)
             .env("DATABASE_URL", self.database_url()?)
+            .env("PG_BIN_DIR", root.join("runtime/postgresql/bin"))
             .stdin(Stdio::null())
             .output()
             .context("run substrate maintenance command")?;

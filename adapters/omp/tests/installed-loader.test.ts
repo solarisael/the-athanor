@@ -323,6 +323,7 @@ test("loads the integrity-checked component release while native current.json ow
   expect(tree.env.ATHANOR_STATE_DIR).toBe(path.join(tree.root, "operator-override"));
   expect(tree.env.ATHANOR_SUBSTRATE_ROOT).toBe(tree.nativeRoot);
   expect(tree.env.ATHANOR_SUBSTRATE_EXE).toBe(path.join(tree.nativeRoot, "bin", "athanor-substrate.exe"));
+  expect(tree.env.PG_BIN_DIR).toBe(path.join(tree.nativeRoot, "runtime", "postgresql", "bin"));
   expect(tree.env.ATHANOR_HOST_HOUSE_ID).toBe("solarisael");
   expect(tree.env.ATHANOR_HOST_TOKEN).toBe("private-token");
   expect(JSON.parse(tree.env.ATHANOR_HOST_ENDPOINTS!)).toEqual({

@@ -20,6 +20,14 @@ the exact implementation record.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-31
+
+### Changed
+
+- Windows OMP writes now allow five minutes for durable PostgreSQL work and backups. Other platforms keep the 90-second limit.
+- Installed OMP sessions now use the bundled PostgreSQL tools for backups. The old WSL flag no longer spawns leaked keepalive processes.
+- Native updates now pair the staged substrate with its bundled PostgreSQL tools. Upgrade backups no longer depend on the parent shell's database mode.
+
 ## [0.5.0] - 2026-08-31
 
 ### Added
@@ -129,7 +137,6 @@ the exact implementation record.
 
 - The product version resets from `0.9.7.2` to `0.5.0`. The new line states the product's current maturity without erasing earlier evidence.
 - The `0.9.*` records remain historical implementation receipts. They do not claim that one-owner startup, one-door room routing, or the web operator surface is complete.
-- Windows OMP writes now allow five minutes for durable PostgreSQL work and backups. Other platforms keep the 90-second limit.
 
 - The OMP adapter no longer injects lesson packets, process reminders, or asynchronous Athanor corrections. Use explicit retrieval for ordinary lessons.
 - Lessons tagged `ttsr-approved` now register as versioned rules in OMP’s native `TtsrManager`. OMP owns matching, interruption, retry, and reminders.

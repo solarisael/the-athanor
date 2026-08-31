@@ -246,7 +246,7 @@ pub async fn flush_insula_emitter() {
 }
 
 fn disabled_by_environment() -> bool {
-    ["ATHANOR_DISABLE_INSULA", "SOLARISAEL_REPLAY_MODE"]
+    ["ATHANOR_DISABLE_INSULA", "ATHANOR_REPLAY_MODE"]
         .into_iter()
         .any(|name| std::env::var(name).is_ok_and(|value| value == "1"))
 }
@@ -429,9 +429,7 @@ mod tests {
                 .connect_lazy("postgres://localhost/insula_disabled_test")
                 .expect("lazy test pool");
             init_insula_emitter(pool);
-            assert!(
-                start_span(&system_binding(), "akasha", "substrate", "test").is_none()
-            );
+            assert!(start_span(&system_binding(), "akasha", "substrate", "test").is_none());
             return;
         }
 

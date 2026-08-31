@@ -972,7 +972,7 @@ export default function solarisaelHouseProof(pi, release) {
         "context",
         houseState?.operator || operator,
         houseState?.embodiedSpirit || spirit,
-        process.env.SOLARISAEL_REPLAY_MODE !== "1",
+        process.env.ATHANOR_REPLAY_MODE !== "1",
       );
       ingestGigaLoggedTurnsDetached(ctx, conversation.loggedTurns);
     } catch (error) {
@@ -1547,7 +1547,7 @@ export default function solarisaelHouseProof(pi, release) {
         "agent_end",
         operator,
         spirit,
-        process.env.SOLARISAEL_REPLAY_MODE !== "1",
+        process.env.ATHANOR_REPLAY_MODE !== "1",
       );
       ingestGigaLoggedTurnsDetached(ctx, capture.loggedTurns);
     } catch {

@@ -47,7 +47,7 @@ pub(super) fn ollama_config() -> Result<OllamaConfig, WorkerFailure> {
     if !classifier_enabled() {
         return Err(WorkerFailure::new(WorkerFailureKind::Disabled));
     }
-    let raw = env::var("SOLARISAEL_HIPPOCAMPUS_OLLAMA_ENDPOINT")
+    let raw = env::var("ATHANOR_HIPPOCAMPUS_OLLAMA_ENDPOINT")
         .unwrap_or_else(|_| GIGA_DEFAULT_OLLAMA_ENDPOINT.into());
     let mut endpoint =
         Url::parse(&raw).map_err(|_| WorkerFailure::new(WorkerFailureKind::OllamaConfiguration))?;
@@ -58,7 +58,7 @@ pub(super) fn ollama_config() -> Result<OllamaConfig, WorkerFailure> {
         || endpoint.fragment().is_some()
         || endpoint.host_str().is_none()
         || (!is_loopback(&endpoint)
-            && env::var("SOLARISAEL_HIPPOCAMPUS_REMOTE_CONSENT")
+            && env::var("ATHANOR_HIPPOCAMPUS_REMOTE_CONSENT")
                 .ok()
                 .as_deref()
                 != Some("1"))

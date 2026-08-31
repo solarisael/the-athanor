@@ -17,7 +17,7 @@ export function isScratchName(targetPath: string): boolean {
 }
 
 const TRACKED_MARKERS = [".git", ".omp", ".opencode"];
-const VAULT_ROOT = process.env.SOLARISAEL_VAULT_ROOT || path.join(os.homedir(), "Solarisael");
+const VAULT_ROOT = process.env.ATHANOR_VAULT_ROOT || path.join(os.homedir(), "Solarisael");
 
 export function dirHasTrackedMarker(directory: string): boolean {
   return TRACKED_MARKERS.some((marker) => existsSync(path.join(directory, marker)));

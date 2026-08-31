@@ -82,7 +82,7 @@ const gigaTurnBuffers = new Map<string, GigaTurnBuffer>();
 
 
 function gigaTransport(cwd: string = process.cwd()): RustJsonlTransport | null {
-  if (process.env.SOLARISAEL_GIGA_ENABLED !== "1") return null;
+  if (process.env.ATHANOR_GIGA_ENABLED !== "1") return null;
   const executable = discoverRustExecutable();
   if (!executable) return null;
   const trusted = roomContext(cwd);
@@ -93,8 +93,8 @@ function gigaTransport(cwd: string = process.cwd()): RustJsonlTransport | null {
       executable,
       cwd: trusted.effectiveRoomDir,
       env: {
-        SOLARISAEL_GIGA_SOURCE_ROOM: trusted.room,
-        SOLARISAEL_GIGA_CLAIM_OWNER: "1",
+        ATHANOR_GIGA_SOURCE_ROOM: trusted.room,
+        ATHANOR_GIGA_CLAIM_OWNER: "1",
       },
     });
     gigaTransports.set(key, transport);
@@ -103,7 +103,7 @@ function gigaTransport(cwd: string = process.cwd()): RustJsonlTransport | null {
 }
 
 function requireGigaTransport(): RustJsonlTransport {
-  if (process.env.SOLARISAEL_GIGA_ENABLED !== "1") {
+  if (process.env.ATHANOR_GIGA_ENABLED !== "1") {
     throw Object.assign(new Error("GIGA is disabled"), { code: "giga_disabled", retryable: false, details: { enabled: false } });
   }
   const transport = gigaTransport();
@@ -159,14 +159,14 @@ export async function requestGigaQueueMaintenance(room: string, operation: GigaQ
 }
 
 async function ingestLoggedTurns(ctx: any, loggedTurns: LoggedTurn[]): Promise<void> {
-  if (gigaClosing || process.env.SOLARISAEL_GIGA_ENABLED !== "1" || loggedTurns.length === 0) return;
+  if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || loggedTurns.length === 0) return;
   try {
     const trusted = roomContext(ctx?.cwd || process.cwd());
     const transport = gigaTransport(ctx?.cwd || process.cwd());
     if (!transport) return;
     await transport.request("giga_conversation_ingest", {
       room: trusted.room,
-      project_keys: process.env.SOLARISAEL_GIGA_PROJECT_KEY ? [process.env.SOLARISAEL_GIGA_PROJECT_KEY] : [],
+      project_keys: process.env.ATHANOR_GIGA_PROJECT_KEY ? [process.env.ATHANOR_GIGA_PROJECT_KEY] : [],
       turns: loggedTurns.map((turn) => ({
         role: turn.role,
         source_id: turn.sourceID,
@@ -191,7 +191,7 @@ function isSubagentSessionContext(ctx: any): boolean {
 }
 
 export function ingestGigaLoggedTurnsDetached(ctx: any, loggedTurns: LoggedTurn[]): void {
-  if (gigaClosing || process.env.SOLARISAEL_GIGA_ENABLED !== "1" || !Array.isArray(loggedTurns) || loggedTurns.length === 0 || isSubagentSessionContext(ctx)) return;
+  if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || !Array.isArray(loggedTurns) || loggedTurns.length === 0 || isSubagentSessionContext(ctx)) return;
   const cwd = String(ctx?.cwd || "");
   for (const turn of loggedTurns) {
     const key = `${cwd}\0${String(turn.sessionID ?? "")}`;

@@ -21,9 +21,9 @@ pub(crate) fn giga_capability_state_from_flags(
 }
 
 pub(crate) fn giga_capability_state() -> GigaCapabilityState {
-    let giga_enabled = env::var("SOLARISAEL_GIGA_ENABLED").ok();
-    let hippocampus_enabled = env::var("SOLARISAEL_HIPPOCAMPUS_ENABLED").ok();
-    let replay_mode = env::var("SOLARISAEL_REPLAY_MODE").ok();
+    let giga_enabled = env::var("ATHANOR_GIGA_ENABLED").ok();
+    let hippocampus_enabled = env::var("ATHANOR_HIPPOCAMPUS_ENABLED").ok();
+    let replay_mode = env::var("ATHANOR_REPLAY_MODE").ok();
     giga_capability_state_from_flags(
         giga_enabled.as_deref(),
         hippocampus_enabled.as_deref(),
@@ -36,5 +36,5 @@ pub(super) fn classifier_enabled() -> bool {
 }
 
 pub(super) fn claim_owner_enabled() -> bool {
-    classifier_enabled() && env::var("SOLARISAEL_GIGA_CLAIM_OWNER").ok().as_deref() == Some("1")
+    classifier_enabled() && env::var("ATHANOR_GIGA_CLAIM_OWNER").ok().as_deref() == Some("1")
 }

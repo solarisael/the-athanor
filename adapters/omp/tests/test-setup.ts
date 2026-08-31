@@ -12,7 +12,7 @@ const LIVE_CONFIGURATION_KEYS = [
   "ATHANOR_SUBSTRATE_ROOT",
   "ATHANOR_STATE_DIR",
   "ATHANOR_AUTO",
-  "SOLARISAEL_GIGA_ENABLED",
+  "ATHANOR_GIGA_ENABLED",
   "SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL",
   "DATABASE_URL",
   "PGHOST",
@@ -31,6 +31,7 @@ const RENAMED_CONFIGURATION_KEYS: ReadonlyArray<readonly [string, string]> = [
   ["SOLARISAEL_HOUSE_AUTO", "ATHANOR_AUTO"],
   ["SOLARISAEL_SUBSTRATE", "ATHANOR_SUBSTRATE_ROOT"],
   ["SOLARISAEL_STATE_DIR", "ATHANOR_STATE_DIR"],
+  ["SOLARISAEL_GIGA_ENABLED", "ATHANOR_GIGA_ENABLED"],
   ["SOLARISAEL_HOUSE_CORE", "(removed; the core root is structural)"],
 ] as const;
 
@@ -124,7 +125,7 @@ function assertNoLiveConfiguration(): void {
   const isolatedPostgres = process.env[ISOLATED_POSTGRES_GATE] === "1";
   const violations = LIVE_CONFIGURATION_KEYS.filter((key) => {
     if (isolatedPostgres && ["ATHANOR_SUBSTRATE_EXE", "ATHANOR_SUBSTRATE_ROOT", "SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL"].includes(key)) return false;
-    if (key === "SOLARISAEL_GIGA_ENABLED") return process.env[key] === "1";
+    if (key === "ATHANOR_GIGA_ENABLED") return process.env[key] === "1";
     return configured(key);
   });
   if (violations.length > 0) {
@@ -136,7 +137,7 @@ function assertNoLiveConfiguration(): void {
 
 assertNoLiveConfiguration();
 
-process.env.SOLARISAEL_GIGA_ENABLED = "0";
+process.env.ATHANOR_GIGA_ENABLED = "0";
 
 // The process-wide Insula writer stays silent for the whole suite: no test may
 // post an observation to whatever Host a developer happens to have installed.

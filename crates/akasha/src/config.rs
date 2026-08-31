@@ -112,10 +112,8 @@ const EMBEDDING_ENV_KEYS: &[&str] = &[
 ];
 const GIGA_ENV_KEYS: &[&str] = &["GIGA_MODEL_TIMEOUT", "GIGA_KEEP_ALIVE", "GIGA_NUM_CTX"];
 const HOUSE_ENV_KEYS: &[&str] = &["SOLARISAEL_HOUSE_TZ"];
-const GIGA_SOURCE_ENV_KEYS: &[&str] = &[
-    "SOLARISAEL_GIGA_SOURCE_LEDGER_DIR",
-    "SOLARISAEL_GIGA_SOURCE_ROOM",
-];
+const GIGA_SOURCE_ENV_KEYS: &[&str] =
+    &["ATHANOR_GIGA_SOURCE_LEDGER_DIR", "ATHANOR_GIGA_SOURCE_ROOM"];
 
 struct Dotenv {
     /// `None` when the state root could not be resolved, so there is no
@@ -889,14 +887,14 @@ impl Config {
             embed_dimension,
             embedding_mode,
             embed_url,
-            giga_source_ledger_dir: configured_value("SOLARISAEL_GIGA_SOURCE_LEDGER_DIR", &dotenv)
+            giga_source_ledger_dir: configured_value("ATHANOR_GIGA_SOURCE_LEDGER_DIR", &dotenv)
                 .map(PathBuf::from)
                 .or_else(|| {
                     env::current_dir()
                         .ok()
                         .map(|room| source_ledger_directory_path(&room))
                 }),
-            giga_source_room: configured_value("SOLARISAEL_GIGA_SOURCE_ROOM", &dotenv),
+            giga_source_room: configured_value("ATHANOR_GIGA_SOURCE_ROOM", &dotenv),
             house_tz: configured_value("SOLARISAEL_HOUSE_TZ", &dotenv).unwrap_or_default(),
         })
     }

@@ -894,7 +894,15 @@ export function registerSolarisaelTools(pi, release) {
       if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 50) {
         return refuseToolResult("limit must be an integer from 1 through 50");
       }
-      const result = await requestRustDomain("design_document_query", params, signal);
+      const result = await requestRustDomain("design_document_query", {
+        system: params.system.trim(),
+        docType: params.docType,
+        name: params.name?.trim() || undefined,
+        group: params.group?.trim() || undefined,
+        query: params.query?.trim() || undefined,
+        includeSuperseded: params.includeSuperseded ?? false,
+        limit: params.limit,
+      }, signal);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -1618,7 +1626,7 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({
       hallway: z.string().describe("Hallway key."),
       body: z.string().describe("Non-empty substantive message, at most 32768 UTF-8 bytes."),
-      reply_to: z.number().optional().describe("Positive message id being answered."),
+      reply_to: z.number().optional().describe("Use 0 or omit for a new message; use a positive message id when replying."),
       to_rooms: z.array(z.string()).optional().describe("Structured recipient room keys. A listed room gets a durable Bell notification (targeted attention, not privacy). Never parsed from body text."),
       idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
     }),
@@ -1629,7 +1637,7 @@ export function registerSolarisaelTools(pi, release) {
         hallway: params.hallway,
         ...binding,
         body: params.body,
-        replyTo: params.reply_to,
+        replyTo: params.reply_to === 0 ? undefined : params.reply_to,
         toRooms: params.to_rooms ?? [],
         idempotencyKey: params.idempotency_key || String(toolCallId),
       }, signal, true);
@@ -1710,7 +1718,7 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({
       hallway: z.string().describe("Hallway key."),
       after: z.number().optional().describe("Non-negative message id; reads after it instead of the presence cursor."),
-      thread: z.string().optional().describe("Exact daily thread key. Omit for the whole Hallway."),
+      thread: z.string().optional().describe("Exact daily thread key. Use an empty string or omit for the whole Hallway."),
       limit: z.number().optional().describe("Maximum messages to return, 1-200; default 50."),
       advance_cursor: z.boolean().optional().describe("Acknowledge returned messages. Whole-Hallway reads also advance this presence's cursor; filtered thread reads leave it unchanged."),
     }),
@@ -1721,7 +1729,7 @@ export function registerSolarisaelTools(pi, release) {
         hallway: params.hallway,
         ...binding,
         after: params.after,
-        thread: params.thread,
+        thread: params.thread?.trim() || undefined,
         limit: params.limit ?? 50,
         advanceCursor: params.advance_cursor ?? false,
       }, signal, params.advance_cursor === true);

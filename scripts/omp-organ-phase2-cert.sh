@@ -92,7 +92,7 @@ ORGAN anamnesis_consult PASS"
 1. Call canon_read by name 'The Athanor', room house, includeHistory true. Require the complete non-empty canonical summary/body, not merely an id or snippet.
 2. Call canon_read by name '$CANON_NAME', room house, includeHistory true. Require its complete TEST summary. This read-back certifies the shared House canon_write fixture for this room.
 3. Call recall with the exact query 'The Athanor' and require a canonical match resolving that known canon name or alias without extrapolating from adjacent semantic matches.
-4. Call design_doc for system solarisael and retrieve any one live catalogue record. Because docType is required by the live schema, try token first, then component, contract, or guideline only if the prior type returns no rows. Use empty name/group and a broad query, includeSuperseded false, limit 1. Require one complete record.
+4. Call design_doc for system solarisael with docType token, omit name, group, and query entirely, includeSuperseded false, and limit 1. Require one complete live catalogue record.
 5. Call recall_policy with requestedMode omitted so this is a read only. Require a healthy current requested and resolved policy and no scar.
 Output exactly:
 ORGAN canon_read PASS

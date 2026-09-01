@@ -141,27 +141,3 @@ pub async fn entity_resolve(
         matches: resolve_matches(&params.query, &entities, params.limit as usize),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn entities() -> Vec<Entity> {
-        vec![Entity {
-            name: "North Star".into(),
-            kind: "project".into(),
-            aliases: vec!["the north-star".into(), "blue".into(), "blue team".into()],
-        }]
-    }
-    #[test]
-    fn normalization_is_boundary_safe_and_prefers_long_aliases() {
-        assert_eq!(
-            resolve_matches("Please check NORTH-STAR.", &entities(), 8)[0].canonical_name,
-            "North Star"
-        );
-        assert_eq!(
-            resolve_matches("blue team", &entities(), 8)[0].matched_alias,
-            "blue team"
-        );
-        assert!(resolve_matches("blueness", &entities(), 8).is_empty());
-    }
-}

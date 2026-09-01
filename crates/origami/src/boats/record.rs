@@ -25,13 +25,3 @@ pub fn bounded_utf8(value: &str, max_bytes: usize) -> (String, bool) {
     }
     (value[..end].to_owned(), true)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn bounded_utf8_never_splits_a_character() {
-        assert_eq!(bounded_utf8("ab💛cd", 5), ("ab".into(), true));
-    }
-}

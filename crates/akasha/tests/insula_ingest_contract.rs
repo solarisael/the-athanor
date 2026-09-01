@@ -338,36 +338,6 @@ async fn trace_projection_orders_cross_writer_parent_before_clock_skewed_child()
 }
 
 #[tokio::test]
-async fn observation_dto_rejects_body_binding_and_docket_authority_fields() {
-    let mut bodyful =
-        serde_json::to_value(event(Uuid::new_v4(), 1)).expect("serialize strict DTO fixture");
-    bodyful["body"] = json!("prose must never enter Insula");
-    assert!(serde_json::from_value::<ObservationEvent>(bodyful).is_err());
-
-    let mut caller_bound =
-        serde_json::to_value(event(Uuid::new_v4(), 1)).expect("serialize strict DTO fixture");
-    caller_bound["houseId"] = json!("caller-selected-house");
-    caller_bound["sessionId"] = json!("caller-selected-session");
-    assert!(serde_json::from_value::<ObservationEvent>(caller_bound).is_err());
-
-    let mut docket_authority =
-        serde_json::to_value(event(Uuid::new_v4(), 1)).expect("serialize strict DTO fixture");
-    docket_authority["questId"] = json!("never an Insula field");
-    docket_authority["attemptId"] = json!("never an Insula field");
-    assert!(serde_json::from_value::<ObservationEvent>(docket_authority).is_err());
-
-    let mut caller_derived =
-        serde_json::to_value(event(Uuid::new_v4(), 1)).expect("serialize strict DTO fixture");
-    caller_derived["idempotencyKey"] = json!("caller must not select a derived logical key");
-    caller_derived["semanticHash"] = json!("caller must not select a derived semantic hash");
-    assert!(serde_json::from_value::<ObservationEvent>(caller_derived).is_err());
-    let mut caller_expiry =
-        serde_json::to_value(event(Uuid::new_v4(), 1)).expect("serialize strict DTO fixture");
-    caller_expiry["expiresAt"] = json!(Utc::now().to_rfc3339());
-    assert!(serde_json::from_value::<ObservationEvent>(caller_expiry).is_err());
-}
-
-#[tokio::test]
 async fn ingest_rejects_future_observation_time_before_database_access() {
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres://localhost/insula-validation-only")

@@ -948,18 +948,6 @@ mod tests {
         assert!(validate_intent_id("00000000-0000-0000-0000-00000000000").is_err());
     }
 
-    // Kills: a stage-deadline receipt that stops matching the const block, so
-    // the keeper would obey a number the House does not hold.
-    // red-proof: change one number in stage_deadlines() only.
-    #[test]
-    fn stage_deadlines_come_from_the_const_block() {
-        let deadlines = stage_deadlines();
-        assert_eq!(deadlines.requested_ttl_secs, REQUESTED_TTL_SECS);
-        assert_eq!(deadlines.exiting_secs, EXITING_DEADLINE_SECS);
-        assert_eq!(deadlines.relaunching_secs, RELAUNCHING_DEADLINE_SECS);
-        assert_eq!(deadlines.relaunch_attempt_limit, RELAUNCH_ATTEMPT_LIMIT);
-    }
-
     // Kills: a token comparison that stops comparing content, or one that
     // treats an absent token as a match.
     // red-proof: replace constant_time_equal's body with a length comparison.

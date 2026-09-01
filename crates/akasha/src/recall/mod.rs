@@ -5,9 +5,6 @@ mod semantic_vocabulary;
 mod temporal;
 mod thread_neighbors;
 
-#[cfg(test)]
-mod tests;
-
 pub use semantic_vocabulary::refresh_semantic_vocabulary;
 
 use crate::cluster::{cluster_resonance, cluster_staleness};

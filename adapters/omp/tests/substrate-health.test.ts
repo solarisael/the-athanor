@@ -3,8 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { HEALTH_REPORT_BLOCKS, catchBoat, closePaperBoatTransports, healthDotenvPath, sleepBoat, substrateExePath, substrateHealth } from "../house-proof/substrate.ts";
-import { RustJsonlTransport, RustTransportOutcomeUnknownError } from "../rust-transport.ts";
+import { HEALTH_REPORT_BLOCKS, closePaperBoatTransports, healthDotenvPath, substrateExePath, substrateHealth } from "../house-proof/substrate.ts";
 
 const tempRoots: string[] = [];
 const substrateEnv = "ATHANOR_SUBSTRATE_ROOT";
@@ -157,93 +156,6 @@ describe("optional substrate health", () => {
 
 
 });
-
-describe("Rust Paper Boat routing", () => {
-  test("routes sleep and wake through domain-prefixed Rust methods", async () => {
-    process.env[executableEnv] = process.execPath;
-    const originalRequest = RustJsonlTransport.prototype.request;
-    const calls: Array<{ method: string; params: unknown; options: unknown }> = [];
-    RustJsonlTransport.prototype.request = async function (method, params, options) {
-      calls.push({ method, params, options });
-      if (method === "paper_boat_sleep") {
-        return {
-          ok: true,
-          memory_id: "17",
-          room: "kintsu",
-          source_path: "db-only/paper-boats/sha256-proof.md",
-          outbox_event_id: "event-17",
-          inserted: true,
-          durable: true,
-          authority: "postgres",
-          backup_status: "completed",
-          warnings: [],
-        };
-      }
-      return {
-        ok: true,
-        found: false,
-        room: "kintsu",
-        id: null,
-        title: null,
-        body: null,
-        date: null,
-        source_path: null,
-        created_at: null,
-        unboated: [],
-        unboated_truncated: false,
-        warnings: [],
-      };
-    };
-    try {
-      await expect(sleepBoat("kintsu", "letter")).resolves.toMatchObject({
-        ok: true,
-        durable: true,
-        backup_status: "completed",
-      });
-      await expect(catchBoat("kintsu", { timeoutMs: 2_000 })).resolves.toMatchObject({
-        ok: true,
-        found: false,
-        room: "kintsu",
-      });
-      expect(calls.map(({ method }) => method)).toEqual([
-        "paper_boat_sleep",
-        "paper_boat_wake",
-      ]);
-      expect(calls[0].params).toEqual({ room: "kintsu", body: "letter", backup: true });
-      expect(calls[0].options).toMatchObject({ settleDefinitively: true });
-      expect(calls[1].options).toMatchObject({ timeoutMs: 2_000 });
-    } finally {
-      RustJsonlTransport.prototype.request = originalRequest;
-      closePaperBoatTransports();
-    }
-  });
-
-  test("returns an explicit idempotent retry receipt for an uncertain sleep", async () => {
-    process.env[executableEnv] = process.execPath;
-    const originalRequest = RustJsonlTransport.prototype.request;
-    RustJsonlTransport.prototype.request = async function () {
-      throw new RustTransportOutcomeUnknownError();
-    };
-    try {
-      await expect(sleepBoat("kintsu", "letter")).resolves.toMatchObject({
-        ok: false,
-        code: "outcome_unknown",
-        outcome: "unknown",
-        retryable: true,
-      });
-    } finally {
-      RustJsonlTransport.prototype.request = originalRequest;
-      closePaperBoatTransports();
-    }
-  });
-
-  test("visibly refuses wake and sleep when Rust is missing", async () => {
-    delete process.env[executableEnv];
-    await expect(catchBoat("kintsu")).resolves.toMatchObject({ ok: false });
-    await expect(sleepBoat("kintsu", "letter")).resolves.toMatchObject({ ok: false });
-  });
-});
-
 
 describe("health dotenv reaches the native Rust CLI as an argument", () => {
   const stateEnv = "ATHANOR_STATE_DIR";

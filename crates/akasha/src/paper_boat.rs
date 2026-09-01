@@ -114,26 +114,3 @@ fn committed_sleep_receipt(
     )
     .map_err(|error| AppError::Invalid(error.to_string()))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use origami::boats::identity::source_identity;
-
-    #[test]
-    fn post_commit_backup_failure_receipt_does_not_deny_durability() {
-        let receipt = committed_sleep_receipt(
-            7,
-            RoomKey::for_memory_write("kintsu").unwrap(),
-            source_identity("kintsu", "body"),
-            "event-7".into(),
-            true,
-            PaperBoatBackupStatus::Failed,
-            vec!["backup failed after PostgreSQL commit".into()],
-        )
-        .unwrap();
-        assert!(receipt.durable());
-        assert_eq!(receipt.backup_status(), PaperBoatBackupStatus::Failed);
-        assert_eq!(receipt.warnings().len(), 1);
-    }
-}

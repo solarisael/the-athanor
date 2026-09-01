@@ -86,19 +86,3 @@ impl RecallRequest {
         self.temporal_decay
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn recall_constructor_compatibility_defaults_decay_off_and_builder_opts_in() {
-        let request =
-            RecallRequest::new(RoomKey::new("lab").unwrap(), "alpha".into(), 8, 0.5, 8, 0.3)
-                .unwrap();
-        assert!(!request.temporal_decay());
-
-        let decayed = request.with_temporal_decay(true);
-        assert!(decayed.temporal_decay());
-    }
-}

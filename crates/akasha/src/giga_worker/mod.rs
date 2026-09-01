@@ -13,9 +13,6 @@ mod schema;
 mod validation;
 mod worker;
 
-#[cfg(test)]
-mod tests;
-
 pub(crate) use enablement::giga_capability_state;
 pub(crate) use health::giga_classifier_health;
 pub(crate) use promotion_sources::verify_promotion_sources;

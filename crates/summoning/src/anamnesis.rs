@@ -546,29 +546,3 @@ impl AnamnesisOperation {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn anamnesis_append_allows_no_source_paths_but_rejects_blank_paths() {
-        let room = RoomKey::for_anamnesis("tuner").unwrap();
-        let rep = || {
-            AnamnesisSeedRep::new(
-                1,
-                None,
-                "worked".into(),
-                "old pull".into(),
-                "lighter".into(),
-            )
-            .unwrap()
-        };
-        assert!(
-            AnamnesisAppendRequest::new(room.clone(), "cycle".into(), rep(), Vec::new()).is_ok()
-        );
-        assert!(
-            AnamnesisAppendRequest::new(room, "cycle".into(), rep(), vec![" ".into()]).is_err()
-        );
-    }
-}

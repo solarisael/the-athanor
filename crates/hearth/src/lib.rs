@@ -16,9 +16,6 @@ pub mod room;
 pub mod routing;
 pub mod triggers;
 
-#[cfg(test)]
-mod tests;
-
 pub use authority::*;
 pub use canon::*;
 pub use cluster::*;

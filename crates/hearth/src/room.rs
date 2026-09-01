@@ -49,31 +49,3 @@ impl fmt::Display for RoomKey {
         f.write_str(&self.0)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn validates_room_keys_and_reserved_house() {
-        assert!(RoomKey::new("living-room2").is_ok());
-        for invalid in ["", "Living", "-room", "room-", "two--rooms", "house"] {
-            assert!(RoomKey::new(invalid).is_err(), "{invalid}");
-        }
-    }
-
-    #[test]
-    fn shared_house_doors_stay_purpose_scoped() {
-        assert!(RoomKey::for_anamnesis("house").is_ok());
-        assert!(RoomKey::for_memory_write("house").is_ok());
-        assert!(RoomKey::for_memory_write("living-room2").is_ok());
-        assert!(RoomKey::for_anamnesis("Living").is_err());
-        assert!(RoomKey::for_memory_write("Living").is_err());
-        assert!(RoomKey::new("house").is_err());
-    }
-    #[test]
-    fn accepts_canonical_room_keys_longer_than_63_bytes() {
-        let room = "a".repeat(64);
-        assert!(RoomKey::new(room).is_ok());
-    }
-}

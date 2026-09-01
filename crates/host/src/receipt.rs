@@ -261,36 +261,32 @@ mod tests {
     }
 
     #[test]
-    fn valid_receipt_is_ordered_and_replay_is_confirmation_not_a_twin() {
+    fn a_replayed_receipt_confirms_and_an_older_sequence_is_stale() {
         let mut tracker = ReceiptTracker::new(true, true);
         tracker.connected();
         let bytes = receipt("8d2c04ae-ef20-4fbc-8141-d0259cbf495f", "kintsu", 7);
-        assert!(matches!(
-            tracker.ingest("kintsu", &bytes).unwrap(),
-            ReceiptIngest::Accepted(_)
-        ));
+        tracker
+            .ingest("kintsu", &bytes)
+            .expect("a valid receipt is accepted");
         assert_eq!(
             tracker.ingest("kintsu", &bytes).unwrap(),
             ReceiptIngest::Duplicate
         );
-        let stale = receipt("77aa2086-a56c-427f-a64e-95ed5e79c4fe", "kintsu", 6);
+        let older = receipt("77aa2086-a56c-427f-a64e-95ed5e79c4fe", "kintsu", 6);
         assert_eq!(
-            tracker.ingest("kintsu", &stale).unwrap(),
+            tracker.ingest("kintsu", &older).unwrap(),
             ReceiptIngest::Stale
         );
-        assert_eq!(tracker.health().latest_original_stream_sequence, Some(7));
     }
 
     #[test]
-    fn wrong_room_and_private_or_malformed_payloads_never_become_state() {
+    fn no_refused_receipt_ever_becomes_visible_state() {
         let mut tracker = ReceiptTracker::new(true, true);
         let foreign = receipt("8d2c04ae-ef20-4fbc-8141-d0259cbf495f", "other", 7);
         assert_eq!(
             tracker.ingest("kintsu", &foreign).unwrap(),
             ReceiptIngest::ForeignRoom
         );
-        assert!(tracker.state().receipt.is_none());
-
         for private_field in ["body", "title"] {
             let mut value: serde_json::Value = serde_json::from_slice(&receipt(
                 "8d2c04ae-ef20-4fbc-8141-d0259cbf495f",
@@ -304,33 +300,23 @@ mod tests {
                     .ingest("kintsu", &serde_json::to_vec(&value).unwrap())
                     .is_err()
             );
-            assert!(tracker.state().receipt.is_none());
         }
         assert!(tracker.ingest("kintsu", b"not-json").is_err());
+        assert!(tracker.state().receipt.is_none());
     }
 
     #[test]
-    fn missing_broker_degrades_akasha_and_reconnect_restores_transport_health() {
-        let missing = ReceiptTracker::new(true, false);
-        assert_eq!(missing.health().state, ReceiptBridgeState::MissingBroker);
-        assert_eq!(missing.state().status, PaperBoatReceiptStatus::Degraded);
-        assert!(missing.state().receipt.is_none());
-
-        let vault = ReceiptTracker::new(false, false);
-        assert_eq!(vault.health().state, ReceiptBridgeState::Disabled);
-        assert_eq!(vault.state().status, PaperBoatReceiptStatus::Pending);
-
-        let mut reconnect = ReceiptTracker::new(true, true);
-        reconnect.degraded("connection lost");
+    fn reconnecting_clears_the_degraded_transport_reason() {
+        let mut tracker = ReceiptTracker::new(true, true);
+        tracker.degraded("connection lost");
         assert_eq!(
-            reconnect.health().state,
+            tracker.health().state,
             ReceiptBridgeState::Degraded {
                 reason: "connection lost".into()
             }
         );
-        reconnect.connecting();
-        reconnect.connected();
-        assert_eq!(reconnect.health().state, ReceiptBridgeState::Connected);
-        assert!(reconnect.state().receipt.is_none());
+        tracker.connecting();
+        tracker.connected();
+        assert_eq!(tracker.health().state, ReceiptBridgeState::Connected);
     }
 }

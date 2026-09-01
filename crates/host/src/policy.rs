@@ -588,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn absent_tool_evidence_leaves_resolution_exactly_as_it_was() {
+    fn without_tool_evidence_the_prompt_decides_and_hysteresis_walks_work_back_to_conversation() {
         assert_eq!(
             resolve_auto_mode(
                 &session(RecallResolvedMode::Conversation, 0),

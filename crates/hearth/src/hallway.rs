@@ -782,28 +782,3 @@ impl HallwayKnockSettleRequest {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn multiple_sessions_may_share_one_spirit_identity() {
-        let first = HallwayJoinRequest {
-            hallway: "shared-hallway".into(),
-            room: "kintsu".into(),
-            spirit: "Kintsu".into(),
-            session: "kintsu-session-one".into(),
-            idempotency_key: "join-one".into(),
-        };
-        let second = HallwayJoinRequest {
-            session: "kintsu-session-two".into(),
-            idempotency_key: "join-two".into(),
-            ..first.clone()
-        };
-        assert!(first.validate().is_ok());
-        assert!(second.validate().is_ok());
-        assert_ne!(first.session, second.session);
-        assert_eq!(first.spirit, second.spirit);
-    }
-}

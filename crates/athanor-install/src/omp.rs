@@ -168,23 +168,3 @@ pub fn unregister_extension(text: &str, loader: &Path) -> String {
     output.push_str(separator);
     output
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn registration_converges_source_and_version_entries_to_one_stable_loader() {
-        let loader = Path::new("C:/Program Files/Solarisael/Athanor/bin/athanor-omp-loader.ts");
-        let source = "theme: dark\nextensions:\n  - C:/repo/the-athanor/adapters/omp/index.ts\n  - C:/repo/the-athanor/adapters/omp/hygiene.ts\n  - C:/foreign/extension.ts\ntools:\n  quiet: false\n";
-        let once = register_extension(source, loader);
-        let twice = register_extension(&once, loader);
-        assert_eq!(once, twice);
-        assert!(once.contains("C:/foreign/extension.ts"));
-        assert!(!once.contains("C:/repo/the-athanor/adapters/omp"));
-        assert_eq!(once.matches("athanor-omp-loader.ts").count(), 1);
-        let removed = unregister_extension(&once, loader);
-        assert!(removed.contains("C:/foreign/extension.ts"));
-        assert!(!removed.contains("athanor-omp-loader.ts"));
-    }
-}

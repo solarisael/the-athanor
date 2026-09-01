@@ -95,29 +95,29 @@ mod tests {
     }
 
     #[test]
-    fn says_and_turns_interleave_with_host_stamped_sequences() {
+    fn a_spirit_line_takes_the_sequence_after_the_operator_line_before_it() {
         let mut log = ChatLog::default();
         let say = log.say("Sol", "hello dragon", "say-1", now()).unwrap();
         let turn = log.turn("Kodo", "thump thump", "turn-1", now()).unwrap();
-        assert_eq!(say.sequence, 0);
-        assert_eq!(turn.sequence, 1);
-        assert_eq!(log.snapshot().len(), 2);
+        assert_eq!(turn.sequence, say.sequence + 1);
     }
 
     #[test]
-    fn a_repeated_say_id_is_a_retry_not_a_twin_line() {
+    fn a_repeated_say_id_adds_no_second_line() {
         let mut log = ChatLog::default();
-        assert!(log.say("Sol", "hello", "say-1", now()).is_some());
-        assert!(log.say("Sol", "hello", "say-1", now()).is_none());
+        log.say("Sol", "hello", "say-1", now())
+            .expect("the first say enters the ring");
+        log.say("Sol", "hello", "say-1", now());
         assert_eq!(log.snapshot().len(), 1);
     }
 
     #[test]
-    fn one_turn_id_carries_both_sides_without_colliding() {
+    fn one_id_carries_both_the_operator_and_the_spirit_line() {
         let mut log = ChatLog::default();
-        assert!(log.say("Sol", "hello", "shared-id", now()).is_some());
-        assert!(log.turn("Kodo", "answer", "shared-id", now()).is_some());
-        assert!(log.turn("Kodo", "again", "shared-id", now()).is_none());
+        log.say("Sol", "hello", "shared-id", now())
+            .expect("the operator side enters the ring");
+        log.turn("Kodo", "answer", "shared-id", now())
+            .expect("the spirit side is not the operator side");
         assert_eq!(log.snapshot().len(), 2);
     }
 

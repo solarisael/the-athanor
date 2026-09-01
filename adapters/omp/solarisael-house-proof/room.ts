@@ -64,6 +64,26 @@ function readActiveSpiritName(roomDir) {
   }
 }
 
+const PRESENCE_PULSE_FILENAME = "presence-pulse.md";
+const PRESENCE_PULSE_MAX_CHARS = 2_000;
+
+export function readPresencePulse(roomDir) {
+  try {
+    const body = readFileSync(path.join(roomDir, PRESENCE_PULSE_FILENAME), "utf8").trim();
+    if (!body) return null;
+    if (body.length > PRESENCE_PULSE_MAX_CHARS) {
+      throw new Error(`Presence pulse exceeds ${PRESENCE_PULSE_MAX_CHARS} characters`);
+    }
+    if (/<\/?presence-pulse>/i.test(body)) {
+      throw new Error("Presence pulse body must not include its wrapper");
+    }
+    return `<presence-pulse>\n${body}\n</presence-pulse>`;
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 function isRoomDirectory(roomDir) {
   return existsSync(path.join(roomDir, ROOM_MARKER_FILENAME))
     || existsSync(path.join(roomDir, "active_spirit.md"))

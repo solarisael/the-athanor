@@ -20,13 +20,18 @@ const originalHouseId = process.env.ATHANOR_HOST_HOUSE_ID;
 const originalHostUrl = process.env.ATHANOR_HOST_WS_URL;
 let activeRoom = "";
 
-function installFakeHost(options: { frameVersion?: number; contractVersion?: number } = {}) {
+function installFakeHost(options: {
+  frameVersion?: number;
+  contractVersion?: number;
+  failFirstConnections?: number;
+} = {}) {
   process.env.ATHANOR_HOST_TOKEN = "test-token";
   process.env.ATHANOR_HOST_HOUSE_ID = "solarisael";
   process.env.ATHANOR_HOST_WS_URL = "ws://127.0.0.1:8787/athanor/v1/ws";
   const commands: Array<Record<string, any>> = [];
   const frameVersion = options.frameVersion ?? 7;
   const contractVersion = options.contractVersion ?? 2;
+  let failedConnections = 0;
 
   class FakeWebSocket {
     listeners = new Map<string, Array<(event: any) => void>>();
@@ -34,6 +39,11 @@ function installFakeHost(options: { frameVersion?: number; contractVersion?: num
     constructor(url: string, request: { headers: { Authorization: string } }) {
       expect(url).toBe("ws://127.0.0.1:8787/athanor/v1/ws");
       expect(request.headers.Authorization).toBe("Bearer test-token");
+      if (failedConnections < (options.failFirstConnections ?? 0)) {
+        failedConnections += 1;
+        queueMicrotask(() => this.emit("error", { message: "Host is starting" }));
+        return;
+      }
       queueMicrotask(() => this.emit("open", {}));
     }
 
@@ -204,5 +214,59 @@ describe("Presence client session fence", () => {
     const compileCommand = commands.find((command) => command.command_or_event_type === "athanor.presence.compile");
     expect(compileCommand?.presence_compile.frameVersion).toBe(17);
     expect(compileCommand?.presence_compile.sessionLedger).toBeUndefined();
+  });
+
+  test("retries one transient Host failure while Presence starts", async () => {
+    const room = "presence-retry-room";
+    const top = "presence-retry-top";
+    activeRoom = room;
+    registerTopLevelSession(room, top);
+    const commands = installFakeHost({ failFirstConnections: 1 });
+
+    await expect(compilePresenceContext({
+      binding: binding(room, top),
+      operator: "Sol",
+      prompt: "hello",
+      turnId: "turn-retry",
+    })).resolves.toMatchObject({
+      frameId: "frame-top",
+      contractId: "contract-top",
+    });
+    expect(commands.map((command) => command.command_or_event_type)).toEqual([
+      "athanor.presence.open",
+      "athanor.presence.compile",
+    ]);
+  });
+
+  test("keys Presence requests by their exact body within one resumed session", async () => {
+    const room = "presence-key-room";
+    const top = "presence-key-top";
+    activeRoom = room;
+    registerTopLevelSession(room, top);
+    const commands = installFakeHost();
+    const request = {
+      binding: binding(room, top),
+      operator: "Sol",
+      prompt: "hello",
+      turnId: "turn-key",
+      presencePulse: "<presence-pulse>\nidentity A\n</presence-pulse>",
+    };
+
+    await compilePresenceContext(request);
+    await compilePresenceContext(request);
+    await compilePresenceContext({
+      ...request,
+      presencePulse: "<presence-pulse>\nidentity B\n</presence-pulse>",
+    });
+
+    const opens = commands.filter((command) => command.command_or_event_type === "athanor.presence.open");
+    expect(opens[0]!.presence_open.identity[0].body).toBe(
+      "<presence-pulse>\nidentity A\n</presence-pulse>",
+    );
+    const compiles = commands.filter((command) => command.command_or_event_type === "athanor.presence.compile");
+    expect(opens[0]!.idempotency_key).toBe(opens[1]!.idempotency_key);
+    expect(opens[2]!.idempotency_key).not.toBe(opens[0]!.idempotency_key);
+    expect(compiles[0]!.idempotency_key).toBe(compiles[1]!.idempotency_key);
+    expect(compiles[2]!.idempotency_key).toBe(compiles[0]!.idempotency_key);
   });
 });

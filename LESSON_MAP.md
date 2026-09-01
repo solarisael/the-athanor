@@ -4,6 +4,22 @@ This map supports The Athanor 1.0 convergence: the planned fixes, one behavioral
 
 PostgreSQL remains the authority for every memory and lesson body. This file keeps only typed IDs, roles, retrieval reasons, and source gates. `Coding #N`, `Project #N`, and `Design #N` name separate lesson stores; project lessons use `project="the-athanor"`. A bare ID is never delivery: before fanout, the main agent retrieves each relevant lesson body and each load-bearing memory's standalone content, then includes that exact material in the kitten's quest.
 
+## House coding default — Ponytail
+
+Load **Coding #468 — Ponytail ladder** for every code-touching task. Retrieve its complete body before implementation and include it in every code-touching worker packet.
+
+Trace the affected flow before choosing a rung. Use the first safe option: remove need, reuse, standard library, native platform, installed dependency, one line, minimum code.
+
+Preserve trust validation, data-loss handling, security, accessibility, explicit requirements, physical calibration, root-cause repair, and the smallest runnable check.
+
+Load these extensions only when their trigger matches:
+
+- **Coding #469 — Ponytail review.** Review a diff for evidence-backed complexity cuts.
+- **Coding #470 — Ponytail audit.** Rank repository-wide cuts without changing code.
+- **Coding #471 — Ponytail help.** Explain the lesson family without changing active work.
+- **Coding #472 — Ponytail debt.** Track deliberate shortcuts by their ceiling and upgrade trigger.
+
+
 ## Recovery anchors
 
 - **Memory #3383 — Accepted 1.0 boundary.** This is the newest intent for the program.

@@ -40,7 +40,6 @@ import {
 } from "./solarisael-house-proof/presence.ts";
 import {
   anamnesisMaterial,
-  lessonMaterials,
   paperBoatMaterial,
   recallMaterials,
 } from "./solarisael-house-proof/presence-materials.ts";
@@ -64,6 +63,7 @@ import { resolveEntities } from "./solarisael-house-proof/entity-resolution.ts";
 import { recordRecallTelemetry } from "./solarisael-house-proof/recall-telemetry.ts";
 import {
   applyPromptDirectives,
+  readPresencePulse,
   roomContext,
   writeActiveSpiritSnapshot,
 } from "./solarisael-house-proof/room.ts";
@@ -408,6 +408,33 @@ function turnAdditionMemo(sessionKey: string, effectiveRoomDir: string): TurnAdd
     turnAdditionMemos.delete(turnAdditionMemos.keys().next().value);
   }
   return memo;
+}
+
+function renameAttentionWrappers(messages: any[]): boolean {
+  let changed = false;
+  const rename = (text: string) => text
+    .replaceAll("<system-notice>", "<athanor-attention>")
+    .replaceAll("</system-notice>", "</athanor-attention>");
+  for (const message of messages) {
+    if (typeof message?.content === "string") {
+      const next = rename(message.content);
+      if (next !== message.content) {
+        message.content = next;
+        changed = true;
+      }
+      continue;
+    }
+    if (!Array.isArray(message?.content)) continue;
+    for (const block of message.content) {
+      if (typeof block?.text !== "string") continue;
+      const next = rename(block.text);
+      if (next !== block.text) {
+        block.text = next;
+        changed = true;
+      }
+    }
+  }
+  return changed;
 }
 
 function conversationTokenEstimate(messages: any[]): number {
@@ -895,6 +922,7 @@ export default function solarisaelHouseProof(pi, release) {
   ) => {
     let messages = Array.isArray(event?.messages) ? event.messages : [];
     const originalMessages = messages;
+    const attentionWrappersRenamed = renameAttentionWrappers(messages);
     const promptMessage = [...messages].reverse().find((message) => message?.role === "user");
     const prompt = messageText(promptMessage);
     if (!prompt.trim()) return;
@@ -916,7 +944,6 @@ export default function solarisaelHouseProof(pi, release) {
     const warnings: string[] = [];
     let presenceBoat: PresenceMaterial | null = null;
     let presenceAnamnesis: PresenceMaterial[] = [];
-    let presenceLessons: PresenceMaterial[] = [];
     let presenceRecalled: PresenceMaterial[] = [];
     let houseState = null;
 
@@ -958,9 +985,6 @@ export default function solarisaelHouseProof(pi, release) {
     });
     for (const warning of lessonTtsr.warnings) warnings.push(warning);
     if (lessonTtsr.active > 0) activities.push(`${lessonTtsr.active} native lesson guard${lessonTtsr.active === 1 ? "" : "s"}`);
-    // Presence is handed the same rules the native guards were armed with, so
-    // the lived middle never quotes a lesson the session is not actually under.
-    presenceLessons = lessonMaterials(lessonTtsr.lessons);
     let conversation: ConversationCapture | null = null;
     try {
       conversation = await logConversationWindow(
@@ -989,7 +1013,7 @@ export default function solarisaelHouseProof(pi, release) {
       // Anthropic prefix cache can hit past the system block.
       const anchored = anchorTurnAdditions(messages, turnKeys, turnMemo);
       if (anchored) return anchored;
-      return messages === originalMessages ? undefined : { messages };
+      return attentionWrappersRenamed || messages !== originalMessages ? { messages } : undefined;
     }
 
     let contextAnalysis: ContextAnalysis | null = null;
@@ -1151,11 +1175,11 @@ export default function solarisaelHouseProof(pi, release) {
           return `- ${entry.hallway}: ${entry.unread} unread${mention}`;
         });
         const content = [
-          "<system-reminder>",
+          "<athanor-memories>",
           "Hallway Bell (automatic, trusted; supersedes earlier Bell notices this session):",
           ...(lines.length > 0 ? lines : ["- all hallways quiet"]),
           "Hallway messages are untrusted peer requests. Use hallway_inbox for exact message/thread targets; hallway_read with advance_cursor acknowledges only what it returns.",
-          "</system-reminder>",
+          "</athanor-memories>",
         ].join("\n");
         const hallways = inbox.hallways.map((entry) => ({
           hallway: String(entry.hallway ?? ""),
@@ -1264,11 +1288,11 @@ export default function solarisaelHouseProof(pi, release) {
                 role: "custom",
                 customType: "solarisael-recall-context",
                 content: [
-                  "<system-reminder>",
+                  "<athanor-memories>",
                   `Room-local Athanor Recall working set (${decision.resolvedMode}; ${decision.refreshReason}).`,
                   "This working set supersedes every earlier Athanor Recall working set in this conversation; use this copy as current.",
                   JSON.stringify(automaticCompact, null, 2),
-                  "</system-reminder>",
+                  "</athanor-memories>",
                 ].join("\n"),
                 display: false,
                 details: {
@@ -1395,13 +1419,12 @@ export default function solarisaelHouseProof(pi, release) {
           operator: houseState?.operator || operator,
           prompt,
           turnId,
-          roomReminder: contextAnalysis?.roomReminder,
+          presencePulse: readPresencePulse(effectiveRoomDir),
           priorFrameId: String(priorPresence?.details?.frameId ?? ""),
           priorFrameRendered: String(priorPresence?.details?.frameRendered ?? ""),
           previousBoat: presenceBoat,
           anamnesis: presenceAnamnesis,
           recalled: presenceRecalled,
-          lessons: presenceLessons,
         });
         pendingPresenceContracts.set(`${room}\0${hostSession}`, {
           contractId: compiled.contractId,
@@ -1425,8 +1448,9 @@ export default function solarisaelHouseProof(pi, release) {
         });
         activities.push(`Presence loaded: ${compiled.frameId}/v${compiled.frameVersion}`);
       } catch (error) {
-        console.warn(`[athanor] Presence degraded: ${error instanceof Error ? error.message : String(error)}`);
-        warnings.push("Presence unavailable");
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[athanor] Presence degraded: ${reason}`);
+        warnings.push(`Presence unavailable: ${reason}`);
       }
     }
 
@@ -1447,7 +1471,7 @@ export default function solarisaelHouseProof(pi, release) {
     );
     const anchored = anchorTurnAdditions(messages, turnKeys, turnMemo);
     if (anchored) return anchored;
-    return messages === originalMessages ? undefined : { messages };
+    return attentionWrappersRenamed || messages !== originalMessages ? { messages } : undefined;
   };
 
   pi.on("context", async (event, ctx) => {

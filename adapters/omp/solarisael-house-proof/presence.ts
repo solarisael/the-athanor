@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { hostCommand, sendHostCommand, type HostBinding, type HostResponse } from "./host.ts";
+import { HostUnavailable, hostCommand, sendHostCommand, type HostBinding, type HostResponse } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 
 export const PRESENCE_PROJECTION_ID = "presence";
@@ -58,31 +58,40 @@ export type PresenceContextInput = {
   operator: string;
   prompt: string;
   turnId: string;
-  roomReminder?: string | null;
+  presencePulse?: string | null;
   priorFrameId?: string;
   priorFrameRendered?: string;
   previousBoat?: PresenceMaterial | null;
   anamnesis?: PresenceMaterial[];
   recalled?: PresenceMaterial[];
-  lessons?: PresenceMaterial[];
 };
 
 export async function compilePresenceContext(input: PresenceContextInput) {
+  try {
+    return await compilePresenceContextOnce(input);
+  } catch (error) {
+    if (!(error instanceof HostUnavailable)) throw error;
+    await Bun.sleep(250);
+    return await compilePresenceContextOnce(input);
+  }
+}
+
+async function compilePresenceContextOnce(input: PresenceContextInput) {
   const recalled = input.recalled ?? [];
-  const lessons = input.lessons ?? [];
   const frame = await resolveFrame(input, recalled);
+  const request: PresenceCompileInput = {
+    frameId: frame.id,
+    turnId: input.turnId,
+    userText: input.prompt,
+    recalled,
+    lessons: [],
+    directives: presenceDirectives(input),
+    frameVersion: frame.version,
+  };
   const contract = await compilePresence(
     input.binding,
-    {
-      frameId: frame.id,
-      turnId: input.turnId,
-      userText: input.prompt,
-      recalled,
-      lessons,
-      directives: presenceDirectives(input, lessons),
-      frameVersion: frame.version,
-    },
-    `presence-compile:${input.turnId}`,
+    request,
+    presenceRequestKey("presence-compile", request),
   );
   const contractId = requiredResultId(contract.contractId, "compile", "contract");
   return {
@@ -104,26 +113,27 @@ async function resolveFrame(
   if (input.priorFrameId) {
     return { id: input.priorFrameId, rendered: input.priorFrameRendered ?? "", version: 1 };
   }
+  const request: PresenceOpenInput = {
+    binding: {
+      room: input.binding.room,
+      spirit: input.binding.spirit,
+      operator: input.operator,
+      session: input.binding.session,
+    },
+    identity: [
+      identityMaterial(input),
+      ...recalled.filter((material) => material.role === "identity"),
+    ],
+    relationship: [],
+    continuity: recalled.filter((material) => material.role !== "identity"),
+    anamnesis: input.anamnesis ?? [],
+    previousBoat: input.previousBoat ?? null,
+    uncertainties: [],
+  };
   const opened = await openPresence(
     input.binding,
-    {
-      binding: {
-        room: input.binding.room,
-        spirit: input.binding.spirit,
-        operator: input.operator,
-        session: input.binding.session,
-      },
-      identity: [
-        identityMaterial(input),
-        ...recalled.filter((material) => material.role === "identity"),
-      ],
-      relationship: [],
-      continuity: recalled.filter((material) => material.role !== "identity"),
-      anamnesis: input.anamnesis ?? [],
-      previousBoat: input.previousBoat ?? null,
-      uncertainties: [],
-    },
-    `presence-open:${input.binding.session}`,
+    request,
+    presenceRequestKey("presence-open", request),
   );
   return {
     id: requiredResultId(opened.frameId, "open", "frame"),
@@ -132,11 +142,15 @@ async function resolveFrame(
   };
 }
 
+function presenceRequestKey(operation: string, request: PresenceOpenInput | PresenceCompileInput): string {
+  return `${operation}:${responseDigest(JSON.stringify(request))}`;
+}
+
 function identityMaterial(input: PresenceContextInput): PresenceMaterial {
   const body = (
-    input.roomReminder
+    input.presencePulse
     || `Active spirit: ${input.binding.spirit}. Operator: ${input.operator}. Room: ${input.binding.room}.`
-  ).slice(0, 4096);
+  ).slice(0, 2_000);
   return {
     id: "identity:active-spirit",
     authority: {
@@ -150,10 +164,7 @@ function identityMaterial(input: PresenceContextInput): PresenceMaterial {
   };
 }
 
-function presenceDirectives(
-  input: PresenceContextInput,
-  lessons: PresenceMaterial[],
-): PresenceDirective[] {
+function presenceDirectives(input: PresenceContextInput): PresenceDirective[] {
   return [
     {
       id: "presence:active-spirit",
@@ -171,14 +182,6 @@ function presenceDirectives(
       sourceIds: ["identity:active-spirit"],
       triggerScope: ["text"],
     },
-    ...lessons.slice(0, 8).map((lesson) => ({
-      id: `presence:${lesson.id}`,
-      kind: "enact" as const,
-      severity: "advisory" as const,
-      instruction: lesson.body.slice(0, 1000),
-      sourceIds: [lesson.id],
-      triggerScope: ["text"],
-    })),
   ];
 }
 

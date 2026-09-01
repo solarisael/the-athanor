@@ -76,7 +76,6 @@ struct ReplayLedger {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PresenceRuntimeError {
     MissingFrame,
-    SecondOpen,
     ReplayOperationConflict {
         key: String,
         recorded: PresenceOperation,
@@ -94,10 +93,6 @@ impl fmt::Display for PresenceRuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingFrame => f.write_str("Presence has no open frame for this session"),
-            Self::SecondOpen => f.write_str(
-                "Presence already has a live frame for this session; \
-                 only an exact replay of the original open may repeat it",
-            ),
             Self::ReplayOperationConflict {
                 key,
                 recorded,
@@ -122,11 +117,11 @@ impl fmt::Display for PresenceRuntimeError {
 impl std::error::Error for PresenceRuntimeError {}
 
 impl PresenceRuntime {
-    /// Open the one live frame for an authenticated session.
+    /// Open or resume the one live frame for an authenticated session.
     ///
-    /// Replay is checked before the lifecycle: an exact retry of the original
-    /// key and body returns the original frame whatever happened since. Any
-    /// other second open is refused rather than replacing a live frame.
+    /// Replay is checked before the lifecycle. An exact retry returns its
+    /// recorded frame. A fresh key resumes the current live frame and records
+    /// that result, so a restarted adapter does not need the original body.
     pub fn open(
         &mut self,
         authentication: &PresenceAuthentication,
@@ -144,8 +139,15 @@ impl PresenceRuntime {
         )? {
             return Ok(frame);
         }
-        if self.sessions.contains_key(&session) {
-            return Err(PresenceRuntimeError::SecondOpen);
+        if let Some(frame) = self.sessions.get(&session).map(|state| state.frame.clone()) {
+            self.replay.record(ReplayEntry {
+                session,
+                key: idempotency_key.to_owned(),
+                operation: PresenceOperation::Open,
+                request_digest,
+                outcome: PresenceResult::Open(frame.clone()),
+            });
+            return Ok(frame);
         }
         let frame = open_presence(authentication.clone(), request).map_err(domain)?;
         self.sessions.insert(
@@ -536,11 +538,13 @@ mod tests {
     }
 
     #[test]
-    fn a_second_live_open_under_a_new_key_refuses() {
-        let (mut runtime, _frame) = opened_runtime();
+    fn a_second_live_open_under_a_new_key_resumes_the_frame() {
+        let (mut runtime, frame) = opened_runtime();
         assert_eq!(
-            runtime.open(&authentication(), "open-b", open_request()),
-            Err(PresenceRuntimeError::SecondOpen)
+            runtime
+                .open(&authentication(), "open-b", open_request())
+                .unwrap(),
+            frame
         );
     }
 
@@ -822,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn a_forgotten_open_key_no_longer_replays_and_the_live_frame_still_stands() {
+    fn a_forgotten_open_key_resumes_the_live_frame() {
         let (mut runtime, frame) = opened_runtime();
         for index in 0..PRESENCE_MAX_REPLAY_ENTRIES {
             let mut request = turn(&frame, "hello");
@@ -832,9 +836,11 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(
-            runtime.open(&authentication(), "open-a", open_request()),
-            Err(PresenceRuntimeError::SecondOpen),
-            "once the open receipt ages out, the live frame is what refuses"
+            runtime
+                .open(&authentication(), "open-a", open_request())
+                .unwrap(),
+            frame,
+            "once the open receipt ages out, the live frame still resumes"
         );
     }
 }

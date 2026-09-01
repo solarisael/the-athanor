@@ -27,6 +27,7 @@ const recallPolicy = {
 mock.module("../solarisael-house-proof/room.ts", () => ({
   applyPromptDirectives: async () => ({ state: { operator: "Sol", embodiedSpirit: "Kintsu" } }),
   roomContext: () => ({ room: "kintsu", spirit: "Kintsu", operator: "Sol", effectiveRoomDir }),
+  readPresencePulse: () => "<presence-pulse>\nKintsu pulse\n</presence-pulse>",
   writeActiveSpiritSnapshot: async () => undefined,
 }));
 

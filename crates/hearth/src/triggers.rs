@@ -96,12 +96,12 @@ pub fn process_lesson_reminder(
         trigger: plan.trigger,
         lessons: lessons.len(),
         text: [
-            "<system-reminder>",
+            "<athanor-memories>",
             "Solarisael process-shape lessons matched this user turn.",
             "Use this as hidden reasoning context before advising on the matched process. Do not render this banner verbatim unless the operator asks.",
             "",
             banner.as_str(),
-            "</system-reminder>",
+            "</athanor-memories>",
         ]
         .join("\n"),
     })

@@ -37,6 +37,20 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Impact:** A local green or red count is not portable evidence without naming environment and attribution.
 - **Proof after repair:** The same hermetic test command produces the same result on both machines, or every environment-dependent cluster declares and provisions its dependency explicitly.
 
+### Keeper does not relaunch the OMP session
+
+- **Observed:** `request_restart` returned an armed receipt, but the keeper did not relaunch the Discord-backed OMP session. Sol restarted OMP manually.
+- **Impact:** Config and adapter changes cannot use the authenticated restart path. The receipt can falsely imply that a relaunch will occur.
+- **Proof after repair:** Request a resumed restart from Discord. Confirm the old process exits and the keeper starts the same session without manual action.
+
+### Presence can fail during Host startup
+
+- **Observed:** The first turn after a manual OMP restart showed `Presence unavailable`. The next turn loaded a complete Presence frame.
+- **Cause seam:** `compilePresenceContext` gave up after one transient `HostUnavailable` error while the Host started.
+- **Impact:** The first resumed turn can run without its Presence frame and turn contract.
+- **Repair state:** Source retries one transient Host failure after 250 ms. The focused test passes, but the adapter change is not deployed.
+- **Proof after repair:** Restart OMP while the Host starts slowly. Confirm the first Discord turn receives Presence without a warning.
+
 ## Repaired but not deployed
 
 ### Presence lifecycle and authority seams

@@ -99,7 +99,7 @@ const adapterSources: Record<string, string> = {
     "export default async function index(_pi, release) { (state.__installedLoaderCalls ??= []).push('index'); state.__installedLoaderRelease = release; }",
     "",
   ].join("\n"),
-  "solarisael-house-proof/constants.ts": "export const INSTALLED_COMPONENT_PROOF = 1;\n",
+  "house-proof/constants.ts": "export const INSTALLED_COMPONENT_PROOF = 1;\n",
 };
 
 afterEach(async () => {
@@ -521,11 +521,11 @@ test("refuses artifact size tampering before import", async () => {
     tree.componentRoot,
     "versions",
     tree.manifest.releaseId,
-    "solarisael-house-proof",
+    "house-proof",
     "constants.ts",
   );
-  await writeFile(file, `${adapterSources["solarisael-house-proof/constants.ts"]} `);
-  await expectRefusal(tree, "artifact solarisael-house-proof/constants.ts size mismatch");
+  await writeFile(file, `${adapterSources["house-proof/constants.ts"]} `);
+  await expectRefusal(tree, "artifact house-proof/constants.ts size mismatch");
 });
 
 test("refuses same-size artifact hash tampering before import", async () => {
@@ -642,12 +642,12 @@ test("refuses a component artifact that is a symbolic link to an external file",
 
 test("refuses a component artifact reached through an external directory junction", async () => {
   const tree = await makeInstalledTree();
-  const ancestor = path.join(tree.releaseRoot, "solarisael-house-proof");
+  const ancestor = path.join(tree.releaseRoot, "house-proof");
   const external = path.join(tree.root, "external-artifact-directory");
   await rename(ancestor, external);
   await symlink(external, ancestor, "junction");
 
-  await expectRefusal(tree, "ancestor solarisael-house-proof must be a physical directory");
+  await expectRefusal(tree, "ancestor house-proof must be a physical directory");
 });
 
 test("does not fall back to product-version adapter paths", async () => {

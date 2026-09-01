@@ -428,7 +428,7 @@ fn consumer_retry_delay(delivery_count: i64) -> Duration {
     CONSUMER_BACKOFF[index]
 }
 
-pub const CONFIGURATION_CONTRACT: &str = "PostgreSQL is authoritative. Set DATABASE_URL (required), SOLARISAEL_NATS_URL (default nats://127.0.0.1:4222), and optionally SOLARISAEL_DELIVERY_INSTANCE_ID (UUID). Commands: configure, publish-once, consume-once, once, run, health.";
+pub const CONFIGURATION_CONTRACT: &str = "PostgreSQL is authoritative. Set DATABASE_URL (required), ATHANOR_NATS_URL (default nats://127.0.0.1:4222), and optionally ATHANOR_DELIVERY_INSTANCE_ID (UUID). Commands: configure, publish-once, consume-once, once, run, health.";
 
 #[cfg(test)]
 mod tests {

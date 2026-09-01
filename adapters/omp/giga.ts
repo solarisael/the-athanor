@@ -14,7 +14,7 @@ import {
   TransportUnavailableError,
   type JsonObject,
 } from "./rust-transport.ts";
-import { roomContext } from "./solarisael-house-proof/room.ts";
+import { roomContext } from "./house-proof/room.ts";
 
 const GIGA_READ_TIMEOUT_MS = 120_000;
 let gigaClosing = false;

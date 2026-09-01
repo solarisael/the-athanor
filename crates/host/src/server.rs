@@ -41,17 +41,20 @@ use summoning::presence::{
     PresenceAuthentication, PresenceBinding, PresenceCloseRequest, PresenceOpenRequest,
     PresenceResult, PresenceSettleRequest, PresenceTurnRequest,
 };
+use crate::chat::ChatLog;
 use protocol::{
     AKASHA_COMMAND_FAILED, AKASHA_LESSON_RESULT, AKASHA_PROJECTION_ID, AKASHA_RECALL_RESULT,
     AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent,
     AkashaRecallQueryPayload, AkashaRecallResultEvent, BOAT_RECEIPT_STREAM_NAME,
-    BOAT_RECEIPT_SUBJECT, CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED,
-    ClientCommand, CommandMeta, CommandOutcomeEvent, ContextAnalysisEvent, ContextViewportEvent,
-    ConversationLogRequest, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED,
-    HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED,
-    HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
-    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, JETSTREAM_ACK_WAIT,
-    JETSTREAM_MAX_ACK_PENDING, JETSTREAM_MAX_BATCH, JETSTREAM_MAX_DELIVER, JETSTREAM_MAX_EXPIRES,
+    BOAT_RECEIPT_SUBJECT, CHAT_COMMAND_ACCEPTED, CHAT_COMMAND_REFUSED, CHAT_DELTA,
+    CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID,
+    CONTEXT_VIEWPORTED, ChatEvent, ChatMessage, ClientCommand, CommandMeta, CommandOutcomeEvent,
+    ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest, DeltaEvent, EventMeta,
+    HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED,
+    HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID,
+    HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent, HallwayKnockClaimedEvent,
+    HallwayKnockSettledEvent, JETSTREAM_ACK_WAIT, JETSTREAM_MAX_ACK_PENDING, JETSTREAM_MAX_BATCH,
+    JETSTREAM_MAX_DELIVER, JETSTREAM_MAX_EXPIRES,
     JETSTREAM_NUM_REPLICAS, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
     PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
     PRESENCE_CLOSED, PRESENCE_COMMAND_REFUSED, PRESENCE_COMPILED, PRESENCE_OPENED,
@@ -81,6 +84,7 @@ struct RuntimeState {
     presence: PresenceRuntime,
     viewport_sessions: HashMap<String, ViewportSession>,
     hallway_inbox_fingerprints: HashMap<String, String>,
+    chat: ChatLog,
     cursor: ProjectionCursor,
     durable: HostDurableStore,
 }
@@ -98,6 +102,7 @@ struct AppState {
     tasks: TaskTracker,
     deltas: broadcast::Sender<String>,
     receipts: broadcast::Sender<String>,
+    chat_deltas: broadcast::Sender<String>,
     receipt_tracker: Arc<Mutex<ReceiptTracker>>,
 }
 
@@ -147,6 +152,7 @@ impl Host {
         }
         let (deltas, _) = broadcast::channel(64);
         let (receipts, _) = broadcast::channel(64);
+        let (chat_deltas, _) = broadcast::channel(64);
         let receipt_tracker = Arc::new(Mutex::new(ReceiptTracker::new(
             config.akasha_enabled,
             config.nats_url.is_some(),
@@ -164,6 +170,7 @@ impl Host {
                     presence: PresenceRuntime::default(),
                     viewport_sessions: HashMap::new(),
                     hallway_inbox_fingerprints: HashMap::new(),
+                    chat: ChatLog::default(),
                     cursor,
                     durable,
                 })),
@@ -175,6 +182,7 @@ impl Host {
                 tasks: TaskTracker::new(),
                 deltas,
                 receipts,
+                chat_deltas,
                 receipt_tracker,
             },
         })
@@ -282,6 +290,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     let mut receipts = state.receipts.subscribe();
     let mut recall_subscribed = false;
     let mut receipts_subscribed = false;
+    let mut chat_deltas = state.chat_deltas.subscribe();
+    let mut chat_subscribed = false;
     loop {
         tokio::select! {
             _ = state.cancellation.cancelled() => {
@@ -314,6 +324,21 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                     Err(broadcast::error::RecvError::Closed) => return,
                 }
             }
+            broadcast = chat_deltas.recv(), if chat_subscribed => {
+                match broadcast {
+                    Ok(text) => {
+                        if sink.send(Message::Text(text.into())).await.is_err() {
+                            return;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let text = diagnostic_refusal(&state, "chat delta stream lagged; resubscribe required").await;
+                        let _ = sink.send(Message::Text(text.into())).await;
+                        return;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
             incoming = source.next() => {
                 let Some(incoming) = incoming else { return; };
                 match incoming {
@@ -331,6 +356,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             && contains_event(&responses.direct, PAPER_BOAT_RECEIPT_SNAPSHOT)
                         {
                             receipts_subscribed = true;
+                        }
+                        if requested.as_deref() == Some(CHAT_SUBSCRIBE)
+                            && contains_event(&responses.direct, CHAT_SNAPSHOT)
+                        {
+                            chat_subscribed = true;
                         }
                         for response in responses.direct {
                             if sink.send(Message::Text(response.into())).await.is_err() {
@@ -752,7 +782,162 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             let reminder = process_lesson_reminder(request.trigger.as_deref(), &request.lessons);
             shell_response(state, meta, json!({ "reminder": reminder })).await
         }
+        ClientCommand::ChatSubscribe { meta } => {
+            let runtime = state.runtime.lock().await;
+            let event = chat_event(
+                state,
+                &meta,
+                CHAT_SNAPSHOT,
+                runtime.chat.snapshot(),
+                runtime.cursor.sequence,
+            );
+            Responses {
+                direct: vec![serialize(&event)],
+                delta: None,
+            }
+        }
+        ClientCommand::ChatSay { meta, payload } => {
+            let identity = match chat_identity(state, &meta, &payload.room).await {
+                Ok(identity) => identity,
+                Err(responses) => return *responses,
+            };
+            let mut runtime = state.runtime.lock().await;
+            let appended = runtime.chat.say(
+                &identity.operator,
+                &payload.text,
+                &payload.say_id,
+                now_rfc3339(),
+            );
+            let sequence = runtime.cursor.sequence;
+            drop(runtime);
+            chat_appended(state, &meta, appended, sequence).await
+        }
+        ClientCommand::ChatTurn { meta, payload } => {
+            let identity = match chat_identity(state, &meta, &payload.room).await {
+                Ok(identity) => identity,
+                Err(responses) => return *responses,
+            };
+            let mut runtime = state.runtime.lock().await;
+            let appended = runtime.chat.turn(
+                &identity.spirit,
+                &payload.text,
+                &payload.turn_id,
+                now_rfc3339(),
+            );
+            let sequence = runtime.cursor.sequence;
+            drop(runtime);
+            chat_appended(state, &meta, appended, sequence).await
+        }
     }
+}
+
+/// The room's authenticated identity, with the claimed room checked against
+/// this Host's own room; a foreign room refuses loudly.
+async fn chat_identity(
+    state: &AppState,
+    meta: &CommandMeta,
+    claimed_room: &str,
+) -> Result<RoomIdentity, Box<Responses>> {
+    if claimed_room != state.config.room {
+        return Err(Box::new(
+            chat_refusal(state, meta, "chat command names a foreign room").await,
+        ));
+    }
+    match state.room_store.identity() {
+        Ok(identity) => Ok(identity),
+        Err(reason) => Err(Box::new(chat_refusal(state, meta, &reason).await)),
+    }
+}
+
+/// Answer an append: accepted either way (a duplicate id is a retry), and a
+/// fresh line additionally broadcasts one delta to chat subscribers.
+async fn chat_appended(
+    state: &AppState,
+    meta: &CommandMeta,
+    appended: Option<ChatMessage>,
+    sequence: u64,
+) -> Responses {
+    if let Some(message) = appended {
+        let delta = chat_event(state, meta, CHAT_DELTA, vec![message], sequence);
+        let _ = state.chat_deltas.send(serialize(&delta));
+    }
+    let outcome_hash = body_hash(&json!({ "ok": true })).expect("chat outcome hashes");
+    let event = CommandOutcomeEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            CHAT_COMMAND_ACCEPTED,
+            CHAT_PROJECTION_ID,
+            sequence,
+            outcome_hash,
+            new_id(),
+        ),
+        reason: None,
+        version: 0,
+        state: None,
+        decision: None,
+    };
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
+    }
+}
+
+async fn chat_refusal(state: &AppState, meta: &CommandMeta, reason: &str) -> Responses {
+    let runtime = state.runtime.lock().await;
+    let reason_hash = body_hash(&json!({ "reason": reason })).expect("chat refusal hashes");
+    let event = CommandOutcomeEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            CHAT_COMMAND_REFUSED,
+            CHAT_PROJECTION_ID,
+            runtime.cursor.sequence,
+            reason_hash,
+            new_id(),
+        ),
+        reason: Some(reason.to_owned()),
+        version: 0,
+        state: None,
+        decision: None,
+    };
+    Responses {
+        direct: vec![serialize(&event)],
+        delta: None,
+    }
+}
+
+fn chat_event(
+    state: &AppState,
+    meta: &CommandMeta,
+    kind: &str,
+    messages: Vec<ChatMessage>,
+    sequence: u64,
+) -> ChatEvent {
+    let body_hash = body_hash(&json!({ "messages": messages.len() })).expect("chat frame hashes");
+    ChatEvent {
+        meta: event_meta_for_projection(
+            state,
+            Some(meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            kind,
+            CHAT_PROJECTION_ID,
+            sequence,
+            body_hash,
+            new_id(),
+        ),
+        room: state.config.room.clone(),
+        messages,
+    }
+}
+
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
 async fn open_presence_frame(

@@ -10,7 +10,7 @@ import {
   paperBoatMaterial,
   presencePulseMaterial,
   recallMaterials,
-} from "../solarisael-house-proof/presence-materials.ts";
+} from "../house-proof/presence-materials.ts";
 
 describe("Presence material mapping", () => {
   test("keeps exact authority identities across wake and retrieval inputs", () => {
@@ -62,14 +62,14 @@ describe("Presence material mapping", () => {
       authority: { kind: "paper_boat", memory_id: 42 },
     });
     expect(paperBoat?.body.startsWith("p".repeat(700))).toBe(true);
-    expect(paperBoat?.body).toContain("solarisael-wake-context");
+    expect(paperBoat?.body).toContain("athanor-wake-context");
     expect(paperBoat?.body.length).toBeLessThan(900);
     expect(anamnesis).toMatchObject({
       id: "anamnesis:wake",
       authority: { kind: "anamnesis", source: "anamnesis:wake" },
     });
     expect(anamnesis?.body.startsWith("a".repeat(700))).toBe(true);
-    expect(anamnesis?.body).toContain("solarisael-anamnesis-wake");
+    expect(anamnesis?.body).toContain("athanor-anamnesis-wake");
     expect(anamnesis?.body.length).toBeLessThan(900);
   });
 

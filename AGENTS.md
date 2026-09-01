@@ -38,21 +38,30 @@ contracts, retention authority, ack-deadline-as-lease, dedup-window-ends-
 before-side-effect, diagnose-from-persisted-state), 349 (retry keys carry real
 execution identity), 49/51 (inserts declare their key; migrations idempotent).
 
+## Main surface (standing, 2026-08-28 — project lesson 462)
+
+The web client at `gui-prototype/` is the House's main operator surface.
+The Godot client under `gui/` is PARKED, not deleted: `athanor.exe` stays the
+canonical desktop owner of harness processes, but the face it fronts is the
+web prototype. Do not extend Godot screens, themes, or scenes without Sol
+explicitly reopening the Godot client.
+
 ## Lessons scopes: runtime vs GUI
 
 Two project scopes, deliberately separate:
 
 - **`the-athanor`** — runtime, substrate, delivery, Host, installer, adapter
-  rules. Version discipline (lesson 358) lives here.
-- **`the-athanor-gui`** — Godot client taste: theme, typography, layout,
-  screen contracts, design-system rules. Client taste must not blur into
-  runtime rules and vice versa. Working under `gui/` → query BOTH (`the-athanor`
-  for boundaries like "Godot is presentation-only", `the-athanor-gui` for taste).
+  rules. Version discipline (lesson 358) lives here. The main-surface
+  direction (lesson 462) also lives here.
+- **`the-athanor-gui`** — parked Godot client taste: theme, typography,
+  layout, screen contracts. Dormant while the client is parked; applies only
+  when Godot work is explicitly resumed. Client taste must not blur into
+  runtime rules and vice versa.
 
 Record new lessons into the matching scope with the `remember` organ
 (`kind: project-lesson`, `project` as above).
 
-## Typography (standing, 2026-08-14 — project lesson 375)
+## Typography (parked Godot client only — project lesson 375)
 
 One face: **Atkinson Hyperlegible Next as an MSDF FontFile**
 (`multichannel_signed_distance_field=true`, `hinting=0`) wrapped in a

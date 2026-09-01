@@ -8,8 +8,8 @@ import {
   normalizeToolResponse,
   showHouseContextFeedback,
   toolThrown,
-} from "../solarisael-house-proof/feedback.ts";
-import { registerSolarisaelTools } from "../solarisael-house-proof/tools.ts";
+} from "../house-proof/feedback.ts";
+import { registerSolarisaelTools } from "../house-proof/tools.ts";
 
 type Schema = {
   describe(description: string): Schema;

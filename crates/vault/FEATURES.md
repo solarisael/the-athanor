@@ -58,7 +58,7 @@ Vault retrieval without a database. The configured files stay the authority. One
 
 ### config
 
-- The room directory holds `.solarisael-room.json`. A missing or broken marker gives the defaults.
+- The room directory holds `.athanor-room.json`. A missing or broken marker gives the defaults.
 - `vaultRoots` names the roots. The default is the room directory. A repeated root drops.
 - A relative root joins the room directory. `.` and `..` resolve without touching the disk.
 - `vaultIgnore` adds ignore rules.

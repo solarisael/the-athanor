@@ -601,7 +601,7 @@ These legacy tokens remain deliberately. They are installed identifiers, not
 public product names:
 
 - the `solarisael` GitHub organization;
-- the `.solarisael-room.json` room marker;
+- the `.athanor-room.json` room marker;
 - `SOLARISAEL_*` runtime environment variables;
 - internal source identifiers that carry the same prefix.
 

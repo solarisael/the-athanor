@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { RustJsonlTransport, RustTransportError } from "../rust-transport.ts";
-import { closeRustAnamnesisTransports, queryAnamnesis } from "../solarisael-house-proof/anamnesis.ts";
+import { closeRustAnamnesisTransports, queryAnamnesis } from "../house-proof/anamnesis.ts";
 
 const originalRust = process.env.ATHANOR_SUBSTRATE_EXE;
 const originalRequest = RustJsonlTransport.prototype.request;

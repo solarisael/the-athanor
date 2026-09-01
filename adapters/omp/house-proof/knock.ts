@@ -173,7 +173,7 @@ function clearActiveKnock(state: KnockDoormanState): void {
 
 function knockMessage(knock: HallwayKnockPointer): Record<string, unknown> {
   return {
-    customType: "solarisael-hallway-knock",
+    customType: "athanor-hallway-knock",
     content: [
       "<system-reminder>",
       "Hallway Knock (automatic, trusted routing only):",

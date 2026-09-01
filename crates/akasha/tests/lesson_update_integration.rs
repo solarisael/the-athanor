@@ -9,7 +9,7 @@ use std::str::FromStr;
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -92,7 +92,7 @@ async fn lesson_state(
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
 async fn guarded_lesson_update_preserves_identity_and_refuses_without_mutation() -> TestResult {
     let pool = temp_lesson_pool().await?;
     sqlx::query(
@@ -245,7 +245,7 @@ async fn guarded_lesson_update_preserves_identity_and_refuses_without_mutation()
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
 async fn writing_and_design_lessons_accept_routing_eligibility_fields() -> TestResult {
     let pool = temp_lesson_pool().await?;
     sqlx::query(

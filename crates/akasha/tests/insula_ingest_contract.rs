@@ -14,7 +14,7 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 const INSULA_MIGRATION: &str = include_str!("../../../substrate/migrations/0022_insula.sql");
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("Insula proof requires a dedicated PostgreSQL URL");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -83,7 +83,7 @@ fn seal(binding: &TrustedBinding, mut event: ObservationEvent) -> ObservationEve
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
 async fn ingest_collapses_only_identical_cross_session_redelivery_and_reports_corruption()
 -> TestResult {
     let pool = fresh_insula().await?;
@@ -299,7 +299,7 @@ async fn ingest_collapses_only_identical_cross_session_redelivery_and_reports_co
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
 async fn trace_projection_orders_cross_writer_parent_before_clock_skewed_child() -> TestResult {
     let pool = fresh_insula().await?;
     let trusted = binding("causal-trace-session");
@@ -394,7 +394,7 @@ async fn ingest_rejects_future_observation_time_before_database_access() {
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
 async fn retention_is_replay_safe_keeps_coverage_and_preserves_recomputable_vitals() -> TestResult {
     let pool = fresh_insula().await?;
     let binding = binding("raw-window-session");

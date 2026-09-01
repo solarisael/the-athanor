@@ -160,7 +160,7 @@ pub async fn post(
                     .await
                     .map_err(|_| {
                         HallwayError::Config(
-                            "SOLARISAEL_HOUSE_TZ is not a timezone PostgreSQL recognizes".into(),
+                            "ATHANOR_HOUSE_TZ is not a timezone PostgreSQL recognizes".into(),
                         )
                     })?;
             sqlx::query(

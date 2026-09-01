@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const ISOLATED_POSTGRES_GATE = "SOLARISAEL_I_UNDERSTAND_THIS_IS_AN_ISOLATED_POSTGRES_TEST";
+const ISOLATED_POSTGRES_GATE = "ATHANOR_I_UNDERSTAND_THIS_IS_AN_ISOLATED_POSTGRES_TEST";
 const OLD_POSTGRES_GATE = "SOLARISAEL_OMP_POSTGRES_TEST";
 // Live Athanor topology and credentials. Any of these pointing at the real
 // House means a test run could reach production state, so the suite refuses to
@@ -13,7 +13,7 @@ const LIVE_CONFIGURATION_KEYS = [
   "ATHANOR_STATE_DIR",
   "ATHANOR_AUTO",
   "ATHANOR_GIGA_ENABLED",
-  "SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL",
+  "ATHANOR_SUBSTRATE_TEST_DATABASE_URL",
   "DATABASE_URL",
   "PGHOST",
   "PGPORT",
@@ -33,6 +33,18 @@ const RENAMED_CONFIGURATION_KEYS: ReadonlyArray<readonly [string, string]> = [
   ["SOLARISAEL_STATE_DIR", "ATHANOR_STATE_DIR"],
   ["SOLARISAEL_GIGA_ENABLED", "ATHANOR_GIGA_ENABLED"],
   ["SOLARISAEL_HOUSE_CORE", "(removed; the core root is structural)"],
+  // The athanor-* naming cutover: every remaining SOLARISAEL_* runtime name
+  // moved to its ATHANOR_* spelling wholesale.
+  ...[
+    "GIGA_ENABLED", "GIGA_CLAIM_OWNER", "GIGA_PROJECT_KEY", "GIGA_SOURCE_LEDGER_DIR",
+    "GIGA_SOURCE_ROOM", "EMBED_URL", "EMBED_MODEL", "EMBED_DIMENSION",
+    "RECALL_TELEMETRY", "REPLAY_MODE", "NATS_URL", "HOUSE_TZ", "PG_WSL",
+    "BACKUP_DIR", "BACKUP_KEEP", "DISABLE_AUTO_RECALL", "DISABLE_EMBEDDING",
+    "DISABLE_LESSON_TRIGGERS", "HIPPOCAMPUS_ENABLED", "HIPPOCAMPUS_OLLAMA_ENDPOINT",
+    "HIPPOCAMPUS_REMOTE_CONSENT", "SUBSTRATE_TEST_DATABASE_URL", "SUBSTRATE_TEST_SCHEMA",
+    "SUBSTRATE_DOTENV_PATH", "VAULT_ROOT", "DELIVERY_INSTANCE_ID", "DELIVERY_TEST_NATS_URL",
+    "I_UNDERSTAND_THIS_IS_AN_ISOLATED_POSTGRES_TEST",
+  ].map((suffix) => [`SOLARISAEL_${suffix}`, `ATHANOR_${suffix}`] as const),
 ] as const;
 
 function configured(key: string): boolean {
@@ -79,12 +91,12 @@ function dotenvDatabaseIdentity(root: string): string | null {
 
 function assertIsolatedPostgresTarget(): void {
   const substrate = process.env.ATHANOR_SUBSTRATE_ROOT?.trim();
-  const testDatabase = process.env.SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL?.trim();
+  const testDatabase = process.env.ATHANOR_SUBSTRATE_TEST_DATABASE_URL?.trim();
   const executable = process.env.ATHANOR_SUBSTRATE_EXE?.trim();
   if (!substrate || !testDatabase || !executable) {
     fail(
       `${ISOLATED_POSTGRES_GATE}=1 requires ATHANOR_SUBSTRATE_ROOT, ATHANOR_SUBSTRATE_EXE, `
-      + "and SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL",
+      + "and ATHANOR_SUBSTRATE_TEST_DATABASE_URL",
     );
   }
   const productionDatabaseIdentity = dotenvDatabaseIdentity(substrate);
@@ -92,11 +104,11 @@ function assertIsolatedPostgresTarget(): void {
     fail("The isolated PostgreSQL target has no complete .env database identity for comparison");
   }
   if (databaseIdentity(testDatabase) === null) {
-    fail(`SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL=${observedValue("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")} is not a valid PostgreSQL DSN`);
+    fail(`ATHANOR_SUBSTRATE_TEST_DATABASE_URL=${observedValue("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")} is not a valid PostgreSQL DSN`);
   }
   if (databaseIdentity(testDatabase) === productionDatabaseIdentity) {
     fail(
-      `SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL=${observedValue("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")} `
+      `ATHANOR_SUBSTRATE_TEST_DATABASE_URL=${observedValue("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")} `
       + "matches the database identity in the configured substrate .env",
     );
   }
@@ -124,7 +136,7 @@ function assertNoLiveConfiguration(): void {
   assertNoRenamedConfiguration();
   const isolatedPostgres = process.env[ISOLATED_POSTGRES_GATE] === "1";
   const violations = LIVE_CONFIGURATION_KEYS.filter((key) => {
-    if (isolatedPostgres && ["ATHANOR_SUBSTRATE_EXE", "ATHANOR_SUBSTRATE_ROOT", "SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL"].includes(key)) return false;
+    if (isolatedPostgres && ["ATHANOR_SUBSTRATE_EXE", "ATHANOR_SUBSTRATE_ROOT", "ATHANOR_SUBSTRATE_TEST_DATABASE_URL"].includes(key)) return false;
     if (key === "ATHANOR_GIGA_ENABLED") return process.env[key] === "1";
     return configured(key);
   });

@@ -37,7 +37,7 @@ const MIGRATIONS: &[&str] = &[
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
     let lower = url.to_ascii_lowercase();
     assert!(

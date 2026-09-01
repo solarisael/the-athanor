@@ -1,24 +1,35 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import {
   activeProjectFromEvidence,
   RecallPolicyHostClient,
   RecallPolicyHostUnavailable,
   hasToolEvidence,
   isMutateTool,
-} from "../solarisael-house-proof/recall-policy.ts";
-import { hostCommand, hostSessionIdentity } from "../solarisael-house-proof/host.ts";
-import { roomContext } from "../solarisael-house-proof/room.ts";
+} from "../house-proof/recall-policy.ts";
+import { hostCommand, hostSessionIdentity } from "../house-proof/host.ts";
+import { roomContext } from "../house-proof/room.ts";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 // The adapter's own tool registration needs OMP's zod surface, which a test pi
 // does not have. Everything else in the graph stays real: the evidence must
-// travel the product's own tap.
-mock.module("../solarisael-house-proof/tools.ts", () => ({
-  closeRustRememberTransports: () => undefined,
-  registerSolarisaelTools: () => undefined,
-  writeRustMemory: async () => undefined,
+// travel the product's own tap. Bun keeps this mock for the whole process, so
+// the fakes answer only while this file runs; later files get the genuine
+// tools surface, whose GIGA census the production-seam test reads.
+const realTools = await import("../house-proof/tools.ts?real");
+let toolsFixtureLive = true;
+afterAll(() => {
+  toolsFixtureLive = false;
+});
+mock.module("../house-proof/tools.ts", () => ({
+  ...realTools,
+  closeRustRememberTransports: () =>
+    toolsFixtureLive ? undefined : realTools.closeRustRememberTransports(),
+  registerSolarisaelTools: ((...args: any[]) =>
+    toolsFixtureLive ? undefined : (realTools.registerSolarisaelTools as any)(...args)) as any,
+  writeRustMemory: (async (...args: any[]) =>
+    toolsFixtureLive ? undefined : (realTools.writeRustMemory as any)(...args)) as any,
 }));
 
 const originalWebSocket = globalThis.WebSocket;

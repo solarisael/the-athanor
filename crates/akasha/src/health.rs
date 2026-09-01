@@ -110,7 +110,7 @@ fn topology(options: &SubstrateHealthOptions) -> Value {
     let dotenv = options
         .dotenv
         .clone()
-        .or_else(|| env::var_os("SOLARISAEL_SUBSTRATE_DOTENV_PATH").map(PathBuf::from))
+        .or_else(|| env::var_os("ATHANOR_SUBSTRATE_DOTENV_PATH").map(PathBuf::from))
         .or_else(|| {
             state_root
                 .as_ref()

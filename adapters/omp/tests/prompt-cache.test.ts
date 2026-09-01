@@ -37,131 +37,210 @@ const recallPolicy = {
   updatedAt: "2026-08-14T00:00:00.000Z",
 };
 
-mock.module("../solarisael-house-proof/room.ts", () => ({
-  applyPromptDirectives: async () => ({ state: { operator: "Sol", embodiedSpirit: "Kodo" } }),
-  roomContext: () => ({
-    room: "kodo",
-    spirit: "Kodo",
-    operator: "Sol",
-    effectiveRoomDir,
-  }),
-  writeActiveSpiritSnapshot: async () => undefined,
+// Bun keeps a module mock for the whole process, so every later test file in
+// the run sees these stand-ins. Each mock therefore spreads the real module
+// and the fakes answer only while this file's own fixture is live; the
+// fixture flag is `effectiveRoomDir`, set by beforeEach and cleared by
+// afterEach. Downstream files get the genuine surface.
+const realRoom = await import("../house-proof/room.ts?real");
+const realFence = await import("../house-proof/top-level-session-fence.ts?real");
+const realConversationLog = await import("../house-proof/conversation-log.ts?real");
+const realGiga = await import("../giga.ts?real");
+const realRecall = await import("../house-proof/recall.ts?real");
+const realTools = await import("../house-proof/tools.ts?real");
+const realPresence = await import("../house-proof/presence.ts?real");
+const realHallway = await import("../house-proof/hallway.ts?real");
+const realAnamnesis = await import("../house-proof/anamnesis.ts?real");
+const realSubstrate = await import("../house-proof/substrate.ts?real");
+const realEntities = await import("../house-proof/entity-resolution.ts?real");
+const realTelemetry = await import("../house-proof/recall-telemetry.ts?real");
+const realContext = await import("../house-proof/context.ts?real");
+const realPolicy = await import("../house-proof/recall-policy.ts?real");
+
+const live = () => effectiveRoomDir !== "";
+function gated<F extends (...args: any[]) => any>(fake: F, genuine: F): F {
+  return ((...args: any[]) => (live() ? fake(...args) : genuine(...args))) as F;
+}
+
+mock.module("../house-proof/room.ts", () => ({
+  ...realRoom,
+  applyPromptDirectives: gated(
+    async () => ({ state: { operator: "Sol", embodiedSpirit: "Kodo" } }),
+    realRoom.applyPromptDirectives,
+  ),
+  roomContext: gated(
+    () => ({ room: "kodo", spirit: "Kodo", operator: "Sol", effectiveRoomDir }),
+    realRoom.roomContext,
+  ),
+  writeActiveSpiritSnapshot: gated(async () => undefined, realRoom.writeActiveSpiritSnapshot),
 }));
 
-mock.module("../solarisael-house-proof/top-level-session-fence.ts", () => ({
-  adoptTopLevelSession: (_room: string, session: string) => { topLevelSessionId ||= session; },
-  registerTopLevelSession: (_room: string, session: string) => { topLevelSessionId = session; },
-  retireTopLevelSession: (_room: string, session: string) => {
-    if (topLevelSessionId === session) topLevelSessionId = "";
-  },
-  topLevelSession: () => topLevelSessionId || null,
+mock.module("../house-proof/top-level-session-fence.ts", () => ({
+  ...realFence,
+  adoptTopLevelSession: gated(
+    (_room: string, session: string) => { topLevelSessionId ||= session; },
+    realFence.adoptTopLevelSession,
+  ),
+  registerTopLevelSession: gated(
+    (_room: string, session: string) => { topLevelSessionId = session; },
+    realFence.registerTopLevelSession,
+  ),
+  retireTopLevelSession: gated(
+    (_room: string, session: string) => {
+      if (topLevelSessionId === session) topLevelSessionId = "";
+    },
+    realFence.retireTopLevelSession,
+  ),
+  topLevelSession: gated(() => topLevelSessionId || null, realFence.topLevelSession),
 }));
 
-mock.module("../solarisael-house-proof/conversation-log.ts", () => ({
-  logConversationWindow: async () => ({ fresh: freshConversation, loggedTurns: [] }),
+mock.module("../house-proof/conversation-log.ts", () => ({
+  ...realConversationLog,
+  logConversationWindow: gated(
+    async () => ({ fresh: freshConversation, loggedTurns: [] }),
+    realConversationLog.logConversationWindow,
+  ),
 }));
 
 mock.module("../giga.ts", () => ({
-  closeGigaTransports: async () => undefined,
-  ingestGigaLoggedTurnsDetached: () => undefined,
+  ...realGiga,
+  closeGigaTransports: gated(async () => undefined, realGiga.closeGigaTransports),
+  ingestGigaLoggedTurnsDetached: gated(() => undefined, realGiga.ingestGigaLoggedTurnsDetached),
 }));
 
-mock.module("../solarisael-house-proof/recall.ts", () => ({
-  closeRustRecallTransports: () => undefined,
-  recallWithRouting: async (_roomDir: string, _room: string, query: string, options: unknown) => {
-    automaticRecallOptions.push(options);
-    return {
-      ok: true,
-      result: { query },
-    };
-  },
+mock.module("../house-proof/recall.ts", () => ({
+  ...realRecall,
+  closeRustRecallTransports: gated(() => undefined, realRecall.closeRustRecallTransports),
+  recallWithRouting: gated(
+    (async (_roomDir: string, _room: string, query: string, options: unknown) => {
+      automaticRecallOptions.push(options);
+      return {
+        ok: true,
+        result: { query },
+      };
+    }) as typeof realRecall.recallWithRouting,
+    realRecall.recallWithRouting,
+  ),
 }));
 
-mock.module("../solarisael-house-proof/tools.ts", () => ({
-  closeRustRememberTransports: () => undefined,
-  registerSolarisaelTools: () => undefined,
-  writeRustMemory: async () => undefined,
+mock.module("../house-proof/tools.ts", () => ({
+  ...realTools,
+  closeRustRememberTransports: gated(() => undefined, realTools.closeRustRememberTransports),
+  registerSolarisaelTools: gated(() => undefined, realTools.registerSolarisaelTools),
+  writeRustMemory: gated(async () => undefined, realTools.writeRustMemory),
 }));
-mock.module("../solarisael-house-proof/presence.ts", () => ({
-  compilePresenceContext: async (request: any) => {
-    presenceOpens.push(request);
-    presenceCompiles.push(request);
-    return {
-      frameId: "frame-1",
-      frameVersion: 1,
-      frameRendered: "Presence frame",
-      contractId: "contract-1",
-      turnId: request.turnId,
-      directiveIds: ["presence:active-spirit"],
-      rendered: "Presence frame\n\nPresence contract",
-    };
-  },
-  settlePresence: async () => ({ contractId: "contract-1" }),
-  responseDigest: () => "d".repeat(64),
+mock.module("../house-proof/presence.ts", () => ({
+  ...realPresence,
+  compilePresenceContext: gated(
+    async (request: any) => {
+      presenceOpens.push(request);
+      presenceCompiles.push(request);
+      return {
+        frameId: "frame-1",
+        frameVersion: 1,
+        frameRendered: "Presence frame",
+        contractId: "contract-1",
+        turnId: request.turnId,
+        directiveIds: ["presence:active-spirit"],
+        rendered: "Presence frame\n\nPresence contract",
+      };
+    },
+    realPresence.compilePresenceContext,
+  ),
+  settlePresence: gated(
+    (async () => ({ contractId: "contract-1" })) as typeof realPresence.settlePresence,
+    realPresence.settlePresence,
+  ),
+  responseDigest: gated(() => "d".repeat(64), realPresence.responseDigest),
 }));
-mock.module("../solarisael-house-proof/hallway.ts", () => ({
-  projectHallwayInbox: async () => hallwayProjection,
+mock.module("../house-proof/hallway.ts", () => ({
+  ...realHallway,
+  projectHallwayInbox: gated(async () => hallwayProjection, realHallway.projectHallwayInbox),
 }));
 
-mock.module("../solarisael-house-proof/anamnesis.ts", () => ({
-  closeRustAnamnesisTransports: () => undefined,
-  formatAnamnesisContext: () => "",
-  queryAnamnesis: async (_roomDir: string, _room: string, options: unknown) => {
-    automaticAnamnesisOptions.push(options);
-    return { ok: true };
-  },
+mock.module("../house-proof/anamnesis.ts", () => ({
+  ...realAnamnesis,
+  closeRustAnamnesisTransports: gated(() => undefined, realAnamnesis.closeRustAnamnesisTransports),
+  formatAnamnesisContext: gated(() => "", realAnamnesis.formatAnamnesisContext),
+  queryAnamnesis: gated(
+    (async (_roomDir: string, _room: string, options: unknown) => {
+      automaticAnamnesisOptions.push(options);
+      return { ok: true };
+    }) as typeof realAnamnesis.queryAnamnesis,
+    realAnamnesis.queryAnamnesis,
+  ),
 }));
 
-mock.module("../solarisael-house-proof/substrate.ts", () => ({
-  catchBoat: async (_room: string, options: unknown) => {
-    automaticWakeOptions.push(options);
-    return { ok: true, found: false };
-  },
-  closePaperBoatTransports: () => undefined,
+mock.module("../house-proof/substrate.ts", () => ({
+  ...realSubstrate,
+  catchBoat: gated(
+    (async (_room: string, options: unknown) => {
+      automaticWakeOptions.push(options);
+      return { ok: true, found: false };
+    }) as typeof realSubstrate.catchBoat,
+    realSubstrate.catchBoat,
+  ),
+  closePaperBoatTransports: gated(() => undefined, realSubstrate.closePaperBoatTransports),
   // An answered, empty board: the wake letter must stay unchanged.
-  readQuestBoard: async () => ({ ok: true, quests: [] }),
-  formatQuestBoardSection: () => "",
+  readQuestBoard: gated(async () => ({ ok: true, quests: [] }), realSubstrate.readQuestBoard),
+  formatQuestBoardSection: gated(() => "", realSubstrate.formatQuestBoardSection),
 }));
 
-mock.module("../solarisael-house-proof/entity-resolution.ts", () => ({
-  resolveEntities: async (input: unknown) => {
-    automaticEntityInputs.push(input);
-    return { ok: true, matches: [] };
-  },
+mock.module("../house-proof/entity-resolution.ts", () => ({
+  ...realEntities,
+  resolveEntities: gated(
+    (async (input: unknown) => {
+      automaticEntityInputs.push(input);
+      return { ok: true, matches: [] };
+    }) as typeof realEntities.resolveEntities,
+    realEntities.resolveEntities,
+  ),
 }));
 
-mock.module("../solarisael-house-proof/recall-telemetry.ts", () => ({
-  recordRecallTelemetry: async () => true,
+mock.module("../house-proof/recall-telemetry.ts", () => ({
+  ...realTelemetry,
+  recordRecallTelemetry: gated(async () => true, realTelemetry.recordRecallTelemetry),
 }));
 
 
-mock.module("../solarisael-house-proof/context.ts", () => ({
-  analyzeContext: async () => ({
-    route: {
-      entityResolutionSuggested,
-      intent: "technical_project",
-      terms: ["cache"],
-      requiredTerms: [],
-      recognizedEntities: [],
-    },
-  }),
-  applyRecallViewport: async (_binding: unknown, recalled: { query: string }) => ({
-    presentation: {
-      found: [{ id: recalled.query }],
-      ...(omitViewportWarnings ? {} : { warnings: [] }),
-      retrievalCandidates: [{ id: recalled.query }],
-      canonMatches: [],
-      dateMatches: [],
-    },
-    diagnostics: {},
-  }),
+mock.module("../house-proof/context.ts", () => ({
+  ...realContext,
+  analyzeContext: gated(
+    async () => ({
+      route: {
+        entityResolutionSuggested,
+        intent: "technical_project",
+        terms: ["cache"],
+        requiredTerms: [],
+        recognizedEntities: [],
+      },
+    }),
+    realContext.analyzeContext,
+  ),
+  applyRecallViewport: gated(
+    (async (_binding: unknown, recalled: { query: string }) => ({
+      presentation: {
+        found: [{ id: recalled.query }],
+        ...(omitViewportWarnings ? {} : { warnings: [] }),
+        retrievalCandidates: [{ id: recalled.query }],
+        canonMatches: [],
+        dateMatches: [],
+      },
+      diagnostics: {},
+    })) as typeof realContext.applyRecallViewport,
+    realContext.applyRecallViewport,
+  ),
 }));
 
-mock.module("../solarisael-house-proof/recall-policy.ts", () => ({
+mock.module("../house-proof/recall-policy.ts", () => ({
+  ...realPolicy,
   RecallPolicyHostClient: class {
     session: string;
 
     constructor(binding: { session: string }) {
+      if (!live()) {
+        return new (realPolicy.RecallPolicyHostClient as any)(binding);
+      }
       this.session = binding.session;
     }
 
@@ -200,11 +279,11 @@ mock.module("../solarisael-house-proof/recall-policy.ts", () => ({
       return undefined;
     }
   },
-  activeProjectFromEvidence: () => null,
-  isMutateTool: () => false,
-  markToolEvidence: () => undefined,
-  mutateToolPaths: () => [],
-  hasToolEvidence: () => false,
+  activeProjectFromEvidence: gated(() => null, realPolicy.activeProjectFromEvidence),
+  isMutateTool: gated(() => false, realPolicy.isMutateTool),
+  markToolEvidence: gated(() => undefined, realPolicy.markToolEvidence),
+  mutateToolPaths: gated(() => [], realPolicy.mutateToolPaths),
+  hasToolEvidence: gated(() => false, realPolicy.hasToolEvidence),
 }));
 
 const { default: registerAdapter } = await import("../index.ts");
@@ -252,7 +331,7 @@ function context(sessionID: string) {
 }
 
 function recallBlocks(messages: Array<Record<string, any>>) {
-  return messages.filter((message) => message.customType === "solarisael-recall-context");
+  return messages.filter((message) => message.customType === "athanor-recall-context");
 }
 
 beforeEach(async () => {
@@ -334,7 +413,7 @@ describe("OMP prompt-cache history", () => {
     }, context("presence-session"));
     if (!result) throw new Error("Presence context returned no additions");
     const presence = result.messages.find((message) =>
-      message.customType === "solarisael-presence-context"
+      message.customType === "athanor-presence-context"
     );
 
     expect(presence?.content).toBe("Presence frame\n\nPresence contract");
@@ -370,7 +449,7 @@ describe("OMP prompt-cache history", () => {
     }, context("hallway-bell"));
     if (!result) throw new Error("Bell context event returned no additions");
     const bell = result.messages.find(
-      (message) => message.customType === "solarisael-hallway-bell",
+      (message) => message.customType === "athanor-hallway-bell",
     );
 
     expect(bell?.content).toContain("family-hallway: 1 unread; 1 mention pending for kodo");

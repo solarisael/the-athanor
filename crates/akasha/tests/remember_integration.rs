@@ -66,7 +66,7 @@ async fn insert_lexical_memory(
 }
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -81,7 +81,7 @@ fn isolated_database_url() -> String {
 }
 
 fn migration_database_scope() -> (String, Option<String>) {
-    let Ok(schema) = std::env::var("SOLARISAEL_SUBSTRATE_TEST_SCHEMA") else {
+    let Ok(schema) = std::env::var("ATHANOR_SUBSTRATE_TEST_SCHEMA") else {
         return (isolated_database_url(), None);
     };
     assert!(schema.starts_with("solarisael_tuner_test_"));
@@ -90,13 +90,13 @@ fn migration_database_scope() -> (String, Option<String>) {
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
     );
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("the schema proof requires a PostgreSQL database URL");
     (url, Some(schema))
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL database"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL database"]
 async fn isolated_database_guard() {
     let url = isolated_database_url();
     let options = PgConnectOptions::from_str(&url).expect("dedicated test URL must be valid");
@@ -210,7 +210,7 @@ async fn isolated_database_guard() {
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL and migrations through 0006"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and migrations through 0006"]
 async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
     let url = isolated_database_url();
     let options = PgConnectOptions::from_str(&url).expect("dedicated test URL must be valid");
@@ -350,7 +350,7 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL database"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL database"]
 async fn lexical_recall_applies_durability_decay_only_when_requested() {
     let url = isolated_database_url();
     let options = PgConnectOptions::from_str(&url).expect("dedicated test URL must be valid");
@@ -695,7 +695,7 @@ async fn migrations_reapply_without_clearing_current_embeddings() {
 #[ignore = "requires an isolated PostgreSQL schema"]
 async fn source_migrations_accepts_text_version_columns() {
     let (url, schema) = migration_database_scope();
-    let schema = schema.expect("text-version proof requires SOLARISAEL_SUBSTRATE_TEST_SCHEMA");
+    let schema = schema.expect("text-version proof requires ATHANOR_SUBSTRATE_TEST_SCHEMA");
     let options = PgConnectOptions::from_str(&url).expect("test database URL must be valid");
     let pool = PgPoolOptions::new()
         .max_connections(1)

@@ -76,7 +76,6 @@ struct ReplayLedger {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PresenceRuntimeError {
     MissingFrame,
-    SecondOpen,
     ReplayOperationConflict {
         key: String,
         recorded: PresenceOperation,
@@ -94,10 +93,6 @@ impl fmt::Display for PresenceRuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingFrame => f.write_str("Presence has no open frame for this session"),
-            Self::SecondOpen => f.write_str(
-                "Presence already has a live frame for this session; \
-                 only an exact replay of the original open may repeat it",
-            ),
             Self::ReplayOperationConflict {
                 key,
                 recorded,
@@ -125,8 +120,14 @@ impl PresenceRuntime {
     /// Open the one live frame for an authenticated session.
     ///
     /// Replay is checked before the lifecycle: an exact retry of the original
-    /// key and body returns the original frame whatever happened since. Any
-    /// other second open is refused rather than replacing a live frame.
+    /// key and body returns the original frame whatever happened since. When
+    /// the session already holds a live frame, any further open — a new key,
+    /// or the original key carrying fresh materials — is answered with the
+    /// live frame instead of refused. A client that reopens is a client that
+    /// lost its own context (compaction, restart); the Host owns the ledger,
+    /// so the door answers with the truth it holds. The caller's claimed
+    /// binding is still checked against the authenticated one first, so an
+    /// impostor adopts nothing.
     pub fn open(
         &mut self,
         authentication: &PresenceAuthentication,
@@ -135,17 +136,56 @@ impl PresenceRuntime {
     ) -> Result<PresenceFrame, PresenceRuntimeError> {
         let session = authentication.binding.session.clone();
         let request_digest = digest_request(&(authentication, &request))?;
-        if let Some(frame) = self.replay.recall(
+        let mut record_adoption = false;
+        let mut recorded_conflict = None;
+        match self.replay.recall(
             &session,
             idempotency_key,
             PresenceOperation::Open,
             &request_digest,
             opened,
-        )? {
+        ) {
+            Ok(Some(frame)) => return Ok(frame),
+            Ok(None) => record_adoption = true,
+            Err(conflict @ PresenceRuntimeError::ReplayOperationConflict { .. }) => {
+                return Err(conflict);
+            }
+            // A reused open key with a different body is exactly what a
+            // reopening client looks like; hold the conflict until the live
+            // frame has had its say.
+            Err(body_conflict) => recorded_conflict = Some(body_conflict),
+        }
+        if let Some(live) = self.sessions.get(&session) {
+            if request.binding != authentication.binding {
+                return Err(PresenceRuntimeError::Domain(
+                    "invalid Presence binding: does not match the authenticated room state".into(),
+                ));
+            }
+            // The live frame answers only the binding it was opened for; a
+            // Host whose authenticated binding moved must close and reopen.
+            if live.frame.binding != authentication.binding {
+                return Err(recorded_conflict.unwrap_or_else(|| {
+                    PresenceRuntimeError::Domain(
+                        "Presence frame is bound to a different authenticated binding; \
+                         close it before opening anew"
+                            .into(),
+                    )
+                }));
+            }
+            let frame = live.frame.clone();
+            if record_adoption {
+                self.replay.record(ReplayEntry {
+                    session,
+                    key: idempotency_key.to_owned(),
+                    operation: PresenceOperation::Open,
+                    request_digest,
+                    outcome: PresenceResult::Open(frame.clone()),
+                });
+            }
             return Ok(frame);
         }
-        if self.sessions.contains_key(&session) {
-            return Err(PresenceRuntimeError::SecondOpen);
+        if let Some(conflict) = recorded_conflict {
+            return Err(conflict);
         }
         let frame = open_presence(authentication.clone(), request).map_err(domain)?;
         self.sessions.insert(
@@ -536,17 +576,42 @@ mod tests {
     }
 
     #[test]
-    fn a_second_live_open_under_a_new_key_refuses() {
-        let (mut runtime, _frame) = opened_runtime();
+    fn a_second_live_open_under_a_new_key_adopts_the_live_frame() {
+        let (mut runtime, frame) = opened_runtime();
         assert_eq!(
-            runtime.open(&authentication(), "open-b", open_request()),
-            Err(PresenceRuntimeError::SecondOpen)
+            runtime
+                .open(&authentication(), "open-b", open_request())
+                .unwrap(),
+            frame
+        );
+        // The adoption is itself replay-recorded: an exact retry of the new
+        // key answers again, and the same key with yet another body still
+        // resolves to the one live frame.
+        assert_eq!(
+            runtime
+                .open(&authentication(), "open-b", open_request())
+                .unwrap(),
+            frame
         );
     }
 
     #[test]
-    fn the_original_key_with_a_changed_body_refuses_as_a_body_conflict() {
-        let (mut runtime, _frame) = opened_runtime();
+    fn a_reopen_after_lost_context_adopts_instead_of_refusing() {
+        // The everyday trigger: compaction or restart erased the client's
+        // prior-frame pointer, so it reopens with the session-stable key and
+        // freshly compiled materials. The Host answers with the live frame.
+        let (mut runtime, frame) = opened_runtime();
+        let mut changed = open_request();
+        changed.identity[0].body = "a different Kintsu".into();
+        assert_eq!(runtime.open(&authentication(), "open-a", changed).unwrap(), frame);
+    }
+
+    #[test]
+    fn a_changed_body_without_a_live_frame_still_refuses_as_a_body_conflict() {
+        let (mut runtime, frame) = opened_runtime();
+        runtime
+            .close(SESSION, "close-a", close(&frame, "letter"))
+            .unwrap();
         let mut changed = open_request();
         changed.identity[0].body = "a different Kintsu".into();
         assert_eq!(
@@ -832,9 +897,11 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(
-            runtime.open(&authentication(), "open-a", open_request()),
-            Err(PresenceRuntimeError::SecondOpen),
-            "once the open receipt ages out, the live frame is what refuses"
+            runtime
+                .open(&authentication(), "open-a", open_request())
+                .unwrap(),
+            frame,
+            "once the open receipt ages out, the live frame still answers the replay"
         );
     }
 }

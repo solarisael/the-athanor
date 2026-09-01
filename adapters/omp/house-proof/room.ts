@@ -2,7 +2,7 @@
 // Silhouette: identify the current room, persist safe state, and refresh active_spirit.md.
 
 import path from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { HOUSE_STATE_FILENAME, OBSIDIAN_ROOT, ROOM_CAPABILITY_FILENAME } from "./constants.ts";
 
@@ -10,7 +10,22 @@ export function roomNameFromCwd(cwd) {
   return path.basename(String(cwd || "")).toLowerCase();
 }
 
-const ROOM_MARKER_FILENAME = ".solarisael-room.json";
+const ROOM_MARKER_FILENAME = ".athanor-room.json";
+// Legacy pre-cutover names. A room provisioned before the athanor-* naming
+// cutover still carries these on disk; the first read renames the file so the
+// old name disappears from the room instead of being served forever.
+const LEGACY_ROOM_MARKER_FILENAME = ".solarisael-room.json";
+const LEGACY_HOUSE_STATE_FILENAME = "solarisael-house-state.json";
+
+function migrateLegacyFile(currentPath, legacyPath) {
+  if (existsSync(currentPath) || !existsSync(legacyPath)) return;
+  try {
+    renameSync(legacyPath, currentPath);
+  } catch {
+    // A failed rename leaves the legacy file in place; the caller's read of
+    // the current path simply finds nothing, exactly as for a fresh room.
+  }
+}
 const DEFAULT_ROOM = "default-room";
 const RESERVED_ROOM_KEY = "house";
 
@@ -38,7 +53,9 @@ function roomDisplayName(room) {
 
 function readRoomMarker(roomDir) {
   try {
-    const parsed = JSON.parse(readFileSync(path.join(roomDir, ROOM_MARKER_FILENAME), "utf8"));
+    const markerPath = path.join(roomDir, ROOM_MARKER_FILENAME);
+    migrateLegacyFile(markerPath, path.join(roomDir, LEGACY_ROOM_MARKER_FILENAME));
+    const parsed = JSON.parse(readFileSync(markerPath, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
@@ -47,7 +64,9 @@ function readRoomMarker(roomDir) {
 
 function readPersistedHouseState(roomDir) {
   try {
-    const parsed = JSON.parse(readFileSync(path.join(roomDir, ".omp", "runtime", HOUSE_STATE_FILENAME), "utf8"));
+    const statePath = path.join(roomDir, ".omp", "runtime", HOUSE_STATE_FILENAME);
+    migrateLegacyFile(statePath, path.join(roomDir, ".omp", "runtime", LEGACY_HOUSE_STATE_FILENAME));
+    const parsed = JSON.parse(readFileSync(statePath, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};

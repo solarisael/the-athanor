@@ -178,6 +178,14 @@ fn eligibility(qb: &mut QueryBuilder<'_, Postgres>, language: &[String], technol
     }
 }
 
+/// A registry query matches any term, not every term. `plainto_tsquery` ANDs
+/// each word, so a natural multi-word query almost always returned zero rows;
+/// joining the words with OR under `websearch_to_tsquery` lets `ts_rank` do
+/// the sorting while every single-term match stays reachable.
+fn any_term_query(query: &str) -> String {
+    query.split_whitespace().collect::<Vec<_>>().join(" OR ")
+}
+
 pub async fn lesson_query(
     pool: &PgPool,
     params: LessonQueryParams,
@@ -212,19 +220,23 @@ pub async fn lesson_query(
         qb.push(" AND always_on");
     }
     if let Some(query) = params.query.as_ref().filter(|v| !v.is_empty()) {
-        qb.push(" AND lesson_tsv @@ plainto_tsquery(CASE WHEN lesson_key = 'audio' THEN ")
+        qb.push(" AND lesson_tsv @@ websearch_to_tsquery(CASE WHEN lesson_key = 'audio' THEN ")
             .push_bind(AUDIO_LESSON_LANGUAGE)
             .push("::regconfig ELSE ")
             .push_bind(settings.house_language.clone())
             .push("::regconfig END, ")
-            .push_bind(query)
+            .push_bind(any_term_query(query))
             .push(")");
     }
-    let rank = params.query.clone().unwrap_or_default();
+    let rank = params
+        .query
+        .as_deref()
+        .map(any_term_query)
+        .unwrap_or_default();
     qb.push(" ORDER BY always_on DESC, CASE WHEN ")
         .push_bind(rank.clone())
         .push(
-            " <> '' THEN ts_rank(lesson_tsv, plainto_tsquery(CASE WHEN lesson_key = 'audio' THEN ",
+            " <> '' THEN ts_rank(lesson_tsv, websearch_to_tsquery(CASE WHEN lesson_key = 'audio' THEN ",
         )
         .push_bind(AUDIO_LESSON_LANGUAGE)
         .push("::regconfig ELSE ")

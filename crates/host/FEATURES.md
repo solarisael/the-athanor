@@ -121,7 +121,7 @@ The Athanor Host. One loopback server that serves one room over WebSocket and HT
 - The token, the room directory, the state directory, the house identifier, the room, the spirit, and the session are all required.
 - The room key must use lowercase letters, digits, and single inner hyphens. The reserved key `house` is refused.
 - The WebSocket path must be one absolute path with no query and no fragment.
-- AKASHA turns on when `DATABASE_URL` or `SOLARISAEL_NATS_URL` exists.
+- AKASHA turns on when `DATABASE_URL` or `ATHANOR_NATS_URL` exists.
 - The NATS address must use the `nats://` scheme, stay under 2048 characters, and hold no whitespace.
 - `KnockAutonomy` parses `off` and `claim` exactly. A typo stops startup instead of a silent downgrade. An absent value gives bounded claims.
 - `room_state_path` names the room state file. `scope` names the authority scope for this room.

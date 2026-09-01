@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { settleAutomaticContextWithinBudget } from "../index.ts";
-import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "../solarisael-house-proof/constants.ts";
+import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "../house-proof/constants.ts";
 
 test("automatic context uses at most a five-second Windows budget", () => {
   if (process.platform === "win32") expect(AUTOMATIC_CONTEXT_IO_TIMEOUT_MS).toBe(5_000);

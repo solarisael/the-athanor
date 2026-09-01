@@ -60,7 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_hallway_messages_thread
 -- ---------------------------------------------------------------------------
 -- Backfills, all guarded. House timezone for legacy day assignment:
 -- America/Sao_Paulo (operator-confirmed default; runtime authority is the
--- SOLARISAEL_HOUSE_TZ config key).
+-- ATHANOR_HOUSE_TZ config key).
 
 -- Root messages (non-replies) name the day threads they need.
 INSERT INTO hallway_threads (hallway_id, thread_key)

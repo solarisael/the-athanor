@@ -76,7 +76,7 @@ record has, and where a correction belongs.
 
 ## Start with Vault
 
-Vault is the lightweight profile. In the room's `.solarisael-room.json`, point
+Vault is the lightweight profile. In the room's `.athanor-room.json`, point
 it at one or several project roots:
 
 ```json

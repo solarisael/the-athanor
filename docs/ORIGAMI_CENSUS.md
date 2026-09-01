@@ -38,7 +38,7 @@ this file keeps the consolidated findings. The skeleton functions in
    health reports green with the whole hallway family missing.
 5. The substrate stdio protocol exposes 7 of 9 hallway methods; knock
    claim and settle are reachable only through house-host (WebSocket).
-6. adapters/omp/solarisael-house-proof/host.ts declares
+6. adapters/omp/house-proof/host.ts declares
    `registerEmbodiedSession` twice (:76, :101), byte-identical.
    Cleanup candidate, verdict pending.
 7. The one call site honoring the extracted boat vocabulary at census

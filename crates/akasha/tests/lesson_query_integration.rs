@@ -8,7 +8,7 @@ use std::str::FromStr;
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -77,7 +77,7 @@ async fn insert_lesson(pool: &PgPool, id: i64, always_on: bool) -> TestResult {
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
 async fn lesson_query_always_on_filter_returns_only_flagged_rows_and_absence_is_unchanged()
 -> TestResult {
     // Kills: deleting the `AND always_on` predicate or applying it when absent.

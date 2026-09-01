@@ -12,8 +12,8 @@ pub const DATA_ROOT_ENV: &str = "ATHANOR_DATA_ROOT";
 pub const SECRETS_FILE: &str = "secrets/runtime-secrets.json";
 pub const LEGACY_NAMES: &[&str] = &[
     "solarisael-house",
-    "solarisael-house-omp",
-    "solarisael-house-substrate",
+    "athanor-omp",
+    "athanor-substrate",
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]

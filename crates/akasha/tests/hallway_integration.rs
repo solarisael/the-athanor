@@ -41,7 +41,7 @@ fn bell_config() -> Config {
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -59,11 +59,11 @@ fn isolated_database_url() -> String {
 #[ignore = "requires an explicitly supplied PostgreSQL URL; all tables live in pg_temp"]
 async fn hallway_temp_session_exchanges_messages_without_persistent_state() -> TestResult {
     assert_eq!(
-        std::env::var("SOLARISAEL_HALLWAY_TEMP_PROOF").as_deref(),
+        std::env::var("ATHANOR_HALLWAY_TEMP_PROOF").as_deref(),
         Ok("1"),
-        "temporary Hallway proof requires SOLARISAEL_HALLWAY_TEMP_PROOF=1"
+        "temporary Hallway proof requires ATHANOR_HALLWAY_TEMP_PROOF=1"
     );
-    let url = std::env::var("SOLARISAEL_HALLWAY_TEMP_DATABASE_URL")
+    let url = std::env::var("ATHANOR_HALLWAY_TEMP_DATABASE_URL")
         .expect("temporary Hallway proof requires a PostgreSQL URL");
     let options = PgConnectOptions::from_str(&url)?;
     let pool = PgPoolOptions::new()

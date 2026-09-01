@@ -515,7 +515,7 @@ mod tests {
     }
 
     fn isolated_database_url() -> String {
-        let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+        let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
             .expect("Insula writer proof requires a dedicated PostgreSQL URL");
         let lower = url.to_ascii_lowercase();
         assert!(
@@ -538,7 +538,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+    #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
     async fn postgres_writer_contract_persists_span_and_receipt_point() -> TestResult {
         let pool = fresh_insula().await?;
         let binding = system_binding();

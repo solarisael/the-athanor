@@ -19,7 +19,7 @@ const HALLWAY_MIGRATION: &str =
 const BELL_MIGRATION: &str = include_str!("../../../substrate/migrations/0020_hallway_bell.sql");
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("Docket proof requires a dedicated PostgreSQL URL");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -93,7 +93,7 @@ async fn insert_attempt(
 // red-proof: append `CREATE TABLE docket.leftover (id integer)` to 0023, or
 // replace a `CREATE ... IF NOT EXISTS` relation declaration with `CREATE`.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_migration_is_idempotent_and_residual_free() -> TestResult {
     let pool = fresh_docket().await?;
     sqlx::raw_sql(DOCKET_MIGRATION).execute(&pool).await?;
@@ -121,7 +121,7 @@ async fn docket_migration_is_idempotent_and_residual_free() -> TestResult {
 // recorded, rather than enforcing the docket_quest_events_append_only trigger.
 // red-proof: drop docket_quest_events_append_only or remove UPDATE from it.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_events_are_append_only() -> TestResult {
     let pool = fresh_docket().await?;
     let quest_id = insert_frozen_quest(&pool).await?;
@@ -169,7 +169,7 @@ async fn docket_events_are_append_only() -> TestResult {
 // red-proof: add 'executor' to docket_quest_acceptance_items_role_check, or
 // remove the principal-and-time conjuncts from settlement_check.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_executor_never_self_settles_acceptance() -> TestResult {
     let pool = fresh_docket().await?;
     let quest_id = insert_frozen_quest(&pool).await?;
@@ -228,7 +228,7 @@ async fn docket_executor_never_self_settles_acceptance() -> TestResult {
 // acceptance digest, review class, or activation timestamp while draft stays editable.
 // red-proof: replace the activation_freeze_check body with `CHECK (TRUE)`.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_activation_freezes_the_full_authority_tuple() -> TestResult {
     let pool = fresh_docket().await?;
     sqlx::query(
@@ -280,7 +280,7 @@ async fn docket_activation_freezes_the_full_authority_tuple() -> TestResult {
 // allowing a claim request to replay its quest-scoped idempotency key.
 // red-proof: drop docket_quest_attempts_epoch_key or idempotency_key.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_attempts_fence_claim_epoch_and_idempotency() -> TestResult {
     let pool = fresh_docket().await?;
     let quest_id = insert_frozen_quest(&pool).await?;
@@ -312,7 +312,7 @@ async fn docket_attempts_fence_claim_epoch_and_idempotency() -> TestResult {
 // lowercase 64-hex digest.
 // red-proof: delete docket_quest_attempts_lease_hash_check.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_attempt_lease_token_must_be_a_sha256_shape() -> TestResult {
     let pool = fresh_docket().await?;
     let quest_id = insert_frozen_quest(&pool).await?;
@@ -332,7 +332,7 @@ async fn docket_attempt_lease_token_must_be_a_sha256_shape() -> TestResult {
 // prerequisite cycle at the first edge.
 // red-proof: delete docket_quest_dependencies_self_check.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_dependency_refuses_self_loop() -> TestResult {
     let pool = fresh_docket().await?;
     let quest_id = insert_frozen_quest(&pool).await?;
@@ -392,7 +392,7 @@ fn settle_request(
 // red-proof: remove the claimant_room comparison from quest_report's
 // SettleItem arm.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_review_independence_refuses_claimant_room() -> TestResult {
     let pool = fresh_docket().await?;
     sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
@@ -519,7 +519,7 @@ fn work_request(
 // red-proof: remove the claimant_room comparison ahead of quest_report's
 // action match.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_claimant_binding_refuses_foreign_room() -> TestResult {
     let pool = fresh_docket().await?;
     sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
@@ -636,7 +636,7 @@ fn clock_request(hallway: &str, idempotency_key: &str) -> QuestClockParams {
 // red-proof: drop the ON CONFLICT dedupe from the clock_ping insert, or ring
 // the Bell when pinged is empty.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_clock_pings_due_quests_and_stays_silent_on_clear() -> TestResult {
     let pool = fresh_docket().await?;
     sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
@@ -757,7 +757,7 @@ async fn docket_clock_pings_due_quests_and_stays_silent_on_clear() -> TestResult
 // red-proof: remove the GREATEST renewal from the Progress arm, or restore
 // the bare `state != "offered"` refusal in quest_claim.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_progress_renews_and_expired_lease_reclaims() -> TestResult {
     let pool = fresh_docket().await?;
     sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
@@ -953,7 +953,7 @@ async fn insert_insula_row(
 // red-proof: drop the observed_at lower bound or the session filter from
 // quest_chargebook's aggregation query.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_chargebook_counts_only_the_attempt_lineage_window() -> TestResult {
     let pool = fresh_docket().await?;
     sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
@@ -1049,7 +1049,7 @@ async fn docket_chargebook_counts_only_the_attempt_lineage_window() -> TestResul
 // red-proof: restore the lease expiry or token-hash comparison to the
 // SettleItem arm of the lease check in quest_report.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Docket schema"]
 async fn docket_settlement_authenticates_the_reviewer_not_the_token() -> TestResult {
     let pool = fresh_docket().await?;
     sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;

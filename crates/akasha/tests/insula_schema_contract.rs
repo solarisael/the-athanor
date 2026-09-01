@@ -6,7 +6,7 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 const INSULA_MIGRATION: &str = include_str!("../../../substrate/migrations/0022_insula.sql");
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("Insula proof requires a dedicated PostgreSQL URL");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -43,7 +43,7 @@ async fn column_names(pool: &PgPool, table: &str) -> TestResult<Vec<String>> {
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
 async fn insula_migration_refuses_bodyful_partial_state_and_keeps_raw_rows_bounded() -> TestResult {
     let pool = fresh_insula().await?;
 
@@ -113,7 +113,7 @@ async fn insula_migration_refuses_bodyful_partial_state_and_keeps_raw_rows_bound
 }
 
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
 async fn insula_retention_has_deterministic_same_house_coverage_proof() -> TestResult {
     let pool = fresh_insula().await?;
 

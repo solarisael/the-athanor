@@ -52,7 +52,7 @@ becomes a second authority.
 | `rust-transport.ts` | Bounded long-lived JSONL transport |
 | `giga.ts` | OMP-side GIGA event bridge; Rust owns claims and transitions |
 | `kitten-lineage.ts` | OMP task-lineage observation |
-| `solarisael-house-proof/` | Named tool schemas and thin Host/Rust adapters |
+| `house-proof/` | Named tool schemas and thin Host/Rust adapters |
 | `starter-room/` | Example room material |
 
 Packaging, installation, migration, update, rollback, doctor, uninstall, and

@@ -32,7 +32,7 @@ const COMPOUND_TERM_MIN_CHARS: usize = 4;
 const EXACT_PHRASE_MIN_CHARS: usize = 3;
 
 // The three tables below are index-aligned with `Field` and with the per-field
-// arrays on `VaultDocument`; a room override in .solarisael-room.json is keyed
+// arrays on `VaultDocument`; a room override in .athanor-room.json is keyed
 // by these names.
 pub(crate) const FIELD_NAMES: [&str; FIELD_COUNT] = [
     "path", "title", "heading", "keys", "tags", "body", "metadata",

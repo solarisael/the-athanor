@@ -3,13 +3,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { HEALTH_REPORT_BLOCKS, catchBoat, closePaperBoatTransports, healthDotenvPath, sleepBoat, substrateExePath, substrateHealth } from "../solarisael-house-proof/substrate.ts";
+import { HEALTH_REPORT_BLOCKS, catchBoat, closePaperBoatTransports, healthDotenvPath, sleepBoat, substrateExePath, substrateHealth } from "../house-proof/substrate.ts";
 import { RustJsonlTransport, RustTransportOutcomeUnknownError } from "../rust-transport.ts";
 
 const tempRoots: string[] = [];
 const substrateEnv = "ATHANOR_SUBSTRATE_ROOT";
 const executableEnv = "ATHANOR_SUBSTRATE_EXE";
-const fixtureEnv = "SOLARISAEL_TEST_SUBSTRATE_HEALTH_SCRIPT";
+const fixtureEnv = "ATHANOR_TEST_SUBSTRATE_HEALTH_SCRIPT";
 
 afterEach(async () => {
   delete process.env[substrateEnv];
@@ -114,7 +114,7 @@ describe("optional substrate health", () => {
     expect(result.diagnostics[0]).toMatchObject({
       category: "database",
       stage: "database_connect",
-      owner: { path: "solarisael-house-proof/substrate.ts", symbol: "substrateHealth" },
+      owner: { path: "house-proof/substrate.ts", symbol: "substrateHealth" },
       expected: { ok: true, mode: "full", substrateApi: 1 },
       execution: { request_dispatched: false, write_outcome: "not_started", retry: "after_change" },
     });

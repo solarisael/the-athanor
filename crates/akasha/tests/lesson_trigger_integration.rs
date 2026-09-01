@@ -20,7 +20,7 @@ use std::str::FromStr;
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn isolated_database_url() -> String {
-    let url = std::env::var("SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL")
+    let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
     let lower = url.to_ascii_lowercase();
     assert!(
@@ -319,7 +319,7 @@ async fn patch_lesson(
 // red-proof: delete the "latest fired_at" ledger lookup from the repeat-policy
 // filter in lesson_trigger_match (treat every eligible lesson as fireable).
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn null_cooldown_fires_once_per_session_and_again_in_a_fresh_session() -> TestResult {
     let pool = temp_trigger_pool().await?;
     insert_trigger(
@@ -391,7 +391,7 @@ async fn null_cooldown_fires_once_per_session_and_again_in_a_fresh_session() -> 
 // red-proof: flip the cooldown comparison in the repeat-policy filter
 // (`fired_at < NOW() - cooldown` -> `fired_at > NOW() - cooldown`).
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn elapsed_cooldown_refires_while_a_live_cooldown_stays_silent() -> TestResult {
     let pool = temp_trigger_pool().await?;
     let mut cooled = Trigger::regex(911, "Cooled lesson", "todo!\\(\\)");
@@ -433,7 +433,7 @@ async fn elapsed_cooldown_refires_while_a_live_cooldown_stays_silent() -> TestRe
 // red-proof: remove the `INSERT INTO lesson_trigger_events` from the fire path,
 // or drop `ON DELETE CASCADE` from the composite FK in migration 0019.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn every_fire_writes_its_ledger_row_and_dies_with_its_lesson() -> TestResult {
     let pool = temp_trigger_pool().await?;
     let mut lesson = Trigger::regex(921, "Ledger lesson", "eval\\(");
@@ -493,7 +493,7 @@ async fn every_fire_writes_its_ledger_row_and_dies_with_its_lesson() -> TestResu
 // red-proof: delete the `AND scope = ANY($scopes)` predicate from the
 // trigger-bearing lesson query.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn foreign_room_scope_never_fires_while_house_and_own_room_do() -> TestResult {
     let pool = temp_trigger_pool().await?;
     let mut foreign = Trigger::regex(931, "Kintsu-only lesson", "sample_rate");
@@ -535,7 +535,7 @@ async fn foreign_room_scope_never_fires_while_house_and_own_room_do() -> TestRes
 // ignored and reminders escalate to blocks. NULL means block by default.
 // red-proof: hardcode `urgency = "remind"` where interrupt_mode is mapped.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn null_interrupt_mode_blocks_and_explicit_remind_demotes() -> TestResult {
     let pool = temp_trigger_pool().await?;
     let defaulted = Trigger::regex(941, "Defaulted lesson", "panic!\\(");
@@ -569,7 +569,7 @@ async fn null_interrupt_mode_blocks_and_explicit_remind_demotes() -> TestResult 
 // pins the empty-scope default (regex matches prose AND tool).
 // red-proof: make the trigger_scope check always return true.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn trigger_scope_tokens_bind_their_surfaces() -> TestResult {
     let pool = temp_trigger_pool().await?;
     let mut write_only = Trigger::regex(951, "Write-only lesson", "secret");
@@ -620,7 +620,7 @@ async fn trigger_scope_tokens_bind_their_surfaces() -> TestResult {
 // red-proof: change the unknown-extension arm from `warnings.push(..)` to
 // `return Err(AppError::Invalid(..))`.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn unknown_extension_skips_ast_patterns_with_a_warning_not_an_error() -> TestResult {
     let pool = temp_trigger_pool().await?;
     let mut ast_only = Trigger::regex(961, "Ast lesson", "");
@@ -666,7 +666,7 @@ async fn unknown_extension_skips_ast_patterns_with_a_warning_not_an_error() -> T
 // red-proof: add `#[serde(skip_serializing_if = "Vec::is_empty")]` to
 // LessonTriggerMatchResult::warnings.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn healthy_zero_warning_response_still_serializes_an_empty_warnings_array() -> TestResult {
     let pool = temp_trigger_pool().await?;
     insert_trigger(&pool, &Trigger::regex(971, "Wire lesson", "dbg!\\(")).await?;
@@ -728,7 +728,7 @@ async fn healthy_zero_warning_response_still_serializes_an_empty_warnings_array(
 // red-proof: replace the `return Err(AppError::Invalid(..))` in the trigger
 // validation pre-pass with `warnings.push(..)` (or delete the pre-pass call).
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn invalid_trigger_specs_are_refused_by_the_write_path() -> TestResult {
     let pool = temp_trigger_pool().await?;
     insert_trigger(&pool, &Trigger::regex(981, "Validated lesson", "ok")).await?;
@@ -786,7 +786,7 @@ async fn invalid_trigger_specs_are_refused_by_the_write_path() -> TestResult {
 // red-proof: remove either location field from `LessonTriggerFired`, or replace
 // either value in its constructor with zero.
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn regex_fire_serializes_surface_index_and_match_start() -> TestResult {
     let pool = temp_trigger_pool().await?;
     insert_trigger(
@@ -825,7 +825,7 @@ async fn regex_fire_serializes_surface_index_and_match_start() -> TestResult {
 // red-proof: delete `language_keys` from TRIGGER_SELECT's column list (or from
 // the spec built in `trigger_row`).
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn a_rust_keyed_lesson_fires_on_rust_and_stays_silent_on_python() -> TestResult {
     let pool = temp_trigger_pool().await?;
     let mut keyed = Trigger::regex(971, "Rust-keyed lesson", "unwrap\\(\\)");
@@ -864,7 +864,7 @@ async fn a_rust_keyed_lesson_fires_on_rust_and_stays_silent_on_python() -> TestR
 // trigger_eligibility with `OR TRUE` (foreign fires) or delete the arm
 // (own-project lesson dies).
 #[tokio::test]
-#[ignore = "requires SOLARISAEL_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
 async fn a_project_lesson_fires_only_inside_its_own_project() -> TestResult {
     let pool = temp_trigger_pool().await?;
     let mut tagged = Trigger::regex(991, "Athanor-only lesson", "unwrap\\(\\)");

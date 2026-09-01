@@ -68,7 +68,7 @@ Every component reads the manifest and nothing else for module presence:
 - `HostConfig` is single-room by construction (`host/src/config.rs:63-78`). House-scoping the Host is the named work item of this section. The Host reads the room registry from config, never from flat env.
 - The single port becomes a declared key: `host_port` beside `nats_port` in `SupervisorConfig`/`RuntimeConfig`. Today nothing declares it — `ATHANOR_HOST_BIND` is transport and `DEFAULT_HOST_WS_PORT` is a fallback pin, documented as such at `contract.rs:39-43`.
 - Installed `config.json` carries `"port"` under `deny_unknown_fields`: this change is a data migration. The installer regenerates config on upgrade. `deploy-local.ps1:133` currently coerces a missing port to `0` and fails with a misleading message; the deploy script updates in the same quest.
-- The OMP adapter derives HTTP endpoints from host:port and discards the path (`adapters/omp/solarisael-house-proof/host.ts:144-157`). Under path routing this strips the room silently. The adapter fix ships in the same quest.
+- The OMP adapter derives HTTP endpoints from host:port and discards the path (`adapters/omp/house-proof/host.ts:144-157`). Under path routing this strips the room silently. The adapter fix ships in the same quest.
 - The room-key grammar exists in three hand-copied spellings (`host/src/config.rs:180-190`, `supervisor.rs:305-313`, `installer.rs:96-104`). As a path segment it becomes a path-traversal surface. One function in `protocol` owns the grammar; the three copies call it.
 - Loopback-only stays. The single door inherits the existing loopback refusal.
 

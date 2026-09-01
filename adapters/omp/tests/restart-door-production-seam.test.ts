@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import solarisaelHouseProof from "../index.ts";
 import { RustJsonlTransport } from "../rust-transport.ts";
 import { __gigaTest, ingestGigaLoggedTurnsDetached } from "../giga.ts";
-import { closeRustRememberTransports } from "../solarisael-house-proof/tools.ts";
+import { closeRustRememberTransports } from "../house-proof/tools.ts";
 
 type CapturedTool = {
   name: string;

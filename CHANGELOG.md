@@ -42,6 +42,42 @@ the exact implementation record.
 
 ### Added
 
+- The chat projection: an operator surface can now talk through the Host.
+  A subscribe answers the room's conversation ring and opens a live delta
+  stream. A say appends the operator line. The room's chat doorman polls
+  the ring, injects each unanswered say as a real OMP turn, and reports
+  the settled response as the spirit line. Repeated say and turn ids are
+  retries and append nothing. The Host stamps names from room state.
+- `athanor-chat`, a terminal client for the chat projection. It prints the
+  ring, streams deltas, and turns each input line into a say. The binary
+  builds with the workspace; the installer and deploy ladder do not ship
+  it yet.
+
+### Changed
+
+- The lesson registry query now matches any term instead of every term, so
+  a natural multi-word query finds its lessons.
+- The Presence open door now adopts. When a session already holds a live
+  frame, a reopen with the same authenticated binding receives that frame
+  instead of an idempotency refusal. Before this change, a session that lost
+  its context through compaction or restart reopened with fresh materials
+  under its stable key, received `ReplayBodyConflict`, and lost Presence for
+  the rest of the session. An impostor binding still refuses, a moved binding
+  still refuses, and operation conflicts always refuse. The compile fallback
+  key now carries the user-turn ordinal, so a repeated prompt text cannot
+  collide.
+- The naming cutover: every plugin-internal `solarisael-*` identifier is now
+  `athanor-*`. This covers the adapter library directory (`house-proof/`),
+  all `SOLARISAEL_*` runtime environment variables, context marker types,
+  Insula component ids, and the room state file names. The adapter renames
+  `.solarisael-room.json` and `solarisael-house-state.json` to their new
+  names on first read. The test fence and deploy guard now report every
+  pre-cutover variable by name. The name Solarisael remains only where it
+  names the installation: install paths, the Windows service, the database,
+  and the legacy pre-install door.
+
+### Added
+
 - `athanor.exe` is the canonical desktop owner. It keeps the existing Godot GUI
   and every managed harness process alive under one application lifetime.
 - A strict registry describes each harness program, workspace, console mode,
@@ -134,6 +170,12 @@ the exact implementation record.
 
 ### Fixed
 
+- Presence no longer degrades on the wake turn after a harness restart. The
+  session's first `presence open` used to race the room Hosts binding their
+  ports and gave up on one connection refusal, so the restarted session ran
+  without a frame. The open now retries a startup-shaped `HostUnavailable` on
+  a short bounded schedule (0.5s/1s/2s/3s, 15s deadline) under its existing
+  idempotency key. Mid-session commands keep their single attempt.
 - GIGA conversation ingest was dead in production. `giga.ts` called
   `path.dirname` without importing `path`. The `ReferenceError` fell into a
   `catch` that answers "this is a subagent session". Every session therefore
@@ -148,6 +190,13 @@ the exact implementation record.
 - The product version resets from `0.9.7.2` to `0.5.0`. The new line states the product's current maturity without erasing earlier evidence.
 - The `0.9.*` records remain historical implementation receipts. They do not claim that one-owner startup, one-door room routing, or the web operator surface is complete.
 
+- `athanor.exe` and `athanor-manage.exe` now carry the House icon (the wooly
+  black godling render, embedded as a multi-size Windows resource from
+  `crates/athanor-install/assets/athanor.ico`).
+- Accepted product direction (Sol, 2026-08-28): the web client at
+  `gui-prototype/` is the House's main operator surface. The Godot client
+  under `gui/` is parked, not removed — `athanor.exe` remains the canonical
+  desktop owner of harness processes; the face it fronts is the web prototype.
 - The OMP adapter no longer injects lesson packets, process reminders, or asynchronous Athanor corrections. Use explicit retrieval for ordinary lessons.
 - Lessons tagged `ttsr-approved` now register as versioned rules in OMP’s native `TtsrManager`. OMP owns matching, interruption, retry, and reminders.
 - Trigger authoring fields remain in `remember` and `update_lesson`. Untagged trigger rows stay dormant.

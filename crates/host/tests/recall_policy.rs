@@ -618,7 +618,7 @@ async fn missing_broker_is_degraded_and_receipt_projection_never_invents_content
 #[tokio::test]
 #[ignore = "requires the test-owned NATS endpoint"]
 async fn nats_receipts_are_strict_room_scoped_and_ordered_on_the_host_socket() {
-    let nats_url = std::env::var("SOLARISAEL_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
+    let nats_url = std::env::var("ATHANOR_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
     let root = TempDir::new().expect("tempdir");
     write_room_state(root.path());
     let mut host_config = config(root.path());
@@ -703,7 +703,7 @@ async fn nats_receipts_are_strict_room_scoped_and_ordered_on_the_host_socket() {
 #[tokio::test]
 #[ignore = "requires the test-owned NATS endpoint"]
 async fn retained_receipt_published_before_host_is_replayed_to_the_room_projection() {
-    let nats_url = std::env::var("SOLARISAEL_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
+    let nats_url = std::env::var("ATHANOR_DELIVERY_TEST_NATS_URL").expect("test-owned NATS URL");
     let broker = Broker::connect(&nats_url).await.expect("delivery broker");
     broker.configure().await.expect("exact delivery streams");
     let event_id = uuid::Uuid::new_v4();

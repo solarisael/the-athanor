@@ -103,7 +103,7 @@ impl HostConfig {
         let recipient =
             optional("ATHANOR_HOST_RECIPIENT").unwrap_or_else(|| "house-host".to_owned());
         let database_url = optional("DATABASE_URL");
-        let nats_url = optional("SOLARISAEL_NATS_URL");
+        let nats_url = optional("ATHANOR_NATS_URL");
         let akasha_enabled = database_url.is_some() || nats_url.is_some();
         let knock_autonomy = KnockAutonomy::from_optional(optional(KNOCK_AUTONOMY_ENV).as_deref())?;
         Ok(Self {
@@ -151,7 +151,7 @@ impl HostConfig {
                 || !url.starts_with("nats://")
                 || url.bytes().any(|byte| byte.is_ascii_whitespace())
             {
-                return Err("Host SOLARISAEL_NATS_URL must be one bounded nats:// URL".into());
+                return Err("Host ATHANOR_NATS_URL must be one bounded nats:// URL".into());
             }
         }
         for (name, value) in [

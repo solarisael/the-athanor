@@ -244,7 +244,7 @@ fn delivery_readiness_uses_a_fresh_process_owned_marker() -> Result<()> {
     assert_eq!(
         delivery
             .environment
-            .get("SOLARISAEL_NATS_URL")
+            .get("ATHANOR_NATS_URL")
             .map(String::as_str),
         Some("nats://127.0.0.1:4222")
     );

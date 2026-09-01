@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) const ROOM_MARKER: &str = ".solarisael-room.json";
+pub(crate) const ROOM_MARKER: &str = ".athanor-room.json";
 const DEFAULT_MAX_FILE_BYTES: u64 = 512 * 1024;
 const DEFAULT_MAX_FILES: usize = 5_000;
 

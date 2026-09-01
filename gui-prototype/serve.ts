@@ -11,9 +11,7 @@ const ROOT = import.meta.dir;
 const CONFIG_PATH = "C:/ProgramData/Solarisael/Athanor/config/runtime.json";
 const SECRETS_PATH = "C:/ProgramData/Solarisael/Athanor/secrets/runtime-secrets.json";
 
-// Named doors, never a pattern: every proxied path is written here beside the
-// exact upstream it reaches, so no upstream opens by accident and a typo is a
-// 404 rather than a surprise. POST only, bearer added on this side.
+// [gui/prototype/proxy] [security/allowlist]
 const LIVE_ROUTES = new Map([
   ["/live/insula/vitals", "/athanor/v1/insula/vitals"],
   ["/live/insula/retention", "/athanor/v1/insula/retention"],
@@ -30,8 +28,12 @@ const runtime = await Bun.file(CONFIG_PATH).json();
 const secrets = await Bun.file(SECRETS_PATH).json();
 const room = Bun.env.PULSE_ROOM ?? "kodo";
 const port = Number(Bun.env.PULSE_PORT ?? 4175);
-const host = runtime.rooms.find((entry: { room: string }) => entry.room === room);
-if (!host) throw new Error(`room ${room} is not in runtime.json`);
+const hostPort = Number(runtime.hostPort);
+if (!Number.isInteger(hostPort)) throw new Error("runtime.json has no hostPort");
+if (!runtime.rooms.some((entry: { room: string }) => entry.room === room)) {
+  throw new Error(`room ${room} is not in runtime.json`);
+}
+const roomPath = `/room/${room}`;
 
 Bun.serve({
   hostname: "127.0.0.1",
@@ -44,7 +46,7 @@ Bun.serve({
       if (!upstreamPath) return new Response("unknown live route", { status: 404 });
       if (request.method !== "POST") return new Response("POST only", { status: 405 });
 
-      const upstream = await fetch(`http://127.0.0.1:${host.port}${upstreamPath}`, {
+      const upstream = await fetch(`http://127.0.0.1:${hostPort}${roomPath}${upstreamPath}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -66,4 +68,4 @@ Bun.serve({
   },
 });
 
-console.log(`prototype on http://127.0.0.1:${port} · live House reads via ${room} Host :${host.port}`);
+console.log(`prototype on http://127.0.0.1:${port} · live House reads via ${roomPath} on Host :${hostPort}`);

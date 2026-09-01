@@ -4,8 +4,8 @@
 //! carries and refuses.
 
 use super::{config::detail, owner::HarnessOwner};
-use anyhow::{Context, Result};
 use ::protocol::harness::{HarnessControlRequest, HarnessControlResponse};
+use anyhow::{Context, Result};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream},
@@ -26,9 +26,8 @@ pub struct ControlServer {
 }
 
 impl ControlServer {
-    /// Binds an ephemeral loopback port and answers newline-delimited JSON, one
-    /// request and one response for each connection. The port and the token reach
-    /// the GUI as ATHANOR_CONTROL_ADDR and ATHANOR_CONTROL_TOKEN.
+    /// Loopback binding and the capability token keep this control door local;
+    /// opening it never starts or adopts a harness.
     pub fn bind(owner: Arc<HarnessOwner>) -> Result<Self> {
         let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .context("bind the harness control socket")?;

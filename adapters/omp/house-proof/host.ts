@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 
 export const HOST_SCHEMA_VERSION = 1 as const;
-const DEFAULT_HOST_WS_URL = "ws://127.0.0.1:8787/athanor/v1/ws";
+const DEFAULT_HOST_URL = "ws://127.0.0.1:8787";
+const HOST_ROOM_PATH_PREFIX = "/room/";
+const DEFAULT_HOST_WS_PATH = "/athanor/v1/ws";
+const HOST_RECIPIENT = "house-host";
 const HOST_TIMEOUT_MS = 3_000;
 
 export type HostBinding = { room: string; spirit: string; session: string };
@@ -57,47 +60,36 @@ export function hostSessionIdentity(context: {
 }
 
 
-// One definition of loopback for every Host boundary. URL runtimes differ on
-// whether an IPv6 hostname retains brackets, so both spellings belong here.
+// [host/routing] [security/loopback]
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
-function hostUrlForRoom(room: string): string {
-  const override = text(process.env.ATHANOR_HOST_WS_URL);
-  if (override) return override;
-  const configured = text(process.env.ATHANOR_HOST_ENDPOINTS);
-  if (!configured) return DEFAULT_HOST_WS_URL;
-  let endpoints: unknown;
-  try {
-    endpoints = JSON.parse(configured);
-  } catch {
-    throw new HostUnavailable("ATHANOR_HOST_ENDPOINTS is not valid JSON");
-  }
-  const entry = endpoints && typeof endpoints === "object" && !Array.isArray(endpoints)
-    ? (endpoints as Record<string, unknown>)[room]
-    : null;
-  const url = entry && typeof entry === "object" && !Array.isArray(entry)
-    ? text((entry as Record<string, unknown>).url)
-    : "";
-  if (!url) throw new HostUnavailable(`no installed Athanor Host endpoint exists for room ${room || "<empty>"}`);
-  const parsed = new URL(url);
-  if (parsed.protocol !== "ws:" || !LOOPBACK_HOSTNAMES.has(parsed.hostname)) {
-    throw new HostUnavailable(`installed Athanor Host endpoint for room ${room} must be loopback WebSocket`);
-  }
-  return url;
+// [protocol/room/key] [security/path]
+function isSafeRoomKey(value: string): boolean {
+  return value !== "house" && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(value);
 }
 
-// The installed WebSocket endpoint is the single topology convention. Every
-// Host HTTP boundary is derived from it rather than configured a second time,
-// so an operator can never point the two at different Hosts.
-export function hostHttpEndpoint(room: string, requestPath: string): { url: string; token: string } {
-  const socket = new URL(hostUrlForRoom(text(room)));
-  if (socket.protocol !== "ws:" || !LOOPBACK_HOSTNAMES.has(socket.hostname)) {
-    throw new HostUnavailable(
-      `installed Athanor Host endpoint for room ${text(room) || "<empty>"} must be loopback WebSocket`,
-    );
+// [host/routing] [security/path]
+function roomRoute(room: string): { host: string; path: string } {
+  const key = text(room);
+  if (!isSafeRoomKey(key)) {
+    throw new HostUnavailable(`room ${key || "<empty>"} is not a safe Athanor room key`);
   }
+  const base = new URL(text(process.env.ATHANOR_HOST_URL) || DEFAULT_HOST_URL);
+  if (base.protocol !== "ws:" || !LOOPBACK_HOSTNAMES.has(base.hostname)) {
+    throw new HostUnavailable("the installed Athanor Host URL must be a loopback WebSocket base");
+  }
+  return { host: base.host, path: `${HOST_ROOM_PATH_PREFIX}${key}` };
+}
+
+export function hostRoomWsUrl(room: string): string {
+  const route = roomRoute(room);
+  return `ws://${route.host}${route.path}${DEFAULT_HOST_WS_PATH}`;
+}
+
+export function hostHttpEndpoint(room: string, requestPath: string): { url: string; token: string } {
+  const route = roomRoute(room);
   return {
-    url: new URL(requestPath, `http://${socket.host}`).toString(),
+    url: `http://${route.host}${route.path}${requestPath}`,
     token: requiredEnvironment("ATHANOR_HOST_TOKEN"),
   };
 }
@@ -123,7 +115,7 @@ export function hostCommand(
     sender_room: binding.room,
     sender_spirit: binding.spirit,
     sender_session: binding.session,
-    recipient: text(process.env.ATHANOR_HOST_RECIPIENT) || "house-host",
+    recipient: HOST_RECIPIENT,
     command_or_event_type: commandType,
     correlation_id: stableKey,
     causation_id: "",
@@ -147,7 +139,7 @@ export async function sendHostCommand(
   signal?: AbortSignal,
   timeoutMs = HOST_TIMEOUT_MS,
 ): Promise<HostResponse> {
-  const url = hostUrlForRoom(text(command.sender_room));
+  const url = hostRoomWsUrl(text(command.sender_room));
   const token = requiredEnvironment("ATHANOR_HOST_TOKEN");
   const requestTimeoutMs = Number.isFinite(timeoutMs)
     ? Math.min(30_000, Math.max(250, Math.trunc(timeoutMs)))

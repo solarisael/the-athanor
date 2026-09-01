@@ -8,12 +8,6 @@ license.workspace = true
 name = "host"
 path = "src/lib.rs"
 
-[[bin]]
-# enough: bin keeps the shipped exe name; deploy-local.ps1, the installer manifest,
-# and the live service all address it. Renaming the exe is a deploy-day migration.
-name = "house-host"
-path = "src/main.rs"
-
 [dependencies]
 atomicwrites.workspace = true
 akasha = { path = "../akasha" }
@@ -32,7 +26,6 @@ sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

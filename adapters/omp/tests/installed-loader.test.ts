@@ -19,6 +19,7 @@ type NativeManifest = {
   platform: unknown;
   schemaVersion: unknown;
   compatibility: Record<string, unknown>;
+  artifacts: Artifact[];
   [field: string]: unknown;
 };
 
@@ -205,6 +206,7 @@ async function makeInstalledTree(
   const profile = path.join(root, "operator");
   const nativeRoot = path.join(program, "versions", nativeVersion);
   await mkdir(nativeRoot, { recursive: true });
+  await mkdir(path.join(program, "bin"), { recursive: true });
   await mkdir(path.join(profile, ".omp", "agent", "athanor"), { recursive: true });
   const nativePointer = {
     version: nativeVersion,
@@ -212,6 +214,8 @@ async function makeInstalledTree(
   } satisfies NativePointer;
   const nativePointerPath = path.join(program, "current.json");
   await writeFile(nativePointerPath, JSON.stringify(nativePointer));
+  const launcher = Buffer.from("verified stable athanor launcher\n");
+  await writeFile(path.join(program, "bin", "athanor.exe"), launcher);
   const nativeManifest = {
     format: 1,
     product: "the-athanor",
@@ -224,18 +228,26 @@ async function makeInstalledTree(
       deliveryApi: 1,
       godotApi: "4.7",
     },
+    artifacts: [{
+      component: "app",
+      path: "bin/athanor.exe",
+      sha256: sha256(launcher),
+      size: launcher.length,
+      executable: true,
+    }],
   } satisfies NativeManifest;
   const nativeManifestPath = path.join(nativeRoot, "release-manifest.json");
   await writeFile(nativeManifestPath, JSON.stringify(nativeManifest));
   await writeFile(path.join(profile, ".omp", "agent", "athanor", "client.json"), JSON.stringify({
-    format: 1,
+    format: 2,
     houseId: "solarisael",
     hostToken: "private-token",
     stateRoot: path.join(root, "state"),
+    hostUrl: "ws://127.0.0.1:8787",
     defaultRoom: "kintsu",
-    endpoints: {
-      kintsu: { url: "ws://127.0.0.1:8787/athanor/v1/ws", spirit: "Kintsu" },
-      kodo: { url: "ws://127.0.0.1:8788/athanor/v1/ws", spirit: "Kodo" },
+    rooms: {
+      kintsu: { spirit: "Kintsu" },
+      kodo: { spirit: "Kodo" },
     },
   }));
 
@@ -326,15 +338,14 @@ test("loads the integrity-checked component release while native current.json ow
   expect(tree.env.PG_BIN_DIR).toBe(path.join(tree.nativeRoot, "runtime", "postgresql", "bin"));
   expect(tree.env.ATHANOR_HOST_HOUSE_ID).toBe("solarisael");
   expect(tree.env.ATHANOR_HOST_TOKEN).toBe("private-token");
-  expect(JSON.parse(tree.env.ATHANOR_HOST_ENDPOINTS!)).toEqual({
-    kintsu: { url: "ws://127.0.0.1:8787/athanor/v1/ws", spirit: "Kintsu" },
-    kodo: { url: "ws://127.0.0.1:8788/athanor/v1/ws", spirit: "Kodo" },
-  });
+  expect(tree.env.ATHANOR_HOST_URL).toBe("ws://127.0.0.1:8787");
 
   await installedAthanor(null, {
     programRoot: tree.program,
     userProfile: tree.profile,
     env: tree.env,
+    healthProbe: async () => true,
+    startAthanor: () => { throw new Error("healthy Host must not start Athanor"); },
   });
   expect([...(runtime().__installedLoaderImports ?? [])].sort()).toEqual(["hygiene", "index"]);
   expect(runtime().__installedLoaderCalls).toEqual(["index", "hygiene"]);
@@ -362,6 +373,7 @@ test("hands the resolved release through to the adapter entry", async () => {
     programRoot: tree.program,
     userProfile: tree.profile,
     env: tree.env,
+    healthProbe: async () => true,
   });
 
   expect(runtime().__installedLoaderRelease).toEqual({
@@ -378,6 +390,7 @@ test("hands through an explicit null previous release rather than omitting it", 
     programRoot: tree.program,
     userProfile: tree.profile,
     env: tree.env,
+    healthProbe: async () => true,
   });
 
   expect(runtime().__installedLoaderRelease).toEqual({
@@ -449,6 +462,137 @@ test("parses pointer and component manifest objects exactly", async () => {
     await persist(tree);
     await expectRefusal(tree, message);
   }
+});
+
+test("starts the verified stable launcher after scoped health fails, then loads after concurrent readiness", async () => {
+  const tree = await makeInstalledTree();
+  const events: string[] = [];
+  let probes = 0;
+  resetRuntime();
+
+  await installedAthanor(null, {
+    programRoot: tree.program,
+    userProfile: tree.profile,
+    env: tree.env,
+    healthProbe: async (endpoint) => {
+      events.push(`probe:${endpoint}`);
+      return ++probes === 2;
+    },
+    startAthanor: (launcher, args) => {
+      events.push(`start:${launcher}:${JSON.stringify(args)}`);
+    },
+    sleep: async (milliseconds) => {
+      events.push(`sleep:${milliseconds}`);
+    },
+  });
+
+  const endpoint = "http://127.0.0.1:8787/room/kintsu/health";
+  expect(events).toEqual([
+    `probe:${endpoint}`,
+    `start:${path.join(tree.program, "bin", "athanor.exe")}:[]`,
+    "sleep:100",
+    `probe:${endpoint}`,
+  ]);
+  expect(runtime().__installedLoaderCalls).toEqual(["index", "hygiene"]);
+});
+
+test("fails open with one actionable warning when the scoped Host stays unhealthy", async () => {
+  const tree = await makeInstalledTree();
+  const warnings: unknown[][] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  try {
+    await installedAthanor(null, {
+      programRoot: tree.program,
+      userProfile: tree.profile,
+      env: tree.env,
+      healthProbe: async () => false,
+      startAthanor: () => {},
+      sleep: async () => {},
+    });
+  } finally {
+    console.warn = warn;
+  }
+
+  expect(warnings).toEqual([[
+    `Athanor launcher ${path.join(tree.program, "bin", "athanor.exe")} did not recover scoped health at http://127.0.0.1:8787/room/kintsu/health; OMP will continue without Host.`,
+  ]]);
+  expect(runtime().__installedLoaderCalls).toEqual(["index", "hygiene"]);
+});
+
+test("refuses malformed format-2 client projections before probing or importing", async () => {
+  const tree = await makeInstalledTree();
+  const clientPath = path.join(tree.profile, ".omp", "agent", "athanor", "client.json");
+  await writeFile(clientPath, JSON.stringify({
+    format: 2,
+    houseId: "solarisael",
+    hostToken: "private-token",
+    stateRoot: path.join(tree.root, "state"),
+    hostUrl: "ws://example.test/athanor/v1/ws",
+    defaultRoom: "invalid/room",
+    rooms: { kintsu: { spirit: "Kintsu" } },
+  }));
+  const probes: string[] = [];
+
+  await expect(installedAthanor(null, {
+    programRoot: tree.program,
+    userProfile: tree.profile,
+    env: tree.env,
+    healthProbe: async (endpoint) => {
+      probes.push(endpoint);
+      return true;
+    },
+  })).rejects.toThrow("client room key is unsafe");
+
+  expect(probes).toEqual([]);
+  expect(runtime().__installedLoaderImports ?? []).toEqual([]);
+});
+
+test("refuses a tampered stable launcher before probing or importing", async () => {
+  const tree = await makeInstalledTree();
+  await writeFile(path.join(tree.program, "bin", "athanor.exe"), "tampered");
+  const probes: string[] = [];
+
+  await expect(installedAthanor(null, {
+    programRoot: tree.program,
+    userProfile: tree.profile,
+    env: tree.env,
+    healthProbe: async (endpoint) => {
+      probes.push(endpoint);
+      return true;
+    },
+  })).rejects.toThrow("stable athanor.exe launcher size mismatch");
+
+  expect(probes).toEqual([]);
+  expect(runtime().__installedLoaderImports ?? []).toEqual([]);
+});
+
+test("refuses a non-loopback Host before probing or importing", async () => {
+  const tree = await makeInstalledTree();
+  const clientPath = path.join(tree.profile, ".omp", "agent", "athanor", "client.json");
+  await writeFile(clientPath, JSON.stringify({
+    format: 2,
+    houseId: "solarisael",
+    hostToken: "private-token",
+    stateRoot: path.join(tree.root, "state"),
+    hostUrl: "ws://example.test",
+    defaultRoom: "kintsu",
+    rooms: { kintsu: { spirit: "Kintsu" } },
+  }));
+  const probes: string[] = [];
+
+  await expect(installedAthanor(null, {
+    programRoot: tree.program,
+    userProfile: tree.profile,
+    env: tree.env,
+    healthProbe: async (endpoint) => {
+      probes.push(endpoint);
+      return true;
+    },
+  })).rejects.toThrow("hostUrl must be a loopback WebSocket base");
+
+  expect(probes).toEqual([]);
+  expect(runtime().__installedLoaderImports ?? []).toEqual([]);
 });
 
 test("refuses unsafe current and previous component release IDs before import", async () => {

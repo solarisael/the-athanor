@@ -6,7 +6,7 @@
 //! loop with no GUI in the path.
 
 use anyhow::{Context, Result, bail};
-use athanor_install::app::installed_client;
+use athanor_install::omp::ClientProjection;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use std::env;
@@ -84,27 +84,24 @@ async fn main() -> Result<()> {
         [flag, value] if flag == "--room" => Some(value.clone()),
         _ => bail!("usage: athanor-chat [--room ROOM]"),
     };
-    let client = installed_client()?;
+    let client = ClientProjection::installed()?;
     let room = requested_room.unwrap_or_else(|| client.default_room.clone());
-    let endpoint = client
-        .endpoints
-        .get(&room)
-        .with_context(|| format!("no Host endpoint for room {room:?}"))?;
+    let (url, identity) = client.room_ws_url(&room)?;
     let wire = Wire {
         house_id: client.house_id.clone(),
         room: room.clone(),
-        spirit: endpoint.spirit.clone(),
+        spirit: identity.spirit.clone(),
         session: format!("chat-cli:{}", Uuid::new_v4()),
     };
 
-    let mut request = endpoint.url.as_str().into_client_request()?;
+    let mut request = url.as_str().into_client_request()?;
     request.headers_mut().insert(
         "Authorization",
         format!("Bearer {}", client.host_token).parse()?,
     );
     let (socket, _) = connect_async(request)
         .await
-        .with_context(|| format!("connect to the Host at {}", endpoint.url))?;
+        .with_context(|| format!("connect to the Host at {url}"))?;
     let (mut sink, mut source) = socket.split();
 
     sink.send(Message::Text(wire.envelope("athanor.chat.subscribe", json!({})).into()))

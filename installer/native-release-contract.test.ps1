@@ -501,6 +501,9 @@ try {
   Assert-True ($DoctorCalls.Count -eq 1) "installed release manifest proof must retain exactly one Doctor invocation"
   Assert-True ($DoctorCalls[0].Extent.Text -match '-Label\s+"native release manifest proof"') "installed release manifest proof must retain its checked Doctor label"
   Assert-True (-not $DeploySource.Contains("FullManifestProof", [StringComparison]::Ordinal)) "installed manifest Doctor proof must not be opt-in"
+  $ResolvedStateExport = $DeploySource.IndexOf('$env:ATHANOR_STATE_DIR = [IO.Path]::GetFullPath($stateRoot)', [StringComparison]::Ordinal)
+  $FullModeHealth = $DeploySource.IndexOf('Full-mode health proof', [StringComparison]::Ordinal)
+  Assert-True ($ResolvedStateExport -ge 0 -and $ResolvedStateExport -lt $FullModeHealth) "the resolved installed state root must reach the substrate health subprocess"
   $EarlyServicePreflight = $DeploySource.IndexOf('$nativeService = Get-Service', [StringComparison]::Ordinal)
   $FreshServicePreflight = $DeploySource.LastIndexOf('$nativeService = Get-Service', [StringComparison]::Ordinal)
   $FirstTest = $DeploySource.IndexOf('if (-not $SkipTests)', [StringComparison]::Ordinal)
@@ -528,6 +531,56 @@ try {
   Assert-True ($DeploySource -match '(?s)Copy-Item\s+\$stagedKeeperExe\s+\$stableKeeperExe') "keeper deployment must refresh the stable terminal owner"
   Assert-True ($DeploySource -match '(?s)foreach\s*\(\$keeperPath\s+in\s+@\(\$liveKeeperExe,\s*\$stableKeeperExe\).*?Get-LiveWorkers\s+-ExecutablePath\s+\$keeperPath') "deployment must refuse both versioned and stable live keeper processes"
   Assert-True ($DeploySource -match '(?s)if\s*\(Test-Path\s+\$liveManifest\s+-PathType\s+Leaf\)\s*\{.*?Move-Item\s+\$stableKeeperExe\s+\$previousStableKeeperExe.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe') "stable keeper backup must stay inside the installed-manifest transaction"
+  foreach ($RequiredFragment in @("adapters\omp\installed-loader.ts", "sourceOmpLoader", "liveOmpLoader", "stableOmpLoader", "previousOmpLoader", "previousStableOmpLoader", "bin/athanor-omp-loader.ts")) {
+    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "loader deployment must retain $RequiredFragment"
+  }
+  Assert-True ($DeploySource -match 'if\s*\(-not\s*\(Test-Path\s+\$sourceOmpLoader\s+-PathType\s+Leaf\)\)') "deployment must refuse a missing product-owned loader source before touching installed files"
+  $LiveLoaderAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\s*\$liveOmpLoader\s*=' })[0]
+  Assert-True ($LiveLoaderAssignment -match 'GetDirectoryName\(\$liveExe\)' -and $LiveLoaderAssignment -match '"athanor-omp-loader\.ts"') "the versioned loader must resolve beside the active version's substrate binary"
+  $StableLoaderAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\s*\$stableOmpLoader\s*=' })[0]
+  Assert-True ($StableLoaderAssignment -match 'GetDirectoryName\(\$stableKeeperExe\)' -and $StableLoaderAssignment -match '"athanor-omp-loader\.ts"') "the stable loader must resolve from the install root bin, not the versions root"
+  Assert-True ($DeploySource -match '(?s)if\s*\(Test-Path\s+\$liveManifest\s+-PathType\s+Leaf\)\s*\{.*?Move-Item\s+\$liveOmpLoader\s+\$previousOmpLoader.*?Move-Item\s+\$stableOmpLoader\s+\$previousStableOmpLoader.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe') "both loader backups must stay inside the installed-manifest transaction"
+  $LoaderCopies = @([Regex]::Matches($DeploySource, '(?m)^\s*Copy-Item\s+(\$\w+)\s+(\$liveOmpLoader|\$stableOmpLoader)\s+-Force\s*$'))
+  Assert-True ($LoaderCopies.Count -eq 2) "deployment must install exactly the versioned and the stable loader copy"
+  $LoaderCopyTargets = @($LoaderCopies | ForEach-Object { $_.Groups[2].Value } | Sort-Object -Unique)
+  Assert-True ($LoaderCopyTargets.Count -eq 2) "the versioned and the stable loader copy must be distinct destinations"
+  $LoaderCopySources = @($LoaderCopies | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+  Assert-True ($LoaderCopySources.Count -eq 1 -and $LoaderCopySources[0] -ceq '$sourceOmpLoader') "both installed loader copies must come from the one product-owned source, so they cannot drift"
+  Assert-True ($DeploySource -match '(?s)@\{\s*Path\s*=\s*"bin/athanor-omp-loader\.ts";\s*Source\s*=\s*\$liveOmpLoader\s*\}') "the installed release manifest must be rehashed from the deployed versioned loader"
+  Assert-True ($DeploySource -match '@\{\s*Live\s*=\s*\$liveOmpLoader;\s*Previous\s*=\s*\$previousOmpLoader;\s*Created\s*=\s*\$copiedOmpLoader\s*\}') "rollback must restore or remove the versioned loader"
+  Assert-True ($DeploySource -match '@\{\s*Live\s*=\s*\$stableOmpLoader;\s*Previous\s*=\s*\$previousStableOmpLoader;\s*Created\s*=\s*\$copiedStableOmpLoader\s*\}') "rollback must restore or remove the stable loader"
+  $LoaderBackupPurge = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\s*foreach\s*\(\$priorPath\s+in\s+@\(\$previousExe' })[0]
+  $LoaderBackupCleanup = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\s*Remove-Item\s+\$previousExe' })[0]
+  foreach ($RequiredFragment in @('$previousOmpLoader', '$previousStableOmpLoader')) {
+    Assert-True ($LoaderBackupPurge.Contains($RequiredFragment, [StringComparison]::Ordinal)) "a stale $RequiredFragment backup must be cleared before the transaction takes a fresh one"
+    Assert-True ($LoaderBackupCleanup.Contains($RequiredFragment, [StringComparison]::Ordinal)) "a successful deployment must clean up $RequiredFragment"
+  }
+  $ClientProjectionFunction = [Regex]::Match($DeploySource, '(?s)function\s+Update-OperatorClientProjection\b.*?(?=\r?\nfunction\s+Import-DeploymentDatabaseEnvironment\b)')
+  Assert-True $ClientProjectionFunction.Success "local deployment must own the operator client projection migration"
+  $ClientProjectionSource = $ClientProjectionFunction.Value
+  foreach ($RequiredFragment in @(
+      'format = 2',
+      'houseId = $houseId',
+      'hostToken = $hostToken',
+      'stateRoot = [IO.Path]::GetFullPath($stateRoot)',
+      'hostUrl = "ws://127.0.0.1:$hostPort"',
+      'defaultRoom = $defaultRoom',
+      'rooms = $rooms')) {
+    Assert-True ($ClientProjectionSource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "client projection must contain the exact format-2 field $RequiredFragment"
+  }
+  Assert-True ($ClientProjectionSource -match '(?s)foreach\s+\(\$entry\s+in\s+@\(\$runtime\.rooms\)\).*?\$rooms\[\$room\]\s*=\s*\[ordered\]@\{\s*spirit\s*=\s*\$spirit') "client projection rooms must derive each room spirit from runtime authority"
+  Assert-True ($ClientProjectionSource -match '(?s)\$temporary\s*=\s*Join-Path\s+\$directory.*?\$backup\s*=\s*Join-Path\s+\$directory.*?\[IO\.File\]::Replace\(\$temporary,\s*\$ClientProjectionPath,\s*\$backup\)') "client projection must write and back up atomically in its ACL-inheriting directory"
+  $StableLoaderCopy = $DeploySource.IndexOf('Copy-Item $sourceOmpLoader $stableOmpLoader', [StringComparison]::Ordinal)
+  $ClientProjectionMutation = $DeploySource.IndexOf('$clientProjection = Update-OperatorClientProjection', [StringComparison]::Ordinal)
+  $ClientProjectionHealthProof = $DeploySource.IndexOf('Full-mode health proof', [StringComparison]::Ordinal)
+  Assert-True ($StableLoaderCopy -ge 0 -and $ClientProjectionMutation -gt $StableLoaderCopy -and $ClientProjectionMutation -lt $ClientProjectionHealthProof) "client projection migration must follow stable loader installation and precede health success"
+  Assert-True ($DeploySource -match '(?s)if\s+\(\$null\s+-ne\s+\$clientProjection\)\s*\{\s*\$clientProjection\s*\}.*?Test-Path\s+\$artifact\.Previous.*?Move-Item\s+\$artifact\.Previous\s+\$artifact\.Live') "rollback must restore the client projection backup after a later failure"
+  Assert-True ($DeploySource -match '(?s)if\s+\(\$null\s+-ne\s+\$clientProjection\)\s*\{\s*Remove-Item\s+\$clientProjection\.Previous') "successful deployment must clean the client projection backup"
+  $AdapterComponentSource = Get-Content (Join-Path $PSScriptRoot "omp-adapter-component.ps1") -Raw
+  $AdapterAllowlist = [Regex]::Match($AdapterComponentSource, '(?s)function\s+Get-OmpAdapterComponentRuntimeAllowlist\b.*?\n\}')
+  Assert-True ($AdapterAllowlist.Success) "the adapter component runtime allowlist must remain discoverable"
+  $AdapterAllowlistEntries = (($AdapterAllowlist.Value -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n")
+  Assert-True (-not $AdapterAllowlistEntries.Contains("installed-loader.ts", [StringComparison]::OrdinalIgnoreCase)) "the product-owned loader must never move into the adapter component allowlist"
   $KeeperProvisioner = Join-Path $PSScriptRoot "../crates/omp-keeper/scripts/provision-local.ps1"
   $KeeperProvisionErrors = $null
   $KeeperProvisionTokens = $null

@@ -1,14 +1,13 @@
 #[cfg(windows)]
 mod windows {
     use crate::{
-        installer::CurrentRelease,
+        installer::{CurrentRelease, RuntimeSecrets},
         layout::{InstallLayout, SERVICE_NAME},
         supervisor::{
-            NativeProcesses, Supervisor, SupervisorConfig, prepare_service_console, runtime_plan,
+            NativeProcesses, RuntimeConfig, Supervisor, prepare_service_console, runtime_plan,
         },
     };
     use anyhow::{Context, Result, bail};
-    use serde::Deserialize;
     use std::{
         env,
         ffi::c_void,
@@ -22,14 +21,6 @@ mod windows {
         Foundation::{ERROR_CALL_NOT_IMPLEMENTED, ERROR_SUCCESS, GetLastError},
         System::Services::*,
     };
-
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Secrets {
-        host_token: String,
-        postgres_password: String,
-        external_database_url: Option<String>,
-    }
 
     static STOP_SENDER: OnceLock<Mutex<mpsc::Sender<()>>> = OnceLock::new();
 
@@ -181,19 +172,16 @@ mod windows {
         trace_service_start("install roots resolved");
         let current: CurrentRelease = serde_json::from_slice(&fs::read(layout.current())?)?;
         trace_service_start("current release read");
-        let config: SupervisorConfig = serde_json::from_slice(&fs::read(layout.config())?)?;
+        let config: RuntimeConfig = serde_json::from_slice(&fs::read(layout.config())?)?;
+        config.validate()?;
         trace_service_start("runtime config read");
-        let secrets: Secrets = serde_json::from_slice(&fs::read(layout.secrets())?)?;
+        let secrets: RuntimeSecrets = serde_json::from_slice(&fs::read(layout.secrets())?)?;
         trace_service_start("runtime secrets read");
-        let database_url = secrets
-            .external_database_url
-            .unwrap_or_else(|| crate::endpoints::managed_database_url(&secrets.postgres_password));
         let specs = runtime_plan(
             &layout.version(&current.version),
             &layout.data,
             &config,
-            &database_url,
-            &secrets.host_token,
+            &secrets.database_url(),
         )?;
         trace_service_start(&format!("runtime plan built: {} children", specs.len()));
         let supervisor = Supervisor {

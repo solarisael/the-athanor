@@ -1,5 +1,5 @@
-use crate::contract::LOOPBACK_HOST;
 use anyhow::{Context, Result, bail};
+use protocol::{LOOPBACK_HOST, is_safe_room_key};
 use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -190,20 +190,88 @@ impl Processes for NativeProcesses {
 pub struct HostRoomConfig {
     pub room: String,
     pub spirit: String,
-    pub port: u16,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SupervisorConfig {
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuntimeConfig {
     pub database_mode: String,
     pub database_host: String,
     pub database_port: u16,
     pub nats_host: String,
     pub nats_port: u16,
-    pub rooms_root: PathBuf,
+    pub host_port: u16,
+    pub schema_version: u32,
     pub house_id: String,
+    pub rooms_root: PathBuf,
+    pub operator_state_root: PathBuf,
+    pub default_room: String,
     pub rooms: Vec<HostRoomConfig>,
+    pub omp_config_path: Option<PathBuf>,
+    pub client_config_path: Option<PathBuf>,
+}
+
+impl RuntimeConfig {
+    pub fn validate(&self) -> Result<()> {
+        if !matches!(self.database_mode.as_str(), "managed" | "external") {
+            bail!("databaseMode must be managed or external");
+        }
+        if self.house_id.trim().is_empty() {
+            bail!("houseId must not be empty");
+        }
+        if !self.rooms_root.is_absolute() || !self.operator_state_root.is_absolute() {
+            bail!("roomsRoot and operatorStateRoot must be absolute");
+        }
+        self.validate_ports()?;
+        self.validate_rooms()
+    }
+
+    fn validate_ports(&self) -> Result<()> {
+        let ports = [
+            loopback_address(&self.database_host, self.database_port)?.port(),
+            loopback_address(&self.nats_host, self.nats_port)?.port(),
+            loopback_address(LOOPBACK_HOST, self.host_port)?.port(),
+        ];
+        if ports.contains(&0) {
+            bail!("runtime ports must be nonzero");
+        }
+        if ports
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != ports.len()
+        {
+            bail!("database, NATS, and Host ports must be distinct");
+        }
+        Ok(())
+    }
+
+    fn validate_rooms(&self) -> Result<()> {
+        if self.rooms.is_empty() {
+            bail!("at least one Host room is required");
+        }
+        let mut rooms = std::collections::BTreeSet::new();
+        for room in &self.rooms {
+            if !is_safe_room_key(&room.room) || room.spirit.trim().is_empty() {
+                bail!("Host room identity is invalid for {:?}", room.room);
+            }
+            if !rooms.insert(room.room.clone()) {
+                bail!("duplicate Host room {:?}", room.room);
+            }
+        }
+        if !rooms.contains(&self.default_room) {
+            bail!("defaultRoom must name one configured room");
+        }
+        Ok(())
+    }
+}
+
+fn loopback_address(host: &str, port: u16) -> Result<SocketAddr> {
+    let address: SocketAddr = format!("{host}:{port}").parse()?;
+    if !address.ip().is_loopback() {
+        bail!("managed service address {address} must be loopback");
+    }
+    Ok(address)
 }
 
 pub struct Supervisor<P> {
@@ -291,54 +359,12 @@ impl<P: Processes> Supervisor<P> {
 pub fn runtime_plan(
     version_root: &Path,
     data_root: &Path,
-    config: &SupervisorConfig,
+    config: &RuntimeConfig,
     database_url: &str,
-    host_token: &str,
 ) -> Result<Vec<ProcessSpec>> {
-    let loopback = |host: &str, port: u16| -> Result<SocketAddr> {
-        let address: SocketAddr = format!("{host}:{port}").parse()?;
-        if !address.ip().is_loopback() {
-            bail!("managed service address {address} must be loopback");
-        }
-        Ok(address)
-    };
-    let database = loopback(&config.database_host, config.database_port)?;
-    let nats = loopback(&config.nats_host, config.nats_port)?;
-    if config.house_id.trim().is_empty() {
-        bail!("houseId must not be empty");
-    }
-    if !config.rooms_root.is_absolute() {
-        bail!("roomsRoot must be absolute");
-    }
-    if config.rooms.is_empty() {
-        bail!("at least one Host room is required");
-    }
-    let mut room_keys = std::collections::BTreeSet::new();
-    let mut host_ports = std::collections::BTreeSet::new();
-    for room in &config.rooms {
-        let safe_room = !room.room.is_empty()
-            && room.room != "house"
-            && !room.room.starts_with('-')
-            && !room.room.ends_with('-')
-            && !room.room.contains("--")
-            && room
-                .room
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
-        if !safe_room || room.spirit.trim().is_empty() {
-            bail!("Host room identity is invalid for {:?}", room.room);
-        }
-        if !room_keys.insert(room.room.clone()) {
-            bail!("duplicate Host room {:?}", room.room);
-        }
-        if !host_ports.insert(room.port)
-            || room.port == config.database_port
-            || room.port == config.nats_port
-        {
-            bail!("Host port {} is duplicate or reserved", room.port);
-        }
-        loopback(LOOPBACK_HOST, room.port)?;
-    }
+    config.validate()?;
+    let database = loopback_address(&config.database_host, config.database_port)?;
+    let nats = loopback_address(&config.nats_host, config.nats_port)?;
 
     let mut specs = Vec::new();
     if config.database_mode == "managed" {
@@ -356,8 +382,6 @@ pub fn runtime_plan(
             environment: BTreeMap::new(),
             readiness: Readiness::Tcp(database),
         });
-    } else if config.database_mode != "external" {
-        bail!("databaseMode must be managed or external");
     }
     specs.push(ProcessSpec {
         name: "nats".into(),
@@ -374,60 +398,23 @@ pub fn runtime_plan(
         environment: BTreeMap::new(),
         readiness: Readiness::Tcp(nats),
     });
-    let common = BTreeMap::from([
-        ("DATABASE_URL".into(), database_url.into()),
-        (
-            "ATHANOR_NATS_URL".into(),
-            format!("nats://{LOOPBACK_HOST}:{}", config.nats_port),
-        ),
-    ]);
-    let delivery_executable = version_root.join("bin/athanor-house-delivery.exe");
     let delivery_ready = data_root.join("state/delivery.ready");
-    let mut delivery_environment = common.clone();
-    delivery_environment.insert(
-        "ATHANOR_DELIVERY_READY_FILE".into(),
-        delivery_ready.display().to_string(),
-    );
     specs.push(ProcessSpec {
         name: "delivery".into(),
-        executable: delivery_executable,
+        executable: version_root.join("bin/athanor-house-delivery.exe"),
         arguments: vec!["run".into()],
-        environment: delivery_environment,
+        environment: BTreeMap::from([
+            ("DATABASE_URL".into(), database_url.into()),
+            (
+                "SOLARISAEL_NATS_URL".into(),
+                format!("nats://{LOOPBACK_HOST}:{}", config.nats_port),
+            ),
+            (
+                "ATHANOR_DELIVERY_READY_FILE".into(),
+                delivery_ready.display().to_string(),
+            ),
+        ]),
         readiness: Readiness::File(delivery_ready),
     });
-    for room in &config.rooms {
-        let mut host_env = common.clone();
-        host_env.insert("ATHANOR_HOST_TOKEN".into(), host_token.into());
-        host_env.insert(
-            "ATHANOR_HOST_ROOM_DIR".into(),
-            config.rooms_root.join(&room.room).display().to_string(),
-        );
-        host_env.insert(
-            "ATHANOR_HOST_STATE_DIR".into(),
-            data_root
-                .join("state/host")
-                .join(&room.room)
-                .display()
-                .to_string(),
-        );
-        host_env.insert("ATHANOR_HOST_HOUSE_ID".into(), config.house_id.clone());
-        host_env.insert("ATHANOR_HOST_ROOM".into(), room.room.clone());
-        host_env.insert("ATHANOR_HOST_SPIRIT".into(), room.spirit.clone());
-        host_env.insert(
-            "ATHANOR_HOST_SESSION".into(),
-            format!("managed:{}", room.room),
-        );
-        host_env.insert(
-            "ATHANOR_HOST_BIND".into(),
-            format!("{LOOPBACK_HOST}:{}", room.port),
-        );
-        specs.push(ProcessSpec {
-            name: format!("host:{}", room.room),
-            executable: version_root.join("bin/house-host.exe"),
-            arguments: Vec::new(),
-            environment: host_env,
-            readiness: Readiness::Tcp(loopback(LOOPBACK_HOST, room.port)?),
-        });
-    }
     Ok(specs)
 }

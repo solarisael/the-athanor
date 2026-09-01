@@ -26,14 +26,8 @@ use crate::protocol::{
     RecoveryState, RequestedMode,
 };
 
-const DEFAULT_HOST_URL: &str = protocol::DEFAULT_HOST_URL;
-
-/// Bound wait for one command outcome before the operator regains the action.
+// [gui/recall/command] [runtime/timeout]
 const PENDING_TIMEOUT_SECONDS: f64 = 15.0;
-
-// ---------------------------------------------------------------------------
-// Local presentation state
-// ---------------------------------------------------------------------------
 
 /// Transport and projection readiness, kept on one axis and never merged with
 /// subsystem health or command lifecycle.
@@ -276,7 +270,7 @@ impl IPanelContainer for AthanorRecallPolicy {
     fn init(base: Base<PanelContainer>) -> Self {
         Self {
             session_path: NodePath::default(),
-            host_url: GString::from(DEFAULT_HOST_URL),
+            host_url: GString::new(),
             disclosure_label: NodePath::default(),
             url_field: NodePath::default(),
             connect_button: NodePath::default(),
@@ -499,7 +493,9 @@ impl AthanorRecallPolicy {
         if bound.url_field.get_text().to_string().trim().is_empty() {
             bound.url_field.set_text(&host_url);
         }
-        bound.url_field.set_placeholder(DEFAULT_HOST_URL);
+        bound
+            .url_field
+            .set_placeholder(protocol::HOST_URL_PLACEHOLDER);
         bound.url_field.set_focus_mode(FocusMode::ALL);
         bound.url_field.connect(
             "text_submitted",

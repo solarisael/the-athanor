@@ -3,11 +3,8 @@ use athanor_install::app;
 use std::env;
 
 fn main() -> Result<()> {
-    let arguments: Vec<String> = env::args().skip(1).collect();
-    let room = match arguments.as_slice() {
-        [] => None,
-        [flag, value] if flag == "--room" => Some(value.clone()),
-        _ => bail!("usage: athanor [--room ROOM]"),
-    };
-    app::run(room)
+    if env::args_os().nth(1).is_some() {
+        bail!("usage: athanor");
+    }
+    app::run()
 }

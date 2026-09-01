@@ -240,7 +240,7 @@ purge contracts.
 |---|---|
 | `crates/house-core`, `crates/house-protocol` | Provider-neutral domain and wire contracts |
 | `crates/house-vault`, `crates/house-substrate` | File-authoritative Vault and PostgreSQL-authoritative AKASHA behavior |
-| `crates/house-host`, `crates/house-delivery` | Authenticated client projection and narrow JetStream delivery |
+| `crates/host`, `crates/delivery` | One authenticated multi-room client boundary and narrow JetStream delivery |
 | `crates/athanor-install`, `installer/` | Native lifecycle, immutable release staging, and Windows installer |
 | `gui/` | Thin Godot operator client; no direct database or broker authority |
 | `adapters/omp/` | OMP lifecycle hooks and named tool surface delegated to Rust |

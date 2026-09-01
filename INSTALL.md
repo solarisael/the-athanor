@@ -41,14 +41,14 @@ installed immutable component. Operator data and secrets are separate:
 %ProgramFiles%\Solarisael\Athanor\
   bin\
     athanor-manage.exe
-    athanor-omp-loader.ts          stable product-owned loader
+    athanor.exe                  stable desktop and Host owner
+    athanor-omp-loader.ts        stable product-owned loader
   current.json                     native product activation pointer
   versions\<version>\
     release-manifest.json
     bin\
       athanor-substrate.exe
       athanor-house-delivery.exe
-      house-host.exe
       athanor-gui.exe              pinned Godot 4.7.1 runtime
     runtime\
       godot\                        imported client project + GDExtension
@@ -91,20 +91,21 @@ source, are never printed, and live only in the restricted secret file.
 
 ## Managed service contract
 
-The Rust Windows service owns only child processes it starts. Startup remains
-`START_PENDING` and reports checkpoints while dependencies become ready:
+The Rust Windows service owns only the child processes it starts. Startup remains
+`START_PENDING` while each dependency becomes ready:
 
-1. managed PostgreSQL on `127.0.0.1:5432` (omitted in external database mode);
+1. managed PostgreSQL on `127.0.0.1:5432` when managed mode is active;
 2. NATS JetStream on `127.0.0.1:4222`;
-3. boat delivery after PostgreSQL authority and NATS are ready;
-4. one Host per configured room on its declared loopback port (`8787`, `8788`,
-   and upward by convention).
+3. boat delivery after PostgreSQL and NATS are ready.
 
-The service reports `RUNNING` only after all configured children pass their
-readiness contract. On SCM Stop or Shutdown it drains in reverse dependency
-order: Host, delivery, NATS, PostgreSQL. Each owned child has a bounded stop
-window. Only the verified child handle retained by the supervisor may be
-hard-killed after that window; unrelated processes are never selected by name.
+The service reports `RUNNING` after these children pass their readiness checks.
+It stops delivery, NATS, and PostgreSQL in reverse order. The supervisor keeps
+the verified handle for each child. It never selects unrelated processes by
+name.
+
+`athanor.exe` is an independent local manager and in-process multi-room Host. It
+does not launch Godot and does not own OMP session lifetime. Every room route
+starts with `/room/<room-key>`.
 
 Run the native doctor from an elevated terminal:
 
@@ -156,9 +157,10 @@ and a non-secret House topology file:
   "roomsRoot": "C:/Solarisael/Obsidian/obsidian",
   "operatorStateRoot": "C:/Solarisael/Obsidian/obsidian/house/state",
   "defaultRoom": "kintsu",
+  "hostPort": 8787,
   "rooms": [
-    { "room": "kintsu", "spirit": "Kintsu", "port": 8787 },
-    { "room": "kodo", "spirit": "Kodo", "port": 8788 }
+    { "room": "kintsu", "spirit": "Kintsu" },
+    { "room": "kodo", "spirit": "Kodo" }
   ]
 }
 ```

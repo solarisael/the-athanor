@@ -1,22 +1,35 @@
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-type Endpoint = { url: string; spirit: string };
+type ClientRoom = {
+  spirit: string;
+};
+
 type ClientProjection = {
-  format: 1;
   houseId: string;
   hostToken: string;
   stateRoot: string;
+  hostUrl: string;
   defaultRoom: string;
-  endpoints: Record<string, Endpoint>;
+  rooms: Record<string, ClientRoom>;
+};
+
+type LauncherArtifact = {
+  path: string;
+  sha256: string;
+  size: number;
 };
 
 type LoaderOptions = {
   programRoot?: string;
   userProfile?: string;
   env?: NodeJS.ProcessEnv;
+  healthProbe?: (endpoint: string) => Promise<boolean>;
+  startAthanor?: (launcher: string, args: readonly string[]) => void;
+  sleep?: (milliseconds: number) => Promise<void>;
 };
 type NativePointer = {
   version: string;
@@ -430,44 +443,177 @@ function verifyArtifacts(root: PhysicalDirectory, manifest: ComponentManifest) {
   };
 }
 
+function safeRoomKey(value: unknown): string {
+  const room = requiredText(value, "room key");
+  if (room === "house"
+    || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(room)
+    || room.includes("--")) {
+    throw new Error("installed Athanor client room key is unsafe");
+  }
+  return room;
+}
+
+function scopedHealthEndpoint(hostUrl: string, room: string): string {
+  let url: URL;
+  try {
+    url = new URL(hostUrl);
+  } catch {
+    throw new Error("installed Athanor client hostUrl is unsafe");
+  }
+  if (url.protocol !== "ws:"
+    || !["127.0.0.1", "::1", "[::1]", "localhost"].includes(url.hostname)
+    || url.username
+    || url.password
+    || url.search
+    || url.hash
+    || url.pathname !== "/") {
+    throw new Error("installed Athanor client hostUrl must be a loopback WebSocket base");
+  }
+  url.protocol = "http:";
+  url.pathname = `/room/${encodeURIComponent(room)}/health`;
+  return url.toString();
+}
+
 function parseClientProjection(value: unknown): ClientProjection {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("installed Athanor client projection must be an object");
+  const source = exactObject(
+    value,
+    "client projection",
+    ["format", "houseId", "hostToken", "stateRoot", "hostUrl", "defaultRoom", "rooms"],
+  );
+  if (source.format !== 2) throw new Error("installed Athanor client projection format is unsupported");
+  const defaultRoom = safeRoomKey(source.defaultRoom);
+  if (!source.rooms || typeof source.rooms !== "object" || Array.isArray(source.rooms)) {
+    throw new Error("installed Athanor client projection rooms must be an object");
   }
-  const source = value as Record<string, unknown>;
-  if (source.format !== 1) throw new Error("installed Athanor client projection format is unsupported");
-  const rawEndpoints = source.endpoints;
-  if (!rawEndpoints || typeof rawEndpoints !== "object" || Array.isArray(rawEndpoints)) {
-    throw new Error("installed Athanor client projection has no endpoints map");
+  const roomsSource = source.rooms as Record<string, unknown>;
+  const rooms: Record<string, ClientRoom> = {};
+  for (const [room, identity] of Object.entries(roomsSource)) {
+    const key = safeRoomKey(room);
+    const identitySource = exactObject(identity, `client projection room ${key}`, ["spirit"]);
+    rooms[key] = { spirit: requiredText(identitySource.spirit, `room ${key} spirit`) };
   }
-  const endpoints: Record<string, Endpoint> = {};
-  for (const [room, raw] of Object.entries(rawEndpoints as Record<string, unknown>)) {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-      throw new Error(`installed Athanor endpoint for room ${room} is invalid`);
-    }
-    const endpoint = raw as Record<string, unknown>;
-    const url = requiredText(endpoint.url, `endpoint URL for room ${room}`);
-    const parsed = new URL(url);
-    if (parsed.protocol !== "ws:" || !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) {
-      throw new Error(`installed Athanor endpoint for room ${room} must be a loopback WebSocket`);
-    }
-    endpoints[room] = {
-      url,
-      spirit: requiredText(endpoint.spirit, `endpoint spirit for room ${room}`),
-    };
+  if (!Object.hasOwn(rooms, defaultRoom)) {
+    throw new Error("installed Athanor client defaultRoom has no room identity");
   }
-  const defaultRoom = requiredText(source.defaultRoom, "defaultRoom");
-  if (!endpoints[defaultRoom]) {
-    throw new Error("installed Athanor defaultRoom has no endpoint");
+  const hostUrl = requiredText(source.hostUrl, "hostUrl");
+  scopedHealthEndpoint(hostUrl, defaultRoom);
+  const stateRoot = requiredText(source.stateRoot, "stateRoot");
+  if (!path.isAbsolute(stateRoot)) {
+    throw new Error("installed Athanor client stateRoot must be absolute");
   }
   return {
-    format: 1,
     houseId: requiredText(source.houseId, "houseId"),
     hostToken: requiredText(source.hostToken, "hostToken"),
-    stateRoot: path.resolve(requiredText(source.stateRoot, "stateRoot")),
+    stateRoot,
+    hostUrl,
     defaultRoom,
-    endpoints,
+    rooms,
   };
+}
+
+const HEALTH_ATTEMPTS = 50;
+const HEALTH_WAIT_MS = 100;
+const HEALTH_REQUEST_TIMEOUT_MS = 500;
+
+function nativeLauncherArtifact(value: unknown): LauncherArtifact {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("installed Athanor active native release manifest has no artifacts");
+  }
+  const artifacts = (value as Record<string, unknown>).artifacts;
+  if (!Array.isArray(artifacts)) {
+    throw new Error("installed Athanor active native release manifest has no artifacts");
+  }
+  const matches = artifacts.filter((artifact) => (
+    artifact
+    && typeof artifact === "object"
+    && !Array.isArray(artifact)
+    && (artifact as Record<string, unknown>).path === "bin/athanor.exe"
+  ));
+  if (matches.length !== 1) {
+    throw new Error("installed Athanor active native release manifest must bind bin/athanor.exe exactly once");
+  }
+  const artifact = matches[0] as Record<string, unknown>;
+  if (typeof artifact.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(artifact.sha256)) {
+    throw new Error("installed Athanor active native release manifest has invalid bin/athanor.exe SHA-256");
+  }
+  return {
+    path: "bin/athanor.exe",
+    sha256: artifact.sha256,
+    size: unsignedInteger(artifact.size, "active native release manifest bin/athanor.exe size"),
+  };
+}
+
+function verifiedStableLauncher(
+  programRoot: PhysicalDirectory,
+  artifact: LauncherArtifact,
+): string {
+  const launcher = regularFileWithin(programRoot, artifact.path, "stable athanor.exe launcher");
+  const bytes = readFileSync(launcher);
+  if (bytes.length !== artifact.size) {
+    throw new Error("installed Athanor stable athanor.exe launcher size mismatch");
+  }
+  if (createHash("sha256").update(bytes).digest("hex") !== artifact.sha256) {
+    throw new Error("installed Athanor stable athanor.exe launcher SHA-256 mismatch");
+  }
+  return launcher;
+}
+
+async function defaultHealthProbe(endpoint: string): Promise<boolean> {
+  try {
+    const response = await fetch(endpoint, {
+      signal: AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) return false;
+    const body = await response.json() as Record<string, unknown>;
+    const url = new URL(endpoint);
+    const route = url.pathname.slice(0, -"/health".length);
+    return body.status === "ok"
+      && body.websocket_path === `${route}/athanor/v1/ws`;
+  } catch {
+    return false;
+  }
+}
+
+function defaultStartAthanor(launcher: string, args: readonly string[]) {
+  const child = spawn(launcher, [...args], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  // Detached spawn reports launch failure asynchronously; name it so a missing
+  // or unrunnable launcher never masquerades as a health timeout.
+  child.once("error", (error) => {
+    console.warn(`Athanor launcher ${launcher} failed to start: ${String(error)}`);
+  });
+  child.unref();
+}
+
+function defaultSleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function ensureScopedHost(launcher: string, endpoint: string, options: LoaderOptions) {
+  const probe = options.healthProbe ?? defaultHealthProbe;
+  if (await probe(endpoint)) return;
+  let startFailure: string | null = null;
+  try {
+    (options.startAthanor ?? defaultStartAthanor)(launcher, []);
+  } catch (error) {
+    startFailure = String(error);
+  }
+  if (startFailure === null) {
+    const sleep = options.sleep ?? defaultSleep;
+    for (let attempt = 0; attempt < HEALTH_ATTEMPTS; attempt += 1) {
+      await sleep(HEALTH_WAIT_MS);
+      if (await probe(endpoint)) return;
+    }
+  }
+  // Host startup is advisory: the OMP adapter remains usable without it, but
+  // the reason it is absent must be visible.
+  const reason = startFailure === null
+    ? `did not recover scoped health at ${endpoint}`
+    : `could not be started: ${startFailure}`;
+  console.warn(`Athanor launcher ${launcher} ${reason}; OMP will continue without Host.`);
 }
 
 function setUnlessConfigured(env: NodeJS.ProcessEnv, key: string, value: string) {
@@ -492,13 +638,12 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
     ["versions", version],
     "active native release",
   );
-  const native = nativeCompatibility(
-    readJson(
-      regularFileWithin(nativeRoot, "release-manifest.json", "active native release manifest"),
-      "active native release manifest",
-    ),
-    version,
+  const nativeManifest = readJson(
+    regularFileWithin(nativeRoot, "release-manifest.json", "active native release manifest"),
+    "active native release manifest",
   );
+  const native = nativeCompatibility(nativeManifest, version);
+  const launcher = verifiedStableLauncher(programRoot, nativeLauncherArtifact(nativeManifest));
 
   const componentRoot = directoryWithin(
     programRoot,
@@ -552,18 +697,21 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
   setUnlessConfigured(env, "PG_BIN_DIR", path.join(nativeRoot.logical, "runtime", "postgresql", "bin"));
   setUnlessConfigured(env, "ATHANOR_HOST_HOUSE_ID", client.houseId);
   setUnlessConfigured(env, "ATHANOR_HOST_TOKEN", client.hostToken);
-  setUnlessConfigured(env, "ATHANOR_HOST_ENDPOINTS", JSON.stringify(client.endpoints));
+  setUnlessConfigured(env, "ATHANOR_HOST_URL", client.hostUrl);
 
   return {
     index: pathToFileURL(entrypoints.index).href,
     hygiene: pathToFileURL(entrypoints.hygiene).href,
     releaseId: pointer.releaseId,
     previousReleaseId: pointer.previousReleaseId,
+    healthEndpoint: scopedHealthEndpoint(client.hostUrl, client.defaultRoom),
+    launcher,
   };
 }
 
 export default async function installedAthanor(pi: unknown, options: LoaderOptions = {}) {
   const modules = configureInstalledAthanor(options);
+  await ensureScopedHost(modules.launcher, modules.healthEndpoint, options);
   const [athanor, hygiene] = await Promise.all([import(modules.index), import(modules.hygiene)]);
   if (typeof athanor.default !== "function" || typeof hygiene.default !== "function") {
     throw new Error("installed Athanor extensions do not export OMP entrypoints");

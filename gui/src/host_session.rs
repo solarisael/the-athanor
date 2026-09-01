@@ -1,7 +1,4 @@
-//! One authenticated Athanor Host session shared by every operator screen.
-//!
-//! Screens own projections and presentation. This node alone owns transport,
-//! credentials, reconnect controls, and the Host-authenticated binding.
+// [gui/host/session] [transport/websocket] [security/auth]
 
 use godot::classes::{INode, Node, Os};
 use godot::prelude::*;
@@ -24,7 +21,7 @@ pub struct AthanorHostSession {
 impl INode for AthanorHostSession {
     fn init(base: Base<Node>) -> Self {
         Self {
-            host_url: GString::from(protocol::DEFAULT_HOST_URL),
+            host_url: GString::new(),
             link: HostLink::new(),
             binding: None,
             base,
@@ -44,7 +41,7 @@ impl INode for AthanorHostSession {
             return;
         }
         let configured = Os::singleton()
-            .get_environment("ATHANOR_HOST_URL")
+            .get_environment("ATHANOR_HOST_WS_URL")
             .to_string();
         let url = if configured.trim().is_empty() {
             self.host_url.to_string()

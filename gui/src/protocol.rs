@@ -1,17 +1,8 @@
-//! Versioned Athanor Host envelope binding for the Recall Policy projection.
-//!
-//! Every wire literal used by the client lives in this module. Display text
-//! never reaches the wire and wire values are never shown as labels without
-//! being marked as wire values.
-//!
-//! Envelope fields follow `docs/RUNTIME_ARCHITECTURE.md` sections 4.1 and 4.5.
-//! Wire names are imported from `protocol`, the same crate used by the
-//! Host, so the native client cannot drift onto a guessed path or type.
-
+// [gui/protocol/wire] [host/schema]
 use godot::classes::Time;
 use godot::prelude::*;
 use protocol::{
-    DEFAULT_HOST_WS_URL, FAMILIAR_STATUS, HOST_SCHEMA_VERSION, PAPER_BOAT_RECEIPT_PROJECTION_ID,
+    FAMILIAR_STATUS, HOST_SCHEMA_VERSION, PAPER_BOAT_RECEIPT_PROJECTION_ID,
     PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE, RECALL_POLICY_ACKNOWLEDGE,
     RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED,
     RECALL_POLICY_DELTA, RECALL_POLICY_FIELD_UPDATE, RECALL_POLICY_PROJECTION_ID,
@@ -20,23 +11,12 @@ use protocol::{
     ROUTING_STATUS,
 };
 
-/// Explicit schema version negotiated with the Host. A mismatch is refused,
-/// never coerced.
+// [gui/protocol/wire] [runtime/limits]
 pub const SCHEMA_VERSION: i64 = HOST_SCHEMA_VERSION as i64;
-
-/// Projection identifier for the Recall Policy state owned by the Host.
 pub const PROJECTION_ID: &str = RECALL_POLICY_PROJECTION_ID;
-pub const DEFAULT_HOST_URL: &str = DEFAULT_HOST_WS_URL;
-
-/// The client speaks to the Host directly; no relay hops are allowed.
+pub const HOST_URL_PLACEHOLDER: &str = "ws://127.0.0.1:8787/room/<room>/athanor/v1/ws";
 pub const MAX_HOPS: i64 = 1;
-
-/// Bound lifetime of an operator-authored command.
 pub const COMMAND_EXPIRY_SECONDS: i64 = 30;
-
-// ---------------------------------------------------------------------------
-// Command and event type vocabulary
-// ---------------------------------------------------------------------------
 
 pub const CMD_SUBSCRIBE: &str = RECALL_POLICY_SUBSCRIBE;
 pub const CMD_RESYNC: &str = RECALL_POLICY_RESYNC;

@@ -17,7 +17,7 @@ import {
 const originalWebSocket = globalThis.WebSocket;
 const originalToken = process.env.ATHANOR_HOST_TOKEN;
 const originalHouseId = process.env.ATHANOR_HOST_HOUSE_ID;
-const originalHostUrl = process.env.ATHANOR_HOST_WS_URL;
+const originalHostUrl = process.env.ATHANOR_HOST_URL;
 let activeRoom = "";
 
 function installFakeHost(
@@ -25,7 +25,7 @@ function installFakeHost(
 ) {
   process.env.ATHANOR_HOST_TOKEN = "test-token";
   process.env.ATHANOR_HOST_HOUSE_ID = "solarisael";
-  process.env.ATHANOR_HOST_WS_URL = "ws://127.0.0.1:8787/athanor/v1/ws";
+  process.env.ATHANOR_HOST_URL = "ws://127.0.0.1:8787";
   const commands: Array<Record<string, any>> = [];
   const frameVersion = options.frameVersion ?? 7;
   const contractVersion = options.contractVersion ?? 2;
@@ -34,7 +34,7 @@ function installFakeHost(
     listeners = new Map<string, Array<(event: any) => void>>();
 
     constructor(url: string, request: { headers: { Authorization: string } }) {
-      expect(url).toBe("ws://127.0.0.1:8787/athanor/v1/ws");
+      expect(url).toBe(`ws://127.0.0.1:8787/room/${activeRoom}/athanor/v1/ws`);
       expect(request.headers.Authorization).toBe("Bearer test-token");
       if (remainingFailures > 0) {
         remainingFailures -= 1;
@@ -137,8 +137,8 @@ afterEach(() => {
   else process.env.ATHANOR_HOST_TOKEN = originalToken;
   if (originalHouseId === undefined) delete process.env.ATHANOR_HOST_HOUSE_ID;
   else process.env.ATHANOR_HOST_HOUSE_ID = originalHouseId;
-  if (originalHostUrl === undefined) delete process.env.ATHANOR_HOST_WS_URL;
-  else process.env.ATHANOR_HOST_WS_URL = originalHostUrl;
+  if (originalHostUrl === undefined) delete process.env.ATHANOR_HOST_URL;
+  else process.env.ATHANOR_HOST_URL = originalHostUrl;
 });
 
 describe("Presence client session fence", () => {

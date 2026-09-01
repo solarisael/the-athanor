@@ -4,14 +4,14 @@ use crate::{
         COMPONENT_FORMAT, COMPONENT_MANIFEST, ComponentManifest, ComponentPointer,
         read_verified_component, valid_release_id,
     },
-    contract::LOOPBACK_HOST,
     endpoints::{MANAGED_DATABASE_PORT, MANAGED_NATS_PORT},
     layout::{InstallLayout, LEGACY_NAMES, SERVICE_DISPLAY_NAME, SERVICE_NAME, safe_version},
     manifest::ReleaseManifest,
-    omp::{ClientEndpoint, ClientProjection, register_extension, unregister_extension},
-    supervisor::HostRoomConfig,
+    omp::{ClientProjection, ClientRoom, register_extension, unregister_extension},
+    supervisor::{HostRoomConfig, RuntimeConfig},
 };
 use anyhow::{Context, Result, bail};
+use protocol::{DEFAULT_HOST_URL, DEFAULT_HOST_WS_PORT, LOOPBACK_HOST, is_safe_room_key};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -50,33 +50,90 @@ pub struct HouseInstallConfig {
     pub rooms: Vec<HostRoomConfig>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RuntimeConfig {
+pub(crate) struct RuntimeSecrets {
+    pub(crate) host_token: String,
+    pub(crate) postgres_password: String,
+    pub(crate) external_database_url: Option<String>,
+}
+
+impl RuntimeSecrets {
+    pub(crate) fn database_url(&self) -> String {
+        self.external_database_url
+            .clone()
+            .unwrap_or_else(|| crate::endpoints::managed_database_url(&self.postgres_password))
+    }
+}
+
+// ponytail: reads the pre-0.5.4 per-room-port runtime.json for one upgrade
+// window; upgrade when every installed House reports runtime format 2 in
+// doctor, then delete LegacyRuntimeConfig and the fallback parse below.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyRuntimeConfig {
     database_mode: String,
-    database_host: String,
-    database_port: u16,
-    nats_host: String,
-    nats_port: u16,
-    host_health: String,
-    schema_version: u32,
     house_id: String,
     rooms_root: PathBuf,
     operator_state_root: PathBuf,
     default_room: String,
-    rooms: Vec<HostRoomConfig>,
-    #[serde(default)]
-    omp_config_path: Option<PathBuf>,
-    #[serde(default)]
-    client_config_path: Option<PathBuf>,
+    rooms: Vec<LegacyHostRoomConfig>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct RuntimeSecrets {
-    host_token: String,
-    postgres_password: String,
-    external_database_url: Option<String>,
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LegacyHostRoomConfig {
+    room: String,
+    spirit: String,
+    #[serde(rename = "port")]
+    _port: u16,
+}
+
+struct ExistingRuntimeConfig {
+    house: HouseInstallConfig,
+    external_database: bool,
+}
+
+fn decode_existing_runtime(bytes: &[u8]) -> Result<ExistingRuntimeConfig> {
+    if let Ok(config) = serde_json::from_slice::<RuntimeConfig>(bytes) {
+        config.validate()?;
+        return Ok(ExistingRuntimeConfig {
+            external_database: config.database_mode == "external",
+            house: HouseInstallConfig {
+                house_id: config.house_id,
+                rooms_root: config.rooms_root,
+                operator_state_root: config.operator_state_root,
+                default_room: config.default_room,
+                rooms: config.rooms,
+            },
+        });
+    }
+    let legacy: LegacyRuntimeConfig =
+        serde_json::from_slice(bytes).context("parse legacy runtime configuration")?;
+    let external_database = match legacy.database_mode.as_str() {
+        "external" => true,
+        "managed" => false,
+        _ => bail!("databaseMode must be managed or external"),
+    };
+    let house = HouseInstallConfig {
+        house_id: legacy.house_id,
+        rooms_root: legacy.rooms_root,
+        operator_state_root: legacy.operator_state_root,
+        default_room: legacy.default_room,
+        rooms: legacy
+            .rooms
+            .into_iter()
+            .map(|room| HostRoomConfig {
+                room: room.room,
+                spirit: room.spirit,
+            })
+            .collect(),
+    };
+    house.validate()?;
+    Ok(ExistingRuntimeConfig {
+        house,
+        external_database,
+    })
 }
 
 impl HouseInstallConfig {
@@ -91,25 +148,12 @@ impl HouseInstallConfig {
             bail!("at least one room is required");
         }
         let mut rooms = std::collections::BTreeSet::new();
-        let mut ports = std::collections::BTreeSet::new();
         for room in &self.rooms {
-            let safe_room = !room.room.is_empty()
-                && room.room != "house"
-                && !room.room.starts_with('-')
-                && !room.room.ends_with('-')
-                && !room.room.contains("--")
-                && room
-                    .room
-                    .bytes()
-                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
-            if !safe_room || room.spirit.trim().is_empty() {
+            if !is_safe_room_key(&room.room) || room.spirit.trim().is_empty() {
                 bail!("room identity is invalid for {:?}", room.room);
             }
             if !rooms.insert(room.room.clone()) {
                 bail!("duplicate room {:?}", room.room);
-            }
-            if !ports.insert(room.port) || matches!(room.port, 4222 | 5432) {
-                bail!("room port {} is duplicate or reserved", room.port);
             }
         }
         if !rooms.contains(&self.default_room) {
@@ -253,22 +297,17 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.fs.rename(staging_target, &rollback.target)?;
             self.verify_native_release(&rollback.target, &request.manifest)?;
 
-            let manager = request
-                .manifest
-                .artifacts
-                .iter()
-                .find(|artifact| artifact.path.ends_with("athanor-manage.exe"))
-                .context("release has no athanor-manage.exe installer artifact")?;
-            let manager_source = rollback.target.join(&manager.path);
-            let manager_target = self.layout.manager();
-            if self.fs.exists(&manager_target) {
-                self.fs
-                    .validate_regular_file(&self.layout.program, &manager_target)?;
-            }
-            let manager_is_current = self.fs.exists(&manager_target)
-                && self.fs.read(&manager_target)? == self.fs.read(&manager_source)?;
-            if !manager_is_current {
-                self.fs.copy(&manager_source, &manager_target)?;
+            for (artifact_path, target) in self.stable_binaries() {
+                let source = rollback.target.join(artifact_path);
+                if self.fs.exists(&target) {
+                    self.fs
+                        .validate_regular_file(&self.layout.program, &target)?;
+                }
+                let is_current =
+                    self.fs.exists(&target) && self.fs.read(&target)? == self.fs.read(&source)?;
+                if !is_current {
+                    self.fs.copy(&source, &target)?;
+                }
             }
             self.write_configuration(&request, &house)?;
             if current.is_none() && request.external_database_url.is_some() {
@@ -799,6 +838,13 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         Ok(FileSnapshot { path, bytes })
     }
 
+    fn stable_binaries(&self) -> [(&'static str, PathBuf); 2] {
+        [
+            ("bin/athanor-manage.exe", self.layout.manager()),
+            ("bin/athanor.exe", self.layout.app()),
+        ]
+    }
+
     fn capture_install_rollback(
         &self,
         request: &InstallRequest,
@@ -811,6 +857,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             (self.layout.omp_adapter(), self.layout.omp_adapter_current()),
             (self.layout.program.clone(), self.layout.manager()),
             (self.layout.program.clone(), self.layout.omp_loader()),
+            (self.layout.program.clone(), self.layout.app()),
         ] {
             if self.fs.exists(&path) {
                 self.fs.validate_regular_file(&root, &path)?;
@@ -822,6 +869,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.layout.config(),
             self.layout.secrets(),
             self.layout.manager(),
+            self.layout.app(),
             self.layout.omp_loader(),
         ];
         paths.push(self.layout.legacy_backup().join("imported.json"));
@@ -1032,6 +1080,16 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                 .with_context(|| format!("read staged artifact {}", artifact.path))?;
             request.manifest.verify_bytes(artifact, &bytes)?;
         }
+        for (artifact_path, _) in self.stable_binaries() {
+            if !request
+                .manifest
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.path == artifact_path)
+            {
+                bail!("release has no {artifact_path} stable binary");
+            }
+        }
         let fallback_root = request.staging.join("components/omp-adapter");
         let fallback = read_verified_component(self.fs, &fallback_root).with_context(|| {
             format!(
@@ -1087,16 +1145,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             return Ok(house.clone());
         }
         if self.fs.exists(&self.layout.config()) {
-            let config: RuntimeConfig =
-                serde_json::from_slice(&self.fs.read(&self.layout.config())?)
-                    .context("parse existing runtime configuration")?;
-            return Ok(HouseInstallConfig {
-                house_id: config.house_id,
-                rooms_root: config.rooms_root,
-                operator_state_root: config.operator_state_root,
-                default_room: config.default_room,
-                rooms: config.rooms,
-            });
+            return Ok(decode_existing_runtime(&self.fs.read(&self.layout.config())?)?.house);
         }
         Ok(HouseInstallConfig {
             house_id: "local".into(),
@@ -1106,7 +1155,6 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             rooms: vec![HostRoomConfig {
                 room: "home".into(),
                 spirit: "Athanor".into(),
-                port: 8787,
             }],
         })
     }
@@ -1149,26 +1197,18 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         house: &HouseInstallConfig,
     ) -> Result<()> {
         let existing_external = if self.fs.exists(&self.layout.config()) {
-            serde_json::from_slice::<RuntimeConfig>(&self.fs.read(&self.layout.config())?)
-                .map(|config| config.database_mode == "external")
-                .unwrap_or(false)
+            decode_existing_runtime(&self.fs.read(&self.layout.config())?)?.external_database
         } else {
             false
         };
         let external = request.external_database_url.is_some() || existing_external;
-        let default_port = house
-            .rooms
-            .iter()
-            .find(|room| room.room == house.default_room)
-            .map(|room| room.port)
-            .context("default room is not configured")?;
         let config = RuntimeConfig {
             database_mode: if external { "external" } else { "managed" }.into(),
             database_host: LOOPBACK_HOST.into(),
             database_port: MANAGED_DATABASE_PORT,
             nats_host: LOOPBACK_HOST.into(),
             nats_port: MANAGED_NATS_PORT,
-            host_health: format!("http://{LOOPBACK_HOST}:{default_port}/health"),
+            host_port: DEFAULT_HOST_WS_PORT,
             schema_version: request.manifest.schema_version,
             house_id: house.house_id.clone(),
             rooms_root: house.rooms_root.clone(),
@@ -1184,6 +1224,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                 .as_ref()
                 .map(|integration| integration.client_config_path.clone()),
         };
+        config.validate()?;
         self.fs
             .write_atomic(&self.layout.config(), &serde_json::to_vec_pretty(&config)?)?;
         let secrets_path = self.layout.secrets();
@@ -1237,26 +1278,26 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         }
         let secrets: RuntimeSecrets =
             serde_json::from_slice(&self.fs.read(&self.layout.secrets())?)?;
-        let endpoints = house
+        let rooms = house
             .rooms
             .iter()
             .map(|room| {
                 (
                     room.room.clone(),
-                    ClientEndpoint {
-                        url: crate::endpoints::host_ws_url(room.port),
+                    ClientRoom {
                         spirit: room.spirit.clone(),
                     },
                 )
             })
             .collect();
         let client = ClientProjection {
-            format: 1,
+            format: 2,
             house_id: house.house_id.clone(),
             host_token: secrets.host_token,
             state_root: house.operator_state_root.display().to_string(),
+            host_url: DEFAULT_HOST_URL.into(),
             default_room: house.default_room.clone(),
-            endpoints,
+            rooms,
         };
         client.validate()?;
         let client_dir = integration

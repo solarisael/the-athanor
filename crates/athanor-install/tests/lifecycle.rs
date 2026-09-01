@@ -9,11 +9,10 @@ use athanor_install::{
     },
     doctor,
     installer::{
-        CurrentRelease, HouseInstallConfig, InstallRequest, Installer, OperatorIntegration,
+        CurrentRelease, InstallRequest, Installer, OperatorIntegration,
     },
     layout::{InstallLayout, SERVICE_NAME, safe_version},
     manifest::{Artifact, Compatibility, REQUIRED_SCHEMA, ReleaseManifest, RollbackContract},
-    supervisor::HostRoomConfig,
 };
 use sha2::{Digest, Sha256};
 use std::{
@@ -251,6 +250,13 @@ fn release(version: &str, bytes: &[u8]) -> ReleaseManifest {
                 executable: true,
             },
             Artifact {
+                component: "app".into(),
+                path: "bin/athanor.exe".into(),
+                sha256: hex::encode(Sha256::digest(bytes)),
+                size: bytes.len() as u64,
+                executable: true,
+            },
+            Artifact {
                 component: "omp-adapter".into(),
                 path: "components/omp-adapter/component-manifest.json".into(),
                 sha256: hex::encode(Sha256::digest(&component_manifest)),
@@ -277,6 +283,9 @@ fn stage_release(fs: &FakeFs, staging: &Path, manager: &[u8]) {
     fs.files
         .borrow_mut()
         .insert(staging.join("bin/athanor-manage.exe"), manager.to_vec());
+    fs.files
+        .borrow_mut()
+        .insert(staging.join("bin/athanor.exe"), manager.to_vec());
     fs.files.borrow_mut().insert(
         staging.join("components/omp-adapter/component-manifest.json"),
         serde_json::to_vec_pretty(&component(adapter)).unwrap(),
@@ -661,72 +670,6 @@ fn first_external_install_backs_up_authority_before_migration() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn custom_house_config_preserves_real_room_identity_and_rejects_missing_state() -> Result<()> {
-    let fs = FakeFs::default();
-    let services = FakeServices::default();
-    let runtime = FakeRuntime::default();
-    let layout = InstallLayout::new(Path::new("C:/Program Files"), Path::new("C:/ProgramData"));
-    let staging = PathBuf::from("C:/stage");
-    stage_release(&fs, &staging, b"native-manager");
-    let rooms_root = PathBuf::from("C:/Solarisael/Obsidian/obsidian");
-    let state_root = PathBuf::from("C:/Solarisael/Obsidian/obsidian/house/state");
-    let house = HouseInstallConfig {
-        house_id: "solarisael".into(),
-        rooms_root: rooms_root.clone(),
-        operator_state_root: state_root.clone(),
-        default_room: "kintsu".into(),
-        rooms: vec![
-            HostRoomConfig {
-                room: "kintsu".into(),
-                spirit: "Kintsu".into(),
-                port: 8787,
-            },
-            HostRoomConfig {
-                room: "kodo".into(),
-                spirit: "Kodo".into(),
-                port: 8788,
-            },
-        ],
-    };
-    let request = || InstallRequest {
-        staging: staging.clone(),
-        manifest: release("1.0.0", b"native-manager"),
-        external_database_url: Some("postgresql://external-authority".into()),
-        house_config: Some(house.clone()),
-        operator_integration: None,
-    };
-    let installer = Installer {
-        fs: &fs,
-        services: &services,
-        runtime: &runtime,
-        secrets: &FixedSecrets,
-        layout: layout.clone(),
-    };
-
-    assert!(installer.install(request()).is_err());
-    assert!(services.events.borrow().is_empty());
-    for room in ["kintsu", "kodo"] {
-        fs.files.borrow_mut().insert(
-            rooms_root
-                .join(room)
-                .join(".omp/runtime/athanor-house-state.json"),
-            format!(r#"{{"version":1,"room":"{room}"}}"#).into_bytes(),
-        );
-    }
-    installer.install(request())?;
-
-    let config: serde_json::Value = serde_json::from_slice(&fs.read(&layout.config())?)?;
-    assert_eq!(config["houseId"], "solarisael");
-    assert_eq!(config["roomsRoot"], rooms_root.display().to_string());
-    assert_eq!(
-        config["operatorStateRoot"],
-        state_root.display().to_string()
-    );
-    assert_eq!(config["rooms"].as_array().unwrap().len(), 2);
-    Ok(())
-}
-
 #[cfg(windows)]
 #[test]
 fn short_operator_name_resolves_to_a_windows_security_principal() -> Result<()> {
@@ -763,6 +706,8 @@ fn write_native_root(root: &Path, manifest: &ReleaseManifest, manager: &[u8]) ->
     let component_manifest = serde_json::to_vec_pretty(&component(adapter))?;
     for artifact in &manifest.artifacts {
         let bytes: &[u8] = if artifact.path.ends_with("athanor-manage.exe") {
+            manager
+        } else if artifact.path.ends_with("athanor.exe") {
             manager
         } else if artifact.path.ends_with("component-manifest.json") {
             &component_manifest

@@ -531,14 +531,14 @@ records, kitten work, GIGA jobs, or live conversation turns.
 
 ### 7.1 Current NATS source census
 
-Only `house-delivery` and `house-host` depend on `async-nats`.
-`house-substrate`, GIGA, Hallway, the OMP adapter, kitten lineage, and the Godot
-Rust client do not connect to NATS.
+Only `delivery` and `host` depend on `async-nats`. `akasha`, GIGA, Hallway, the
+OMP adapter, kitten lineage, and the Godot Rust client do not connect to NATS.
 
 The native service starts one loopback JetStream server with file storage, then
-delivery, then one Host per room. Delivery and every Host receive the same NATS
-URL. The managed server currently has no NATS accounts, users, credentials, or
-subject ACLs; binding to loopback is its containment boundary.
+delivery. Independent `athanor.exe` starts one in-process multi-room Host and
+gives it the same NATS URL; it does not launch Godot or own OMP process lifetime.
+The managed server has no NATS accounts, users, credentials, or subject ACLs.
+Loopback binding is its containment boundary.
 
 The compiled JetStream contract is:
 

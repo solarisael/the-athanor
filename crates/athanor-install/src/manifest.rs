@@ -5,10 +5,8 @@ use std::path::{Component, Path};
 use thiserror::Error;
 
 pub const MANIFEST_FORMAT: u32 = 1;
-/// The schema a release must declare: the head of `substrate/migrations/`, read
-/// from the one authority in `crate::contract` that `origami` also reads. It
-/// was frozen at 18 here while migrations ran on to 0025.
-pub const REQUIRED_SCHEMA: u32 = crate::contract::SUBSTRATE_SCHEMA_VERSION;
+/// Release manifests and `origami` share the protocol-owned migration head.
+pub const REQUIRED_SCHEMA: u32 = protocol::SUBSTRATE_SCHEMA_VERSION;
 pub const SUPPORTED_PLATFORM: &str = "windows-x64";
 pub const POSTGRESQL_VERSION: &str = "18.4-2";
 pub const PGVECTOR_VERSION: &str = "0.8.6";

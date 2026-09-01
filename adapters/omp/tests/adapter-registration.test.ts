@@ -229,17 +229,14 @@ function firstHook(hooks: CapturedHook[], name: string): Handler {
 function captureHostEnvironment(): () => void {
   const original = {
     disabled: process.env.ATHANOR_DISABLE_INSULA,
-    endpoints: process.env.ATHANOR_HOST_ENDPOINTS,
-    socket: process.env.ATHANOR_HOST_WS_URL,
+    base: process.env.ATHANOR_HOST_URL,
     token: process.env.ATHANOR_HOST_TOKEN,
   };
   return () => {
     if (original.disabled === undefined) delete process.env.ATHANOR_DISABLE_INSULA;
     else process.env.ATHANOR_DISABLE_INSULA = original.disabled;
-    if (original.endpoints === undefined) delete process.env.ATHANOR_HOST_ENDPOINTS;
-    else process.env.ATHANOR_HOST_ENDPOINTS = original.endpoints;
-    if (original.socket === undefined) delete process.env.ATHANOR_HOST_WS_URL;
-    else process.env.ATHANOR_HOST_WS_URL = original.socket;
+    if (original.base === undefined) delete process.env.ATHANOR_HOST_URL;
+    else process.env.ATHANOR_HOST_URL = original.base;
     if (original.token === undefined) delete process.env.ATHANOR_HOST_TOKEN;
     else process.env.ATHANOR_HOST_TOKEN = original.token;
   };
@@ -266,10 +263,7 @@ function startInsulaHost() {
     },
   });
   process.env.ATHANOR_DISABLE_INSULA = "0";
-  process.env.ATHANOR_HOST_ENDPOINTS = JSON.stringify({
-    "default-room": { url: `ws://127.0.0.1:${server.port}/athanor/v1/ws` },
-  });
-  delete process.env.ATHANOR_HOST_WS_URL;
+  process.env.ATHANOR_HOST_URL = `ws://127.0.0.1:${server.port}`;
   process.env.ATHANOR_HOST_TOKEN = "adapter-registration-insula-token";
   return {
     received,
@@ -572,13 +566,11 @@ describe("OMP adapter registration", () => {
       { message: "Athanor /insula takes one optional range: 15m, 1h, 24h.", type: "warning" },
     ]);
 
-    // No installed Host at all: the cockpit reports absence rather than a page
-    // of zeros it never measured, and cannot reach a real House to find out.
+    // An inert loopback base proves absence without touching an installed House.
     const restore = captureHostEnvironment();
     try {
-      delete process.env.ATHANOR_HOST_ENDPOINTS;
-      delete process.env.ATHANOR_HOST_WS_URL;
-      delete process.env.ATHANOR_HOST_TOKEN;
+      process.env.ATHANOR_HOST_URL = "ws://127.0.0.1:59999";
+      process.env.ATHANOR_HOST_TOKEN = "missing-host-token";
       await commands.insula!.handler("", ctx);
     } finally {
       restore();

@@ -1,97 +1,90 @@
-//! The default path of `athanor.exe`.
-//!
-//! One process holds the GUI window and every harness handle, so the operator
-//! closing Athanor also closes what Athanor started. `athanor-manage` keeps the
-//! installer commands; this is the door a person opens.
-
 use crate::{
     boundaries::OsSecrets,
-    harness::{
-        CONTROL_ADDR_ENV, CONTROL_TOKEN_ENV, ControlServer, HarnessOwner, HarnessRegistry,
-        control_token, registry_path,
-    },
-    installer::CurrentRelease,
+    harness::{ControlServer, HarnessOwner, HarnessRegistry, control_token, registry_path},
+    installer::RuntimeSecrets,
     layout::InstallLayout,
-    omp::ClientProjection,
+    supervisor::RuntimeConfig,
 };
-use anyhow::{Context, Result, bail};
-use interactive_process::JobOwnedCommand;
-use std::{env, fs, path::PathBuf, sync::Arc};
+use anyhow::{Context, Result};
+use protocol::LOOPBACK_HOST;
+use std::{
+    env, fs,
+    io::{self, Write},
+    net::SocketAddr,
+    sync::Arc,
+};
 
-pub struct InstalledGui {
-    pub executable: PathBuf,
-    pub project: PathBuf,
-}
-
-pub fn installed_gui(layout: &InstallLayout) -> Result<InstalledGui> {
-    let pointer = layout.current();
-    let current: CurrentRelease = serde_json::from_slice(
-        &fs::read(&pointer).with_context(|| format!("read {}", pointer.display()))?,
+fn installed_runtime(layout: &InstallLayout) -> Result<(RuntimeConfig, RuntimeSecrets)> {
+    let config: RuntimeConfig = serde_json::from_slice(
+        &fs::read(layout.config())
+            .with_context(|| format!("read {}", layout.config().display()))?,
     )?;
-    let version_root = layout.version(&current.version);
-    Ok(InstalledGui {
-        executable: version_root.join("bin/athanor-gui.exe"),
-        project: version_root.join("runtime/godot"),
-    })
-}
-
-pub fn installed_client() -> Result<ClientProjection> {
-    let user_profile =
-        PathBuf::from(env::var_os("USERPROFILE").context("USERPROFILE is unavailable")?);
-    let path = user_profile.join(".omp/agent/athanor/client.json");
-    let client: ClientProjection = serde_json::from_slice(
-        &fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+    config.validate()?;
+    let secrets = serde_json::from_slice(
+        &fs::read(layout.secrets())
+            .with_context(|| format!("read {}", layout.secrets().display()))?,
     )?;
-    client.validate()?;
-    Ok(client)
+    Ok((config, secrets))
 }
 
-/// Blocks for the whole life of the GUI: this call is the app session, and the
-/// harness children die with it.
-pub fn run(room: Option<String>) -> Result<()> {
+fn host_configs(
+    layout: &InstallLayout,
+    config: &RuntimeConfig,
+    secrets: &RuntimeSecrets,
+) -> Result<Vec<host::HostConfig>> {
+    let bind: SocketAddr = format!("{LOOPBACK_HOST}:{}", config.host_port).parse()?;
+    let database_url = secrets.database_url();
+    let nats_url = format!("nats://{}:{}", config.nats_host, config.nats_port);
+    let knock_autonomy =
+        host::KnockAutonomy::from_optional(env::var(host::KNOCK_AUTONOMY_ENV).ok().as_deref())
+            .map_err(anyhow::Error::msg)?;
+    Ok(config
+        .rooms
+        .iter()
+        .map(|room| host::HostConfig {
+            bind,
+            bearer_token: secrets.host_token.clone(),
+            room_dir: config.rooms_root.join(&room.room),
+            state_dir: layout.host_state().join(&room.room),
+            house_id: config.house_id.clone(),
+            room: room.room.clone(),
+            spirit: room.spirit.clone(),
+            session: format!("app:{}", room.room),
+            database_url: Some(database_url.clone()),
+            nats_url: Some(nats_url.clone()),
+            knock_autonomy: knock_autonomy.clone(),
+        })
+        .collect())
+}
+
+pub fn run() -> Result<()> {
     let layout = InstallLayout::from_environment()?;
-    let client = installed_client()?;
-    let room = room.unwrap_or_else(|| client.default_room.clone());
-    let endpoint = client
-        .endpoints
-        .get(&room)
-        .with_context(|| format!("installed Athanor has no endpoint for room {room:?}"))?;
+    let (config, secrets) = installed_runtime(&layout)?;
     let registry = registry_path(&layout);
     let owner = Arc::new(HarnessOwner::new(
         HarnessRegistry::load(&registry)?,
         control_token(&OsSecrets)?,
         layout.program.clone(),
-        PathBuf::from(&client.state_root),
+        config.operator_state_root.clone(),
     ));
     let control = ControlServer::bind(Arc::clone(&owner))?;
-    let gui = installed_gui(&layout)?;
-    let project = gui.project.display().to_string();
-    let mut child = JobOwnedCommand::new(&gui.executable)
-        .args(["--path", project.as_str()])
-        .env("ATHANOR_HOST_TOKEN", &client.host_token)
-        .env("ATHANOR_HOST_HOUSE_ID", &client.house_id)
-        .env("ATHANOR_HOST_WS_URL", &endpoint.url)
-        .env("ATHANOR_HOST_ROOM", &room)
-        .env("ATHANOR_HOST_SPIRIT", &endpoint.spirit)
-        .env(CONTROL_ADDR_ENV, control.address.to_string())
-        .env(CONTROL_TOKEN_ENV, owner.token())
-        .spawn()
-        .context("launch installed Godot client")?;
+    let host =
+        host::start(host_configs(&layout, &config, &secrets)?).map_err(anyhow::Error::msg)?;
     println!(
         "{}",
         serde_json::json!({
             "ok": true,
-            "room": room,
-            "pid": child.id(),
+            "pid": std::process::id(),
+            "hostAddress": host.address().to_string(),
             "controlAddress": control.address.to_string(),
             "registry": registry.display().to_string(),
             "harnesses": owner.registry().len(),
+            "defaultRoom": config.default_room,
+            "rooms": config.rooms,
         })
     );
-    let status = child.wait().context("wait for the Athanor GUI")?;
-    owner.shutdown();
-    if !status.success() {
-        bail!("the Athanor GUI exited with {status}");
-    }
-    Ok(())
+    io::stdout().flush().context("report Athanor readiness")?;
+
+    // Athanor exit must not stop OMP sessions, which remain peer-owned.
+    host.wait().map_err(anyhow::Error::msg)
 }

@@ -57,16 +57,12 @@ const INERT_PORT = 59_999;
 const TEST_TOKEN = "insula-test-token";
 
 const originalEnvironment = {
-  ATHANOR_HOST_ENDPOINTS: process.env.ATHANOR_HOST_ENDPOINTS,
-  ATHANOR_HOST_WS_URL: process.env.ATHANOR_HOST_WS_URL,
+  ATHANOR_HOST_URL: process.env.ATHANOR_HOST_URL,
   ATHANOR_HOST_TOKEN: process.env.ATHANOR_HOST_TOKEN,
 };
 
 function installHostEndpoint(port: number, token = TEST_TOKEN): void {
-  process.env.ATHANOR_HOST_ENDPOINTS = JSON.stringify({
-    kintsu: { url: `ws://127.0.0.1:${port}/athanor/v1/ws` },
-  });
-  delete process.env.ATHANOR_HOST_WS_URL;
+  process.env.ATHANOR_HOST_URL = `ws://127.0.0.1:${port}`;
   process.env.ATHANOR_HOST_TOKEN = token;
 }
 
@@ -321,11 +317,7 @@ describe("Insula observation writer", () => {
   });
 
   test("attributes queue overflow receipts to each room Host endpoint", async () => {
-    process.env.ATHANOR_HOST_ENDPOINTS = JSON.stringify({
-      kintsu: { url: `ws://127.0.0.1:${INERT_PORT}/athanor/v1/ws` },
-      kodo: { url: `ws://127.0.0.1:${INERT_PORT - 1}/athanor/v1/ws` },
-    });
-    delete process.env.ATHANOR_HOST_WS_URL;
+    process.env.ATHANOR_HOST_URL = `ws://127.0.0.1:${INERT_PORT}`;
     process.env.ATHANOR_HOST_TOKEN = TEST_TOKEN;
     const sink = recorder();
     let peakQueued = 0;
@@ -363,8 +355,11 @@ describe("Insula observation writer", () => {
     const dropBatches = sink.batches.filter(
       (batch) => batch.events.length === 1 && batch.events[0]?.phase === "drop",
     );
-    expect(dropBatches.map((batch) => [new URL(batch.url).port, batch.events[0]?.dropCount]))
-      .toEqual([[String(INERT_PORT), 1], [String(INERT_PORT - 1), 1]]);
+    expect(dropBatches.map((batch) => [new URL(batch.url).pathname, batch.events[0]?.dropCount]))
+      .toEqual([
+        ["/room/kintsu/athanor/v1/insula/events", 1],
+        ["/room/kodo/athanor/v1/insula/events", 1],
+      ]);
     expect(peakQueued).toBeLessThanOrEqual(1);
   });
 
@@ -390,10 +385,11 @@ describe("Insula observation writer", () => {
     });
     try {
       installHostEndpoint(server.port);
-      // The HTTP boundary is derived from the installed WebSocket topology, so
-      // an operator can never point the two at different Hosts.
+      // HTTP and WebSocket routes share one installed room-scoped Host base.
       const endpoint = hostHttpEndpoint("kintsu", INSULA_EVENTS_PATH);
-      expect(endpoint.url).toBe(`http://127.0.0.1:${server.port}${INSULA_EVENTS_PATH}`);
+      expect(endpoint.url).toBe(
+        `http://127.0.0.1:${server.port}/room/kintsu${INSULA_EVENTS_PATH}`,
+      );
       expect(endpoint.token).toBe(TEST_TOKEN);
 
       const writer = new InsulaWriter({ flushDelayMs: 10_000 });
@@ -413,7 +409,7 @@ describe("Insula observation writer", () => {
     const [request] = received;
     expect(request.method).toBe("POST");
     const url = new URL(request.url);
-    expect(url.pathname).toBe(INSULA_EVENTS_PATH);
+    expect(url.pathname).toBe(`/room/kintsu${INSULA_EVENTS_PATH}`);
     expect(url.search).toBe("");
     expect(request.auth).toBe(`Bearer ${TEST_TOKEN}`);
     expect(Object.keys(request.body)).toEqual(["events"]);
@@ -424,14 +420,13 @@ describe("Insula observation writer", () => {
   });
 
   test("refuses a Host HTTP boundary that is not loopback", () => {
-    process.env.ATHANOR_HOST_WS_URL = "ws://athanor.example.com:8787/athanor/v1/ws";
+    process.env.ATHANOR_HOST_URL = "ws://athanor.example.com:8787";
     process.env.ATHANOR_HOST_TOKEN = TEST_TOKEN;
     expect(() => hostHttpEndpoint("kintsu", INSULA_EVENTS_PATH)).toThrow(HostUnavailable);
   });
 
   test("stays silent when no Host is installed", async () => {
-    delete process.env.ATHANOR_HOST_ENDPOINTS;
-    delete process.env.ATHANOR_HOST_WS_URL;
+    delete process.env.ATHANOR_HOST_URL;
     delete process.env.ATHANOR_HOST_TOKEN;
     const sink = recorder();
     const writer = new InsulaWriter({ transport: sink.transport, flushDelayMs: 10_000 });
@@ -615,7 +610,7 @@ describe("Insula Vitals cockpit", () => {
     const [request] = received;
     expect(request!.method).toBe("POST");
     const url = new URL(request!.url);
-    expect(url.pathname).toBe(INSULA_VITALS_PATH);
+    expect(url.pathname).toBe(`/room/kintsu${INSULA_VITALS_PATH}`);
     // The Host refuses any query string on this router.
     expect(url.search).toBe("");
     expect(request!.auth).toBe(`Bearer ${TEST_TOKEN}`);
@@ -660,7 +655,7 @@ describe("Insula Vitals cockpit", () => {
   });
 
   test("refuses a Vitals boundary that is not the installed loopback Host", async () => {
-    process.env.ATHANOR_HOST_WS_URL = "ws://athanor.example.com:8787/athanor/v1/ws";
+    process.env.ATHANOR_HOST_URL = "ws://athanor.example.com:8787";
     process.env.ATHANOR_HOST_TOKEN = TEST_TOKEN;
     await expect(readInsulaVitals("kintsu", "1h")).rejects.toThrow(HostUnavailable);
   });

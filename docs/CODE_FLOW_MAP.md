@@ -26,24 +26,23 @@ standalone mock/specimen and has no production runtime edge.
 
 ```mermaid
 flowchart LR
-    Operator["Operator / Windows SCM"] --> Manager["athanor-manage<br/>service::dispatch"]
+    Operator["Operator"] --> App["athanor.exe"]
+    Operator --> Manager["athanor-manage<br/>service::dispatch"]
     Manager --> Plan["runtime_plan"]
     Plan --> Supervisor["Supervisor::run"]
 
-    subgraph Children["Managed runtime children"]
+    subgraph Children["Managed service children"]
         PG[("PostgreSQL<br/>AKASHA authority")]
         NATS["NATS JetStream<br/>transport, not authority"]
         Delivery["athanor-delivery<br/>PostgreSQL ↔ NATS bridge"]
-        Host["one Athanor Host<br/>per room"]
     end
 
     Supervisor --> PG
     Supervisor --> NATS
     Supervisor --> Delivery
-    Supervisor --> Host
+    App --> Host["one in-process<br/>multi-room Host"]
 
     OMP["OMP adapter"] <-->|"authenticated Host WebSocket"| Host
-    Godot["Godot client"] <-->|"authenticated Host WebSocket"| Host
     OMP <-->|"long-lived JSONL child stdio"| Substrate["athanor-substrate"]
 
     Substrate <-->|"durable organ reads and writes"| PG
@@ -61,10 +60,11 @@ flowchart LR
     Host --> HostState[("room-scoped Host projection state")]
 ```
 
-Startup order is PostgreSQL when managed, then NATS, delivery, and one Host per
-configured room. Shutdown drains the same process plan in reverse. OMP can use
-both boundaries: Host commands for interactive room state and substrate JSONL
-for durable organs. Godot uses Host only.
+The Windows service starts PostgreSQL when managed, then NATS and delivery.
+`athanor.exe` independently owns the one multi-room Host and may start or stop
+without owning OMP sessions. OMP can use both boundaries: Host commands for
+interactive room state and substrate JSONL for durable organs. The dormant
+Godot prototype is not launched by this runtime path.
 
 NATS never opens a PostgreSQL connection. `athanor-delivery` is the
 transactional-outbox bridge: it claims durable rows from PostgreSQL, publishes
@@ -78,7 +78,7 @@ queue nor candidate authority.
 
 Sources: `crates/athanor-install/src/service.rs`,
 `crates/athanor-install/src/native_runtime.rs`,
-`crates/athanor-install/src/supervisor.rs`, `crates/house-host/src/server.rs`,
+`crates/athanor-install/src/supervisor.rs`, `crates/host/src/house.rs`,
 `adapters/omp/rust-transport.ts`, `gui/src/host_session.rs`.
 
 ## 2. Rust workspace dependency DAG
@@ -92,7 +92,7 @@ flowchart BT
     Vault["house-vault"]
     Substrate["house-substrate"]
     Delivery["house-delivery"]
-    Host["house-host"]
+    Host["host"]
     Install["athanor-install"]
     Godot["athanor-godot<br/>gui/src"]
 
@@ -134,28 +134,20 @@ sequenceDiagram
     participant PG as managed PostgreSQL
     participant NATS as NATS
     participant Delivery as delivery
-    participant Host as Host per room
 
     SCM->>Manage: start
-    Manage->>Layout: resolve active immutable version and topology
-    Manage->>Plan: build ordered ProcessSpec list
-    Plan-->>Sup: PostgreSQL? -> NATS -> delivery -> Hosts
+    Manage->>Layout: resolve the active version and service topology
+    Manage->>Plan: build the ordered ProcessSpec list
+    Plan-->>Sup: PostgreSQL? -> NATS -> delivery
     opt managed database mode
-        Sup->>PG: spawn
-        loop until deadline
-            Sup->>PG: readiness check
-        end
+        Sup->>PG: spawn and await readiness
     end
     Sup->>NATS: spawn and await readiness
     Sup->>Delivery: spawn and await readiness
-    loop each configured room
-        Sup->>Host: spawn identity-bound Host and await /health
-    end
-    Sup-->>SCM: report RUNNING only after every child is ready
+    Sup-->>SCM: report RUNNING
 
     SCM->>Manage: stop
-    Manage->>Sup: stop process plan
-    Sup->>Host: stop Hosts in reverse order
+    Manage->>Sup: stop the process plan
     Sup->>Delivery: stop
     Sup->>NATS: stop
     opt managed database mode
@@ -304,7 +296,7 @@ flowchart LR
     Tools --> RT["RustJsonlTransport.request"]
 
     Local --> Files[("room files / OMP session state")]
-    HostClient <-->|"authenticated WebSocket"| Host["house-host router"]
+    HostClient <-->|"authenticated WebSocket"| Host["multi-room Host router"]
 
     RT --> Ensure["ensureStarted"]
     Ensure --> Queue["queue and flush stdin line"]
@@ -433,13 +425,15 @@ Sources: `crates/house-substrate/src/recall.rs`,
 
 ```mermaid
 flowchart TD
-    Main["house-host main"] --> Config["HostConfig::from_env + validate"]
-    Config --> New["Host::new"]
+    App["athanor.exe"] --> Start["host::start"]
+    Start --> House["open_house"]
+    House --> Pool["one shared PostgreSQL pool"]
+    House --> Listener["one loopback listener"]
+    House --> Rooms["nest /room/&lt;key&gt;"]
+    Rooms --> New["Host::new for each room"]
     New --> Load["load room state, cursor,<br/>sessions, receipts, ReceiptTracker"]
-    Load --> Serve["serve"]
-    Serve --> Axum["Axum /health + WebSocket"]
-    Serve -.-> Bridge["run_receipt_bridge<br/>when NATS configured"]
-
+    Load --> Axum["Axum room routes"]
+    New -.-> Bridge["run_receipt_bridge<br/>when NATS configured"]
     Axum --> Socket["handle_socket"]
     Socket --> Text["process_text"]
     Text --> JSON["parse JSON"]
@@ -474,8 +468,8 @@ flowchart TD
     Tracker --> Delta
 ```
 
-Sources: `crates/house-host/src/main.rs`, `config.rs`, `server.rs`, `policy.rs`,
-`store.rs`, `receipt.rs`, `viewport.rs`.
+Sources: `crates/athanor-install/src/app.rs`, `crates/host/src/house.rs`,
+`config.rs`, `server.rs`, `policy.rs`, `store.rs`, `receipt.rs`, and `viewport.rs`.
 
 ## 9. Paper Boat, Crane delivery, and receipt projection
 
@@ -525,7 +519,7 @@ transient failures nack within bounded retry policy.
 
 Sources: `crates/house-substrate/src/paper_boat.rs`, migrations `0016` and
 `0017` in `crates/house-substrate/src/migrations.rs`,
-`crates/house-delivery/src/`, `crates/house-host/src/receipt.rs`.
+`crates/delivery/src/`, `crates/host/src/receipt.rs`.
 
 ## 10. GIGA candidate lifecycle
 
@@ -714,7 +708,7 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 
 ## 13. Module ownership index
 
-### Rust production modules: 64
+### Rust production modules
 
 | Crate | Modules | Boundary |
 |---|---|---|
@@ -723,7 +717,7 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 | `house-vault` (1) | `lib` | Strict file-authoritative, database-free Vault retrieval |
 | `house-substrate` (19) | `lib`, `main`, `config`, `state`, `migrations`, `backup`, `health`, `remember`, `recall`, `bm25f`, `canon`, `entity`, `anamnesis`, `lesson`, `cluster`, `paper_boat`, `hallway`, `giga`, `giga_worker` | JSONL dispatch, PostgreSQL configuration and migrations, durable organs, retrieval, GIGA, backup, and health |
 | `house-delivery` (5) | `lib`, `main`, `model`, `broker`, `store` | Crane envelope validation, PostgreSQL outbox/receipt store, JetStream publication and consumption |
-| `house-host` (8) | `lib`, `main`, `config`, `server`, `policy`, `store`, `receipt`, `viewport` | Authenticated client boundary, room projection state, Recall Policy, ordered deltas, receipt bridge, viewport shaping |
+| `host` (11) | `lib`, `house`, `config`, `insula`, `panel`, `policy`, `presence`, `receipt`, `server`, `store`, `viewport` | One in-process multi-room listener, authenticated client boundary, room projection state, Recall Policy, receipts, panels, and viewport shaping |
 | `athanor-install` (10) | `lib`, `main`, `layout`, `manifest`, `boundaries`, `installer`, `native_runtime`, `omp`, `service`, `supervisor` | Installed layout, release validation, transactional update/rollback, runtime planning, Windows service, OMP integration |
 | `athanor-godot` (11) | `lib`, `host_link`, `host_session`, `protocol`, `shell`, `recall_policy`, `routing`, `familiar_status`, `dispatch`, `health`, `paper_boat_receipt` | Thin native client transport, exact Host wire contract, projections, shell routes, and Paper Boat receipt state |
 

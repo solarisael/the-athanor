@@ -41,7 +41,6 @@ recall_columns = NodePath("ApplicationShell/ContentViewport/RecallPolicyPage/Ins
 recall_state_grid = NodePath("ApplicationShell/ContentViewport/RecallPolicyPage/Instrument/Margin/Column/Columns/PolicyColumn/StateGrid")
 
 [node name="HostSession" type="AthanorHostSession" parent="."]
-host_url = "ws://127.0.0.1:8787/athanor/v1/ws"
 
 [node name="Ground" type="Panel" parent="."]
 layout_mode = 1
@@ -675,7 +674,6 @@ layout_mode = 2
 layout_mode = 2
 size_flags_vertical = 3
 theme_type_variation = &"AthanorVessel"
-host_url = "ws://127.0.0.1:8787/athanor/v1/ws"
 session_path = NodePath("../../../../HostSession")
 disclosure_label = NodePath("Margin/Column/Disclosure")
 url_field = NodePath("Margin/Column/Columns/LinkColumn/UrlField")

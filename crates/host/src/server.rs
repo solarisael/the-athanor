@@ -1,4 +1,4 @@
-use crate::config::HostConfig;
+use crate::config::{HOST_RECIPIENT, HostConfig};
 use crate::insula::InsulaHost;
 use crate::panel::PanelHost;
 use crate::policy::{RecallPolicySession, apply_requested_mode};
@@ -9,9 +9,7 @@ use crate::store::{
     state_hash, timestamp,
 };
 use crate::viewport::{ViewportSession, apply_viewport};
-use akasha::insula_writer::{
-    end_span, flush_insula_emitter, init_insula_emitter, record_point, start_span,
-};
+use akasha::insula_writer::{end_span, record_point, start_span};
 use akasha::{
     AppError, Config as SubstrateConfig, LessonFamily, LessonQueryParams, OutcomeClass,
     RecallParams, TrustedBinding, hallway_inbox, hallway_knock_claim, hallway_knock_settle,
@@ -37,10 +35,6 @@ use hearth::routing::{
     load_spellbook,
 };
 use hearth::triggers::{process_lesson_plan, process_lesson_reminder};
-use summoning::presence::{
-    PresenceAuthentication, PresenceBinding, PresenceCloseRequest, PresenceOpenRequest,
-    PresenceResult, PresenceSettleRequest, PresenceTurnRequest,
-};
 use crate::chat::ChatLog;
 use protocol::{
     AKASHA_COMMAND_FAILED, AKASHA_LESSON_RESULT, AKASHA_PROJECTION_ID, AKASHA_RECALL_RESULT,
@@ -49,12 +43,12 @@ use protocol::{
     BOAT_RECEIPT_SUBJECT, CHAT_COMMAND_ACCEPTED, CHAT_COMMAND_REFUSED, CHAT_DELTA,
     CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID,
     CONTEXT_VIEWPORTED, ChatEvent, ChatMessage, ClientCommand, CommandMeta, CommandOutcomeEvent,
-    ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest, DeltaEvent, EventMeta,
-    HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED,
-    HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID,
-    HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent, HallwayKnockClaimedEvent,
-    HallwayKnockSettledEvent, JETSTREAM_ACK_WAIT, JETSTREAM_MAX_ACK_PENDING, JETSTREAM_MAX_BATCH,
-    JETSTREAM_MAX_DELIVER, JETSTREAM_MAX_EXPIRES,
+    ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest, DEFAULT_HOST_WS_PATH,
+    DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED,
+    HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED,
+    HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
+    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, JETSTREAM_ACK_WAIT,
+    JETSTREAM_MAX_ACK_PENDING, JETSTREAM_MAX_BATCH, JETSTREAM_MAX_DELIVER, JETSTREAM_MAX_EXPIRES,
     JETSTREAM_NUM_REPLICAS, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
     PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
     PRESENCE_CLOSED, PRESENCE_COMMAND_REFUSED, PRESENCE_COMPILED, PRESENCE_OPENED,
@@ -67,12 +61,14 @@ use protocol::{
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::future::Future;
 use std::sync::Arc;
-use tokio::net::TcpListener;
+use summoning::presence::{
+    PresenceAuthentication, PresenceBinding, PresenceCloseRequest, PresenceOpenRequest,
+    PresenceResult, PresenceSettleRequest, PresenceTurnRequest,
+};
 use tokio::sync::{Mutex, broadcast};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -94,7 +90,7 @@ struct AppState {
     config: Arc<HostConfig>,
     room_store: RoomStateStore,
     runtime: Arc<Mutex<RuntimeState>>,
-    hallway_pool: Option<sqlx::PgPool>,
+    hallway_pool: Option<PgPool>,
     insula_binding: Arc<TrustedBinding>,
     insula: InsulaHost,
     panel: PanelHost,
@@ -117,29 +113,21 @@ fn host_insula_binding(config: &HostConfig) -> Result<TrustedBinding, String> {
     Ok(binding)
 }
 
-pub struct Host {
+pub(crate) struct Host {
     state: AppState,
 }
 
 impl Host {
-    pub fn new(config: HostConfig) -> Result<Self, String> {
-        config.validate()?;
+    // [host/pool/shared] [host/state/room] [host/lifetime/shutdown]
+    pub(crate) fn new(
+        config: HostConfig,
+        pool: Option<PgPool>,
+        cancellation: CancellationToken,
+        tasks: TaskTracker,
+    ) -> Result<Self, String> {
         let insula_binding = Arc::new(host_insula_binding(&config)?);
-        let hallway_pool = config
-            .database_url
-            .as_deref()
-            .map(|url| PgPoolOptions::new().max_connections(2).connect_lazy(url))
-            .transpose()
-            .map_err(|error| format!("Host DATABASE_URL is invalid: {error}"))?;
-        let insula_pool = config
-            .database_url
-            .as_deref()
-            .map(|url| PgPoolOptions::new().max_connections(1).connect_lazy(url))
-            .transpose()
-            .map_err(|error| format!("Host Insula DATABASE_URL is invalid: {error}"))?;
-        let emitter_pool = insula_pool.clone();
-        let insula = InsulaHost::new(&config, insula_pool, insula_binding.clone())?;
-        let panel = PanelHost::new(&config, hallway_pool.clone(), insula_binding.clone());
+        let insula = InsulaHost::new(&config, pool.clone(), insula_binding.clone())?;
+        let panel = PanelHost::new(&config, pool.clone(), insula_binding.clone());
         let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone());
         let projection = room_store.load()?;
         let (durable, cursor, mut sessions) =
@@ -154,12 +142,9 @@ impl Host {
         let (receipts, _) = broadcast::channel(64);
         let (chat_deltas, _) = broadcast::channel(64);
         let receipt_tracker = Arc::new(Mutex::new(ReceiptTracker::new(
-            config.akasha_enabled,
+            config.akasha_enabled(),
             config.nats_url.is_some(),
         )));
-        if let Some(pool) = emitter_pool {
-            init_insula_emitter(pool);
-        }
         Ok(Self {
             state: AppState {
                 config: Arc::new(config),
@@ -174,12 +159,12 @@ impl Host {
                     cursor,
                     durable,
                 })),
-                hallway_pool,
+                hallway_pool: pool,
                 insula,
                 panel,
                 insula_binding,
-                cancellation: CancellationToken::new(),
-                tasks: TaskTracker::new(),
+                cancellation,
+                tasks,
                 deltas,
                 receipts,
                 chat_deltas,
@@ -188,35 +173,22 @@ impl Host {
         })
     }
 
-    pub async fn serve<F>(self, listener: TcpListener, shutdown: F) -> Result<(), String>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
+    pub(crate) fn spawn_receipt_bridge(&self) {
         if let Some(url) = self.state.config.nats_url.clone() {
             self.state
                 .tasks
                 .spawn(run_receipt_bridge(self.state.clone(), url));
         }
-        let ws_path = self.state.config.ws_path.clone();
-        let app = Router::new()
+    }
+
+    // [host/routing] [security/auth]
+    pub(crate) fn router(&self) -> Router {
+        Router::new()
             .route("/health", get(health))
-            .route(&ws_path, get(upgrade))
+            .route(DEFAULT_HOST_WS_PATH, get(upgrade))
             .with_state(self.state.clone())
             .merge(self.state.insula.router())
-            .merge(self.state.panel.router());
-        let cancellation = self.state.cancellation.clone();
-        let tasks = self.state.tasks.clone();
-        let serve_result = axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                shutdown.await;
-                cancellation.cancel();
-            })
-            .await;
-        self.state.cancellation.cancel();
-        tasks.close();
-        tasks.wait().await;
-        flush_insula_emitter().await;
-        serve_result.map_err(|error| format!("Host server failed: {error}"))
+            .merge(self.state.panel.router())
     }
 }
 
@@ -226,7 +198,7 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
     Json(json!({
         "status": "ok",
         "schema_version": HOST_SCHEMA_VERSION,
-        "websocket_path": state.config.ws_path,
+        "websocket_path": format!("{}{DEFAULT_HOST_WS_PATH}", state.config.room_path()),
         "projection_id": RECALL_POLICY_PROJECTION_ID,
         "version": runtime.cursor.version,
         "sequence": runtime.cursor.sequence,
@@ -996,7 +968,7 @@ fn authenticate_presence(
             session: meta.sender_session.clone(),
         },
         capabilities: host_capabilities(
-            state.config.akasha_enabled && state.config.database_url.is_some(),
+            state.config.database_url.is_some(),
             state.config.nats_url.is_some(),
         ),
     })
@@ -2126,7 +2098,7 @@ fn validate_command(state: &AppState, command: &ClientCommand) -> Result<(), Str
         || meta.sender_spirit != expected.spirit
         || meta.sender_session.trim().is_empty()
         || meta.sender_session.len() > 256
-        || meta.recipient != expected.recipient
+        || meta.recipient != HOST_RECIPIENT
         || meta.reply_target != meta.sender_session
         || meta.scope != expected.scope()
         || meta.visibility != "operator"
@@ -2293,7 +2265,7 @@ fn event_meta_for_projection(
         command_or_event_type: kind.into(),
         correlation_id: correlation_id.into(),
         causation_id: correlation_id.into(),
-        reply_target: state.config.recipient.clone(),
+        reply_target: HOST_RECIPIENT.to_owned(),
         idempotency_key: idempotency_key.into(),
         source_record_refs: Vec::new(),
         scope: state.config.scope(),
@@ -2341,7 +2313,7 @@ fn receipt_snapshot(
             command_or_event_type: PAPER_BOAT_RECEIPT_SNAPSHOT.into(),
             correlation_id: correlation_id.clone(),
             causation_id: correlation_id,
-            reply_target: state.config.recipient.clone(),
+            reply_target: HOST_RECIPIENT.to_owned(),
             idempotency_key,
             source_record_refs: Vec::new(),
             scope: format!("room:{}:paper_boat_receipt", state.config.room),
@@ -2624,7 +2596,6 @@ mod tests {
     fn config(knock_autonomy: KnockAutonomy) -> HostConfig {
         HostConfig {
             bind: "127.0.0.1:0".parse().expect("test bind"),
-            ws_path: "/athanor/v1/ws".into(),
             bearer_token: "test-token".into(),
             room_dir: std::path::PathBuf::from("configured-room"),
             state_dir: std::path::PathBuf::from("host-state"),
@@ -2632,9 +2603,7 @@ mod tests {
             room: "kodo".into(),
             spirit: "Kodo".into(),
             session: "test-session".into(),
-            recipient: "house-host".into(),
             database_url: None,
-            akasha_enabled: false,
             nats_url: None,
             knock_autonomy,
         }

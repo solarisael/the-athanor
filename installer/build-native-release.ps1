@@ -165,7 +165,6 @@ Invoke-NativeReleaseStage -Name "payload-materialization" -OutDir $Out -Action {
   Copy-Item (Join-Path $ReleaseBin "athanor.exe") $Bin
   Copy-Item (Join-Path $ReleaseBin "athanor-manage.exe") $Bin
   Copy-Item (Join-Path $ReleaseBin "athanor-substrate.exe") $Bin
-  Copy-Item (Join-Path $ReleaseBin "house-host.exe") $Bin
   Copy-Item (Join-Path $ReleaseBin "athanor-house-delivery.exe") $Bin
   Copy-Item (Join-Path $ReleaseBin "omp-keeper.exe") $Bin
   Copy-Item (Join-Path $Root "adapters/omp/installed-loader.ts") (Join-Path $Bin "athanor-omp-loader.ts")
@@ -211,7 +210,6 @@ Invoke-NativeReleaseStage -Name "manifest-hashing" -OutDir $Out -Action {
       elseif ($Relative -eq "bin/athanor-manage.exe") { "installer" }
       elseif ($Relative -like "runtime/postgresql/*") { "postgresql-pgvector" }
       elseif ($Relative -like "runtime/nats/*") { "nats-server" }
-      elseif ($Relative -like "bin/house-host.exe") { "host" }
       elseif ($Relative -like "bin/athanor-house-delivery.exe") { "delivery" }
       elseif ($Relative -like "bin/athanor-substrate.exe") { "substrate" }
       elseif ($Relative -like "bin/omp-keeper.exe") { "omp-keeper" }

@@ -1,23 +1,15 @@
-use crate::{boundaries::RuntimeControl, installer::CurrentRelease, layout::InstallLayout};
+use crate::{
+    boundaries::RuntimeControl,
+    installer::{CurrentRelease, RuntimeSecrets},
+    layout::InstallLayout,
+    supervisor::RuntimeConfig,
+};
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
 use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Secrets {
-    postgres_password: String,
-    external_database_url: Option<String>,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Config {
-    database_mode: String,
-}
 
 pub struct NativeRuntimeControl {
     pub layout: InstallLayout,
@@ -46,21 +38,20 @@ impl NativeRuntimeControl {
         }
         self.current_root()
     }
-    fn secrets(&self) -> Result<Secrets> {
+    fn secrets(&self) -> Result<RuntimeSecrets> {
         Ok(serde_json::from_slice(
             &fs::read(self.layout.secrets()).context("read runtime secrets")?,
         )?)
     }
-    fn config(&self) -> Result<Config> {
-        Ok(serde_json::from_slice(
+    fn config(&self) -> Result<RuntimeConfig> {
+        let config: RuntimeConfig = serde_json::from_slice(
             &fs::read(self.layout.config()).context("read runtime configuration")?,
-        )?)
+        )?;
+        config.validate()?;
+        Ok(config)
     }
     fn database_url(&self) -> Result<String> {
-        let secrets = self.secrets()?;
-        Ok(secrets
-            .external_database_url
-            .unwrap_or_else(|| crate::endpoints::managed_database_url(&secrets.postgres_password)))
+        Ok(self.secrets()?.database_url())
     }
     fn run(&self, arguments: &[&str]) -> Result<String> {
         let root = self.maintenance_root()?;

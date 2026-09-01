@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use athanor_install::{
-    app,
     boundaries::{NativeFileSystem, OsSecrets, ScServiceManager},
     doctor,
     installer::{HouseInstallConfig, InstallRequest, Installer, OperatorIntegration},
@@ -47,7 +46,7 @@ fn main() -> Result<()> {
     }
     if matches!(command, "help" | "--help" | "-h") {
         println!(
-            "Athanor native runtime manager\n\nCommands:\n  install --staging DIR --manifest FILE [--external-database-file FILE] [--house-config-file FILE] [--omp-config FILE --client-config FILE --operator-principal NAME]\n  update --staging DIR --manifest FILE [same options]\n  install-omp-adapter --source DIR\n  rollback-omp-adapter [--release-id ID]\n  gui [--room ROOM]\n  doctor\n  rollback\n  uninstall\n  purge --confirm-data-loss\n  service"
+            "Athanor native runtime manager\n\nCommands:\n  install --staging DIR --manifest FILE [--external-database-file FILE] [--house-config-file FILE] [--omp-config FILE --client-config FILE --operator-principal NAME]\n  update --staging DIR --manifest FILE [same options]\n  install-omp-adapter --source DIR\n  rollback-omp-adapter [--release-id ID]\n  doctor\n  rollback\n  uninstall\n  purge --confirm-data-loss\n  service"
         );
         return Ok(());
     }
@@ -146,9 +145,6 @@ fn main() -> Result<()> {
                     &installer.rollback_omp_adapter(release_id.as_deref())?
                 )?
             );
-        }
-        "gui" => {
-            app::run(optional_value(&arguments, "--room")?)?;
         }
         "doctor" => {
             let report = doctor(&fs_boundary, &services, &layout)?;

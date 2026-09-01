@@ -1,16 +1,5 @@
-// The Insula cockpit: one bounded authenticated read of the Host's own Vitals
-// rollup, aggregated into a few honest lines.
-//
-// This is the read half of Insula and it obeys the opposite law from the
-// writer. A cockpit is allowed to await, and it must never invent a number: a
-// Host that cannot answer reads "unavailable", never zero, because zero is
-// itself an observation the House may legitimately have recorded.
-//
-// The request carries no authority. There is no houseId, room, spirit, or
-// session field to send at all — the Host stamps identity from its own trusted
-// binding and refuses unknown fields, so authority is refused by omission. The
-// bearer is resolved only through hostHttpEndpoint and never leaves this
-// process, which is why no browser surface can sit on this path.
+// Vitals absence is not zero; the authenticated Host stamps authority, so the
+// bounded request carries no caller-supplied identity.
 
 import { HostUnavailable, hostHttpEndpoint } from "./host.ts";
 import { insulaErrorClass } from "./insula.ts";
@@ -191,17 +180,22 @@ export async function readInsulaVitals(
   now: number = Date.now(),
 ): Promise<InsulaVitalsResponse> {
   const endpoint = hostHttpEndpoint(room, INSULA_VITALS_PATH);
-  const response = await fetch(endpoint.url, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${endpoint.token}` },
-    // Exactly three fields. House, room, and spirit belong to the Host.
-    body: JSON.stringify({
-      start: new Date(now - RANGE_MS[range]).toISOString(),
-      end: new Date(now).toISOString(),
-      limit: MAX_VITALS_ROWS,
-    }),
-    signal: AbortSignal.timeout(READ_TIMEOUT_MS),
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint.url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${endpoint.token}` },
+      body: JSON.stringify({
+        start: new Date(now - RANGE_MS[range]).toISOString(),
+        end: new Date(now).toISOString(),
+        limit: MAX_VITALS_ROWS,
+      }),
+      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new HostUnavailable(`Insula Vitals is unavailable: ${detail}`);
+  }
   if (!response.ok) {
     await response.arrayBuffer().catch(() => undefined);
     throw new HostUnavailable(`Insula Vitals refused with status ${response.status}`);

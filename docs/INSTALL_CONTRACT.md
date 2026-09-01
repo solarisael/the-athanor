@@ -63,14 +63,18 @@ Every component reads the manifest and nothing else for module presence:
 
 ### 3.3 One door
 
-- One house-scoped Host process (ruling 8). One listener on one declared port. Rooms route by name in the path (`/room/<key>`) on the WebSocket route and on every HTTP route (insula, vitals, panel).
-- `HostRoomConfig.port` is deleted. Both collision checkers die with it: `supervisor.rs:303,320-326` and the independent second copy at `installer.rs:94,111-113`.
-- `HostConfig` is single-room by construction (`host/src/config.rs:63-78`). House-scoping the Host is the named work item of this section. The Host reads the room registry from config, never from flat env.
-- The single port becomes a declared key: `host_port` beside `nats_port` in `SupervisorConfig`/`RuntimeConfig`. Today nothing declares it — `ATHANOR_HOST_BIND` is transport and `DEFAULT_HOST_WS_PORT` is a fallback pin, documented as such at `contract.rs:39-43`.
-- Installed `config.json` carries `"port"` under `deny_unknown_fields`: this change is a data migration. The installer regenerates config on upgrade. `deploy-local.ps1:133` currently coerces a missing port to `0` and fails with a misleading message; the deploy script updates in the same quest.
-- The OMP adapter derives HTTP endpoints from host:port and discards the path (`adapters/omp/house-proof/host.ts:144-157`). Under path routing this strips the room silently. The adapter fix ships in the same quest.
-- The room-key grammar exists in three hand-copied spellings (`host/src/config.rs:180-190`, `supervisor.rs:305-313`, `installer.rs:96-104`). As a path segment it becomes a path-traversal surface. One function in `protocol` owns the grammar; the three copies call it.
-- Loopback-only stays. The single door inherits the existing loopback refusal.
+- `athanor.exe` owns one in-process multi-room Host.
+- The process is an independent peer: it launches neither Godot nor OMP and
+  owns neither OMP session lifetime nor terminal parenthood.
+- The Host binds one declared loopback port.
+- Every WebSocket and HTTP route starts with `/room/<room-key>`.
+- `RuntimeConfig.host_port` owns the port.
+- `HostRoomConfig` contains only the room key and spirit identity.
+- The installer converts the old per-room port format before it writes format 2.
+- `protocol::is_safe_room_key` owns the Rust room-key grammar.
+- The OMP adapter receives one base URL and adds the validated room path.
+- The Host uses one shared PostgreSQL pool.
+- Unknown rooms have no route.
 
 ### 3.4 Ollama as a managed child
 

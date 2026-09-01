@@ -22,6 +22,45 @@ Every published evaluation names:
 
 Private prompts, memory titles, source paths, excerpts, entities, threads, and raw telemetry never enter public artifacts.
 
+## Windows one-owner and one-door proof — 2026-08-31
+
+### Contract
+
+`athanor.exe` owns one in-process multi-room Host. The Host binds one loopback
+listener. Every room route starts with `/room/<room-key>`.
+
+### Setup
+
+- Windows 11 Pro x64;
+- installed native release `0.5.4`;
+- external PostgreSQL authority;
+- five configured rooms;
+- no test suite;
+- optimized native build, installed update, and live runtime probes.
+
+### Results
+
+| Measure | Result |
+|---|---|
+| Stable app activation | Stable, versioned, and staged `athanor.exe` SHA-256 values match |
+| Host processes | One `athanor.exe`; zero `house-host.exe` children |
+| Host listeners | One listener on `127.0.0.1:8787` |
+| Room health | Five of five paths returned `200` and `status=ok` |
+| WebSocket path | Five of five paths opened with the installed bearer token |
+| Root route | `/health` returned `404` |
+| Unknown room | `/room/__missing__/health` returned `404` |
+| Invalid bearer | WebSocket upgrade refused |
+| Service children | NATS and Delivery; no Host child |
+
+The release manifest and this table are the sanitized artifacts.
+
+### Boundary
+
+The Godot client remains a presentation child of `athanor.exe`. OMP still owns
+its current substrate transport children. The legacy `omp-keeper.exe` process
+also remains. PostgreSQL, Ollama, and OMP remain external dependencies.
+
+
 ## Public retrieval pilot — 2026-07-22
 
 ### Contract

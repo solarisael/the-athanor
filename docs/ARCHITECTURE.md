@@ -91,7 +91,7 @@ documents link to it instead of repeating it.
 | `crates/house-core`, `crates/house-protocol` | Provider-neutral domain, authority, and wire contracts |
 | `crates/house-vault` | Strict database-free, file-authoritative Vault retrieval |
 | `crates/house-substrate`, `substrate/` | PostgreSQL-authoritative AKASHA operations, migrations, retrieval, typed stores, GIGA, health, backup, and restore |
-| `crates/house-host` | Authenticated snapshots, typed deltas, resync, Recall Policy, and receipt projection |
+| `crates/host` | One authenticated multi-room listener, snapshots, deltas, Recall Policy, and receipt projection |
 | `crates/house-delivery` | Transactional outbox publication and bounded JetStream consumption |
 | `crates/athanor-install`, `installer/` | Native service lifecycle, immutable staging, rollback, doctor, and Windows installer |
 | `gui/` | Thin Godot operator client |
@@ -113,28 +113,31 @@ Immutable product versions and mutable operator data are separate:
 
 | Installed path | Content |
 |---|---|
-| `%ProgramFiles%\Solarisael\Athanor\bin` | Native lifecycle manager and stable OMP loader |
+| `%ProgramFiles%\Solarisael\Athanor\bin` | Stable independent manager and Host owner, lifecycle manager, and OMP loader |
 | `%ProgramFiles%\Solarisael\Athanor\versions\<version>` | Verified immutable runtime, OMP adapter, Godot client, PostgreSQL, and NATS |
-| `%ProgramData%\Solarisael\Athanor\config` | Non-secret database mode and exact House room/port topology |
+| `%ProgramData%\Solarisael\Athanor\config` | Non-secret database mode, one Host port, and House room identities |
 | `%ProgramData%\Solarisael\Athanor\secrets` | ACL-restricted service secrets |
 | `%ProgramData%\Solarisael\Athanor\data` | Managed PostgreSQL and NATS durable data |
 | `%ProgramData%\Solarisael\Athanor\state\host\<room>` | Isolated Host projection state per room |
 | `%ProgramData%\Solarisael\Athanor\backups` | Upgrade, rollback, external-authority, and legacy pre-install backups |
-| `%USERPROFILE%\.omp\agent\athanor\client.json` | ACL-restricted per-user Host token and room endpoint projection |
+| `%USERPROFILE%\.omp\agent\athanor\client.json` | ACL-restricted Host base URL, token, and room identities |
 
 `current.json` atomically selects the active immutable version. The
-`SolarisaelAthanor` Windows service starts only the exact children under that
-version: optional managed PostgreSQL, one NATS broker, one delivery worker, and
-one identity-bound Host per configured room. It reports `RUNNING` only after
-every child passes readiness and drains the runtime plan in reverse order.
+`SolarisaelAthanor` Windows service starts optional managed PostgreSQL, one NATS
+broker, and one delivery worker. It reports `RUNNING` after these children pass
+readiness. It drains the same children in reverse order.
 
-OMP registers one stable loader under Program Files. The loader follows
-`current.json`, reads the invoking user's restricted client projection, sets
-Host/substrate paths and credentials only in process memory, then loads the
-active adapter and hygiene extension exactly once. Room-bound commands choose
-their endpoint by exact room key; missing entries fail closed rather than route
-to another room. Development checkouts may still set explicit topology
-overrides, but install removes duplicate source/version registration owners.
+`athanor.exe` is an independent local manager and the one in-process multi-room
+Host owner. It binds one loopback listener without launching Godot or becoming
+the parent of OMP sessions. Every WebSocket and HTTP route starts with
+`/room/<room-key>`. One shared PostgreSQL pool serves all room projections.
+
+OMP registers one stable loader under Program Files. The loader follows the
+native and adapter activation pointers, reads the restricted client projection,
+and checks the default room's scoped Host health. When Athanor is absent it
+starts the verified stable `athanor.exe` as an independent hidden peer, waits
+boundedly for real scoped health, then loads the adapter. Unknown room paths
+fail closed. Install removes duplicate development registration owners.
 
 ### Release and support target
 

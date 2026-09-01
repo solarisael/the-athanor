@@ -1,11 +1,11 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use protocol::{DEFAULT_HOST_WS_PATH, HOST_ROOM_PATH_PREFIX, is_safe_room_key};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{collections::BTreeMap, env, fs, path::Path, path::PathBuf};
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ClientEndpoint {
-    pub url: String,
+pub struct ClientRoom {
     pub spirit: String,
 }
 
@@ -16,38 +16,68 @@ pub struct ClientProjection {
     pub house_id: String,
     pub host_token: String,
     pub state_root: String,
+    pub host_url: String,
     pub default_room: String,
-    pub endpoints: std::collections::BTreeMap<String, ClientEndpoint>,
+    pub rooms: BTreeMap<String, ClientRoom>,
 }
 
 impl ClientProjection {
     pub fn validate(&self) -> Result<()> {
-        if self.format != 1 || self.house_id.trim().is_empty() || self.host_token.trim().is_empty()
+        if self.format != 2 {
+            bail!("installed OMP client projection format must be 2");
+        }
+        if [
+            &self.house_id,
+            &self.host_token,
+            &self.host_url,
+            &self.default_room,
+        ]
+        .into_iter()
+        .any(|value| value.trim().is_empty())
         {
             bail!("installed OMP client projection identity is incomplete");
         }
         if !Path::new(&self.state_root).is_absolute() {
             bail!("installed OMP client stateRoot must be absolute");
         }
-        if !self.endpoints.contains_key(&self.default_room) {
-            bail!("installed OMP client defaultRoom has no endpoint");
+        if !self.rooms.contains_key(&self.default_room) {
+            bail!("installed OMP client defaultRoom has no room identity");
         }
-        for (room, endpoint) in &self.endpoints {
-            if room.trim().is_empty() || endpoint.spirit.trim().is_empty() {
-                bail!("installed OMP client endpoint identity is incomplete");
-            }
-            let url = url::Url::parse(&endpoint.url)?;
-            let loopback = url.host_str().is_some_and(|host| {
-                host.eq_ignore_ascii_case("localhost")
-                    || host
-                        .parse::<std::net::IpAddr>()
-                        .is_ok_and(|ip| ip.is_loopback())
-            });
-            if url.scheme() != "ws" || !loopback {
-                bail!("installed OMP client endpoint for {room:?} must be loopback WebSocket");
+        for (room, identity) in &self.rooms {
+            if [!is_safe_room_key(room), identity.spirit.trim().is_empty()]
+                .into_iter()
+                .any(|invalid| invalid)
+            {
+                bail!("installed OMP client room identity is incomplete");
             }
         }
         Ok(())
+    }
+
+    /// Reads and validates the invoking user's restricted projection.
+    pub fn installed() -> Result<Self> {
+        let user_profile =
+            PathBuf::from(env::var_os("USERPROFILE").context("USERPROFILE is unavailable")?);
+        let path = user_profile.join(".omp/agent/athanor/client.json");
+        let client: Self = serde_json::from_slice(
+            &fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+        )?;
+        client.validate()?;
+        Ok(client)
+    }
+
+    // [protocol/host/path] [protocol/room/key]
+    /// The room-scoped WebSocket URL, or a refusal when the room is unknown.
+    pub fn room_ws_url(&self, room: &str) -> Result<(String, &ClientRoom)> {
+        let identity = self
+            .rooms
+            .get(room)
+            .with_context(|| format!("installed Athanor has no room identity for {room:?}"))?;
+        let base = self.host_url.trim_end_matches('/');
+        Ok((
+            format!("{base}{HOST_ROOM_PATH_PREFIX}{room}{DEFAULT_HOST_WS_PATH}"),
+            identity,
+        ))
     }
 }
 

@@ -22,7 +22,31 @@ the exact implementation record.
 
 ### Changed
 
-- Automatic context now releases a Windows turn after five seconds. A slow or unavailable organ degrades the context instead of holding the handler for 30 seconds.
+- `athanor.exe` now runs as the independent multi-room Host and local manager
+  without launching Godot or owning OMP session lifetime.
+- The stable OMP loader now checks scoped Host health and starts the verified
+  stable `athanor.exe` as an independent hidden peer when Athanor is absent.
+
+
+## [0.5.4] - 2026-08-31
+
+### Changed
+
+- `athanor.exe` now owns one in-process multi-room Host and one loopback listener.
+- Every Host route now starts with `/room/<room-key>`.
+- The Windows service now starts only PostgreSQL when managed, NATS, and Delivery.
+- Installed configuration now uses one `hostPort` and room identities without per-room ports.
+- The installer converts the old runtime format before activation.
+- Native activation now updates the stable `athanor.exe` launcher with the manager.
+- OMP now receives one Host base URL and adds the validated room path.
+- Automatic context now releases a Windows turn after five seconds.
+
+## [0.5.3] - 2026-08-31
+
+### Changed
+
+- The first one-door release moved Host ownership into `athanor.exe`.
+- Stable app activation remained on the previous binary. Version `0.5.4` corrects this release defect.
 
 ## [0.5.2] - 2026-08-31
 

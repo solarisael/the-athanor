@@ -23,6 +23,7 @@ path = "src/bin/athanor-chat.rs"
 [dependencies]
 anyhow.workspace = true
 hex.workspace = true
+host = { path = "../host" }
 protocol = { path = "../protocol" }
 interactive-process = { path = "../interactive-process" }
 omp-keeper = { path = "../omp-keeper" }

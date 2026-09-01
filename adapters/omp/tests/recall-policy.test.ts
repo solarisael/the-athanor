@@ -35,8 +35,7 @@ mock.module("../house-proof/tools.ts", () => ({
 const originalWebSocket = globalThis.WebSocket;
 const originalToken = process.env.ATHANOR_HOST_TOKEN;
 const originalHouseId = process.env.ATHANOR_HOST_HOUSE_ID;
-const originalEndpoints = process.env.ATHANOR_HOST_ENDPOINTS;
-const originalHostUrl = process.env.ATHANOR_HOST_WS_URL;
+const originalHostUrl = process.env.ATHANOR_HOST_URL;
 
 afterEach(() => {
   (globalThis as any).WebSocket = originalWebSocket;
@@ -44,10 +43,8 @@ afterEach(() => {
   else process.env.ATHANOR_HOST_TOKEN = originalToken;
   if (originalHouseId === undefined) delete process.env.ATHANOR_HOST_HOUSE_ID;
   else process.env.ATHANOR_HOST_HOUSE_ID = originalHouseId;
-  if (originalEndpoints === undefined) delete process.env.ATHANOR_HOST_ENDPOINTS;
-  else process.env.ATHANOR_HOST_ENDPOINTS = originalEndpoints;
-  if (originalHostUrl === undefined) delete process.env.ATHANOR_HOST_WS_URL;
-  else process.env.ATHANOR_HOST_WS_URL = originalHostUrl;
+  if (originalHostUrl === undefined) delete process.env.ATHANOR_HOST_URL;
+  else process.env.ATHANOR_HOST_URL = originalHostUrl;
 });
 
 function hostState() {
@@ -99,18 +96,14 @@ describe("Recall Policy Host adapter", () => {
   test("sends facts to Host and consumes its decision without evaluating policy locally", async () => {
     process.env.ATHANOR_HOST_TOKEN = "test-token";
     process.env.ATHANOR_HOST_HOUSE_ID = "solarisael";
-    delete process.env.ATHANOR_HOST_WS_URL;
-    process.env.ATHANOR_HOST_ENDPOINTS = JSON.stringify({
-      kintsu: { url: "ws://127.0.0.1:8787/athanor/v1/ws", spirit: "Kintsu" },
-      kodo: { url: "ws://127.0.0.1:8788/athanor/v1/ws", spirit: "Kodo" },
-    });
+    process.env.ATHANOR_HOST_URL = "ws://127.0.0.1:8787";
     let command: Record<string, any> | null = null;
 
     class FakeWebSocket {
       listeners = new Map<string, Array<(event: any) => void>>();
 
       constructor(url: string, options: any) {
-        expect(url).toBe("ws://127.0.0.1:8787/athanor/v1/ws");
+        expect(url).toBe("ws://127.0.0.1:8787/room/kintsu/athanor/v1/ws");
         expect(options.headers.Authorization).toBe("Bearer test-token");
         queueMicrotask(() => this.emit("open", {}));
       }
@@ -200,19 +193,23 @@ describe("Recall Policy Host adapter", () => {
     await expect(client.inspect()).rejects.toBeInstanceOf(RecallPolicyHostUnavailable);
   });
 
-  test("refuses a missing room endpoint instead of routing to the wrong Host", async () => {
+  test("scopes a room on the shared Host instead of routing another room", async () => {
     process.env.ATHANOR_HOST_TOKEN = "test-token";
     process.env.ATHANOR_HOST_HOUSE_ID = "solarisael";
-    delete process.env.ATHANOR_HOST_WS_URL;
-    process.env.ATHANOR_HOST_ENDPOINTS = JSON.stringify({
-      kodo: { url: "ws://127.0.0.1:8788/athanor/v1/ws", spirit: "Kodo" },
-    });
+    process.env.ATHANOR_HOST_URL = "ws://127.0.0.1:8787";
+    class RefusingWebSocket {
+      constructor(url: string) {
+        expect(url).toBe("ws://127.0.0.1:8787/room/kintsu/athanor/v1/ws");
+        throw new Error("offline");
+      }
+    }
+    (globalThis as any).WebSocket = RefusingWebSocket;
     const client = new RecallPolicyHostClient({
       room: "kintsu",
       spirit: "Kintsu",
       session: "session-1",
     });
-    await expect(client.inspect()).rejects.toThrow("no installed Athanor Host endpoint exists for room kintsu");
+    await expect(client.inspect()).rejects.toBeInstanceOf(RecallPolicyHostUnavailable);
   });
 
 });
@@ -228,7 +225,7 @@ describe("hands-on-files evidence", () => {
   function installFakeHost(): Array<Record<string, any>> {
     process.env.ATHANOR_HOST_TOKEN = "test-token";
     process.env.ATHANOR_HOST_HOUSE_ID = "solarisael";
-    process.env.ATHANOR_HOST_WS_URL = "ws://127.0.0.1:8787/athanor/v1/ws";
+    process.env.ATHANOR_HOST_URL = "ws://127.0.0.1:8787";
     const commands: Array<Record<string, any>> = [];
 
     class FakeWebSocket {

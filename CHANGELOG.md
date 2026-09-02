@@ -26,6 +26,18 @@ the exact implementation record.
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified
   stable `athanor.exe` as an independent hidden peer when Athanor is absent.
+- The crane delivery loop now runs inside the Host. `athanor.exe` starts it
+  when a room sets `DATABASE_URL` and `ATHANOR_NATS_URL`. The loop reconnects
+  to NATS after a failure and stops when the House closes.
+
+### Removed
+
+- The `athanor-house-delivery.exe` binary and the `delivery` crate. The
+  service code lives in `origami::cranes::delivery`. The Windows service
+  now supervises PostgreSQL and NATS only, and no longer reads the runtime
+  secrets file.
+- `GIGA health` no longer reports `ok` when the classifier is disabled or
+  failing. The `dead` list names each disabled or failing part.
 
 
 ## [0.5.4] - 2026-08-31

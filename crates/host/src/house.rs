@@ -1,6 +1,7 @@
 use crate::config::HostConfig;
 use crate::server::Host;
 use akasha::insula_writer::{flush_insula_emitter, init_insula_emitter};
+use origami::cranes::{broker::Broker, delivery::DeliveryService, outbox::Store};
 use axum::Router;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -15,6 +16,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 const HOUSE_POOL_CONNECTIONS: u32 = 8;
+const CRANE_RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct HostRuntime {
     address: SocketAddr,
@@ -166,9 +168,12 @@ async fn open_house(
     cancellation: &CancellationToken,
     tasks: &TaskTracker,
 ) -> Result<OpenHouse, String> {
-    let (bind, pool) = house_settings(&rooms)?;
+    let (bind, pool, nats_url) = house_settings(&rooms)?;
     if let Some(pool) = pool.clone() {
-        init_insula_emitter(pool);
+        init_insula_emitter(pool.clone());
+        if let Some(nats_url) = nats_url {
+            spawn_cranes(pool, nats_url, cancellation.clone(), tasks);
+        }
     }
     let count = rooms.len();
     let mut router = Router::new();
@@ -192,8 +197,37 @@ async fn open_house(
     })
 }
 
+// The crane loop lives in the Host process: one lease owner per Host
+// lifetime, reconnecting to NATS after any failure until the House closes.
+fn spawn_cranes(pool: PgPool, nats_url: String, cancellation: CancellationToken, tasks: &TaskTracker) {
+    let store = Store::from_pool(pool);
+    let lease_owner = uuid::Uuid::new_v4();
+    tasks.spawn(async move {
+        loop {
+            let flight = async {
+                let broker = Broker::connect(&nats_url).await?;
+                broker.configure().await?;
+                DeliveryService::new(store.clone(), broker, lease_owner).run().await
+            };
+            tokio::select! {
+                _ = cancellation.cancelled() => return,
+                result = flight => {
+                    let error = result.err().map(|e| e.to_string()).unwrap_or_default();
+                    tracing::warn!(%error, "crane delivery loop stopped; reconnecting");
+                }
+            }
+            tokio::select! {
+                _ = cancellation.cancelled() => return,
+                _ = tokio::time::sleep(CRANE_RECONNECT_DELAY) => {}
+            }
+        }
+    });
+}
+
 // [host/config/validation] [host/pool/shared]
-fn house_settings(rooms: &[HostConfig]) -> Result<(SocketAddr, Option<PgPool>), String> {
+fn house_settings(
+    rooms: &[HostConfig],
+) -> Result<(SocketAddr, Option<PgPool>, Option<String>), String> {
     let Some(first) = rooms.first() else {
         return Err("the Athanor Host needs at least one room".into());
     };
@@ -211,7 +245,7 @@ fn house_settings(rooms: &[HostConfig]) -> Result<(SocketAddr, Option<PgPool>), 
             ("bearer token", first.bearer_token == room.bearer_token),
             ("house identifier", first.house_id == room.house_id),
             ("DATABASE_URL", first.database_url == room.database_url),
-            ("SOLARISAEL_NATS_URL", first.nats_url == room.nats_url),
+            ("ATHANOR_NATS_URL", first.nats_url == room.nats_url),
         ] {
             if !agrees {
                 return Err(format!(
@@ -231,5 +265,5 @@ fn house_settings(rooms: &[HostConfig]) -> Result<(SocketAddr, Option<PgPool>), 
         })
         .transpose()
         .map_err(|error| format!("the Athanor Host DATABASE_URL is invalid: {error}"))?;
-    Ok((first.bind, pool))
+    Ok((first.bind, pool, first.nats_url.clone()))
 }

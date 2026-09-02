@@ -48,7 +48,6 @@ installed immutable component. Operator data and secrets are separate:
     release-manifest.json
     bin\
       athanor-substrate.exe
-      athanor-house-delivery.exe
       athanor-gui.exe              pinned Godot 4.7.1 runtime
     runtime\
       godot\                        imported client project + GDExtension

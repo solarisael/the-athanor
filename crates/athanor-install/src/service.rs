@@ -1,7 +1,7 @@
 #[cfg(windows)]
 mod windows {
     use crate::{
-        installer::{CurrentRelease, RuntimeSecrets},
+        installer::CurrentRelease,
         layout::{InstallLayout, SERVICE_NAME},
         supervisor::{
             NativeProcesses, RuntimeConfig, Supervisor, prepare_service_console, runtime_plan,
@@ -175,14 +175,7 @@ mod windows {
         let config: RuntimeConfig = serde_json::from_slice(&fs::read(layout.config())?)?;
         config.validate()?;
         trace_service_start("runtime config read");
-        let secrets: RuntimeSecrets = serde_json::from_slice(&fs::read(layout.secrets())?)?;
-        trace_service_start("runtime secrets read");
-        let specs = runtime_plan(
-            &layout.version(&current.version),
-            &layout.data,
-            &config,
-            &secrets.database_url(),
-        )?;
+        let specs = runtime_plan(&layout.version(&current.version), &layout.data, &config)?;
         trace_service_start(&format!("runtime plan built: {} children", specs.len()));
         let supervisor = Supervisor {
             processes: NativeProcesses::default(),

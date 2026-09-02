@@ -37,12 +37,6 @@ pub fn plan(room: &str, body: &str, now: DateTime<Utc>) -> BoatPlan {
     }
 }
 
-pub fn write_boat_tx() {
-    todo!(
-        "stays in remember.rs write_memory_tx: the boat branch is one head of \
-         a generic memories insert; A1's kind registry replaces it with a flag"
-    )
-}
 
 /// The one place boats touch cranes: the 0016 trigger enqueued this
 /// pointer in the same transaction we're still inside.

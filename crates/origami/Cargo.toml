@@ -11,12 +11,15 @@ license.workspace = true
 anyhow.workspace = true
 async-nats.workspace = true
 chrono.workspace = true
+futures-util.workspace = true
 hex.workspace = true
 hearth = { path = "../hearth" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 
 [lib]

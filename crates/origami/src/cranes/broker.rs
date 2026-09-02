@@ -8,6 +8,7 @@ use async_nats::{
         stream::{DiscardPolicy, RetentionPolicy, StorageType},
     },
 };
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -22,6 +23,7 @@ pub const CRANE_SUBJECT_FILTER: &str = "athanor.crane.>";
 pub const CRANE_CONSUMER_NAME: &str = "athanor-crane-receipts-v1";
 pub const RECEIPT_STREAM_NAME: &str = "ATHANOR_BOAT_RECEIPTS";
 pub const RECEIPT_SUBJECT: &str = "athanor.boat.receipt.v1";
+pub const RECEIPT_SCHEMA_VERSION: u8 = 1;
 pub const STREAM_MAX_MESSAGES: i64 = 100_000;
 pub const STREAM_MAX_BYTES: i64 = 512 * 1024 * 1024;
 pub const STREAM_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -42,6 +44,20 @@ pub const CONSUMER_BACKOFF: [Duration; 5] = [
     Duration::from_secs(300),
     Duration::from_secs(600),
 ];
+
+/// The sanitized receipt a crane publishes on `RECEIPT_SUBJECT` once a
+/// delivery is recorded. Exact by design: body and title never cross.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoatReceiptProjection {
+    pub schema_version: u8,
+    pub event_id: String,
+    pub record_id: String,
+    pub room: String,
+    pub processed_at: String,
+    pub original_stream_sequence: u64,
+    pub integrity_sha256: String,
+}
 
 #[derive(Clone)]
 pub struct Broker {
@@ -364,6 +380,26 @@ fn verify_consumer_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn receipt_projection_is_exact_and_private_fields_are_refused() {
+        let valid = serde_json::json!({
+            "schema_version": 1,
+            "event_id": "8d2c04ae-ef20-4fbc-8141-d0259cbf495f",
+            "record_id": "42",
+            "room": "work",
+            "processed_at": "2026-08-10T09:30:00Z",
+            "original_stream_sequence": 7,
+            "integrity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        });
+        let parsed: BoatReceiptProjection = serde_json::from_value(valid.clone()).unwrap();
+        assert_eq!(parsed.record_id, "42");
+        for private_field in ["body", "title"] {
+            let mut private = valid.clone();
+            private[private_field] = serde_json::json!("must not cross");
+            assert!(serde_json::from_value::<BoatReceiptProjection>(private).is_err());
+        }
+    }
     use crate::sea::subject_owns;
 
     #[test]

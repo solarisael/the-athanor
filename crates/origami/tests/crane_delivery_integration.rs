@@ -1,12 +1,13 @@
-use delivery::{
-    ConsumeOutcome, DeliveryService, PublishOutcome,
-    broker::{BOAT_READY_CONSUMER_NAME, Broker, CRANE_CONSUMER_NAME},
-    model::{BOAT_READY_EVENT_KIND, CraneEvent},
-    store::Store,
-};
 use futures_util::StreamExt;
-use origami::cranes::broker::{RECEIPT_STREAM_NAME as BOAT_RECEIPT_STREAM_NAME, RECEIPT_SUBJECT as BOAT_RECEIPT_SUBJECT};
-use protocol::BoatReceiptProjection;
+use origami::cranes::{
+    broker::{
+        BOAT_READY_CONSUMER_NAME, BoatReceiptProjection, Broker, CRANE_CONSUMER_NAME,
+        RECEIPT_STREAM_NAME, RECEIPT_SUBJECT,
+    },
+    delivery::{ConsumeOutcome, DeliveryService, PublishOutcome},
+    envelope::{BOAT_READY_EVENT_KIND, CraneEvent},
+    outbox::Store,
+};
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use std::{collections::BTreeSet, time::Duration};
@@ -497,7 +498,7 @@ async fn run_contract(pool: &PgPool) -> TestResult {
 
     let broker = Broker::connect(&nats_url()).await?;
     let receipt_client = async_nats::connect(nats_url()).await?;
-    let mut receipt_messages = receipt_client.subscribe(BOAT_RECEIPT_SUBJECT).await?;
+    let mut receipt_messages = receipt_client.subscribe(RECEIPT_SUBJECT).await?;
     let mut boat_subjects = receipt_client.subscribe("athanor.boat.ready").await?;
     broker.configure().await?;
     let first_owner = Uuid::new_v4();
@@ -547,7 +548,7 @@ async fn run_contract(pool: &PgPool) -> TestResult {
     assert!(ledger_row.try_get::<i64, _>("stream_sequence")? > 0);
     assert_eq!(ledger_row.try_get::<i32, _>("first_delivery_count")?, 1);
     let receipt_context = async_nats::jetstream::new(receipt_client.clone());
-    let mut receipt_stream = receipt_context.get_stream(BOAT_RECEIPT_STREAM_NAME).await?;
+    let mut receipt_stream = receipt_context.get_stream(RECEIPT_STREAM_NAME).await?;
     let receipt_messages_before_replay = receipt_stream.info().await?.state.messages;
 
     broker

@@ -49,23 +49,18 @@ pub fn prepare_service_console() -> Result<()> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Readiness {
-    Tcp(SocketAddr),
-    File(PathBuf),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProcessSpec {
     pub name: String,
     pub executable: PathBuf,
     pub arguments: Vec<OsString>,
     pub environment: BTreeMap<String, String>,
-    pub readiness: Readiness,
+    /// The child is ready once this loopback port accepts a connection.
+    pub ready_at: SocketAddr,
 }
 
 pub trait Processes {
     fn spawn(&self, spec: &ProcessSpec) -> Result<u32>;
-    fn ready(&self, name: &str, readiness: &Readiness) -> Result<bool>;
+    fn ready(&self, name: &str, address: &SocketAddr) -> Result<bool>;
     fn request_stop(&self, name: &str) -> Result<()>;
     fn wait_exit(&self, name: &str, timeout: Duration) -> Result<bool>;
     fn kill_verified(&self, name: &str) -> Result<()>;
@@ -77,17 +72,6 @@ pub struct NativeProcesses {
 }
 impl Processes for NativeProcesses {
     fn spawn(&self, spec: &ProcessSpec) -> Result<u32> {
-        if let Readiness::File(path) = &spec.readiness {
-            match std::fs::remove_file(path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(error).with_context(|| {
-                        format!("remove stale readiness file {}", path.display())
-                    });
-                }
-            }
-        }
         let mut command = Command::new(&spec.executable);
         command
             .args(&spec.arguments)
@@ -112,7 +96,7 @@ impl Processes for NativeProcesses {
             .insert(spec.name.clone(), child);
         Ok(pid)
     }
-    fn ready(&self, name: &str, readiness: &Readiness) -> Result<bool> {
+    fn ready(&self, name: &str, address: &SocketAddr) -> Result<bool> {
         if let Some(status) = self
             .children
             .lock()
@@ -123,12 +107,7 @@ impl Processes for NativeProcesses {
         {
             bail!("managed child {name} exited before readiness with {status}");
         }
-        match readiness {
-            Readiness::Tcp(address) => {
-                Ok(TcpStream::connect_timeout(address, Duration::from_millis(250)).is_ok())
-            }
-            Readiness::File(path) => Ok(path.is_file()),
-        }
+        Ok(TcpStream::connect_timeout(address, Duration::from_millis(250)).is_ok())
     }
     fn request_stop(&self, name: &str) -> Result<()> {
         #[cfg(windows)]
@@ -296,7 +275,7 @@ impl<P: Processes> Supervisor<P> {
             checkpoint((index + 1) as u32, name)?;
             let deadline = Instant::now() + START_TIMEOUT;
             loop {
-                let ready = match self.processes.ready(name, &spec.readiness) {
+                let ready = match self.processes.ready(name, &spec.ready_at) {
                     Ok(ready) => ready,
                     Err(error) => {
                         if let Err(cleanup_error) = self.stop_names(&started) {
@@ -360,7 +339,6 @@ pub fn runtime_plan(
     version_root: &Path,
     data_root: &Path,
     config: &RuntimeConfig,
-    database_url: &str,
 ) -> Result<Vec<ProcessSpec>> {
     config.validate()?;
     let database = loopback_address(&config.database_host, config.database_port)?;
@@ -380,7 +358,7 @@ pub fn runtime_plan(
                 config.database_port.to_string().into(),
             ],
             environment: BTreeMap::new(),
-            readiness: Readiness::Tcp(database),
+            ready_at: database,
         });
     }
     specs.push(ProcessSpec {
@@ -396,25 +374,7 @@ pub fn runtime_plan(
             data_root.join("data/nats").into_os_string(),
         ],
         environment: BTreeMap::new(),
-        readiness: Readiness::Tcp(nats),
-    });
-    let delivery_ready = data_root.join("state/delivery.ready");
-    specs.push(ProcessSpec {
-        name: "delivery".into(),
-        executable: version_root.join("bin/athanor-house-delivery.exe"),
-        arguments: vec!["run".into()],
-        environment: BTreeMap::from([
-            ("DATABASE_URL".into(), database_url.into()),
-            (
-                "SOLARISAEL_NATS_URL".into(),
-                format!("nats://{LOOPBACK_HOST}:{}", config.nats_port),
-            ),
-            (
-                "ATHANOR_DELIVERY_READY_FILE".into(),
-                delivery_ready.display().to_string(),
-            ),
-        ]),
-        readiness: Readiness::File(delivery_ready),
+        ready_at: nats,
     });
     Ok(specs)
 }

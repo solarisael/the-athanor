@@ -30,7 +30,6 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-delivery = { path = "../delivery" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tempfile = "3"
 tokio-tungstenite = "0.28"

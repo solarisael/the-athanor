@@ -7,7 +7,6 @@ members = [
     "crates/protocol",
     "crates/host",
     "crates/akasha",
-    "crates/delivery",
     "crates/origami",
     "crates/vault",
     "crates/athanor-install",

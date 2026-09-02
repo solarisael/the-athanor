@@ -1,32 +1,21 @@
-//! The delivery service: the composition that drives the crane shape.
-//!
-//! Every crane mechanic — lanes, envelope, outbox ledger, JetStream
-//! broker — lives in `origami::cranes`. This crate owns only the loop
-//! that walks them: claim, publish, consume, record, acknowledge. The
-//! three modules below are re-export shims for existing callers.
-
-pub mod broker;
-pub mod model;
-pub mod store;
+//! The delivery loop that walks the crane mechanics: claim, publish,
+//! consume, record, acknowledge. Lanes, envelope, outbox ledger and
+//! JetStream broker are siblings in this module; this file only drives them.
 
 use anyhow::{Context, Result, bail};
 use async_nats::jetstream::{consumer::PullConsumer, message::AckKind};
-#[cfg(test)]
-use origami::cranes::broker::{BOAT_READY_CONSUMER_NAME, CRANE_CONSUMER_NAME};
-use origami::{
-    cranes::{
-        broker::{
-            BOAT_READY_SUBJECT, Broker, CONSUMER_BACKOFF, CRANE_SUBJECT_FILTER, MAX_DELIVER,
-        },
-        envelope::{CraneEvent, classify_invalid_payload, event_id_hint},
-        lanes::Lane,
-        outbox::{ClaimedEvent, ReceiptDisposition, RecordedReceipt, Store},
+use super::{
+    broker::{
+        BOAT_READY_SUBJECT, BoatReceiptProjection, Broker, BrokerHealth, CONSUMER_BACKOFF,
+        CRANE_SUBJECT_FILTER, MAX_DELIVER, RECEIPT_SCHEMA_VERSION,
     },
-    sea::subject_owns,
+    envelope::{CraneEvent, classify_invalid_payload, event_id_hint},
+    lanes::Lane,
+    outbox::{ClaimedEvent, DatabaseHealth, ReceiptDisposition, RecordedReceipt, Store},
 };
+use crate::sea::subject_owns;
 use chrono::Utc;
 use futures_util::StreamExt;
-use protocol::{BOAT_RECEIPT_SCHEMA_VERSION, BoatReceiptProjection};
 use serde::Serialize;
 use std::time::Duration;
 use uuid::Uuid;
@@ -68,8 +57,8 @@ pub struct DeliveryHealth {
     pub ok: bool,
     pub authority: &'static str,
     pub delivery: &'static str,
-    pub database: origami::cranes::outbox::DatabaseHealth,
-    pub broker: origami::cranes::broker::BrokerHealth,
+    pub database: DatabaseHealth,
+    pub broker: BrokerHealth,
 }
 
 impl DeliveryService {
@@ -138,7 +127,7 @@ impl DeliveryService {
                 self.store
                     .mark_publish_failure(&claimed, self.lease_owner, &error.to_string())
                     .await?;
-                return Ok(if claimed.attempts >= origami::cranes::outbox::MAX_PUBLISH_ATTEMPTS {
+                return Ok(if claimed.attempts >= super::outbox::MAX_PUBLISH_ATTEMPTS {
                     PublishOutcome::DeadLettered
                 } else {
                     PublishOutcome::RetryScheduled
@@ -411,7 +400,7 @@ fn poison_reason_code(error: &anyhow::Error) -> Option<&'static str> {
 
 fn receipt_projection(receipt: &RecordedReceipt) -> BoatReceiptProjection {
     BoatReceiptProjection {
-        schema_version: BOAT_RECEIPT_SCHEMA_VERSION,
+        schema_version: RECEIPT_SCHEMA_VERSION,
         event_id: receipt.event_id.to_string(),
         record_id: receipt.record_id.to_string(),
         room: receipt.room.clone(),
@@ -427,8 +416,6 @@ fn consumer_retry_delay(delivery_count: i64) -> Duration {
         .min(CONSUMER_BACKOFF.len() - 1);
     CONSUMER_BACKOFF[index]
 }
-
-pub const CONFIGURATION_CONTRACT: &str = "PostgreSQL is authoritative. Set DATABASE_URL (required), ATHANOR_NATS_URL (default nats://127.0.0.1:4222), and optionally ATHANOR_DELIVERY_INSTANCE_ID (UUID). Commands: configure, publish-once, consume-once, once, run, health.";
 
 #[cfg(test)]
 mod tests {
@@ -585,9 +572,6 @@ mod tests {
             poison_reason_code(&anyhow::anyhow!("database unavailable")),
             None
         );
-        assert!(CONFIGURATION_CONTRACT.contains("PostgreSQL is authoritative"));
-        assert!(!CONFIGURATION_CONTRACT.contains(BOAT_READY_CONSUMER_NAME));
-        assert!(!CONFIGURATION_CONTRACT.contains(CRANE_CONSUMER_NAME));
         assert_eq!(consumer_retry_delay(1), CONSUMER_BACKOFF[0]);
         assert_eq!(
             consumer_retry_delay(MAX_DELIVER),

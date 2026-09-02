@@ -7,11 +7,11 @@ use summoning::presence::{
     PresenceCloseRequest, PresenceOpenRequest, PresenceResult, PresenceSettleRequest,
     PresenceTurnRequest,
 };
+use origami::cranes::broker::BoatReceiptProjection;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
 pub const HOST_SCHEMA_VERSION: u8 = 1;
-pub const BOAT_RECEIPT_SCHEMA_VERSION: u8 = 1;
 pub const PAPER_BOAT_RECEIPT_PROJECTION_ID: &str = "paper_boat_receipt";
 pub const PAPER_BOAT_RECEIPT_SUBSCRIBE: &str = "athanor.paper_boat_receipt.subscribe";
 pub const PAPER_BOAT_RECEIPT_SNAPSHOT: &str = "athanor.paper_boat_receipt.snapshot";
@@ -1680,18 +1680,6 @@ pub struct CommandOutcomeEvent {
     pub decision: Option<RecallPolicyDecision>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct BoatReceiptProjection {
-    pub schema_version: u8,
-    pub event_id: String,
-    pub record_id: String,
-    pub room: String,
-    pub processed_at: String,
-    pub original_stream_sequence: u64,
-    pub integrity_sha256: String,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PaperBoatReceiptStatus {
@@ -1721,27 +1709,6 @@ pub struct PaperBoatReceiptEvent {
 mod receipt_tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn broker_receipt_projection_is_exact_and_private_fields_are_refused() {
-        let valid = json!({
-            "schema_version": 1,
-            "event_id": "8d2c04ae-ef20-4fbc-8141-d0259cbf495f",
-            "record_id": "42",
-            "room": "work",
-            "processed_at": "2026-08-10T09:30:00Z",
-            "original_stream_sequence": 7,
-            "integrity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        });
-        let parsed: BoatReceiptProjection = serde_json::from_value(valid.clone()).unwrap();
-        assert_eq!(parsed.record_id, "42");
-
-        for private_field in ["body", "title"] {
-            let mut private = valid.clone();
-            private[private_field] = json!("must not cross");
-            assert!(serde_json::from_value::<BoatReceiptProjection>(private).is_err());
-        }
-    }
 
     #[test]
     fn recall_policy_state_reads_legacy_snake_case_receipts_but_writes_camel_case() {

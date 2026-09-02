@@ -1,5 +1,6 @@
+use origami::cranes::broker::{BoatReceiptProjection, RECEIPT_SCHEMA_VERSION};
 use protocol::{
-    BOAT_RECEIPT_SCHEMA_VERSION, BoatReceiptProjection, PaperBoatReceiptState,
+    PaperBoatReceiptState,
     PaperBoatReceiptStatus,
 };
 use serde::{Serialize, Serializer};
@@ -208,7 +209,7 @@ impl ReceiptTracker {
 }
 
 fn validate_projection(projection: &BoatReceiptProjection) -> Result<(), String> {
-    if projection.schema_version != BOAT_RECEIPT_SCHEMA_VERSION {
+    if projection.schema_version != RECEIPT_SCHEMA_VERSION {
         return Err("unsupported receipt schema_version".into());
     }
     uuid::Uuid::parse_str(&projection.event_id).map_err(|_| "event_id is not a UUID")?;

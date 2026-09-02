@@ -1,8 +1,9 @@
-use super::{RememberReceipt, RememberRequest, normalize_strings};
-use crate::backup;
+use super::{backup_warning, normalize_strings};
 use crate::config::{AppError, Config};
 use crate::settings::RoomSettings;
 use hearth::lesson_triggers::LessonTriggerSpec;
+use hearth::{RememberKind, RememberReceipt, RememberRequest};
+use protocol::RememberResult;
 use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -335,146 +336,144 @@ pub(super) async fn remember_lesson(
     cfg: &Config,
     settings: &RoomSettings,
     req: &RememberRequest,
-) -> Result<RememberReceipt, AppError> {
-    let text = req.lesson_body();
-    let tags = req
-        .tags
-        .iter()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    let thread_keys = normalize_strings(&req.thread_keys);
-    let register = normalize_strings(&req.register);
+) -> Result<RememberResult, AppError> {
+    let kind = req.kind();
+    let text = req.body();
+    let tags = normalize_strings(req.tags());
     // A voiced lesson with no register still has to satisfy the writing and
     // design readers, which filter on register; 'general' is that floor.
-    let register = if register.is_empty()
-        && matches!(req.kind.as_str(), "writing-lesson" | "design-lesson")
-    {
+    let register = if req.register().is_empty()
+        && matches!(
+            kind,
+            RememberKind::WritingLesson | RememberKind::DesignLesson
+        ) {
         vec!["general".to_owned()]
     } else {
-        register
+        req.register().to_vec()
     };
     let meta = json!({
         "origin": "direct-db-write",
-        "kind": req.kind,
+        "kind": kind.as_str(),
         "recorded_at": chrono::Utc::now().to_rfc3339(),
     });
-    let triggers = req.trigger_spec();
     let mut tx = pool.begin().await?;
-    let id = match req.kind.as_str() {
-        "coding-lesson" => {
+    let id = match kind {
+        RememberKind::CodingLesson => {
             write_coding_lesson_tx(
                 &mut tx,
-                req.scope.as_deref().unwrap_or("house"),
-                req.project.as_deref(),
-                req.voice.as_deref(),
-                req.shape.as_deref(),
-                &req.title,
+                req.scope().unwrap_or("house"),
+                req.project(),
+                req.voice(),
+                req.shape(),
+                req.title(),
                 text,
-                req.trigger_context.as_deref(),
-                req.proof_pattern.as_deref(),
-                &req.language_keys,
-                &req.technology_keys,
-                &thread_keys,
+                req.trigger_context(),
+                req.proof_pattern(),
+                req.language_keys(),
+                req.technology_keys(),
+                req.thread_keys(),
                 &tags,
-                req.source_memory_path.as_deref(),
-                &triggers,
+                req.source_memory_path(),
+                req.triggers(),
                 meta,
             )
             .await?
         }
-        "project-lesson" => {
+        RememberKind::ProjectLesson => {
+            let Some(project) = req.project() else {
+                return Err(AppError::Invalid(
+                    "project is required for project lessons".into(),
+                ));
+            };
             write_project_lesson_tx(
                 &mut tx,
-                req.project.as_deref().unwrap(),
-                &req.title,
+                project,
+                req.title(),
                 text,
-                req.trigger_context.as_deref(),
-                req.proof_pattern.as_deref(),
-                &req.language_keys,
-                &req.technology_keys,
-                &thread_keys,
+                req.trigger_context(),
+                req.proof_pattern(),
+                req.language_keys(),
+                req.technology_keys(),
+                req.thread_keys(),
                 &tags,
-                req.source_memory_path.as_deref(),
-                &triggers,
+                req.source_memory_path(),
+                req.triggers(),
                 meta,
             )
             .await?
         }
-        "writing-lesson" => {
+        RememberKind::WritingLesson => {
             write_writing_lesson_tx(
                 &mut tx,
-                req.voice.as_deref().unwrap_or("general"),
+                req.voice().unwrap_or("general"),
                 &register,
-                req.shape.as_deref(),
-                &req.title,
+                req.shape(),
+                req.title(),
                 text,
-                req.trigger_context.as_deref(),
-                &thread_keys,
+                req.trigger_context(),
+                req.thread_keys(),
                 &tags,
-                req.source_memory_path.as_deref(),
-                &triggers,
+                req.source_memory_path(),
+                req.triggers(),
                 meta,
             )
             .await?
         }
-        "design-lesson" => {
+        RememberKind::DesignLesson => {
             write_design_lesson_tx(
                 &mut tx,
-                req.voice.as_deref().unwrap_or("general"),
+                req.voice().unwrap_or("general"),
                 &register,
-                req.shape.as_deref(),
-                &req.title,
+                req.shape(),
+                req.title(),
                 text,
-                req.trigger_context.as_deref(),
-                req.proof_pattern.as_deref(),
-                req.example_text.as_deref(),
-                &thread_keys,
+                req.trigger_context(),
+                req.proof_pattern(),
+                req.example_text(),
+                req.thread_keys(),
                 &tags,
-                req.source_memory_path.as_deref(),
-                &triggers,
+                req.source_memory_path(),
+                req.triggers(),
                 meta,
             )
             .await?
         }
-        "audio-lesson" => {
+        RememberKind::AudioLesson => {
             write_audio_lesson_tx(
                 &mut tx,
-                req.shape.as_deref(),
-                &req.title,
+                req.shape(),
+                req.title(),
                 text,
-                req.trigger_context.as_deref(),
-                &thread_keys,
+                req.trigger_context(),
+                req.thread_keys(),
                 &tags,
-                req.source_memory_path.as_deref(),
-                &triggers,
+                req.source_memory_path(),
+                req.triggers(),
                 meta,
             )
             .await?
         }
-        _ => return Err(AppError::Invalid("unsupported remember kind".into())),
+        RememberKind::Memory => {
+            return Err(AppError::Invalid("memory is not a lesson kind".into()));
+        }
     };
     tx.commit().await?;
     let mut warnings = Vec::new();
-    if req.backup
+    if req.backup()
         && matches!(
-            req.kind.as_str(),
-            "project-lesson" | "audio-lesson" | "design-lesson"
+            kind,
+            RememberKind::ProjectLesson | RememberKind::AudioLesson | RememberKind::DesignLesson
         )
-        && let Err(error) =
-            backup::run_post_write(pool, &cfg.database_url, settings.backup_keep_count).await
     {
-        warnings.push(format!("backup failed: {error}"));
+        warnings.extend(backup_warning(pool, cfg, settings).await);
     }
-    Ok(RememberReceipt {
-        memory_id: 0,
-        lesson_id: id,
-        kind: req.kind.clone(),
-        room: req.room.clone(),
-        source_path: String::new(),
-        durable: true,
-        authority: "postgres",
+    let receipt = RememberReceipt::committed_lesson(
+        u64::try_from(id)
+            .map_err(|_| AppError::Invalid("database returned an invalid lesson ID".into()))?,
+        kind,
+        req.room().clone(),
         warnings,
-    })
+    )
+    .map_err(|error| AppError::Invalid(error.to_string()))?;
+    Ok(receipt.into())
 }

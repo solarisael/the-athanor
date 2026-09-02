@@ -176,6 +176,9 @@ impl RememberRequest {
         if body.trim().is_empty() {
             return Err(DomainError::EmptyBody);
         }
+        if kind.is_lesson() && room.as_str() == "house" {
+            return Err(DomainError::ReservedRoomKey);
+        }
         let (
             source_path,
             source_memory_path,
@@ -596,6 +599,47 @@ mod tests {
             ),
             Err(DomainError::EmptyBody)
         );
+    }
+
+    #[test]
+    fn house_room_refuses_every_lesson_kind() {
+        for kind in [
+            RememberKind::CodingLesson,
+            RememberKind::ProjectLesson,
+            RememberKind::WritingLesson,
+            RememberKind::AudioLesson,
+            RememberKind::DesignLesson,
+        ] {
+            let details = RememberLessonDetails {
+                backup: false,
+                source_memory_path: None,
+                shape: None,
+                voice: None,
+                register: vec![],
+                scope: None,
+                project: Some("athanor".into()),
+                proof_pattern: None,
+                trigger_context: None,
+                example_text: None,
+                language_keys: vec![],
+                technology_keys: vec![],
+                thread_keys: vec![],
+                tags: vec![],
+                triggers: LessonTriggerSpec::default(),
+            };
+            assert_eq!(
+                RememberRequest::new_lesson(
+                    RoomKey::for_memory_write("house").unwrap(),
+                    kind,
+                    "validation probe".into(),
+                    "validation body".into(),
+                    details,
+                ),
+                Err(DomainError::ReservedRoomKey),
+                "{}",
+                kind.as_str()
+            );
+        }
     }
 
     #[test]

@@ -80,7 +80,7 @@ pub use lesson::{
 };
 pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
 pub use recall::{RecallParams, RecallResult, recall, refresh_semantic_vocabulary};
-pub use remember::{RememberReceipt, RememberRequest, ThreadContinuation, remember};
+pub use remember::remember;
 pub use restart::{
     EXITING_DEADLINE_SECS, RELAUNCH_ATTEMPT_LIMIT, RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS,
     STORM_MAX_EXITING_PER_WINDOW, STORM_WINDOW_SECS, restart_claim, restart_request,

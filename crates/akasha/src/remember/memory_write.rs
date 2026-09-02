@@ -1,12 +1,17 @@
-use super::{
-    ThreadContinuation, chunk_body, derive_dates, embed, normalize_threads, token_estimate,
-};
+use super::{chunk_body, derive_dates, embed, normalize_strings, token_estimate};
 use crate::config::{AppError, Config, EmbeddingMode, HTTP_CLIENT};
 use crate::settings::RoomSettings;
 use chrono::NaiveDate;
+use hearth::ThreadContinuation;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use std::collections::{BTreeSet, HashSet};
+
+/// Memory IDs are PostgreSQL BIGINT; the domain carries them as u64.
+fn bigint(id: u64, field: &str) -> Result<i64, AppError> {
+    i64::try_from(id)
+        .map_err(|_| AppError::Invalid(format!("{field} is out of PostgreSQL BIGINT range")))
+}
 
 pub(crate) struct PreparedMemoryWrite {
     primary_date: NaiveDate,
@@ -25,7 +30,7 @@ pub(crate) async fn prepare_memory_write(
     threads: &[String],
     primary_date: NaiveDate,
 ) -> Result<PreparedMemoryWrite, AppError> {
-    let threads = normalize_threads(threads);
+    let threads = normalize_strings(threads);
     let dates = derive_dates(source_path, primary_date);
     let chunks = chunk_body(body, settings);
     let mut warnings = Vec::new();
@@ -78,7 +83,7 @@ pub(crate) async fn write_memory_tx(
     title: &str,
     source_path: &str,
     body: &str,
-    supersedes: &[i64],
+    supersedes: &[u64],
     meta: Value,
     prepared: &PreparedMemoryWrite,
 ) -> Result<(i64, bool), AppError> {
@@ -192,7 +197,7 @@ pub(crate) async fn write_memory_tx(
     for old_id in supersedes.iter().copied().collect::<BTreeSet<_>>() {
         sqlx::query("UPDATE memories SET superseded_by=$1 WHERE id=$2 AND id<>$1")
             .bind(memory_id)
-            .bind(old_id)
+            .bind(bigint(old_id, "supersedes ID")?)
             .execute(&mut **tx)
             .await?;
     }
@@ -259,7 +264,8 @@ pub(super) async fn write_continuations_tx(
         if !seen.insert(thread_key) {
             continue;
         }
-        if continuation.previous_memory_id == memory_id {
+        let previous_memory_id = bigint(continuation.previous_memory_id, "previousMemoryId")?;
+        if previous_memory_id == memory_id {
             return Err(AppError::Invalid("a memory cannot continue itself".into()));
         }
         let events = sqlx::query(
@@ -278,13 +284,12 @@ pub(super) async fn write_continuations_tx(
         .bind(room)
         .bind(thread_key)
         .bind(memory_id)
-        .bind(continuation.previous_memory_id)
+        .bind(previous_memory_id)
         .fetch_optional(&mut **tx)
         .await?;
         let Some(events) = events else {
             return Err(AppError::Invalid(format!(
-                "previous memory {} must share room {room} and thread {thread_key}",
-                continuation.previous_memory_id
+                "previous memory {previous_memory_id} must share room {room} and thread {thread_key}"
             )));
         };
         let thread_id: i64 = sqlx::Row::try_get(&events, "thread_id")?;

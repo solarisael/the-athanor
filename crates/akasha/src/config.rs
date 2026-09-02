@@ -291,7 +291,7 @@ fn validation_owner(operation: &str) -> (&'static str, &'static str) {
     match operation {
         "canon_write" => ("src/canon.rs", "canon_write"),
         "canon_read" => ("src/canon.rs", "canon_read"),
-        "remember" => ("src/remember.rs", "RememberRequest::validate"),
+        "remember" => ("src/remember/mod.rs", "remember"),
         "paper_boat_sleep" => ("src/paper_boat.rs", "PaperBoatSleepRequest::new"),
         "paper_boat_wake" => ("src/paper_boat.rs", "PaperBoatWakeRequest::new"),
         "recall" => ("src/recall.rs", "RecallParams::validate"),

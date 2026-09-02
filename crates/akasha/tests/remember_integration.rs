@@ -1,7 +1,9 @@
-use akasha::{
-    Config, EmbeddingMode, RecallParams, RememberRequest, ThreadContinuation,
-    backup::source_migrations, recall, remember,
+use akasha::{Config, EmbeddingMode, RecallParams, backup::source_migrations, recall, remember};
+use hearth::{
+    RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberRequest, RoomKey,
+    ThreadContinuation, lesson_triggers::LessonTriggerSpec,
 };
+use sqlx::Row;
 use sqlx::{
     PgPool,
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -124,36 +126,19 @@ async fn isolated_database_guard() {
     let receipt = remember(
         &pool,
         &cfg,
-        RememberRequest {
-            room: "isolated-test".into(),
-            kind: "memory".into(),
-            title: "isolated integration proof".into(),
-            body: body.into(),
-            lesson: None,
-            source_path: Some(source_path.clone()),
-            source_memory_path: None,
-            threads: vec!["integration".into()],
-            continues: vec![],
-            supersedes: vec![],
-            shape: None,
-            voice: None,
-            register: vec![],
-            scope: None,
-            project: None,
-            proof_pattern: None,
-            trigger_context: None,
-            example_text: None,
-            language_keys: vec![],
-            technology_keys: vec![],
-            thread_keys: vec![],
-            tags: vec![],
-            condition: vec![],
-            ast_condition: vec![],
-            trigger_scope: vec![],
-            interrupt_mode: None,
-            repeat_cooldown_secs: None,
-            backup: false,
-        },
+        RememberRequest::new_memory(
+            RoomKey::for_memory_write("isolated-test").unwrap(),
+            "isolated integration proof".into(),
+            body.into(),
+            RememberMemoryDetails {
+                source_path: Some(source_path.clone()),
+                threads: vec!["integration".into()],
+                continues: vec![],
+                supersedes: vec![],
+                backup: false,
+            },
+        )
+        .unwrap(),
     )
     .await
     .expect("remember mutation must commit");
@@ -170,7 +155,7 @@ async fn isolated_database_guard() {
     let lexical_chunks: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM memory_chunks WHERE memory_id=$1 AND body_embedding IS NULL",
     )
-    .bind(receipt.memory_id)
+    .bind(i64::try_from(receipt.memory_id).unwrap())
     .fetch_one(&pool)
     .await
     .unwrap();
@@ -235,36 +220,19 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
     let root = remember(
         &pool,
         &cfg,
-        RememberRequest {
-            room: "thread-continuity-integration".into(),
-            kind: "memory".into(),
-            title: "root decision".into(),
-            body: "The initial explicit work page decision.".into(),
-            lesson: None,
-            source_path: Some(root_source.clone()),
-            source_memory_path: None,
-            threads: vec![thread.into()],
-            continues: vec![],
-            supersedes: vec![],
-            shape: None,
-            voice: None,
-            register: vec![],
-            scope: None,
-            project: None,
-            proof_pattern: None,
-            trigger_context: None,
-            example_text: None,
-            language_keys: vec![],
-            technology_keys: vec![],
-            thread_keys: vec![],
-            tags: vec![],
-            condition: vec![],
-            ast_condition: vec![],
-            trigger_scope: vec![],
-            interrupt_mode: None,
-            repeat_cooldown_secs: None,
-            backup: false,
-        },
+        RememberRequest::new_memory(
+            RoomKey::for_memory_write("thread-continuity-integration").unwrap(),
+            "root decision".into(),
+            "The initial explicit work page decision.".into(),
+            RememberMemoryDetails {
+                source_path: Some(root_source.clone()),
+                threads: vec![thread.into()],
+                continues: vec![],
+                supersedes: vec![],
+                backup: false,
+            },
+        )
+        .unwrap(),
     )
     .await
     .expect("root memory must commit");
@@ -272,39 +240,22 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
     let next = remember(
         &pool,
         &cfg,
-        RememberRequest {
-            room: "thread-continuity-integration".into(),
-            kind: "memory".into(),
-            title: "successor decision".into(),
-            body: next_body.into(),
-            lesson: None,
-            source_path: Some(next_source.clone()),
-            source_memory_path: None,
-            threads: vec![thread.into()],
-            continues: vec![ThreadContinuation {
-                thread: thread.into(),
-                previous_memory_id: root.memory_id,
-            }],
-            supersedes: vec![],
-            shape: None,
-            voice: None,
-            register: vec![],
-            scope: None,
-            project: None,
-            proof_pattern: None,
-            trigger_context: None,
-            example_text: None,
-            language_keys: vec![],
-            technology_keys: vec![],
-            thread_keys: vec![],
-            tags: vec![],
-            condition: vec![],
-            ast_condition: vec![],
-            trigger_scope: vec![],
-            interrupt_mode: None,
-            repeat_cooldown_secs: None,
-            backup: false,
-        },
+        RememberRequest::new_memory(
+            RoomKey::for_memory_write("thread-continuity-integration").unwrap(),
+            "successor decision".into(),
+            next_body.into(),
+            RememberMemoryDetails {
+                source_path: Some(next_source.clone()),
+                threads: vec![thread.into()],
+                continues: vec![ThreadContinuation {
+                    thread: thread.into(),
+                    previous_memory_id: root.memory_id,
+                }],
+                supersedes: vec![],
+                backup: false,
+            },
+        )
+        .unwrap(),
     )
     .await
     .expect("continuation memory must commit");
@@ -327,7 +278,7 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
     let candidate = recalled
         .retrieval_candidates
         .iter()
-        .find(|candidate| candidate["memory_id"].as_i64() == Some(next.memory_id))
+        .find(|candidate| candidate["memory_id"].as_u64() == Some(next.memory_id))
         .expect("the successor must be surfaced as a fused recall candidate");
     let neighbors = candidate["thread_neighbors"]
         .as_array()
@@ -335,7 +286,7 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
     assert!(neighbors.iter().any(|neighbor| {
         neighbor["thread"].as_str() == Some(thread)
             && neighbor["direction"].as_str() == Some("previous")
-            && neighbor["id"].as_i64() == Some(root.memory_id)
+            && neighbor["id"].as_u64() == Some(root.memory_id)
             && neighbor["authority_state"].as_str() == Some("active")
     }));
 
@@ -346,6 +297,102 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
         .await
         .expect("thread integration memories must clean up");
     pool.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL database"]
+async fn lesson_write_lands_typed_columns_and_trigger_spec() {
+    let url = isolated_database_url();
+    let options = PgConnectOptions::from_str(&url).expect("dedicated test URL must be valid");
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(options)
+        .await
+        .expect("isolated database must be reachable");
+    let cfg = Config {
+        database_url: url,
+        embed_url: None,
+        embed_model: "disabled".into(),
+        embed_dimension: 2048,
+        embedding_mode: EmbeddingMode::DisabledForTest,
+        giga_source_ledger_dir: None,
+        giga_source_room: None,
+        house_tz: "America/Sao_Paulo".into(),
+    };
+    let title = format!("lesson door proof {}", Uuid::new_v4());
+    let receipt = remember(
+        &pool,
+        &cfg,
+        RememberRequest::new_lesson(
+            RoomKey::new("isolated-test").unwrap(),
+            RememberKind::CodingLesson,
+            title.clone(),
+            "Bind rows by column name, never by position.".into(),
+            RememberLessonDetails {
+                backup: false,
+                source_memory_path: None,
+                shape: Some("structure".into()),
+                voice: Some("kodo".into()),
+                register: vec![],
+                scope: None,
+                project: None,
+                proof_pattern: Some("A renamed column fails as NOT NULL.".into()),
+                trigger_context: Some("Writing sqlx inserts.".into()),
+                example_text: None,
+                language_keys: vec!["rust".into(), " rust ".into()],
+                technology_keys: vec!["sqlx".into()],
+                thread_keys: vec![],
+                tags: vec![" sql ".into(), "sql".into()],
+                triggers: LessonTriggerSpec {
+                    condition: vec![r"\.bind\(".into()],
+                    trigger_scope: vec!["tool:edit".into()],
+                    interrupt_mode: Some("remind".into()),
+                    ..LessonTriggerSpec::default()
+                },
+            },
+        )
+        .unwrap(),
+    )
+    .await
+    .expect("lesson write must commit");
+    assert_eq!(receipt.kind.as_deref(), Some("coding-lesson"));
+    assert_eq!(receipt.memory_id, 0);
+    assert!(receipt.room.is_empty());
+    let lesson_id = receipt.lesson_id.expect("lesson receipt carries its id");
+
+    let row = sqlx::query(
+        "SELECT kind_path,scope,voice,shape,title,language_keys,technology_keys,tags,condition,trigger_scope,interrupt_mode,meta->>'kind' AS meta_kind FROM lessons WHERE id=$1",
+    )
+    .bind(i64::try_from(lesson_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .expect("the lesson row must exist");
+    assert_eq!(row.get::<String, _>("kind_path"), "coding/structure");
+    assert_eq!(row.get::<String, _>("scope"), "house");
+    assert_eq!(row.get::<String, _>("voice"), "kodo");
+    assert_eq!(row.get::<String, _>("title"), title);
+    assert_eq!(row.get::<Vec<String>, _>("language_keys"), vec!["rust"]);
+    assert_eq!(row.get::<Vec<String>, _>("technology_keys"), vec!["sqlx"]);
+    assert_eq!(row.get::<Vec<String>, _>("tags"), vec!["sql"]);
+    assert_eq!(row.get::<Vec<String>, _>("condition"), vec![r"\.bind\("]);
+    assert_eq!(
+        row.get::<Vec<String>, _>("trigger_scope"),
+        vec!["tool:edit"]
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("interrupt_mode").as_deref(),
+        Some("remind")
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("meta_kind").as_deref(),
+        Some("coding-lesson")
+    );
+
+    sqlx::query("DELETE FROM lessons WHERE id=$1")
+        .bind(i64::try_from(lesson_id).unwrap())
+        .execute(&pool)
+        .await
+        .expect("cleanup");
 }
 
 #[tokio::test]
@@ -730,33 +777,3 @@ async fn source_migrations_accepts_text_version_columns() {
         .expect("isolated schema cleanup must succeed");
     pool.close().await;
 }
-
-fn validation_request(room: &str, kind: &str) -> RememberRequest {
-    serde_json::from_value(serde_json::json!({
-        "room": room,
-        "kind": kind,
-        "title": "validation probe",
-        "body": "validation body",
-    }))
-    .expect("request fixture must deserialize")
-}
-
-#[test]
-fn validate_refuses_house_room_for_every_lesson_kind() {
-    for kind in [
-        "coding-lesson",
-        "project-lesson",
-        "writing-lesson",
-        "audio-lesson",
-        "design-lesson",
-    ] {
-        let error = validation_request("house", kind)
-            .validate()
-            .expect_err("house lesson writes must be refused");
-        assert!(
-            format!("{error:?}").contains("house accepts only memory writes"),
-            "unexpected refusal for {kind}: {error:?}"
-        );
-    }
-}
-

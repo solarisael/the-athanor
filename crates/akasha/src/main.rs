@@ -4,17 +4,15 @@ use akasha::insula_writer::{
 };
 use akasha::migrations::{migration_pool, run_migrations};
 use akasha::{
-    AppError, Config, DesignDocumentQueryParams,
-    DesignDocumentWriteParams, EntityResolveParams, LessonContextParams, LessonDeleteParams,
-    LessonQueryParams, LessonTriggerMatchParams, LessonUpdateParams, OutcomeClass,
-    QuestBoardParams, QuestChargebookParams, QuestClaimParams, QuestClockParams,
-    QuestEvidenceParams, QuestPostParams, QuestReportParams, RecallParams, RememberRequest,
-    SubstrateHealthOptions, ThreadContinuation as ServiceThreadContinuation, TrustedBinding,
-    anamnesis, anamnesis_write, canon_read, canon_write, cluster_maintenance,
-    design_document_query, design_document_write, entity_resolve, giga_candidate_list,
-    giga_conversation_ingest, giga_event_claim, giga_event_finish, giga_event_ingest,
-    giga_event_replay, giga_health, giga_promote, giga_queue_maintenance, giga_review,
-    giga_tool_promote, giga_tool_review, hallway_create, hallway_inbox, hallway_join,
+    AppError, Config, DesignDocumentQueryParams, DesignDocumentWriteParams, EntityResolveParams,
+    LessonContextParams, LessonDeleteParams, LessonQueryParams, LessonTriggerMatchParams,
+    LessonUpdateParams, OutcomeClass, QuestBoardParams, QuestChargebookParams, QuestClaimParams,
+    QuestClockParams, QuestEvidenceParams, QuestPostParams, QuestReportParams, RecallParams,
+    SubstrateHealthOptions, TrustedBinding, anamnesis, anamnesis_write, canon_read, canon_write,
+    cluster_maintenance, design_document_query, design_document_write, entity_resolve,
+    giga_candidate_list, giga_conversation_ingest, giga_event_claim, giga_event_finish,
+    giga_event_ingest, giga_event_replay, giga_health, giga_promote, giga_queue_maintenance,
+    giga_review, giga_tool_promote, giga_tool_review, hallway_create, hallway_inbox, hallway_join,
     hallway_knock, hallway_knock_policy, hallway_post, hallway_read, lesson_context, lesson_delete,
     lesson_query, lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake,
     quest_board, quest_chargebook, quest_claim, quest_clock, quest_evidence, quest_post,
@@ -27,15 +25,12 @@ use hearth::{
     CanonReadRequest, CanonWriteRequest,
     ClusterMaintenanceRequest as DomainClusterMaintenanceRequest, GigaEvent, GigaEventClaimRequest,
     GigaEventFinishRequest, GigaEventReplayRequest, GigaPromotionRequest,
-    GigaQueueMaintenanceRequest, GigaReviewAction,
-    RecallRequest as DomainRecallRequest, RememberRequest as DomainRememberRequest,
+    GigaQueueMaintenanceRequest, GigaReviewAction, RecallRequest as DomainRecallRequest,
+    RememberRequest,
     hallway::{
         HallwayCreateRequest, HallwayInboxRequest, HallwayJoinRequest, HallwayKnockPolicyRequest,
         HallwayKnockRequest, HallwayPostRequest, HallwayReadRequest,
     },
-};
-use summoning::{
-    AnamnesisReadRequest, AnamnesisWriteRequest, PaperBoatSleepRequest, PaperBoatWakeRequest,
 };
 use protocol::restart::{
     RestartClaimParams, RestartRequestParams, RestartStatusParams, RestartTransitionParams,
@@ -55,6 +50,9 @@ use std::{
     env,
     path::PathBuf,
     process::{Child, Command, Stdio},
+};
+use summoning::{
+    AnamnesisReadRequest, AnamnesisWriteRequest, PaperBoatSleepRequest, PaperBoatWakeRequest,
 };
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use vault::{VaultRecallRequest, recall as vault_recall};
@@ -118,64 +116,6 @@ fn invalid_params(message: impl Into<String>) -> ProtocolError {
     ProtocolError::InvalidParams(message.into())
 }
 
-fn positive_i64(value: u64, field: &str) -> Result<i64, ProtocolError> {
-    i64::try_from(value)
-        .map_err(|_| invalid_params(format!("{field} is out of PostgreSQL BIGINT range")))
-}
-
-fn remember_service_request(
-    request: DomainRememberRequest,
-) -> Result<RememberRequest, ProtocolError> {
-    let supersedes = request
-        .supersedes()
-        .iter()
-        .map(|&id| positive_i64(id, "supersedes ID"))
-        .collect::<Result<Vec<_>, _>>()?;
-    let continues = request
-        .continues()
-        .iter()
-        .map(|continuation| {
-            Ok(ServiceThreadContinuation {
-                thread: continuation.thread.clone(),
-                previous_memory_id: positive_i64(
-                    continuation.previous_memory_id,
-                    "previousMemoryId",
-                )?,
-            })
-        })
-        .collect::<Result<Vec<_>, ProtocolError>>()?;
-    Ok(RememberRequest {
-        room: request.room().to_string(),
-        kind: request.kind().as_str().into(),
-        title: request.title().into(),
-        body: request.body().into(),
-        lesson: None,
-        source_path: request.source_path().map(str::to_owned),
-        source_memory_path: request.source_memory_path().map(str::to_owned),
-        threads: request.threads().to_vec(),
-        continues,
-        supersedes,
-        shape: request.shape().map(str::to_owned),
-        voice: request.voice().map(str::to_owned),
-        register: request.register().to_vec(),
-        scope: request.scope().map(str::to_owned),
-        project: request.project().map(str::to_owned),
-        proof_pattern: request.proof_pattern().map(str::to_owned),
-        trigger_context: request.trigger_context().map(str::to_owned),
-        example_text: request.example_text().map(str::to_owned),
-        language_keys: request.language_keys().to_vec(),
-        technology_keys: request.technology_keys().to_vec(),
-        thread_keys: request.thread_keys().to_vec(),
-        tags: request.tags().to_vec(),
-        condition: request.triggers().condition.clone(),
-        ast_condition: request.triggers().ast_condition.clone(),
-        trigger_scope: request.triggers().trigger_scope.clone(),
-        interrupt_mode: request.triggers().interrupt_mode.clone(),
-        repeat_cooldown_secs: request.triggers().repeat_cooldown_secs,
-        backup: request.backup(),
-    })
-}
-
 fn recall_service_request(request: DomainRecallRequest) -> RecallParams {
     RecallParams {
         room: request.room().to_string(),
@@ -210,10 +150,7 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
         "canon_read" => envelope
             .canon_read_request()
             .map(ProtocolRequest::CanonRead),
-        "remember" => envelope
-            .remember_request()
-            .and_then(remember_service_request)
-            .map(ProtocolRequest::Remember),
+        "remember" => envelope.remember_request().map(ProtocolRequest::Remember),
         "paper_boat_sleep" => envelope
             .paper_boat_sleep_request()
             .map(ProtocolRequest::PaperBoatSleep),
@@ -248,9 +185,7 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
         "vault_recall" => envelope
             .vault_recall_request()
             .map(ProtocolRequest::VaultRecall),
-        "anamnesis" => envelope
-            .anamnesis_request()
-            .map(ProtocolRequest::Anamnesis),
+        "anamnesis" => envelope.anamnesis_request().map(ProtocolRequest::Anamnesis),
         "anamnesis_write" => match envelope.params.get("operation").and_then(Value::as_str) {
             Some("add") => envelope
                 .anamnesis_add_request()
@@ -964,7 +899,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let span = start_span(&binding, INSULA_COMPONENT, INSULA_LAYER, operation);
                 let validation = match &request {
                     ProtocolRequest::CanonWrite(_) | ProtocolRequest::CanonRead(_) => Ok(()),
-                    ProtocolRequest::Remember(request) => request.validate(),
+                    ProtocolRequest::Remember(_) => Ok(()),
                     ProtocolRequest::PaperBoatSleep(_) | ProtocolRequest::PaperBoatWake(_) => {
                         Ok(())
                     }
@@ -1529,7 +1464,7 @@ mod tests {
             r#"{"protocol":1,"id":"r1","method":"remember","params":{"room":"room","kind":"memory","title":"title","body":"body","supersedes":["12","3","12"]}}"#,
         );
         match request.unwrap() {
-            ProtocolRequest::Remember(request) => assert_eq!(request.supersedes, vec![12, 3]),
+            ProtocolRequest::Remember(request) => assert_eq!(request.supersedes(), &[12, 3]),
             _ => panic!("expected remember"),
         }
     }

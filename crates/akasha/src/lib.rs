@@ -22,10 +22,7 @@ pub mod settings;
 pub mod state;
 mod timeline;
 
-pub use anamnesis::{
-    AnamnesisParams, AnamnesisReceipt, AnamnesisResult, AnamnesisSeed, AnamnesisWrite, anamnesis,
-    anamnesis_write,
-};
+pub use anamnesis::{anamnesis, anamnesis_write};
 pub use backup::{backup, restore};
 pub use canon::{canon_read, canon_write};
 pub use cluster::{

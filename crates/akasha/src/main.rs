@@ -4,7 +4,7 @@ use akasha::insula_writer::{
 };
 use akasha::migrations::{migration_pool, run_migrations};
 use akasha::{
-    AnamnesisParams, AnamnesisSeed, AnamnesisWrite, AppError, Config, DesignDocumentQueryParams,
+    AppError, Config, DesignDocumentQueryParams,
     DesignDocumentWriteParams, EntityResolveParams, LessonContextParams, LessonDeleteParams,
     LessonQueryParams, LessonTriggerMatchParams, LessonUpdateParams, OutcomeClass,
     QuestBoardParams, QuestChargebookParams, QuestClaimParams, QuestClockParams,
@@ -22,7 +22,7 @@ use akasha::{
     restart_status, restart_transition, restart_verify, spawn_giga_worker, substrate_health,
     substrate_health_with_config, validate_trusted_binding,
 };
-use chrono::{DateTime, Duration, NaiveDate, Timelike, Utc};
+use chrono::{DateTime, Duration, Timelike, Utc};
 use hearth::{
     CanonReadRequest, CanonWriteRequest,
     ClusterMaintenanceRequest as DomainClusterMaintenanceRequest, GigaEvent, GigaEventClaimRequest,
@@ -35,10 +35,7 @@ use hearth::{
     },
 };
 use summoning::{
-    AnamnesisAddRequest as DomainAnamnesisAddRequest,
-    AnamnesisAppendRequest as DomainAnamnesisAppendRequest,
-    AnamnesisReadRequest as DomainAnamnesisReadRequest, PaperBoatSleepRequest,
-    PaperBoatWakeRequest,
+    AnamnesisReadRequest, AnamnesisWriteRequest, PaperBoatSleepRequest, PaperBoatWakeRequest,
 };
 use protocol::restart::{
     RestartClaimParams, RestartRequestParams, RestartStatusParams, RestartTransitionParams,
@@ -78,8 +75,8 @@ enum ProtocolRequest {
     HallwayKnock(HallwayKnockRequest),
     Recall(RecallParams),
     VaultRecall(VaultRecallParams),
-    Anamnesis(AnamnesisParams),
-    AnamnesisWrite(AnamnesisWrite),
+    Anamnesis(AnamnesisReadRequest),
+    AnamnesisWrite(AnamnesisWriteRequest),
     LessonQuery(LessonQueryParams),
     QuestPost(QuestPostParams),
     QuestBoard(QuestBoardParams),
@@ -124,20 +121,6 @@ fn invalid_params(message: impl Into<String>) -> ProtocolError {
 fn positive_i64(value: u64, field: &str) -> Result<i64, ProtocolError> {
     i64::try_from(value)
         .map_err(|_| invalid_params(format!("{field} is out of PostgreSQL BIGINT range")))
-}
-
-fn positive_i32(value: u32, field: &str) -> Result<i32, ProtocolError> {
-    i32::try_from(value)
-        .map_err(|_| invalid_params(format!("{field} is out of PostgreSQL INTEGER range")))
-}
-
-fn optional_date(value: Option<&str>, field: &str) -> Result<Option<NaiveDate>, ProtocolError> {
-    value
-        .map(|raw| {
-            NaiveDate::parse_from_str(raw, "%Y-%m-%d")
-                .map_err(|_| invalid_params(format!("{field} must use YYYY-MM-DD")))
-        })
-        .transpose()
 }
 
 fn remember_service_request(
@@ -205,90 +188,6 @@ fn recall_service_request(request: DomainRecallRequest) -> RecallParams {
     }
 }
 
-fn anamnesis_service_request(request: DomainAnamnesisReadRequest) -> AnamnesisParams {
-    AnamnesisParams {
-        room: request.room().to_string(),
-        mode: request.mode().as_str().into(),
-        query: request.query().unwrap_or_default().into(),
-        limit: Some(request.limit()),
-    }
-}
-
-fn anamnesis_add_service_request(
-    request: DomainAnamnesisAddRequest,
-) -> Result<AnamnesisWrite, ProtocolError> {
-    let seed_rep = request
-        .seed_rep()
-        .map(|seed| {
-            Ok(AnamnesisSeed {
-                number: positive_i32(seed.number(), "seedRep.number")?,
-                occurred_on: optional_date(seed.occurred_on(), "seedRep.occurredOn")?,
-                how_it_went: seed.how_it_went().into(),
-                portal_pull: seed.portal_pull().into(),
-                lighter: seed.lighter().into(),
-                source_path: None,
-            })
-        })
-        .transpose()?;
-    Ok(AnamnesisWrite {
-        room: request.room().to_string(),
-        operation: "add".into(),
-        kind: Some(request.kind().as_str().into()),
-        fidelity: Some(request.fidelity().as_str().into()),
-        activation: Some(request.activation().as_str().into()),
-        dormant: request.dormant(),
-        title: request.title().into(),
-        shape: request.shape().map(str::to_owned),
-        ramp: Some(request.ramp().into()),
-        counsel: request.counsel().map(str::to_owned),
-        peak: request.peak().map(str::to_owned),
-        beginning: request.beginning().map(str::to_owned),
-        verify_note: request.verify_note().map(str::to_owned),
-        source_paths: request.source_paths().to_vec(),
-        canon_links: request.canon().to_vec(),
-        tags: request.tags().to_vec(),
-        allow_empty_cycle: request.allow_empty_cycle(),
-        seed_rep,
-        backup: true,
-        rep_number: None,
-        occurred_on: None,
-        how_it_went: None,
-        portal_pull: None,
-        lighter: None,
-    })
-}
-
-fn anamnesis_append_service_request(
-    request: DomainAnamnesisAppendRequest,
-) -> Result<AnamnesisWrite, ProtocolError> {
-    Ok(AnamnesisWrite {
-        room: request.room().to_string(),
-        operation: "append-rep".into(),
-        kind: None,
-        fidelity: None,
-        activation: None,
-        dormant: false,
-        title: request.title().into(),
-        shape: None,
-        ramp: None,
-        counsel: None,
-        peak: None,
-        beginning: None,
-        verify_note: None,
-        source_paths: request.source_paths().to_vec(),
-        canon_links: Vec::new(),
-        tags: Vec::new(),
-        allow_empty_cycle: false,
-        seed_rep: None,
-        backup: true,
-        rep_number: Some(positive_i32(request.rep_number(), "repNumber")?),
-        occurred_on: optional_date(request.occurred_on(), "occurredOn")?,
-        how_it_went: Some(request.how_it_went().into()),
-        portal_pull: Some(request.portal_pull().into()),
-        lighter: Some(request.lighter().into()),
-    })
-}
-
 fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
     let envelope = match RequestEnvelope::parse_line(line) {
         Ok(envelope) => envelope,
@@ -351,16 +250,15 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
             .map(ProtocolRequest::VaultRecall),
         "anamnesis" => envelope
             .anamnesis_request()
-            .map(anamnesis_service_request)
             .map(ProtocolRequest::Anamnesis),
         "anamnesis_write" => match envelope.params.get("operation").and_then(Value::as_str) {
             Some("add") => envelope
                 .anamnesis_add_request()
-                .and_then(anamnesis_add_service_request)
+                .map(AnamnesisWriteRequest::Add)
                 .map(ProtocolRequest::AnamnesisWrite),
             Some("append-rep") => envelope
                 .anamnesis_append_request()
-                .and_then(anamnesis_append_service_request)
+                .map(AnamnesisWriteRequest::AppendRep)
                 .map(ProtocolRequest::AnamnesisWrite),
             Some(operation) => Err(invalid_params(format!(
                 "unsupported anamnesis_write operation: {operation}"
@@ -1093,7 +991,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     ProtocolRequest::Recall(request) => request.validate(),
                     ProtocolRequest::VaultRecall(_) => Ok(()),
-                    ProtocolRequest::Anamnesis(request) => request.validate().map(|_| ()),
                     ProtocolRequest::QuestPost(request) => request.validate(),
                     ProtocolRequest::QuestBoard(request) => request.validate(),
                     ProtocolRequest::QuestClaim(request) => request.validate(),
@@ -1116,7 +1013,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::RestartStatus(request) => {
                         request.validate().map_err(AppError::Invalid)
                     }
-                    ProtocolRequest::AnamnesisWrite(_)
+                    ProtocolRequest::Anamnesis(_)
+                    | ProtocolRequest::AnamnesisWrite(_)
                     | ProtocolRequest::LessonQuery(_)
                     | ProtocolRequest::LessonContext(_)
                     | ProtocolRequest::LessonUpdate(_)
@@ -1722,9 +1620,9 @@ mod tests {
             r#"{"protocol":1,"id":"a1","method":"anamnesis_write","params":{"operation":"append-rep","room":"tuner","title":"cycle","repNumber":1,"occurredOn":"2026-07-23","howItWent":"clean","portalPull":"none","lighter":"yes","sourcePaths":["memory/a.md"]}}"#,
         );
         match request.unwrap() {
-            ProtocolRequest::AnamnesisWrite(request) => {
-                assert_eq!(request.operation, "append-rep");
-                assert_eq!(request.rep_number, Some(1));
+            ProtocolRequest::AnamnesisWrite(AnamnesisWriteRequest::AppendRep(request)) => {
+                assert_eq!(request.rep().number(), 1);
+                assert_eq!(request.title(), "cycle");
             }
             _ => panic!("expected anamnesis write"),
         }

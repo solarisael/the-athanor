@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use hearth::{DomainError, RoomKey};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -141,7 +142,7 @@ impl AnamnesisActivation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AnamnesisSeedRep {
     number: u32,
-    occurred_on: Option<String>,
+    occurred_on: Option<NaiveDate>,
     how_it_went: String,
     portal_pull: String,
     lighter: String,
@@ -157,6 +158,16 @@ impl AnamnesisSeedRep {
         if number == 0 {
             return Err(DomainError::InvalidAnamnesisRepNumber);
         }
+        let occurred_on = occurred_on
+            .map(|raw| {
+                NaiveDate::parse_from_str(&raw, "%Y-%m-%d").map_err(|_| {
+                    DomainError::InvalidAnamnesis {
+                        field: "occurred_on".into(),
+                        message: "must use YYYY-MM-DD".into(),
+                    }
+                })
+            })
+            .transpose()?;
         for (field, value) in [
             ("how_it_went", &how_it_went),
             ("portal_pull", &portal_pull),
@@ -180,8 +191,8 @@ impl AnamnesisSeedRep {
     pub const fn number(&self) -> u32 {
         self.number
     }
-    pub fn occurred_on(&self) -> Option<&str> {
-        self.occurred_on.as_deref()
+    pub const fn occurred_on(&self) -> Option<NaiveDate> {
+        self.occurred_on
     }
     pub fn how_it_went(&self) -> &str {
         &self.how_it_went
@@ -360,11 +371,7 @@ impl AnamnesisAddRequest {
 pub struct AnamnesisAppendRequest {
     room: RoomKey,
     title: String,
-    rep_number: u32,
-    occurred_on: Option<String>,
-    how_it_went: String,
-    portal_pull: String,
-    lighter: String,
+    rep: AnamnesisSeedRep,
     source_paths: Vec<String>,
 }
 impl AnamnesisAppendRequest {
@@ -386,21 +393,10 @@ impl AnamnesisAppendRequest {
                 message: "paths must not be empty".into(),
             });
         }
-        let AnamnesisSeedRep {
-            number: rep_number,
-            occurred_on,
-            how_it_went,
-            portal_pull,
-            lighter,
-        } = rep;
         Ok(Self {
             room,
             title,
-            rep_number,
-            occurred_on,
-            how_it_went,
-            portal_pull,
-            lighter,
+            rep,
             source_paths,
         })
     }
@@ -410,20 +406,8 @@ impl AnamnesisAppendRequest {
     pub fn title(&self) -> &str {
         &self.title
     }
-    pub const fn rep_number(&self) -> u32 {
-        self.rep_number
-    }
-    pub fn occurred_on(&self) -> Option<&str> {
-        self.occurred_on.as_deref()
-    }
-    pub fn how_it_went(&self) -> &str {
-        &self.how_it_went
-    }
-    pub fn portal_pull(&self) -> &str {
-        &self.portal_pull
-    }
-    pub fn lighter(&self) -> &str {
-        &self.lighter
+    pub const fn rep(&self) -> &AnamnesisSeedRep {
+        &self.rep
     }
     pub fn source_paths(&self) -> &[String] {
         &self.source_paths
@@ -523,26 +507,10 @@ impl AnamnesisAppendReceipt {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AnamnesisOperation {
-    Add,
-    AppendRep,
-}
-impl AnamnesisOperation {
-    pub fn parse(value: &str) -> Result<Self, DomainError> {
-        match value {
-            "add" => Ok(Self::Add),
-            "append-rep" => Ok(Self::AppendRep),
-            other => Err(DomainError::InvalidAnamnesis {
-                field: "operation".into(),
-                message: format!("unsupported value: {other}"),
-            }),
-        }
-    }
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Add => "add",
-            Self::AppendRep => "append-rep",
-        }
-    }
+/// One write door with two operations: a new drawer, or a lived repetition
+/// appended to an existing cycle.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AnamnesisWriteRequest {
+    Add(AnamnesisAddRequest),
+    AppendRep(AnamnesisAppendRequest),
 }

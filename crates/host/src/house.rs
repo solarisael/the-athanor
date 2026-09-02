@@ -1,7 +1,7 @@
 use crate::config::HostConfig;
 use crate::server::Host;
 use akasha::insula_writer::{flush_insula_emitter, init_insula_emitter};
-use origami::cranes::{broker::Broker, delivery::DeliveryService, outbox::Store};
+use origami::cranes::{delivery::DeliveryService, outbox::Store};
 use axum::Router;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -16,7 +16,6 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 const HOUSE_POOL_CONNECTIONS: u32 = 8;
-const CRANE_RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct HostRuntime {
     address: SocketAddr,
@@ -172,7 +171,11 @@ async fn open_house(
     if let Some(pool) = pool.clone() {
         init_insula_emitter(pool.clone());
         if let Some(nats_url) = nats_url {
-            spawn_cranes(pool, nats_url, cancellation.clone(), tasks);
+            tasks.spawn(DeliveryService::serve(
+                Store::from_pool(pool),
+                nats_url,
+                cancellation.clone(),
+            ));
         }
     }
     let count = rooms.len();
@@ -195,33 +198,6 @@ async fn open_house(
         listener,
         router,
     })
-}
-
-// The crane loop lives in the Host process: one lease owner per Host
-// lifetime, reconnecting to NATS after any failure until the House closes.
-fn spawn_cranes(pool: PgPool, nats_url: String, cancellation: CancellationToken, tasks: &TaskTracker) {
-    let store = Store::from_pool(pool);
-    let lease_owner = uuid::Uuid::new_v4();
-    tasks.spawn(async move {
-        loop {
-            let flight = async {
-                let broker = Broker::connect(&nats_url).await?;
-                broker.configure().await?;
-                DeliveryService::new(store.clone(), broker, lease_owner).run().await
-            };
-            tokio::select! {
-                _ = cancellation.cancelled() => return,
-                result = flight => {
-                    let error = result.err().map(|e| e.to_string()).unwrap_or_default();
-                    tracing::warn!(%error, "crane delivery loop stopped; reconnecting");
-                }
-            }
-            tokio::select! {
-                _ = cancellation.cancelled() => return,
-                _ = tokio::time::sleep(CRANE_RECONNECT_DELAY) => {}
-            }
-        }
-    });
 }
 
 // [host/config/validation] [host/pool/shared]

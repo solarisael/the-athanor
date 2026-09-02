@@ -517,9 +517,9 @@ latest complete Boat from PostgreSQL and adds a bounded set of later unboated
 memories. Duplicate delivery replays safely; poison events dead-letter and
 transient failures nack within bounded retry policy.
 
-Sources: `crates/house-substrate/src/paper_boat.rs`, migrations `0016` and
-`0017` in `crates/house-substrate/src/migrations.rs`,
-`crates/delivery/src/`, `crates/host/src/receipt.rs`.
+Sources: `crates/akasha/src/paper_boat.rs`, migrations `0016` and
+`0017` in `crates/akasha/src/migrations.rs`,
+`crates/origami/src/cranes/`, `crates/host/src/receipt.rs`.
 
 ## 10. GIGA candidate lifecycle
 

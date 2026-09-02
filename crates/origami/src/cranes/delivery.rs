@@ -1,24 +1,29 @@
 //! The delivery loop that walks the crane mechanics: claim, publish,
 //! consume, record, acknowledge. Lanes, envelope, outbox ledger and
 //! JetStream broker are siblings in this module; this file only drives them.
+//! The Host spawns [`DeliveryService::serve`] once per House lifetime.
 
 use anyhow::{Context, Result, bail};
 use async_nats::jetstream::{consumer::PullConsumer, message::AckKind};
 use super::{
     broker::{
-        BOAT_READY_SUBJECT, BoatReceiptProjection, Broker, BrokerHealth, CONSUMER_BACKOFF,
-        CRANE_SUBJECT_FILTER, MAX_DELIVER, RECEIPT_SCHEMA_VERSION,
+        BOAT_READY_SUBJECT, BoatReceiptProjection, Broker, CONSUMER_BACKOFF, CRANE_SUBJECT_FILTER,
+        MAX_DELIVER, RECEIPT_SCHEMA_VERSION,
     },
     envelope::{CraneEvent, classify_invalid_payload, event_id_hint},
     lanes::Lane,
-    outbox::{ClaimedEvent, DatabaseHealth, ReceiptDisposition, RecordedReceipt, Store},
+    outbox::{ClaimedEvent, ReceiptDisposition, RecordedReceipt, Store},
 };
 use crate::sea::subject_owns;
 use chrono::Utc;
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+const RECONNECT_DELAY: Duration = Duration::from_secs(5);
+const IDLE_TICK: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 pub struct DeliveryService {
@@ -46,33 +51,7 @@ pub enum ConsumeOutcome {
     RetryRequested,
 }
 
-#[derive(Debug, Serialize)]
-pub struct OnceOutcome {
-    pub publisher: PublishOutcome,
-    pub consumer: ConsumeOutcome,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DeliveryHealth {
-    pub ok: bool,
-    pub authority: &'static str,
-    pub delivery: &'static str,
-    pub database: DatabaseHealth,
-    pub broker: BrokerHealth,
-}
-
 impl DeliveryService {
-    pub async fn connect(database_url: &str, nats_url: &str, lease_owner: Uuid) -> Result<Self> {
-        let store = Store::connect(database_url).await?;
-        let broker = Broker::connect(nats_url).await?;
-        broker.configure().await?;
-        Ok(Self {
-            store,
-            broker,
-            lease_owner,
-        })
-    }
-
     pub fn new(store: Store, broker: Broker, lease_owner: Uuid) -> Self {
         Self {
             store,
@@ -81,15 +60,41 @@ impl DeliveryService {
         }
     }
 
-    pub fn store(&self) -> &Store {
-        &self.store
+    /// Drive the cranes until the House closes. Each NATS failure is logged and
+    /// reconnected; a cancellation is honoured at the next tick boundary, so a
+    /// claimed outbox row is always published or released before exit. One
+    /// lease owner per call: the outbox lease is what makes a restart safe.
+    pub async fn serve(store: Store, nats_url: String, cancellation: CancellationToken) {
+        let lease_owner = Uuid::new_v4();
+        while !cancellation.is_cancelled() {
+            let flight = async {
+                let broker = Broker::connect(&nats_url).await?;
+                broker.configure().await?;
+                Self::new(store.clone(), broker, lease_owner)
+                    .ticks(&cancellation)
+                    .await
+            };
+            if let Err(error) = flight.await {
+                tracing::warn!(%error, "crane delivery stopped; reconnecting");
+            }
+            tokio::select! {
+                _ = cancellation.cancelled() => {}
+                _ = tokio::time::sleep(RECONNECT_DELAY) => {}
+            }
+        }
     }
 
-    pub fn broker(&self) -> &Broker {
-        &self.broker
-    }
-
-    pub async fn drain(&self) -> Result<()> {
+    async fn ticks(&self, cancellation: &CancellationToken) -> Result<()> {
+        while !cancellation.is_cancelled() {
+            let published = self.publish_once().await?;
+            let consumed = self.consume_once(Duration::from_secs(1)).await?;
+            if published == PublishOutcome::Idle && consumed == ConsumeOutcome::Idle {
+                tokio::select! {
+                    _ = cancellation.cancelled() => {}
+                    _ = tokio::time::sleep(IDLE_TICK) => {}
+                }
+            }
+        }
         self.broker.drain().await
     }
 
@@ -329,35 +334,6 @@ impl DeliveryService {
                     .await
                     .map_err(|error| anyhow::anyhow!("request delivery retry: {error}"))?;
                 Ok(ConsumeOutcome::RetryRequested)
-            }
-        }
-    }
-
-    pub async fn once(&self, wait: Duration) -> Result<OnceOutcome> {
-        Ok(OnceOutcome {
-            publisher: self.publish_once().await?,
-            consumer: self.consume_once(wait).await?,
-        })
-    }
-
-    pub async fn health(&self) -> Result<DeliveryHealth> {
-        let database = self.store.health().await?;
-        let broker = self.broker.health().await?;
-        Ok(DeliveryHealth {
-            ok: true,
-            authority: "postgresql",
-            delivery: "nats-jetstream",
-            database,
-            broker,
-        })
-    }
-
-    pub async fn run(&self) -> Result<()> {
-        loop {
-            let published = self.publish_once().await?;
-            let consumed = self.consume_once(Duration::from_secs(1)).await?;
-            if published == PublishOutcome::Idle && consumed == ConsumeOutcome::Idle {
-                tokio::time::sleep(Duration::from_millis(250)).await;
             }
         }
     }

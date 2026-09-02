@@ -1,7 +1,6 @@
 //! Pure domain rules shared by Athanor concerns.
 
-/// Head of `substrate/migrations/`. The installer pins a release to exactly
-/// this number; origami's outbox treats it as a floor on a live database.
+/// Head of `substrate/migrations/`.
 pub const SUBSTRATE_SCHEMA_VERSION: u32 = 28;
 
 pub mod authority;

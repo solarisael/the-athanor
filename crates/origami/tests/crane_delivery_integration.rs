@@ -576,8 +576,7 @@ async fn run_contract(pool: &PgPool) -> TestResult {
 
     let restart_memory = insert_memory(pool, "paper-boat", "courier-proof", "restart body").await?;
     let (restart_event_id, restart_payload) = next_outbox(pool, restart_memory).await?;
-    let claimed = first
-        .store()
+    let claimed = Store::from_pool(pool.clone())
         .claim_next(first_owner)
         .await?
         .expect("restart event is claimable");
@@ -786,4 +785,53 @@ async fn run_contract(pool: &PgPool) -> TestResult {
     let parsed = CraneEvent::parse(&serde_json::to_vec(&payload)?)?;
     assert_eq!(parsed.record_id_i64(), memory_id);
     Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL database and test-owned NATS 2.14.4 JetStream process"]
+async fn serve_delivers_until_cancelled_and_leaves_no_lease_behind() -> TestResult {
+    in_isolated_schema(|pool| async move {
+        apply_migrations(&pool).await?;
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let cranes = tokio::spawn(DeliveryService::serve(
+            Store::from_pool(pool.clone()),
+            nats_url(),
+            cancellation.clone(),
+        ));
+
+        let memory_id = insert_memory(&pool, "paper-boat", "courier-proof", "served").await?;
+        let (event_id, _) = next_outbox(&pool, memory_id).await?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            let receipts: i64 =
+                sqlx::query_scalar("SELECT count(*) FROM crane_receipts WHERE event_id = $1")
+                    .bind(event_id)
+                    .fetch_one(&pool)
+                    .await?;
+            if receipts == 1 {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "serve must publish and record the boat without help"
+            );
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        let state: String = sqlx::query_scalar("SELECT state FROM crane_outbox WHERE event_id = $1")
+            .bind(event_id)
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(state, "published");
+
+        cancellation.cancel();
+        tokio::time::timeout(Duration::from_secs(5), cranes)
+            .await
+            .expect("serve exits after cancellation")?;
+        let leased: i64 = sqlx::query_scalar("SELECT count(*) FROM crane_outbox WHERE state = 'leased'")
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(leased, 0, "cancellation lands on a tick boundary, never mid-claim");
+        Ok(())
+    })
+    .await
 }

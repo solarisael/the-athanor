@@ -238,9 +238,10 @@ purge contracts.
 
 | Component | Owns |
 |---|---|
-| `crates/house-core`, `crates/house-protocol` | Provider-neutral domain and wire contracts |
-| `crates/house-vault`, `crates/house-substrate` | File-authoritative Vault and PostgreSQL-authoritative AKASHA behavior |
-| `crates/host`, `crates/delivery` | One authenticated multi-room client boundary and narrow JetStream delivery |
+| `crates/hearth`, `crates/protocol` | Provider-neutral domain and wire contracts |
+| `crates/vault`, `crates/akasha` | File-authoritative Vault and PostgreSQL-authoritative AKASHA behavior |
+| `crates/origami` | The communication layer: paper boats, cranes over the PostgreSQL outbox and JetStream, hallways |
+| `crates/host` | One authenticated multi-room client boundary; runs the crane loop |
 | `crates/athanor-install`, `installer/` | Native lifecycle, immutable release staging, and Windows installer |
 | `gui/` | Thin Godot operator client; no direct database or broker authority |
 | `adapters/omp/` | OMP lifecycle hooks and named tool surface delegated to Rust |

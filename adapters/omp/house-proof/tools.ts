@@ -411,7 +411,7 @@ export function closeRustRememberTransports() {
   }
 }
 
-function normalizeGigaHealth(result: GigaHealthResult) {
+export function normalizeGigaHealth(result: GigaHealthResult) {
   const dead = [
     !result.capture_enabled && "capture disabled",
     !result.store_healthy && "store unhealthy",

@@ -8,12 +8,11 @@ use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 
-use super::binding::{TrustedBinding, binding};
-use super::error::{InsulaError, bad};
-use super::event::{ObservationEvent, event};
-use super::idempotency::{derive_idempotency_key_v1, derive_semantic_hash_v1};
-use super::lock::lock;
-use super::vitals::vitals;
+use super::event::{TrustedBinding, validate_trusted_binding};
+use super::{InsulaError, bad};
+use super::event::{ObservationEvent, validate_event};
+use super::event::{derive_idempotency_key_v1, derive_semantic_hash_v1};
+use super::lock;
 
 pub const INSULA_MAX_BATCH_EVENTS: usize = 512;
 
@@ -54,7 +53,7 @@ pub async fn ingest_batch(
     b: &TrustedBinding,
     mut batch: IngestBatch,
 ) -> Result<IngestReceipt, InsulaError> {
-    binding(b)?;
+    validate_trusted_binding(b)?;
     if batch.events.is_empty() {
         return Err(bad("events", "empty_batch"));
     }
@@ -74,7 +73,7 @@ pub async fn ingest_batch(
             .observed_at
             .with_nanosecond(e.observed_at.nanosecond() / 1_000 * 1_000)
             .unwrap_or(e.observed_at);
-        expiries.push(event(e)?);
+        expiries.push(validate_event(e)?);
         e.idempotency_key = derive_idempotency_key_v1(b, e)?;
         e.semantic_hash = derive_semantic_hash_v1(b, e)?;
     }
@@ -122,7 +121,7 @@ async fn write_batch(
         // remove, not contains: the same event_id twice in one batch is one
         // inserted row; the second occurrence settles as duplicate or conflict.
         if accepted.remove(&e.event_id) {
-            vitals(&mut tx, b, e).await?;
+            roll_vitals(&mut tx, b, e).await?;
             out.accepted_count += 1;
             continue;
         }
@@ -277,14 +276,19 @@ fn conflict_kind(i: &Existing, e: &ObservationEvent) -> Option<IngestConflictKin
     None
 }
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 struct Existing {
     event_id: String,
     writer_id: String,
+    #[sqlx(rename = "writer_sequence")]
     sequence: i64,
+    #[sqlx(rename = "idempotency_version")]
     version: i16,
+    #[sqlx(rename = "idempotency_scope")]
     scope: String,
+    #[sqlx(rename = "idempotency_key")]
     key: String,
+    #[sqlx(rename = "semantic_hash")]
     semantic: String,
 }
 
@@ -301,7 +305,7 @@ async fn existing(
     b: &TrustedBinding,
     e: &ObservationEvent,
 ) -> Result<Vec<Existing>, InsulaError> {
-    let rows = sqlx::query(
+    let rows = sqlx::query_as::<_, Existing>(
         "SELECT event_id::text event_id, writer_id::text writer_id,
                 writer_sequence, idempotency_version, idempotency_scope,
                 idempotency_key, semantic_hash
@@ -325,18 +329,110 @@ async fn existing(
     .fetch_all(&mut **tx)
     .await?;
 
-    rows.into_iter()
-        .map(|r| {
-            Ok(Existing {
-                event_id: r.try_get("event_id")?,
-                writer_id: r.try_get("writer_id")?,
-                sequence: r.try_get("writer_sequence")?,
-                version: r.try_get("idempotency_version")?,
-                scope: r.try_get("idempotency_scope")?,
-                key: r.try_get("idempotency_key")?,
-                semantic: r.try_get("semantic_hash")?,
-            })
-        })
-        .collect::<Result<_, sqlx::Error>>()
-        .map_err(Into::into)
+    Ok(rows)
+}
+
+async fn roll_vitals(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    b: &TrustedBinding,
+    e: &ObservationEvent,
+) -> Result<(), InsulaError> {
+    sqlx::query(
+        r#"INSERT INTO insula.vitals_minute(
+               query_name,query_version,minute,house_id,room,spirit,component,layer,operation,
+               phase,outcome_class,event_count,duration_us_sum,duration_us_max,bytes_in_sum,
+               bytes_out_sum,tokens_in_sum,tokens_out_sum,drop_count_sum,source_first_sequence,
+               source_last_sequence,source_first_observed_at,source_last_observed_at,
+               source_coverage_hash
+           )
+           VALUES(
+               'insula.vitals.minute',1,
+               date_trunc('minute',$1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',
+               $2,$3,$4,$5,$6,$7,$8,$9,1,COALESCE($10,0),$10,$11,$12,$13,$14,$15,$16,$16,$1,$1,$17
+           )
+           ON CONFLICT(
+               query_name,query_version,minute,house_id,room,spirit,component,layer,operation,
+               phase,outcome_class
+           )
+           DO UPDATE SET
+               event_count=insula.vitals_minute.event_count+1,
+               duration_us_sum=insula.vitals_minute.duration_us_sum+EXCLUDED.duration_us_sum,
+               duration_us_max=GREATEST(insula.vitals_minute.duration_us_max,EXCLUDED.duration_us_max),
+               bytes_in_sum=insula.vitals_minute.bytes_in_sum+EXCLUDED.bytes_in_sum,
+               bytes_out_sum=insula.vitals_minute.bytes_out_sum+EXCLUDED.bytes_out_sum,
+               tokens_in_sum=insula.vitals_minute.tokens_in_sum+EXCLUDED.tokens_in_sum,
+               tokens_out_sum=insula.vitals_minute.tokens_out_sum+EXCLUDED.tokens_out_sum,
+               drop_count_sum=insula.vitals_minute.drop_count_sum+EXCLUDED.drop_count_sum,
+               source_first_sequence=LEAST(
+                   insula.vitals_minute.source_first_sequence,EXCLUDED.source_first_sequence
+               ),
+               source_last_sequence=GREATEST(
+                   insula.vitals_minute.source_last_sequence,EXCLUDED.source_last_sequence
+               ),
+               source_first_observed_at=LEAST(
+                   insula.vitals_minute.source_first_observed_at,EXCLUDED.source_first_observed_at
+               ),
+               source_last_observed_at=GREATEST(
+                   insula.vitals_minute.source_last_observed_at,EXCLUDED.source_last_observed_at
+               ),
+               updated_at=NOW()"#,
+    )
+    .bind(e.observed_at)
+    .bind(&b.house_id)
+    .bind(&b.room)
+    .bind(&b.spirit)
+    .bind(&e.component)
+    .bind(&e.layer)
+    .bind(&e.operation)
+    .bind(e.phase.as_str())
+    .bind(e.outcome_class.as_str())
+    .bind(e.duration_us)
+    .bind(e.bytes_in)
+    .bind(e.bytes_out)
+    .bind(e.tokens_in)
+    .bind(e.tokens_out)
+    .bind(e.drop_count)
+    .bind(e.writer_sequence)
+    .bind(&e.semantic_hash)
+    .execute(&mut **tx)
+    .await?;
+
+    // Coverage is a canonical set hash, not an arrival-order hash chain.
+    sqlx::query(
+        r#"UPDATE insula.vitals_minute AS v
+           SET source_coverage_hash=source.coverage_hash,updated_at=NOW()
+           FROM (
+               SELECT encode(
+                   digest(
+                       convert_to(
+                           string_agg(event_id::text||':'||semantic_hash,E'\n' ORDER BY event_id),
+                           'UTF8'
+                       ),
+                       'sha256'
+                   ),
+                   'hex'
+               ) AS coverage_hash
+               FROM insula.log
+               WHERE house_id=$2 AND room=$3 AND spirit=$4 AND component=$5 AND layer=$6
+                 AND operation=$7 AND phase=$8 AND outcome_class=$9
+                 AND date_trunc('minute',observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+                     = date_trunc('minute',$1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+           ) AS source
+           WHERE v.query_name='insula.vitals.minute' AND v.query_version=1
+             AND v.minute=date_trunc('minute',$1::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+             AND v.house_id=$2 AND v.room=$3 AND v.spirit=$4 AND v.component=$5
+             AND v.layer=$6 AND v.operation=$7 AND v.phase=$8 AND v.outcome_class=$9"#,
+    )
+    .bind(e.observed_at)
+    .bind(&b.house_id)
+    .bind(&b.room)
+    .bind(&b.spirit)
+    .bind(&e.component)
+    .bind(&e.layer)
+    .bind(&e.operation)
+    .bind(e.phase.as_str())
+    .bind(e.outcome_class.as_str())
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }

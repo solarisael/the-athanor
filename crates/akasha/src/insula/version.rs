@@ -1,2 +1,0 @@
-pub const INSULA_SCHEMA_VERSION: i16 = 1;
-pub const INSULA_QUERY_VERSION: i16 = 1;

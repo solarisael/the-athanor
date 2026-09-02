@@ -6,7 +6,7 @@ use thiserror::Error;
 
 pub const MANIFEST_FORMAT: u32 = 1;
 /// Release manifests and `origami` share the protocol-owned migration head.
-pub const REQUIRED_SCHEMA: u32 = protocol::SUBSTRATE_SCHEMA_VERSION;
+pub const REQUIRED_SCHEMA: u32 = hearth::SUBSTRATE_SCHEMA_VERSION;
 pub const SUPPORTED_PLATFORM: &str = "windows-x64";
 pub const POSTGRESQL_VERSION: &str = "18.4-2";
 pub const PGVECTOR_VERSION: &str = "0.8.6";

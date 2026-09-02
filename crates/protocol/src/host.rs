@@ -12,25 +12,6 @@ use serde_json::Value;
 
 pub const HOST_SCHEMA_VERSION: u8 = 1;
 pub const BOAT_RECEIPT_SCHEMA_VERSION: u8 = 1;
-pub const BOAT_RECEIPT_STREAM_NAME: &str = "ATHANOR_BOAT_RECEIPTS";
-pub const BOAT_RECEIPT_SUBJECT: &str = "athanor.boat.receipt.v1";
-
-// The House's JetStream ack discipline, shared by every Athanor pull consumer:
-// origami's cranes broker builds the boat-ready and crane lane consumers from
-// it, and host builds its receipt replay consumer from it. These are properties
-// of how Athanor traffic wants to be acknowledged -- redelivery budget, ack
-// window, in-flight and batch ceilings -- not of any one stream or reader, so
-// they belong here rather than being retyped per call site.
-//
-// What is NOT shared is durability. A durable ledger writer and an ephemeral
-// socket replay disagree about storage on purpose; each names its own, and the
-// seam comment in host::server says why.
-pub const JETSTREAM_ACK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
-pub const JETSTREAM_MAX_DELIVER: i64 = 5;
-pub const JETSTREAM_MAX_ACK_PENDING: i64 = 64;
-pub const JETSTREAM_MAX_BATCH: i64 = 64;
-pub const JETSTREAM_MAX_EXPIRES: std::time::Duration = std::time::Duration::from_secs(5);
-pub const JETSTREAM_NUM_REPLICAS: usize = 1;
 pub const PAPER_BOAT_RECEIPT_PROJECTION_ID: &str = "paper_boat_receipt";
 pub const PAPER_BOAT_RECEIPT_SUBSCRIBE: &str = "athanor.paper_boat_receipt.subscribe";
 pub const PAPER_BOAT_RECEIPT_SNAPSHOT: &str = "athanor.paper_boat_receipt.snapshot";

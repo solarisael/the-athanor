@@ -15,15 +15,7 @@ use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions};
 use uuid::Uuid;
 
 /// The lowest PostgreSQL schema this build will speak to.
-///
-/// One authority with `athanor-install`: both read
-/// `protocol::SUBSTRATE_SCHEMA_VERSION`, the head of `substrate/migrations/`.
-/// The predicates differ on purpose -- the installer pins a release manifest to
-/// exactly this number, while origami treats it as a floor on a live database --
-/// but the number itself is one number, and this one had been frozen at 17
-/// since `0017_crane_delivery.sql` even after origami grew hallway Knocks and
-/// started querying tables that only arrive in `0021_hallway_knock.sql`.
-pub const REQUIRED_SCHEMA_VERSION: i32 = protocol::SUBSTRATE_SCHEMA_VERSION as i32;
+pub const REQUIRED_SCHEMA_VERSION: i32 = hearth::SUBSTRATE_SCHEMA_VERSION as i32;
 /// How long a claimed outbox row stays claimed before another publisher may
 /// take it. Sibling of `crate::hallways::knocks::KNOCK_CLAIM_LEASE_SECONDS`:
 /// same 30-second grip on a claimed row, different ledger.

@@ -24,6 +24,7 @@ path = "src/bin/athanor-chat.rs"
 anyhow.workspace = true
 hex.workspace = true
 host = { path = "../host" }
+hearth = { path = "../hearth" }
 protocol = { path = "../protocol" }
 interactive-process = { path = "../interactive-process" }
 omp-keeper = { path = "../omp-keeper" }

@@ -1,6 +1,7 @@
 
 pub mod error;
 pub mod identity;
+pub mod paper_boat;
 pub mod record;
 pub mod sleep;
 pub mod wake;

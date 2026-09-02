@@ -137,6 +137,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "getrandom 0.3.4",
+ "hearth",
  "hex",
  "host",
  "interactive-process",
@@ -981,6 +982,7 @@ dependencies = [
  "futures-util",
  "hearth",
  "hex",
+ "origami",
  "protocol",
  "reqwest",
  "serde",
@@ -1523,12 +1525,10 @@ dependencies = [
  "chrono",
  "hearth",
  "hex",
- "protocol",
  "serde",
  "serde_json",
  "sha2",
  "sqlx",
- "summoning",
  "uuid",
 ]
 
@@ -2551,6 +2551,7 @@ name = "summoning"
 version = "0.1.0"
 dependencies = [
  "hearth",
+ "origami",
  "presence",
 ]
 

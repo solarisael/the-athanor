@@ -36,20 +36,21 @@ use hearth::routing::{
 };
 use hearth::triggers::{process_lesson_plan, process_lesson_reminder};
 use crate::chat::ChatLog;
+use origami::cranes::broker::{
+    ACK_WAIT, MAX_ACK_PENDING, MAX_BATCH, MAX_DELIVER, MAX_EXPIRES, NUM_REPLICAS,
+    RECEIPT_STREAM_NAME, RECEIPT_SUBJECT,
+};
 use protocol::{
     AKASHA_COMMAND_FAILED, AKASHA_LESSON_RESULT, AKASHA_PROJECTION_ID, AKASHA_RECALL_RESULT,
     AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent,
-    AkashaRecallQueryPayload, AkashaRecallResultEvent, BOAT_RECEIPT_STREAM_NAME,
-    BOAT_RECEIPT_SUBJECT, CHAT_COMMAND_ACCEPTED, CHAT_COMMAND_REFUSED, CHAT_DELTA,
+    AkashaRecallQueryPayload, AkashaRecallResultEvent, CHAT_COMMAND_ACCEPTED, CHAT_COMMAND_REFUSED, CHAT_DELTA,
     CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID,
     CONTEXT_VIEWPORTED, ChatEvent, ChatMessage, ClientCommand, CommandMeta, CommandOutcomeEvent,
     ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest, DEFAULT_HOST_WS_PATH,
     DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED,
     HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED,
     HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
-    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, JETSTREAM_ACK_WAIT,
-    JETSTREAM_MAX_ACK_PENDING, JETSTREAM_MAX_BATCH, JETSTREAM_MAX_DELIVER, JETSTREAM_MAX_EXPIRES,
-    JETSTREAM_NUM_REPLICAS, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
+    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
     PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
     PRESENCE_CLOSED, PRESENCE_COMMAND_REFUSED, PRESENCE_COMPILED, PRESENCE_OPENED,
     PRESENCE_PROJECTION_ID, PRESENCE_SETTLED, PaperBoatReceiptEvent, PaperBoatReceiptState,
@@ -2383,7 +2384,7 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
             }
         };
         let context = async_nats::jetstream::new(client);
-        let stream = match context.get_stream(BOAT_RECEIPT_STREAM_NAME).await {
+        let stream = match context.get_stream(RECEIPT_STREAM_NAME).await {
             Ok(stream) => stream,
             Err(_) => {
                 publish_receipt_degradation(
@@ -2405,12 +2406,12 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                 ),
                 deliver_policy: async_nats::jetstream::consumer::DeliverPolicy::All,
                 ack_policy: async_nats::jetstream::consumer::AckPolicy::Explicit,
-                ack_wait: JETSTREAM_ACK_WAIT,
-                max_deliver: JETSTREAM_MAX_DELIVER,
-                filter_subject: BOAT_RECEIPT_SUBJECT.into(),
-                max_ack_pending: JETSTREAM_MAX_ACK_PENDING,
-                max_batch: JETSTREAM_MAX_BATCH,
-                max_expires: JETSTREAM_MAX_EXPIRES,
+                ack_wait: ACK_WAIT,
+                max_deliver: MAX_DELIVER,
+                filter_subject: RECEIPT_SUBJECT.into(),
+                max_ack_pending: MAX_ACK_PENDING,
+                max_batch: MAX_BATCH,
+                max_expires: MAX_EXPIRES,
                 // The seam: this is a genuinely different consumer on the same
                 // stream as origami's cranes broker, not a drifted copy of it.
                 // The broker's lane consumers are durable ledger writers whose
@@ -2423,7 +2424,7 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                 // config carries no durable_name and no CONSUMER_BACKOFF: a
                 // ten-minute backoff would outlive the socket it serves.
                 inactive_threshold: RECEIPT_CONSUMER_IDLE_TTL,
-                num_replicas: JETSTREAM_NUM_REPLICAS,
+                num_replicas: NUM_REPLICAS,
                 memory_storage: true,
                 ..Default::default()
             })

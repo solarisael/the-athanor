@@ -1,6 +1,3 @@
-// [protocol/contract] [install/include]
-pub const SUBSTRATE_SCHEMA_VERSION: u32 = 28;
-
 macro_rules! loopback_host_literal {
     () => {
         "127.0.0.1"

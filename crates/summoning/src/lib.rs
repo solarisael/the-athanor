@@ -7,10 +7,10 @@
 //! branch weight of frame and turn assembly lives with its own owner.
 
 pub mod anamnesis;
-pub mod paper_boat;
 
 pub use anamnesis::*;
-pub use paper_boat::*;
+/// The boat is a fold of origami; Summoning is the cycle that sails it.
+pub use origami::boats::paper_boat::*;
 
 /// Presence, reached through the cycle that owns it.
 pub use ::presence;
@@ -22,6 +22,6 @@ pub use ::presence;
 /// build stops, which is the point: a letter that survives Presence must
 /// survive the boat it becomes.
 const _: () = assert!(
-    presence::PRESENCE_MAX_CLOSE_BODY_BYTES == paper_boat::PAPER_BOAT_MAX_BODY_BYTES,
+    presence::PRESENCE_MAX_CLOSE_BODY_BYTES == PAPER_BOAT_MAX_BODY_BYTES,
     "Presence close material becomes a paper boat body; the two bounds must agree"
 );

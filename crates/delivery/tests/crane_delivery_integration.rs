@@ -5,7 +5,8 @@ use delivery::{
     store::Store,
 };
 use futures_util::StreamExt;
-use protocol::{BOAT_RECEIPT_STREAM_NAME, BOAT_RECEIPT_SUBJECT, BoatReceiptProjection};
+use origami::cranes::broker::{RECEIPT_STREAM_NAME as BOAT_RECEIPT_STREAM_NAME, RECEIPT_SUBJECT as BOAT_RECEIPT_SUBJECT};
+use protocol::BoatReceiptProjection;
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row, postgres::PgPoolOptions};
 use std::{collections::BTreeSet, time::Duration};

@@ -17,6 +17,7 @@ chrono.workspace = true
 futures-util.workspace = true
 hex.workspace = true
 hearth = { path = "../hearth" }
+origami = { path = "../origami" }
 protocol = { path = "../protocol" }
 summoning = { path = "../summoning" }
 serde.workspace = true

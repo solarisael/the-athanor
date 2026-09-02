@@ -13,13 +13,8 @@ pub const PRESENCE_MAX_ATTEMPTS: u8 = 2;
 pub const PRESENCE_MAX_REPAIR_RULES: usize = 16;
 pub const PRESENCE_MAX_LEDGER_CLAIMS: usize = 8;
 
-/// The largest close body Presence will seal.
-///
-/// enough: close material becomes a paper boat body, and Summoning owns that
-/// bound. Presence cannot depend on Summoning without a cycle, so the number
-/// lives here and `summoning` pins it to `PAPER_BOAT_MAX_BODY_BYTES` with a
-/// compile-time assertion. Change one alone and the build stops.
-pub const PRESENCE_MAX_CLOSE_BODY_BYTES: usize = 64 * 1024;
+/// Close material becomes a paper boat body, so the two bounds are one bound.
+pub const PRESENCE_MAX_CLOSE_BODY_BYTES: usize = crate::PAPER_BOAT_MAX_BODY_BYTES;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

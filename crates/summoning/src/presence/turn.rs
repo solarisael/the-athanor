@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::model::*;
-use crate::support::{
+use super::model::*;
+use super::support::{
     PresenceError, bound_list, digest, directive_rows, invalid, material_rows,
     normalize_materials, normalize_strings, reject_conflicting_ids, render_lines, render_section,
     require_active_frame, required, sha256, validate_ledger,
@@ -404,7 +404,7 @@ fn directive_sources(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::open_presence;
+    use super::super::open_presence;
 
     fn authentication() -> PresenceAuthentication {
         PresenceAuthentication {

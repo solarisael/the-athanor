@@ -1649,16 +1649,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "presence"
-version = "0.1.0"
-dependencies = [
- "hearth",
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
 name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2536,7 +2526,9 @@ version = "0.1.0"
 dependencies = [
  "hearth",
  "origami",
- "presence",
+ "serde",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

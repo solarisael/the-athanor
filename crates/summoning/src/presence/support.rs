@@ -3,7 +3,7 @@ use std::fmt;
 use hearth::RoomKey;
 use sha2::{Digest, Sha256};
 
-use crate::model::*;
+use super::model::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PresenceError {

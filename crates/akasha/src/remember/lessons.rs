@@ -461,12 +461,7 @@ pub(super) async fn remember_lesson(
     };
     tx.commit().await?;
     let mut warnings = Vec::new();
-    if req.backup()
-        && matches!(
-            kind,
-            RememberKind::ProjectLesson | RememberKind::AudioLesson | RememberKind::DesignLesson
-        )
-    {
+    if req.backup() {
         warnings.extend(backup_warning(pool, cfg, settings).await);
     }
     let receipt = RememberReceipt::committed_lesson(

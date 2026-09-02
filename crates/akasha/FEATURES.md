@@ -32,7 +32,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `derive_dates` reads dates out of the source path. A stitched path date moves to the next day.
 - `embed` posts the chunks to the embedding endpoint with the `passage: ` prefix. It checks the vector count and the dimension.
 - `normalize_strings` and `token_estimate` clean the inputs the writers store.
-- A memory write calls `backup::run_post_write`. A lesson write backs up only the project, audio, and design kinds.
+- Every write calls `backup::run_post_write` when the request asks for it. A failed backup is a warning on the receipt, never a failed write.
 
 ### recall/ — the retrieval door
 

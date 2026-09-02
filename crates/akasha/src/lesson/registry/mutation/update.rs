@@ -139,6 +139,8 @@ pub async fn lesson_update(
             LessonMutationKind::Update,
         ));
     }
+    // Routing columns every family carries; the query filters on them without
+    // regard to family.
     let common = [
         "title",
         "body",
@@ -146,6 +148,9 @@ pub async fn lesson_update(
         "triggerContext",
         "tags",
         "threadKeys",
+        "languageKeys",
+        "technologyKeys",
+        "alwaysOn",
         "condition",
         "astCondition",
         "triggerScope",
@@ -158,28 +163,12 @@ pub async fn lesson_update(
             "scope",
             "project",
             "proofPattern",
-            "languageKeys",
-            "technologyKeys",
             "negationOf",
-            "alwaysOn",
             "clearProject",
         ],
-        "project" => &[
-            "project",
-            "clearProject",
-            "proofPattern",
-            "languageKeys",
-            "technologyKeys",
-        ],
+        "project" => &["project", "clearProject", "proofPattern"],
         "writing" => &["voice", "register", "exampleText", "writers", "negationOf"],
-        "design" => &[
-            "voice",
-            "register",
-            "proofPattern",
-            "exampleText",
-            "languageKeys",
-            "technologyKeys",
-        ],
+        "design" => &["voice", "register", "proofPattern", "exampleText"],
         _ => &[],
     };
     if let Some(invalid) = fields

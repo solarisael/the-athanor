@@ -6,6 +6,7 @@ mod panel;
 mod policy;
 mod presence;
 mod receipt;
+mod routing;
 mod server;
 mod store;
 mod viewport;

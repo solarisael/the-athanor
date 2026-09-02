@@ -16,7 +16,6 @@ pub mod lineage;
 pub mod recall;
 pub mod remember;
 pub mod room;
-pub mod routing;
 pub mod triggers;
 
 pub use authority::*;

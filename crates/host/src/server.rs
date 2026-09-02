@@ -30,7 +30,7 @@ use hearth::conversation::{
 };
 use hearth::hallway::{HallwayInboxRequest, HallwayKnockClaimRequest, HallwayKnockSettleRequest};
 use hearth::lineage::{QuestLifecycle, normalize_lifecycle_memory, normalize_quest_memories};
-use hearth::routing::{
+use crate::routing::{
     DispatchRequest, LoadedSpellbook, SpellbookRead, familiar_status, house_dispatch, lane_status,
     load_spellbook,
 };

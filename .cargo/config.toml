@@ -1,0 +1,20 @@
+# Build policy for every cargo invocation in this checkout.
+#
+# One target directory: build, test, check, clippy and the deploy ritual share
+# target/deploy, so no invocation cold-builds its own tree (project lesson
+# #465). The ritual prunes target/debug and target/release after a deploy;
+# with this default those trees never appear.
+[build]
+target-dir = "target/deploy"
+
+# Incremental artifacts are per-crate, per-target and never collected; a week
+# of dev and test builds left 20 GB of them on 2026-09-02. A full recompile of
+# one crate on this machine costs seconds; the cache cost gigabytes.
+[profile.dev]
+incremental = false
+
+# Integration proofs share one PostgreSQL test database and one JetStream
+# consumer per lane; run in parallel they race each other and fail on HEAD.
+# Nothing here needs test parallelism yet (Sol, 2026-09-02).
+[env]
+RUST_TEST_THREADS = "1"

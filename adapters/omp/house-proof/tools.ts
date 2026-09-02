@@ -412,10 +412,14 @@ export function closeRustRememberTransports() {
 }
 
 function normalizeGigaHealth(result: GigaHealthResult) {
-  const output = {
-    ok: result.capture_enabled && result.store_healthy,
-    ...result,
-  };
+  const dead = [
+    !result.capture_enabled && "capture disabled",
+    !result.store_healthy && "store unhealthy",
+    !result.classifier_enabled && "classifier disabled",
+    result.classifier.consecutive_failures > 0
+      && `classifier failing (${result.classifier.consecutive_failures} consecutive)`,
+  ].filter(Boolean);
+  const output = { ok: dead.length === 0, dead, ...result };
   return {
     isError: !output.ok,
     content: [{ type: "text", text: JSON.stringify(output, null, 2) }],

@@ -1,5 +1,6 @@
 use super::{backup_warning, normalize_strings};
 use crate::config::{AppError, Config};
+use crate::lesson::validate_patterns;
 use crate::settings::RoomSettings;
 use hearth::lesson_triggers::LessonTriggerSpec;
 use hearth::{RememberKind, RememberReceipt, RememberRequest};
@@ -340,6 +341,7 @@ pub(super) async fn remember_lesson(
     let kind = req.kind();
     let text = req.body();
     let tags = normalize_strings(req.tags());
+    validate_patterns(req.triggers()).map_err(AppError::Invalid)?;
     // A voiced lesson with no register still has to satisfy the writing and
     // design readers, which filter on register; 'general' is that floor.
     let register = if req.register().is_empty()

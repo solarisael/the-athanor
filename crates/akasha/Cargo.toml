@@ -6,6 +6,15 @@ license.workspace = true
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde", "clock"] }
+# Pinned exactly: ast-grep 0.45.1 is the pair that provides Pattern::try_new
+# (pattern parsing without a file) plus the grammars the House writes in.
+ast-grep-core = "=0.45.1"
+ast-grep-language = { version = "=0.45.1", default-features = false, features = [
+    "tree-sitter-rust",
+    "tree-sitter-typescript",
+    "tree-sitter-javascript",
+    "tree-sitter-python",
+] }
 hearth = { path = "../hearth" }
 protocol = { path = "../protocol" }
 vault = { path = "../vault" }

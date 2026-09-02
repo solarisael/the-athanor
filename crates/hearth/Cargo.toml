@@ -5,15 +5,6 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# Pinned exactly: ast-grep 0.45.1 is the pair that provides Pattern::try_new
-# (pattern parsing without a file) plus the grammars the House writes in.
-ast-grep-core = "=0.45.1"
-ast-grep-language = { version = "=0.45.1", default-features = false, features = [
-    "tree-sitter-rust",
-    "tree-sitter-typescript",
-    "tree-sitter-javascript",
-    "tree-sitter-python",
-] }
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true

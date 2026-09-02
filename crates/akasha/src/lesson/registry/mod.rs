@@ -20,3 +20,4 @@ pub use trigger::{
     LessonTriggerFired, LessonTriggerMatchParams, LessonTriggerMatchResult, LessonTriggerSurface,
     lesson_trigger_match,
 };
+pub(crate) use trigger::validate_patterns;

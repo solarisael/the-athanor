@@ -43,6 +43,7 @@ fn a_trigger_patch_is_judged_before_any_row_is_locked() {
     .unwrap();
     assert_eq!(spec.condition, vec!["\\bunwrap\\(\\)".to_owned()]);
     assert_eq!(spec.validate_fields(), Ok(()));
+    assert_eq!(validate_patterns(&spec), Ok(()));
 
     let broken = patch_trigger_spec(
         serde_json::json!({"condition": ["unwrap("]})
@@ -50,7 +51,8 @@ fn a_trigger_patch_is_judged_before_any_row_is_locked() {
             .unwrap(),
     )
     .unwrap();
-    assert!(broken.validate_fields().is_err());
+    assert_eq!(broken.validate_fields(), Ok(()), "shape is fine");
+    assert!(validate_patterns(&broken).is_err(), "the regex is not");
 
     assert!(
         patch_trigger_spec(

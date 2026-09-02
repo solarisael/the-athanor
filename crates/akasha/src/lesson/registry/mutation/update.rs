@@ -1,5 +1,6 @@
 use crate::config::AppError;
 use crate::lesson::coerce::deserialize_i64;
+use crate::lesson::validate_patterns;
 use hearth::lesson_triggers::LessonTriggerSpec;
 use serde::Deserialize;
 use serde_json::Value;
@@ -192,12 +193,12 @@ pub async fn lesson_update(
             LessonMutationKind::Update,
         ));
     }
-    // Semantic trigger validation runs before a single row is locked: an
-    // uncompilable trigger is a refusal, never a stored pattern that can never
-    // fire. A patch is partial, so only the fields it names are judged.
-    patch_trigger_spec(fields)?
-        .validate_fields()
-        .map_err(AppError::Invalid)?;
+    // Trigger validation runs before a single row is locked: an uncompilable
+    // trigger is a refusal, never a stored pattern that can never fire. A
+    // patch is partial, so only the fields it names are judged.
+    let patched = patch_trigger_spec(fields)?;
+    patched.validate_fields().map_err(AppError::Invalid)?;
+    validate_patterns(&patched).map_err(AppError::Invalid)?;
     let mut tx = pool.begin().await?;
     let actual = sqlx::query_scalar::<_, String>(
         "SELECT title FROM lessons WHERE lesson_key=$1 AND id=$2 FOR UPDATE",

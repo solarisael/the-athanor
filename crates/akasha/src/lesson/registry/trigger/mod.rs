@@ -1,9 +1,11 @@
+mod engine;
+
+pub(crate) use engine::validate_patterns;
+
 use crate::config::{AppError, ROOM_KEY_RE};
 use chrono::{DateTime, Utc};
-use hearth::lesson_triggers::{
-    CompiledTriggerSet, LessonTriggerSpec, Surface, SurfaceKind, TriggerRow, cached_set,
-    match_surfaces, store_set,
-};
+use engine::{CompiledTriggerSet, Surface, TriggerRow, cached_set, match_surfaces, store_set};
+use hearth::lesson_triggers::{LessonTriggerSpec, SurfaceKind};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::collections::HashMap;

@@ -18,3 +18,4 @@ pub use registry::{
     LessonUpdateParams, lesson_context, lesson_delete, lesson_query, lesson_trigger_match,
     lesson_update,
 };
+pub(crate) use registry::validate_patterns;

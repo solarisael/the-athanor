@@ -8,93 +8,20 @@ mod thread_neighbors;
 pub use semantic_vocabulary::refresh_semantic_vocabulary;
 
 use crate::cluster::{cluster_resonance, cluster_staleness};
-use crate::config::{
-    AppError, Config, EMBED_DIMENSION, EmbeddingMode, HTTP_CLIENT, QUERY_DATE_RE, ROOM_KEY_RE,
-};
+use crate::config::{AppError, Config, EMBED_DIMENSION, EmbeddingMode, HTTP_CLIENT, QUERY_DATE_RE};
 use crate::settings::RoomSettings;
 use bm25f_candidates::{load_bm25f_candidates, load_bm25f_candidates_for_terms};
 use chrono::{NaiveDate, Utc};
 use embedding::embed_query;
 use pointer_files::protocol_pointer_files;
 use semantic_vocabulary::{load_semantic_vocabulary_concepts, semantic_vocabulary_terms};
-use serde::{Deserialize, Serialize};
+use hearth::RecallRequest;
+use serde::Serialize;
 use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, BTreeSet};
 use temporal::{compare_weighted_lane, giga_temporal_factor, weighted_lane_score};
 use thread_neighbors::load_thread_neighbors;
 
-fn default_semantic_top_k() -> u32 {
-    8
-}
-// Calibration bound to the embedding model, not a strictness knob. On
-// Nemotron-3-Embed-1B/Q4 correct rank-1 matches land at 0.42-0.56 and noise tops
-// out at 0.24, so the earlier 0.50 sat inside the signal band and cut correct
-// hits. Re-measure on any model/quantization change — coding lesson 222.
-fn default_semantic_min_similarity() -> f64 {
-    0.40
-}
-fn default_content_top_k() -> u32 {
-    8
-}
-// enough: this floor is calibrated to the lexical matcher; re-measure the
-// corpus before raising it so configuration cannot manufacture false certainty.
-fn default_content_min_similarity() -> f64 {
-    0.30
-}
-fn default_temporal_decay() -> bool {
-    false
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecallParams {
-    pub room: String,
-    pub query: String,
-    #[serde(default = "default_semantic_top_k")]
-    pub semantic_top_k: u32,
-    #[serde(default = "default_semantic_min_similarity")]
-    pub semantic_min_similarity: f64,
-    #[serde(default = "default_temporal_decay")]
-    pub temporal_decay: bool,
-    #[serde(default = "default_content_top_k")]
-    pub content_top_k: u32,
-    #[serde(default = "default_content_min_similarity")]
-    pub content_min_similarity: f64,
-}
-
-impl RecallParams {
-    pub fn validate(&self) -> Result<(), AppError> {
-        if !ROOM_KEY_RE.is_match(&self.room) || self.room == "house" {
-            return Err(AppError::Invalid(
-                "room must be a lowercase slug and cannot be house".into(),
-            ));
-        }
-        if self.query.trim().is_empty() {
-            return Err(AppError::Invalid("query must not be empty".into()));
-        }
-        for (name, value) in [
-            ("semantic_top_k", self.semantic_top_k),
-            ("content_top_k", self.content_top_k),
-        ] {
-            if value == 0 || value > 1000 {
-                return Err(AppError::Invalid(format!(
-                    "{name} must be positive and at most 1000"
-                )));
-            }
-        }
-        for (name, value) in [
-            ("semantic_min_similarity", self.semantic_min_similarity),
-            ("content_min_similarity", self.content_min_similarity),
-        ] {
-            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-                return Err(AppError::Invalid(format!(
-                    "{name} must be finite and in [0, 1]"
-                )));
-            }
-        }
-        Ok(())
-    }
-}
 
 #[derive(Debug, Serialize)]
 pub struct RecallResult {
@@ -195,17 +122,23 @@ pub(crate) fn candidate_terms(
 pub async fn recall(
     pool: &PgPool,
     cfg: &Config,
-    params: RecallParams,
+    request: RecallRequest,
 ) -> Result<RecallResult, AppError> {
-    params.validate()?;
-    let settings = RoomSettings::load(pool, &params.room).await?;
-    let query_dates = query_dates(&params.query);
-    let query_terms = query_terms(&params.query);
+    let room = request.room().as_str();
+    let query = request.query();
+    let temporal_decay = request.temporal_decay();
+    let semantic_top_k = request.semantic_top_k();
+    let content_top_k = request.content_top_k();
+    let semantic_min_similarity = request.semantic_min_similarity();
+    let content_min_similarity = request.content_min_similarity();
+    let settings = RoomSettings::load(pool, room).await?;
+    let query_dates = query_dates(query);
+    let query_terms = query_terms(query);
     let content_patterns = query_terms
         .iter()
         .map(|term| format!("%{term}%"))
         .collect::<Vec<_>>();
-    let rooms = vec![params.room.clone(), "house".to_string()];
+    let rooms = vec![room.to_owned(), "house".to_owned()];
     let mut warnings = Vec::new();
     let vector_text = match (cfg.embedding_mode, cfg.embed_url.as_deref()) {
         (EmbeddingMode::Disabled, _) => {
@@ -220,7 +153,7 @@ pub async fn recall(
             &HTTP_CLIENT,
             url,
             &cfg.embed_model,
-            &params.query,
+            query,
             EMBED_DIMENSION,
         )
         .await
@@ -247,8 +180,8 @@ pub async fn recall(
     let bm25f_candidates = load_bm25f_candidates(
         pool,
         &rooms,
-        &params.query,
-        params.temporal_decay,
+        query,
+        temporal_decay,
         decay_now,
         &settings,
         &mut warnings,
@@ -270,14 +203,14 @@ pub async fn recall(
         pool,
         &rooms,
         &semantic_vocabulary_terms,
-        params.temporal_decay,
+        temporal_decay,
         decay_now,
         &settings,
         &mut warnings,
     )
     .await?;
-    let semantic_fetch_limit = (!params.temporal_decay).then_some(i64::from(params.semantic_top_k));
-    let content_fetch_limit = (!params.temporal_decay).then_some(i64::from(params.content_top_k));
+    let semantic_fetch_limit = (!temporal_decay).then_some(i64::from(semantic_top_k));
+    let content_fetch_limit = (!temporal_decay).then_some(i64::from(content_top_k));
     let mut semantic_chunks = Vec::new();
     if let Some(vector_text) = vector_text.clone() {
         let semantic_rows = sqlx::query(
@@ -303,14 +236,14 @@ pub async fn recall(
         )
         .bind(&vector_text)
         .bind(&rooms)
-        .bind(params.semantic_min_similarity)
+        .bind(semantic_min_similarity)
         .bind(semantic_fetch_limit)
         .bind(origami::boats::MEMORY_KIND)
         .fetch_all(pool)
         .await?;
         for row in semantic_rows {
             let sim: f64 = row.try_get("sim")?;
-            if sim < params.semantic_min_similarity {
+            if sim < semantic_min_similarity {
                 continue;
             }
             let source_path: String = row.try_get("source_path")?;
@@ -318,7 +251,7 @@ pub async fn recall(
             let heading_path: Option<String> = row.try_get("heading_path")?;
             let body: String = row.try_get("body")?;
             let meta: serde_json::Value = row.try_get("meta")?;
-            let (durability, temporal_weight) = if params.temporal_decay {
+            let (durability, temporal_weight) = if temporal_decay {
                 giga_temporal_factor(&meta, decay_now, &settings)
             } else {
                 (None, 1.0)
@@ -354,8 +287,7 @@ pub async fn recall(
             .await?;
             warnings.push(match top_sim {
                 Some(top) => format!(
-                    "semantic lane empty: top sim {top:.2} < floor {:.2} (rooms {})",
-                    params.semantic_min_similarity,
+                    "semantic lane empty: top sim {top:.2} < floor {semantic_min_similarity:.2} (rooms {})",
                     rooms.join(",")
                 ),
                 None => format!(
@@ -380,9 +312,9 @@ pub async fn recall(
          ORDER BY sim DESC,m.source_path,c.chunk_index
          LIMIT $4",
     )
-    .bind(&params.query)
+    .bind(query)
     .bind(&rooms)
-    .bind(params.content_min_similarity)
+    .bind(content_min_similarity)
     .bind(content_fetch_limit)
     .bind(&content_patterns)
     .bind(origami::boats::MEMORY_KIND)
@@ -396,7 +328,7 @@ pub async fn recall(
         let heading_path: Option<String> = row.try_get("heading_path")?;
         let body: String = row.try_get("body")?;
         let meta: serde_json::Value = row.try_get("meta")?;
-        let (durability, temporal_weight) = if params.temporal_decay {
+        let (durability, temporal_weight) = if temporal_decay {
             giga_temporal_factor(&meta, decay_now, &settings)
         } else {
             (None, 1.0)
@@ -412,12 +344,12 @@ pub async fn recall(
         );
         content_chunks.push(serde_json::json!({"memory_id":row.try_get::<i64,_>("memory_id")?,"source_path":source_path,"title":title,"heading_path":heading_path,"body":bounded_excerpt(&body),"char_start":row.try_get::<i32,_>("char_start")?,"char_end":row.try_get::<i32,_>("char_end")?,"chunk_index":row.try_get::<i32,_>("chunk_index")?,"ws":sim,"durability":durability,"temporal_weight":temporal_weight,"matched_terms":matched_terms,"missing_terms":missing_terms,"term_coverage":coverage,"evidence":"lexical word_similarity"}));
     }
-    if params.temporal_decay {
+    if temporal_decay {
         semantic_chunks.sort_by(|left, right| compare_weighted_lane(left, right, "sim"));
         content_chunks.sort_by(|left, right| compare_weighted_lane(left, right, "ws"));
     }
-    semantic_chunks.truncate(params.semantic_top_k as usize);
-    content_chunks.truncate(params.content_top_k as usize);
+    semantic_chunks.truncate(semantic_top_k as usize);
+    content_chunks.truncate(content_top_k as usize);
     let mut date_matches = Vec::new();
     if !query_dates.is_empty() {
         let rows = sqlx::query(
@@ -467,7 +399,7 @@ pub async fn recall(
          LIMIT 8",
     )
     .bind(&rooms)
-    .bind(&params.query)
+    .bind(query)
     .bind(&content_patterns)
     .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
@@ -674,7 +606,7 @@ pub async fn recall(
             .then_with(|| a["chunk_index"].as_i64().cmp(&b["chunk_index"].as_i64()))
             .then_with(|| a["memory_id"].as_i64().cmp(&b["memory_id"].as_i64()))
     });
-    retrieval_candidates.truncate(params.semantic_top_k.max(params.content_top_k) as usize);
+    retrieval_candidates.truncate(semantic_top_k.max(content_top_k) as usize);
     let memory_ids = retrieval_candidates
         .iter()
         .filter_map(|candidate| candidate["memory_id"].as_i64())
@@ -692,9 +624,9 @@ pub async fn recall(
     // dark; widening to ILIKE/tsvector then lets fuzzy hits evict the row the
     // caller literally named. So: whole-phrase exact, then token exact, then
     // similarity — and only the last tier competes for leftover LIMIT slots.
-    let query_phrase = params.query.trim().to_lowercase();
+    let query_phrase = query.trim().to_lowercase();
     let canon_rows = sqlx::query("SELECT name,kind,summary,aliases,weighty,pointer_files, (CASE WHEN lower(name) = $5 OR EXISTS (SELECT 1 FROM unnest(aliases) a1 WHERE lower(a1) = $5) THEN 0 WHEN lower(name) = ANY($2::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) a2 WHERE lower(a2) = ANY($2::text[])) THEN 1 ELSE 2 END) AS exactness FROM named_entities, websearch_to_tsquery($6::regconfig, $3) AS tsq WHERE room = ANY($1::text[]) AND authority = 'active' AND (lower(name) = $5 OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = $5) OR lower(name) = ANY($2::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = ANY($2::text[])) OR name ILIKE ANY($4::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE alias ILIKE ANY($4::text[])) OR summary_tsv @@ tsq) ORDER BY exactness, weighty DESC, name LIMIT 12")
-        .bind(&rooms).bind(&query_terms).bind(&params.query).bind(&content_patterns).bind(&query_phrase).bind(&settings.house_language).fetch_all(pool).await?;
+        .bind(&rooms).bind(&query_terms).bind(query).bind(&content_patterns).bind(&query_phrase).bind(&settings.house_language).fetch_all(pool).await?;
     let mut canon_matches = Vec::new();
     let mut named_entities = Vec::new();
     for row in canon_rows {
@@ -749,7 +681,7 @@ pub async fn recall(
     };
     Ok(RecallResult {
         ok: true,
-        query: params.query,
+        query: query.to_owned(),
         found: !retrieval_candidates.is_empty()
             || !canon_matches.is_empty()
             || !date_matches.is_empty(),

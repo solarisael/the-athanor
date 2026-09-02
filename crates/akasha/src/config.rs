@@ -294,7 +294,7 @@ fn validation_owner(operation: &str) -> (&'static str, &'static str) {
         "remember" => ("src/remember/mod.rs", "remember"),
         "paper_boat_sleep" => ("src/paper_boat.rs", "PaperBoatSleepRequest::new"),
         "paper_boat_wake" => ("src/paper_boat.rs", "PaperBoatWakeRequest::new"),
-        "recall" => ("src/recall.rs", "RecallParams::validate"),
+        "recall" => ("src/recall/mod.rs", "recall"),
         "anamnesis" => ("src/anamnesis.rs", "AnamnesisParams::validate"),
         "anamnesis_write" => ("src/anamnesis.rs", "anamnesis_write"),
         "cluster_maintenance" => ("src/cluster.rs", "cluster_maintenance"),

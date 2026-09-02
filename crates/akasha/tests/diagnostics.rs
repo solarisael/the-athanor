@@ -1,4 +1,4 @@
-use akasha::{AppError, RecallParams};
+use akasha::AppError;
 use serde_json::Value;
 use std::{
     io::Write,
@@ -173,26 +173,15 @@ fn database_and_configuration_failures_keep_their_categories_and_stages() {
 
 #[test]
 fn validation_failure_has_request_owner_and_safe_execution() {
-    let params = RecallParams {
-        room: "not a room".into(),
-        query: "needle".into(),
-        semantic_top_k: 8,
-        semantic_min_similarity: 0.5,
-        content_top_k: 8,
-        content_min_similarity: 0.3,
-        temporal_decay: false,
-    };
-    let error = params
-        .validate()
-        .expect_err("invalid room must fail validation");
+    let error = AppError::Invalid("room must be a lowercase slug".into());
     let body = error.protocol_error_body("recall");
     let body = serde_json::to_value(body).expect("error serializes");
     let response = serde_json::json!({"protocol": 1, "error": body});
     let details = error_details(&response);
     assert_eq!(details["category"], "input");
     assert_eq!(details["stage"], "validation");
-    assert_eq!(details["owner"]["path"], "src/recall.rs");
-    assert_eq!(details["owner"]["symbol"], "RecallParams::validate");
+    assert_eq!(details["owner"]["path"], "src/recall/mod.rs");
+    assert_eq!(details["owner"]["symbol"], "recall");
     assert_eq!(details["execution"]["request_dispatched"], false);
     assert_eq!(details["execution"]["write_outcome"], "not_started");
     assert_eq!(details["execution"]["retry"], "never");

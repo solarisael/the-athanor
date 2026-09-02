@@ -1,7 +1,7 @@
-use akasha::{Config, EmbeddingMode, RecallParams, backup::source_migrations, recall, remember};
+use akasha::{Config, EmbeddingMode, backup::source_migrations, recall, remember};
 use hearth::{
-    RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberRequest, RoomKey,
-    ThreadContinuation, lesson_triggers::LessonTriggerSpec,
+    RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberRequest,
+    RoomKey, ThreadContinuation, lesson_triggers::LessonTriggerSpec,
 };
 use sqlx::Row;
 use sqlx::{
@@ -163,15 +163,15 @@ async fn isolated_database_guard() {
     let recalled = recall(
         &pool,
         &cfg,
-        RecallParams {
-            room: "isolated-test".into(),
-            query: body.into(),
-            semantic_top_k: 1,
-            semantic_min_similarity: 0.5,
-            content_top_k: 8,
-            content_min_similarity: 0.3,
-            temporal_decay: false,
-        },
+        RecallRequest::new(
+            RoomKey::new("isolated-test").unwrap(),
+            body.into(),
+            1,
+            0.5,
+            8,
+            0.3,
+        )
+        .unwrap(),
     )
     .await
     .expect("lexical recall must succeed with embeddings disabled");
@@ -263,15 +263,15 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
     let recalled = recall(
         &pool,
         &cfg,
-        RecallParams {
-            room: "thread-continuity-integration".into(),
-            query: next_body.into(),
-            semantic_top_k: 1,
-            semantic_min_similarity: 0.5,
-            content_top_k: 8,
-            content_min_similarity: 0.3,
-            temporal_decay: false,
-        },
+        RecallRequest::new(
+            RoomKey::new("thread-continuity-integration").unwrap(),
+            next_body.into(),
+            1,
+            0.5,
+            8,
+            0.3,
+        )
+        .unwrap(),
     )
     .await
     .expect("recall must surface the explicit continuation");
@@ -493,15 +493,8 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     giga_source_room: None,
                     house_tz: "America/Sao_Paulo".into(),
                 };
-                let params = RecallParams {
-                    room: room.into(),
-                    query: body.into(),
-                    semantic_top_k: 1,
-                    semantic_min_similarity: 0.0,
-                    content_top_k: 8,
-                    content_min_similarity: 0.0,
-                    temporal_decay: true,
-                };
+                let params = RecallRequest::new(RoomKey::new(room)?, body.into(), 1, 0.0, 8, 0.0)?
+                    .with_temporal_decay(true);
                 let decayed = recall(&pool, &cfg, params).await?;
                 let decayed_paths = decayed
                     .retrieval_candidates
@@ -550,15 +543,8 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                 let cutoff = recall(
                     &pool,
                     &cfg,
-                    RecallParams {
-                        room: room.into(),
-                        query: body.into(),
-                        semantic_top_k: 1,
-                        semantic_min_similarity: 0.0,
-                        content_top_k: 2,
-                        content_min_similarity: 0.0,
-                        temporal_decay: true,
-                    },
+                    RecallRequest::new(RoomKey::new(room)?, body.into(), 1, 0.0, 2, 0.0)?
+                        .with_temporal_decay(true),
                 )
                 .await?;
                 let cutoff_paths = cutoff
@@ -584,15 +570,7 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                 let bypassed = recall(
                     &pool,
                     &cfg,
-                    RecallParams {
-                        room: room.into(),
-                        query: body.into(),
-                        semantic_top_k: 1,
-                        semantic_min_similarity: 0.0,
-                        content_top_k: 8,
-                        content_min_similarity: 0.0,
-                        temporal_decay: false,
-                    },
+                    RecallRequest::new(RoomKey::new(room)?, body.into(), 1, 0.0, 8, 0.0)?,
                 )
                 .await?;
                 let bypassed_paths = bypassed

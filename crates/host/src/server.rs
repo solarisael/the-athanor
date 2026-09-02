@@ -12,8 +12,8 @@ use crate::viewport::{ViewportSession, apply_viewport};
 use akasha::insula_writer::{end_span, record_point, start_span};
 use akasha::{
     AppError, Config as SubstrateConfig, LessonFamily, LessonQueryParams, OutcomeClass,
-    RecallParams, TrustedBinding, hallway_inbox, hallway_knock_claim, hallway_knock_settle,
-    lesson_query, recall, validate_trusted_binding,
+    TrustedBinding, hallway_inbox, hallway_knock_claim, hallway_knock_settle, lesson_query, recall,
+    validate_trusted_binding,
 };
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
@@ -57,7 +57,7 @@ use protocol::{
     PresenceResultEvent, RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED,
     RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA, RECALL_POLICY_PROJECTION_ID,
     RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT,
-    RecallPolicyDecision, RecallPolicyMutation, RecallPolicyState, RoutingResultEvent,
+    RecallParams, RecallPolicyDecision, RecallPolicyMutation, RecallPolicyState, RoutingResultEvent,
     SHELL_PROJECTION_ID, SHELL_RESULT, ShellResultEvent, SnapshotEvent, parse_client_command,
 };
 use serde_json::{Value, json};
@@ -1267,7 +1267,13 @@ async fn query_akasha_recall(
         "query": payload.query
     }))
     .expect("recall params carry only the bound room and query, every tuning field defaulted");
-    let result = match recall(pool, &config, params).await {
+    let request = match hearth::RecallRequest::try_from(params) {
+        Ok(request) => request,
+        Err(error) => {
+            return akasha_failed(state, &meta, format!("Akasha recall refused: {error}")).await;
+        }
+    };
+    let result = match recall(pool, &config, request).await {
         Ok(result) => serde_json::to_value(&result).expect("Akasha recall result serializes"),
         Err(error) => {
             return akasha_failed(state, &meta, format!("Akasha recall failed: {error}")).await;

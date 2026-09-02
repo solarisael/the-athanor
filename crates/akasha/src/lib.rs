@@ -79,7 +79,7 @@ pub use lesson::{
     lesson_delete, lesson_query, lesson_trigger_match, lesson_update,
 };
 pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
-pub use recall::{RecallParams, RecallResult, recall, refresh_semantic_vocabulary};
+pub use recall::{RecallResult, recall, refresh_semantic_vocabulary};
 pub use remember::remember;
 pub use restart::{
     EXITING_DEADLINE_SECS, RELAUNCH_ATTEMPT_LIMIT, RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS,

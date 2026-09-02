@@ -7,7 +7,7 @@ use akasha::{
     AppError, Config, DesignDocumentQueryParams, DesignDocumentWriteParams, EntityResolveParams,
     LessonContextParams, LessonDeleteParams, LessonQueryParams, LessonTriggerMatchParams,
     LessonUpdateParams, OutcomeClass, QuestBoardParams, QuestChargebookParams, QuestClaimParams,
-    QuestClockParams, QuestEvidenceParams, QuestPostParams, QuestReportParams, RecallParams,
+    QuestClockParams, QuestEvidenceParams, QuestPostParams, QuestReportParams,
     SubstrateHealthOptions, TrustedBinding, anamnesis, anamnesis_write, canon_read, canon_write,
     cluster_maintenance, design_document_query, design_document_write, entity_resolve,
     giga_candidate_list, giga_conversation_ingest, giga_event_claim, giga_event_finish,
@@ -25,8 +25,7 @@ use hearth::{
     CanonReadRequest, CanonWriteRequest,
     ClusterMaintenanceRequest as DomainClusterMaintenanceRequest, GigaEvent, GigaEventClaimRequest,
     GigaEventFinishRequest, GigaEventReplayRequest, GigaPromotionRequest,
-    GigaQueueMaintenanceRequest, GigaReviewAction, RecallRequest as DomainRecallRequest,
-    RememberRequest,
+    GigaQueueMaintenanceRequest, GigaReviewAction, RecallRequest, RememberRequest,
     hallway::{
         HallwayCreateRequest, HallwayInboxRequest, HallwayJoinRequest, HallwayKnockPolicyRequest,
         HallwayKnockRequest, HallwayPostRequest, HallwayReadRequest,
@@ -71,7 +70,7 @@ enum ProtocolRequest {
     HallwayInbox(HallwayInboxRequest),
     HallwayKnockPolicy(HallwayKnockPolicyRequest),
     HallwayKnock(HallwayKnockRequest),
-    Recall(RecallParams),
+    Recall(RecallRequest),
     VaultRecall(VaultRecallParams),
     Anamnesis(AnamnesisReadRequest),
     AnamnesisWrite(AnamnesisWriteRequest),
@@ -114,18 +113,6 @@ enum ProtocolRequest {
 
 fn invalid_params(message: impl Into<String>) -> ProtocolError {
     ProtocolError::InvalidParams(message.into())
-}
-
-fn recall_service_request(request: DomainRecallRequest) -> RecallParams {
-    RecallParams {
-        room: request.room().to_string(),
-        query: request.query().into(),
-        semantic_top_k: request.semantic_top_k(),
-        semantic_min_similarity: request.semantic_min_similarity(),
-        content_top_k: request.content_top_k(),
-        content_min_similarity: request.content_min_similarity(),
-        temporal_decay: request.temporal_decay(),
-    }
 }
 
 fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
@@ -180,7 +167,6 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
             .map_err(|error| invalid_params(error.to_string())),
         "recall" => envelope
             .recall_request()
-            .map(recall_service_request)
             .map(ProtocolRequest::Recall),
         "vault_recall" => envelope
             .vault_recall_request()
@@ -924,7 +910,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ProtocolRequest::HallwayKnock(request) => {
                         request.validate().map_err(AppError::Invalid)
                     }
-                    ProtocolRequest::Recall(request) => request.validate(),
+                    ProtocolRequest::Recall(_) => Ok(()),
                     ProtocolRequest::VaultRecall(_) => Ok(()),
                     ProtocolRequest::QuestPost(request) => request.validate(),
                     ProtocolRequest::QuestBoard(request) => request.validate(),

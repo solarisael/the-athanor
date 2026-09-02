@@ -1,5 +1,7 @@
-use akasha::{Config, EmbeddingMode, RecallParams, canon_read, canon_write, recall};
-use hearth::{CanonAttribution, CanonPointer, CanonReadRequest, CanonWriteRequest};
+use akasha::{Config, EmbeddingMode, canon_read, canon_write, recall};
+use hearth::{
+    CanonAttribution, CanonPointer, CanonReadRequest, CanonWriteRequest, RecallRequest, RoomKey,
+};
 use sqlx::{
     PgPool, Row,
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -236,15 +238,14 @@ async fn canon_write_correction_history_and_active_recall_are_postgres_authorita
     let recalled_old = recall(
         &pool,
         &cfg,
-        RecallParams {
-            room: "canon-proof".into(),
-            query: "obsolete authority phrase".into(),
-            semantic_top_k: 8,
-            semantic_min_similarity: 0.4,
-            content_top_k: 8,
-            content_min_similarity: 0.3,
-            temporal_decay: false,
-        },
+        RecallRequest::new(
+            RoomKey::new("canon-proof")?,
+            "obsolete authority phrase".into(),
+            8,
+            0.4,
+            8,
+            0.3,
+        )?,
     )
     .await?;
     assert!(
@@ -259,15 +260,14 @@ async fn canon_write_correction_history_and_active_recall_are_postgres_authorita
     let recalled_archived = recall(
         &pool,
         &cfg,
-        RecallParams {
-            room: "canon-proof".into(),
-            query: "New Name".into(),
-            semantic_top_k: 8,
-            semantic_min_similarity: 0.4,
-            content_top_k: 8,
-            content_min_similarity: 0.3,
-            temporal_decay: false,
-        },
+        RecallRequest::new(
+            RoomKey::new("canon-proof")?,
+            "New Name".into(),
+            8,
+            0.4,
+            8,
+            0.3,
+        )?,
     )
     .await?;
     assert!(

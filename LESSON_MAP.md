@@ -6,6 +6,8 @@ PostgreSQL remains the authority for every memory and lesson body. This file kee
 
 Every lesson in the matching section is mandatory. Before dispatch, query the typed registry and put each complete lesson body into every relevant kitten packet. IDs, titles, summaries, and this map are not delivery. A packet with a missing required body is invalid and must not spawn. The main agent owns the completeness check. Deferred lessons become mandatory when their named trigger matches; they are never silently skipped.
 
+Query the registry one rare word at a time. The full-text lookup joins every term with AND, so a multi-word query returns an empty list even when the lesson exists. An empty list is not proof of absence. Retry with one word before you conclude that the registry does not have it.
+
 ## House coding default — Ponytail
 
 Load **Coding #468 — Ponytail ladder** for every code-touching task. Retrieve its complete body before implementation and include it in every code-touching worker packet.
@@ -67,6 +69,21 @@ The 1.0 boundary is Rust, narrow NATS delivery, planned correctness fixes, harde
 - **Coding #460 — Complexity budgets apply to functions, modules, and crates.** Functions target CCN 6 or below; 7–15 is a ratcheted warning, and anything above 15 requires immediate rewrite or refactor. A split needs a distinct owner, lifecycle, and public door; never split only to reset a counter.
 
 **Coding #315 governs this replacement.** Do not read the legacy TypeScript or Python implementation to design its Rust successor. Use current specifications, accepted contracts, external observation, and focused parity probes to build Coding #184's behavior inventory. Legacy source may be inspected only after the independent contract exists, to find callers and orphaned behavior during cutover; it is evidence, never the replacement design.
+
+## Refactor slices (crate folds, module collapses, cutovers)
+
+Load these before the first cut of any refactor slice. Today's audit (2026-09-02) found every one of them already in the registry and none of them loaded.
+
+- **Coding #468 — Ponytail ladder.** The database owns a constraint it already declares (CHECK, UNIQUE); Rust never checks it a second time.
+- **Coding #382 — Line breaks expose mental operations.** A bind chain with sixteen binds on one line is not formatted code.
+- **Coding #389 — An empty catch is a silent fallback.** `try_get(..).ok().flatten()` on a row column is the Rust spelling of the same fallback; rows come out as `FromRow` with `?`.
+- **Coding #194 and #337 — Comments point outward.** A moved block keeps only the comment that names a dependency, a frozen contract, or an incident.
+- **Coding #219 — Sweep for orphans after a move.** README, `docs/CODE_FLOW_MAP.md`, installer scripts, and every `pub` symbol of the moved module.
+- **Coding #260 — Exercise the real async lifecycle.** A loop that the Host spawns gets one proof that starts it, delivers one real message, cancels it, and observes the exit.
+
+The House write shape is one `serde_json::json!` row keyed by column name through `jsonb_populate_record(NULL::table, $1)`; the read shape is a `#[derive(sqlx::FromRow)]` struct. `crates/akasha/src/insula/ingest.rs` and `crates/akasha/src/anamnesis.rs` are the reference.
+
+- **Coding #475 — Rewrite from the schema; never regex-transform the old text.** A transform keeps every defect and gives it new margins. Write the file by hand, read it back, run the real-boundary proof.
 
 ## Vault, AKASHA, and retrieval
 

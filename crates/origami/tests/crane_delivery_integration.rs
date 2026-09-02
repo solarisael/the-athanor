@@ -817,20 +817,25 @@ async fn serve_delivers_until_cancelled_and_leaves_no_lease_behind() -> TestResu
             );
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        let state: String = sqlx::query_scalar("SELECT state FROM crane_outbox WHERE event_id = $1")
-            .bind(event_id)
-            .fetch_one(&pool)
-            .await?;
+        let state: String =
+            sqlx::query_scalar("SELECT state FROM crane_outbox WHERE event_id = $1")
+                .bind(event_id)
+                .fetch_one(&pool)
+                .await?;
         assert_eq!(state, "published");
 
         cancellation.cancel();
         tokio::time::timeout(Duration::from_secs(5), cranes)
             .await
             .expect("serve exits after cancellation")?;
-        let leased: i64 = sqlx::query_scalar("SELECT count(*) FROM crane_outbox WHERE state = 'leased'")
-            .fetch_one(&pool)
-            .await?;
-        assert_eq!(leased, 0, "cancellation lands on a tick boundary, never mid-claim");
+        let leased: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM crane_outbox WHERE state = 'leased'")
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(
+            leased, 0,
+            "cancellation lands on a tick boundary, never mid-claim"
+        );
         Ok(())
     })
     .await

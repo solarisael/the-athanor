@@ -1,4 +1,3 @@
-
 use sha2::{Digest, Sha256};
 
 pub fn payload_digest(payload: &[u8]) -> String {
@@ -54,6 +53,9 @@ mod tests {
             idempotency_digest(&["a", "bc"]),
             "3fafa1cf2f19a7c1129beb20cf0983f73a489a221fc0dd2f16d1be292d089205"
         );
-        assert_ne!(idempotency_digest(&["ab", "c"]), idempotency_digest(&["a", "bc"]));
+        assert_ne!(
+            idempotency_digest(&["ab", "c"]),
+            idempotency_digest(&["a", "bc"])
+        );
     }
 }

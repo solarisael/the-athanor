@@ -1,4 +1,3 @@
-
 use anyhow::{Context, Result, bail};
 use async_nats::{
     HeaderMap,
@@ -452,7 +451,10 @@ mod tests {
     fn consumer_filters_own_exactly_their_lane() {
         assert!(subject_owns(BOAT_READY_SUBJECT, BOAT_READY_SUBJECT));
         assert!(!subject_owns("athanor.boat.readyish", BOAT_READY_SUBJECT));
-        assert!(subject_owns("athanor.crane.room.kodo", CRANE_SUBJECT_FILTER));
+        assert!(subject_owns(
+            "athanor.crane.room.kodo",
+            CRANE_SUBJECT_FILTER
+        ));
         assert!(!subject_owns(BOAT_READY_SUBJECT, CRANE_SUBJECT_FILTER));
         assert!(!subject_owns("athanor.crane.", CRANE_SUBJECT_FILTER));
     }

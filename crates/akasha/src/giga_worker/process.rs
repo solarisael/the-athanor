@@ -1,3 +1,8 @@
+use super::classify::classify_event;
+use super::identity::{
+    GIGA_MODEL_MANIFEST_DIGEST, GIGA_MODEL_TAG, GIGA_PROMPT_VERSION, sha256_bytes, source_digest,
+};
+use super::ledger::resolve_sources_from_ledger;
 use crate::{
     AppError, Config,
     giga::{database_now, event_from_store, giga_candidate_store_and_finish, giga_event_finish},
@@ -9,11 +14,6 @@ use hearth::{
 };
 use protocol::{GigaProcessResult, RequiredNullable};
 use sqlx::{PgPool, Row};
-use super::classify::classify_event;
-use super::identity::{
-    GIGA_MODEL_MANIFEST_DIGEST, GIGA_MODEL_TAG, GIGA_PROMPT_VERSION, sha256_bytes, source_digest,
-};
-use super::ledger::resolve_sources_from_ledger;
 
 const GIGA_RETRY_DELAY_SECONDS: u32 = 30;
 

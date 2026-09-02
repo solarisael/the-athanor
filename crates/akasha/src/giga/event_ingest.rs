@@ -1,10 +1,10 @@
+use super::clock::timestamp;
+use super::lifecycle::lifecycle_json;
+use super::sources::insert_event_source;
 use crate::AppError;
 use hearth::GigaEvent;
 use protocol::{GigaEventIngestDisposition, GigaEventIngestResult};
 use sqlx::{PgPool, types::Json};
-use super::clock::timestamp;
-use super::lifecycle::lifecycle_json;
-use super::sources::insert_event_source;
 
 pub async fn giga_event_ingest(
     pool: &PgPool,

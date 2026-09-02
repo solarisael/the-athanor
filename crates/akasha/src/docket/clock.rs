@@ -1,13 +1,13 @@
+use super::capability::require_docket_capability;
+use super::validate::{nonempty, principal, validate_write_identity};
 use crate::config::{AppError, Config};
 use crate::hallway::hallway_post;
 use chrono::{DateTime, Utc};
 use hearth::hallway::HallwayPostRequest;
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
-use super::capability::require_docket_capability;
-use super::validate::{nonempty, principal, validate_write_identity};
 
 // The clock (guild-hall #136 rail, #145 boundary): it only reads and rings.
 // It never measures, wakes, or judges a spirit. A clear board is silence,

@@ -1,7 +1,7 @@
+use super::params::QuestReportParams;
 use crate::config::AppError;
 use crate::docket::digest::sha256_hex;
 use sqlx::{Postgres, Transaction};
-use super::params::QuestReportParams;
 
 pub(super) async fn insert_receipt(
     tx: &mut Transaction<'_, Postgres>,

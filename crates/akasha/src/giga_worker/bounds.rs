@@ -1,4 +1,3 @@
-
 pub(super) const GIGA_MAX_MODEL_RATIONALE_BYTES: usize = 4 * 1024;
 pub(super) const GIGA_MAX_STORED_RATIONALE_BYTES: usize = 1_200;
 pub(super) const GIGA_RATIONALE_TRUNCATION_MARKER: &str =

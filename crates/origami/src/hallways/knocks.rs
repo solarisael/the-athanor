@@ -1,4 +1,3 @@
-
 use super::channels::{ensure_presence, lookup_id};
 use super::errors::{HallwayError, invalid, refusal};
 use super::rows;
@@ -69,7 +68,9 @@ fn policy_receipt_from_row(
     })
 }
 
-fn knock_pointer_from_row(row: &sqlx::postgres::PgRow) -> Result<HallwayKnockPointer, HallwayError> {
+fn knock_pointer_from_row(
+    row: &sqlx::postgres::PgRow,
+) -> Result<HallwayKnockPointer, HallwayError> {
     let turn_index: i16 = row.try_get("turn_index")?;
     let max_turns: i16 = row.try_get("max_turns")?;
     Ok(HallwayKnockPointer {

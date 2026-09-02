@@ -1,7 +1,5 @@
 use crate::config::AppError;
-use crate::docket::validate::{
-    nonempty, validate_uuid, validate_write_identity,
-};
+use crate::docket::validate::{nonempty, validate_uuid, validate_write_identity};
 use serde::{Deserialize, Serialize};
 
 const ITEM_VERDICTS: &[&str] = &[

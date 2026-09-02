@@ -1,3 +1,5 @@
+use super::failure::{WorkerFailure, WorkerFailureKind};
+use super::identity::sha256_bytes;
 use crate::Config;
 use hearth::{
     GIGA_MAX_PROCESS_SOURCE_BYTES, GIGA_MAX_PROCESS_SOURCES, GIGA_MAX_PROCESS_WINDOW_BYTES,
@@ -7,8 +9,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use tokio::fs;
-use super::failure::{WorkerFailure, WorkerFailureKind};
-use super::identity::sha256_bytes;
 
 #[derive(Clone, Debug)]
 pub(super) struct ResolvedSource {

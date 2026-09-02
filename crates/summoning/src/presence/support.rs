@@ -58,11 +58,7 @@ impl std::error::Error for PresenceError {}
 // refusal reads the same wherever a caller meets it and there is one place to
 // change what it says.
 
-pub(crate) fn required(
-    field: &'static str,
-    value: &str,
-    max: usize,
-) -> Result<(), PresenceError> {
+pub(crate) fn required(field: &'static str, value: &str, max: usize) -> Result<(), PresenceError> {
     let length = value.trim().chars().count();
     if !(1..=max).contains(&length) {
         return Err(invalid(
@@ -77,11 +73,7 @@ pub(crate) fn required(
 ///
 /// enough: five separate `if len > MAX` sites said this, five chances for the
 /// sentence to drift while every caller believed it was the same refusal.
-pub(crate) fn bound_list(
-    field: &'static str,
-    len: usize,
-    max: usize,
-) -> Result<(), PresenceError> {
+pub(crate) fn bound_list(field: &'static str, len: usize, max: usize) -> Result<(), PresenceError> {
     if len > max {
         return Err(invalid(field, "contains too many entries"));
     }
@@ -146,7 +138,10 @@ fn validate_authority(authority: &PresenceAuthority) -> Result<(), PresenceError
     .try_fold((), |(), checked| checked)
 }
 
-type MaterialField = (&'static str, fn(&PresenceMaterial, &PresenceMaterial) -> bool);
+type MaterialField = (
+    &'static str,
+    fn(&PresenceMaterial, &PresenceMaterial) -> bool,
+);
 
 /// The fields that make a material the record it is.
 ///
@@ -266,9 +261,7 @@ fn merge_or_refuse(
 /// identity and continuity, or frame material and fresh recall, used to
 /// survive into an authority map where the last writer won. Two records under
 /// one identifier is a conflict to name, not a collision to order.
-pub(crate) fn reject_conflicting_ids(
-    groups: &[&[PresenceMaterial]],
-) -> Result<(), PresenceError> {
+pub(crate) fn reject_conflicting_ids(groups: &[&[PresenceMaterial]]) -> Result<(), PresenceError> {
     let mut combined = groups
         .iter()
         .flat_map(|group| group.iter().cloned())
@@ -276,9 +269,7 @@ pub(crate) fn reject_conflicting_ids(
     collapse_materials(&mut combined)
 }
 
-pub(crate) fn bound_material_count(
-    groups: &[&[PresenceMaterial]],
-) -> Result<(), PresenceError> {
+pub(crate) fn bound_material_count(groups: &[&[PresenceMaterial]]) -> Result<(), PresenceError> {
     let total = groups.iter().map(|group| group.len()).sum::<usize>();
     bound_list("materials", total, PRESENCE_MAX_MATERIALS)
 }
@@ -411,9 +402,7 @@ pub(crate) fn render_section<'a>(
 }
 
 /// Every material as a citable row, for the renderers.
-pub(crate) fn material_rows(
-    materials: &[PresenceMaterial],
-) -> impl Iterator<Item = (&str, &str)> {
+pub(crate) fn material_rows(materials: &[PresenceMaterial]) -> impl Iterator<Item = (&str, &str)> {
     materials
         .iter()
         .map(|material| (material.id.as_str(), material.body.as_str()))

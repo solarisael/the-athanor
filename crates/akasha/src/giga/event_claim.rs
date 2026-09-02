@@ -1,11 +1,11 @@
+use super::clock::database_now;
+use super::error::domain_error;
+use super::event_store::event_from_store;
 use crate::AppError;
 use chrono::{DateTime, Duration, Utc};
 use hearth::{GIGA_MAX_EVENT_ATTEMPTS, GigaEventClaimReceipt, GigaEventClaimRequest};
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row};
-use super::clock::database_now;
-use super::error::domain_error;
-use super::event_store::event_from_store;
 
 // Keys are giga_event_attempts column names; the table is the only schema
 // (0004_giga_runtime.sql:33-50). `SELECT *` from the record writes over column

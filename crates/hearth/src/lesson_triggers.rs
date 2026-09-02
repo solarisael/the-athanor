@@ -185,10 +185,18 @@ impl LessonTriggerSpec {
                 "a lesson may carry at most {MAX_TRIGGER_PATTERNS} trigger patterns per field"
             ));
         }
-        if self.condition.iter().any(|pattern| pattern.trim().is_empty()) {
+        if self
+            .condition
+            .iter()
+            .any(|pattern| pattern.trim().is_empty())
+        {
             return Err("condition must not contain empty patterns".to_owned());
         }
-        if self.ast_condition.iter().any(|pattern| pattern.trim().is_empty()) {
+        if self
+            .ast_condition
+            .iter()
+            .any(|pattern| pattern.trim().is_empty())
+        {
             return Err("astCondition must not contain empty patterns".to_owned());
         }
         for token in &self.trigger_scope {
@@ -246,7 +254,10 @@ mod tests {
 
     #[test]
     fn scope_tokens_pin_the_surfaces_they_name() {
-        assert_eq!(ScopeToken::parse(" tool: write "), Ok(ScopeToken::NamedTool("write".into())));
+        assert_eq!(
+            ScopeToken::parse(" tool: write "),
+            Ok(ScopeToken::NamedTool("write".into()))
+        );
         assert!(ScopeToken::parse("tool:").is_err());
         assert!(ScopeToken::parse("toolbar").is_err());
 

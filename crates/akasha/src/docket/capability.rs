@@ -1,7 +1,7 @@
-use crate::config::AppError;
-use sqlx::PgPool;
 use super::digest::{constant_time_equal, sha256_hex};
 use super::validate::refusal;
+use crate::config::AppError;
+use sqlx::PgPool;
 
 /// Gate a Docket write before any cooperation-plane state is read or changed.
 pub async fn require_docket_capability(

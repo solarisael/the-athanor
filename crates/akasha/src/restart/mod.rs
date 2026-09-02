@@ -59,15 +59,15 @@ use authority::{
     require_requester_session, require_successor_identity,
 };
 use chrono::{DateTime, Utc};
+use proof::{
+    clear as clear_successor_proof, require_current as require_successor_proof,
+    rotate as rotate_successor_proof,
+};
 use protocol::restart::{
     RestartClaimParams, RestartClaimReceipt, RestartMode, RestartRequestParams,
     RestartRequestReceipt, RestartStageDeadlines, RestartState, RestartStatusDeadlines,
     RestartStatusIntent, RestartStatusParams, RestartStatusReceipt, RestartTransitionParams,
     RestartTransitionReceipt, RestartTransitionTarget, RestartVerifyParams, RestartVerifyReceipt,
-};
-use proof::{
-    clear as clear_successor_proof, require_current as require_successor_proof,
-    rotate as rotate_successor_proof,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

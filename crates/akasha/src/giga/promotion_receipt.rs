@@ -1,9 +1,9 @@
+use super::error::domain_error;
 use crate::AppError;
 use chrono::{DateTime, Utc};
 use hearth::{GigaPromotionKind, GigaPromotionPayload, GigaPromotionReceipt, GigaPromotionRequest};
 use serde_json::Value;
 use sqlx::{Row, postgres::PgRow, types::Json};
-use super::error::domain_error;
 
 pub(super) fn typed_promotion_receipt(
     request: &GigaPromotionRequest,

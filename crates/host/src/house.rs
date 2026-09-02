@@ -1,8 +1,8 @@
 use crate::config::HostConfig;
 use crate::server::Host;
 use akasha::insula_writer::{flush_insula_emitter, init_insula_emitter};
-use origami::cranes::{delivery::DeliveryService, outbox::Store};
 use axum::Router;
+use origami::cranes::{delivery::DeliveryService, outbox::Store};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::HashSet;

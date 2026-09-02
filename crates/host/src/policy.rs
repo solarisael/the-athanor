@@ -493,9 +493,7 @@ impl ResolvedRequestedMode for RecallRequestedMode {
 #[cfg(test)]
 mod tests {
     use super::{RecallPolicySession, resolve_auto_mode};
-    use protocol::{
-        RecallPolicyState, RecallRequestedMode, RecallResolvedMode, RecoveryState,
-    };
+    use protocol::{RecallPolicyState, RecallRequestedMode, RecallResolvedMode, RecoveryState};
 
     fn projection() -> RecallPolicyState {
         RecallPolicyState {

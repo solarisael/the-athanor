@@ -10,11 +10,7 @@ pub const HARNESS_REGISTRY: &str = "config/harnesses.json";
 pub const PROGRAM_ROOT_ENV: &str = "ATHANOR_PROGRAM_ROOT";
 pub const DATA_ROOT_ENV: &str = "ATHANOR_DATA_ROOT";
 pub const SECRETS_FILE: &str = "secrets/runtime-secrets.json";
-pub const LEGACY_NAMES: &[&str] = &[
-    "solarisael-house",
-    "athanor-omp",
-    "athanor-substrate",
-];
+pub const LEGACY_NAMES: &[&str] = &["solarisael-house", "athanor-omp", "athanor-substrate"];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InstallLayout {

@@ -1,5 +1,7 @@
 use crate::AppError;
-use hearth::{GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope};
+use hearth::{
+    GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
+};
 use protocol::{GigaQueueMaintenanceResult, GigaQueueStateCount};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 

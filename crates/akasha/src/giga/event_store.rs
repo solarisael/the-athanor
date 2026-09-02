@@ -1,11 +1,11 @@
+use super::error::domain_error;
+use super::lifecycle::lifecycle_from_json;
+use super::sources::source_from_row;
 use crate::AppError;
 use chrono::{DateTime, Utc};
 use hearth::{GigaEvent, GigaEventType, RoomKey};
 use serde_json::Value;
 use sqlx::{Postgres, Row, Transaction, types::Json};
-use super::error::domain_error;
-use super::lifecycle::lifecycle_from_json;
-use super::sources::source_from_row;
 
 pub(crate) async fn event_from_store(
     tx: &mut Transaction<'_, Postgres>,

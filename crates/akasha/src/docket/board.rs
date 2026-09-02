@@ -1,8 +1,8 @@
+use super::validate::{nonempty, validate_identity};
 use crate::config::AppError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
-use super::validate::{nonempty, validate_identity};
 
 const QUEST_STATES: &[&str] = &[
     "draft",

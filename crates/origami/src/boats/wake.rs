@@ -1,8 +1,7 @@
-
-use chrono::{DateTime, NaiveDate, Utc};
 use super::paper_boat::{
     PAPER_BOAT_MAX_BODY_BYTES, PAPER_BOAT_MAX_UNBOATED, PaperBoatRecord, UnboatedMemory,
 };
+use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::{PgPool, Row};
 
 use super::MEMORY_KIND;

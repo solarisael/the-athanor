@@ -1,9 +1,9 @@
-use hearth::GigaEvent;
 use super::bounds::{GIGA_MAX_MODEL_RATIONALE_BYTES, bounded_trimmed};
 use super::failure::{WorkerFailure, domain_failure};
 use super::schema::{
     ExtractionOutput, GIGA_MAX_RETRIEVAL_TERMS, GIGA_MAX_SELECTED_SOURCES, GateKind, GateOutput,
 };
+use hearth::GigaEvent;
 
 fn exact_unique_subset(values: &[String], allowed: &[String], allow_empty: bool) -> bool {
     (allow_empty || !values.is_empty())

@@ -4,14 +4,14 @@ mod receipt;
 mod settle;
 mod submit;
 
+use self::progress::report_progress;
+use self::settle::report_settle_item;
+use self::submit::report_submit;
 use crate::config::AppError;
 use crate::docket::capability::require_docket_capability;
 use crate::docket::claim::LEASE_MINUTES;
 use crate::docket::digest::{constant_time_equal, sha256_hex};
 use crate::docket::validate::refusal;
-use self::progress::report_progress;
-use self::settle::report_settle_item;
-use self::submit::report_submit;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::{PgPool, Row};

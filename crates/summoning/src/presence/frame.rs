@@ -78,7 +78,9 @@ type OpenMaterials = (
     Vec<String>,
 );
 
-fn prepare_open_materials(mut request: PresenceOpenRequest) -> Result<OpenMaterials, PresenceError> {
+fn prepare_open_materials(
+    mut request: PresenceOpenRequest,
+) -> Result<OpenMaterials, PresenceError> {
     if request.identity.is_empty() {
         return Err(invalid("identity", "must contain at least one material"));
     }
@@ -297,7 +299,11 @@ mod tests {
     fn the_frame_carries_only_host_proved_capabilities() {
         let frame = open_presence(authentication(), request()).unwrap();
         assert_eq!(frame.capabilities, vec![PresenceCapability::RoomState]);
-        assert!(frame.rendered.contains("Capabilities the Host proved: room_state"));
+        assert!(
+            frame
+                .rendered
+                .contains("Capabilities the Host proved: room_state")
+        );
     }
 
     #[test]

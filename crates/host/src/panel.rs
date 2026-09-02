@@ -400,9 +400,7 @@ fn refused(refusal: akasha::AppError) -> Response {
     // Refusal text is the substrate's own; the panel adds nothing and hides
     // nothing. Server faults stay 502 so the GUI can tell fence from fire.
     let status = match &refusal {
-        akasha::AppError::Refusal { .. } | akasha::AppError::Invalid(_) => {
-            StatusCode::BAD_REQUEST
-        }
+        akasha::AppError::Refusal { .. } | akasha::AppError::Invalid(_) => StatusCode::BAD_REQUEST,
         _ => StatusCode::BAD_GATEWAY,
     };
     (

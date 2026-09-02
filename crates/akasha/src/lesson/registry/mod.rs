@@ -16,8 +16,8 @@ pub use mutation::{
 pub use query::{
     LessonFilters, LessonQueryParams, LessonQueryResult, LessonRecord, LessonTaxonomy, lesson_query,
 };
+pub(crate) use trigger::validate_patterns;
 pub use trigger::{
     LessonTriggerFired, LessonTriggerMatchParams, LessonTriggerMatchResult, LessonTriggerSurface,
     lesson_trigger_match,
 };
-pub(crate) use trigger::validate_patterns;

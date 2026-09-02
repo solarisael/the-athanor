@@ -1,4 +1,3 @@
-
 const GIGA_MAX_DIAGNOSTIC_CLASS_BYTES: usize = 128;
 
 #[derive(Clone, Copy, Debug)]

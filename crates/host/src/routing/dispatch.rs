@@ -180,10 +180,7 @@ fn rejected_receipt(
     }
 }
 
-fn base_dispatch_errors(
-    request: &DispatchRequest,
-    lane: Option<WorkerLane>,
-) -> Vec<String> {
+fn base_dispatch_errors(request: &DispatchRequest, lane: Option<WorkerLane>) -> Vec<String> {
     let mut errors = Vec::new();
     if lane.is_none() {
         let name = request.lane.trim();

@@ -3,8 +3,6 @@
 //! JetStream broker are siblings in this module; this file only drives them.
 //! The Host spawns [`DeliveryService::serve`] once per House lifetime.
 
-use anyhow::{Context, Result, bail};
-use async_nats::jetstream::{consumer::PullConsumer, message::AckKind};
 use super::{
     broker::{
         BOAT_READY_SUBJECT, BoatReceiptProjection, Broker, CONSUMER_BACKOFF, CRANE_SUBJECT_FILTER,
@@ -15,6 +13,8 @@ use super::{
     outbox::{ClaimedEvent, ReceiptDisposition, RecordedReceipt, Store},
 };
 use crate::sea::subject_owns;
+use anyhow::{Context, Result, bail};
+use async_nats::jetstream::{consumer::PullConsumer, message::AckKind};
 use chrono::Utc;
 use futures_util::StreamExt;
 use serde::Serialize;

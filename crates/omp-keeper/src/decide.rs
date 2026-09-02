@@ -169,21 +169,37 @@ mod tests {
     fn an_exiting_intent_is_killed_by_the_instant_on_the_intent_not_by_elapsed_time() {
         let deadline = Deadline::House(at("2026-08-25T18:01:00Z"));
         assert_eq!(
-            exiting_action(Some(RestartState::Exiting), Some(deadline), at("2026-08-25T18:01:01Z")),
+            exiting_action(
+                Some(RestartState::Exiting),
+                Some(deadline),
+                at("2026-08-25T18:01:01Z")
+            ),
             ExitingAction::Kill
         );
         // an hour late is still late, however long this keeper has been looking
         assert_eq!(
-            exiting_action(Some(RestartState::Exiting), Some(deadline), at("2026-08-25T19:00:00Z")),
+            exiting_action(
+                Some(RestartState::Exiting),
+                Some(deadline),
+                at("2026-08-25T19:00:00Z")
+            ),
             ExitingAction::Kill
         );
         // standing exactly on the instant is not past it
         assert_eq!(
-            exiting_action(Some(RestartState::Exiting), Some(deadline), at("2026-08-25T18:01:00Z")),
+            exiting_action(
+                Some(RestartState::Exiting),
+                Some(deadline),
+                at("2026-08-25T18:01:00Z")
+            ),
             ExitingAction::Wait
         );
         assert_eq!(
-            exiting_action(Some(RestartState::Exiting), Some(deadline), at("2026-08-25T18:00:59Z")),
+            exiting_action(
+                Some(RestartState::Exiting),
+                Some(deadline),
+                at("2026-08-25T18:00:59Z")
+            ),
             ExitingAction::Wait
         );
     }

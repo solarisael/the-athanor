@@ -125,7 +125,10 @@ async fn append_rep(
     upsert_rep(&mut tx, id, append.rep(), append.source_paths().first()).await?;
     tx.commit().await?;
 
-    let warnings = backup_warning(pool, cfg, &settings).await.into_iter().collect();
+    let warnings = backup_warning(pool, cfg, &settings)
+        .await
+        .into_iter()
+        .collect();
     let receipt = AnamnesisAppendReceipt::committed(
         append.room().clone(),
         title.into(),
@@ -312,7 +315,11 @@ struct Drawer {
 
 impl Drawer {
     fn is_verifiable(&self) -> bool {
-        self.kind != "cycle" || self.verify_note.as_deref().is_some_and(|v| !v.trim().is_empty())
+        self.kind != "cycle"
+            || self
+                .verify_note
+                .as_deref()
+                .is_some_and(|v| !v.trim().is_empty())
     }
 }
 

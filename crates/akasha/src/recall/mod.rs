@@ -13,15 +13,14 @@ use crate::settings::RoomSettings;
 use bm25f_candidates::{load_bm25f_candidates, load_bm25f_candidates_for_terms};
 use chrono::{NaiveDate, Utc};
 use embedding::embed_query;
+use hearth::RecallRequest;
 use pointer_files::protocol_pointer_files;
 use semantic_vocabulary::{load_semantic_vocabulary_concepts, semantic_vocabulary_terms};
-use hearth::RecallRequest;
 use serde::Serialize;
 use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, BTreeSet};
 use temporal::{compare_weighted_lane, giga_temporal_factor, weighted_lane_score};
 use thread_neighbors::load_thread_neighbors;
-
 
 #[derive(Debug, Serialize)]
 pub struct RecallResult {
@@ -149,28 +148,22 @@ pub async fn recall(
             warnings.push("semantic lane absent: embedding disabled for isolated test".to_string());
             None
         }
-        (EmbeddingMode::Required, Some(url)) => match embed_query(
-            &HTTP_CLIENT,
-            url,
-            &cfg.embed_model,
-            query,
-            EMBED_DIMENSION,
-        )
-        .await
-        {
-            Ok(vector) => Some(format!(
-                "[{}]",
-                vector
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            )),
-            Err(e) => {
-                warnings.push(format!("semantic lane absent: {e}"));
-                None
+        (EmbeddingMode::Required, Some(url)) => {
+            match embed_query(&HTTP_CLIENT, url, &cfg.embed_model, query, EMBED_DIMENSION).await {
+                Ok(vector) => Some(format!(
+                    "[{}]",
+                    vector
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )),
+                Err(e) => {
+                    warnings.push(format!("semantic lane absent: {e}"));
+                    None
+                }
             }
-        },
+        }
         (EmbeddingMode::Required, None) => {
             warnings.push("semantic lane absent: embedding endpoint is required".to_string());
             None

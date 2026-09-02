@@ -1,3 +1,6 @@
+use super::candidate_store::giga_candidate_store_tx;
+use super::clock::database_now;
+use super::error::domain_error;
 use crate::AppError;
 use chrono::{DateTime, Duration, Utc};
 use hearth::{
@@ -5,9 +8,6 @@ use hearth::{
     GigaEventFinishRequest, GigaQueueState,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
-use super::candidate_store::giga_candidate_store_tx;
-use super::clock::database_now;
-use super::error::domain_error;
 
 async fn giga_event_finish_tx(
     tx: &mut Transaction<'_, Postgres>,

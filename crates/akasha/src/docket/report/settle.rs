@@ -1,10 +1,10 @@
+use super::QuestReportResult;
+use super::params::QuestReportParams;
 use crate::config::AppError;
 use crate::docket::ledger::insert_event;
 use crate::docket::validate::principal;
 use serde_json::json;
 use sqlx::{Postgres, Row, Transaction};
-use super::QuestReportResult;
-use super::params::QuestReportParams;
 
 const SETTLED_VERDICTS: &[&str] = &["met", "not_applicable"];
 pub(super) async fn report_settle_item(

@@ -1,3 +1,4 @@
+use super::sources::source_params;
 use crate::AppError;
 use chrono::{DateTime, Utc};
 use hearth::GigaAuthority;
@@ -6,7 +7,6 @@ use protocol::{
     GigaScopeParams, GigaSourceRefParams, RequiredNullable,
 };
 use sqlx::{PgPool, Row, types::Json};
-use super::sources::source_params;
 
 async fn candidate_sources(
     pool: &PgPool,

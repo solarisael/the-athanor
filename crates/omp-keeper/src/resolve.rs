@@ -12,7 +12,10 @@ pub fn resolve_substrate_exe(program_root: &Path) -> Result<PathBuf> {
     let root = PhysicalDirectory::open(program_root, "program root", None)?;
     let pointer = root.regular_file(POINTER_FILE_NAME, "current release pointer")?;
     let version = pointer_version(&pointer)?;
-    let versions = root.child(VERSIONS_DIRECTORY, "active native release ancestor versions")?;
+    let versions = root.child(
+        VERSIONS_DIRECTORY,
+        "active native release ancestor versions",
+    )?;
     let release = versions.child(&version, "active native release")?;
     let bin = release.child(BIN_DIRECTORY, "active native release ancestor bin")?;
     bin.regular_file(substrate_exe_name(), "substrate executable")
@@ -40,8 +43,12 @@ struct NativePointer {
 }
 
 fn pointer_version(pointer: &Path) -> Result<String> {
-    let text = std::fs::read_to_string(pointer)
-        .with_context(|| format!("current release pointer could not be read: {}", pointer.display()))?;
+    let text = std::fs::read_to_string(pointer).with_context(|| {
+        format!(
+            "current release pointer could not be read: {}",
+            pointer.display()
+        )
+    })?;
     let parsed: NativePointer = serde_json::from_str(&text)
         .context("current release pointer is not a valid release pointer")?;
     let version = safe_version(&parsed.version, "current release version")?;
@@ -62,9 +69,9 @@ fn safe_version(value: &str, field: &str) -> Result<String> {
             .chars()
             .next()
             .is_some_and(|first| first.is_ascii_alphanumeric())
-        && value
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '+' | '-'));
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '+' | '-')
+        });
     if !safe {
         bail!("{field} is unsafe");
     }
@@ -87,8 +94,9 @@ impl PhysicalDirectory {
                 "installed Athanor {label} must be a physical directory; symbolic links, junctions, and reparse points are refused"
             );
         }
-        let physical = std::fs::canonicalize(&logical)
-            .with_context(|| format!("installed Athanor {label} physical path could not be resolved"))?;
+        let physical = std::fs::canonicalize(&logical).with_context(|| {
+            format!("installed Athanor {label} physical path could not be resolved")
+        })?;
         let root_physical = match parent {
             Some(parent) => parent.root_physical.clone(),
             None => physical.clone(),
@@ -115,8 +123,9 @@ impl PhysicalDirectory {
                 "installed Athanor {label} must be a regular physical file; symbolic links, junctions, and reparse points are refused"
             );
         }
-        let physical = std::fs::canonicalize(&logical)
-            .with_context(|| format!("installed Athanor {label} physical path could not be resolved"))?;
+        let physical = std::fs::canonicalize(&logical).with_context(|| {
+            format!("installed Athanor {label} physical path could not be resolved")
+        })?;
         if !physical.starts_with(&self.root_physical) {
             bail!("installed Athanor {label} escapes its physical root");
         }
@@ -198,12 +207,14 @@ mod tests {
         )
         .expect("rewrite pointer");
         let resolved = resolve_substrate_exe(&tree.program_root).expect("resolves");
-        assert!(resolved.ends_with(
-            Path::new(VERSIONS_DIRECTORY)
-                .join("0.11.4")
-                .join(BIN_DIRECTORY)
-                .join(substrate_exe_name())
-        ));
+        assert!(
+            resolved.ends_with(
+                Path::new(VERSIONS_DIRECTORY)
+                    .join("0.11.4")
+                    .join(BIN_DIRECTORY)
+                    .join(substrate_exe_name())
+            )
+        );
     }
 
     #[test]

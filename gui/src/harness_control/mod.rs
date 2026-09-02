@@ -4,10 +4,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use godot::prelude::*;
 use ::protocol::harness::{
     HARNESS_CONTROL_FORMAT, HarnessCommand, HarnessControlRequest, HarnessControlResponse,
 };
+use godot::prelude::*;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;

@@ -6,9 +6,7 @@ use protocol::restart::RestartState;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-use super::event::{
-    ObservationPhase, OutcomeClass, TrustedBinding, atom, is_room, opaque, uuid,
-};
+use super::event::{ObservationPhase, OutcomeClass, TrustedBinding, atom, is_room, opaque, uuid};
 use super::{InsulaError, bad};
 
 pub const INSULA_MAX_VITALS_ROWS: u32 = 5_000;
@@ -63,7 +61,6 @@ pub struct VitalsResult {
     pub query_version: i16,
     pub rows: Vec<VitalsRow>,
 }
-
 
 pub async fn query_vitals(pool: &PgPool, q: &VitalsQuery) -> Result<VitalsResult, InsulaError> {
     if !atom(&q.house_id, 64)

@@ -1,10 +1,10 @@
+use super::clock::timestamp;
+use super::error::domain_error;
 use crate::AppError;
 use chrono::{DateTime, Utc};
 use hearth::{GigaScope, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility};
 use protocol::{GigaScopeParams, GigaSourceRangeParams, GigaSourceRefParams, RequiredNullable};
 use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
-use super::clock::timestamp;
-use super::error::domain_error;
 
 pub(super) fn scope_parts(
     source: &GigaSourceRef,

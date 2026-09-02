@@ -1,3 +1,8 @@
+use super::clock::database_now;
+use super::error::domain_error;
+use super::event_store::event_from_store;
+use super::promotion::giga_promote;
+use super::sources::fresh_candidate_sources;
 use crate::{AppError, config::Config, giga_worker::verify_promotion_sources};
 use chrono::{DateTime, Utc};
 use hearth::{
@@ -7,11 +12,6 @@ use hearth::{
 };
 use protocol::{GigaToolPromoteParams, GigaToolPromotionTargetParams};
 use sqlx::{PgPool, Row};
-use super::clock::database_now;
-use super::error::domain_error;
-use super::event_store::event_from_store;
-use super::promotion::giga_promote;
-use super::sources::fresh_candidate_sources;
 
 pub async fn giga_tool_promote(
     pool: &PgPool,

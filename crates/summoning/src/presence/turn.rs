@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use super::model::*;
 use super::support::{
-    PresenceError, bound_list, digest, directive_rows, invalid, material_rows,
-    normalize_materials, normalize_strings, reject_conflicting_ids, render_lines, render_section,
-    require_active_frame, required, sha256, validate_ledger,
+    PresenceError, bound_list, digest, directive_rows, invalid, material_rows, normalize_materials,
+    normalize_strings, reject_conflicting_ids, render_lines, render_section, require_active_frame,
+    required, sha256, validate_ledger,
 };
 
 /// Compile one turn's contract against the frame and the Host's ledger.
@@ -403,8 +403,8 @@ fn directive_sources(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::open_presence;
+    use super::*;
 
     fn authentication() -> PresenceAuthentication {
         PresenceAuthentication {

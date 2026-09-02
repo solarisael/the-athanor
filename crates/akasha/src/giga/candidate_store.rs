@@ -1,9 +1,9 @@
+use super::clock::timestamp;
+use super::sources::{range_parts, scope_parts, verify_event_source};
 use crate::AppError;
 use hearth::GigaCandidate;
 use protocol::{GigaCandidateStoreDisposition, GigaCandidateStoreResult};
 use sqlx::{PgPool, Postgres, Row, Transaction, types::Json};
-use super::clock::timestamp;
-use super::sources::{range_parts, scope_parts, verify_event_source};
 
 async fn verify_parent_event(
     tx: &mut Transaction<'_, Postgres>,

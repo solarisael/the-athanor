@@ -1,10 +1,10 @@
+use super::QuestPostResult;
+use super::params::QuestPostParams;
 use crate::config::AppError;
 use crate::docket::ledger::insert_goal_event;
 use crate::docket::validate::{principal, refusal, required};
 use serde_json::json;
 use sqlx::{Postgres, Row, Transaction};
-use super::QuestPostResult;
-use super::params::QuestPostParams;
 
 pub(super) async fn post_goal_draft(
     tx: &mut Transaction<'_, Postgres>,

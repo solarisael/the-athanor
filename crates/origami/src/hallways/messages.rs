@@ -1,4 +1,3 @@
-
 use super::bells;
 use super::channels::{ensure_presence, lookup_id};
 use super::errors::{HallwayError, invalid, refusal};
@@ -200,7 +199,13 @@ pub async fn post(
          FROM jsonb_populate_record(NULL::hallway_messages,$1)
          RETURNING id,created_at::text AS created_at_text",
     )
-    .bind(rows::message(id, sequence, &request, &body_digest, thread_id))
+    .bind(rows::message(
+        id,
+        sequence,
+        &request,
+        &body_digest,
+        thread_id,
+    ))
     .fetch_one(&mut *tx)
     .await?;
     let message_id: i64 = row.try_get("id")?;

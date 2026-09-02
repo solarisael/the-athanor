@@ -1,12 +1,12 @@
+use super::clock::timestamp;
+use super::promotion_payload::promotion_sources_json;
+use super::sources::{source_ref_params, stored_source_matches, verify_event_source};
 use crate::AppError;
 use hearth::{GigaResonance, GigaReviewAction, GigaReviewState, GigaVisibility, RoomKey};
 use protocol::{GigaClassifierParams, GigaResonanceParams, GigaReviewResult, RequiredNullable};
 use serde_json::{Value, json};
 use sqlx::{PgPool, Postgres, Row, Transaction, types::Json};
 use std::collections::HashSet;
-use super::clock::timestamp;
-use super::promotion_payload::promotion_sources_json;
-use super::sources::{source_ref_params, stored_source_matches, verify_event_source};
 
 fn review_action(state: GigaReviewState) -> &'static str {
     match state {
@@ -254,11 +254,7 @@ pub async fn giga_review(
             "INSERT INTO giga_review_resonances
              SELECT * FROM jsonb_populate_record(NULL::giga_review_resonances,$1)",
         )
-        .bind(resonance_row(
-            review_id,
-            review.candidate_id(),
-            resonance,
-        )?)
+        .bind(resonance_row(review_id, review.candidate_id(), resonance)?)
         .execute(&mut *tx)
         .await?;
     }

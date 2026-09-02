@@ -10,6 +10,7 @@ pub use design::{
     DesignDocumentTaxonomy, DesignDocumentWriteParams, DesignDocumentWriteReceipt,
     design_document_query, design_document_write,
 };
+pub(crate) use registry::validate_patterns;
 pub use registry::{
     LessonContextFilters, LessonContextMatch, LessonContextParams, LessonContextRecord,
     LessonContextResult, LessonDeleteParams, LessonFamily, LessonFilters, LessonMutationKind,
@@ -18,4 +19,3 @@ pub use registry::{
     LessonUpdateParams, lesson_context, lesson_delete, lesson_query, lesson_trigger_match,
     lesson_update,
 };
-pub(crate) use registry::validate_patterns;

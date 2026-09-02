@@ -129,7 +129,10 @@ mod tests {
         }
         let snapshot = log.snapshot();
         assert_eq!(snapshot.len(), CHAT_MAX_ENTRIES);
-        assert_eq!(snapshot.last().unwrap().turn_id, format!("say-{}", CHAT_MAX_ENTRIES + 7));
+        assert_eq!(
+            snapshot.last().unwrap().turn_id,
+            format!("say-{}", CHAT_MAX_ENTRIES + 7)
+        );
     }
 
     #[test]

@@ -1,11 +1,3 @@
-use chrono::Utc;
-use hearth::{
-    GigaAuthority, GigaCandidate, GigaClassifierIdentity, GigaEvent, GigaReviewState, GigaScope,
-    GigaScores, GigaVisibility,
-};
-use serde::Serialize;
-use serde_json::json;
-use uuid::Uuid;
 use super::bounds::{
     GIGA_MAX_STORED_RATIONALE_BYTES, GIGA_RATIONALE_TRUNCATION_MARKER, truncate_with_marker,
 };
@@ -21,6 +13,14 @@ use super::schema::{
     ExtractionOutput, GateKind, GateOutput, extraction_schema, gate_schema, schema_json,
 };
 use super::validation::{dedupe_preserving_order, validate_extraction, validate_gate};
+use chrono::Utc;
+use hearth::{
+    GigaAuthority, GigaCandidate, GigaClassifierIdentity, GigaEvent, GigaReviewState, GigaScope,
+    GigaScores, GigaVisibility,
+};
+use serde::Serialize;
+use serde_json::json;
+use uuid::Uuid;
 
 #[derive(Serialize)]
 struct ModelSource<'a> {

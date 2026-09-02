@@ -1,4 +1,3 @@
-
 use crate::cranes::lanes::{Lane, RecipientKind, is_recipient_key};
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
@@ -7,7 +6,9 @@ use serde_json::Value;
 use uuid::Uuid;
 
 pub const EVENT_SCHEMA_VERSION: u8 = 1;
-pub use crate::boats::{CREASE_PATTERN as BOAT_READY_CREASE_PATTERN, EVENT_KIND as BOAT_READY_EVENT_KIND};
+pub use crate::boats::{
+    CREASE_PATTERN as BOAT_READY_CREASE_PATTERN, EVENT_KIND as BOAT_READY_EVENT_KIND,
+};
 pub const MAX_EVENT_KIND_BYTES: usize = 128;
 pub const MAX_CREASE_PATTERN_BYTES: usize = 128;
 

@@ -1,6 +1,4 @@
-use akasha::{
-    LessonMutationKind, LessonMutationReceipt, LessonUpdateParams, lesson_update,
-};
+use akasha::{LessonMutationKind, LessonMutationReceipt, LessonUpdateParams, lesson_update};
 use serde_json::{Value, json};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{PgPool, Row};
@@ -275,7 +273,10 @@ async fn writing_and_design_lessons_accept_routing_eligibility_fields() -> TestR
     .fetch_one(&pool)
     .await?;
     assert!(row.try_get::<bool, _>("always_on")?);
-    assert_eq!(row.try_get::<Vec<String>, _>("language_keys")?, Vec::<String>::new());
+    assert_eq!(
+        row.try_get::<Vec<String>, _>("language_keys")?,
+        Vec::<String>::new()
+    );
     assert_eq!(
         row.try_get::<Vec<String>, _>("technology_keys")?,
         vec!["figma".to_string()]

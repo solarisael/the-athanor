@@ -2,8 +2,8 @@ use super::{
     config::{HarnessKind, HarnessRegistry, HarnessSpec, detail},
     omp::{self, OmpExit, OwnedOmp},
 };
-use anyhow::{Context, Result, bail};
 use ::protocol::harness::{HarnessCommand, HarnessLifecycle, HarnessStatus};
+use anyhow::{Context, Result, bail};
 use interactive_process::{InteractiveChild, InteractiveCommand};
 use std::{
     collections::BTreeMap,

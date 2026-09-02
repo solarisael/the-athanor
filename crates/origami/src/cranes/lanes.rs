@@ -1,4 +1,3 @@
-
 use crate::cranes::broker::{BOAT_READY_SUBJECT, CRANE_SUBJECT_PREFIX};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};

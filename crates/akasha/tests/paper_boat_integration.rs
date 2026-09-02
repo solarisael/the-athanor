@@ -1,7 +1,7 @@
 use akasha::{Config, EmbeddingMode, paper_boat_sleep, paper_boat_wake};
-use summoning::{PaperBoatSleepRequest, PaperBoatWakeRequest};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
+use summoning::{PaperBoatSleepRequest, PaperBoatWakeRequest};
 use uuid::Uuid;
 
 macro_rules! migration {

@@ -1,4 +1,3 @@
-
 use std::fmt;
 
 // Same four shapes as substrate AppError on purpose — the adapter in

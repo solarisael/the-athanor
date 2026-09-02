@@ -1,4 +1,3 @@
-
 use super::error::{BoatError, BoatResult};
 
 pub const MAX_TITLE_BYTES: usize = 512;

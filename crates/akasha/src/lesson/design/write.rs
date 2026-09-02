@@ -1,9 +1,9 @@
+use super::valid_doc_type;
 use crate::config::AppError;
 use crate::lesson::coerce::deserialize_optional_i64;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{PgPool, Row};
-use super::valid_doc_type;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

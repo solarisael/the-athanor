@@ -1,4 +1,3 @@
-
 use super::errors::{HallwayError, invalid, refusal};
 use super::rows;
 use crate::sea::idempotency_digest;

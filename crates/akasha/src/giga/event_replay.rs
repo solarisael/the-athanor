@@ -1,9 +1,9 @@
+use super::clock::database_now;
+use super::error::domain_error;
 use crate::AppError;
 use chrono::{DateTime, Utc};
 use hearth::{GigaEventReplayReceipt, GigaEventReplayRequest, GigaQueueState};
 use sqlx::{PgPool, Row};
-use super::clock::database_now;
-use super::error::domain_error;
 
 pub async fn giga_event_replay(
     pool: &PgPool,

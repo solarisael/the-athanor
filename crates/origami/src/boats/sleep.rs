@@ -1,4 +1,3 @@
-
 use chrono::{DateTime, NaiveDate, Utc};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
@@ -36,7 +35,6 @@ pub fn plan(room: &str, body: &str, now: DateTime<Utc>) -> BoatPlan {
         source_path,
     }
 }
-
 
 /// The one place boats touch cranes: the 0016 trigger enqueued this
 /// pointer in the same transaction we're still inside.

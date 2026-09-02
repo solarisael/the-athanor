@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 mod dispatch;
 mod spellbook;
 
+use dispatch::dispatch_with_familiar;
 pub use dispatch::{DispatchReceipt, DispatchRequest, DispatchStatus, DispatcherReceipt, dispatch};
 pub use spellbook::{Familiar, FamiliarStatus, Spellbook, validate_spellbook};
-use dispatch::dispatch_with_familiar;
 
 const CONTEXT_MODES: &[ContextMode] = &[
     ContextMode::Exact,
@@ -197,8 +197,6 @@ pub fn lane_status() -> LaneStatus {
         },
     }
 }
-
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

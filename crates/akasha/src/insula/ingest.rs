@@ -8,11 +8,11 @@ use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 
-use super::event::{TrustedBinding, validate_trusted_binding};
-use super::{InsulaError, bad};
 use super::event::{ObservationEvent, validate_event};
+use super::event::{TrustedBinding, validate_trusted_binding};
 use super::event::{derive_idempotency_key_v1, derive_semantic_hash_v1};
 use super::lock;
+use super::{InsulaError, bad};
 
 pub const INSULA_MAX_BATCH_EVENTS: usize = 512;
 

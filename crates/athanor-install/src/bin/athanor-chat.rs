@@ -104,8 +104,10 @@ async fn main() -> Result<()> {
         .with_context(|| format!("connect to the Host at {url}"))?;
     let (mut sink, mut source) = socket.split();
 
-    sink.send(Message::Text(wire.envelope("athanor.chat.subscribe", json!({})).into()))
-        .await?;
+    sink.send(Message::Text(
+        wire.envelope("athanor.chat.subscribe", json!({})).into(),
+    ))
+    .await?;
     println!("connected to {room}; type to speak, Ctrl+C to leave");
 
     let (say_sender, mut say_receiver) = tokio::sync::mpsc::unbounded_channel::<String>();

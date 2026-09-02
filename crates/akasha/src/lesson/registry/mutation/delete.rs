@@ -1,8 +1,8 @@
+use super::receipt::{LessonMutationKind, LessonMutationReceipt, lesson_key, mutation_refusal};
 use crate::config::AppError;
 use crate::lesson::coerce::deserialize_i64;
 use serde::Deserialize;
 use sqlx::PgPool;
-use super::receipt::{LessonMutationKind, LessonMutationReceipt, lesson_key, mutation_refusal};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

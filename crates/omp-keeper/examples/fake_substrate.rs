@@ -18,13 +18,13 @@
 //! State lives in a sidecar file beside the transcript because the keeper opens
 //! more than one substrate session per run and each session is a fresh process.
 
-use chrono::{DateTime, TimeDelta, Utc};
 use ::protocol::PROTOCOL_VERSION;
 use ::protocol::restart::{
     RestartClaimParams, RestartClaimReceipt, RestartMode, RestartStageDeadlines, RestartState,
     RestartStatusDeadlines, RestartStatusIntent, RestartStatusParams, RestartStatusReceipt,
     RestartTransitionParams, RestartTransitionReceipt, RestartTransitionTarget,
 };
+use chrono::{DateTime, TimeDelta, Utc};
 use omp_keeper::protocol::{
     METHOD_RESTART_CLAIM, METHOD_RESTART_STATUS, METHOD_RESTART_TRANSITION, STORM_REFUSAL_CODE,
 };

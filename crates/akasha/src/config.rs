@@ -865,9 +865,7 @@ impl Config {
         let embed_dimension = configured_value("ATHANOR_EMBED_DIMENSION", &dotenv)
             .unwrap_or_else(|| EMBED_DIMENSION.to_string())
             .parse()
-            .map_err(|_| {
-                AppError::Config("ATHANOR_EMBED_DIMENSION must be an integer".into())
-            })?;
+            .map_err(|_| AppError::Config("ATHANOR_EMBED_DIMENSION must be an integer".into()))?;
         if embed_dimension != EMBED_DIMENSION {
             return Err(AppError::Config(
                 "embedding dimension must be 2048 for migration 0002".into(),

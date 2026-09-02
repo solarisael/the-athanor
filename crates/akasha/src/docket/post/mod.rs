@@ -2,10 +2,10 @@ mod goal;
 mod params;
 mod quest;
 
-use crate::config::AppError;
-use crate::docket::capability::require_docket_capability;
 use self::goal::{post_goal_activate, post_goal_draft};
 use self::quest::{post_quest_activate, post_quest_draft};
+use crate::config::AppError;
+use crate::docket::capability::require_docket_capability;
 use serde::Serialize;
 use sqlx::PgPool;
 

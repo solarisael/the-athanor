@@ -3,13 +3,13 @@ use hearth::conversation::VisibleMessage;
 use hearth::hallway::HallwayInboxReceipt;
 use hearth::lineage::{QuestBatch, QuestLifecycle, QuestMemory};
 use hearth::triggers::ProcessLesson;
+use origami::cranes::broker::BoatReceiptProjection;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::Value;
 use summoning::presence::{
     PresenceCloseRequest, PresenceOpenRequest, PresenceResult, PresenceSettleRequest,
     PresenceTurnRequest,
 };
-use origami::cranes::broker::BoatReceiptProjection;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::Value;
 
 pub const HOST_SCHEMA_VERSION: u8 = 1;
 pub const PAPER_BOAT_RECEIPT_PROJECTION_ID: &str = "paper_boat_receipt";
@@ -1866,8 +1866,7 @@ mod receipt_tests {
         let mut say = akasha_envelope(CHAT_SAY, "chat-say");
         say["projection_id"] = json!(CHAT_PROJECTION_ID);
         say["chat_say"] = json!({ "room": "kodo", "text": "hello dragon", "sayId": "say-2" });
-        let Ok(ClientCommand::ChatSay { meta, payload }) = parse_client_command(say)
-        else {
+        let Ok(ClientCommand::ChatSay { meta, payload }) = parse_client_command(say) else {
             panic!("a complete chat say parses");
         };
         assert_eq!(meta.projection_id, CHAT_PROJECTION_ID);

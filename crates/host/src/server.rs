@@ -1,9 +1,14 @@
+use crate::chat::ChatLog;
 use crate::config::{HOST_RECIPIENT, HostConfig};
 use crate::insula::InsulaHost;
 use crate::panel::PanelHost;
 use crate::policy::{RecallPolicySession, apply_requested_mode};
 use crate::presence::{PresenceRuntime, host_capabilities};
 use crate::receipt::{ReceiptIngest, ReceiptTracker};
+use crate::routing::{
+    DispatchRequest, LoadedSpellbook, SpellbookRead, familiar_status, house_dispatch, lane_status,
+    load_spellbook,
+};
 use crate::store::{
     DurableReceipt, HostDurableStore, ProjectionCursor, RoomIdentity, RoomStateStore, body_hash,
     state_hash, timestamp,
@@ -30,12 +35,7 @@ use hearth::conversation::{
 };
 use hearth::hallway::{HallwayInboxRequest, HallwayKnockClaimRequest, HallwayKnockSettleRequest};
 use hearth::lineage::{QuestLifecycle, normalize_lifecycle_memory, normalize_quest_memories};
-use crate::routing::{
-    DispatchRequest, LoadedSpellbook, SpellbookRead, familiar_status, house_dispatch, lane_status,
-    load_spellbook,
-};
 use hearth::triggers::{process_lesson_plan, process_lesson_reminder};
-use crate::chat::ChatLog;
 use origami::cranes::broker::{
     ACK_WAIT, MAX_ACK_PENDING, MAX_BATCH, MAX_DELIVER, MAX_EXPIRES, NUM_REPLICAS,
     RECEIPT_STREAM_NAME, RECEIPT_SUBJECT,
@@ -43,22 +43,23 @@ use origami::cranes::broker::{
 use protocol::{
     AKASHA_COMMAND_FAILED, AKASHA_LESSON_RESULT, AKASHA_PROJECTION_ID, AKASHA_RECALL_RESULT,
     AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent,
-    AkashaRecallQueryPayload, AkashaRecallResultEvent, CHAT_COMMAND_ACCEPTED, CHAT_COMMAND_REFUSED, CHAT_DELTA,
-    CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, CONTEXT_ANALYZED, CONTEXT_PROJECTION_ID,
-    CONTEXT_VIEWPORTED, ChatEvent, ChatMessage, ClientCommand, CommandMeta, CommandOutcomeEvent,
-    ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest, DEFAULT_HOST_WS_PATH,
-    DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED,
+    AkashaRecallQueryPayload, AkashaRecallResultEvent, CHAT_COMMAND_ACCEPTED, CHAT_COMMAND_REFUSED,
+    CHAT_DELTA, CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, CONTEXT_ANALYZED,
+    CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ChatEvent, ChatMessage, ClientCommand, CommandMeta,
+    CommandOutcomeEvent, ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest,
+    DEFAULT_HOST_WS_PATH, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED,
     HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED,
     HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
-    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID, LineageResultEvent,
-    PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT, PAPER_BOAT_RECEIPT_SUBSCRIBE,
-    PRESENCE_CLOSED, PRESENCE_COMMAND_REFUSED, PRESENCE_COMPILED, PRESENCE_OPENED,
-    PRESENCE_PROJECTION_ID, PRESENCE_SETTLED, PaperBoatReceiptEvent, PaperBoatReceiptState,
-    PresenceResultEvent, RECALL_POLICY_COMMAND_ACCEPTED, RECALL_POLICY_COMMAND_FAILED,
-    RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA, RECALL_POLICY_PROJECTION_ID,
-    RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE, ROUTING_PROJECTION_ID, ROUTING_RESULT,
-    RecallParams, RecallPolicyDecision, RecallPolicyMutation, RecallPolicyState, RoutingResultEvent,
-    SHELL_PROJECTION_ID, SHELL_RESULT, ShellResultEvent, SnapshotEvent, parse_client_command,
+    HallwayKnockClaimedEvent, HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID,
+    LineageResultEvent, PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT,
+    PAPER_BOAT_RECEIPT_SUBSCRIBE, PRESENCE_CLOSED, PRESENCE_COMMAND_REFUSED, PRESENCE_COMPILED,
+    PRESENCE_OPENED, PRESENCE_PROJECTION_ID, PRESENCE_SETTLED, PaperBoatReceiptEvent,
+    PaperBoatReceiptState, PresenceResultEvent, RECALL_POLICY_COMMAND_ACCEPTED,
+    RECALL_POLICY_COMMAND_FAILED, RECALL_POLICY_COMMAND_REFUSED, RECALL_POLICY_DELTA,
+    RECALL_POLICY_PROJECTION_ID, RECALL_POLICY_SNAPSHOT, RECALL_POLICY_SUBSCRIBE,
+    ROUTING_PROJECTION_ID, ROUTING_RESULT, RecallParams, RecallPolicyDecision,
+    RecallPolicyMutation, RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT,
+    ShellResultEvent, SnapshotEvent, parse_client_command,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

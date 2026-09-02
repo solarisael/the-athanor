@@ -1,4 +1,3 @@
-
 use super::errors::HallwayError;
 use sqlx::{Postgres, Transaction};
 

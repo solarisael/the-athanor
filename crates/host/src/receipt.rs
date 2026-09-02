@@ -1,8 +1,5 @@
 use origami::cranes::broker::{BoatReceiptProjection, RECEIPT_SCHEMA_VERSION};
-use protocol::{
-    PaperBoatReceiptState,
-    PaperBoatReceiptStatus,
-};
+use protocol::{PaperBoatReceiptState, PaperBoatReceiptStatus};
 use serde::{Serialize, Serializer};
 
 #[derive(Clone, Debug, Eq, PartialEq)]

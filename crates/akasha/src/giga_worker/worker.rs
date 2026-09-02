@@ -1,11 +1,11 @@
+use super::enablement::claim_owner_enabled;
+use super::process::giga_process;
 use crate::{AppError, Config, giga::giga_event_claim};
 use hearth::{GigaEventClaimRequest, RoomKey};
 use sqlx::PgPool;
 use std::{sync::LazyLock, time::Duration};
 use tokio::{sync::watch, task::JoinHandle};
 use uuid::Uuid;
-use super::enablement::claim_owner_enabled;
-use super::process::giga_process;
 
 const GIGA_LEASE_SECONDS: u32 = 300;
 const GIGA_POLL_INTERVAL: Duration = Duration::from_secs(1);

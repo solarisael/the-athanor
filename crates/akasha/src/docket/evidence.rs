@@ -1,9 +1,9 @@
+use super::validate::{refusal, validate_identity, validate_uuid};
 use crate::config::AppError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{PgPool, Row};
-use super::validate::{refusal, validate_identity, validate_uuid};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]

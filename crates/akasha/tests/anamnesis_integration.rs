@@ -167,7 +167,11 @@ async fn run_contract(pool: &sqlx::PgPool, url: &str) -> TestResult {
     )
     .await?;
     assert!(wake.found);
-    assert!(wake.warnings.is_empty(), "both drawers are verifiable: {:?}", wake.warnings);
+    assert!(
+        wake.warnings.is_empty(),
+        "both drawers are verifiable: {:?}",
+        wake.warnings
+    );
     let titles: Vec<&str> = wake
         .entries
         .iter()
@@ -178,7 +182,9 @@ async fn run_contract(pool: &sqlx::PgPool, url: &str) -> TestResult {
         ["Ternary in a binary world", "The 4am walk-out"],
         "pillars wake before cycles"
     );
-    let reps = wake.entries[1]["reps"].as_array().expect("cycle carries its reps");
+    let reps = wake.entries[1]["reps"]
+        .as_array()
+        .expect("cycle carries its reps");
     assert_eq!(reps.len(), 2);
     assert_eq!(reps[0]["rep_number"], 1, "oldest rep first");
     assert_eq!(reps[1]["source_path"], "memory/2026-08-20.md");
@@ -197,11 +203,20 @@ async fn run_contract(pool: &sqlx::PgPool, url: &str) -> TestResult {
         )?,
     )
     .await?;
-    assert_eq!(consult.entries.len(), 0, "consult searches drawers, not reps");
+    assert_eq!(
+        consult.entries.len(),
+        0,
+        "consult searches drawers, not reps"
+    );
 
     let consult = anamnesis(
         pool,
-        AnamnesisReadRequest::new(room, AnamnesisReadMode::Consult, Some("outsideness".into()), 10)?,
+        AnamnesisReadRequest::new(
+            room,
+            AnamnesisReadMode::Consult,
+            Some("outsideness".into()),
+            10,
+        )?,
     )
     .await?;
     assert_eq!(consult.entries.len(), 1);

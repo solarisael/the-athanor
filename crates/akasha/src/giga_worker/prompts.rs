@@ -1,4 +1,3 @@
-
 pub const GIGA_GATE_PROMPT: &str = concat!(
     "[CLASS]\n",
     "You are Hippocampus, Librarian-Gatekeeper of the Akashic Archives.\n\n",

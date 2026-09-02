@@ -1,3 +1,5 @@
+use super::error::domain_error;
+use super::event_ingest::giga_event_ingest;
 use crate::AppError;
 use hearth::{
     GigaEvent, GigaEventType, GigaLifecycle, GigaScope, GigaSourceRef, GigaSourceType,
@@ -7,8 +9,6 @@ use protocol::{GigaConversationIngestParams, GigaEventIngestResult};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::collections::HashSet;
-use super::error::domain_error;
-use super::event_ingest::giga_event_ingest;
 
 pub async fn giga_conversation_ingest(
     pool: &PgPool,

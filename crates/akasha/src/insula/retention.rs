@@ -5,10 +5,10 @@ use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use super::event::atom;
-use super::{InsulaError, bad};
-use super::{hf, hp, hs};
 use super::lock;
 use super::query::VITALS;
+use super::{InsulaError, bad};
+use super::{hf, hp, hs};
 
 // enough: retention sweeps are one receipt per House per cutoff minute, so a
 // hundred newest-first rows reach far past the configured raw window; upgrade

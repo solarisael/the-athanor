@@ -1,6 +1,6 @@
+use super::ledger::resolve_sources_from_ledger;
 use crate::{AppError, Config};
 use hearth::GigaEvent;
-use super::ledger::resolve_sources_from_ledger;
 
 pub(crate) async fn verify_promotion_sources(
     config: &Config,

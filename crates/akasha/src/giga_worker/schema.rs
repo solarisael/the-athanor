@@ -1,7 +1,7 @@
+use super::failure::{WorkerFailure, WorkerFailureKind};
 use hearth::GigaCandidateKind;
 use serde::{Deserialize, Serialize, ser::SerializeMap};
 use serde_json::{Value, json};
-use super::failure::{WorkerFailure, WorkerFailureKind};
 
 pub(super) const GIGA_MAX_SELECTED_SOURCES: usize = 4;
 pub(super) const GIGA_MAX_RETRIEVAL_TERMS: usize = 8;

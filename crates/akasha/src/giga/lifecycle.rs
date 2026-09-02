@@ -1,7 +1,7 @@
+use super::error::domain_error;
 use crate::AppError;
 use hearth::{GigaEvent, GigaEventType, GigaLifecycle, GigaRisk, GigaSourceRange};
 use serde_json::{Value, json};
-use super::error::domain_error;
 
 pub(super) fn lifecycle_json(event: &GigaEvent) -> Value {
     let lifecycle = event.lifecycle();

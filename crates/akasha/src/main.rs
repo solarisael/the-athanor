@@ -165,9 +165,7 @@ fn decode_line(line: &str) -> (String, Result<ProtocolRequest, ProtocolError>) {
         "hallway_knock" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::HallwayKnock)
             .map_err(|error| invalid_params(error.to_string())),
-        "recall" => envelope
-            .recall_request()
-            .map(ProtocolRequest::Recall),
+        "recall" => envelope.recall_request().map(ProtocolRequest::Recall),
         "vault_recall" => envelope
             .vault_recall_request()
             .map(ProtocolRequest::VaultRecall),

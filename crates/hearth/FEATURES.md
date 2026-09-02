@@ -20,7 +20,7 @@ Anamnesis and Paper Boat live in `summoning`.
 - A room key refuses a leading hyphen, a trailing hyphen, and a double hyphen.
 - The `house` commons key is reserved. A plain `new` call refuses it.
 - Three named constructors open the commons: `for_memory_write`, `for_canon`, and `for_anamnesis`.
-- A lesson write uses `new`, so a lesson can never target the commons.
+- A lesson write refuses the commons even when the key was opened for a memory write.
 - The key prints as its raw text.
 
 ### domain_error (src/error.rs)
@@ -106,39 +106,16 @@ Anamnesis and Paper Boat live in `summoning`.
 - A receipt needs a positive durable identifier and RFC 3339 timestamps.
 - Shared checks cover text with content, string lists, hashes, and RFC 3339 timestamps.
 
-### routing (src/routing.rs)
-
-- One dispatch decision takes exactly one lane or exactly one familiar.
-- A constant table holds the worker lanes. It names each lane, its kitten, and its rules.
-- Validation returns errors and warnings together. A refused request still returns a receipt.
-- The receipt builds a spawn packet: the task, the arguments, and the shared context the worker reads.
-- The shared context formats the hints, the acceptance lines, and the lesson bodies.
-- Advisor is a review channel. Advisor is not a dispatch lane.
-- A context hint carries a mode and a risk level.
-- Context modes and risk levels come from closed lists.
-- The room spellbook binds named familiars and aliases to lanes.
-- The spellbook lives in the room `familiars` directory. `spellbook.json` comes first, then `litters.json`.
-- Spellbook loading asks the caller for each candidate read. This module touches no file.
-- The spellbook validates each familiar identifier and each model role.
-- A model role comes from the agent definition. A dispatch cannot override it.
-- `familiar_status` reports the loaded spellbook, its source, whether the source was an alias, and its refusals.
-- `familiar_dispatch` resolves a named familiar, then dispatches with the resolved lane.
-
 ### lesson_triggers (src/lesson_triggers.rs)
 
 - A lesson becomes a trigger when it carries regex conditions or ast-grep patterns.
-- One table holds 19 file extensions. Each row gives a language slug and an optional grammar.
-- The fence and the grammar lookup read the same table, so they cannot disagree.
-- A row without a grammar fences regex conditions only. An ast condition skips with a warning.
-- One lesson carries at most 32 patterns for each axis.
-- Scope tokens say which surfaces a lesson watches.
-- A lesson fires once for each call, on the first surface and pattern that catches it.
+- This module names what the trigger columns mean. AKASHA owns the compilers and the matcher.
+- One lesson carries at most 32 patterns for each axis. An empty pattern refuses.
+- Scope tokens say which surfaces a lesson watches: `text`, `tool`, or `tool:<name>`.
 - Urgency defaults to block. An empty column means block.
-- The cooldown policy decides whether a lesson may fire again.
-- A compiled set covers one room, or one room and one project.
-- The cache holds one entry for each fence, and replaces the entry when the fingerprint changes.
-- A poisoned cache lock recovers. The map holds no invariant that a panic can break.
-- The module reads no database row and no clock. The caller supplies both the rows and the ledger.
+- The cooldown policy decides whether a lesson may fire again. A cooldown must be positive.
+- Policy columns without a pattern refuse. A lesson that can never fire is a lie in the store.
+- Whether a pattern compiles is not judged here. The write path in AKASHA refuses that before any row is touched.
 
 ### context (src/context.rs)
 

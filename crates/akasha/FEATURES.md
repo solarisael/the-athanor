@@ -19,22 +19,24 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 
 ### remember/ — the durable write
 
+- `remember` takes `hearth::RememberRequest`, already validated by its constructor, and returns `protocol::RememberResult`.
 - `remember` writes one memory in one transaction: the row, its threads, its chunks, and its continuations.
-- `RememberRequest::validate` checks the room slug and the kind before any write.
+- Memory identifiers cross from `u64` to PostgreSQL BIGINT at the bind. An identifier outside that range refuses there.
 - `write_memory_tx` upserts the memory on (room, source_path). It refuses a conflicting paper boat and returns the id plus an inserted flag.
 - `write_memory_tx` also links threads, prunes dropped thread events, marks superseded memories, and rewrites every chunk row.
 - `write_continuations_tx` records which memory a thread continues from.
-- `remember_lesson` writes five lesson kinds: coding, project, writing, design, and audio.
+- `remember_lesson` writes five lesson kinds: coding, project, writing, design, and audio. It refuses a trigger pattern that does not compile before the transaction opens.
 - Five named lesson writers exist, one per kind: `write_coding_lesson_tx`, `write_project_lesson_tx`, `write_writing_lesson_tx`, `write_design_lesson_tx`, and `write_audio_lesson_tx`. Each sends one jsonb row to `jsonb_populate_record`; `remember_lesson` only dispatches.
 - `prepare_memory_write` is the shared preparation step. It normalizes threads, derives dates, chunks the body, and asks for vectors.
 - `chunk_body` splits the body on `## ` headings. A section above 4000 characters splits again on paragraphs, with a 200 character overlap.
 - `derive_dates` reads dates out of the source path. A stitched path date moves to the next day.
 - `embed` posts the chunks to the embedding endpoint with the `passage: ` prefix. It checks the vector count and the dimension.
-- `normalize_strings`, `normalize_threads`, and `token_estimate` clean the inputs the writers store.
+- `normalize_strings` and `token_estimate` clean the inputs the writers store.
 - A memory write calls `backup::run_post_write`. A lesson write backs up only the project, audio, and design kinds.
 
 ### recall/ — the retrieval door
 
+- `recall` takes `hearth::RecallRequest`. The wire defaults live on `protocol::RecallParams`.
 - `recall` runs the whole retrieval and fuses the lanes into `retrievalCandidates`. It never fails on one absent lane; it adds a warning instead.
 - The semantic lane embeds the query and ranks chunks by cosine similarity. An empty lane reports the top similarity it found.
 - The content lane ranks chunks by trigram `word_similarity` and filters on the query terms.
@@ -48,7 +50,6 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `embed_texts`, `embed_text`, and `embed_query` are the embedding client. The `query: ` prefix is load-bearing and pairs with the indexer prefix.
 - `query_terms`, `query_dates`, `term_evidence`, `candidate_terms`, and `bounded_excerpt` build the evidence each candidate carries.
 - `recall` also returns date matches, the room taxonomy, cluster staleness, and cluster resonance.
-- `RecallParams::validate` refuses the `house` room, an empty query, a limit above 1000, and a similarity outside [0, 1].
 
 ### giga/ — the Stage 1 candidate plane
 
@@ -99,8 +100,11 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - Lesson query. `lesson_query` reads one lesson family with filters for scope, project, shape, register, stage, language, and technology. It ranks by always-on, then text rank, then update time.
 - The query expands the result along shared thread keys, up to 50 rows.
 - Trigger match. `lesson_trigger_match` fires trigger-bearing lessons against at most 16 offered surfaces. `trigger_eligibility` is the one visibility rule every trigger read pushes.
+- Trigger engine. `trigger/engine.rs` owns the compilers: one table of 19 file extensions maps a path to its language slug and its optional ast-grep grammar, so the language fence and the grammar lookup cannot disagree. A row without a grammar fences regex conditions only; an ast condition on it skips with a warning.
+- A lesson fires once for each call, on the first surface and pattern that catches it. A compiled set covers one room, or one room and one project, and the cache replaces it when the fingerprint changes.
+- `validate_patterns` is the write-time refusal for a regex that does not compile or an ast pattern no grammar parses. `remember_lesson` and `lesson_update` call it before any row is touched.
 - Lesson context. `lesson_context` returns the lessons a context activates, with the matched terms, shapes, and projects.
-- Lesson update. `lesson_update` patches one lesson by id and title. `patch_trigger_spec` types the trigger columns.
+- Lesson update. `lesson_update` patches one lesson by id and title. `patch_trigger_spec` types the trigger columns; the patch is judged by shape and by pattern before the row is locked.
 - Lesson delete. `lesson_delete` removes exactly one lesson. Both mutations refuse on a title mismatch and return a typed refusal receipt.
 - Design document query. `design_document_query` reads the House design catalogue by type, status, and text.
 - Design document write. `design_document_write` writes one catalogue entry. `valid_doc_type` limits the type to token, component, contract, or guideline.

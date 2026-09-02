@@ -712,12 +712,12 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 
 | Crate | Modules | Boundary |
 |---|---|---|
-| `house-core` (8) | `lib`, `context`, `conversation`, `hallway`, `lesson_triggers`, `lineage`, `routing`, `triggers` | Provider-neutral domain types; context classification; transcript/source identity; Hallway validation; trigger compilation; quest normalization; lane and dispatch contracts |
+| `hearth` (23) | `lib`, `authority`, `canon`, `cluster`, `context`, `conversation`, `error`, `giga/*`, `hallway`, `lesson_triggers`, `lineage`, `recall`, `remember`, `room`, `triggers` | Vocabulary and pure rules only: typed requests and receipts, context classification, transcript/source identity, Hallway validation, trigger vocabulary, quest normalization. No file, socket, database, or clock |
 | `house-protocol` (2) | `lib`, `host` | Substrate JSONL DTOs/results/errors and Host command/event envelopes |
 | `house-vault` (1) | `lib` | Strict file-authoritative, database-free Vault retrieval |
 | `house-substrate` (19) | `lib`, `main`, `config`, `state`, `migrations`, `backup`, `health`, `remember`, `recall`, `bm25f`, `canon`, `entity`, `anamnesis`, `lesson`, `cluster`, `paper_boat`, `hallway`, `giga`, `giga_worker` | JSONL dispatch, PostgreSQL configuration and migrations, durable organs, retrieval, GIGA, backup, and health |
 | `house-delivery` (5) | `lib`, `main`, `model`, `broker`, `store` | Crane envelope validation, PostgreSQL outbox/receipt store, JetStream publication and consumption |
-| `host` (11) | `lib`, `house`, `config`, `insula`, `panel`, `policy`, `presence`, `receipt`, `server`, `store`, `viewport` | One in-process multi-room listener, authenticated client boundary, room projection state, Recall Policy, receipts, panels, and viewport shaping |
+| `host` (14) | `lib`, `house`, `config`, `insula`, `panel`, `policy`, `presence`, `receipt`, `routing/*`, `server`, `store`, `viewport` | One in-process multi-room listener, authenticated client boundary, room projection state, Recall Policy, receipts, panels, viewport shaping, worker lanes and spellbook dispatch |
 | `athanor-install` (10) | `lib`, `main`, `layout`, `manifest`, `boundaries`, `installer`, `native_runtime`, `omp`, `service`, `supervisor` | Installed layout, release validation, transactional update/rollback, runtime planning, Windows service, OMP integration |
 | `athanor-godot` (11) | `lib`, `host_link`, `host_session`, `protocol`, `shell`, `recall_policy`, `routing`, `familiar_status`, `dispatch`, `health`, `paper_boat_receipt` | Thin native client transport, exact Host wire contract, projections, shell routes, and Paper Boat receipt state |
 

@@ -25,10 +25,29 @@ The Athanor Host. One loopback server that serves one room over WebSocket and HT
 - **State commit.** `commit_change` increments the version and the sequence, hashes the next state, writes the room state, saves the cursor, the sessions, and the receipt, then emits an accepted outcome with a delta.
 - **Command validation.** `validate_command` requires exactly one hop, a correlation identifier equal to the message identifier, an unexpired RFC 3339 expiry, and a binding that matches this Host. Only the two subscribe commands may carry a blank binding.
 - **Conversation logging.** `log_conversation` writes the transcript, the source ledger, and a debug provenance line. It skips a turn that the transcript already holds.
-- **Room file reads.** The Host reads the room spellbook and the quest report from disk. `house_core` owns which files exist and what they must contain.
+- **Room file reads.** The Host reads the room spellbook and the quest report from disk. `routing` owns which spellbook files exist and what they must contain.
 - **Event metadata.** Two builders stamp every outgoing event with the schema version, the identity, the correlation chain, the scope, and the projection identifier.
 - **Receipt bridge.** A background task connects to NATS, opens the boat receipt stream, and creates a bounded ephemeral consumer. It replays receipts, ingests each one, and acknowledges it. Every failure publishes a degradation and retries.
 - **Insula spans.** Command paths open and close observation spans with an outcome class taken from the result.
+
+### routing
+
+`src/routing.rs` with `routing/dispatch.rs` and `routing/spellbook.rs`. The worker lanes, the room spellbook, and the dispatch packet.
+
+- One dispatch decision takes exactly one lane or exactly one familiar.
+- A constant table holds the worker lanes. It names each lane, its kitten, and its rules.
+- Validation returns errors and warnings together. A refused request still returns a receipt.
+- The receipt builds a spawn packet: the task, the arguments, and the shared context the worker reads.
+- The shared context formats the hints, the acceptance lines, and the lesson bodies.
+- Advisor is a review channel. Advisor is not a dispatch lane.
+- A context hint carries a mode and a risk level. Both come from closed lists.
+- The room spellbook binds named familiars and aliases to lanes.
+- The spellbook lives in the room `familiars` directory. `spellbook.json` comes first, then `litters.json`.
+- Spellbook loading asks the caller for each candidate read. `server` supplies the file read.
+- The spellbook validates each familiar identifier and each model role.
+- A model role comes from the agent definition. A dispatch cannot override it.
+- `familiar_status` reports the loaded spellbook, its source, whether the source was an alias, and its refusals.
+- `familiar_dispatch` resolves a named familiar, then dispatches with the resolved lane.
 
 ### policy
 

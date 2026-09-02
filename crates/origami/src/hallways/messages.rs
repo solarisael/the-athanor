@@ -87,6 +87,8 @@ pub async fn post(
     .fetch_optional(&mut *tx)
     .await?;
     if let Some(row) = existing {
+        // Fields, not the stored digest: rows from before 2026-08-18 carry a
+        // digest without recipients, and a true replay of one must still pass.
         let mut stored_to_rooms: Vec<String> = row.try_get("to_rooms")?;
         stored_to_rooms.sort_unstable();
         let same_request = row.try_get::<String, _>("body")? == request.body
@@ -124,35 +126,32 @@ pub async fn post(
         }
     }
 
-    let inherited_thread: Option<i64> = if let Some(reply_to) = request.reply_to {
-        let row =
-            sqlx::query("SELECT thread_id FROM hallway_messages WHERE hallway_id=$1 AND id=$2")
-                .bind(id)
-                .bind(reply_to)
-                .fetch_optional(&mut *tx)
-                .await?;
-        let Some(row) = row else {
-            return Err(refusal(
-                "message_not_found",
-                "replyTo does not identify a message in this hallway",
-            ));
-        };
-        row.try_get("thread_id")?
-    } else {
-        None
+    // A reply lives in its parent's day; a root message lives in today's, and
+    // today is the House's clock read by the server, never the driver's.
+    let inherited: Option<(Option<i64>, Option<String>)> = match request.reply_to {
+        Some(reply_to) => Some(
+            sqlx::query_as(
+                "SELECT m.thread_id,t.thread_key FROM hallway_messages m
+                 LEFT JOIN hallway_threads t ON t.id=m.thread_id
+                 WHERE m.hallway_id=$1 AND m.id=$2",
+            )
+            .bind(id)
+            .bind(reply_to)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| {
+                refusal(
+                    "message_not_found",
+                    "replyTo does not identify a message in this hallway",
+                )
+            })?,
+        ),
+        None => None,
     };
-
-    let (thread_id, thread_key) = match inherited_thread {
-        Some(thread_id) => {
-            let key: String =
-                sqlx::query_scalar("SELECT thread_key FROM hallway_threads WHERE id=$1")
-                    .bind(thread_id)
-                    .fetch_one(&mut *tx)
-                    .await?;
-            (thread_id, key)
-        }
-        None => {
-            let key: String =
+    let (thread_id, thread_key) = match inherited {
+        Some((Some(thread_id), Some(thread_key))) => (thread_id, thread_key),
+        _ => {
+            let today: String =
                 sqlx::query_scalar("SELECT to_char(NOW() AT TIME ZONE $1, 'YYYY-MM-DD')")
                     .bind(house_tz)
                     .fetch_one(&mut *tx)
@@ -162,22 +161,16 @@ pub async fn post(
                             "ATHANOR_HOUSE_TZ is not a timezone PostgreSQL recognizes".into(),
                         )
                     })?;
-            sqlx::query(
-                "INSERT INTO hallway_threads(hallway_id,thread_key) VALUES($1,$2)
-                 ON CONFLICT (hallway_id,thread_key) DO NOTHING",
-            )
-            .bind(id)
-            .bind(&key)
-            .execute(&mut *tx)
-            .await?;
             let thread_id: i64 = sqlx::query_scalar(
-                "SELECT id FROM hallway_threads WHERE hallway_id=$1 AND thread_key=$2",
+                "INSERT INTO hallway_threads(hallway_id,thread_key) VALUES($1,$2)
+                 ON CONFLICT (hallway_id,thread_key) DO UPDATE SET thread_key=EXCLUDED.thread_key
+                 RETURNING id",
             )
             .bind(id)
-            .bind(&key)
+            .bind(&today)
             .fetch_one(&mut *tx)
             .await?;
-            (thread_id, key)
+            (thread_id, today)
         }
     };
 
@@ -294,14 +287,13 @@ pub async fn read(
     let visible_cursor = messages.last().map_or(after, |message| message.id);
 
     let mut acked_mentions: i64 = 0;
-    let mut room_read_sequence: i64 = sqlx::query_scalar::<_, Option<i64>>(
+    let mut room_read_sequence: i64 = sqlx::query_scalar(
         "SELECT read_sequence FROM hallway_room_state WHERE hallway_id=$1 AND room=$2",
     )
     .bind(id)
     .bind(&request.room)
     .fetch_optional(&mut *tx)
     .await?
-    .flatten()
     .unwrap_or(0);
 
     let read_cursor = if request.advance_cursor {

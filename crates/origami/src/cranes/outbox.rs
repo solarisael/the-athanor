@@ -10,7 +10,7 @@ use crate::{
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use sqlx::{PgPool, Postgres, Row, Transaction, postgres::PgPoolOptions};
+use sqlx::{FromRow, PgExecutor, PgPool, Row, postgres::PgPoolOptions};
 use uuid::Uuid;
 
 /// The lowest PostgreSQL schema this build will speak to.
@@ -26,7 +26,7 @@ pub struct Store {
     pool: PgPool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, FromRow)]
 pub struct ClaimedEvent {
     pub event_id: Uuid,
     pub event_kind: String,
@@ -74,7 +74,7 @@ pub struct RecordedReceipt {
     pub integrity_sha256: String,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, FromRow, serde::Serialize)]
 pub struct DatabaseHealth {
     pub schema_version: i32,
     pub pending: i64,
@@ -119,8 +119,7 @@ impl Store {
     }
 
     pub async fn claim_next(&self, lease_owner: Uuid) -> Result<Option<ClaimedEvent>> {
-        let mut transaction = self.pool.begin().await?;
-        let claimed = sqlx::query(
+        sqlx::query_as(
             "WITH candidate AS (
                SELECT event_id
                FROM crane_outbox
@@ -145,27 +144,9 @@ impl Store {
         )
         .bind(lease_owner)
         .bind(LEASE_SECONDS)
-        .fetch_optional(&mut *transaction)
+        .fetch_optional(&self.pool)
         .await
-        .context("claim pending crane outbox event")?;
-        let claimed = claimed
-            .map(|row| -> std::result::Result<ClaimedEvent, sqlx::Error> {
-                Ok(ClaimedEvent {
-                    event_id: row.try_get("event_id")?,
-                    event_kind: row.try_get("event_kind")?,
-                    aggregate_id: row.try_get("aggregate_id")?,
-                    room: row.try_get("room")?,
-                    payload: row.try_get("payload")?,
-                    integrity_sha256: row.try_get("integrity_sha256")?,
-                    attempts: row.try_get("attempts")?,
-                    recipient_kind: row.try_get("recipient_kind")?,
-                    recipient_key: row.try_get("recipient_key")?,
-                    expires_at: row.try_get("expires_at")?,
-                })
-            })
-            .transpose()?;
-        transaction.commit().await?;
-        Ok(claimed)
+        .context("claim pending crane outbox event")
     }
 
     pub async fn mark_published(
@@ -199,56 +180,29 @@ impl Store {
         lease_owner: Uuid,
         error: &str,
     ) -> Result<()> {
-        let safe_error = bounded_reason(error);
-        let mut transaction = self.pool.begin().await?;
-        let exhausted = claimed.attempts >= MAX_PUBLISH_ATTEMPTS;
-        let updated = if exhausted {
-            sqlx::query(
-                "UPDATE crane_outbox
-                 SET state = 'dead_letter', dead_lettered_at = NOW(), lease_owner = NULL,
-                     lease_expires_at = NULL, last_error = $3, updated_at = NOW()
-                 WHERE event_id = $1 AND state = 'leased' AND lease_owner = $2",
-            )
-            .bind(claimed.event_id)
-            .bind(lease_owner)
-            .bind(&safe_error)
-            .execute(&mut *transaction)
-            .await?
-        } else {
-            let delay = publish_retry_seconds(claimed.attempts);
-            sqlx::query(
-                "UPDATE crane_outbox
-                 SET state = 'pending', available_at = NOW() + make_interval(secs => $3),
-                     lease_owner = NULL, lease_expires_at = NULL, last_error = $4, updated_at = NOW()
-                 WHERE event_id = $1 AND state = 'leased' AND lease_owner = $2",
-            )
-            .bind(claimed.event_id)
-            .bind(lease_owner)
-            .bind(delay)
-            .bind(&safe_error)
-            .execute(&mut *transaction)
-            .await?
-        };
+        if claimed.attempts >= MAX_PUBLISH_ATTEMPTS {
+            return self
+                .dead_letter_claim(claimed, lease_owner, "publish_exhausted", error)
+                .await;
+        }
+        let updated = sqlx::query(
+            "UPDATE crane_outbox
+             SET state = 'pending', available_at = NOW() + make_interval(secs => $3),
+                 lease_owner = NULL, lease_expires_at = NULL, last_error = $4, updated_at = NOW()
+             WHERE event_id = $1 AND state = 'leased' AND lease_owner = $2",
+        )
+        .bind(claimed.event_id)
+        .bind(lease_owner)
+        .bind(publish_retry_seconds(claimed.attempts))
+        .bind(bounded_reason(error))
+        .execute(&self.pool)
+        .await?;
         if updated.rows_affected() != 1 {
             bail!(
                 "cannot record publish failure for outbox event {} without its active lease",
                 claimed.event_id
             );
         }
-        if exhausted {
-            self.insert_dead_letter_tx(
-                &mut transaction,
-                Some(claimed.event_id),
-                "publisher",
-                claimed.subject().as_deref(),
-                "publish_exhausted",
-                &safe_error,
-                serde_json::to_vec(&claimed.payload)?.as_slice(),
-                None,
-            )
-            .await?;
-        }
-        transaction.commit().await?;
         Ok(())
     }
 
@@ -275,8 +229,8 @@ impl Store {
         if updated.rows_affected() != 1 {
             bail!("cannot dead-letter outbox event without its active lease");
         }
-        self.insert_dead_letter_tx(
-            &mut transaction,
+        self.insert_dead_letter(
+            &mut *transaction,
             Some(claimed.event_id),
             "publisher",
             claimed.subject().as_deref(),
@@ -416,9 +370,8 @@ impl Store {
         payload: &[u8],
         delivery_count: i64,
     ) -> Result<()> {
-        let mut transaction = self.pool.begin().await?;
-        self.insert_dead_letter_tx(
-            &mut transaction,
+        self.insert_dead_letter(
+            &self.pool,
             event_id,
             "consumer",
             Some(subject),
@@ -427,15 +380,13 @@ impl Store {
             payload,
             Some(delivery_count),
         )
-        .await?;
-        transaction.commit().await?;
-        Ok(())
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn insert_dead_letter_tx(
+    async fn insert_dead_letter(
         &self,
-        transaction: &mut Transaction<'_, Postgres>,
+        executor: impl PgExecutor<'_>,
         event_id: Option<Uuid>,
         source: &str,
         subject: Option<&str>,
@@ -470,16 +421,15 @@ impl Store {
             "payload_bytes": i32::try_from(payload.len()).unwrap_or(i32::MAX),
             "delivery_count": delivery_count.and_then(|count| i32::try_from(count).ok()),
         }))
-        .execute(&mut **transaction)
+        .execute(executor)
         .await?;
         Ok(())
     }
 
     pub async fn health(&self) -> Result<DatabaseHealth> {
-        self.require_schema().await?;
-        let row = sqlx::query(
+        let health: DatabaseHealth = sqlx::query_as(
             "SELECT
-               (SELECT max(version)::integer FROM schema_migrations) AS schema_version,
+               (SELECT coalesce(max(version), 0)::integer FROM schema_migrations) AS schema_version,
                count(*) FILTER (WHERE state = 'pending') AS pending,
                count(*) FILTER (WHERE state = 'leased') AS leased,
                count(*) FILTER (WHERE state = 'published') AS published,
@@ -489,14 +439,13 @@ impl Store {
         )
         .fetch_one(&self.pool)
         .await?;
-        Ok(DatabaseHealth {
-            schema_version: row.try_get("schema_version")?,
-            pending: row.try_get("pending")?,
-            leased: row.try_get("leased")?,
-            published: row.try_get("published")?,
-            dead_letters: row.try_get("dead_letters")?,
-            receipts: row.try_get("receipts")?,
-        })
+        if health.schema_version < REQUIRED_SCHEMA_VERSION {
+            bail!(
+                "PostgreSQL schema {} is older than required schema {REQUIRED_SCHEMA_VERSION}",
+                health.schema_version
+            );
+        }
+        Ok(health)
     }
 }
 

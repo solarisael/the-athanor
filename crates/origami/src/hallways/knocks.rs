@@ -1,3 +1,6 @@
+//! The Knock ledger: a room sets its policy, a presence asks a peer room for
+//! one bounded turn, the recipient claims that turn and settles it.
+
 use super::channels::{ensure_presence, lookup_id};
 use super::errors::{HallwayError, invalid, refusal};
 use super::rows;
@@ -8,6 +11,7 @@ use hearth::hallway::{
     HallwayKnockPolicyMode, HallwayKnockPolicyReceipt, HallwayKnockPolicyRequest,
     HallwayKnockReceipt, HallwayKnockRequest, HallwayKnockSettleReceipt, HallwayKnockSettleRequest,
 };
+use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
@@ -37,6 +41,22 @@ macro_rules! knock_claim_lease_seconds {
 /// one and you should look at the other.
 pub const KNOCK_CLAIM_LEASE_SECONDS: i64 = knock_claim_lease_seconds!();
 
+/// The unique constraint 0021_hallway_knock.sql:64 declares on
+/// `(message_id, recipient_room)`: one message asks one recipient once.
+const ONE_KNOCK_PER_MESSAGE_AND_RECIPIENT: &str = "hallway_knocks_message_id_recipient_room_key";
+
+/// Where a Knock sits in its exchange.
+///
+/// A root Knock opens an exchange with its own id, turn 1, the caller's
+/// ceiling and a fresh lifetime. A child inherits all four from its parent and
+/// takes the next turn.
+pub(super) struct ChainPosition {
+    pub root_knock_id: String,
+    pub turn_index: i16,
+    pub max_turns: i16,
+    pub expires_at: DateTime<Utc>,
+}
+
 fn policy_mode_from_db(value: &str) -> Result<HallwayKnockPolicyMode, HallwayError> {
     match value {
         "manual" => Ok(HallwayKnockPolicyMode::Manual),
@@ -49,7 +69,7 @@ fn policy_mode_from_db(value: &str) -> Result<HallwayKnockPolicyMode, HallwayErr
 }
 
 fn policy_receipt_from_row(
-    row: &sqlx::postgres::PgRow,
+    row: &PgRow,
     hallway: String,
     room: String,
     duplicate: bool,
@@ -68,9 +88,7 @@ fn policy_receipt_from_row(
     })
 }
 
-fn knock_pointer_from_row(
-    row: &sqlx::postgres::PgRow,
-) -> Result<HallwayKnockPointer, HallwayError> {
+fn knock_pointer_from_row(row: &PgRow) -> Result<HallwayKnockPointer, HallwayError> {
     let turn_index: i16 = row.try_get("turn_index")?;
     let max_turns: i16 = row.try_get("max_turns")?;
     Ok(HallwayKnockPointer {
@@ -91,11 +109,12 @@ fn knock_pointer_from_row(
     })
 }
 
-async fn knock_row_by_id(
+async fn knock_pointer(
     tx: &mut Transaction<'_, Postgres>,
     knock_id: &str,
-) -> Result<Option<sqlx::postgres::PgRow>, HallwayError> {
-    Ok(sqlx::query(
+    missing: &'static str,
+) -> Result<HallwayKnockPointer, HallwayError> {
+    let row = sqlx::query(
         "SELECT k.knock_id::text AS knock_id,c.hallway_key,k.message_id,m.sequence,
                 COALESCE(t.thread_key,'') AS thread_key,k.from_room,k.from_spirit,
                 k.recipient_room,k.parent_knock_id::text AS parent_knock_id,
@@ -109,36 +128,9 @@ async fn knock_row_by_id(
     )
     .bind(knock_id)
     .fetch_optional(&mut **tx)
-    .await?)
-}
-
-async fn existing_knock_row(
-    tx: &mut Transaction<'_, Postgres>,
-    hallway_id: i64,
-    room: &str,
-    session: &str,
-    idempotency_key: &str,
-) -> Result<Option<sqlx::postgres::PgRow>, HallwayError> {
-    Ok(sqlx::query(
-        "SELECT k.request_digest,k.knock_id::text AS knock_id,c.hallway_key,
-                k.message_id,m.sequence,COALESCE(t.thread_key,'') AS thread_key,
-                k.from_room,k.from_spirit,k.recipient_room,
-                k.parent_knock_id::text AS parent_knock_id,
-                k.root_knock_id::text AS root_knock_id,k.turn_index,k.max_turns,k.status,
-                k.expires_at::text AS expires_at_text
-         FROM hallway_knocks k
-         JOIN hallway_channels c ON c.id=k.hallway_id
-         JOIN hallway_messages m ON m.id=k.message_id
-         LEFT JOIN hallway_threads t ON t.id=m.thread_id
-         WHERE k.hallway_id=$1 AND k.from_room=$2
-           AND k.request_session=$3 AND k.idempotency_key=$4",
-    )
-    .bind(hallway_id)
-    .bind(room)
-    .bind(session)
-    .bind(idempotency_key)
-    .fetch_optional(&mut **tx)
-    .await?)
+    .await?
+    .ok_or_else(|| refusal("knock_state_conflict", missing))?;
+    knock_pointer_from_row(&row)
 }
 
 pub async fn policy(
@@ -227,29 +219,16 @@ pub async fn policy(
         }
     }
 
+    // The room's state row is the serialization point for its policy history:
+    // the upsert takes the row lock whether it inserts or finds the row, so
+    // two writers cannot both compute the same next revision.
     sqlx::query(
-        "INSERT INTO hallway_room_state(hallway_id,room)
-         VALUES($1,$2) ON CONFLICT DO NOTHING",
+        "INSERT INTO hallway_room_state(hallway_id,room) VALUES($1,$2)
+         ON CONFLICT (hallway_id,room) DO UPDATE SET room=EXCLUDED.room",
     )
     .bind(id)
     .bind(&request.room)
     .execute(&mut *tx)
-    .await?;
-    sqlx::query(
-        "SELECT notification_revision FROM hallway_room_state
-         WHERE hallway_id=$1 AND room=$2 FOR UPDATE",
-    )
-    .bind(id)
-    .bind(&request.room)
-    .fetch_one(&mut *tx)
-    .await?;
-    let revision: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(revision),0)+1
-         FROM hallway_knock_policies WHERE hallway_id=$1 AND room=$2",
-    )
-    .bind(id)
-    .bind(&request.room)
-    .fetch_one(&mut *tx)
     .await?;
     sqlx::query(
         "UPDATE hallway_knock_policies SET superseded_at=NOW()
@@ -265,16 +244,183 @@ pub async fn policy(
             mode,allowed_rooms,max_turns,revision
          )
          SELECT hallway_id,room,spirit,session_id,idempotency_key,request_digest,
-                mode,allowed_rooms,max_turns,revision
+                mode,allowed_rooms,max_turns,
+                COALESCE((SELECT MAX(revision) FROM hallway_knock_policies
+                          WHERE hallway_id=$2 AND room=$3),0)+1
          FROM jsonb_populate_record(NULL::hallway_knock_policies,$1)
          RETURNING mode,allowed_rooms,max_turns,revision",
     )
-    .bind(rows::knock_policy(id, &request, &request_digest, revision))
+    .bind(rows::knock_policy(id, &request, &request_digest))
+    .bind(id)
+    .bind(&request.room)
     .fetch_one(&mut *tx)
     .await?;
     let receipt = policy_receipt_from_row(&row, request.hallway, request.room, false)?;
     tx.commit().await?;
     Ok(receipt)
+}
+
+/// May this presence knock on that room about this message? Returns the
+/// locked message row, which the chain rules read next.
+async fn admit(
+    tx: &mut Transaction<'_, Postgres>,
+    hallway_id: i64,
+    request: &HallwayKnockRequest,
+) -> Result<PgRow, HallwayError> {
+    let message = sqlx::query(
+        "SELECT m.room,m.spirit,m.session_id,m.reply_to,m.to_rooms,m.thread_id
+         FROM hallway_messages m
+         WHERE m.hallway_id=$1 AND m.id=$2
+         FOR UPDATE",
+    )
+    .bind(hallway_id)
+    .bind(request.message_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| refusal("message_not_found", "Hallway message does not exist"))?;
+    if message.try_get::<String, _>("room")? != request.room
+        || message.try_get::<String, _>("spirit")? != request.spirit
+        || message.try_get::<String, _>("session_id")? != request.session
+    {
+        return Err(refusal(
+            "knock_message_mismatch",
+            "Knock message was not authored by this room, spirit, and session",
+        ));
+    }
+    let to_rooms: Vec<String> = message.try_get("to_rooms")?;
+    if !to_rooms.iter().any(|room| room == &request.recipient_room) {
+        return Err(refusal(
+            "knock_message_mismatch",
+            "Knock recipient is not a target of the referenced message",
+        ));
+    }
+
+    // One read for the recipient's standing: allowed in this hallway, and its
+    // current policy held FOR SHARE so a policy write waits for this Knock.
+    let standing = sqlx::query(
+        "SELECT a.room IS NOT NULL AS recipient_allowed,p.mode,p.allowed_rooms,p.max_turns
+         FROM hallway_channels c
+         LEFT JOIN hallway_allowed_rooms a ON a.hallway_id=c.id AND a.room=$2
+         LEFT JOIN (
+             SELECT mode,allowed_rooms,max_turns FROM hallway_knock_policies
+             WHERE hallway_id=$1 AND room=$2 AND superseded_at IS NULL
+             FOR SHARE
+         ) p ON TRUE
+         WHERE c.id=$1",
+    )
+    .bind(hallway_id)
+    .bind(&request.recipient_room)
+    .fetch_one(&mut **tx)
+    .await?;
+    if !standing.try_get::<bool, _>("recipient_allowed")? {
+        return Err(refusal(
+            "room_not_allowed",
+            "Knock recipient is not allowed in this hallway",
+        ));
+    }
+    let Some(mode) = standing.try_get::<Option<String>, _>("mode")? else {
+        return Err(refusal(
+            "knock_policy_denied",
+            "recipient room has not enabled Hallway Knocks from this room",
+        ));
+    };
+    let allowed_rooms: Vec<String> = standing.try_get("allowed_rooms")?;
+    let policy_max: i16 = standing.try_get("max_turns")?;
+    if mode != "allow_list"
+        || !allowed_rooms.iter().any(|room| room == &request.room)
+        || i16::from(request.max_turns) > policy_max
+    {
+        return Err(refusal(
+            "knock_policy_denied",
+            "recipient room policy does not allow this Hallway Knock",
+        ));
+    }
+    Ok(message)
+}
+
+/// A child Knock continues its parent's exchange: it reverses the rooms,
+/// replies directly in the parent's thread, inherits the ceiling, takes the
+/// next turn, and runs on the parent's clock.
+async fn chain_position(
+    tx: &mut Transaction<'_, Postgres>,
+    hallway_id: i64,
+    request: &HallwayKnockRequest,
+    message: &PgRow,
+    knock_id: &str,
+    parent_knock_id: Option<&str>,
+) -> Result<ChainPosition, HallwayError> {
+    let Some(parent_knock_id) = parent_knock_id else {
+        return Ok(ChainPosition {
+            root_knock_id: knock_id.to_string(),
+            turn_index: 1,
+            max_turns: i16::from(request.max_turns),
+            expires_at: Utc::now() + KNOCK_REQUEST_LIFETIME,
+        });
+    };
+    let parent = sqlx::query(
+        "SELECT k.from_room,k.recipient_room,k.message_id,
+                k.root_knock_id::text AS root_knock_id,k.turn_index,k.max_turns,
+                k.status,k.expires_at,pm.thread_id
+         FROM hallway_knocks k
+         JOIN hallway_messages pm ON pm.id=k.message_id
+         WHERE k.knock_id=$1::uuid AND k.hallway_id=$2
+         FOR SHARE OF k",
+    )
+    .bind(parent_knock_id)
+    .bind(hallway_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or_else(|| {
+        refusal(
+            "knock_parent_mismatch",
+            "parent Knock does not belong to this hallway",
+        )
+    })?;
+    let parent_status: String = parent.try_get("status")?;
+    if parent_status != "started" && parent_status != "completed" {
+        return Err(refusal(
+            "knock_state_conflict",
+            "child Knock requires a parent turn that started",
+        ));
+    }
+    let max_turns: i16 = parent.try_get("max_turns")?;
+    let turn_index = parent.try_get::<i16, _>("turn_index")? + 1;
+    if turn_index > max_turns {
+        return Err(refusal(
+            "knock_exchange_exhausted",
+            "Hallway Knock exchange has reached its maximum turns",
+        ));
+    }
+    if i16::from(request.max_turns) != max_turns {
+        return Err(refusal(
+            "knock_parent_mismatch",
+            "child Knock must inherit maxTurns from its parent",
+        ));
+    }
+    if parent.try_get::<String, _>("recipient_room")? != request.room
+        || parent.try_get::<String, _>("from_room")? != request.recipient_room
+        || message.try_get::<Option<i64>, _>("reply_to")? != Some(parent.try_get("message_id")?)
+        || message.try_get::<Option<i64>, _>("thread_id")?
+            != parent.try_get::<Option<i64>, _>("thread_id")?
+    {
+        return Err(refusal(
+            "knock_parent_mismatch",
+            "child Knock must reverse rooms and directly reply in the parent thread",
+        ));
+    }
+    let expires_at: DateTime<Utc> = parent.try_get("expires_at")?;
+    if expires_at <= Utc::now() {
+        return Err(refusal(
+            "knock_state_conflict",
+            "parent Knock exchange has expired",
+        ));
+    }
+    Ok(ChainPosition {
+        root_knock_id: parent.try_get("root_knock_id")?,
+        turn_index,
+        max_turns,
+        expires_at,
+    })
 }
 
 pub async fn knock(
@@ -313,13 +459,15 @@ pub async fn knock(
     )
     .await?;
 
-    if let Some(row) = existing_knock_row(
-        &mut tx,
-        id,
-        &request.room,
-        &request.session,
-        &request.idempotency_key,
+    if let Some(row) = sqlx::query(
+        "SELECT knock_id::text AS knock_id,request_digest FROM hallway_knocks
+         WHERE hallway_id=$1 AND from_room=$2 AND request_session=$3 AND idempotency_key=$4",
     )
+    .bind(id)
+    .bind(&request.room)
+    .bind(&request.session)
+    .bind(&request.idempotency_key)
+    .fetch_optional(&mut *tx)
     .await?
     {
         if row.try_get::<String, _>("request_digest")? != request_digest {
@@ -328,7 +476,9 @@ pub async fn knock(
                 "idempotency key was reused with a different Hallway Knock request",
             ));
         }
-        let knock = knock_pointer_from_row(&row)?;
+        let knock_id: String = row.try_get("knock_id")?;
+        let knock =
+            knock_pointer(&mut tx, &knock_id, "recorded Knock could not be read back").await?;
         tx.commit().await?;
         return Ok(HallwayKnockReceipt {
             ok: true,
@@ -337,171 +487,17 @@ pub async fn knock(
         });
     }
 
-    let message = sqlx::query(
-        "SELECT m.room,m.spirit,m.session_id,m.reply_to,m.to_rooms,m.thread_id,
-                COALESCE(t.thread_key,'') AS thread_key
-         FROM hallway_messages m
-         LEFT JOIN hallway_threads t ON t.id=m.thread_id
-         WHERE m.hallway_id=$1 AND m.id=$2
-         FOR UPDATE OF m",
-    )
-    .bind(id)
-    .bind(request.message_id)
-    .fetch_optional(&mut *tx)
-    .await?
-    .ok_or_else(|| refusal("message_not_found", "Hallway message does not exist"))?;
-    if message.try_get::<String, _>("room")? != request.room
-        || message.try_get::<String, _>("spirit")? != request.spirit
-        || message.try_get::<String, _>("session_id")? != request.session
-    {
-        return Err(refusal(
-            "knock_message_mismatch",
-            "Knock message was not authored by this room, spirit, and session",
-        ));
-    }
-    let to_rooms: Vec<String> = message.try_get("to_rooms")?;
-    if !to_rooms.iter().any(|room| room == &request.recipient_room) {
-        return Err(refusal(
-            "knock_message_mismatch",
-            "Knock recipient is not a target of the referenced message",
-        ));
-    }
-    let already_requested: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM hallway_knocks WHERE message_id=$1 AND recipient_room=$2
-         )",
-    )
-    .bind(request.message_id)
-    .bind(&request.recipient_room)
-    .fetch_one(&mut *tx)
-    .await?;
-    if already_requested {
-        return Err(refusal(
-            "knock_already_requested",
-            "referenced Hallway message already requested a Knock for this recipient",
-        ));
-    }
-    let recipient_allowed: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-            SELECT 1 FROM hallway_allowed_rooms WHERE hallway_id=$1 AND room=$2
-         )",
-    )
-    .bind(id)
-    .bind(&request.recipient_room)
-    .fetch_one(&mut *tx)
-    .await?;
-    if !recipient_allowed {
-        return Err(refusal(
-            "room_not_allowed",
-            "Knock recipient is not allowed in this hallway",
-        ));
-    }
-    let policy = sqlx::query(
-        "SELECT mode,allowed_rooms,max_turns
-         FROM hallway_knock_policies
-         WHERE hallway_id=$1 AND room=$2 AND superseded_at IS NULL
-         FOR SHARE",
-    )
-    .bind(id)
-    .bind(&request.recipient_room)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(policy) = policy else {
-        return Err(refusal(
-            "knock_policy_denied",
-            "recipient room has not enabled Hallway Knocks from this room",
-        ));
-    };
-    let allowed_rooms: Vec<String> = policy.try_get("allowed_rooms")?;
-    let policy_max: i16 = policy.try_get("max_turns")?;
-    if policy.try_get::<String, _>("mode")? != "allow_list"
-        || !allowed_rooms.iter().any(|room| room == &request.room)
-        || i16::from(request.max_turns) > policy_max
-    {
-        return Err(refusal(
-            "knock_policy_denied",
-            "recipient room policy does not allow this Hallway Knock",
-        ));
-    }
-
+    let message = admit(&mut tx, id, &request).await?;
     let knock_id = Uuid::new_v4().to_string();
-    let (root_knock_id, turn_index, max_turns, expires_at) = if let Some(parent_knock_id) =
-        parent_knock_id.as_deref()
-    {
-        let parent = sqlx::query(
-            "SELECT k.from_room,k.recipient_room,k.message_id,
-                        k.root_knock_id::text AS root_knock_id,k.turn_index,k.max_turns,
-                        k.status,k.expires_at,pm.thread_id
-                 FROM hallway_knocks k
-                 JOIN hallway_messages pm ON pm.id=k.message_id
-                 WHERE k.knock_id=$1::uuid AND k.hallway_id=$2
-                 FOR SHARE OF k",
-        )
-        .bind(parent_knock_id)
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or_else(|| {
-            refusal(
-                "knock_parent_mismatch",
-                "parent Knock does not belong to this hallway",
-            )
-        })?;
-        let parent_status: String = parent.try_get("status")?;
-        if parent_status != "started" && parent_status != "completed" {
-            return Err(refusal(
-                "knock_state_conflict",
-                "child Knock requires a parent turn that started",
-            ));
-        }
-        let parent_max: i16 = parent.try_get("max_turns")?;
-        let parent_turn: i16 = parent.try_get("turn_index")?;
-        let next_turn = parent_turn + 1;
-        if next_turn > parent_max {
-            return Err(refusal(
-                "knock_exchange_exhausted",
-                "Hallway Knock exchange has reached its maximum turns",
-            ));
-        }
-        if request.max_turns != parent_max as u8 {
-            return Err(refusal(
-                "knock_parent_mismatch",
-                "child Knock must inherit maxTurns from its parent",
-            ));
-        }
-        if parent.try_get::<String, _>("recipient_room")? != request.room
-            || parent.try_get::<String, _>("from_room")? != request.recipient_room
-            || message.try_get::<Option<i64>, _>("reply_to")? != Some(parent.try_get("message_id")?)
-            || message.try_get::<Option<i64>, _>("thread_id")?
-                != parent.try_get::<Option<i64>, _>("thread_id")?
-        {
-            return Err(refusal(
-                "knock_parent_mismatch",
-                "child Knock must reverse rooms and directly reply in the parent thread",
-            ));
-        }
-        let expires_at: DateTime<Utc> = parent.try_get("expires_at")?;
-        if expires_at <= Utc::now() {
-            return Err(refusal(
-                "knock_state_conflict",
-                "parent Knock exchange has expired",
-            ));
-        }
-        (
-            parent.try_get("root_knock_id")?,
-            next_turn,
-            parent_max,
-            expires_at,
-        )
-    } else {
-        (
-            knock_id.clone(),
-            1_i16,
-            i16::from(request.max_turns),
-            Utc::now() + KNOCK_REQUEST_LIFETIME,
-        )
-    };
-
+    let position = chain_position(
+        &mut tx,
+        id,
+        &request,
+        &message,
+        &knock_id,
+        parent_knock_id.as_deref(),
+    )
+    .await?;
     sqlx::query(
         "INSERT INTO hallway_knocks(
             knock_id,hallway_id,message_id,from_room,from_spirit,request_session,
@@ -519,13 +515,21 @@ pub async fn knock(
         &request,
         &request_digest,
         parent_knock_id.as_deref(),
-        &root_knock_id,
-        turn_index,
-        max_turns,
-        expires_at,
+        &position,
     ))
     .execute(&mut *tx)
-    .await?;
+    .await
+    .map_err(|error| match &error {
+        sqlx::Error::Database(database)
+            if database.constraint() == Some(ONE_KNOCK_PER_MESSAGE_AND_RECIPIENT) =>
+        {
+            refusal(
+                "knock_already_requested",
+                "referenced Hallway message already requested a Knock for this recipient",
+            )
+        }
+        _ => error.into(),
+    })?;
     let bumped = sqlx::query(
         "UPDATE hallway_room_state
          SET notification_revision=notification_revision+1,updated_at=NOW()
@@ -541,13 +545,7 @@ pub async fn knock(
             "recipient Hallway notification state is missing",
         ));
     }
-    let row = knock_row_by_id(&mut tx, &knock_id).await?.ok_or_else(|| {
-        refusal(
-            "knock_state_conflict",
-            "created Knock could not be read back",
-        )
-    })?;
-    let knock = knock_pointer_from_row(&row)?;
+    let knock = knock_pointer(&mut tx, &knock_id, "created Knock could not be read back").await?;
     tx.commit().await?;
     Ok(HallwayKnockReceipt {
         ok: true,
@@ -636,13 +634,7 @@ pub async fn claim(
     .bind(&request.session)
     .execute(&mut *tx)
     .await?;
-    let row = knock_row_by_id(&mut tx, &knock_id).await?.ok_or_else(|| {
-        refusal(
-            "knock_state_conflict",
-            "claimed Knock could not be read back",
-        )
-    })?;
-    let knock = knock_pointer_from_row(&row)?;
+    let knock = knock_pointer(&mut tx, &knock_id, "claimed Knock could not be read back").await?;
     tx.commit().await?;
     Ok(HallwayKnockClaimReceipt {
         ok: true,
@@ -704,24 +696,19 @@ pub async fn settle(
         });
     }
 
-    match request.outcome {
+    let lease_expires_at: DateTime<Utc> = row.try_get("lease_expires_at")?;
+    let lease_active = status == "claimed" && lease_expires_at > Utc::now();
+    let statement = match request.outcome {
         HallwayKnockOutcome::Started => {
-            let lease_expires_at: DateTime<Utc> = row.try_get("lease_expires_at")?;
-            if status != "claimed" || lease_expires_at <= Utc::now() {
+            if !lease_active {
                 return Err(refusal(
                     "knock_state_conflict",
                     "Knock cannot start outside its active claim lease",
                 ));
             }
-            sqlx::query(
-                "UPDATE hallway_knocks
-                 SET status='started',started_at=NOW(),started_reason=$2
-                 WHERE knock_id=$1::uuid",
-            )
-            .bind(&knock_id)
-            .bind(&request.reason)
-            .execute(&mut *tx)
-            .await?;
+            "UPDATE hallway_knocks
+             SET status='started',started_at=NOW(),started_reason=$2
+             WHERE knock_id=$1::uuid"
         }
         HallwayKnockOutcome::Completed => {
             if status != "started" {
@@ -730,35 +717,27 @@ pub async fn settle(
                     "Knock can complete only after its turn has started",
                 ));
             }
-            sqlx::query(
-                "UPDATE hallway_knocks
-                 SET status='completed',settled_at=NOW(),settled_reason=$2
-                 WHERE knock_id=$1::uuid",
-            )
-            .bind(&knock_id)
-            .bind(&request.reason)
-            .execute(&mut *tx)
-            .await?;
+            "UPDATE hallway_knocks
+             SET status='completed',settled_at=NOW(),settled_reason=$2
+             WHERE knock_id=$1::uuid"
         }
         HallwayKnockOutcome::Failed => {
-            let lease_expires_at: DateTime<Utc> = row.try_get("lease_expires_at")?;
-            if status != "started" && !(status == "claimed" && lease_expires_at > Utc::now()) {
+            if status != "started" && !lease_active {
                 return Err(refusal(
                     "knock_state_conflict",
                     "Knock cannot fail outside its active claim or started turn",
                 ));
             }
-            sqlx::query(
-                "UPDATE hallway_knocks
-                 SET status='failed',settled_at=NOW(),settled_reason=$2
-                 WHERE knock_id=$1::uuid",
-            )
-            .bind(&knock_id)
-            .bind(&request.reason)
-            .execute(&mut *tx)
-            .await?;
+            "UPDATE hallway_knocks
+             SET status='failed',settled_at=NOW(),settled_reason=$2
+             WHERE knock_id=$1::uuid"
         }
-    }
+    };
+    sqlx::query(statement)
+        .bind(&knock_id)
+        .bind(&request.reason)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(HallwayKnockSettleReceipt {
         ok: true,

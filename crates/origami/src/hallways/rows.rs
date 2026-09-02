@@ -11,7 +11,7 @@
 //! Hallway's clock into the driver. Adding a column here means adding it to
 //! that writer's two lists; the first insert says so out loud.
 
-use chrono::{DateTime, Utc};
+use super::knocks::ChainPosition;
 use hearth::hallway::{
     HallwayCreateRequest, HallwayKnockPolicyRequest, HallwayKnockRequest, HallwayPostRequest,
 };
@@ -86,13 +86,13 @@ pub(super) fn message(
 /// `hallway_knock_policies` (0021_hallway_knock.sql:9-28).
 ///
 /// Policy rows are append-only command history: id, created_at and
-/// superseded_at stay with the DDL, and the caller supersedes the incumbent in
-/// its own statement before this row lands.
+/// superseded_at stay with the DDL, the caller supersedes the incumbent in
+/// its own statement before this row lands, and revision is computed in the
+/// INSERT from the history it joins.
 pub(super) fn knock_policy(
     hallway_id: i64,
     request: &HallwayKnockPolicyRequest,
     request_digest: &str,
-    revision: i64,
 ) -> Value {
     json!({
         "hallway_id": hallway_id,
@@ -104,7 +104,6 @@ pub(super) fn knock_policy(
         "mode": request.mode.as_str(),
         "allowed_rooms": request.allowed_rooms,
         "max_turns": i16::from(request.max_turns),
-        "revision": revision,
     })
 }
 
@@ -114,17 +113,13 @@ pub(super) fn knock_policy(
 /// type, which is why no `::uuid` cast survives at the writer. status,
 /// created_at and every claim, start and settle column stay NULL or default
 /// here: a fresh Knock is pending, and `claim`/`settle` own those columns.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn knock(
     hallway_id: i64,
     knock_id: &str,
     request: &HallwayKnockRequest,
     request_digest: &str,
     parent_knock_id: Option<&str>,
-    root_knock_id: &str,
-    turn_index: i16,
-    max_turns: i16,
-    expires_at: DateTime<Utc>,
+    position: &ChainPosition,
 ) -> Value {
     json!({
         "knock_id": knock_id,
@@ -137,9 +132,9 @@ pub(super) fn knock(
         "request_digest": request_digest,
         "recipient_room": request.recipient_room,
         "parent_knock_id": parent_knock_id,
-        "root_knock_id": root_knock_id,
-        "turn_index": turn_index,
-        "max_turns": max_turns,
-        "expires_at": expires_at,
+        "root_knock_id": position.root_knock_id,
+        "turn_index": position.turn_index,
+        "max_turns": position.max_turns,
+        "expires_at": position.expires_at,
     })
 }

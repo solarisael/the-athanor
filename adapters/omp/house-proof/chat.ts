@@ -53,10 +53,10 @@ function sayMessage(line: ChatLine): Record<string, unknown> {
   return {
     customType: "athanor-chat-say",
     content: [
-      "<system-reminder>",
+      "<athanor-attention>",
       `Chat surface message from ${line.authorName} (say ${line.turnId}).`,
       "Answer as the room's normal turn; the chat surface renders your final response text.",
-      "</system-reminder>",
+      "</athanor-attention>",
       line.text,
     ].join("\n"),
     display: true,

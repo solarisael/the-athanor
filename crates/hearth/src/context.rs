@@ -780,7 +780,7 @@ fn keyword_reminder(directives: &[KeywordDirective]) -> Option<KeywordReminder> 
 
 fn room_reminder(room: &str, active_spirit: &str, operator: &str) -> String {
     [
-        "<system-reminder>".to_owned(),
+        "<athanor-memories>".to_owned(),
         format!("Room: {room}"),
         format!("Active spirit: {active_spirit}"),
         format!("Operator: {operator}"),
@@ -801,7 +801,7 @@ fn room_reminder(room: &str, active_spirit: &str, operator: &str) -> String {
         "giga tools: Stage 1 candidates and their review and promotion path. A candidate is a proposal, never authority or evidence, until it is promoted.".into(),
         "Authority order: PostgreSQL is authoritative, canon outranks loose memory, and markdown on disk is provenance. A GIGA candidate is not memory, and Anamnesis counsel is not canon.".into(),
         "This is hidden LLM context only: it must not be persisted or rendered.".into(),
-        "</system-reminder>".into(),
+        "</athanor-memories>".into(),
     ]
     .join("\n")
 }
@@ -809,7 +809,7 @@ fn room_reminder(room: &str, active_spirit: &str, operator: &str) -> String {
 fn routing_reminder(enabled: bool) -> Option<String> {
     enabled.then(|| {
         [
-            "<system-reminder>",
+            "<athanor-memories>",
             "The Athanor worker-routing mode is enabled.",
             "Default modus operandi for delegable work:",
             "1. Main model owns intent, inference, and final judgment.",
@@ -818,7 +818,7 @@ fn routing_reminder(enabled: bool) -> Option<String> {
             "4. Before dispatch, query the typed registries once for the fanout and pass every required complete body in lessonBodies; bare IDs and summaries are not delivery, and a missing body forbids spawn.",
             "5. Do not route casual contact, high-level judgment, or exact-sensitive work without exact/retrieve-only context.",
             "6. Advisor is a separate review channel, not a dispatch lane.",
-            "</system-reminder>",
+            "</athanor-memories>",
         ]
         .join("\n")
     })

@@ -2094,14 +2094,14 @@ fn wake_context(
         )
     });
     [
-        Some("<system-reminder>".to_owned()),
+        Some("<athanor-memories>".to_owned()),
         warning,
         Some("Automatic wake: latest paper boat for this room.".into()),
         Some("Receive it as lived continuity from the room's previous waking self: keep its voice, relationships, uncertainty, and concrete state intact; orient from it without turning it into a script or status report.".into()),
         Some(format!("Title: {title}")),
         Some(format!("Source: {source_path}")),
         Some(bounded_wake_body(body)),
-        Some("</system-reminder>".into()),
+        Some("</athanor-memories>".into()),
     ]
     .into_iter()
     .flatten()

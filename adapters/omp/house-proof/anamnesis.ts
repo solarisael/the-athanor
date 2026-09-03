@@ -241,7 +241,7 @@ function text(value) { return String(value || "").trim(); }
 
 export function formatAnamnesisContext(result, { automatic = false } = {}) {
   if (!result?.ok || !Array.isArray(result.entries) || !result.entries.length) return "";
-  const lines = ["<system-reminder>", automatic ? "Automatic Anamnesis counsel (not present-state truth)." : "Anamnesis Cabinet counsel."];
+  const lines = ["<athanor-memories>", automatic ? "Automatic Anamnesis counsel (not present-state truth)." : "Anamnesis Cabinet counsel."];
   if (automatic) {
     lines.push("The Cabinet is counsel, not present-state truth.", "Pillars are standing places.", "Active cycles are prior patterns to verify against the live turn.", "Never assert a cycle is active merely because it loaded.");
   }
@@ -267,10 +267,10 @@ export function formatAnamnesisContext(result, { automatic = false } = {}) {
     lines.push("");
   }
   if (Array.isArray(result.warnings) && result.warnings.length) lines.push(`Warnings: ${result.warnings.map(String).join(" | ")}`);
-  lines.push("</system-reminder>");
+  lines.push("</athanor-memories>");
   const output = lines.join("\n");
   if (automatic && output.length > 8000) {
-    const suffix = "\n...[anamnesis context clipped]\n</system-reminder>";
+    const suffix = "\n...[anamnesis context clipped]\n</athanor-memories>";
     return `${output.slice(0, 8000 - suffix.length).trimEnd()}${suffix}`;
   }
   return output;

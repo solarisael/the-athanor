@@ -29,6 +29,14 @@ the exact implementation record.
 - The crane delivery loop now runs inside the Host. `athanor.exe` starts it
   when a room sets `DATABASE_URL` and `ATHANOR_NATS_URL`. The loop reconnects
   to NATS after a failure and stops when the House closes.
+- Injected context carries Athanor wrapper tags. Hidden continuity frames
+  (room reminder, routing mode, lesson banner, wake boat, Anamnesis counsel,
+  Recall working set) use `<athanor-memories>`. Frames that ask for a
+  response (Hallway Bell, Hallway Knock, chat surface) use
+  `<athanor-attention>`. OMP's own `<system-notice>` is untouched.
+- Every cargo invocation in the checkout builds into `target/deploy`,
+  incremental artifacts are off, and test binaries run single-threaded
+  (`.cargo/config.toml`).
 
 ### Removed
 

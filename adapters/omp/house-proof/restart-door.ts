@@ -584,7 +584,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       // session's context away, so the letter has to be waiting on the other
       // side before the door agrees to leave - otherwise the restart is just
       // amnesia. Confirming never consumes: paper_boat_wake is a pure read, and
-      // crates/house-substrate/tests/paper_boat_integration.rs wakes one room
+      // crates/akasha/tests/paper_boat_integration.rs wakes one room
       // twice and gets the boat both times.
       let boat: Record<string, unknown> | undefined;
       if (effectiveMode === "fresh") {

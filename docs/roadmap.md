@@ -102,7 +102,7 @@ not replace running the affected production-shaped path.
 
 ### 3. Lock one Rust domain, Host, and profile contract
 
-`house-core` becomes the single behavioral authority. Define one common envelope
+`hearth` becomes the single behavioral authority. Define one common envelope
 for identity, House and room scope, authority, lifecycle, provenance, chronology,
 and relationships, with typed payloads for memories, canon, lessons, counsel,
 candidates, and other distinct records. Do not flatten typed constraints into an

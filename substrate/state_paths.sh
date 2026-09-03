@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Where mutable substrate state lives. Mirrors
-# crates/house-substrate/src/state.rs.
+# crates/akasha/src/state.rs.
 #
 # Product code is immutable once installed, so nothing written at runtime may
 # land inside it. The installed layout is <install-root>/the-athanor for product

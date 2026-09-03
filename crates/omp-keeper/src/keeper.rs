@@ -231,7 +231,7 @@ fn relaunch(
         attempts += 1;
         // One relaunching transition per attempt. The intent row counts
         // relaunch_attempts and mints a fresh relaunching_deadline_at on every
-        // relaunching transition (house-substrate/src/restart/mod.rs:518-545),
+        // relaunching transition (akasha/src/restart/mod.rs `keeper_move`),
         // so a retry runs inside the House's own new window instead of a second
         // clock invented here.
         let detail = (attempts > 1).then(|| format!("relaunch attempt {attempts}"));

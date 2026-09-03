@@ -1485,8 +1485,9 @@ export default function solarisaelHouseProof(pi, release) {
         activities.push(`Presence loaded: ${compiled.frameId}/v${compiled.frameVersion}`);
         if (presencePulse) activities.push("Presence pulse loaded");
       } catch (error) {
-        console.warn(`[athanor] Presence degraded: ${error instanceof Error ? error.message : String(error)}`);
-        warnings.push("Presence unavailable");
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`[athanor] Presence degraded: ${reason}`);
+        warnings.push(`Presence unavailable: ${reason}`);
       }
     }
 

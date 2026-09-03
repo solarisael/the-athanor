@@ -563,7 +563,7 @@ stream/consumer policy drift is refused rather than silently rewritten.
 ```mermaid
 flowchart LR
   SLEEP["paper_boat_sleep"] -->|"one transaction"| PG[("PostgreSQL<br/>Boat + crane_outbox")]
-  PG -->|"claim pending row"| DELIVERY["house-delivery"]
+  PG -->|"claim pending row"| DELIVERY["origami cranes::delivery"]
   DELIVERY -->|"publish pointer"| READY["JetStream<br/>athanor.boat.ready"]
   READY -->|"pull first"| DELIVERY
   DELIVERY -->|"commit transport receipt"| RECEIPTS[("PostgreSQL<br/>crane_receipts")]
@@ -571,7 +571,7 @@ flowchart LR
   RECEIPT_STREAM --> HOST["room Host<br/>ephemeral replay consumer"]
   HOST -->|"WebSocket projection"| GODOT["Godot receipt UI"]
 
-  WAKE["explicit wake tool"] --> SUBSTRATE["house-substrate"]
+  WAKE["explicit wake tool"] --> SUBSTRATE["akasha"]
   SUBSTRATE -->|"reload complete Boat"| PG
 
   HALLWAY["Hallway"] -.->|"PostgreSQL only"| PG
@@ -1238,9 +1238,9 @@ This table adds only the runtime surfaces above it.
 
 | Surface | Canonical owner |
 |---|---|
-| Logical Host, invocation, event, refinement, and proof contracts | `crates/house-core` and `crates/house-protocol` |
+| Logical Host, invocation, event, refinement, and proof contracts | `crates/hearth` and `crates/protocol` |
 | OMP lifecycle, tool, task, and live-session integration | `adapters/omp` |
-| PostgreSQL authority, outbox rows, code-change facts, materialized derivations, GIGA jobs, outcomes, proof receipts, and health | `crates/house-substrate` and `substrate/` |
+| PostgreSQL authority, outbox rows, code-change facts, materialized derivations, GIGA jobs, outcomes, proof receipts, and health | `crates/akasha` and `substrate/` |
 | Godot rendering and interaction | A separate client package implementing `GODOT_CLIENT.md`; no core authority |
 | NATS deployment and relay | Deployment/runtime integration; behavior remains defined by core contracts |
 | Model-provider implementations | Replaceable adapter/provider modules |

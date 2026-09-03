@@ -87,38 +87,48 @@ Arrows point from a crate to its internal workspace dependency.
 
 ```mermaid
 flowchart BT
-    Core["house-core"]
-    Protocol["house-protocol"]
-    Vault["house-vault"]
-    Substrate["house-substrate"]
-    Delivery["house-delivery"]
+    Hearth["hearth"]
+    Origami["origami"]
+    Summoning["summoning"]
+    Protocol["protocol"]
+    Vault["vault"]
+    Akasha["akasha"]
     Host["host"]
+    Keeper["omp-keeper"]
+    Interactive["interactive-process"]
     Install["athanor-install"]
     Godot["athanor-godot<br/>gui/src"]
 
-    Protocol --> Core
-    Host --> Core
+    Origami --> Hearth
+    Summoning --> Hearth
+    Summoning --> Origami
+    Protocol --> Hearth
+    Protocol --> Origami
+    Protocol --> Summoning
+    Akasha --> Hearth
+    Akasha --> Protocol
+    Akasha --> Vault
+    Akasha --> Origami
+    Akasha --> Summoning
+    Host --> Akasha
+    Host --> Hearth
+    Host --> Origami
     Host --> Protocol
-    Host --> Delivery
-    Substrate --> Core
-    Substrate --> Protocol
-    Substrate --> Vault
-    Delivery --> Protocol
+    Host --> Summoning
+    Keeper --> Protocol
+    Keeper --> Interactive
+    Install --> Host
+    Install --> Hearth
+    Install --> Protocol
+    Install --> Interactive
+    Install --> Keeper
     Godot --> Protocol
-
-    Proof["tests and smoke harnesses"] -.-> Core
-    Proof -.-> Protocol
-    Proof -.-> Vault
-    Proof -.-> Substrate
-    Proof -.-> Delivery
-    Proof -.-> Host
-    Proof -.-> Install
-    Proof -.-> Godot
 ```
 
-`house-core`, `house-vault`, and `athanor-install` have no internal workspace
-crate dependency. Repository proximity does not erase authority boundaries:
-Vault stays database-free, and the core does not import an adapter.
+`hearth`, `vault`, and `interactive-process` have no internal workspace crate
+dependency. Repository proximity does not erase authority boundaries: Vault
+stays database-free, hearth reads no file, socket, database, or clock, and
+the core does not import an adapter.
 
 Source: workspace manifests resolved from `Cargo.toml` and each crate manifest.
 
@@ -337,7 +347,7 @@ flowchart TD
     Main --> Req{"ProtocolRequest"}
 
     Req --> Vault["vault_recall"]
-    Vault --> VaultCrate["house-vault<br/>no database initialization"]
+    Vault --> VaultCrate["vault<br/>no database initialization"]
 
     Req --> Pre["health / migrations<br/>pre-init paths"]
 
@@ -369,7 +379,7 @@ The main binary owns protocol dispatch and lazy shared state. Domain modules own
 the transactions; `main.rs` does not become a second implementation of their
 rules.
 
-Sources: `crates/house-substrate/src/main.rs`, `lib.rs`, `config.rs`,
+Sources: `crates/akasha/src/main.rs`, `lib.rs`, `config.rs`,
 `health.rs`, and the domain modules listed in the module index.
 
 ## 7. Recall paths
@@ -418,8 +428,8 @@ flowchart TD
     NoDB["No PostgreSQL<br/>No writes"] -.-> Q
 ```
 
-Sources: `crates/house-substrate/src/recall.rs`,
-`crates/house-substrate/src/bm25f.rs`, `crates/house-vault/src/lib.rs`.
+Sources: `crates/akasha/src/recall/`,
+`crates/akasha/src/bm25f.rs`, `crates/vault/src/recall.rs`.
 
 ## 8. Host command cycle
 
@@ -558,9 +568,9 @@ A candidate never becomes evidence merely because the worker extracted it.
 Review and promotion are separate durable transitions. Project lessons add an
 operator publication-consent gate.
 
-Sources: `adapters/omp/giga.ts`, `crates/house-substrate/src/giga.rs`,
-`crates/house-substrate/src/giga_worker.rs`,
-`crates/house-core/src/conversation.rs`.
+Sources: `adapters/omp/giga.ts`, `crates/akasha/src/giga/`,
+`crates/akasha/src/giga_worker/`,
+`crates/hearth/src/conversation.rs`.
 
 ## 11. Native release, install, rollback, and removal
 
@@ -713,13 +723,16 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 | Crate | Modules | Boundary |
 |---|---|---|
 | `hearth` (23) | `lib`, `authority`, `canon`, `cluster`, `context`, `conversation`, `error`, `giga/*`, `hallway`, `lesson_triggers`, `lineage`, `recall`, `remember`, `room`, `triggers` | Vocabulary and pure rules only: typed requests and receipts, context classification, transcript/source identity, Hallway validation, trigger vocabulary, quest normalization. No file, socket, database, or clock |
-| `house-protocol` (2) | `lib`, `host` | Substrate JSONL DTOs/results/errors and Host command/event envelopes |
-| `house-vault` (1) | `lib` | Strict file-authoritative, database-free Vault retrieval |
-| `house-substrate` (19) | `lib`, `main`, `config`, `state`, `migrations`, `backup`, `health`, `remember`, `recall`, `bm25f`, `canon`, `entity`, `anamnesis`, `lesson`, `cluster`, `paper_boat`, `hallway`, `giga`, `giga_worker` | JSONL dispatch, PostgreSQL configuration and migrations, durable organs, retrieval, GIGA, backup, and health |
-| `house-delivery` (5) | `lib`, `main`, `model`, `broker`, `store` | Crane envelope validation, PostgreSQL outbox/receipt store, JetStream publication and consumption |
-| `host` (14) | `lib`, `house`, `config`, `insula`, `panel`, `policy`, `presence`, `receipt`, `routing/*`, `server`, `store`, `viewport` | One in-process multi-room listener, authenticated client boundary, room projection state, Recall Policy, receipts, panels, viewport shaping, worker lanes and spellbook dispatch |
-| `athanor-install` (10) | `lib`, `main`, `layout`, `manifest`, `boundaries`, `installer`, `native_runtime`, `omp`, `service`, `supervisor` | Installed layout, release validation, transactional update/rollback, runtime planning, Windows service, OMP integration |
-| `athanor-godot` (11) | `lib`, `host_link`, `host_session`, `protocol`, `shell`, `recall_policy`, `routing`, `familiar_status`, `dispatch`, `health`, `paper_boat_receipt` | Thin native client transport, exact Host wire contract, projections, shell routes, and Paper Boat receipt state |
+| `origami` (22) | `lib`, `sea`, `boats/*`, `cranes/*`, `hallways/*` | The communication layer: paper boat records, sleep and wake; Crane envelopes, PostgreSQL outbox and receipts, JetStream broker and the delivery loop; Hallway channels, messages, Bells and Knocks over PostgreSQL |
+| `summoning` (7) | `lib`, `anamnesis`, `presence/*` | The waking cycle's typed requests: Anamnesis read and write shapes, Presence frames, turns and settlement rules |
+| `protocol` (5) | `lib`, `contract`, `harness`, `host`, `restart/*` | Substrate JSONL DTOs/results/errors, Host command/event envelopes, harness and restart wire shapes |
+| `vault` (12) | `lib`, `config`, `documents`, `error`, `ignore`, `index`, `model`, `rank`, `recall`, `text`, `walk` | Strict file-authoritative, database-free Vault retrieval |
+| `akasha` (113) | `lib`, `main`, `config`, `state`, `settings`, `migrations`, `backup`, `health`, `remember/*`, `recall/*`, `bm25f`, `canon`, `entity`, `anamnesis`, `lesson/*`, `cluster`, `paper_boat`, `hallway`, `timeline`, `docket/*`, `giga/*`, `giga_worker/*`, `insula/*`, `insula_writer`, `restart/*` | JSONL dispatch, PostgreSQL configuration and migrations, durable organs, retrieval, lesson registry and trigger engine, Docket, GIGA, Insula telemetry, restart intents, backup, and health |
+| `host` (15) | `lib`, `house`, `config`, `chat`, `insula`, `panel`, `policy`, `presence`, `receipt`, `routing/*`, `server`, `store`, `viewport` | One in-process multi-room listener, authenticated client boundary, room projection state, Recall Policy, receipts, panels, viewport shaping, worker lanes, spellbook dispatch, and the delivery task it spawns |
+| `omp-keeper` (10) | `lib`, `main`, `clock`, `config`, `control`, `decide`, `keeper`, `protocol`, `resolve`, `session` | Supervises one OMP session per room: restart intents, relaunch decisions, and the substrate executable it resolves |
+| `interactive-process` (1) | `lib` | Child process with a PTY-shaped stdin/stdout contract for the keeper and installer |
+| `athanor-install` (20) | `lib`, `main`, `app`, `bin/athanor`, `bin/athanor-chat`, `boundaries`, `component`, `endpoints`, `harness/*`, `installer`, `layout`, `manifest`, `native_runtime`, `omp`, `service`, `supervisor` | `athanor.exe`: installed layout, release validation, transactional update/rollback, runtime planning, Windows service supervising PostgreSQL and NATS, OMP integration, and the in-process Host |
+| `athanor-godot` (14) | `lib`, `host_link`, `host_session`, `protocol`, `shell`, `tokens`, `disclosure`, `recall_policy`, `routing`, `familiar_status`, `dispatch`, `health`, `harness_control/*`, `paper_boat_receipt` | Thin native client transport, exact Host wire contract, projections, shell routes, and Paper Boat receipt state (parked; the web `gui-prototype/` is the operator surface) |
 
 ### OMP adapter modules: 26
 

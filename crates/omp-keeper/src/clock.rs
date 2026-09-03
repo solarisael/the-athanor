@@ -3,7 +3,7 @@
 //! The concern: which instant a stage ends at. The keeper owns no stage seconds
 //! of its own. `restart_status` publishes absolute RFC3339 instants — the
 //! substrate computes them in Postgres and hands them over as text
-//! (house-substrate/src/restart/mod.rs:657-659) — and this module is the only
+//! (akasha/src/restart/mod.rs `STATUS_COLUMNS`) — and this module is the only
 //! place that turns one into a comparable instant and asks whether it has
 //! passed.
 //!

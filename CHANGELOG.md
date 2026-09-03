@@ -217,7 +217,7 @@ the exact implementation record.
   `catch` that answers "this is a subagent session". Every session therefore
   looked like a subagent, and the adapter buffered no turn. The break started at
   `b635264`. Turn ingest resumes with this release. Set
-  `SOLARISAEL_GIGA_ENABLED=0` to hold it off if the queue load surprises you.
+  `ATHANOR_GIGA_ENABLED=0` to hold it off if the queue load surprises you.
   Kintsu's demand for a production-seam proof found this. The restart door's new
   seam test showed it.
 
@@ -446,7 +446,7 @@ the exact implementation record.
   pending mentions, and latest-message metadata per hallway, and OMP projects
   a revision-gated Hallway Bell notice into context so no spirit has to
   remember to poll its mailbox. The House timezone is explicit runtime
-  authority via SOLARISAEL_HOUSE_TZ. Live NATS knock delivery is deferred:
+  authority via ATHANOR_HOUSE_TZ. Live NATS knock delivery is deferred:
   Crane's outbox still requires a memory-row aggregate.
   Post idempotency now binds the normalized recipient set, inbox rows expose
   pending notification message/thread targets, and `hallway_read` accepts an
@@ -528,7 +528,7 @@ the exact implementation record.
   returns the lesson as the reason. A `remind` fire prepends an in-band reminder
   to the tool result. Prose matches inject a current-turn reminder without
   moving earlier anchors. Every tap fails open with a 300ms budget and honors
-  `SOLARISAEL_DISABLE_LESSON_TRIGGERS=1`.
+  `ATHANOR_DISABLE_LESSON_TRIGGERS=1`.
 - Write paths refuse lesson triggers that can never fire: a regex that does not
   compile, an ast pattern that does not parse cleanly for any supported grammar,
   an unknown scope token, or an invalid interrupt mode. GIGA promotions never

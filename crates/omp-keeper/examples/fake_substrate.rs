@@ -44,7 +44,7 @@ const SUCCESSOR_PROOF_ONE: &str =
 const SUCCESSOR_PROOF_TWO: &str =
     "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
 
-// The contract's stage numbers, mirroring house-substrate's restart consts.
+// The contract's stage numbers, mirroring akasha's restart consts.
 const REQUESTED_TTL_SECS: i64 = 300;
 const EXITING_DEADLINE_SECS: i64 = 60;
 const RELAUNCHING_DEADLINE_SECS: i64 = 120;
@@ -373,7 +373,7 @@ fn refusal(id: &str, code: &str, message: &str) -> String {
 }
 
 fn storm_refusal(id: &str) -> String {
-    // the substrate's own words (house-substrate/src/restart/mod.rs:152-155)
+    // the substrate's own words (akasha/src/restart/mod.rs `refuse_on_storm`)
     refusal(
         id,
         STORM_REFUSAL_CODE,

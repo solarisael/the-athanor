@@ -88,13 +88,13 @@ documents link to it instead of repeating it.
 
 | Component path | Responsibility |
 |---|---|
-| `crates/house-core`, `crates/house-protocol` | Provider-neutral domain, authority, and wire contracts |
-| `crates/house-vault` | Strict database-free, file-authoritative Vault retrieval |
-| `crates/house-substrate`, `substrate/` | PostgreSQL-authoritative AKASHA operations, migrations, retrieval, typed stores, GIGA, health, backup, and restore |
-| `crates/host` | One authenticated multi-room listener, snapshots, deltas, Recall Policy, and receipt projection |
-| `crates/house-delivery` | Transactional outbox publication and bounded JetStream consumption |
-| `crates/athanor-install`, `installer/` | Native service lifecycle, immutable staging, rollback, doctor, and Windows installer |
-| `gui/` | Thin Godot operator client |
+| `crates/hearth`, `crates/protocol` | Provider-neutral domain, authority, and wire contracts |
+| `crates/origami`, `crates/summoning` | The communication layer (paper boats, Cranes, Hallways) and the waking cycle's typed requests (Anamnesis, Presence) |
+| `crates/vault` | Strict database-free, file-authoritative Vault retrieval |
+| `crates/akasha`, `substrate/` | PostgreSQL-authoritative AKASHA operations, migrations, retrieval, typed stores, Docket, GIGA, Insula, health, backup, and restore |
+| `crates/host` | One authenticated multi-room listener, snapshots, deltas, Recall Policy, receipt projection, and the Crane delivery task |
+| `crates/athanor-install`, `crates/omp-keeper`, `crates/interactive-process`, `installer/` | `athanor.exe`: native service lifecycle, immutable staging, rollback, doctor, OMP session keeper, and the Windows installer |
+| `gui/`, `gui-prototype/` | Godot operator client (parked) and the web operator surface |
 | `adapters/omp/` | OMP entrypoint, room integration, named tools, and Rust transport |
 | `.github/workflows/` | Continuous integration and native release assembly |
 | `docs/`, root Markdown | Canonical documentation |
@@ -264,8 +264,8 @@ candidates as non-authoritative pointers to source evidence. Review, Curios,
 promotion, health, and safe queue maintenance are explicit operations.
 Striatum's current operational slice is deliberately narrow: twelve hard-coded
 process-trigger patterns select at most one trigger per prompt
-(`house-core/src/context.rs`), and a matched trigger braids up to twelve
-process-shape coding lessons into the turn (`house-core/src/triggers.rs`). No
+(`hearth/src/context.rs`), and a matched trigger braids up to twelve
+process-shape coding lessons into the turn (`hearth/src/triggers.rs`). No
 semantic model, hysteresis, or lesson-set carryover is active; the earlier
 six-lesson Nemotron/hysteresis slice was removed. The target Striatum is a
 post-Docket, shadow-first selector over Docket facts: eligibility precedes

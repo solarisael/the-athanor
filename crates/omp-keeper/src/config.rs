@@ -134,7 +134,7 @@ impl KeeperConfig {
     }
 }
 
-/// Mirrors ROOM_KEY_RE in house-substrate/src/config.rs, the name shape the substrate accepts.
+/// Mirrors ROOM_KEY_RE in akasha/src/config.rs, the name shape the substrate accepts.
 pub fn is_principal_name(value: &str) -> bool {
     if value.is_empty() {
         return false;

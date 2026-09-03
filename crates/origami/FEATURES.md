@@ -10,7 +10,7 @@ The message shapes of the House. PostgreSQL holds every body. NATS carries only 
 - Two lanes exist: the boat.ready lane, and the addressed crane lane.
 - The broker declares the streams, the subjects, and the durable consumers. It refuses a live configuration that differs.
 - Failure has bounds. Ten publish attempts, then a dead letter row with a reason.
-- house-delivery walks these shapes. Origami never calls back into it.
+- `cranes::delivery` walks these shapes. The outbox never calls back into it.
 
 ### hallways
 

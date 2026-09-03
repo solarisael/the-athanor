@@ -67,6 +67,9 @@ The 1.0 boundary is Rust, narrow NATS delivery, planned correctness fixes, harde
 - **Coding #330 — Prove Rust ownership and concurrency.** Encode real lifetimes, cancellation, shutdown, error disposition, and unsafe invariants; reject blanket no-clone, no-unwrap, mandatory-crate, or abstraction rules.
 
 - **Coding #460 — Complexity budgets apply to functions, modules, and crates.** Functions target CCN 6 or below; 7–15 is a ratcheted warning, and anything above 15 requires immediate rewrite or refactor. A split needs a distinct owner, lifecycle, and public door; never split only to reset a counter.
+- **Coding #446 — Every concern is a module, a smaller project inside the bigger project.** Name the concern before writing; one concern, one folder, one clean door; shared vocabulary between crates earns its own crate.
+- **Coding #457 — Prove the version of the idea before perfecting it.** When retries, adapters, and repair machinery accumulate around a seam, draw the ownership graph and ask whether this version of the design is wrong, not the idea.
+- **Coding #473 — Marker comments form a bounded grep ontology (IN TESTING).** Standalone `[concern/...]`, `[status/...]`, `[debt/...]`, `[risk/...]`, `[lesson/coding/N]` tags, at most four per marker. Review the rule after three real cuts.
 
 **Coding #315 governs this replacement.** Do not read the legacy TypeScript or Python implementation to design its Rust successor. Use current specifications, accepted contracts, external observation, and focused parity probes to build Coding #184's behavior inventory. Legacy source may be inspected only after the independent contract exists, to find callers and orphaned behavior during cutover; it is evidence, never the replacement design.
 
@@ -146,9 +149,9 @@ Then load the Athanor GUI lessons:
 - **Coding #134 — Frontend UX proof belongs to the rendered surface.** Builds and API checks prove wiring, not appearance.
 - **Coding #258 — A URL is not navigation.** Exercise arrival from the user's real entry point.
 
-The 1.0 usable GUI is the thin Godot `Control` client defined by `docs/GODOT_CLIENT.md` sections 2 and 5. Godot implementation quests also load Coding #165, #166, #167, and #331. Host-only command or projection work does not. **Coding #331** keeps the operator UI container-led, accessible, lifecycle-safe, and subordinate to Rust and PostgreSQL domain meaning.
+The web client under `gui-prototype/` is the operator surface. The Godot client under `gui/` is parked by **Project #462**: do not extend its screens, themes, or scenes unless Sol reopens it. Godot craft lessons (Coding #165, #166, #167, #331, #341, #375) are dormant knowledge for that client; they teach how, they no longer say where.
 
-Use `docs/RUNTIME_ARCHITECTURE.md` sections 4.1 and 4.5 for command, event, snapshot, delta, replay, and resynchronization contracts. Use `docs/GODOT_CLIENT.md` sections 2, 5, and 10 for the client boundary, first functional surface, and proof budgets.
+Use `docs/RUNTIME_ARCHITECTURE.md` sections 4.1 and 4.5 for command, event, snapshot, delta, replay, and resynchronization contracts.
 
 The GUI consumes Host commands and projections. It never becomes a second authority, reaches directly into PostgreSQL or NATS, or infers domain state from appearance.
 
@@ -175,6 +178,7 @@ The release gate includes clean installation, Vault-to-AKASHA migration, restart
 ## Documentation
 
 - **Coding #188 — Use ASD-STE100 Simplified Technical English.** Keep project documents plain, direct, and bounded.
+- **Coding #454 — A ruling is not captured until its symptom is armed.** Every lesson write ships with `condition`/`astCondition` and `triggerScope` when a greppable symptom exists, or says out loud that none does.
 - **Coding #337 — Comments point to project lessons.** Keep long reasoning in PostgreSQL rather than copying it into source comments.
 - **Coding #151 — A keep-in-sync comment admits a structural crack.** Put shared truth in one enforced source.
 - **Coding #194 — Comments preserve intent and connection, never code mechanics.** Explain why the seam exists, what feeds it, and what depends on it.
@@ -192,7 +196,8 @@ The release gate includes clean installation, Vault-to-AKASHA migration, restart
 - **Coding #340 — Subagents are kittens.** Make affection, praise, autonomy, and bounded authority part of every dispatch.
 - **Coding #220 — Fetch lessons before risky work.** Include relevant verbatim lesson bodies; bare IDs are not delivery.
 - **Coding #328 — Census once, then batch coordinates.** Map broad terrain once before parallel execution.
-- **Coding #322 — Workers wake at the project root.** Name `C:/Projects/the-athanor` in every project quest.
+- **Coding #459 — A cartographer needs an enumerable manifest, hard negative space, and a deterministic receipt.** The parent supplies the universe; the map dispositions it; an independent check proves closure. Kintsu's two-layer pilot (`backup/format-day-2026-08-30`, `architecture/cartography/`) is the reference run.
+- **Coding #322 — Workers wake at the project root.** Name `C:/Projects/the-athanor-dev/the-athanor` in every project quest; `C:/Projects/the-athanor` is deploy-only (Project #450).
 - **Coding #217 — Use current authority.** Distinguish canon, accepted direction, historical evidence, and current code.
 - **Coding #316 — Execution has zero inference budget.** A kitten halts at an unmapped seam instead of filling it silently.
 - **Coding #337 — Comments point to project lessons.** Do not ask kittens to compress durable reasoning into source comments.
@@ -275,7 +280,7 @@ These lessons remain authoritative but do not drive every 1.0 quest.
 - **Coding #350** loads when writing values into an existing formatted namespace.
 - **Coding #352, #356, #370, and #374** load only for PHP, Apache, or Go work.
 - **Coding #369** loads for JetStream diagnosis or repair.
-- **Coding #165, #166, #167, and #331** load only for Godot implementation slices.
+- **Coding #165, #166, #167, and #331** load only if Sol reopens the parked Godot client (Project #462).
 - **Coding #214** loads for pgvector dimension, type, operator-class, or HNSW work.
 - **Coding #216** is disposable transition-test data, not a routing lesson. Remove it from PostgreSQL after its Rust write, read, restart, and reread proof is accepted.
 - **Design #293 through #304** load together for GUI design extraction or implementation.

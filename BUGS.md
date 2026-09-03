@@ -66,6 +66,20 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Impact:** A local green or red count is not portable evidence without naming environment and attribution.
 - **Proof after repair:** The same hermetic test command produces the same result on both machines, or every environment-dependent cluster declares and provisions its dependency explicitly.
 
+### A durable write's backup leaves no receipt on success and only a string on failure
+
+- **Observed:** `backup::run_post_write` (`crates/akasha/src/backup.rs`) returns `Result<(), _>` and discards the `Manifest` that `backup_with_migrations` produced. Every caller (`remember`, `remember_lesson`, `anamnesis_write`, `paper_boat_sleep`) turns an error into one warning string and records nothing on success. Kintsu's cartography audit of 2026-08-30 (`backup/format-day-2026-08-30`, `architecture/cartography/pilots/run-post-write/audit/judgments.tsv`, J07) found this; it still holds on `dev/next`.
+- **Impact:** A spirit cannot name the backup its write produced, and a failed backup exists only inside one session's tool output. Nothing durable records that an organ failed.
+- **Expected:** The backup outcome is a typed receipt (dump path, checksum, or the failure code) that rides on the write receipt and lands where Insula can read it.
+- **Proof after repair:** A `remember` with `backup: true` returns the dump identity; a forced backup failure produces a row an operator can find without the session transcript.
+
+### Durable-write file backup reports "program not found" on the Windows tower
+
+- **Observed:** 2026-08-29, twice: `remember` (project-lesson #465) and `sleep` (paper boat #4219) committed to PostgreSQL and then reported `backup failed after PostgreSQL commit; ... backup io: program not found`. Recovered from `rescue/athanor-dev-wip-2026-08-28`; not yet reproduced on `dev/next`.
+- **Cause seam:** the backup path runs `pg_dump` through WSL when `ATHANOR_PG_WSL=1`; the same `pg_dump` works when run directly.
+- **Impact:** Every durable write silently loses its file backup until someone reads the warning.
+- **Proof after repair:** A `remember` and a `sleep` on the Windows tower both report a successful backup receipt, and the dump exists with a verifiable checksum.
+
 ## Repaired but not deployed
 
 ### Presence lifecycle and authority seams

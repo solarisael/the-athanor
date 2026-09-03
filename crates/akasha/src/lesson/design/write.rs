@@ -107,13 +107,31 @@ pub async fn design_document_write(
                 "superseded document identity differs; pass --allow-identity-change",
             ));
         }
+        // `design_documents_current_identity_uidx` is UNIQUE (system, doc_type, name)
+        // WHERE superseded_by IS NULL. A same-identity successor cannot be inserted
+        // while the old row is still current. Retire the old row first with a
+        // transient self-reference (satisfies the FK, leaves the partial index),
+        // then repoint it at the real successor once that id exists.
+        let retired = sqlx::query(
+            "UPDATE design_documents SET superseded_by=id WHERE id=$1 AND superseded_by IS NULL",
+        )
+        .bind(old)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if retired != 1 {
+            return Ok(design_refusal(
+                &p,
+                "supersession affected an unexpected number of rows",
+            ));
+        }
     }
     let id: i64 = sqlx::query_scalar("INSERT INTO design_documents(system,doc_type,name,group_name,\"values\",body,provenance,tags) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id")
         .bind(&system).bind(&p.doc_type).bind(&name).bind(&p.group).bind(&p.values)
         .bind(&p.body).bind(&p.provenance).bind(&p.tags).fetch_one(&mut *tx).await?;
     if let Some(old) = p.supersedes {
         let changed = sqlx::query(
-            "UPDATE design_documents SET superseded_by=$1 WHERE id=$2 AND superseded_by IS NULL",
+            "UPDATE design_documents SET superseded_by=$1 WHERE id=$2 AND superseded_by=id",
         )
         .bind(id)
         .bind(old)

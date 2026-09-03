@@ -75,12 +75,28 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 
 ### Durable-write file backup reports "program not found" on the Windows tower
 
-- **Observed:** 2026-08-29, twice: `remember` (project-lesson #465) and `sleep` (paper boat #4219) committed to PostgreSQL and then reported `backup failed after PostgreSQL commit; ... backup io: program not found`. Recovered from `rescue/athanor-dev-wip-2026-08-28`; not yet reproduced on `dev/next`.
+- **Observed:** 2026-08-29, twice: `remember` (project-lesson #465) and `sleep` (paper boat #4219) committed to PostgreSQL and then reported `backup failed after PostgreSQL commit; ... backup io: program not found`. Recovered from `rescue/athanor-dev-wip-2026-08-28`; not yet reproduced on `dev/next`. On 2026-09-02 (`dev/next` @ b91f196) two `remember` writes (kodo #4370, #4371) backed up clean.
 - **Cause seam:** the backup path runs `pg_dump` through WSL when `ATHANOR_PG_WSL=1`; the same `pg_dump` works when run directly.
 - **Impact:** Every durable write silently loses its file backup until someone reads the warning.
 - **Proof after repair:** A `remember` and a `sleep` on the Windows tower both report a successful backup receipt, and the dump exists with a verifiable checksum.
 
+### Rescue-tool backup runs with no credentials on the Windows tower
+
+- **Observed:** 2026-09-02, room `kodo`, two divination writes through `house/substrate/record_memory.py --env-file ../state/substrate/.env` (house #4372, #4373). Both rows committed. The post-write backup then reported `WARN: backup failed (rc=1): pg_dump: error: connection to server at "127.0.0.1", port 5432 failed: fe_sendauth: no password supplied`.
+- **Cause seam:** `backup_runner.run_backup` executes `house/substrate/backup.sh` through `wsl.exe bash` and passes no environment. `backup.sh` does `cd "$(dirname "$0")"` and sources a sibling `.env`. The sibling directory holds only `.env.example`; the real credentials live in `house/state/substrate/.env`. The `--env-file` the writer accepted never reaches the backup, so `pg_dump` runs with an empty `PGPASSWORD`.
+- **Impact:** Every rescue-tool write on the tower commits and then loses its file backup. The warning is one stderr line in one shell.
+- **Expected:** The backup receives the same credentials the write used. Either `run_backup` forwards the resolved `PG*` values into the child environment, or `backup.sh` reads `house/state/substrate/.env` when no sibling `.env` exists.
+- **Proof after repair:** A `record_memory.py --env-file ../state/substrate/.env` write on the Windows tower prints a `backup:` line with a dump path, and the dump exists under `substrate/backups/`.
+
 ## Repaired but not deployed
+
+### Design catalogue same-identity supersession always failed
+
+- **Observed:** 2026-09-03, room `kodo`. `design_doc_write` with `supersedes: 2` for `solarisael/token/reliquary-palette` (same system, type, and name) returned `database operation failed` three times with the PostgreSQL detail hidden. A plain write with a new name landed (#22). Reads worked throughout.
+- **Cause:** `crates/akasha/src/lesson/design/write.rs` inserted the successor row before it marked the old row superseded. `design_documents_current_identity_uidx` (`substrate/migrations/0012_design_documents.sql:24`) is `UNIQUE (system, doc_type, name) WHERE superseded_by IS NULL`, so the insert collided with the still-current old row. Every same-name correction in the catalogue's history was refused at the index.
+- **Repair:** `dev/next`, uncommitted. The write now retires the old row with a transient self-reference (`superseded_by = id`), inserts the successor, then repoints the old row at the real successor id, all in one transaction.
+- **Proof:** `crates/akasha/tests/design_document_integration.rs` (`same_identity_supersession_keeps_one_current_row_and_full_history`). Fails on the old order, passes on the new. Run with `ATHANOR_SUBSTRATE_TEST_DATABASE_URL` and an isolated schema, `cargo test -p akasha --test design_document_integration -- --ignored`.
+- **Deployed evidence pending:** the installed binary under `Program Files/Solarisael/Athanor` still carries the old order. After deploy, the reliquary-palette supersession (Sol's 2026-09-03 palette ruling) is the first live proof.
 
 ### Presence lifecycle and authority seams
 

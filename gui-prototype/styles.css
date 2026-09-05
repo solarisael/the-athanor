@@ -3640,10 +3640,10 @@ input:focus-visible {
 
 .mechanics-categories {
   display: flex;
+  flex-wrap: wrap;
 
   gap: 6px;
   padding-bottom: 3px;
-  overflow-x: auto;
 }
 
 .mechanics-categories button {
@@ -4226,7 +4226,6 @@ input:focus-visible {
     grid-column: 3;
   }
 
-  .mechanics-categories,
   .shelf-marks {
     flex-wrap: wrap;
 

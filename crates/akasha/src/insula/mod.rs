@@ -19,9 +19,10 @@ pub use ingest::{
     ingest_batch,
 };
 pub use query::{
-    INSULA_MAX_TRACE_ROWS, INSULA_MAX_UNVERIFIED_EXIT_ROWS, INSULA_MAX_VITALS_ROWS, TraceResult,
-    TraceRow, TraceScope, UnverifiedExitResult, UnverifiedExitRow, VitalsQuery, VitalsResult,
-    VitalsRow, query_trace, query_unverified_exit, query_vitals,
+    INSULA_MAX_SPAN_ROWS, INSULA_MAX_TRACE_ROWS, INSULA_MAX_UNVERIFIED_EXIT_ROWS,
+    INSULA_MAX_VITALS_ROWS, SpanRow, SpanWindow, SpansQuery, SpansResult, TraceResult, TraceRow,
+    TraceScope, UnverifiedExitResult, UnverifiedExitRow, VitalsQuery, VitalsResult, VitalsRow,
+    query_spans, query_trace, query_unverified_exit, query_vitals,
 };
 pub use retention::{
     INSULA_MAX_RETENTION_ROWS, RetentionReadResult, RetentionReceipt, RetentionReceiptRow,

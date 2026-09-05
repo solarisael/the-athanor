@@ -57,20 +57,34 @@ const KNOCK_NOTE = "Doorman claim poll, roughly one span per host every two seco
 const RAW_ONLY = "raw rows only — not carried in rollups";
 const TRACE_LIMIT = 100;
 
-// Why a lane may have no trace to open. The Host's trace route reads one exact
-// trace id; nothing it serves lists the spans behind a lane, and a minute
-// rollup is an aggregate over many traces. So the drawer names the missing
-// identity rather than inventing a uuid to ask with.
-const ROLLUP_NO_TRACE = "insula.vitals.minute v1 rollups aggregate many spans and carry no trace id. The Host's trace route reads one exact trace id, and it serves no route that lists a lane's spans, so this lane has no trace to open.";
-const SNAPSHOT_NO_TRACE = "This lane comes from the stamped PostgreSQL snapshot, which recorded rollups only. Query the Host first — and a live lane still needs a trace id the Host does not publish.";
+// The drawer shows the newest handful, not a log. The Host caps this read at
+// 100; eight is what fits a lane body without becoming its own scroll surface.
+const SPANS_LIMIT = 8;
+
+// The same 24 h the lane's own rollups were summed over (see queryPulseHost),
+// so the spans in the drawer belong to the population the lane counted. A
+// narrower window would show an empty drawer under a lane reporting events.
+const SPANS_WINDOW = "24h";
+
+// Only settled spans. A `start` row carries no duration and no real outcome
+// yet, and the drawer's two columns are duration and outcome.
+const SPANS_PHASE = "end";
+
+// Why a lane may still have no spans to list: the stamped snapshot recorded
+// rollups only, and this read lives on the Host.
+const SNAPSHOT_NO_SPANS = "This lane comes from the stamped PostgreSQL snapshot, which recorded rollups only. Query the Host to list the spans behind a lane.";
 
 // Pulse-local source state: idle → pending → live | failed. Nothing outside
 // this module reads it; the shell sees rendered markup and a render request.
 let live = { status: "idle" };
 
-// The drilldown drawer, one lane at a time: idle → pending → live | failed |
-// unavailable. The open lane lives here rather than in the <details> element,
-// so an async trace answer can re-render without closing the drawer it fills.
+// The drilldown, one lane at a time, in two stages. A minute rollup aggregates
+// many traces and carries no trace id, so the lane cannot open a trace
+// directly: `spans` lists the lane's newest settled spans from the Host, and
+// picking one of those supplies the trace id `trace` then reads. Both live here
+// rather than in the <details> element, so an async answer can re-render
+// without closing the drawer it fills.
+let spans = { key: null, status: "idle" };
 let trace = { key: null, status: "idle" };
 let requestRender = () => {};
 
@@ -88,48 +102,129 @@ export function handlePulseClick(event) {
     return true;
   }
 
+  // A span row sits inside the open lane's drawer, so it is tested before the
+  // lane it lives in or the lane would swallow every drill-down click.
+  const spanRow = event.target.closest("[data-pulse-span-trace]");
+  if (spanRow) {
+    event.preventDefault();
+    const key = spanRow.dataset.pulseSpanKey;
+    const traceId = spanRow.dataset.pulseSpanTrace;
+    if (trace.key === key && trace.traceId === traceId) {
+      trace = { key: null, status: "idle" };
+      renderWithSpanFocus(traceId);
+      return true;
+    }
+
+    openLaneTrace(key, traceId);
+    return true;
+  }
+
   const summary = event.target.closest("[data-pulse-lane]");
   if (!summary) return false;
 
   // The drawer owns the open state, so the native <details> toggle stands down.
   event.preventDefault();
   const key = summary.dataset.pulseLane;
-  if (trace.key === key) {
+  if (spans.key === key) {
+    spans = { key: null, status: "idle" };
     trace = { key: null, status: "idle" };
     renderWithLaneFocus(key);
     return true;
   }
 
-  openLaneTrace(key, summary.dataset.pulseTrace || null);
+  openLaneSpans(key, summary.dataset.pulseOperation);
   return true;
 }
 
-// The shell re-renders the whole panel, so the lane the operator activated has
-// to be handed its focus back or a keyboard drawer cycle would strand it. The
-// double frame outlasts the shell's own scheduled focus.
-function renderWithLaneFocus(key) {
+// The shell re-renders the whole panel, so the control the operator activated
+// has to be handed its focus back or a keyboard drawer cycle would strand it.
+// The double frame outlasts the shell's own scheduled focus.
+function renderWithFocus(selector) {
   requestRender();
   window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-    document.querySelector(`[data-pulse-lane="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+    document.querySelector(selector)?.focus({ preventScroll: true });
   }));
 }
 
-// One lane's spans, read from the Host's trace route. A missing identity, a
-// refusal, an unparsable body, and an empty answer are four different states,
-// and each one says which it is instead of borrowing another's words.
-async function openLaneTrace(key, traceId) {
-  if (!traceId) {
-    trace = {
-      key,
-      status: "unavailable",
-      reason: live.status === "live" ? ROLLUP_NO_TRACE : SNAPSHOT_NO_TRACE
-    };
+function renderWithLaneFocus(key) {
+  renderWithFocus(`[data-pulse-lane="${CSS.escape(key)}"]`);
+}
+
+// Once the spans list is open, the span row is the control the operator pressed.
+// Handing focus back to the lane header instead would strand a keyboard
+// operator above the whole list they just chose from, with the trace drawer
+// they opened below it.
+function renderWithSpanFocus(traceId) {
+  renderWithFocus(`[data-pulse-span-trace="${CSS.escape(traceId)}"]`);
+}
+
+// The lane's newest settled spans, read from the Host's spans route. The Host
+// scopes this to its own House and room from its trusted binding; the page
+// names only the lane. A snapshot lane, a refusal, an unparsable body, and an
+// empty window are four different states, and each says which it is instead of
+// borrowing another's words.
+async function openLaneSpans(key, operation) {
+  trace = { key: null, status: "idle" };
+
+  if (live.status !== "live") {
+    spans = { key, status: "unavailable", reason: SNAPSHOT_NO_SPANS };
     renderWithLaneFocus(key);
     return;
   }
 
-  trace = { key, status: "pending", traceId };
+  spans = { key, status: "pending", operation };
   renderWithLaneFocus(key);
+
+  try {
+    const response = await fetch("/live/insula/spans", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        operation,
+        phase: SPANS_PHASE,
+        window: SPANS_WINDOW,
+        limit: SPANS_LIMIT
+      })
+    });
+    const raw = await response.text();
+    let answer = null;
+    try {
+      answer = JSON.parse(raw);
+    } catch {
+      throw new Error(`Host answered an unparsable body: ${raw.slice(0, 80)}`);
+    }
+    if (!response.ok) throw new Error(`Host refused: ${answer?.error ?? response.status}`);
+    if (!Array.isArray(answer.rows)) throw new Error("Host answered without a rows collection");
+
+    spans = {
+      key,
+      status: "live",
+      operation,
+      rows: answer.rows,
+      truncated: answer.truncated === true,
+      window: answer.window,
+      queryName: `${answer.queryName} v${answer.queryVersion}`,
+      queriedAt: new Date().toTimeString().slice(0, 5)
+    };
+  } catch (error) {
+    spans = {
+      key,
+      status: "failed",
+      operation,
+      reason: error instanceof Error ? error.message : "no route to Host"
+    };
+  }
+  renderWithLaneFocus(key);
+}
+
+// One trace, read from the Host's trace route for a trace id the spans list
+// supplied. A refusal, an unparsable body, and an empty answer are three
+// different states, and each one says which it is instead of borrowing
+// another's words. There is no missing-identity state here any more: the only
+// door into this function is a span row that carries a real trace id.
+async function openLaneTrace(key, traceId) {
+  trace = { key, status: "pending", traceId };
+  renderWithSpanFocus(traceId);
 
   try {
     const response = await fetch("/live/insula/trace", {
@@ -164,7 +259,7 @@ async function openLaneTrace(key, traceId) {
       reason: error instanceof Error ? error.message : "no route to Host"
     };
   }
-  renderWithLaneFocus(key);
+  renderWithSpanFocus(traceId);
 }
 
 function pulseCount(value) {
@@ -265,9 +360,10 @@ function derivePulseLive(vitals, retention, queriedAt) {
       settled: laneSettled,
       maxDuration: lane.maxUs == null ? "" : formatMicroseconds(lane.maxUs),
       errorClasses: RAW_ONLY,
-      note: lane.operation === "knock_claim" ? KNOCK_NOTE : undefined,
-      // Rollups carry no trace identity; the drawer says so rather than guessing.
-      traceId: null
+      // Rollups carry no trace identity. The lane no longer needs one: its
+      // drawer asks the Host's spans route by operation and reads the trace
+      // ids back from real rows.
+      note: lane.operation === "knock_claim" ? KNOCK_NOTE : undefined
     });
   }
   laneList.sort((a, b) => b.settled - a.settled);
@@ -361,14 +457,11 @@ function renderLane(lane) {
 
   const note = lane.note ? `<p>${escapeHtml(lane.note)}</p>` : "";
   const key = laneKey(lane);
-  const open = trace.key === key ? " open" : "";
-  // Present only when the lane's source actually carries a trace identity, so
-  // the door is never advertised where there is nothing behind it.
-  const identity = lane.traceId ? ` data-pulse-trace="${escapeHtml(lane.traceId)}"` : "";
+  const open = spans.key === key ? " open" : "";
 
   return `
     <details class="mechanics-row"${open}>
-      <summary data-pulse-lane="${escapeHtml(key)}"${identity}>
+      <summary data-pulse-lane="${escapeHtml(key)}" data-pulse-operation="${escapeHtml(lane.operation)}">
         <span class="mechanics-row-title"><strong>${escapeHtml(lane.operation)}</strong><small>${escapeHtml(lane.component)}</small></span>
         <span class="mechanics-row-value"><small>Settled</small><code>${pulseCount(settled)} events</code></span>
         <span class="mechanics-row-flags">${flags.join("")}</span>
@@ -381,12 +474,81 @@ function renderLane(lane) {
           <div><dt>Recompute</dt><dd>${escapeHtml(PULSE_SNAPSHOT.vitalsQuery)}</dd></div>
         </dl>
         ${note}
+        ${renderLaneSpans(key)}
         ${renderLaneTrace(key)}
       </div>
     </details>`;
 }
 
-// The drawer under the open lane: exactly what the Host said about its spans.
+// The first drawer under the open lane: the lane's newest settled spans, and
+// the only place a trace id becomes reachable from the surface.
+function renderLaneSpans(key) {
+  if (spans.key !== key) return "";
+
+  if (spans.status === "pending") {
+    return spansDrawer(
+      '<span data-tone="quiet">Reading spans…</span>',
+      `<p>Asked the Host for the newest ${SPANS_LIMIT} settled spans of ${escapeHtml(spans.operation)} in the last ${SPANS_WINDOW}.</p>`
+    );
+  }
+  if (spans.status === "unavailable") {
+    return spansDrawer(
+      '<span data-tone="attention">No spans to list</span>',
+      `<p>${escapeHtml(spans.reason)}</p>`
+    );
+  }
+  if (spans.status === "failed") {
+    return spansDrawer(
+      '<span data-tone="attention">Spans refused</span>',
+      `<p>${escapeHtml(spans.reason)}</p><p>Requested lane ${escapeHtml(spans.operation)}.</p>`
+    );
+  }
+  if (spans.rows.length === 0) {
+    return spansDrawer(
+      '<span data-tone="quiet">No spans in window</span>',
+      `<p>${escapeHtml(spans.queryName)} answered zero settled spans for ${escapeHtml(spans.operation)} in the last ${escapeHtml(spans.window)} inside this room's scope.</p>`
+    );
+  }
+
+  const truncation = spans.truncated ? ` · truncated at ${SPANS_LIMIT}` : "";
+  return spansDrawer(
+    `<span data-tone="steady">${pulseCount(spans.rows.length)} spans</span>`,
+    `<p>${escapeHtml(spans.queryName)} · last ${escapeHtml(spans.window)} · queried ${escapeHtml(spans.queriedAt)} local${escapeHtml(truncation)}</p>
+        <div class="pulse-trace-spans">${spans.rows.map((row) => renderSpanChoice(key, row)).join("")}</div>`
+  );
+}
+
+function spansDrawer(chip, body) {
+  return `
+        <section class="pulse-trace" aria-label="Lane spans">
+          <header class="pulse-block-lead">
+            <h5>Spans</h5>
+            <div class="mechanics-snapshot-status">${chip}</div>
+          </header>
+          ${body}
+        </section>`;
+}
+
+// One offered span. It is a real <button> because it performs the drill-down
+// the whole row exists for; the trace id rides a data attribute so the click
+// handler never has to parse rendered text back into an identity.
+function renderSpanChoice(key, row) {
+  const duration = row.durationUs == null ? "open" : formatMicroseconds(row.durationUs);
+  const errorFlag = row.errorClass
+    ? `<span data-tone="attention">${escapeHtml(row.errorClass)}</span>`
+    : "";
+  const chosen = trace.key === key && trace.traceId === row.traceId;
+
+  return `
+            <button type="button" class="pulse-trace-span" aria-pressed="${chosen}"
+              data-pulse-span-key="${escapeHtml(key)}" data-pulse-span-trace="${escapeHtml(row.traceId)}">
+              <span class="mechanics-row-title"><strong>${escapeHtml(row.observedAt)}</strong><small>span ${escapeHtml(row.spanId)}</small><code>${escapeHtml(row.traceId)}</code></span>
+              <span class="mechanics-row-value"><small>Duration</small><code>${escapeHtml(duration)}</code></span>
+              <span class="mechanics-row-flags"><span data-tone="${outcomeTone(row.outcomeClass)}">${escapeHtml(row.outcomeClass)}</span>${errorFlag}</span>
+            </button>`;
+}
+
+// The second drawer: the full causal trace behind the span the operator picked.
 function renderLaneTrace(key) {
   if (trace.key !== key) return "";
 
@@ -394,12 +556,6 @@ function renderLaneTrace(key) {
     return traceDrawer(
       '<span data-tone="quiet">Reading trace…</span>',
       `<p>Asked the Host for trace ${escapeHtml(trace.traceId)}.</p>`
-    );
-  }
-  if (trace.status === "unavailable") {
-    return traceDrawer(
-      '<span data-tone="attention">No trace to open</span>',
-      `<p>${escapeHtml(trace.reason)}</p>`
     );
   }
   if (trace.status === "failed") {

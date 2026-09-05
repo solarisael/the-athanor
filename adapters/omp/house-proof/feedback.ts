@@ -537,6 +537,75 @@ function resultIdentity(payload: JsonRecord, args: JsonRecord): string {
   return id ? `${kind} #${id}` : kind;
 }
 
+/** The `backup` receipt a durable write carries: `ok`, `failed`, or `skipped`. */
+export type BackupReceiptView = {
+  status: "ok" | "failed" | "skipped" | "unknown";
+  line: HouseFrameLine | null;
+  detailLines: HouseFrameLine[];
+  attention: boolean;
+};
+
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || path;
+}
+
+function formatBytes(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+export function backupReceiptView(payload: JsonRecord, theme: FeedbackTheme | undefined): BackupReceiptView {
+  const backup = asRecord(payload.backup);
+  const status = textValue(backup.status);
+  if (status === "ok") {
+    const dumpPath = textValue(backup.dump_path);
+    const sha = textValue(backup.sha256);
+    const meta = [
+      dumpPath ? baseName(dumpPath) : "",
+      sha ? `sha256 ${sha.slice(0, 12)}` : "",
+      formatBytes(backup.bytes),
+      typeof backup.elapsed_ms === "number" ? `${backup.elapsed_ms} ms` : "",
+      textValue(backup.tool),
+    ].filter(Boolean);
+    return {
+      status: "ok",
+      line: { text: `${statusSymbol(theme, "success")} backup ok · ${meta.join(" · ")}`, color: "success" },
+      detailLines: [
+        ...(dumpPath ? [{ text: `dump · ${dumpPath}`, color: "dim" }] : []),
+        ...(sha ? [{ text: `sha256 · ${sha}`, color: "dim" }] : []),
+      ],
+      attention: false,
+    };
+  }
+  if (status === "failed") {
+    const code = textValue(backup.code) || "backup_failed";
+    const detail = textValue(backup.detail);
+    const tool = textValue(backup.tool);
+    const meta = [code, tool].filter(Boolean).join(" · ");
+    return {
+      status: "failed",
+      line: {
+        text: `${statusSymbol(theme, "warning")} backup failed · ${meta}${detail ? ` · ${detail}` : ""}`,
+        color: "warning",
+      },
+      detailLines: [],
+      attention: true,
+    };
+  }
+  if (status === "skipped") {
+    return {
+      status: "skipped",
+      line: { text: "backup skipped", color: "dim" },
+      detailLines: [],
+      attention: false,
+    };
+  }
+  return { status: "unknown", line: null, detailLines: [], attention: false };
+}
+
 function createRememberRenderers(label: string) {
   const title = feedbackTitle(label);
   const generic = createGenericToolRenderers(label);
@@ -568,6 +637,8 @@ function createRememberRenderers(label: string) {
       const source = textValue(payload.source_path || payload.sourcePath);
       const body = textValue(argumentsRecord.body);
       const durable = payload.durable === true ? "durable" : "stored";
+      const backup = backupReceiptView(payload, theme);
+      const attention = warnings.length > 0 || backup.attention;
       const lines: HouseFrameLine[] = [
         { text: memoryTitle, color: "accent" },
         { text: `${room} · ${displayAuthority(payload.authority)} · ${durable}`, color: "muted" },
@@ -576,6 +647,7 @@ function createRememberRenderers(label: string) {
           color: "success",
         },
       ];
+      if (backup.line) lines.push(backup.line);
 
       if (options?.expanded) {
         if (body) {
@@ -589,6 +661,7 @@ function createRememberRenderers(label: string) {
           }
         }
         if (source) lines.push({ text: `source · ${source}`, color: "dim" });
+        lines.push(...backup.detailLines);
       }
 
       for (const warning of warnings) {
@@ -596,10 +669,12 @@ function createRememberRenderers(label: string) {
       }
 
       return richFrame(theme, {
-        header: `${statusSymbol(theme, warnings.length ? "warning" : "success")} ${title} · ${identity}`,
-        headerColor: warnings.length ? "warning" : "success",
+        header: `${statusSymbol(theme, attention ? "warning" : "success")} ${title} · ${identity}`,
+        headerColor: attention ? "warning" : "success",
         lines,
-        footer: body || source ? (options?.expanded ? "expanded evidence" : "⟨Ctrl+O: Expand⟩") : undefined,
+        footer: body || source || backup.detailLines.length
+          ? (options?.expanded ? "expanded evidence" : "⟨Ctrl+O: Expand⟩")
+          : undefined,
       });
     },
   };
@@ -638,19 +713,19 @@ function createSleepRenderers(label: string) {
       const warnings = stringValues(payload.warnings);
       const durable = payload.durable === true;
       const inserted = payload.inserted === true;
-      const backupStatus = textValue(payload.backup_status) || "unknown";
-      const backupComplete = backupStatus === "completed";
-      const attention = warnings.length > 0 || !durable || !backupComplete;
+      const backup = backupReceiptView(payload, theme);
+      const attention = warnings.length > 0 || !durable || backup.status !== "ok";
       const lines: HouseFrameLine[] = [
         {
           text: `${room} · ${displayAuthority(payload.authority)} · ${durable ? "durable" : "durability unconfirmed"}`,
           color: "muted",
         },
         {
-          text: `${statusSymbol(theme, attention ? "warning" : "success")} ${inserted ? "boat cast" : "boat confirmed"} · backup ${backupStatus}`,
+          text: `${statusSymbol(theme, attention ? "warning" : "success")} ${inserted ? "boat cast" : "boat confirmed"} · backup ${backup.status}`,
           color: attention ? "warning" : "success",
         },
       ];
+      if (backup.line) lines.push(backup.line);
 
       if (!attention) {
         lines.push({ text: "continuity ready for the next session", color: "accent" });
@@ -669,6 +744,7 @@ function createSleepRenderers(label: string) {
         }
         if (source) lines.push({ text: `source · ${source}`, color: "dim" });
         if (outboxEvent) lines.push({ text: `outbox · ${outboxEvent}`, color: "dim" });
+        lines.push(...backup.detailLines);
       }
 
       for (const warning of warnings) {

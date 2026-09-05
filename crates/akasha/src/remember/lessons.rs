@@ -1,4 +1,4 @@
-use super::{backup_warning, normalize_strings};
+use super::{normalize_strings, post_write_backup};
 use crate::config::{AppError, Config};
 use crate::lesson::validate_patterns;
 use crate::settings::RoomSettings;
@@ -461,14 +461,13 @@ pub(super) async fn remember_lesson(
     };
     tx.commit().await?;
     let mut warnings = Vec::new();
-    if req.backup() {
-        warnings.extend(backup_warning(pool, cfg, settings).await);
-    }
+    let backup = post_write_backup(pool, cfg, settings, req.backup(), &mut warnings).await;
     let receipt = RememberReceipt::committed_lesson(
         u64::try_from(id)
             .map_err(|_| AppError::Invalid("database returned an invalid lesson ID".into()))?,
         kind,
         req.room().clone(),
+        backup,
         warnings,
     )
     .map_err(|error| AppError::Invalid(error.to_string()))?;

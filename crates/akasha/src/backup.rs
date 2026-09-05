@@ -1,4 +1,7 @@
+use crate::insula::OutcomeClass;
+use crate::insula_writer::{record_timed_point, system_binding};
 use chrono::{DateTime, Utc};
+use hearth::{BackupFailure, BackupFailureCode, BackupReceipt};
 use percent_encoding::percent_decode_str;
 use protocol::{
     DiagnosticCategory, DiagnosticDetails, DiagnosticEvidence, DiagnosticExecution,
@@ -14,6 +17,7 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::Instant,
 };
 use uuid::Uuid;
 
@@ -76,8 +80,28 @@ pub enum BackupError {
     Command(String),
     #[error("backup manifest: {0}")]
     Manifest(String),
+    /// A PostgreSQL client tool resolved nowhere. `probed` lists every
+    /// candidate in the order it was tried, each with the reason it failed.
+    #[error("{tool} not found; probed {}", probed.join(", "))]
+    ToolNotFound { tool: String, probed: Vec<String> },
 }
 impl BackupError {
+    /// The mechanical class this error lands under: on the write receipt, in
+    /// the Insula point, and in diagnostics. Never carries the message.
+    pub fn failure_code(&self) -> BackupFailureCode {
+        match self {
+            Self::Config(_) => BackupFailureCode::Configuration,
+            Self::State(_) => BackupFailureCode::StateRoot,
+            Self::Io(_) => BackupFailureCode::Io,
+            Self::Command(_) => BackupFailureCode::Command,
+            Self::Manifest(_) => BackupFailureCode::Manifest,
+            Self::ToolNotFound { tool, .. } if tool == "pg_restore" => {
+                BackupFailureCode::PgRestoreNotFound
+            }
+            Self::ToolNotFound { .. } => BackupFailureCode::PgDumpNotFound,
+        }
+    }
+
     pub fn diagnostics(&self, operation: &str) -> DiagnosticDetails {
         let (failure, retry, write_outcome, target) = match self {
             Self::Config(_) | Self::State(_) => (
@@ -104,11 +128,22 @@ impl BackupError {
                 DiagnosticWriteOutcome::NotStarted,
                 DiagnosticTarget::new(DiagnosticTargetKind::File, "backup manifest"),
             ),
+            Self::ToolNotFound { .. } => (
+                "postgres_tool_not_found",
+                DiagnosticRetry::AfterChange,
+                DiagnosticWriteOutcome::NotStarted,
+                DiagnosticTarget::new(DiagnosticTargetKind::Service, "pg_dump or pg_restore"),
+            ),
         };
         let observed = match self {
             Self::Io(error) => serde_json::json!({
                 "failure": failure,
                 "io_error_kind": error.kind().to_string(),
+            }),
+            Self::ToolNotFound { tool, probed } => serde_json::json!({
+                "failure": failure,
+                "tool": tool,
+                "probed": probed,
             }),
             _ => serde_json::json!({"failure": failure}),
         };
@@ -171,6 +206,10 @@ pub struct Manifest {
     pub format: String,
     pub schema_migrations: Vec<String>,
     pub pg_dump_version: String,
+    /// Which `pg_dump` made the dump: `pg_bin_dir:pg_dump`, `wsl:pg_dump`,
+    /// `path:pg_dump`. Absent on manifests written before the field existed.
+    #[serde(default)]
+    pub pg_dump_tool: String,
     pub dump: String,
 }
 
@@ -185,58 +224,222 @@ pub struct BackupHealth {
     pub error: Option<String>,
 }
 
-fn use_wsl_pg() -> bool {
-    cfg!(windows) && env::var("ATHANOR_PG_WSL").as_deref() == Ok("1")
+/// How a resolved PostgreSQL client tool is spawned.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PgInvocation {
+    /// A native executable, by absolute path or bare name on `PATH`.
+    Native(PathBuf),
+    /// `<wsl> --exec <tool>`: the tool inside the default WSL distribution.
+    Wsl { wsl: PathBuf },
 }
 
-fn pg_command(name: &str) -> Command {
-    if use_wsl_pg() {
-        let mut command = Command::new("wsl.exe");
-        let mut wslenv = env::var("WSLENV").unwrap_or_default();
-        if !wslenv.split(':').any(|entry| entry == "PGPASSWORD/u") {
-            if !wslenv.is_empty() {
-                wslenv.push(':');
-            }
-            wslenv.push_str("PGPASSWORD/u");
+/// One place a tool may be, in the order the resolver tries it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PgCandidate {
+    /// `pg_bin_dir:pg_dump`, `wsl:pg_dump`, `wsl-system32:pg_dump`, `path:pg_dump`.
+    pub label: String,
+    pub invocation: PgInvocation,
+}
+
+impl PgCandidate {
+    fn describe(&self) -> String {
+        match &self.invocation {
+            PgInvocation::Native(path) => format!("{}={}", self.label, path.display()),
+            PgInvocation::Wsl { wsl } => format!("{}={} --exec", self.label, wsl.display()),
         }
-        command.env("WSLENV", wslenv);
-        command.args(["--exec", name]);
-        return command;
     }
-    let executable = env::var_os("PG_BIN_DIR")
-        .map(PathBuf::from)
-        .map(|dir| {
-            dir.join(if cfg!(windows) {
-                format!("{name}.exe")
-            } else {
-                name.into()
-            })
-        })
-        .unwrap_or_else(|| {
-            PathBuf::from(if cfg!(windows) {
-                format!("{name}.exe")
-            } else {
-                name.into()
-            })
-        });
-    Command::new(executable)
 }
 
-fn pg_path(path: &Path) -> Result<String, BackupError> {
-    if !use_wsl_pg() {
-        return Ok(path.to_string_lossy().into_owned());
+/// The environment the resolver reads: configured bin directory, whether
+/// WSL is the operator's chosen route, and whether this is Windows at all.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PgResolution {
+    pub pg_bin_dir: Option<PathBuf>,
+    pub wsl: bool,
+    pub windows: bool,
+    pub system_root: Option<PathBuf>,
+}
+
+impl PgResolution {
+    fn from_env() -> Self {
+        Self {
+            pg_bin_dir: env::var_os("PG_BIN_DIR")
+                .filter(|dir| !dir.is_empty())
+                .map(PathBuf::from),
+            wsl: env::var("ATHANOR_PG_WSL").as_deref() == Ok("1"),
+            windows: cfg!(windows),
+            system_root: env::var_os("SystemRoot")
+                .filter(|root| !root.is_empty())
+                .map(PathBuf::from),
+        }
     }
-    let output = Command::new("wsl.exe")
-        .args(["--exec", "wslpath", "-a"])
-        .arg(path)
+
+    fn executable(&self, name: &str) -> String {
+        if self.windows {
+            format!("{name}.exe")
+        } else {
+            name.to_owned()
+        }
+    }
+
+    /// The candidates for `name`, in order: the configured `PG_BIN_DIR`,
+    /// then WSL (only on Windows with `ATHANOR_PG_WSL=1`: `wsl.exe` on
+    /// `PATH`, then the one under `%SystemRoot%\System32`), then `PATH`.
+    pub fn candidates(&self, name: &str) -> Vec<PgCandidate> {
+        let mut out = Vec::with_capacity(4);
+        if let Some(dir) = &self.pg_bin_dir {
+            out.push(PgCandidate {
+                label: format!("pg_bin_dir:{name}"),
+                invocation: PgInvocation::Native(dir.join(self.executable(name))),
+            });
+        }
+        if self.windows && self.wsl {
+            out.push(PgCandidate {
+                label: format!("wsl:{name}"),
+                invocation: PgInvocation::Wsl {
+                    wsl: PathBuf::from("wsl.exe"),
+                },
+            });
+            if let Some(root) = &self.system_root {
+                out.push(PgCandidate {
+                    label: format!("wsl-system32:{name}"),
+                    invocation: PgInvocation::Wsl {
+                        wsl: root.join("System32").join("wsl.exe"),
+                    },
+                });
+            }
+        }
+        out.push(PgCandidate {
+            label: format!("path:{name}"),
+            invocation: PgInvocation::Native(PathBuf::from(self.executable(name))),
+        });
+        out
+    }
+}
+
+/// A PostgreSQL client tool that answered `--version`, remembered with the
+/// route that reached it so every later spawn and path argument agrees.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PgTool {
+    name: String,
+    label: String,
+    invocation: PgInvocation,
+    version: String,
+}
+
+impl PgTool {
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    fn command(&self) -> Command {
+        spawn_command(&self.invocation, &self.name)
+    }
+
+    /// The path as this tool's process will see it: translated through
+    /// `wslpath` for a WSL tool, verbatim for a native one.
+    fn path_arg(&self, path: &Path) -> Result<String, BackupError> {
+        match &self.invocation {
+            PgInvocation::Native(_) => Ok(path.to_string_lossy().into_owned()),
+            PgInvocation::Wsl { wsl } => {
+                let output = Command::new(wsl)
+                    .args(["--exec", "wslpath", "-a"])
+                    .arg(path)
+                    .output()
+                    .map_err(BackupError::Io)?;
+                if !output.status.success() {
+                    return Err(BackupError::Command(
+                        String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                    ));
+                }
+                Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            }
+        }
+    }
+}
+
+fn spawn_command(invocation: &PgInvocation, name: &str) -> Command {
+    match invocation {
+        PgInvocation::Native(path) => Command::new(path),
+        PgInvocation::Wsl { wsl } => {
+            let mut command = Command::new(wsl);
+            let mut wslenv = env::var("WSLENV").unwrap_or_default();
+            if !wslenv.split(':').any(|entry| entry == "PGPASSWORD/u") {
+                if !wslenv.is_empty() {
+                    wslenv.push(':');
+                }
+                wslenv.push_str("PGPASSWORD/u");
+            }
+            command.env("WSLENV", wslenv);
+            command.args(["--exec", name]);
+            command
+        }
+    }
+}
+
+/// Runs `<candidate> --version`. `Ok` carries the version line; `Err` the
+/// one-line reason this candidate is not the tool.
+fn probe_version(candidate: &PgCandidate, name: &str) -> Result<String, String> {
+    let output = spawn_command(&candidate.invocation, name)
+        .arg("--version")
+        .stdin(Stdio::null())
         .output()
-        .map_err(BackupError::Io)?;
+        .map_err(|error| match error.kind() {
+            io::ErrorKind::NotFound => "program not found".to_owned(),
+            kind => format!("{kind}"),
+        })?;
     if !output.status.success() {
-        return Err(BackupError::Command(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let first = stderr.lines().find(|line| !line.trim().is_empty());
+        return Err(match first {
+            Some(line) => format!("{}: {}", output.status, line.trim()),
+            None => output.status.to_string(),
+        });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if version.is_empty() {
+        return Err("empty --version output".into());
+    }
+    Ok(version)
+}
+
+/// Tries `candidates` in order with `probe`; the first that answers is the
+/// tool. When none does, the error names every candidate and its reason.
+pub fn resolve_pg_tool_with(
+    name: &str,
+    candidates: Vec<PgCandidate>,
+    mut probe: impl FnMut(&PgCandidate) -> Result<String, String>,
+) -> Result<PgTool, BackupError> {
+    let mut probed = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        match probe(&candidate) {
+            Ok(version) => {
+                return Ok(PgTool {
+                    name: name.to_owned(),
+                    label: candidate.label,
+                    invocation: candidate.invocation,
+                    version,
+                });
+            }
+            Err(reason) => probed.push(format!("{} ({reason})", candidate.describe())),
+        }
+    }
+    Err(BackupError::ToolNotFound {
+        tool: name.to_owned(),
+        probed,
+    })
+}
+
+/// Resolves `pg_dump` or `pg_restore` from the live environment.
+pub fn resolve_pg_tool(name: &str) -> Result<PgTool, BackupError> {
+    let resolution = PgResolution::from_env();
+    resolve_pg_tool_with(name, resolution.candidates(name), |candidate| {
+        probe_version(candidate, name)
+    })
 }
 fn db_parts(raw: &str) -> Result<(String, Option<String>, String), BackupError> {
     let u =
@@ -281,14 +484,6 @@ fn run(mut c: Command) -> Result<std::process::Output, BackupError> {
             }
         })
 }
-fn version(name: &str) -> String {
-    pg_command(name)
-        .arg("--version")
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "unknown".into())
-}
 fn hash(path: &Path) -> Result<(u64, String), BackupError> {
     let mut f = fs::File::open(path)?;
     let mut h = Sha256::new();
@@ -311,10 +506,15 @@ const PRESERVED_EXTENSIONS: &[&str] = &["vector", "pg_trgm"];
 
 /// Reads the archive table of contents. Doubles as the dump validity check:
 /// `pg_restore --list` fails on a truncated or corrupt custom-format dump.
-fn dump_toc(path: &Path, url: &str, password: Option<&str>) -> Result<String, BackupError> {
-    let mut c = pg_command("pg_restore");
+fn dump_toc(
+    pg_restore: &PgTool,
+    path: &Path,
+    url: &str,
+    password: Option<&str>,
+) -> Result<String, BackupError> {
+    let mut c = pg_restore.command();
     c.args(["--list"])
-        .arg(pg_path(path)?)
+        .arg(pg_restore.path_arg(path)?)
         .args(["--dbname"])
         .arg(url);
     if let Some(p) = password {
@@ -464,15 +664,17 @@ pub fn backup_with_migrations(
             source.join(", ")
         )));
     }
+    let pg_dump = resolve_pg_tool("pg_dump")?;
+    let pg_restore = resolve_pg_tool("pg_restore")?;
     fs::create_dir_all(output_dir)?;
     let (db, password, safe) = db_parts(database_url)?;
     let stem = format!("{db}-{}", Uuid::new_v4());
     let dump_name = format!("{stem}.dump");
     let dump = output_dir.join(&dump_name);
     let tmp = output_dir.join(format!(".{stem}.tmp"));
-    let mut c = pg_command("pg_dump");
+    let mut c = pg_dump.command();
     c.args(["--format=custom", "--no-owner", "--no-acl", "--file"])
-        .arg(pg_path(&tmp)?)
+        .arg(pg_dump.path_arg(&tmp)?)
         .args(["--dbname"])
         .arg(&safe);
     if let Some(p) = password.as_deref() {
@@ -485,7 +687,7 @@ pub fn backup_with_migrations(
     let f = fs::OpenOptions::new().write(true).open(&tmp)?;
     f.sync_all()?;
     drop(f);
-    dump_toc(&tmp, &safe, password.as_deref())?;
+    dump_toc(&pg_restore, &tmp, &safe, password.as_deref())?;
     fs::rename(&tmp, &dump)?;
     let (size, sha) = hash(&dump)?;
     let manifest = Manifest {
@@ -495,7 +697,8 @@ pub fn backup_with_migrations(
         sha256: sha,
         format: "custom".into(),
         schema_migrations: source,
-        pg_dump_version: version("pg_dump"),
+        pg_dump_version: pg_dump.version().to_owned(),
+        pg_dump_tool: pg_dump.label().to_owned(),
         dump: dump_name,
     };
     let mp = output_dir.join(format!("{stem}.manifest.json"));
@@ -599,10 +802,11 @@ pub fn restore(database_url: &str, manifest_path: &Path, confirm: &str) -> Resul
             "dump checksum or size mismatch".into(),
         ));
     }
-    let toc = dump_toc(&dump, &safe, password.as_deref())?;
+    let pg_restore = resolve_pg_tool("pg_restore")?;
+    let toc = dump_toc(&pg_restore, &dump, &safe, password.as_deref())?;
     let list = filter_extension_toc(&toc)?;
     let list = write_temp_list(manifest_path.parent().unwrap_or(Path::new(".")), &list)?;
-    let mut c = pg_command("pg_restore");
+    let mut c = pg_restore.command();
     c.args([
         "--clean",
         "--if-exists",
@@ -611,10 +815,10 @@ pub fn restore(database_url: &str, manifest_path: &Path, confirm: &str) -> Resul
         "--single-transaction",
         "--use-list",
     ])
-    .arg(pg_path(&list.0)?)
+    .arg(pg_restore.path_arg(&list.0)?)
     .args(["--dbname"])
     .arg(&safe)
-    .arg(pg_path(&dump)?);
+    .arg(pg_restore.path_arg(&dump)?);
     if let Some(p) = password {
         c.env("PGPASSWORD", p);
     }
@@ -700,17 +904,96 @@ pub fn backup_health_in(
         error: (!problems.is_empty()).then(|| problems.join("; ")),
     })
 }
+/// The Insula operation every post-write backup lands under, ok or not.
+pub const POST_WRITE_OPERATION: &str = "backup.post_write";
+
+/// The dump that follows a durable write. Returns the dump's identity, or
+/// the mechanical seam that refused; either way one Insula point records
+/// the outcome and how long it took. The PostgreSQL commit this follows is
+/// never in question here.
 pub async fn run_post_write(
     pool: &PgPool,
     database_url: &str,
     room_keep: usize,
-) -> Result<(), BackupError> {
+) -> Result<BackupReceipt, BackupFailure> {
+    let started = Instant::now();
+    let result = post_write_manifest(pool, database_url, room_keep).await;
+    let elapsed = started.elapsed();
+    let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+    let outcome = match result {
+        Ok((dir, manifest)) => BackupReceipt::new(
+            dir.join(&manifest.dump).to_string_lossy().into_owned(),
+            manifest.sha256,
+            manifest.size,
+            elapsed_ms,
+            manifest.pg_dump_tool,
+        )
+        .map_err(|error| {
+            BackupFailure::new(
+                BackupFailureCode::Manifest,
+                error.to_string(),
+                elapsed_ms,
+                None,
+            )
+        }),
+        Err((error, tool)) => Err(BackupFailure::new(
+            error.failure_code(),
+            error.to_string(),
+            elapsed_ms,
+            tool,
+        )),
+    };
+    let (class, error_class) = match &outcome {
+        Ok(_) => (OutcomeClass::Ok, None),
+        Err(failure) => (OutcomeClass::Error, Some(failure.code().as_str())),
+    };
+    record_timed_point(
+        &system_binding(),
+        "akasha",
+        "substrate",
+        POST_WRITE_OPERATION,
+        elapsed,
+        class,
+        error_class,
+    );
+    outcome
+}
+
+/// `Skipped` when the write did not ask; otherwise the backup's own answer.
+pub async fn post_write_outcome(
+    pool: &PgPool,
+    database_url: &str,
+    room_keep: usize,
+    requested: bool,
+) -> hearth::BackupOutcome {
+    if !requested {
+        return hearth::BackupOutcome::Skipped;
+    }
+    match run_post_write(pool, database_url, room_keep).await {
+        Ok(receipt) => hearth::BackupOutcome::Ok(receipt),
+        Err(failure) => hearth::BackupOutcome::Failed(failure),
+    }
+}
+
+/// The manifest and the directory it landed in. On error, also which
+/// `pg_dump` had been resolved, when one had, so the failure can name it.
+async fn post_write_manifest(
+    pool: &PgPool,
+    database_url: &str,
+    room_keep: usize,
+) -> Result<(PathBuf, Manifest), (BackupError, Option<String>)> {
     let keep = env::var("ATHANOR_BACKUP_KEEP")
         .ok()
         .and_then(|x| x.parse().ok())
         .unwrap_or(room_keep);
-    let source = source_migrations(pool).await?;
-    backup_with_migrations(database_url, &default_backup_dir()?, keep, source).map(|_| ())
+    let source = source_migrations(pool).await.map_err(|error| (error, None))?;
+    let dir = default_backup_dir().map_err(|error| (error, None))?;
+    let tool = resolve_pg_tool("pg_dump")
+        .ok()
+        .map(|tool| tool.label().to_owned());
+    backup_with_migrations(database_url, &dir, keep, source)
+        .map(|manifest| (dir, manifest))
+        .map_err(|error| (error, tool))
 }
 
 #[cfg(test)]
@@ -769,6 +1052,154 @@ mod tests {
         assert!(backup("postgres://host/db", Path::new("target/nope"), 0).is_err());
     }
 
+    fn resolution(pg_bin_dir: Option<&str>, wsl: bool, windows: bool) -> PgResolution {
+        PgResolution {
+            pg_bin_dir: pg_bin_dir.map(PathBuf::from),
+            wsl,
+            windows,
+            system_root: windows.then(|| PathBuf::from("C:\\Windows")),
+        }
+    }
+
+    fn labels(candidates: &[PgCandidate]) -> Vec<&str> {
+        candidates.iter().map(|c| c.label.as_str()).collect()
+    }
+
+    #[test]
+    fn candidates_run_pg_bin_dir_then_wsl_then_path() {
+        assert_eq!(
+            labels(&resolution(Some("C:\\pg\\bin"), true, true).candidates("pg_dump")),
+            [
+                "pg_bin_dir:pg_dump",
+                "wsl:pg_dump",
+                "wsl-system32:pg_dump",
+                "path:pg_dump"
+            ]
+        );
+        assert_eq!(
+            labels(&resolution(None, true, true).candidates("pg_dump")),
+            ["wsl:pg_dump", "wsl-system32:pg_dump", "path:pg_dump"]
+        );
+        // ATHANOR_PG_WSL unset: WSL is never a route.
+        assert_eq!(
+            labels(&resolution(Some("C:\\pg\\bin"), false, true).candidates("pg_dump")),
+            ["pg_bin_dir:pg_dump", "path:pg_dump"]
+        );
+        // WSL is a Windows route only, whatever the variable says.
+        assert_eq!(
+            labels(&resolution(None, true, false).candidates("pg_restore")),
+            ["path:pg_restore"]
+        );
+        let windows = resolution(Some("C:\\pg\\bin"), true, true).candidates("pg_dump");
+        assert_eq!(
+            windows[0].invocation,
+            PgInvocation::Native(PathBuf::from("C:\\pg\\bin\\pg_dump.exe"))
+        );
+        assert_eq!(
+            windows[2].invocation,
+            PgInvocation::Wsl {
+                wsl: PathBuf::from("C:\\Windows\\System32\\wsl.exe")
+            }
+        );
+        let unix = resolution(Some("/usr/lib/postgresql/16/bin"), false, false).candidates("pg_dump");
+        assert_eq!(
+            unix[0].invocation,
+            PgInvocation::Native(PathBuf::from("/usr/lib/postgresql/16/bin/pg_dump"))
+        );
+        assert_eq!(
+            unix[1].invocation,
+            PgInvocation::Native(PathBuf::from("pg_dump"))
+        );
+    }
+
+    #[test]
+    fn resolution_takes_the_first_candidate_that_answers_and_remembers_its_route() {
+        let candidates = resolution(Some("C:\\pg\\bin"), true, true).candidates("pg_dump");
+        let mut probed = Vec::new();
+        let tool = resolve_pg_tool_with("pg_dump", candidates, |candidate| {
+            probed.push(candidate.label.clone());
+            match candidate.label.as_str() {
+                "pg_bin_dir:pg_dump" => Err("program not found".into()),
+                "wsl:pg_dump" => Ok("pg_dump (PostgreSQL) 16.3".into()),
+                other => panic!("probed past the answer: {other}"),
+            }
+        })
+        .unwrap();
+        assert_eq!(probed, ["pg_bin_dir:pg_dump", "wsl:pg_dump"]);
+        assert_eq!(tool.label(), "wsl:pg_dump");
+        assert_eq!(tool.version(), "pg_dump (PostgreSQL) 16.3");
+        assert_eq!(
+            tool.invocation,
+            PgInvocation::Wsl {
+                wsl: PathBuf::from("wsl.exe")
+            }
+        );
+    }
+
+    #[test]
+    fn resolution_failure_names_every_probed_candidate_in_order() {
+        let candidates = resolution(Some("C:\\pg\\bin"), true, true).candidates("pg_dump");
+        let error = resolve_pg_tool_with("pg_dump", candidates, |candidate| {
+            Err(match candidate.label.as_str() {
+                "wsl:pg_dump" => "exit status: 1: /usr/bin/pg_dump: No such file".into(),
+                _ => "program not found".into(),
+            })
+        })
+        .unwrap_err();
+        assert_eq!(error.failure_code(), BackupFailureCode::PgDumpNotFound);
+        let BackupError::ToolNotFound { tool, probed } = &error else {
+            panic!("expected ToolNotFound, got {error:?}");
+        };
+        assert_eq!(tool, "pg_dump");
+        assert_eq!(
+            probed,
+            &[
+                "pg_bin_dir:pg_dump=C:\\pg\\bin\\pg_dump.exe (program not found)",
+                "wsl:pg_dump=wsl.exe --exec (exit status: 1: /usr/bin/pg_dump: No such file)",
+                "wsl-system32:pg_dump=C:\\Windows\\System32\\wsl.exe --exec (program not found)",
+                "path:pg_dump=pg_dump.exe (program not found)",
+            ]
+        );
+        let text = error.to_string();
+        assert!(text.starts_with("pg_dump not found; probed pg_bin_dir:pg_dump="));
+        assert!(text.contains("path:pg_dump=pg_dump.exe (program not found)"));
+        let restore = resolve_pg_tool_with("pg_restore", vec![], |_| Err(String::new()))
+            .unwrap_err();
+        assert_eq!(
+            restore.failure_code(),
+            BackupFailureCode::PgRestoreNotFound
+        );
+    }
+
+    #[test]
+    fn every_backup_error_maps_to_one_failure_code() {
+        assert_eq!(
+            BackupError::Config(String::new()).failure_code(),
+            BackupFailureCode::Configuration
+        );
+        assert_eq!(
+            BackupError::Io(io::Error::other("x")).failure_code(),
+            BackupFailureCode::Io
+        );
+        assert_eq!(
+            BackupError::Command(String::new()).failure_code(),
+            BackupFailureCode::Command
+        );
+        assert_eq!(
+            BackupError::Manifest(String::new()).failure_code(),
+            BackupFailureCode::Manifest
+        );
+    }
+
+    #[test]
+    fn old_manifests_without_a_tool_still_load() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"database":"db","created_at":"2026-08-10T00:00:00Z","size":1,"sha256":"ab","format":"custom","schema_migrations":["1"],"pg_dump_version":"16","dump":"db.dump"}"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.pg_dump_tool, "");
+    }
+
     #[test]
     fn backup_health_requires_a_custom_format_dump() {
         let dir = env::temp_dir().join(format!("athanor-health-{}", Uuid::new_v4()));
@@ -801,6 +1232,7 @@ mod tests {
                 format: "custom".into(),
                 schema_migrations: crate::migrations::consolidated_version_labels(),
                 pg_dump_version: "16".into(),
+                pg_dump_tool: "path:pg_dump".into(),
                 dump: "other.dump".into(),
             })
             .unwrap(),

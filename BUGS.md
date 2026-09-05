@@ -42,33 +42,6 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Impact:** A local green or red count is not portable evidence without naming environment and attribution.
 - **Proof after repair:** The same hermetic test command produces the same result on both machines, or every environment-dependent cluster declares and provisions its dependency explicitly.
 
-### Mechanics observatory category row overflows its column at 1440 px
-
-- **Observed:** 2026-09-05, Chromium at 1440 × 1000, House slot 2. `.mechanics-categories` puts two elements past the viewport's right edge: the Advanced Guardrails button to 1457 px and its count `<small>` to 1447 px. Measured identically on the unmodified prototype, so it predates the status-strip wave.
-- **Impact:** The last category button and its count are clipped at the default working viewport. No horizontal document overflow, so the page looks correct until the operator tries to reach that category.
-- **Proof after repair:** At 1440 × 1000 and 390 × 844, every `.mechanics-categories` button's right edge sits inside the viewport, with zero elements past the right edge and the count badge fully visible.
-
-### Pulse trace drawer has no operator-reachable trace id
-
-- **Observed:** 2026-09-05. The Pulse lane trace drawer renders real Host spans when given a trace id, but a lane derived from `insula.vitals_minute` rollups carries no trace id, and no Host route lists spans or traces. `query_trace` filters `WHERE trace_id = $2::uuid` only.
-- **Impact:** The drawer's live branch is proven but unreachable from the surface; an operator cannot drill from a lane to its spans.
-- **Expected:** One bounded Host read that lists recent spans (or trace ids) for a lane: house, room, operation, phase, window, capped rows. The drawer asks it, then `insula/trace`.
-- **Proof after repair:** From House slot 2, click a lane, receive its latest trace, and see the same spans `insula/trace` returns for that id.
-
-### A durable write's backup leaves no receipt on success and only a string on failure
-
-- **Observed:** `backup::run_post_write` (`crates/akasha/src/backup.rs`) returns `Result<(), _>` and discards the `Manifest` that `backup_with_migrations` produced. Every caller (`remember`, `remember_lesson`, `anamnesis_write`, `paper_boat_sleep`) turns an error into one warning string and records nothing on success. Kintsu's cartography audit of 2026-08-30 (`backup/format-day-2026-08-30`, `architecture/cartography/pilots/run-post-write/audit/judgments.tsv`, J07) found this; it still holds on `dev/next`.
-- **Impact:** A spirit cannot name the backup its write produced, and a failed backup exists only inside one session's tool output. Nothing durable records that an organ failed.
-- **Expected:** The backup outcome is a typed receipt (dump path, checksum, or the failure code) that rides on the write receipt and lands where Insula can read it.
-- **Proof after repair:** A `remember` with `backup: true` returns the dump identity; a forced backup failure produces a row an operator can find without the session transcript.
-
-### Durable-write file backup reports "program not found" on the Windows tower
-
-- **Observed:** 2026-08-29, twice: `remember` (project-lesson #465) and `sleep` (paper boat #4219) committed to PostgreSQL and then reported `backup failed after PostgreSQL commit; ... backup io: program not found`. Recovered from `rescue/athanor-dev-wip-2026-08-28`; not yet reproduced on `dev/next`. On 2026-09-02 (`dev/next` @ b91f196) two `remember` writes (kodo #4370, #4371) backed up clean.
-- **Cause seam:** the backup path runs `pg_dump` through WSL when `ATHANOR_PG_WSL=1`; the same `pg_dump` works when run directly.
-- **Impact:** Every durable write silently loses its file backup until someone reads the warning.
-- **Proof after repair:** A `remember` and a `sleep` on the Windows tower both report a successful backup receipt, and the dump exists with a verifiable checksum.
-
 ### Rescue-tool backup runs with no credentials on the Windows tower
 
 - **Observed:** 2026-09-02, room `kodo`, two divination writes through `house/substrate/record_memory.py --env-file ../state/substrate/.env` (house #4372, #4373). Both rows committed. The post-write backup then reported `WARN: backup failed (rc=1): pg_dump: error: connection to server at "127.0.0.1", port 5432 failed: fe_sendauth: no password supplied`.
@@ -78,6 +51,31 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Proof after repair:** A `record_memory.py --env-file ../state/substrate/.env` write on the Windows tower prints a `backup:` line with a dump path, and the dump exists under `substrate/backups/`.
 
 ## Repaired but not deployed
+
+### Mechanics observatory category row overflows its column at 1440 px
+
+- **Observed:** 2026-09-05, Chromium at 1440 × 1000, House slot 2. `.mechanics-categories` put two elements past the viewport's right edge: the Advanced Guardrails button to 1457 px and its count `<small>` to 1447 px.
+- **Repair:** `dev/next`, 2026-09-05. Category chips wrap at all widths; the desktop horizontal scroll rule and the redundant mobile override are removed. Chip and count styling unchanged.
+- **Proof:** Headless Chrome over CDP, House slot 2: all eight buttons and badges fit at 1440 × 1000 (max right edge 1305 px; Advanced Guardrails 496/486 px) and 390 × 844 (max 362 px); zero elements past the right edge, zero horizontal overflow. Measurements in `gui-prototype/LESSONS_MAP.md`. Live half owed after deploy: repeat the geometry check on the deployed surface.
+
+### Pulse trace drawer has no operator-reachable trace id
+
+- **Observed:** 2026-09-05. The lane trace drawer rendered real Host spans when given a trace id, but a lane derived from `insula.vitals_minute` rollups carried no trace id, and no Host route listed spans.
+- **Repair:** `dev/next`, 2026-09-05. New bounded Host read `/athanor/v1/insula/spans` (`crates/host/src/insula.rs`; `akasha::insula::query_spans`): room-scoped by the trusted binding, `{ operation, phase?, outcome_class?, window: 15m|1h|24h, limit ≤ 100 }`, newest first, `query_name`/`query_version` stamped. Migration `0029_insula_log_lane_spans.sql` adds `idx_insula_log_lane_spans (house_id, room, operation, observed_at DESC, span_id DESC)`; EXPLAIN shows Limit → Index Scan with no Sort. The proxy exposes `/live/insula/spans`; Pulse lanes open a two-stage drawer: spans list → trace. Proof found and fixed two defects: `ORDER BY span_id` bound to the text alias (index never served the order) and keyboard focus stranding above the span rows.
+- **Proof:** `cargo test -p akasha --lib insula::query -- --ignored` (3: window/limit/newest-first/cross-room refusal, malformed refusals, plan); `cargo test -p host --lib` (34; absent or wrong bearer → 401 before the handler); browser receipt at 1440 × 1000 and 390 × 844 in `gui-prototype/LESSONS_MAP.md` (8-row spans list, drill-down to a real trace, `No spans in window`, genuine Host 422 refusal rendered by name). Live half owed after deploy: from House slot 2, click a lane, pick a span, and see the same spans `insula/trace` returns.
+
+### A durable write's backup leaves no receipt on success and only a string on failure
+
+- **Observed:** `backup::run_post_write` (`crates/akasha/src/backup.rs`) returned `Result<(), _>` and discarded the `Manifest` that `backup_with_migrations` produced. Every caller (`remember`, `remember_lesson`, `anamnesis_write`, `paper_boat_sleep`) turned an error into one warning string and recorded nothing on success. Kintsu's cartography audit of 2026-08-30 (J07) found this.
+- **Repair:** `dev/next`, 2026-09-05. `run_post_write` returns `hearth::BackupReceipt { dump_path, sha256, bytes, elapsed_ms, tool }` or `hearth::BackupFailure { code, detail, elapsed_ms, tool }`. Every write receipt carries `backup: { status: ok|failed|skipped, … }` on the wire; the OMP remember and sleep frames render it. Every outcome lands one Insula point `backup.post_write` with the elapsed time and the failure code as error class. A failed backup still never fails the PostgreSQL commit. OMP memory writes no longer force `backup: false`; they follow the substrate default (backup on).
+- **Proof:** `cargo test -p akasha --lib` (75), `cargo test -p protocol --lib` (59), `bun test tests/backup-receipt-feedback.test.ts` (5), `cargo test -p akasha --test remember_integration remember_with_backup_returns_a_verifiable_dump_receipt -- --ignored` (1 passed on this tower: dump 960,390 B, receipt sha256 equals the file, `insula.log` point ok 273,712 µs). Live half owed after deploy: one `remember` and one `sleep` through the installed OMP tool show the `backup` receipt and the same `backup.post_write` row.
+
+### Durable-write file backup reports "program not found" on the Windows tower
+
+- **Observed:** 2026-08-29, twice: `remember` (project-lesson #465) and `sleep` (paper boat #4219) committed to PostgreSQL and then reported `backup failed after PostgreSQL commit; ... backup io: program not found`.
+- **Cause seam:** `pg_dump` resolution was implicit; when neither `PG_BIN_DIR` nor a WSL route answered, the io error carried no name.
+- **Repair:** `dev/next`, 2026-09-05. `backup::resolve_pg_tool` probes `--version` on each candidate in order — `PG_BIN_DIR`, WSL `pg_dump` via `wsl.exe` on `PATH` then `%SystemRoot%\System32\wsl.exe` (Windows with `ATHANOR_PG_WSL=1`), then `PATH` — and the chosen route is the receipt's `tool` and the manifest's `pg_dump_tool`. When nothing answers the code is `pg_dump_not_found` and the detail names every candidate with its reason. The same resolver serves `pg_restore`.
+- **Proof:** `cargo test -p akasha --lib backup` (19). The ignored DB proof passed on this tower over both real routes: `tool: pg_bin_dir:pg_dump` (273 ms) and, with `PG_BIN_DIR` unset and `ATHANOR_PG_WSL=1`, `tool: wsl:pg_dump` (857 ms); with neither set it returned `pg_dump_not_found` with the probed list and an Insula error point — the tower's old `program not found`, now named. Live half owed after deploy: a `remember` and a `sleep` from the installed service report `backup.status: ok` with a `tool`, and the dump's sha256 matches.
 
 ### Numeric memory IDs are not resolvable through Recall
 

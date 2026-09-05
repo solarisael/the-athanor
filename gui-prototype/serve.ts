@@ -6,6 +6,12 @@
 // actual Athanor; it still writes nothing.
 //
 // Run: bun gui-prototype/serve.ts   (PULSE_ROOM=kodo PULSE_PORT=4175)
+//
+// PULSE_HOST_PORT overrides the installed `runtime.json` hostPort. A Host route
+// cannot be proven on the rendered surface before it is deployed, because the
+// installed Host does not carry it yet; this lets the harness read a locally
+// built Host on a spare port instead. The room, the bearer, and the allow-list
+// are unchanged, so nothing else about the one live wire moves.
 
 const ROOT = import.meta.dir;
 const CONFIG_PATH = "C:/ProgramData/Solarisael/Athanor/config/runtime.json";
@@ -21,6 +27,7 @@ const LIVE_ROUTES = new Map([
   ["/live/health", { path: "/health", method: "GET" }],
   ["/live/insula/vitals", { path: "/athanor/v1/insula/vitals", method: "POST" }],
   ["/live/insula/trace", { path: "/athanor/v1/insula/trace", method: "POST" }],
+  ["/live/insula/spans", { path: "/athanor/v1/insula/spans", method: "POST" }],
   ["/live/insula/retention", { path: "/athanor/v1/insula/retention", method: "POST" }],
   ["/live/docket/board", { path: "/athanor/v1/docket/board", method: "POST" }],
   ["/live/docket/evidence", { path: "/athanor/v1/docket/evidence", method: "POST" }],
@@ -35,8 +42,8 @@ const runtime = await Bun.file(CONFIG_PATH).json();
 const secrets = await Bun.file(SECRETS_PATH).json();
 const room = Bun.env.PULSE_ROOM ?? "kodo";
 const port = Number(Bun.env.PULSE_PORT ?? 4175);
-const hostPort = Number(runtime.hostPort);
-if (!Number.isInteger(hostPort)) throw new Error("runtime.json has no hostPort");
+const hostPort = Number(Bun.env.PULSE_HOST_PORT ?? runtime.hostPort);
+if (!Number.isInteger(hostPort)) throw new Error("no usable hostPort");
 if (!runtime.rooms.some((entry: { room: string }) => entry.room === room)) {
   throw new Error(`room ${room} is not in runtime.json`);
 }

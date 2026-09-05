@@ -100,6 +100,24 @@ the exact implementation record.
   failures, cancellations, the first empty result after a claim, and every
   settle keep their spans. Measured before: 12,744 `knock_claim` rows in one
   idle hour across two Hosts; expected after: 24.
+- Durable writes (`remember`, `remember_lesson`, `anamnesis_write`,
+  `paper_boat_sleep`) now carry a typed `backup` receipt: `ok` with dump
+  path, sha256, bytes, elapsed_ms, and the `pg_dump` route; `failed` with a
+  mechanical `code` and one-line `detail`; or `skipped`. Every post-write
+  backup lands one Insula point `backup.post_write`. `pg_dump` and
+  `pg_restore` are resolved by probing `PG_BIN_DIR`, then WSL, then `PATH`;
+  when none answers the code is `pg_dump_not_found` with the probed list.
+  Wire: the `paper_boat_sleep` result's `backup_status` string is replaced
+  by the `backup` object; `remember` and `anamnesis_write` results gain
+  `backup`. Manifests gain `pg_dump_tool`. OMP memory writes follow the
+  substrate's backup default instead of forcing it off.
+- New bounded Host read `insula/spans` lists recent spans for one lane
+  (operation, optional phase and outcome, window, limit ≤ 100), newest first,
+  room-scoped by the trusted binding. Migration 0029 adds the lane index so
+  the read is an index walk. Pulse lanes open a two-stage drawer: spans,
+  then the trace. The proxy exposes `/live/insula/spans`.
+- Mechanics category chips wrap inside their column at every width; the
+  last category and its count no longer pass the viewport edge at 1440 px.
 - `athanor.exe` now runs as the independent multi-room Host and local manager
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified

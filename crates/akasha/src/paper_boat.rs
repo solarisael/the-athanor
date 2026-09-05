@@ -5,14 +5,13 @@ use crate::config::{AppError, Config};
 use crate::remember::{prepare_memory_write, write_memory_tx};
 use crate::settings::RoomSettings;
 use chrono::Utc;
-use hearth::RoomKey;
+use hearth::{BackupOutcome, RoomKey};
 use origami::boats;
 use origami::boats::error::BoatError;
 use origami::boats::record::{MAX_WARNING_BYTES, bounded_utf8, positive_id};
 use sqlx::PgPool;
 use summoning::{
-    PaperBoatBackupStatus, PaperBoatSleepReceipt, PaperBoatSleepRequest, PaperBoatWakeReceipt,
-    PaperBoatWakeRequest,
+    PaperBoatSleepReceipt, PaperBoatSleepRequest, PaperBoatWakeReceipt, PaperBoatWakeRequest,
 };
 
 impl From<BoatError> for AppError {
@@ -60,27 +59,25 @@ pub async fn paper_boat_sleep(
     let outbox_event_id = boats::sleep::ready_pointer(&mut tx, memory_id).await?;
     tx.commit().await?;
 
-    let backup_status = if !request.backup() {
-        PaperBoatBackupStatus::NotRequested
-    } else {
-        match backup::run_post_write(pool, &cfg.database_url, settings.backup_keep_count).await {
-            Ok(()) => PaperBoatBackupStatus::Completed,
-            Err(error) => {
-                let warning = format!(
-                    "backup failed after PostgreSQL commit; paper boat remains durable: {error}"
-                );
-                warnings.push(bounded_utf8(&warning, MAX_WARNING_BYTES).0);
-                PaperBoatBackupStatus::Failed
-            }
-        }
-    };
+    // The boat is durable once committed; a failed backup is a typed outcome
+    // on the receipt and one bounded warning line, never a failed write.
+    let backup = backup::post_write_outcome(
+        pool,
+        &cfg.database_url,
+        settings.backup_keep_count,
+        request.backup(),
+    )
+    .await;
+    if let Some(warning) = backup.warning() {
+        warnings.push(bounded_utf8(&warning, MAX_WARNING_BYTES).0);
+    }
     committed_sleep_receipt(
         memory_id,
         request.room().clone(),
         plan.source_path,
         outbox_event_id,
         inserted,
-        backup_status,
+        backup,
         warnings,
     )
 }
@@ -100,7 +97,7 @@ fn committed_sleep_receipt(
     source_path: String,
     outbox_event_id: String,
     inserted: bool,
-    backup_status: PaperBoatBackupStatus,
+    backup: BackupOutcome,
     warnings: Vec<String>,
 ) -> Result<PaperBoatSleepReceipt, AppError> {
     PaperBoatSleepReceipt::committed(
@@ -109,7 +106,7 @@ fn committed_sleep_receipt(
         source_path,
         outbox_event_id,
         inserted,
-        backup_status,
+        backup,
         warnings,
     )
     .map_err(|error| AppError::Invalid(error.to_string()))

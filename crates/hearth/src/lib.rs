@@ -4,6 +4,7 @@
 pub const SUBSTRATE_SCHEMA_VERSION: u32 = 28;
 
 pub mod authority;
+pub mod backup;
 pub mod canon;
 pub mod cluster;
 pub mod context;
@@ -19,6 +20,7 @@ pub mod room;
 pub mod triggers;
 
 pub use authority::*;
+pub use backup::*;
 pub use canon::*;
 pub use cluster::*;
 pub use error::*;

@@ -22,7 +22,7 @@ use crate::backup;
 use crate::config::{AppError, Config};
 use crate::settings::RoomSettings;
 use chrono::Local;
-use hearth::{RememberReceipt, RememberRequest};
+use hearth::{BackupOutcome, RememberReceipt, RememberRequest};
 use lessons::remember_lesson;
 use memory_write::write_continuations_tx;
 use protocol::RememberResult;
@@ -50,17 +50,24 @@ fn derived_source_path(req: &RememberRequest) -> String {
     )
 }
 
-// The row is durable once committed; a failed backup is a warning, never a
-// failed write.
-pub(super) async fn backup_warning(
+// The row is durable once committed; a failed backup is a typed outcome on
+// the receipt and one warning line, never a failed write.
+pub(super) async fn post_write_backup(
     pool: &PgPool,
     cfg: &Config,
     settings: &RoomSettings,
-) -> Option<String> {
-    backup::run_post_write(pool, &cfg.database_url, settings.backup_keep_count)
-        .await
-        .err()
-        .map(|error| format!("backup failed: {error}"))
+    requested: bool,
+    warnings: &mut Vec<String>,
+) -> BackupOutcome {
+    let outcome = backup::post_write_outcome(
+        pool,
+        &cfg.database_url,
+        settings.backup_keep_count,
+        requested,
+    )
+    .await;
+    warnings.extend(outcome.warning());
+    outcome
 }
 
 pub async fn remember(
@@ -104,14 +111,13 @@ pub async fn remember(
     .await?;
     write_continuations_tx(&mut tx, req.room().as_str(), memory_id, req.continues()).await?;
     tx.commit().await?;
-    if req.backup() {
-        warnings.extend(backup_warning(pool, cfg, &settings).await);
-    }
+    let backup = post_write_backup(pool, cfg, &settings, req.backup(), &mut warnings).await;
     let receipt = RememberReceipt::committed(
         u64::try_from(memory_id)
             .map_err(|_| AppError::Invalid("database returned an invalid memory ID".into()))?,
         req.room().clone(),
         source_path,
+        backup,
         warnings,
     )
     .map_err(|error| AppError::Invalid(error.to_string()))?;

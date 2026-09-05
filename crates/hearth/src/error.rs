@@ -38,6 +38,7 @@ pub enum DomainError {
     UnknownGigaValue { field: String, value: String },
     InvalidPaperBoat { field: String, message: String },
     InvalidLessonTrigger(String),
+    InvalidBackupReceipt { field: String, message: String },
 }
 impl fmt::Display for DomainError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -109,6 +110,9 @@ impl fmt::Display for DomainError {
             Self::UnknownGigaValue { field, value } => write!(f, "unknown GIGA {field}: {value}"),
             Self::InvalidPaperBoat { field, message } => {
                 write!(f, "invalid paper boat {field}: {message}")
+            }
+            Self::InvalidBackupReceipt { field, message } => {
+                write!(f, "invalid backup receipt {field}: {message}")
             }
             Self::InvalidLessonTrigger(message) => write!(f, "invalid lesson trigger: {message}"),
         }

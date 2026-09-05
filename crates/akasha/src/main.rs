@@ -331,13 +331,7 @@ fn protocol_error_class(error: &ProtocolError) -> &'static str {
 }
 
 fn backup_error_class(error: &BackupError) -> &'static str {
-    match error {
-        BackupError::Config(_) => "backup_error.config",
-        BackupError::State(_) => "backup_error.state",
-        BackupError::Io(_) => "backup_error.io",
-        BackupError::Command(_) => "backup_error.command",
-        BackupError::Manifest(_) => "backup_error.manifest",
-    }
+    error.failure_code().as_str()
 }
 
 /// The observed operation is the protocol method itself: one table, so a new
@@ -1775,11 +1769,16 @@ mod tests {
             BackupError::Io(std::io::Error::other(body)),
             BackupError::Command(body.into()),
             BackupError::Manifest(body.into()),
+            BackupError::ToolNotFound {
+                tool: "pg_dump".into(),
+                probed: vec![body.into()],
+            },
         ] {
             let class = backup_error_class(&error);
             assert!(is_mechanical_name(class), "{class} is not mechanical");
             assert!(!class.contains("secret"), "{class} leaked a message");
         }
+        assert!(is_mechanical_name(akasha::backup::POST_WRITE_OPERATION));
     }
 
     #[test]

@@ -10,6 +10,7 @@ use crate::config::{AppError, Config, EmbeddingMode, HTTP_CLIENT};
 use crate::remember::embed;
 use crate::settings::RoomSettings;
 use chrono::NaiveDate;
+use hearth::BackupOutcome;
 use protocol::{AnamnesisResult, AnamnesisWriteResult};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -98,10 +99,15 @@ async fn add_drawer(
     }
     tx.commit().await?;
 
-    warnings.extend(backup_warning(pool, cfg, &settings).await);
-    let receipt =
-        AnamnesisReceipt::committed(add.room().clone(), add.title().into(), add.kind(), warnings)
-            .map_err(|error| AppError::Invalid(error.to_string()))?;
+    let backup = post_write_backup(pool, cfg, &settings, &mut warnings).await;
+    let receipt = AnamnesisReceipt::committed(
+        add.room().clone(),
+        add.title().into(),
+        add.kind(),
+        backup,
+        warnings,
+    )
+    .map_err(|error| AppError::Invalid(error.to_string()))?;
     Ok(receipt.into())
 }
 
@@ -125,14 +131,13 @@ async fn append_rep(
     upsert_rep(&mut tx, id, append.rep(), append.source_paths().first()).await?;
     tx.commit().await?;
 
-    let warnings = backup_warning(pool, cfg, &settings)
-        .await
-        .into_iter()
-        .collect();
+    let mut warnings = Vec::new();
+    let backup = post_write_backup(pool, cfg, &settings, &mut warnings).await;
     let receipt = AnamnesisAppendReceipt::committed(
         append.room().clone(),
         title.into(),
         append.rep().number(),
+        backup,
         warnings,
     )
     .map_err(|error| AppError::Invalid(error.to_string()))?;
@@ -280,13 +285,20 @@ fn embedding_warning(mode: EmbeddingMode) -> Option<&'static str> {
     }
 }
 
-// The row is durable once committed; a failed backup is a warning, never a
-// failed write.
-async fn backup_warning(pool: &PgPool, cfg: &Config, settings: &RoomSettings) -> Option<String> {
-    backup::run_post_write(pool, &cfg.database_url, settings.backup_keep_count)
-        .await
-        .err()
-        .map(|error| format!("backup failed: {error}"))
+// The drawer is durable once committed; the Cabinet always asks for its
+// backup, and a failed one is a typed outcome on the receipt plus one
+// warning line, never a failed write.
+async fn post_write_backup(
+    pool: &PgPool,
+    cfg: &Config,
+    settings: &RoomSettings,
+    warnings: &mut Vec<String>,
+) -> BackupOutcome {
+    let outcome =
+        backup::post_write_outcome(pool, &cfg.database_url, settings.backup_keep_count, true)
+            .await;
+    warnings.extend(outcome.warning());
+    outcome
 }
 
 // ---- read ----

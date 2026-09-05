@@ -10,9 +10,10 @@ pub use contract::*;
 pub use host::*;
 
 use hearth::{
-    CanonAttribution, CanonPointer, CanonReadRequest, CanonWriteReceipt, CanonWriteRequest,
-    ClusterExecution, ClusterFreshnessPolicy, ClusterMaintenanceOutcome, ClusterMaintenanceRequest,
-    ClusterMaintenanceStatus, ClusterStaleness, ClusterSummary, GigaAuthority, GigaCandidate,
+    BackupOutcome, CanonAttribution, CanonPointer, CanonReadRequest, CanonWriteReceipt,
+    CanonWriteRequest, ClusterExecution, ClusterFreshnessPolicy, ClusterMaintenanceOutcome,
+    ClusterMaintenanceRequest, ClusterMaintenanceStatus, ClusterStaleness, ClusterSummary,
+    GigaAuthority, GigaCandidate,
     GigaCandidateKind, GigaClassifierIdentity, GigaCodingLessonPromotionPayload, GigaEvent,
     GigaEventClaimReceipt, GigaEventClaimRequest, GigaEventFinishOutcome, GigaEventFinishReceipt,
     GigaEventFinishRequest, GigaEventReplayReceipt, GigaEventReplayRequest, GigaEventType,
@@ -1267,6 +1268,66 @@ fn is_sensitive_diagnostic_key(key: &str) -> bool {
         || normalized.ends_with("token")
 }
 
+/// The file backup that followed a durable write, as it rides on the write's
+/// receipt. `status` is `ok`, `failed`, or `skipped`; the receipt fields are
+/// present for `ok`, the failure fields for `failed`, neither for `skipped`.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct BackupResult {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dump_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl BackupResult {
+    pub fn skipped() -> Self {
+        Self::from(&BackupOutcome::Skipped)
+    }
+}
+
+impl From<&BackupOutcome> for BackupResult {
+    fn from(outcome: &BackupOutcome) -> Self {
+        let mut result = Self {
+            status: outcome.status().into(),
+            dump_path: None,
+            sha256: None,
+            bytes: None,
+            elapsed_ms: None,
+            tool: None,
+            code: None,
+            detail: None,
+        };
+        match outcome {
+            BackupOutcome::Skipped => {}
+            BackupOutcome::Ok(receipt) => {
+                result.dump_path = Some(receipt.dump_path().into());
+                result.sha256 = Some(receipt.sha256().into());
+                result.bytes = Some(receipt.bytes());
+                result.elapsed_ms = Some(receipt.elapsed_ms());
+                result.tool = Some(receipt.tool().into());
+            }
+            BackupOutcome::Failed(failure) => {
+                result.elapsed_ms = Some(failure.elapsed_ms());
+                result.tool = failure.tool().map(str::to_owned);
+                result.code = Some(failure.code().as_str().into());
+                result.detail = Some(failure.detail().into());
+            }
+        }
+        result
+    }
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct RememberResult {
     #[serde(skip_serializing_if = "is_zero")]
@@ -1281,6 +1342,7 @@ pub struct RememberResult {
     pub kind: Option<String>,
     pub durable: bool,
     pub authority: String,
+    pub backup: BackupResult,
     pub warnings: Vec<String>,
 }
 
@@ -1299,6 +1361,7 @@ struct RememberResultWire {
     kind: Option<String>,
     durable: Option<bool>,
     authority: Option<String>,
+    backup: Option<BackupResult>,
     warnings: Option<Vec<String>>,
 }
 
@@ -1317,6 +1380,9 @@ impl<'de> Deserialize<'de> for RememberResult {
         let authority = wire
             .authority
             .ok_or_else(|| D::Error::missing_field("authority"))?;
+        let backup = wire
+            .backup
+            .ok_or_else(|| D::Error::missing_field("backup"))?;
         let warnings = wire
             .warnings
             .ok_or_else(|| D::Error::missing_field("warnings"))?;
@@ -1335,8 +1401,8 @@ impl<'de> Deserialize<'de> for RememberResult {
                 lesson_id: None,
                 kind: None,
                 durable,
-
                 authority,
+                backup,
                 warnings,
             }),
             (false, true) => Ok(Self {
@@ -1350,6 +1416,7 @@ impl<'de> Deserialize<'de> for RememberResult {
                 kind: Some(wire.kind.ok_or_else(|| D::Error::missing_field("kind"))?),
                 durable,
                 authority,
+                backup,
                 warnings,
             }),
             (false, false) => Err(D::Error::custom(
@@ -2019,7 +2086,7 @@ pub struct PaperBoatSleepResult {
     pub inserted: bool,
     pub durable: bool,
     pub authority: String,
-    pub backup_status: String,
+    pub backup: BackupResult,
     pub warnings: Vec<String>,
 }
 
@@ -2034,7 +2101,7 @@ impl From<PaperBoatSleepReceipt> for PaperBoatSleepResult {
             inserted: receipt.inserted(),
             durable: receipt.durable(),
             authority: "postgres".into(),
-            backup_status: receipt.backup_status().as_str().into(),
+            backup: BackupResult::from(receipt.backup()),
             warnings: receipt.warnings().to_vec(),
         }
     }
@@ -2490,6 +2557,7 @@ impl From<RememberReceipt> for RememberResult {
                 .then(|| receipt.kind().as_str().to_owned()),
             durable: receipt.durable(),
             authority: "postgres".into(),
+            backup: BackupResult::from(receipt.backup()),
             warnings: receipt.warnings().to_vec(),
         }
     }
@@ -2530,6 +2598,7 @@ pub struct AnamnesisWriteResult {
     pub rep_number: Option<u32>,
     pub durable: bool,
     pub authority: String,
+    pub backup: BackupResult,
     #[serde(default)]
     pub warnings: Vec<String>,
 }
@@ -2544,6 +2613,7 @@ impl From<AnamnesisReceipt> for AnamnesisWriteResult {
             rep_number: None,
             durable: r.durable(),
             authority: "postgres".into(),
+            backup: BackupResult::from(r.backup()),
             warnings: r.warnings().to_vec(),
         }
     }
@@ -2559,6 +2629,7 @@ impl From<AnamnesisAppendReceipt> for AnamnesisWriteResult {
             rep_number: Some(r.rep_number()),
             durable: r.durable(),
             authority: "postgres".into(),
+            backup: BackupResult::from(r.backup()),
             warnings: r.warnings().to_vec(),
         }
     }
@@ -4399,13 +4470,14 @@ mod tests {
                 kind: None,
                 durable: true,
                 authority: "postgres".into(),
+                backup: BackupResult::skipped(),
                 warnings: vec![],
             },
         ))
         .unwrap();
         assert_eq!(
             json,
-            r#"{"protocol":1,"id":"x","result":{"memory_id":4,"room":"lab","source_path":"mem.md","durable":true,"authority":"postgres","warnings":[]}}"#
+            r#"{"protocol":1,"id":"x","result":{"memory_id":4,"room":"lab","source_path":"mem.md","durable":true,"authority":"postgres","backup":{"status":"skipped"},"warnings":[]}}"#
         );
     }
 
@@ -4457,15 +4529,18 @@ mod tests {
     fn remember_result_deserializes_memory_and_lesson_receipts_without_hybrids() {
         let memory: RememberResult = serde_json::from_value(serde_json::json!({
             "memory_id": 4, "room": "lab", "source_path": "mem.md",
-            "durable": true, "authority": "postgres", "warnings": []
+            "durable": true, "authority": "postgres",
+            "backup": {"status": "skipped"}, "warnings": []
         }))
         .unwrap();
         assert_eq!(memory.memory_id, 4);
         assert_eq!(memory.lesson_id, None);
+        assert_eq!(memory.backup.status, "skipped");
 
         let lesson: RememberResult = serde_json::from_value(serde_json::json!({
             "lesson_id": 9, "kind": "coding-lesson",
-            "durable": true, "authority": "postgres", "warnings": []
+            "durable": true, "authority": "postgres",
+            "backup": {"status": "skipped"}, "warnings": []
         }))
         .unwrap();
         assert_eq!(lesson.lesson_id, Some(9));
@@ -4475,9 +4550,124 @@ mod tests {
         let hybrid = serde_json::json!({
             "memory_id": 4, "room": "lab", "source_path": "mem.md",
             "lesson_id": 9, "kind": "coding-lesson",
-            "durable": true, "authority": "postgres", "warnings": []
+            "durable": true, "authority": "postgres",
+            "backup": {"status": "skipped"}, "warnings": []
         });
         assert!(serde_json::from_value::<RememberResult>(hybrid).is_err());
+
+        let without_backup = serde_json::json!({
+            "memory_id": 4, "room": "lab", "source_path": "mem.md",
+            "durable": true, "authority": "postgres", "warnings": []
+        });
+        assert!(serde_json::from_value::<RememberResult>(without_backup).is_err());
+    }
+
+    #[test]
+    fn backup_result_carries_exactly_the_fields_of_its_outcome() {
+        use hearth::{BackupFailure, BackupFailureCode, BackupReceipt};
+
+        let ok = BackupResult::from(&BackupOutcome::Ok(
+            BackupReceipt::new(
+                "C:/state/backups/db-1.dump".into(),
+                "f".repeat(64),
+                1024,
+                830,
+                "wsl:pg_dump".into(),
+            )
+            .unwrap(),
+        ));
+        assert_eq!(
+            serde_json::to_value(&ok).unwrap(),
+            serde_json::json!({
+                "status": "ok",
+                "dump_path": "C:/state/backups/db-1.dump",
+                "sha256": "f".repeat(64),
+                "bytes": 1024,
+                "elapsed_ms": 830,
+                "tool": "wsl:pg_dump",
+            })
+        );
+
+        let failed = BackupResult::from(&BackupOutcome::Failed(BackupFailure::new(
+            BackupFailureCode::PgDumpNotFound,
+            "pg_dump not found; probed wsl:pg_dump (program not found), path:pg_dump (program not found)",
+            12,
+            None,
+        )));
+        assert_eq!(
+            serde_json::to_value(&failed).unwrap(),
+            serde_json::json!({
+                "status": "failed",
+                "elapsed_ms": 12,
+                "code": "pg_dump_not_found",
+                "detail": "pg_dump not found; probed wsl:pg_dump (program not found), path:pg_dump (program not found)",
+            })
+        );
+
+        assert_eq!(
+            serde_json::to_value(BackupResult::skipped()).unwrap(),
+            serde_json::json!({"status": "skipped"})
+        );
+        let round: BackupResult = serde_json::from_value(serde_json::to_value(&ok).unwrap()).unwrap();
+        assert_eq!(round, ok);
+    }
+
+    #[test]
+    fn paper_boat_and_anamnesis_results_carry_the_backup_receipt() {
+        use hearth::{BackupFailure, BackupFailureCode};
+
+        let failure = BackupOutcome::Failed(BackupFailure::new(
+            BackupFailureCode::Command,
+            "pg_dump: error: exit status 1",
+            40,
+            Some("path:pg_dump".into()),
+        ));
+        let sleep = PaperBoatSleepResult::from(
+            PaperBoatSleepReceipt::committed(
+                7,
+                RoomKey::new("kodo").unwrap(),
+                "db-only/paper-boats/x.md".into(),
+                "evt-1".into(),
+                true,
+                failure.clone(),
+                vec![],
+            )
+            .unwrap(),
+        );
+        let json = serde_json::to_value(&sleep).unwrap();
+        assert_eq!(json["backup"]["status"], "failed");
+        assert_eq!(json["backup"]["code"], "backup_error.command");
+        assert_eq!(json["backup"]["tool"], "path:pg_dump");
+        assert!(json.get("backup_status").is_none());
+
+        let add = AnamnesisWriteResult::from(
+            AnamnesisReceipt::committed(
+                RoomKey::new("kodo").unwrap(),
+                "pillar".into(),
+                AnamnesisKind::Pillar,
+                BackupOutcome::Skipped,
+                vec![],
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            serde_json::to_value(&add).unwrap()["backup"],
+            serde_json::json!({"status": "skipped"})
+        );
+        let append = AnamnesisWriteResult::from(
+            AnamnesisAppendReceipt::committed(
+                RoomKey::new("kodo").unwrap(),
+                "cycle".into(),
+                2,
+                failure,
+                vec![],
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            serde_json::to_value(&append).unwrap()["backup"]["detail"],
+            "pg_dump: error: exit status 1"
+        );
     }
     #[test]
     fn rejects_mismatch_malformed_unknown_and_bad_param_shape() {

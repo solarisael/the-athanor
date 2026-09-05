@@ -1,4 +1,4 @@
-use hearth::{Authority, DomainError, RoomKey};
+use hearth::{Authority, BackupOutcome, DomainError, RoomKey};
 
 pub const PAPER_BOAT_MAX_BODY_BYTES: usize = 64 * 1024;
 pub const PAPER_BOAT_MAX_UNBOATED: usize = 64;
@@ -58,23 +58,6 @@ impl PaperBoatWakeRequest {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PaperBoatBackupStatus {
-    NotRequested,
-    Completed,
-    Failed,
-}
-
-impl PaperBoatBackupStatus {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::NotRequested => "not_requested",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaperBoatSleepReceipt {
     memory_id: u64,
@@ -82,7 +65,7 @@ pub struct PaperBoatSleepReceipt {
     source_path: String,
     outbox_event_id: String,
     inserted: bool,
-    backup_status: PaperBoatBackupStatus,
+    backup: BackupOutcome,
     warnings: Vec<String>,
 }
 
@@ -93,7 +76,7 @@ impl PaperBoatSleepReceipt {
         source_path: String,
         outbox_event_id: String,
         inserted: bool,
-        backup_status: PaperBoatBackupStatus,
+        backup: BackupOutcome,
         warnings: Vec<String>,
     ) -> Result<Self, DomainError> {
         if memory_id == 0 {
@@ -117,7 +100,7 @@ impl PaperBoatSleepReceipt {
             source_path,
             outbox_event_id,
             inserted,
-            backup_status,
+            backup,
             warnings,
         })
     }
@@ -142,8 +125,9 @@ impl PaperBoatSleepReceipt {
         self.inserted
     }
 
-    pub const fn backup_status(&self) -> PaperBoatBackupStatus {
-        self.backup_status
+    /// The file backup that followed the PostgreSQL commit.
+    pub const fn backup(&self) -> &BackupOutcome {
+        &self.backup
     }
 
     pub const fn durable(&self) -> bool {

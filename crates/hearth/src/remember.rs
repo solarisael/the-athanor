@@ -1,4 +1,5 @@
 use crate::authority::Authority;
+use crate::backup::BackupOutcome;
 use crate::error::DomainError;
 use crate::lesson_triggers::LessonTriggerSpec;
 use crate::room::RoomKey;
@@ -486,6 +487,7 @@ pub struct RememberReceipt {
     kind: RememberKind,
     room: RoomKey,
     source_path: Option<String>,
+    backup: BackupOutcome,
     warnings: Vec<String>,
 }
 
@@ -494,6 +496,7 @@ impl RememberReceipt {
         memory_id: u64,
         room: RoomKey,
         source_path: String,
+        backup: BackupOutcome,
         warnings: Vec<String>,
     ) -> Result<Self, DomainError> {
         if source_path.trim().is_empty() {
@@ -505,6 +508,7 @@ impl RememberReceipt {
             kind: RememberKind::Memory,
             room,
             source_path: Some(source_path),
+            backup,
             warnings,
         })
     }
@@ -512,6 +516,7 @@ impl RememberReceipt {
         lesson_id: u64,
         kind: RememberKind,
         room: RoomKey,
+        backup: BackupOutcome,
         warnings: Vec<String>,
     ) -> Result<Self, DomainError> {
         if !kind.is_lesson() {
@@ -523,6 +528,7 @@ impl RememberReceipt {
             kind,
             room,
             source_path: None,
+            backup,
             warnings,
         })
     }
@@ -547,6 +553,10 @@ impl RememberReceipt {
     pub const fn authority(&self) -> Authority {
         Authority::Full
     }
+    /// The file backup that followed the PostgreSQL commit.
+    pub const fn backup(&self) -> &BackupOutcome {
+        &self.backup
+    }
     pub fn warnings(&self) -> &[String] {
         &self.warnings
     }
@@ -559,11 +569,22 @@ mod tests {
     #[test]
     fn committed_receipt_requires_source_path_and_is_postgres_durable() {
         let room = RoomKey::new("lab").unwrap();
-        assert!(RememberReceipt::committed(1, room.clone(), " ".into(), vec![]).is_err());
-        let receipt = RememberReceipt::committed(1, room, "memory.md".into(), vec![]).unwrap();
+        assert!(
+            RememberReceipt::committed(1, room.clone(), " ".into(), BackupOutcome::Skipped, vec![])
+                .is_err()
+        );
+        let receipt = RememberReceipt::committed(
+            1,
+            room,
+            "memory.md".into(),
+            BackupOutcome::Skipped,
+            vec![],
+        )
+        .unwrap();
         assert_eq!(receipt.source_path(), "memory.md");
         assert!(receipt.durable());
         assert_eq!(receipt.authority(), Authority::Full);
+        assert_eq!(receipt.backup(), &BackupOutcome::Skipped);
     }
 
     #[test]

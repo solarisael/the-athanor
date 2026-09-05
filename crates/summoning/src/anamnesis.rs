@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use hearth::{DomainError, RoomKey};
+use hearth::{BackupOutcome, DomainError, RoomKey};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AnamnesisReadMode {
@@ -419,6 +419,7 @@ pub struct AnamnesisReceipt {
     title: String,
     kind: AnamnesisKind,
     durable: bool,
+    backup: BackupOutcome,
     warnings: Vec<String>,
 }
 impl AnamnesisReceipt {
@@ -426,6 +427,7 @@ impl AnamnesisReceipt {
         room: RoomKey,
         title: String,
         kind: AnamnesisKind,
+        backup: BackupOutcome,
         warnings: Vec<String>,
     ) -> Result<Self, DomainError> {
         if title.trim().is_empty() {
@@ -439,6 +441,7 @@ impl AnamnesisReceipt {
             title,
             kind,
             durable: true,
+            backup,
             warnings,
         })
     }
@@ -454,6 +457,10 @@ impl AnamnesisReceipt {
     pub const fn durable(&self) -> bool {
         self.durable
     }
+    /// The file backup that followed the PostgreSQL commit.
+    pub const fn backup(&self) -> &BackupOutcome {
+        &self.backup
+    }
     pub fn warnings(&self) -> &[String] {
         &self.warnings
     }
@@ -464,6 +471,7 @@ pub struct AnamnesisAppendReceipt {
     title: String,
     rep_number: u32,
     durable: bool,
+    backup: BackupOutcome,
     warnings: Vec<String>,
 }
 impl AnamnesisAppendReceipt {
@@ -471,6 +479,7 @@ impl AnamnesisAppendReceipt {
         room: RoomKey,
         title: String,
         rep_number: u32,
+        backup: BackupOutcome,
         warnings: Vec<String>,
     ) -> Result<Self, DomainError> {
         if rep_number == 0 {
@@ -487,6 +496,7 @@ impl AnamnesisAppendReceipt {
             title,
             rep_number,
             durable: true,
+            backup,
             warnings,
         })
     }
@@ -501,6 +511,10 @@ impl AnamnesisAppendReceipt {
     }
     pub const fn durable(&self) -> bool {
         self.durable
+    }
+    /// The file backup that followed the PostgreSQL commit.
+    pub const fn backup(&self) -> &BackupOutcome {
+        &self.backup
     }
     pub fn warnings(&self) -> &[String] {
         &self.warnings

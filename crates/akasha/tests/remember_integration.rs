@@ -759,3 +759,160 @@ async fn source_migrations_accepts_text_version_columns() {
         .expect("isolated schema cleanup must succeed");
     pool.close().await;
 }
+
+/// The BUGS row "A durable write's backup leaves no receipt on success":
+/// `remember` with `backup: true` returns the dump's identity, the dump is
+/// on disk with the checksum the receipt names, the manifest beside it names
+/// the same `pg_dump` route, and one `backup.post_write` point lands in
+/// Insula. Runs in an isolated schema migrated to head, because the backup
+/// refuses an unknown migration lineage. Needs a resolvable `pg_dump`
+/// (`PG_BIN_DIR`, `ATHANOR_PG_WSL=1`, or `PATH`) beside the database.
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL, ATHANOR_SUBSTRATE_TEST_SCHEMA, and pg_dump"]
+async fn remember_with_backup_returns_a_verifiable_dump_receipt() {
+    use akasha::{flush_insula_emitter, init_insula_emitter, migrations::run_migrations};
+    use sha2::{Digest, Sha256};
+
+    let (url, schema) = migration_database_scope();
+    let schema = schema.expect("backup proof requires ATHANOR_SUBSTRATE_TEST_SCHEMA");
+    let options = PgConnectOptions::from_str(&url).expect("dedicated test URL must be valid");
+    // One connection, so the schema search path set here is the one every
+    // later statement, including the migration lineage read, runs under.
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .expect("isolated database must be reachable");
+    sqlx::query(&format!("CREATE SCHEMA {schema}"))
+        .execute(&pool)
+        .await
+        .expect("isolated schema must create");
+    sqlx::query(&format!("SET search_path TO {schema}, public"))
+        .execute(&pool)
+        .await
+        .expect("isolated schema must become active");
+    run_migrations(&pool)
+        .await
+        .expect("owned migrations must reach head in the isolated schema");
+    let backup_dir = std::env::temp_dir().join(format!("athanor-backup-proof-{}", Uuid::new_v4()));
+    // SAFETY: this proof runs ignored and alone; nothing else in the process
+    // reads the backup directory while it is set.
+    unsafe { std::env::set_var("ATHANOR_BACKUP_DIR", &backup_dir) };
+    init_insula_emitter(pool.clone());
+
+    let cfg = Config {
+        database_url: url,
+        embed_url: None,
+        embed_model: "disabled".into(),
+        embed_dimension: 2048,
+        embedding_mode: EmbeddingMode::DisabledForTest,
+        giga_source_ledger_dir: None,
+        giga_source_room: None,
+        house_tz: "America/Sao_Paulo".into(),
+    };
+    let source_path = format!("isolated-test/backup-{}", Uuid::new_v4());
+    let receipt = remember(
+        &pool,
+        &cfg,
+        RememberRequest::new_memory(
+            RoomKey::for_memory_write("isolated-test").unwrap(),
+            "backup receipt proof".into(),
+            "This write asks for its file backup and expects to be told where it went.".into(),
+            RememberMemoryDetails {
+                source_path: Some(source_path.clone()),
+                threads: vec![],
+                continues: vec![],
+                supersedes: vec![],
+                backup: true,
+            },
+        )
+        .unwrap(),
+    )
+    .await
+    .expect("remember mutation must commit");
+    assert!(receipt.durable);
+
+    let backup = &receipt.backup;
+    eprintln!(
+        "backup receipt: {}",
+        serde_json::to_string(backup).expect("receipt serializes")
+    );
+
+    // The Insula point lands whatever the backup came to, and it says the
+    // same thing the receipt says.
+    flush_insula_emitter().await;
+    let point = sqlx::query(
+        "SELECT outcome_class, error_class, duration_us, phase FROM insula.log
+         WHERE operation = 'backup.post_write' AND component = 'akasha'
+         ORDER BY observed_at DESC LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .expect("insula.log must be queryable")
+    .expect("one backup.post_write point must land");
+    eprintln!(
+        "insula point: phase={} outcome={} error_class={:?} duration_us={:?}",
+        point.get::<String, _>("phase"),
+        point.get::<String, _>("outcome_class"),
+        point.get::<Option<String>, _>("error_class"),
+        point.get::<Option<i64>, _>("duration_us"),
+    );
+    assert_eq!(point.get::<String, _>("phase"), "point");
+    assert_eq!(
+        point.get::<String, _>("outcome_class"),
+        if backup.status == "ok" { "ok" } else { "error" }
+    );
+    assert_eq!(point.get::<Option<String>, _>("error_class"), backup.code);
+    assert!(point.get::<Option<i64>, _>("duration_us").is_some_and(|us| us > 0));
+
+    assert_eq!(
+        backup.status, "ok",
+        "backup must succeed: code={:?} detail={:?}",
+        backup.code, backup.detail
+    );
+    assert!(
+        !receipt.warnings.iter().any(|warning| warning.contains("backup")),
+        "an ok backup adds no warning: {:?}",
+        receipt.warnings
+    );
+    let dump_path = std::path::PathBuf::from(backup.dump_path.as_deref().expect("dump path"));
+    assert!(dump_path.is_file(), "dump must exist at {}", dump_path.display());
+    assert_eq!(dump_path.parent(), Some(backup_dir.as_path()));
+    let bytes = std::fs::read(&dump_path).expect("dump must be readable");
+    assert_eq!(&bytes[..5], b"PGDMP", "dump must be a custom-format archive");
+    assert_eq!(backup.bytes, Some(bytes.len() as u64));
+    assert_eq!(
+        backup.sha256.as_deref(),
+        Some(format!("{:x}", Sha256::digest(&bytes)).as_str()),
+        "receipt sha256 must be the file's sha256"
+    );
+    let tool = backup.tool.as_deref().expect("tool");
+    assert!(
+        ["pg_bin_dir:pg_dump", "wsl:pg_dump", "wsl-system32:pg_dump", "path:pg_dump"].contains(&tool),
+        "tool must name the probed route: {tool}"
+    );
+    assert!(backup.elapsed_ms.is_some());
+    let manifest_path = dump_path.with_file_name(
+        dump_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .replace(".dump", ".manifest.json"),
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).expect("manifest beside dump"))
+            .unwrap();
+    assert_eq!(manifest["sha256"].as_str(), backup.sha256.as_deref());
+    assert_eq!(manifest["pg_dump_tool"].as_str(), Some(tool));
+
+    sqlx::query("SET search_path TO public")
+        .execute(&pool)
+        .await
+        .expect("public schema must become active for cleanup");
+    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE"))
+        .execute(&pool)
+        .await
+        .expect("isolated schema cleanup must succeed");
+    let _ = std::fs::remove_dir_all(&backup_dir);
+    pool.close().await;
+}

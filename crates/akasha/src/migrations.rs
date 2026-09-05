@@ -151,6 +151,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0028_room_settings.sql",
         sql: include_str!("../../../substrate/migrations/0028_room_settings.sql"),
     },
+    Migration {
+        version: 29,
+        name: "0029_insula_log_lane_spans.sql",
+        sql: include_str!("../../../substrate/migrations/0029_insula_log_lane_spans.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

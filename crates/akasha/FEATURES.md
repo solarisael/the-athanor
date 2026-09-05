@@ -32,7 +32,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `derive_dates` reads dates out of the source path. A stitched path date moves to the next day.
 - `embed` posts the chunks to the embedding endpoint with the `passage: ` prefix. It checks the vector count and the dimension.
 - `normalize_strings` and `token_estimate` clean the inputs the writers store.
-- Every write calls `backup::run_post_write` when the request asks for it. A failed backup is a warning on the receipt, never a failed write.
+- Every write calls `backup::post_write_outcome` after its commit. The receipt carries a `backup` field: `skipped` when the request did not ask, `ok` with the dump path, sha256, bytes, elapsed time, and the `pg_dump` route that ran, or `failed` with a mechanical code and one line of detail. A failed backup adds one warning line and is never a failed write.
 
 ### recall/ — the retrieval door
 
@@ -183,9 +183,9 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `filter_extension_toc`, `is_preserved_extension_entry`, and `dump_toc` do that filtering. Reading the contents also proves the dump is not truncated.
 - `TempList` and `write_temp_list` hold the scratch restore list under an unpredictable name and always remove it.
 - `backup_health` and `backup_health_in` report the newest dump and its age against a limit.
-- `run_post_write` runs the dump the write paths request.
+- `run_post_write` runs the dump the write paths request and returns `hearth::BackupReceipt` or `hearth::BackupFailure`. Every outcome lands one Insula point under `backup.post_write` with the elapsed time and, on failure, the code as its error class. `post_write_outcome` folds the request's `backup` flag in.
 - `default_backup_dir` puts dumps under the state directory. There is no guessed directory.
-- `pg_command` and `use_wsl_pg` run the PostgreSQL tools through WSL when the operator asks for it.
+- `resolve_pg_tool` finds `pg_dump` and `pg_restore` by probing `--version` on each candidate in order: `PG_BIN_DIR`, then WSL (`wsl.exe` on `PATH`, then `%SystemRoot%\System32\wsl.exe`; Windows with `ATHANOR_PG_WSL=1` only), then `PATH`. The chosen route is the receipt's `tool` and the manifest's `pg_dump_tool`. When none answers the failure code is `pg_dump_not_found` and the detail lists every candidate with its reason.
 
 ### health.rs — the substrate verdict
 

@@ -273,6 +273,8 @@ export async function writeRustMemory({ room, title, body, threads, continues, s
   const transport = rustRememberTransport();
   if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
   try {
+    // The substrate's default backs a memory write up; the adapter does not
+    // switch it off. The receipt names the outcome either way.
     const value = await transport.request("remember", {
       room,
       kind: "memory",
@@ -281,7 +283,6 @@ export async function writeRustMemory({ room, title, body, threads, continues, s
       threads,
       continues,
       supersedes,
-      backup: false,
     }, {
       signal: signal || undefined,
       timeoutMs: WRITE_TIMEOUT_MS,

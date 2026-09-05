@@ -2,10 +2,11 @@ use crate::config::HostConfig;
 use crate::server::authorized;
 use akasha::insula_writer::{EmitterSpan, end_span, start_span};
 use akasha::{
-    INSULA_MAX_RETENTION_ROWS, INSULA_MAX_TRACE_ROWS, INSULA_MAX_UNVERIFIED_EXIT_ROWS,
-    INSULA_MAX_VITALS_ROWS, IngestBatch, InsulaError, ObservationPhase, OutcomeClass,
-    RetentionReceiptRow, TraceRow, TraceScope, TrustedBinding, UnverifiedExitRow, VitalsQuery,
-    VitalsRow, ingest_batch, query_retention, query_trace, query_unverified_exit, query_vitals,
+    INSULA_MAX_RETENTION_ROWS, INSULA_MAX_SPAN_ROWS, INSULA_MAX_TRACE_ROWS,
+    INSULA_MAX_UNVERIFIED_EXIT_ROWS, INSULA_MAX_VITALS_ROWS, IngestBatch, InsulaError,
+    ObservationPhase, OutcomeClass, RetentionReceiptRow, SpanRow, SpanWindow, SpansQuery, TraceRow,
+    TraceScope, TrustedBinding, UnverifiedExitRow, VitalsQuery, VitalsRow, ingest_batch,
+    query_retention, query_spans, query_trace, query_unverified_exit, query_vitals,
     validate_trusted_binding,
 };
 use axum::extract::rejection::JsonRejection;
@@ -27,6 +28,10 @@ pub(crate) const EVENTS_PATH: &str = "/athanor/v1/insula/events";
 pub(crate) const VITALS_PATH: &str = "/athanor/v1/insula/vitals";
 pub(crate) const TRACE_PATH: &str = "/athanor/v1/insula/trace";
 pub(crate) const RETENTION_PATH: &str = "/athanor/v1/insula/retention";
+// The Pulse drawer's door from a lane to a trace id. A lane is a rollup and
+// carries no trace identity, so without this read the trace route is
+// unreachable from the surface (BUGS.md, 2026-09-05).
+pub(crate) const SPANS_PATH: &str = "/athanor/v1/insula/spans";
 // The restart plane's operator window: which sessions armed an exit and never
 // came back. A read behind the same bearer as the rest of this family; it
 // commands no restart and claims no intent.
@@ -46,6 +51,8 @@ const DEFAULT_RETENTION_LIMIT: u32 = 20;
 const MAX_RETENTION_LIMIT: u32 = INSULA_MAX_RETENTION_ROWS - 1;
 const DEFAULT_UNVERIFIED_EXIT_LIMIT: u32 = 20;
 const MAX_UNVERIFIED_EXIT_LIMIT: u32 = INSULA_MAX_UNVERIFIED_EXIT_ROWS - 1;
+const DEFAULT_SPANS_LIMIT: u32 = 10;
+const MAX_SPANS_LIMIT: u32 = INSULA_MAX_SPAN_ROWS - 1;
 
 const HEALTH_UNVERIFIED: u8 = 0;
 const HEALTH_OK: u8 = 1;
@@ -144,6 +151,33 @@ struct TraceResponse<'a> {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct SpansRequest {
+    operation: String,
+    phase: Option<ObservationPhase>,
+    outcome_class: Option<OutcomeClass>,
+    window: SpanWindow,
+    #[serde(default = "default_spans_limit")]
+    limit: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SpansResponse<'a> {
+    schema_version: u16,
+    query_name: String,
+    query_version: i16,
+    house_id: &'a str,
+    room: &'a str,
+    operation: &'a str,
+    window: &'static str,
+    window_secs: i64,
+    limit: u32,
+    truncated: bool,
+    rows: Vec<SpanRow>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct RetentionRequest {
     #[serde(default = "default_retention_limit")]
     limit: u32,
@@ -198,6 +232,10 @@ const fn default_unverified_exit_limit() -> u32 {
     DEFAULT_UNVERIFIED_EXIT_LIMIT
 }
 
+const fn default_spans_limit() -> u32 {
+    DEFAULT_SPANS_LIMIT
+}
+
 impl InsulaHost {
     pub(crate) fn new(
         config: &HostConfig,
@@ -236,6 +274,7 @@ impl InsulaHost {
             .route(VITALS_PATH, post(read_vitals))
             .route(TRACE_PATH, post(read_trace))
             .route(RETENTION_PATH, post(read_retention))
+            .route(SPANS_PATH, post(read_spans))
             .route(UNVERIFIED_EXIT_PATH, post(read_unverified_exit))
             .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
             .route_layer(middleware::from_fn_with_state(auth, require_bearer))
@@ -305,6 +344,12 @@ async fn require_bearer(State(auth): State<AuthState>, request: Request, next: N
             "host",
             "host",
             "insula_retention",
+        ),
+        SPANS_PATH => start_span(
+            auth.observer_binding.as_ref(),
+            "host",
+            "host",
+            "insula_spans",
         ),
         UNVERIFIED_EXIT_PATH => start_span(
             auth.observer_binding.as_ref(),
@@ -477,6 +522,57 @@ async fn read_trace(
     )
 }
 
+async fn read_spans(
+    State(state): State<InsulaHost>,
+    payload: Result<Json<SpansRequest>, JsonRejection>,
+) -> Response {
+    let Json(request) = match payload {
+        Ok(payload) => payload,
+        Err(rejection) => return json_rejection(rejection),
+    };
+    if request.limit == 0 || request.limit > MAX_SPANS_LIMIT {
+        return error(StatusCode::UNPROCESSABLE_ENTITY, "invalid_request");
+    }
+    let Some(pool) = state.pool() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "insula_unavailable");
+    };
+
+    // Authority: House and room both come from this Host's trusted binding. The
+    // caller names a lane inside its own room and nothing wider. Letting the
+    // body carry a room would hand one bearer another room's span identities,
+    // and every one of those is a working key into `insula/trace`.
+    let requested_limit = request.limit;
+    let query = SpansQuery {
+        house_id: state.binding.house_id.clone(),
+        room: state.binding.room.clone(),
+        operation: request.operation,
+        phase: request.phase,
+        outcome_class: request.outcome_class,
+        window: request.window,
+        limit: requested_limit + 1,
+    };
+    substrate_response(
+        &state,
+        query_spans(pool, &query).await.map(|mut result| {
+            let truncated = result.rows.len() > requested_limit as usize;
+            result.rows.truncate(requested_limit as usize);
+            SpansResponse {
+                schema_version: API_SCHEMA_VERSION,
+                query_name: result.query_name,
+                query_version: result.query_version,
+                house_id: state.binding.house_id.as_str(),
+                room: state.binding.room.as_str(),
+                operation: query.operation.as_str(),
+                window: query.window.as_str(),
+                window_secs: result.window_secs,
+                limit: requested_limit,
+                truncated,
+                rows: result.rows,
+            }
+        }),
+    )
+}
+
 async fn read_retention(
     State(state): State<InsulaHost>,
     payload: Result<Json<RetentionRequest>, JsonRejection>,
@@ -603,9 +699,130 @@ fn error(status: StatusCode, code: &'static str) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::outcome_for_status;
-    use akasha::OutcomeClass;
+    use super::{
+        InsulaHost, MAX_SPANS_LIMIT, SPANS_PATH, TRACE_PATH, VITALS_PATH, outcome_for_status,
+    };
+    use crate::config::{HostConfig, KnockAutonomy};
+    use akasha::{OutcomeClass, TrustedBinding};
     use axum::http::StatusCode;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    const BEARER: &str = "spans-route-proof-token";
+
+    fn config() -> HostConfig {
+        HostConfig {
+            bind: "127.0.0.1:0".parse().expect("loopback bind"),
+            bearer_token: BEARER.to_owned(),
+            room_dir: PathBuf::from("."),
+            state_dir: PathBuf::from("."),
+            house_id: "solarisael".to_owned(),
+            room: "kodo".to_owned(),
+            spirit: "Kodo".to_owned(),
+            session: "service:kodo".to_owned(),
+            database_url: None,
+            nats_url: None,
+            knock_autonomy: KnockAutonomy::Off,
+        }
+    }
+
+    /// The bearer gate lives in middleware ahead of every handler, so the proof
+    /// speaks real HTTP to a real listener rather than calling the handler
+    /// directly. `pool` is None on purpose: an authenticated request would
+    /// answer 503 `insula_unavailable`, which is exactly how the test can tell
+    /// the gate refused *before* the handler rather than after it.
+    async fn ask(path: &str, authorization: Option<&str>) -> (StatusCode, String) {
+        let binding = Arc::new(TrustedBinding {
+            house_id: "solarisael".to_owned(),
+            room: "kodo".to_owned(),
+            spirit: "Kodo".to_owned(),
+            session_id: "service:kodo".to_owned(),
+        });
+        let insula = InsulaHost::new(&config(), None, binding).expect("bound Insula host");
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = listener.local_addr().expect("bound address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, insula.router())
+                .with_graceful_shutdown(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                })
+                .await
+                .ok();
+        });
+
+        let body = "{\"operation\":\"tool_call\",\"window\":\"1h\",\"limit\":5}";
+        let header = match authorization {
+            Some(token) => format!("Authorization: Bearer {token}\r\n"),
+            None => String::new(),
+        };
+        let request = format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\ncontent-type: application/json\r\n\
+             {header}content-length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let mut stream = TcpStream::connect(address).await.expect("connect");
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .expect("write request");
+        let mut answer = String::new();
+        stream
+            .read_to_string(&mut answer)
+            .await
+            .expect("read response");
+        server.abort();
+
+        let status = answer
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse::<u16>().ok())
+            .and_then(|code| StatusCode::from_u16(code).ok())
+            .unwrap_or_else(|| panic!("no status line in {answer}"));
+        (status, answer)
+    }
+
+    #[tokio::test]
+    async fn spans_route_refuses_an_absent_bearer_before_the_handler() {
+        let (status, body) = ask(SPANS_PATH, None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert!(body.contains("unauthenticated"), "{body}");
+        // Not the handler's own unavailable answer: the gate stopped it first.
+        assert!(!body.contains("insula_unavailable"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn spans_route_refuses_a_wrong_bearer() {
+        let (status, body) = ask(SPANS_PATH, Some("not-the-token")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert!(body.contains("unauthenticated"), "{body}");
+    }
+
+    /// The gate is the same one the proven routes sit behind, and the spans
+    /// route is mounted inside it rather than beside it.
+    #[tokio::test]
+    async fn spans_route_shares_the_bearer_gate_with_vitals_and_trace() {
+        for path in [VITALS_PATH, TRACE_PATH, SPANS_PATH] {
+            let (status, _) = ask(path, None).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+        }
+    }
+
+    /// With the bearer present the request reaches the handler, which proves the
+    /// route is really mounted. No pool, so the honest answer is 503.
+    #[tokio::test]
+    async fn spans_route_with_a_bearer_reaches_the_handler() {
+        let (status, body) = ask(SPANS_PATH, Some(BEARER)).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(body.contains("insula_unavailable"), "{body}");
+    }
+
+    #[test]
+    fn spans_limit_leaves_room_for_the_truncation_probe() {
+        assert_eq!(MAX_SPANS_LIMIT, 100);
+        assert!(MAX_SPANS_LIMIT + 1 <= akasha::INSULA_MAX_SPAN_ROWS);
+    }
 
     #[test]
     fn insula_http_observation_outcomes_follow_response_class() {

@@ -30,6 +30,10 @@ type LoaderOptions = {
   healthProbe?: (endpoint: string) => Promise<boolean>;
   startAthanor?: (launcher: string, args: readonly string[]) => void;
   sleep?: (milliseconds: number) => Promise<void>;
+  /** Host watch period; default HOST_WATCH_INTERVAL_MS. */
+  watchIntervalMs?: number;
+  /** Aborting stops the Host watch. */
+  signal?: AbortSignal;
 };
 type NativePointer = {
   version: string;
@@ -514,6 +518,7 @@ function parseClientProjection(value: unknown): ClientProjection {
 const HEALTH_ATTEMPTS = 50;
 const HEALTH_WAIT_MS = 100;
 const HEALTH_REQUEST_TIMEOUT_MS = 500;
+const HOST_WATCH_INTERVAL_MS = 30_000;
 
 function nativeLauncherArtifact(value: unknown): LauncherArtifact {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -592,28 +597,72 @@ function defaultSleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function ensureScopedHost(launcher: string, endpoint: string, options: LoaderOptions) {
+// Starts the launcher and waits for scoped health. Null when the Host answers;
+// otherwise the reason it does not. The caller decides how loudly to say so:
+// at session start the absence is one warning, inside the watch it is one
+// warning per outage.
+async function startScopedHost(
+  launcher: string,
+  endpoint: string,
+  options: LoaderOptions,
+): Promise<string | null> {
   const probe = options.healthProbe ?? defaultHealthProbe;
-  if (await probe(endpoint)) return;
-  let startFailure: string | null = null;
   try {
     (options.startAthanor ?? defaultStartAthanor)(launcher, []);
   } catch (error) {
-    startFailure = String(error);
+    return `could not be started: ${String(error)}`;
   }
-  if (startFailure === null) {
-    const sleep = options.sleep ?? defaultSleep;
-    for (let attempt = 0; attempt < HEALTH_ATTEMPTS; attempt += 1) {
-      await sleep(HEALTH_WAIT_MS);
-      if (await probe(endpoint)) return;
+  const sleep = options.sleep ?? defaultSleep;
+  for (let attempt = 0; attempt < HEALTH_ATTEMPTS; attempt += 1) {
+    await sleep(HEALTH_WAIT_MS);
+    if (await probe(endpoint)) return null;
+  }
+  return `did not recover scoped health at ${endpoint}`;
+}
+
+async function ensureScopedHost(
+  launcher: string,
+  endpoint: string,
+  options: LoaderOptions,
+): Promise<string | null> {
+  const probe = options.healthProbe ?? defaultHealthProbe;
+  if (await probe(endpoint)) return null;
+  return await startScopedHost(launcher, endpoint, options);
+}
+
+// Session start only ensures the Host once; a Host that dies later would stay
+// dead for every running session until some session starts. This watch keeps
+// ensuring it for the life of the OMP process. Cost: one loopback GET per
+// interval per session, plus the start sequence during an outage. The timer
+// is unref'd so it never holds the process open.
+function watchScopedHost(launcher: string, endpoint: string, options: LoaderOptions): void {
+  const probe = options.healthProbe ?? defaultHealthProbe;
+  const intervalMs = options.watchIntervalMs ?? HOST_WATCH_INTERVAL_MS;
+  let busy = false;
+  let lost = false;
+  const tick = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      if (await probe(endpoint)) {
+        if (lost) console.warn(`Athanor Host answers scoped health again at ${endpoint}.`);
+        lost = false;
+        return;
+      }
+      if (!lost) console.warn(`Athanor Host stopped answering scoped health at ${endpoint}; restarting it.`);
+      lost = true;
+      const reason = await startScopedHost(launcher, endpoint, options);
+      if (reason === null) {
+        lost = false;
+        console.warn(`Athanor Host restarted and answers scoped health at ${endpoint}.`);
+      }
+    } finally {
+      busy = false;
     }
-  }
-  // Host startup is advisory: the OMP adapter remains usable without it, but
-  // the reason it is absent must be visible.
-  const reason = startFailure === null
-    ? `did not recover scoped health at ${endpoint}`
-    : `could not be started: ${startFailure}`;
-  console.warn(`Athanor launcher ${launcher} ${reason}; OMP will continue without Host.`);
+  };
+  const interval = setInterval(() => { void tick(); }, intervalMs);
+  interval.unref();
+  options.signal?.addEventListener("abort", () => clearInterval(interval), { once: true });
 }
 
 function setUnlessConfigured(env: NodeJS.ProcessEnv, key: string, value: string) {
@@ -711,7 +760,12 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
 
 export default async function installedAthanor(pi: unknown, options: LoaderOptions = {}) {
   const modules = configureInstalledAthanor(options);
-  await ensureScopedHost(modules.launcher, modules.healthEndpoint, options);
+  const absent = await ensureScopedHost(modules.launcher, modules.healthEndpoint, options);
+  if (absent !== null) {
+    // Host startup is advisory: the OMP adapter remains usable without it, but
+    // the reason it is absent must be visible.
+    console.warn(`Athanor launcher ${modules.launcher} ${absent}; OMP will continue without Host.`);
+  }
   const [athanor, hygiene] = await Promise.all([import(modules.index), import(modules.hygiene)]);
   if (typeof athanor.default !== "function" || typeof hygiene.default !== "function") {
     throw new Error("installed Athanor extensions do not export OMP entrypoints");
@@ -723,4 +777,5 @@ export default async function installedAthanor(pi: unknown, options: LoaderOptio
     previousReleaseId: modules.previousReleaseId,
   });
   await hygiene.default(pi);
+  watchScopedHost(modules.launcher, modules.healthEndpoint, options);
 }

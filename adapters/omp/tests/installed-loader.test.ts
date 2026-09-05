@@ -520,6 +520,119 @@ test("fails open with one actionable warning when the scoped Host stays unhealth
   expect(runtime().__installedLoaderCalls).toEqual(["index", "hygiene"]);
 });
 
+async function until(condition: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("condition did not hold in time");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+test("restarts the scoped Host when it stops answering mid-session", async () => {
+  const tree = await makeInstalledTree();
+  const events: string[] = [];
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+  // Healthy at session start, dead on the first watch tick, alive again once
+  // the launcher has been started.
+  const answers = [true, false, true];
+  const watch = new AbortController();
+  resetRuntime();
+  try {
+    await installedAthanor(null, {
+      programRoot: tree.program,
+      userProfile: tree.profile,
+      env: tree.env,
+      healthProbe: async () => {
+        const answer = answers.length > 1 ? answers.shift()! : answers[0]!;
+        events.push(`probe:${answer}`);
+        return answer;
+      },
+      startAthanor: (launcher) => { events.push(`start:${launcher}`); },
+      sleep: async () => {},
+      watchIntervalMs: 5,
+      signal: watch.signal,
+    });
+    expect(events).toEqual(["probe:true"]);
+    await until(() => events.length >= 4);
+    // A settled watch probes again and finds the Host healthy; give it time
+    // to prove it says nothing more.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  } finally {
+    watch.abort();
+    console.warn = warn;
+  }
+
+  const endpoint = "http://127.0.0.1:8787/room/kintsu/health";
+  const launcher = path.join(tree.program, "bin", "athanor.exe");
+  expect(events.slice(0, 4)).toEqual(["probe:true", "probe:false", `start:${launcher}`, "probe:true"]);
+  expect(events.slice(4).every((event) => event === "probe:true")).toBe(true);
+  expect(warnings).toEqual([
+    `Athanor Host stopped answering scoped health at ${endpoint}; restarting it.`,
+    `Athanor Host restarted and answers scoped health at ${endpoint}.`,
+  ]);
+});
+
+test("keeps retrying a Host that stays down, warns once per outage, and reports recovery", async () => {
+  const tree = await makeInstalledTree();
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+  let sessionStarted = false;
+  let hostAlive = true;
+  let starts = 0;
+  const watch = new AbortController();
+  resetRuntime();
+  try {
+    await installedAthanor(null, {
+      programRoot: tree.program,
+      userProfile: tree.profile,
+      env: tree.env,
+      healthProbe: async () => hostAlive,
+      startAthanor: () => { starts += 1; },
+      sleep: async () => {},
+      watchIntervalMs: 5,
+      signal: watch.signal,
+    });
+    sessionStarted = true;
+    hostAlive = false;
+    await until(() => starts >= 3);
+    hostAlive = true;
+    await until(() => warnings.length >= 2);
+  } finally {
+    watch.abort();
+    console.warn = warn;
+  }
+
+  const endpoint = "http://127.0.0.1:8787/room/kintsu/health";
+  expect(sessionStarted).toBe(true);
+  expect(warnings).toEqual([
+    `Athanor Host stopped answering scoped health at ${endpoint}; restarting it.`,
+    `Athanor Host answers scoped health again at ${endpoint}.`,
+  ]);
+});
+
+test("aborting the loader signal stops the Host watch", async () => {
+  const tree = await makeInstalledTree();
+  let probes = 0;
+  const watch = new AbortController();
+  resetRuntime();
+  await installedAthanor(null, {
+    programRoot: tree.program,
+    userProfile: tree.profile,
+    env: tree.env,
+    healthProbe: async () => { probes += 1; return true; },
+    watchIntervalMs: 5,
+    signal: watch.signal,
+  });
+  await until(() => probes >= 3);
+  watch.abort();
+  const settled = probes;
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  expect(probes).toBe(settled);
+});
+
 test("refuses malformed format-2 client projections before probing or importing", async () => {
   const tree = await makeInstalledTree();
   const clientPath = path.join(tree.profile, ".omp", "agent", "athanor", "client.json");

@@ -165,6 +165,7 @@ impl Isolated {
             &self.pool,
             &self.cfg,
             RecallRequest::new(RoomKey::new(room)?, query.into(), 8, 0.4, 8, 0.3)?,
+            None,
         )
         .await?)
     }

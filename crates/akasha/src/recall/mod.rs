@@ -11,6 +11,8 @@ pub use semantic_vocabulary::refresh_semantic_vocabulary;
 use crate::bm25f;
 use crate::cluster::{cluster_resonance, cluster_staleness};
 use crate::config::{AppError, Config, EMBED_DIMENSION, EmbeddingMode, HTTP_CLIENT, QUERY_DATE_RE};
+use crate::insula::OutcomeClass;
+use crate::insula_writer::{EmitterSpan, end_span};
 use crate::settings::RoomSettings;
 use bm25f_candidates::load_bm25f_candidates_for_terms;
 use chrono::{NaiveDate, Utc};
@@ -126,10 +128,46 @@ pub(crate) fn candidate_terms(
     (matched, missing, coverage)
 }
 
+/// One phase of a recall, observed as a child of the request's `recall`
+/// span. An unfinished phase dropped by an early `?` exit ends as an error;
+/// the parent span carries the exact error class.
+struct Phase(Option<EmitterSpan>);
+
+impl Phase {
+    fn start(parent: Option<&EmitterSpan>, operation: &'static str) -> Self {
+        Self(parent.and_then(|span| span.child(operation)))
+    }
+
+    fn bytes_in(&mut self, bytes: usize) {
+        if let Some(span) = &mut self.0 {
+            span.set_bytes_in(bytes);
+        }
+    }
+
+    fn ok(mut self) {
+        end_span(self.0.take(), OutcomeClass::Ok, None);
+    }
+
+    fn degraded(mut self, class: &'static str) {
+        end_span(self.0.take(), OutcomeClass::Degraded, Some(class));
+    }
+}
+
+impl Drop for Phase {
+    fn drop(&mut self) {
+        end_span(
+            self.0.take(),
+            OutcomeClass::Error,
+            Some("recall.phase_aborted"),
+        );
+    }
+}
+
 pub async fn recall(
     pool: &PgPool,
     cfg: &Config,
     request: RecallRequest,
+    span: Option<&EmitterSpan>,
 ) -> Result<RecallResult, AppError> {
     let room = request.room().as_str();
     let query = request.query();
@@ -138,16 +176,20 @@ pub async fn recall(
     let content_top_k = request.content_top_k();
     let semantic_min_similarity = request.semantic_min_similarity();
     let content_min_similarity = request.content_min_similarity();
+    let phase = Phase::start(span, "recall.settings");
     let settings = RoomSettings::load(pool, room).await?;
+    phase.ok();
     let rooms = vec![room.to_owned(), "house".to_owned()];
     let mut warnings = Vec::new();
     // An explicit memory reference is the cheapest cross-reference the House
     // has, so it is answered by primary key before any ranked lane runs; the
     // reference tokens then leave the ranked vocabulary so a resolved ID can
     // never be reported as a missing term.
+    let phase = Phase::start(span, "recall.reference");
     let references = memory_references(query);
     let exact_candidates =
         resolve_memory_references(pool, &rooms, &references, &mut warnings).await?;
+    phase.ok();
     let query_dates = query_dates(query);
     let query_terms = references.strip_terms(query_terms(query));
     let content_patterns = query_terms
@@ -164,16 +206,22 @@ pub async fn recall(
             None
         }
         (EmbeddingMode::Required, Some(url)) => {
+            let mut phase = Phase::start(span, "recall.embed");
+            phase.bytes_in(query.len());
             match embed_query(&HTTP_CLIENT, url, &cfg.embed_model, query, EMBED_DIMENSION).await {
-                Ok(vector) => Some(format!(
-                    "[{}]",
-                    vector
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(",")
-                )),
+                Ok(vector) => {
+                    phase.ok();
+                    Some(format!(
+                        "[{}]",
+                        vector
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    ))
+                }
                 Err(e) => {
+                    phase.degraded("app_error.embedding");
                     warnings.push(format!("semantic lane absent: {e}"));
                     None
                 }
@@ -185,6 +233,7 @@ pub async fn recall(
         }
     };
     let decay_now = Utc::now();
+    let phase = Phase::start(span, "recall.lexical");
     let bm25f_candidates = load_bm25f_candidates_for_terms(
         pool,
         &rooms,
@@ -195,18 +244,27 @@ pub async fn recall(
         &mut warnings,
     )
     .await?;
+    phase.ok();
     let semantic_vocabulary_concepts = match vector_text.as_deref() {
-        Some(vector) => match load_semantic_vocabulary_concepts(pool, &rooms, vector, cfg).await {
-            Ok(concepts) => concepts,
-            Err(error) => {
-                // A missing/unmigrated/stale vocabulary must never impair exact recall.
-                warnings.push(format!("semantic lexical bridge absent: {error}"));
-                Vec::new()
+        Some(vector) => {
+            let phase = Phase::start(span, "recall.vocabulary");
+            match load_semantic_vocabulary_concepts(pool, &rooms, vector, cfg).await {
+                Ok(concepts) => {
+                    phase.ok();
+                    concepts
+                }
+                Err(error) => {
+                    // A missing/unmigrated/stale vocabulary must never impair exact recall.
+                    phase.degraded("recall.vocabulary_absent");
+                    warnings.push(format!("semantic lexical bridge absent: {error}"));
+                    Vec::new()
+                }
             }
-        },
+        }
         None => Vec::new(),
     };
     let semantic_vocabulary_terms = semantic_vocabulary_terms(&semantic_vocabulary_concepts);
+    let phase = Phase::start(span, "recall.semantic_lexical");
     let semantic_lexical_candidates = load_bm25f_candidates_for_terms(
         pool,
         &rooms,
@@ -217,10 +275,12 @@ pub async fn recall(
         &mut warnings,
     )
     .await?;
+    phase.ok();
     let semantic_fetch_limit = (!temporal_decay).then_some(i64::from(semantic_top_k));
     let content_fetch_limit = (!temporal_decay).then_some(i64::from(content_top_k));
     let mut semantic_chunks = Vec::new();
     if let Some(vector_text) = vector_text.clone() {
+        let phase = Phase::start(span, "recall.semantic");
         let semantic_rows = sqlx::query(
             r#"SELECT memory_id,source_path,title,heading_path,body,char_start,char_end,chunk_index,meta,sim
                FROM (
@@ -304,7 +364,9 @@ pub async fn recall(
                 ),
             });
         }
+        phase.ok();
     }
+    let phase = Phase::start(span, "recall.content");
     let content_rows = sqlx::query(
         "SELECT m.id AS memory_id,m.source_path,coalesce(m.title,'') AS title,
                 coalesce(c.heading_path,'') AS heading_path,c.body,c.char_start,c.char_end,
@@ -328,6 +390,7 @@ pub async fn recall(
     .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
+    phase.ok();
     let mut content_chunks = Vec::new();
     for row in content_rows {
         let sim: f64 = row.try_get("sim")?;
@@ -360,6 +423,7 @@ pub async fn recall(
     content_chunks.truncate(content_top_k as usize);
     let mut date_matches = Vec::new();
     if !query_dates.is_empty() {
+        let phase = Phase::start(span, "recall.dates");
         let rows = sqlx::query(
             "SELECT source_path,title,body,date,dates
              FROM memories
@@ -387,7 +451,9 @@ pub async fn recall(
             );
             date_matches.push(serde_json::json!({"source_path":source_path,"title":title,"body_excerpt":bounded_excerpt(&body),"excerpt":bounded_excerpt(&body),"date":row.try_get::<Option<NaiveDate>,_>("date")?.map(|d|d.to_string()),"dates":dates.into_iter().map(|d|d.to_string()).collect::<Vec<_>>(),"score":1.0,"reason":"date match","matched_terms":matched_terms,"missing_terms":missing_terms,"term_coverage":coverage}));
         }
+        phase.ok();
     }
+    let phase = Phase::start(span, "recall.threads");
     let thread_rows = sqlx::query(
         "SELECT DISTINCT ON (m.id) m.id AS memory_id,m.source_path,
                 coalesce(m.title,'') AS title,t.thread_key,left(m.body,1200) AS body,
@@ -412,6 +478,8 @@ pub async fn recall(
     .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
+    phase.ok();
+    let phase = Phase::start(span, "recall.fuse");
     let mut fused: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     for (rank, c) in semantic_chunks.iter().enumerate() {
         let key = format!(
@@ -630,18 +698,21 @@ pub async fn recall(
     });
     retrieval_candidates.truncate(semantic_top_k.max(content_top_k) as usize);
     retrieval_candidates.splice(0..0, exact_candidates);
+    phase.ok();
     let memory_ids = retrieval_candidates
         .iter()
         .filter_map(|candidate| candidate["memory_id"].as_i64())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
+    let phase = Phase::start(span, "recall.neighbors");
     let mut neighbors = load_thread_neighbors(pool, &memory_ids).await?;
     for candidate in &mut retrieval_candidates {
         let memory_id = candidate["memory_id"].as_i64().unwrap_or_default();
         candidate["thread_neighbors"] =
             serde_json::Value::Array(neighbors.remove(&memory_id).unwrap_or_default());
     }
+    phase.ok();
     // Canon lookup matches three ways, ranked. Tokens alone can never match a
     // multi-word name or a hyphenated alias, which is how 42 of 109 rows went
     // dark; widening to ILIKE/tsvector then lets fuzzy hits evict the row the
@@ -650,6 +721,7 @@ pub async fn recall(
     // leftover LIMIT slots. An exact row is authority the caller named, so it
     // carries its complete active assertion; only the similarity tier is
     // excerpted, and that excerpt says so.
+    let phase = Phase::start(span, "recall.canon");
     let query_phrase = query.trim().to_lowercase();
     let canon_rows = sqlx::query(
         r#"WITH tiered AS (
@@ -726,6 +798,8 @@ pub async fn recall(
         }));
         named_entities.push(name);
     }
+    phase.ok();
+    let phase = Phase::start(span, "recall.taxonomy");
     let memory_types: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT type
          FROM memories
@@ -757,6 +831,8 @@ pub async fn recall(
     .fetch_all(pool)
     .await?;
     let taxonomy = serde_json::json!({"rooms":rooms,"memoryTypes":memory_types,"threadKeys":thread_keys,"namedEntities":named_entities});
+    phase.ok();
+    let phase = Phase::start(span, "recall.cluster");
     let cluster_staleness = cluster_staleness(pool, None)
         .await
         .ok()
@@ -766,6 +842,11 @@ pub async fn recall(
     } else {
         None
     };
+    if cluster_staleness.is_some() && (vector_text.is_none() || cluster_resonance.is_some()) {
+        phase.ok();
+    } else {
+        phase.degraded("recall.cluster_absent");
+    }
     Ok(RecallResult {
         ok: true,
         query: query.to_owned(),

@@ -172,6 +172,7 @@ async fn isolated_database_guard() {
             0.3,
         )
         .unwrap(),
+        None,
     )
     .await
     .expect("lexical recall must succeed with embeddings disabled");
@@ -272,6 +273,7 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
             0.3,
         )
         .unwrap(),
+        None,
     )
     .await
     .expect("recall must surface the explicit continuation");
@@ -495,7 +497,7 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                 };
                 let params = RecallRequest::new(RoomKey::new(room)?, body.into(), 1, 0.0, 8, 0.0)?
                     .with_temporal_decay(true);
-                let decayed = recall(&pool, &cfg, params).await?;
+                let decayed = recall(&pool, &cfg, params, None).await?;
                 let decayed_paths = decayed
                     .retrieval_candidates
                     .iter()
@@ -545,6 +547,7 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     &cfg,
                     RecallRequest::new(RoomKey::new(room)?, body.into(), 1, 0.0, 2, 0.0)?
                         .with_temporal_decay(true),
+                        None,
                 )
                 .await?;
                 let cutoff_paths = cutoff
@@ -571,6 +574,7 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     &pool,
                     &cfg,
                     RecallRequest::new(RoomKey::new(room)?, body.into(), 1, 0.0, 8, 0.0)?,
+                    None,
                 )
                 .await?;
                 let bypassed_paths = bypassed

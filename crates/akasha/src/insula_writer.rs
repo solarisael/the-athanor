@@ -68,7 +68,59 @@ pub struct EmitterSpan {
     operation: &'static str,
     trace_id: Uuid,
     span_id: Uuid,
+    parent_span_id: Option<Uuid>,
+    bytes_in: i64,
     started_at: Instant,
+}
+
+impl EmitterSpan {
+    /// A child phase of this span: same trace, binding, component, and
+    /// layer; its own span id; this span as parent. `None` when the name is
+    /// not mechanical or the emitter has stopped accepting.
+    pub fn child(&self, operation: &'static str) -> Option<EmitterSpan> {
+        if !mechanical_name(operation) || !self.state.accepting.load(Ordering::Acquire) {
+            return None;
+        }
+        let started_at = Instant::now();
+        let span_id = Uuid::new_v4();
+        let event = observation(
+            &self.state,
+            self.trace_id,
+            span_id,
+            self.component,
+            self.layer,
+            operation,
+            ObservationPhase::Start,
+            Some(self.span_id),
+            None,
+            OutcomeClass::Unknown,
+            None,
+            None,
+            0,
+            0,
+        );
+        self.state.enqueue(QueuedObservation {
+            binding: self.binding.clone(),
+            event,
+        });
+        Some(EmitterSpan {
+            state: Arc::clone(&self.state),
+            binding: self.binding.clone(),
+            component: self.component,
+            layer: self.layer,
+            operation,
+            trace_id: self.trace_id,
+            span_id,
+            parent_span_id: Some(self.span_id),
+            bytes_in: 0,
+            started_at,
+        })
+    }
+
+    /// Bytes handed to the observed call; carried on the End event.
+    pub fn set_bytes_in(&mut self, bytes: usize) {
+        self.bytes_in = i64::try_from(bytes).unwrap_or(i64::MAX);
+    }
 }
 
 pub fn system_binding() -> TrustedBinding {
@@ -135,9 +187,11 @@ pub fn start_span(
         operation,
         ObservationPhase::Start,
         None,
+        None,
         OutcomeClass::Unknown,
         None,
         None,
+        0,
         0,
     );
     emitter.state.enqueue(QueuedObservation {
@@ -152,6 +206,8 @@ pub fn start_span(
         operation,
         trace_id,
         span_id,
+        parent_span_id: None,
+        bytes_in: 0,
         started_at,
     })
 }
@@ -173,10 +229,12 @@ pub fn end_span(span: Option<EmitterSpan>, outcome: OutcomeClass, error_class: O
         span.layer,
         span.operation,
         ObservationPhase::End,
+        span.parent_span_id,
         Some(duration_us),
         outcome,
         error_class,
         None,
+        span.bytes_in,
         0,
     );
     span.state.enqueue(QueuedObservation {
@@ -216,9 +274,11 @@ pub fn record_point(
         operation,
         ObservationPhase::Point,
         None,
+        None,
         outcome,
         error_class,
         receipt,
+        0,
         0,
     );
     emitter.state.enqueue(QueuedObservation {
@@ -279,10 +339,12 @@ fn observation(
     layer: &'static str,
     operation: &'static str,
     phase: ObservationPhase,
+    parent_span_id: Option<Uuid>,
     duration_us: Option<i64>,
     outcome_class: OutcomeClass,
     error_class: Option<&str>,
     receipt: Option<(&str, &str)>,
+    bytes_in: i64,
     drop_count: i64,
 ) -> ObservationEvent {
     let (receipt_kind, receipt_id) = match receipt {
@@ -293,7 +355,7 @@ fn observation(
         event_id: Uuid::new_v4().to_string(),
         span_id: span_id.to_string(),
         trace_id: trace_id.to_string(),
-        parent_span_id: None,
+        parent_span_id: parent_span_id.map(|id| id.to_string()),
         writer_id: state.writer_id.to_string(),
         writer_sequence: state.next_sequence(),
         component: component.into(),
@@ -306,7 +368,7 @@ fn observation(
         error_class: error_class
             .filter(|value| mechanical_name(value))
             .map(str::to_owned),
-        bytes_in: 0,
+        bytes_in,
         bytes_out: 0,
         tokens_in: 0,
         tokens_out: 0,
@@ -338,9 +400,11 @@ fn drop_observation(state: &WriterState, drop_count: i64) -> QueuedObservation {
             "insula_writer",
             ObservationPhase::Drop,
             None,
+            None,
             OutcomeClass::Degraded,
             None,
             None,
+            0,
             drop_count,
         ),
     }
@@ -466,9 +530,11 @@ mod tests {
                 "test",
                 ObservationPhase::Point,
                 None,
+                None,
                 OutcomeClass::Ok,
                 None,
                 None,
+                0,
                 0,
             );
             state.enqueue(QueuedObservation {

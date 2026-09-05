@@ -1,3 +1,4 @@
+use crate::insula::OutcomeClass;
 use crate::settings::RoomSettings;
 use hearth::conversation::source_ledger_directory_path;
 use protocol::{
@@ -400,6 +401,31 @@ fn config_reason(message: &str) -> &'static str {
 }
 
 impl AppError {
+    /// The Insula error class of this error: a mechanical name, no state.
+    pub fn insula_class(&self) -> &'static str {
+        match self {
+            Self::Invalid(_) => "app_error.invalid",
+            Self::Refusal { .. } => "app_error.refusal",
+            Self::Config(_) => "app_error.config",
+            Self::Database(_) => "app_error.database",
+            Self::DatabaseConnect(_) => "app_error.database_connect",
+            Self::DatabaseSchema(_) => "app_error.database_schema",
+            Self::Embedding(_) => "app_error.embedding",
+            Self::Protocol(_) => "app_error.protocol",
+            Self::Io(_) => "app_error.io",
+        }
+    }
+
+    /// `Invalid` and `Refusal` are the House refusing a request, not the
+    /// substrate failing at one: the same class of event whether request
+    /// validation or a service raises it.
+    pub fn insula_outcome(&self) -> OutcomeClass {
+        match self {
+            Self::Invalid(_) | Self::Refusal { .. } => OutcomeClass::Refused,
+            _ => OutcomeClass::Error,
+        }
+    }
+
     pub fn protocol_error_body(&self, operation: &str) -> ProtocolErrorBody {
         ProtocolErrorBody::application(self.code(), self.safe_message())
             .retryable(self.retryable())

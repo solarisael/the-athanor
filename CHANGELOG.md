@@ -75,6 +75,12 @@ the exact implementation record.
   `relaunching` intent belongs to a live keeper and is never swept.
 - `omp-keeper` exits 88 when a child armed an exit that no relaunch served.
   It exited 0 before, so a lost session looked like success to the shell.
+- Every recall phase is now an Insula child span of the request's `recall`
+  span (`recall.settings`, `reference`, `embed`, `lexical`, `vocabulary`,
+  `semantic_lexical`, `semantic`, `content`, `dates`, `threads`, `fuse`,
+  `neighbors`, `canon`, `taxonomy`, `cluster`), each ending ok, degraded, or
+  error with a duration. `recall.embed` carries the query byte count. The
+  emitter gains `EmitterSpan::child` and `parent_span_id`.
 - `athanor.exe` now runs as the independent multi-room Host and local manager
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified

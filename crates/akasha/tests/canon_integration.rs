@@ -246,6 +246,7 @@ async fn canon_write_correction_history_and_active_recall_are_postgres_authorita
             8,
             0.3,
         )?,
+        None,
     )
     .await?;
     assert!(
@@ -268,6 +269,7 @@ async fn canon_write_correction_history_and_active_recall_are_postgres_authorita
             8,
             0.3,
         )?,
+        None,
     )
     .await?;
     assert!(

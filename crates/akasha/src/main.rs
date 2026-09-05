@@ -327,20 +327,6 @@ fn protocol_error_class(error: &ProtocolError) -> &'static str {
     }
 }
 
-fn app_error_class(error: &AppError) -> &'static str {
-    match error {
-        AppError::Invalid(_) => "app_error.invalid",
-        AppError::Refusal { .. } => "app_error.refusal",
-        AppError::Config(_) => "app_error.config",
-        AppError::Database(_) => "app_error.database",
-        AppError::DatabaseConnect(_) => "app_error.database_connect",
-        AppError::DatabaseSchema(_) => "app_error.database_schema",
-        AppError::Embedding(_) => "app_error.embedding",
-        AppError::Protocol(_) => "app_error.protocol",
-        AppError::Io(_) => "app_error.io",
-    }
-}
-
 fn backup_error_class(error: &BackupError) -> &'static str {
     match error {
         BackupError::Config(_) => "backup_error.config",
@@ -348,16 +334,6 @@ fn backup_error_class(error: &BackupError) -> &'static str {
         BackupError::Io(_) => "backup_error.io",
         BackupError::Command(_) => "backup_error.command",
         BackupError::Manifest(_) => "backup_error.manifest",
-    }
-}
-
-/// `Invalid` and `Refusal` are the House refusing a request, not the substrate
-/// failing at one: the same class of event whether request validation or a
-/// service raises it.
-fn app_error_outcome(error: &AppError) -> OutcomeClass {
-    match error {
-        AppError::Invalid(_) | AppError::Refusal { .. } => OutcomeClass::Refused,
-        _ => OutcomeClass::Error,
     }
 }
 
@@ -509,8 +485,8 @@ fn protocol_error(id: String, error: ProtocolError) -> Dispatched {
 
 fn app_error(id: String, operation: &str, error: AppError) -> Dispatched {
     Dispatched {
-        outcome: app_error_outcome(&error),
-        error_class: Some(app_error_class(&error)),
+        outcome: error.insula_outcome(),
+        error_class: Some(error.insula_class()),
         json: error_json(id, error.protocol_error_body(operation)),
     }
 }
@@ -792,7 +768,7 @@ fn spawn_retention_service() {
                 Ok(config) => config,
                 Err(error) => {
                     tracing::warn!(
-                        error_class = app_error_class(&error),
+                        error_class = error.insula_class(),
                         "retention_sweep_unavailable"
                     );
                     continue;
@@ -802,7 +778,7 @@ fn spawn_retention_service() {
                 Ok(pool) => pool,
                 Err(error) => {
                     tracing::warn!(
-                        error_class = app_error_class(&error),
+                        error_class = error.insula_class(),
                         "retention_sweep_unavailable"
                     );
                     continue;
@@ -1108,7 +1084,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                     }
                                     ProtocolRequest::Recall(request) => {
-                                        match recall(pool, config, request).await {
+                                        match recall(pool, config, request, span.as_ref()).await {
                                             Ok(result) => success_json(id, result)?,
                                             Err(error) => app_error(id, operation, error),
                                         }
@@ -1753,7 +1729,7 @@ mod tests {
             AppError::Protocol(body.into()),
             AppError::Io(std::io::Error::other(body)),
         ] {
-            let class = app_error_class(&error);
+            let class = error.insula_class();
             assert!(is_mechanical_name(class), "{class} is not mechanical");
             assert!(!class.contains("secret"), "{class} leaked a message");
         }
@@ -1782,22 +1758,23 @@ mod tests {
     #[test]
     fn refusals_and_faults_are_separate_outcome_classes() {
         assert_eq!(
-            app_error_outcome(&AppError::Invalid("bad field".into())),
+            AppError::Invalid("bad field".into()).insula_outcome(),
             OutcomeClass::Refused
         );
         assert_eq!(
-            app_error_outcome(&AppError::Refusal {
+            AppError::Refusal {
                 code: "rule",
                 message: "static refusal"
-            }),
+            }
+            .insula_outcome(),
             OutcomeClass::Refused
         );
         assert_eq!(
-            app_error_outcome(&AppError::Database(sqlx::Error::PoolClosed)),
+            AppError::Database(sqlx::Error::PoolClosed).insula_outcome(),
             OutcomeClass::Error
         );
         assert_eq!(
-            app_error_outcome(&AppError::Config("missing".into())),
+            AppError::Config("missing".into()).insula_outcome(),
             OutcomeClass::Error
         );
     }

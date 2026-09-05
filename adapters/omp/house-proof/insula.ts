@@ -173,6 +173,29 @@ export function insulaErrorClass(error: unknown): string {
   return mechanicalName(mechanical) ?? "error";
 }
 
+/**
+ * The Insula operation name for one harness tool call. `room_state` becomes
+ * `tool.room_state`; a name Insula cannot hold becomes `tool.unknown`. The
+ * prefix keeps every tool in one lane family so vitals can count the family
+ * while each organ still owns its own row.
+ */
+export function insulaToolOperation(toolName: unknown): string {
+  const mechanical = String(toolName ?? "")
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9_.:-]+/g, "_")
+    .replace(/^[^a-z0-9]+/, "")
+    .slice(0, 59);
+  return mechanicalName(mechanical) ? `tool.${mechanical}` : "tool.unknown";
+}
+
+/** True for any tool-call lane, old (`tool_call`) or named (`tool.<name>`). */
+export function isInsulaToolOperation(operation: unknown): boolean {
+  const candidate = String(operation ?? "");
+  return candidate === "tool_call" || candidate.startsWith("tool.");
+}
+
 function boundedDuration(value: number | null | undefined): number | null {
   if (value == null || !Number.isFinite(value)) return null;
   return Math.min(MAX_DURATION_US, Math.max(0, Math.round(value)));

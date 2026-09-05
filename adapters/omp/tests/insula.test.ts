@@ -5,6 +5,8 @@ import {
   INSULA_EVENTS_PATH,
   InsulaWriter,
   insulaErrorClass,
+  insulaToolOperation,
+  isInsulaToolOperation,
   noteInsulaProviderRequestId,
   type InsulaObservation,
   type InsulaTransport,
@@ -682,7 +684,9 @@ describe("Insula Vitals cockpit", () => {
         durationUsMax: null,
         sourceLastObservedAt: "2026-08-20T12:30:09.000Z",
       }),
-      vitalsRow({ operation: "tool_call", eventCount: 7, durationUsSum: 70_000, durationUsMax: 20_000 }),
+      vitalsRow({ operation: "tool_call", eventCount: 4, durationUsSum: 40_000, durationUsMax: 20_000 }),
+      vitalsRow({ operation: "tool.room_state", eventCount: 2, durationUsSum: 20_000, durationUsMax: 15_000 }),
+      vitalsRow({ operation: "tool.house_dispatch", eventCount: 1, durationUsSum: 10_000, durationUsMax: 10_000 }),
       vitalsRow({
         operation: "insula_writer",
         phase: "drop",
@@ -738,5 +742,32 @@ describe("Insula Vitals cockpit", () => {
       "window 1h · Host Vitals unavailable (host_unavailable)",
       "no counts shown: this is absence, not zero",
     ]);
+  });
+});
+
+describe("Insula tool lanes", () => {
+  test("every harness tool lands under its own mechanical name", () => {
+    expect(insulaToolOperation("room_state")).toBe("tool.room_state");
+    expect(insulaToolOperation("house_dispatch")).toBe("tool.house_dispatch");
+    expect(insulaToolOperation("mcp__obscura_browser_click")).toBe("tool.mcp__obscura_browser_click");
+    expect(insulaToolOperation("Read File")).toBe("tool.read_file");
+    expect(insulaToolOperation("askUser")).toBe("tool.ask_user");
+  });
+
+  test("a name Insula cannot hold becomes tool.unknown, never a refused row", () => {
+    expect(insulaToolOperation("")).toBe("tool.unknown");
+    expect(insulaToolOperation(undefined)).toBe("tool.unknown");
+    expect(insulaToolOperation("___")).toBe("tool.unknown");
+    const long = insulaToolOperation("x".repeat(200));
+    expect(long.length).toBeLessThanOrEqual(64);
+    expect(long).toMatch(/^tool\.x+$/);
+  });
+
+  test("the family predicate counts old and named lanes and nothing else", () => {
+    expect(isInsulaToolOperation("tool_call")).toBe(true);
+    expect(isInsulaToolOperation("tool.recall")).toBe(true);
+    expect(isInsulaToolOperation("tool_result")).toBe(false);
+    expect(isInsulaToolOperation("provider_request")).toBe(false);
+    expect(isInsulaToolOperation(null)).toBe(false);
   });
 });

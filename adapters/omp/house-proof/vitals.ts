@@ -2,7 +2,7 @@
 // bounded request carries no caller-supplied identity.
 
 import { HostUnavailable, hostHttpEndpoint } from "./host.ts";
-import { insulaErrorClass } from "./insula.ts";
+import { insulaErrorClass, isInsulaToolOperation } from "./insula.ts";
 import { roomContext } from "./room.ts";
 
 export const INSULA_VITALS_PATH = "/athanor/v1/insula/vitals";
@@ -252,7 +252,7 @@ export function summarizeInsulaVitals(
       tokensOut += row.tokensOutSum;
       continue;
     }
-    if (row.operation === "tool_call" && row.phase === "end") toolCalls += row.eventCount;
+    if (isInsulaToolOperation(row.operation) && row.phase === "end") toolCalls += row.eventCount;
   }
 
   return {

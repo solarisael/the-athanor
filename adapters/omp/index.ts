@@ -101,6 +101,7 @@ import {
   closeInsulaWriter,
   endInsulaSpan,
   insulaErrorClass,
+  insulaToolOperation,
   noteInsulaProviderRequestId,
   recordInsulaPoint,
   startInsulaSpan,
@@ -692,7 +693,7 @@ export default function solarisaelHouseProof(pi, release) {
       const request = insulaRequestSpans.get(insulaRequestKey(room, session));
       const span = startInsulaSpan({
         room,
-        operation: "tool_call",
+        operation: insulaToolOperation(event?.toolName),
         toolCallId,
         traceId: request?.traceId ?? null,
         parentSpanId: request?.spanId ?? null,

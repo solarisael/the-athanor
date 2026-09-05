@@ -494,6 +494,8 @@ try {
   $DoctorCalls = @($DeployCalls | Where-Object { $_.Extent.Text -match '"doctor"' })
   Assert-True ($WorkspaceTests.Count -eq 1) "the deploy driver must run the whole Cargo workspace test suite exactly once"
   Assert-True ($AdapterTests.Count -eq 1) "the deploy driver must run the OMP adapter tests exactly once, through the adapter's own driver"
+  $AdapterInstalls = @($DeployCalls | Where-Object { $_.Extent.Text -match 'adapters/omp/deploy-local\.ps1.*"-SkipTests"' })
+  Assert-True ($AdapterInstalls.Count -eq 1) "the deploy driver must install the OMP adapter component exactly once, through the adapter's own driver, without rerunning its tests"
   Assert-True ($PayloadBuilds.Count -eq 1) "the deploy driver must build exactly one native release payload"
   Assert-True ($PayloadBuilds[0].Extent.Text -match '"-Version",\s*\$Release,\s*"-OutDir",\s*\$Out') "the payload build must receive the release identity and the deploy output directory"
   Assert-True ($Installs.Count -eq 1) "the deploy driver must install exactly once, through the staged manager's update command"
@@ -506,7 +508,8 @@ try {
   $DoctorAt = $DeploySource.IndexOf('"doctor"', [StringComparison]::Ordinal)
   $PointerAt = $DeploySource.IndexOf('current.json names', [StringComparison]::Ordinal)
   $HealthAt = $DeploySource.IndexOf('Full-mode health proof', [StringComparison]::Ordinal)
-  Assert-True ($TestsAt -ge 0 -and $TestsAt -lt $PayloadAt -and $PayloadAt -lt $InstallAt -and $InstallAt -lt $DoctorAt -and $DoctorAt -lt $PointerAt -and $PointerAt -lt $HealthAt) "the driver must order tests, payload, install, Doctor, pointer check, then Full-mode health"
+  $AdapterInstallAt = $DeploySource.IndexOf('"-SkipTests"', [StringComparison]::Ordinal)
+  Assert-True ($TestsAt -ge 0 -and $TestsAt -lt $PayloadAt -and $PayloadAt -lt $InstallAt -and $InstallAt -lt $AdapterInstallAt -and $AdapterInstallAt -lt $DoctorAt -and $DoctorAt -lt $PointerAt -and $PointerAt -lt $HealthAt) "the driver must order tests, payload, native install, adapter install, Doctor, pointer check, then Full-mode health"
   $ServicePreflight = $DeploySource.IndexOf('$Service = Get-Service', [StringComparison]::Ordinal)
   Assert-True ($ServicePreflight -ge 0 -and $ServicePreflight -lt $TestsAt) "service state must be checked before any test or build work"
   Assert-True ($DeploySource -match '(?s)-notin\s+@\("Running",\s*"Stopped"\).*?recover it to Running or Stopped') "transitional service states must refuse with a recovery instruction"

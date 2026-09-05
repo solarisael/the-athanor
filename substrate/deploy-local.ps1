@@ -104,6 +104,13 @@ Invoke-Checked -Label "install release $Release" -FilePath $StagedManager -Argum
   "update", "--staging", $Payload, "--manifest", $Manifest
 )
 
+# --- the adapter component belongs to the same release: without this step
+# a native deploy leaves the installed TypeScript behind, and every adapter
+# cut waits for somebody to remember the other driver. Its tests ran above.
+Invoke-Checked -Label "install OMP adapter component" -FilePath "pwsh" -ArgumentList @(
+  "-NoProfile", "-File", (Join-Path $Root "adapters/omp/deploy-local.ps1"), "-SkipTests"
+)
+
 # --- proof on the installed tree ---
 Invoke-Checked -Label "native release manifest proof" -FilePath $InstalledManager -ArgumentList @("doctor")
 $Current = Get-Content (Join-Path $ProgramRoot "current.json") -Raw | ConvertFrom-Json

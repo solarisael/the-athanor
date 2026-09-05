@@ -1,7 +1,9 @@
 param(
   [string]$ProgramRoot = "$env:ProgramFiles\Solarisael\Athanor",
-  [switch]$TestsOnly
+  [switch]$TestsOnly,
+  [switch]$SkipTests
 )
+if ($TestsOnly -and $SkipTests) { throw "TestsOnly and SkipTests exclude each other" }
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -29,7 +31,6 @@ if (-not (Test-Path -LiteralPath $Manager -PathType Leaf)) {
   throw "The installed Athanor manager is missing: $Manager"
 }
 
-Write-Host "==> OMP adapter tests"
 $GuardedEnvironment = @(
   "ATHANOR_SUBSTRATE_EXE", "ATHANOR_SUBSTRATE_ROOT", "ATHANOR_STATE_DIR", "ATHANOR_AUTO",
   "ATHANOR_GIGA_ENABLED", "ATHANOR_HIPPOCAMPUS_ENABLED", "ATHANOR_HIPPOCAMPUS_OLLAMA_ENDPOINT",
@@ -43,22 +44,25 @@ $GuardedEnvironment += @(
   [Environment]::GetEnvironmentVariables("Process").Keys |
     Where-Object { $_ -like "SOLARISAEL_*" }
 )
-$SavedEnvironment = @{}
-foreach ($Name in $GuardedEnvironment) {
-  $SavedEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
-  [Environment]::SetEnvironmentVariable($Name, $null, "Process")
-}
-try {
-  Push-Location $AdapterRoot
-  try {
-    & bun test --isolate --max-concurrency 1
-    if ($LASTEXITCODE -ne 0) { throw "OMP adapter tests failed" }
-  } finally {
-    Pop-Location
-  }
-} finally {
+if (-not $SkipTests) {
+  Write-Host "==> OMP adapter tests"
+  $SavedEnvironment = @{}
   foreach ($Name in $GuardedEnvironment) {
-    [Environment]::SetEnvironmentVariable($Name, $SavedEnvironment[$Name], "Process")
+    $SavedEnvironment[$Name] = [Environment]::GetEnvironmentVariable($Name, "Process")
+    [Environment]::SetEnvironmentVariable($Name, $null, "Process")
+  }
+  try {
+    Push-Location $AdapterRoot
+    try {
+      & bun test --isolate --max-concurrency 1
+      if ($LASTEXITCODE -ne 0) { throw "OMP adapter tests failed" }
+    } finally {
+      Pop-Location
+    }
+  } finally {
+    foreach ($Name in $GuardedEnvironment) {
+      [Environment]::SetEnvironmentVariable($Name, $SavedEnvironment[$Name], "Process")
+    }
   }
 }
 if ($TestsOnly) {

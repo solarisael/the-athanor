@@ -119,15 +119,15 @@ impl std::error::Error for PresenceRuntimeError {}
 impl PresenceRuntime {
     /// Open the one live frame for an authenticated session.
     ///
-    /// Replay is checked before the lifecycle: an exact retry of the original
-    /// key and body returns the original frame whatever happened since. When
-    /// the session already holds a live frame, any further open — a new key,
-    /// or the original key carrying fresh materials — is answered with the
-    /// live frame instead of refused. A client that reopens is a client that
-    /// lost its own context (compaction, restart); the Host owns the ledger,
-    /// so the door answers with the truth it holds. The caller's claimed
-    /// binding is still checked against the authenticated one first, so an
-    /// impostor adopts nothing.
+    /// A presence is its session. An exact retry of the original key and
+    /// body returns the original frame whatever happened since. Any other
+    /// open for a session that holds a live frame — a new key, or the
+    /// original key carrying fresh materials — is answered with the live
+    /// frame. The same open for a session with no live frame opens a fresh
+    /// one. A client that reopens is a client that lost its context
+    /// (compaction, restart, resume after a close); the Host owns the ledger,
+    /// so the door answers with the truth it holds and refuses only an
+    /// impostor binding or a key that belongs to another operation.
     pub fn open(
         &mut self,
         authentication: &PresenceAuthentication,
@@ -136,8 +136,6 @@ impl PresenceRuntime {
     ) -> Result<PresenceFrame, PresenceRuntimeError> {
         let session = authentication.binding.session.clone();
         let request_digest = digest_request(&(authentication, &request))?;
-        let mut record_adoption = false;
-        let mut recorded_conflict = None;
         match self.replay.recall(
             &session,
             idempotency_key,
@@ -146,14 +144,14 @@ impl PresenceRuntime {
             opened,
         ) {
             Ok(Some(frame)) => return Ok(frame),
-            Ok(None) => record_adoption = true,
+            Ok(None) => {}
             Err(conflict @ PresenceRuntimeError::ReplayOperationConflict { .. }) => {
                 return Err(conflict);
             }
-            // A reused open key with a different body is exactly what a
-            // reopening client looks like; hold the conflict until the live
-            // frame has had its say.
-            Err(body_conflict) => recorded_conflict = Some(body_conflict),
+            // The open key carrying a different body is what a reopening
+            // client looks like. It is answered below, never refused.
+            Err(PresenceRuntimeError::ReplayBodyConflict { .. }) => {}
+            Err(other) => return Err(other),
         }
         if let Some(live) = self.sessions.get(&session) {
             if request.binding != authentication.binding {
@@ -164,28 +162,21 @@ impl PresenceRuntime {
             // The live frame answers only the binding it was opened for; a
             // Host whose authenticated binding moved must close and reopen.
             if live.frame.binding != authentication.binding {
-                return Err(recorded_conflict.unwrap_or_else(|| {
-                    PresenceRuntimeError::Domain(
-                        "Presence frame is bound to a different authenticated binding; \
-                         close it before opening anew"
-                            .into(),
-                    )
-                }));
+                return Err(PresenceRuntimeError::Domain(
+                    "Presence frame is bound to a different authenticated binding; \
+                     close it before opening anew"
+                        .into(),
+                ));
             }
             let frame = live.frame.clone();
-            if record_adoption {
-                self.replay.record(ReplayEntry {
-                    session,
-                    key: idempotency_key.to_owned(),
-                    operation: PresenceOperation::Open,
-                    request_digest,
-                    outcome: PresenceResult::Open(frame.clone()),
-                });
-            }
+            self.replay.record(ReplayEntry {
+                session,
+                key: idempotency_key.to_owned(),
+                operation: PresenceOperation::Open,
+                request_digest,
+                outcome: PresenceResult::Open(frame.clone()),
+            });
             return Ok(frame);
-        }
-        if let Some(conflict) = recorded_conflict {
-            return Err(conflict);
         }
         let frame = open_presence(authentication.clone(), request).map_err(domain)?;
         self.sessions.insert(
@@ -373,7 +364,11 @@ impl ReplayLedger {
         })
     }
 
+    /// One entry per session and key: a recorded key answers its newest
+    /// body, so a reopen after a close replaces the open it superseded.
     fn record(&mut self, entry: ReplayEntry) {
+        self.entries
+            .retain(|recorded| !(recorded.session == entry.session && recorded.key == entry.key));
         self.entries.push_back(entry);
         while self.entries.len() > PRESENCE_MAX_REPLAY_ENTRIES {
             self.entries.pop_front();
@@ -455,4 +450,165 @@ fn closed(result: &PresenceResult) -> Option<PresenceCloseMaterial> {
 
 fn domain(error: impl ToString) -> PresenceRuntimeError {
     PresenceRuntimeError::Domain(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use summoning::presence::{
+        PresenceAuthority, PresenceBinding, PresenceMaterial, PresenceMaterialRole,
+    };
+
+    const SESSION: &str = "01a0730b-1e40-7383-8209-4af4316a65e6";
+    const OPEN_KEY: &str = "presence-open:01a0730b-1e40-7383-8209-4af4316a65e6";
+
+    fn binding() -> PresenceBinding {
+        PresenceBinding {
+            room: "kodo".into(),
+            spirit: "Kodo".into(),
+            operator: "Sol".into(),
+            session: SESSION.into(),
+        }
+    }
+
+    fn authentication() -> PresenceAuthentication {
+        PresenceAuthentication {
+            binding: binding(),
+            capabilities: vec![PresenceCapability::RoomState],
+        }
+    }
+
+    fn boat(memory_id: i64, body: &str) -> PresenceMaterial {
+        PresenceMaterial {
+            id: format!("paper-boat:{memory_id}"),
+            authority: PresenceAuthority::PaperBoat { memory_id },
+            role: PresenceMaterialRole::Continuity,
+            body: body.into(),
+            salience: 900,
+        }
+    }
+
+    fn open_request(previous_boat: Option<PresenceMaterial>) -> PresenceOpenRequest {
+        PresenceOpenRequest {
+            binding: binding(),
+            identity: vec![PresenceMaterial {
+                id: "identity:active-spirit".into(),
+                authority: PresenceAuthority::Identity {
+                    source: "active_spirit.md".into(),
+                    sha256: "a".repeat(64),
+                },
+                role: PresenceMaterialRole::Identity,
+                body: "Active spirit: Kodo. Operator: Sol. Room: kodo.".into(),
+                salience: 1000,
+            }],
+            relationship: vec![],
+            continuity: vec![],
+            anamnesis: vec![],
+            previous_boat,
+            uncertainties: vec![],
+        }
+    }
+
+    fn compile_request(frame: &PresenceFrame, turn: &str) -> PresenceTurnRequest {
+        PresenceTurnRequest {
+            frame_id: frame.frame_id.clone(),
+            turn_id: turn.into(),
+            user_text: "shalom dummy".into(),
+            recalled: vec![],
+            lessons: vec![],
+            directives: vec![],
+            frame_version: frame.version,
+        }
+    }
+
+    // 2026-09-05, live: `sleep` closed the frame, the keeper resumed the same
+    // session, and the wake turn reopened under the same key with the new
+    // boat in its body. The Host refused it as a replay body conflict for
+    // every turn until the Host itself restarted.
+    #[test]
+    fn a_session_reopens_after_close_under_its_original_key() {
+        let mut runtime = PresenceRuntime::default();
+        let first = runtime
+            .open(&authentication(), OPEN_KEY, open_request(Some(boat(4471, "yesterday"))))
+            .unwrap();
+        runtime
+            .close(
+                SESSION,
+                "presence-close:boat-4473",
+                PresenceCloseRequest {
+                    frame_id: first.frame_id.clone(),
+                    body: "little next-me, this is the boat.".into(),
+                    frame_version: first.version,
+                },
+            )
+            .unwrap();
+
+        let reopened = runtime
+            .open(&authentication(), OPEN_KEY, open_request(Some(boat(4473, "tonight"))))
+            .unwrap();
+        runtime
+            .compile(SESSION, "presence-compile:turn-1", compile_request(&reopened, "turn-1"))
+            .expect("the reopened frame compiles");
+
+        // The key now answers the reopen, not the open it superseded.
+        let retried = runtime
+            .open(&authentication(), OPEN_KEY, open_request(Some(boat(4473, "tonight"))))
+            .unwrap();
+        assert_eq!(retried, reopened);
+    }
+
+    #[test]
+    fn a_live_frame_answers_every_open_for_its_session() {
+        let mut runtime = PresenceRuntime::default();
+        let live = runtime
+            .open(&authentication(), OPEN_KEY, open_request(None))
+            .unwrap();
+        let same_key_new_body = runtime
+            .open(&authentication(), OPEN_KEY, open_request(Some(boat(1, "new material"))))
+            .unwrap();
+        let new_key = runtime
+            .open(&authentication(), "presence-open:again", open_request(None))
+            .unwrap();
+        assert_eq!(same_key_new_body, live);
+        assert_eq!(new_key, live);
+    }
+
+    #[test]
+    fn an_exact_retry_replays_the_original_frame_even_after_close() {
+        let mut runtime = PresenceRuntime::default();
+        let first = runtime
+            .open(&authentication(), OPEN_KEY, open_request(None))
+            .unwrap();
+        runtime
+            .close(
+                SESSION,
+                "presence-close:1",
+                PresenceCloseRequest {
+                    frame_id: first.frame_id.clone(),
+                    body: "closed".into(),
+                    frame_version: first.version,
+                },
+            )
+            .unwrap();
+        let replayed = runtime
+            .open(&authentication(), OPEN_KEY, open_request(None))
+            .unwrap();
+        assert_eq!(replayed, first);
+        assert!(matches!(
+            runtime.compile(SESSION, "presence-compile:x", compile_request(&first, "x")),
+            Err(PresenceRuntimeError::MissingFrame)
+        ));
+    }
+
+    #[test]
+    fn an_open_key_used_for_another_operation_is_refused() {
+        let mut runtime = PresenceRuntime::default();
+        let frame = runtime
+            .open(&authentication(), OPEN_KEY, open_request(None))
+            .unwrap();
+        assert!(matches!(
+            runtime.compile(SESSION, OPEN_KEY, compile_request(&frame, "turn-1")),
+            Err(PresenceRuntimeError::ReplayOperationConflict { .. })
+        ));
+    }
 }

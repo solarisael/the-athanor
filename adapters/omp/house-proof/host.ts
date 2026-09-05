@@ -26,6 +26,16 @@ export class HostUnavailable extends Error {
   }
 }
 
+// The Host answered and said no. Every caller that treats absence as
+// degradation keeps doing so; only a retry loop needs the distinction, because
+// asking again does not change a refusal.
+export class HostRefused extends HostUnavailable {
+  constructor(message: string) {
+    super(message);
+    this.name = "HostRefused";
+  }
+}
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();
 }
@@ -188,7 +198,7 @@ export async function sendHostCommand(
       if (response.correlation_id !== command.message_id) return;
       const kind = text(response.command_or_event_type);
       if (kind.endsWith("command_refused") || kind.endsWith("command_failed")) {
-        finish(new HostUnavailable(text(response.reason) || "Athanor Host rejected the command"));
+        finish(new HostRefused(text(response.reason) || "Athanor Host rejected the command"));
       } else if (acceptedTypes.has(kind)) {
         finish(null, response);
       }

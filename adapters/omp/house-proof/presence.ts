@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { HostUnavailable, hostCommand, sendHostCommand, type HostBinding, type HostResponse } from "./host.ts";
+import { HostRefused, HostUnavailable, hostCommand, sendHostCommand, type HostBinding, type HostResponse } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 
 export const PRESENCE_PROJECTION_ID = "presence";
@@ -150,6 +150,7 @@ async function resolveFrame(
       const delay = delays[attempt];
       if (
         !(error instanceof HostUnavailable)
+        || error instanceof HostRefused
         || delay === undefined
         || Date.now() + delay > deadline
       ) {

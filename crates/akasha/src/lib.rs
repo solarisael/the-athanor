@@ -15,6 +15,7 @@ pub mod insula_writer;
 mod lesson;
 pub mod migrations;
 mod paper_boat;
+mod presence;
 mod recall;
 mod remember;
 mod restart;
@@ -79,6 +80,10 @@ pub use lesson::{
     lesson_delete, lesson_query, lesson_trigger_match, lesson_update,
 };
 pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
+pub use presence::{
+    PresenceSessionRow, presence_session_close, presence_session_load, presence_session_open,
+    presence_session_write_ledger,
+};
 pub use recall::{RecallResult, recall, refresh_semantic_vocabulary};
 pub use remember::remember;
 pub use restart::{

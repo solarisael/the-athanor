@@ -134,6 +134,19 @@ impl PresenceRuntime {
         idempotency_key: &str,
         request: PresenceOpenRequest,
     ) -> Result<PresenceFrame, PresenceRuntimeError> {
+        self.open_carrying(authentication, idempotency_key, request, None)
+    }
+
+    /// Open with a ledger carried from the session's closed presence. The
+    /// repair rules, registers, and threads a session learned before it slept
+    /// come back with it; only the frame is new.
+    pub fn open_carrying(
+        &mut self,
+        authentication: &PresenceAuthentication,
+        idempotency_key: &str,
+        request: PresenceOpenRequest,
+        carried: Option<PresenceLedger>,
+    ) -> Result<PresenceFrame, PresenceRuntimeError> {
         let session = authentication.binding.session.clone();
         let request_digest = digest_request(&(authentication, &request))?;
         match self.replay.recall(
@@ -179,14 +192,14 @@ impl PresenceRuntime {
             return Ok(frame);
         }
         let frame = open_presence(authentication.clone(), request).map_err(domain)?;
+        let ledger = PresenceLedger {
+            frame_version: frame.version,
+            ..carried.unwrap_or_default()
+        };
         self.sessions.insert(
             session.clone(),
             PresenceSession {
-                ledger: PresenceLedger {
-                    frame_version: frame.version,
-                    contract_version: 0,
-                    ..PresenceLedger::default()
-                },
+                ledger,
                 frame: frame.clone(),
                 active_contract: None,
                 receipts: VecDeque::new(),
@@ -200,6 +213,28 @@ impl PresenceRuntime {
             outcome: PresenceResult::Open(frame.clone()),
         });
         Ok(frame)
+    }
+
+    /// Install a session the store holds live and this process does not: a
+    /// Host that restarted continues the session from its row.
+    pub fn adopt(&mut self, session: &str, frame: PresenceFrame, ledger: PresenceLedger) {
+        self.sessions.entry(session.to_owned()).or_insert(PresenceSession {
+            frame,
+            ledger,
+            active_contract: None,
+            receipts: VecDeque::new(),
+        });
+    }
+
+    pub fn has_session(&self, session: &str) -> bool {
+        self.sessions.contains_key(session)
+    }
+
+    /// The session's frame and ledger as this process holds them.
+    pub fn session_state(&self, session: &str) -> Option<(&PresenceFrame, &PresenceLedger)> {
+        self.sessions
+            .get(session)
+            .map(|state| (&state.frame, &state.ledger))
     }
 
     /// Compile the turn contract against the Host's ledger, advancing its
@@ -555,6 +590,62 @@ mod tests {
             .open(&authentication(), OPEN_KEY, open_request(Some(boat(4473, "tonight"))))
             .unwrap();
         assert_eq!(retried, reopened);
+    }
+
+    #[test]
+    fn a_reopen_carries_the_slept_ledger_under_the_new_frame() {
+        let mut runtime = PresenceRuntime::default();
+        let slept = PresenceLedger {
+            repair_rule_ids: vec!["presence:lesson:408".into()],
+            recent_registers: vec!["soft".into()],
+            frame_version: 7,
+            contract_version: 12,
+            ..PresenceLedger::default()
+        };
+        let frame = runtime
+            .open_carrying(&authentication(), OPEN_KEY, open_request(None), Some(slept))
+            .unwrap();
+        let (_, ledger) = runtime.session_state(SESSION).expect("live");
+        assert_eq!(ledger.repair_rule_ids, vec!["presence:lesson:408".to_owned()]);
+        assert_eq!(ledger.recent_registers, vec!["soft".to_owned()]);
+        assert_eq!(ledger.contract_version, 12);
+        assert_eq!(ledger.frame_version, frame.version, "the ledger follows the new frame");
+    }
+
+    #[test]
+    fn an_adopted_session_answers_open_and_compile_without_a_new_frame() {
+        let mut source = PresenceRuntime::default();
+        let frame = source
+            .open(&authentication(), OPEN_KEY, open_request(None))
+            .unwrap();
+        let (_, ledger) = source.session_state(SESSION).expect("live");
+        let ledger = ledger.clone();
+
+        // A different process: nothing in memory, the row in hand.
+        let mut restarted = PresenceRuntime::default();
+        assert!(!restarted.has_session(SESSION));
+        restarted.adopt(SESSION, frame.clone(), ledger);
+        assert!(restarted.has_session(SESSION));
+        let answered = restarted
+            .open(&authentication(), "presence-open:after-restart", open_request(None))
+            .unwrap();
+        assert_eq!(answered, frame);
+        restarted
+            .compile(SESSION, "presence-compile:t", compile_request(&frame, "t"))
+            .expect("the adopted frame compiles");
+
+        // Adoption never displaces a session this process already holds.
+        let other = frame_with_version(&frame, 99);
+        restarted.adopt(SESSION, other, PresenceLedger::default());
+        let (held, _) = restarted.session_state(SESSION).expect("live");
+        assert_eq!(held, &frame);
+    }
+
+    fn frame_with_version(frame: &PresenceFrame, version: u32) -> PresenceFrame {
+        PresenceFrame {
+            version,
+            ..frame.clone()
+        }
     }
 
     #[test]

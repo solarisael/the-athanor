@@ -17,8 +17,9 @@ use crate::viewport::{ViewportSession, apply_viewport};
 use akasha::insula_writer::{EmitterSpan, defer_span, end_span, record_point, start_span};
 use akasha::{
     AppError, Config as SubstrateConfig, LessonFamily, LessonQueryParams, OutcomeClass,
-    TrustedBinding, hallway_inbox, hallway_knock_claim, hallway_knock_settle, lesson_query, recall,
-    validate_trusted_binding,
+    TrustedBinding, hallway_inbox, hallway_knock_claim, hallway_knock_settle, lesson_query,
+    presence_session_close, presence_session_load, presence_session_open,
+    presence_session_write_ledger, recall, validate_trusted_binding,
 };
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
@@ -69,8 +70,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use summoning::presence::{
-    PresenceAuthentication, PresenceBinding, PresenceCloseRequest, PresenceOpenRequest,
-    PresenceResult, PresenceSettleRequest, PresenceTurnRequest,
+    PresenceAuthentication, PresenceBinding, PresenceCloseRequest, PresenceLedger,
+    PresenceOpenRequest, PresenceResult, PresenceSettleRequest, PresenceTurnRequest,
 };
 use tokio::sync::{Mutex, broadcast};
 use tokio_util::sync::CancellationToken;
@@ -963,6 +964,83 @@ fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
+/// The store is the authority for a presence; this process is its cache.
+/// A session the store holds live and this process does not is adopted
+/// before any door answers, so a Host restart continues the session.
+/// Returns the closed row's ledger when the session slept, so a reopen can
+/// carry it forward. No pool means memory only, as before.
+async fn adopt_presence_from_store(
+    state: &AppState,
+    runtime: &mut RuntimeState,
+    session: &str,
+) -> Result<Option<PresenceLedger>, AppError> {
+    if runtime.presence.has_session(session) {
+        return Ok(None);
+    }
+    let Some(pool) = state.hallway_pool.as_ref() else {
+        return Ok(None);
+    };
+    let Some(row) = presence_session_load(pool, session).await? else {
+        return Ok(None);
+    };
+    if row.is_live() {
+        runtime.presence.adopt(session, row.frame, row.ledger);
+        return Ok(None);
+    }
+    Ok(Some(row.ledger))
+}
+
+/// Write the session's frame and ledger as this process holds them. The
+/// write is the whole state, so a missed write is repaired by the next.
+/// A failed write degrades the point and never fails the door: the door
+/// already answered from the same state it tried to persist.
+async fn persist_presence(
+    state: &AppState,
+    runtime: &RuntimeState,
+    session: &str,
+    binding: &PresenceBinding,
+    operation: &'static str,
+) -> OutcomeClass {
+    let Some(pool) = state.hallway_pool.as_ref() else {
+        return OutcomeClass::Ok;
+    };
+    let Some((frame, ledger)) = runtime.presence.session_state(session) else {
+        return OutcomeClass::Ok;
+    };
+    let written = match presence_session_write_ledger(pool, session, ledger).await {
+        Ok(()) => Ok(()),
+        // The row is absent or closed under a live process: rewrite it whole.
+        Err(AppError::Refusal { .. }) => presence_session_open(pool, binding, frame, ledger)
+            .await
+            .map(|_| ()),
+        Err(error) => Err(error),
+    };
+    match written {
+        Ok(()) => OutcomeClass::Ok,
+        Err(error) => {
+            eprintln!("presence {operation}: store write failed: {error}");
+            OutcomeClass::Degraded
+        }
+    }
+}
+
+fn presence_point(
+    state: &AppState,
+    operation: &'static str,
+    outcome: OutcomeClass,
+    error_class: Option<&str>,
+) {
+    record_point(
+        state.insula_binding.as_ref(),
+        "host",
+        "presence",
+        operation,
+        outcome,
+        error_class,
+        None,
+    );
+}
+
 async fn open_presence_frame(
     state: &AppState,
     meta: CommandMeta,
@@ -970,18 +1048,41 @@ async fn open_presence_frame(
 ) -> Responses {
     let authentication = match authenticate_presence(state, &meta) {
         Ok(authentication) => authentication,
-        Err(reason) => return presence_refusal(state, &meta, &reason).await,
+        Err(reason) => {
+            presence_point(state, "presence_open", OutcomeClass::Refused, Some("not_authenticated"));
+            return presence_refusal(state, &meta, &reason).await;
+        }
     };
     let mut runtime = state.runtime.lock().await;
-    let result = runtime
-        .presence
-        .open(&authentication, &meta.idempotency_key, request)
-        .map(PresenceResult::Open);
+    let carried = match adopt_presence_from_store(state, &mut runtime, &meta.sender_session).await {
+        Ok(carried) => carried,
+        Err(error) => {
+            presence_point(state, "presence_open", OutcomeClass::Error, Some("store_read"));
+            return presence_refusal_sync(
+                state,
+                &meta,
+                format!("Presence store read failed: {error}"),
+                runtime.cursor.sequence,
+            );
+        }
+    };
+    let binding = authentication.binding.clone();
+    let result = runtime.presence.open_carrying(
+        &authentication,
+        &meta.idempotency_key,
+        request,
+        carried,
+    );
+    let outcome = match &result {
+        Ok(_) => persist_presence(state, &runtime, &meta.sender_session, &binding, "open").await,
+        Err(_) => OutcomeClass::Refused,
+    };
+    presence_point(state, "presence_open", outcome, result.as_ref().err().map(|_| "refused"));
     presence_response(
         state,
         &meta,
         PRESENCE_OPENED,
-        result,
+        result.map(PresenceResult::Open),
         runtime.cursor.sequence,
     )
 }
@@ -1031,15 +1132,31 @@ async fn compile_presence_turn(
     request: PresenceTurnRequest,
 ) -> Responses {
     let mut runtime = state.runtime.lock().await;
+    if let Err(error) = adopt_presence_from_store(state, &mut runtime, &meta.sender_session).await {
+        presence_point(state, "presence_compile", OutcomeClass::Error, Some("store_read"));
+        return presence_refusal_sync(
+            state,
+            &meta,
+            format!("Presence store read failed: {error}"),
+            runtime.cursor.sequence,
+        );
+    }
     let result = runtime
         .presence
-        .compile(&meta.sender_session, &meta.idempotency_key, request)
-        .map(PresenceResult::Compile);
+        .compile(&meta.sender_session, &meta.idempotency_key, request);
+    let outcome = match &result {
+        Ok(_) => {
+            let binding = presence_binding(state, &meta);
+            persist_presence(state, &runtime, &meta.sender_session, &binding, "compile").await
+        }
+        Err(_) => OutcomeClass::Refused,
+    };
+    presence_point(state, "presence_compile", outcome, result.as_ref().err().map(|_| "refused"));
     presence_response(
         state,
         &meta,
         PRESENCE_COMPILED,
-        result,
+        result.map(PresenceResult::Compile),
         runtime.cursor.sequence,
     )
 }
@@ -1052,13 +1169,20 @@ async fn settle_presence_turn(
     let mut runtime = state.runtime.lock().await;
     let result = runtime
         .presence
-        .settle(&meta.sender_session, &meta.idempotency_key, request)
-        .map(PresenceResult::Settle);
+        .settle(&meta.sender_session, &meta.idempotency_key, request);
+    let outcome = match &result {
+        Ok(_) => {
+            let binding = presence_binding(state, &meta);
+            persist_presence(state, &runtime, &meta.sender_session, &binding, "settle").await
+        }
+        Err(_) => OutcomeClass::Refused,
+    };
+    presence_point(state, "presence_settle", outcome, result.as_ref().err().map(|_| "refused"));
     presence_response(
         state,
         &meta,
         PRESENCE_SETTLED,
-        result,
+        result.map(PresenceResult::Settle),
         runtime.cursor.sequence,
     )
 }
@@ -1069,17 +1193,56 @@ async fn close_presence_frame(
     request: PresenceCloseRequest,
 ) -> Responses {
     let mut runtime = state.runtime.lock().await;
+    if let Err(error) = adopt_presence_from_store(state, &mut runtime, &meta.sender_session).await {
+        presence_point(state, "presence_close", OutcomeClass::Error, Some("store_read"));
+        return presence_refusal_sync(
+            state,
+            &meta,
+            format!("Presence store read failed: {error}"),
+            runtime.cursor.sequence,
+        );
+    }
+    // The ledger leaves memory with the session; read it before the close.
+    let ledger = runtime
+        .presence
+        .session_state(&meta.sender_session)
+        .map(|(_, ledger)| ledger.clone());
     let result = runtime
         .presence
-        .close(&meta.sender_session, &meta.idempotency_key, request)
-        .map(PresenceResult::Close);
+        .close(&meta.sender_session, &meta.idempotency_key, request);
+    let outcome = match (&result, state.hallway_pool.as_ref(), ledger) {
+        (Ok(_), Some(pool), Some(ledger)) => {
+            match presence_session_close(pool, &meta.sender_session, &ledger).await {
+                Ok(()) => OutcomeClass::Ok,
+                Err(error) => {
+                    eprintln!("presence close: store write failed: {error}");
+                    OutcomeClass::Degraded
+                }
+            }
+        }
+        (Ok(_), _, _) => OutcomeClass::Ok,
+        (Err(_), _, _) => OutcomeClass::Refused,
+    };
+    presence_point(state, "presence_close", outcome, result.as_ref().err().map(|_| "refused"));
     presence_response(
         state,
         &meta,
         PRESENCE_CLOSED,
-        result,
+        result.map(PresenceResult::Close),
         runtime.cursor.sequence,
     )
+}
+
+/// The binding the store row carries for a door that did not authenticate a
+/// full open: the room's own identity plus the sender's session.
+fn presence_binding(state: &AppState, meta: &CommandMeta) -> PresenceBinding {
+    let identity = state.room_store.identity().ok();
+    PresenceBinding {
+        room: identity.as_ref().map(|i| i.room.clone()).unwrap_or_else(|| meta.sender_room.clone()),
+        spirit: identity.as_ref().map(|i| i.spirit.clone()).unwrap_or_else(|| meta.sender_spirit.clone()),
+        operator: identity.map(|i| i.operator).unwrap_or_default(),
+        session: meta.sender_session.clone(),
+    }
 }
 
 fn presence_response(

@@ -26,6 +26,11 @@ the exact implementation record.
   `tool.<name>` (for example `tool.room_state`, `tool.house_dispatch`),
   instead of one anonymous `tool_call` row. The adapter cockpit and vitals
   count the whole family, so rows written before this change stay counted.
+- A managed child that dies during service startup now leaves evidence. Its
+  stderr lands in `<ProgramData>/Solarisael/Athanor/logs/<name>.stderr.log`,
+  the failure names the child with its exit status and stderr tail, the
+  service checkpoint keeps advancing while a child starts, and a failed start
+  reports `STOPPED` with service code 1 instead of staying `START_PENDING`.
 - `athanor.exe` now runs as the independent multi-room Host and local manager
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified

@@ -6,6 +6,8 @@ use std::os::windows::process::CommandExt;
 use std::{
     collections::BTreeMap,
     ffi::OsString,
+    fs::{self, File},
+    io::{Read, Seek, SeekFrom},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -27,6 +29,10 @@ use windows_sys::Win32::{
 
 pub const START_TIMEOUT: Duration = Duration::from_secs(90);
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(30);
+/// How often a waiting start reports progress, so a slow child never looks hung.
+pub const START_PROGRESS_INTERVAL: Duration = Duration::from_secs(5);
+/// The most child stderr a startup failure carries. The file keeps the rest.
+pub const STDERR_TAIL_BYTES: u64 = 2048;
 #[cfg(windows)]
 unsafe extern "system" fn ignore_supervisor_console_control(_: u32) -> i32 {
     1
@@ -66,19 +72,84 @@ pub trait Processes {
     fn kill_verified(&self, name: &str) -> Result<()>;
 }
 
+/// What the supervisor reports while it starts a child.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StartProgress {
+    /// The child process exists. Its readiness wait begins now.
+    Spawned,
+    /// The child is still starting. Nothing failed yet.
+    Waiting,
+}
+
 #[derive(Default)]
 pub struct NativeProcesses {
     children: Mutex<BTreeMap<String, Child>>,
+    /// Each child's stderr lands in `<log_dir>/<name>.stderr.log`. `None`
+    /// discards it.
+    log_dir: Option<PathBuf>,
+}
+
+impl NativeProcesses {
+    /// Keep every managed child's stderr under `log_dir`.
+    pub fn with_log_dir(log_dir: PathBuf) -> Self {
+        Self {
+            children: Mutex::default(),
+            log_dir: Some(log_dir),
+        }
+    }
+
+    fn stderr_path(&self, name: &str) -> Option<PathBuf> {
+        self.log_dir
+            .as_ref()
+            .map(|dir| dir.join(format!("{name}.stderr.log")))
+    }
+
+    /// The last `STDERR_TAIL_BYTES` of the child's stderr, or a plain note when
+    /// nothing was kept.
+    pub fn stderr_tail(&self, name: &str) -> String {
+        let Some(path) = self.stderr_path(name) else {
+            return String::from("(stderr not kept)");
+        };
+        read_tail(&path, STDERR_TAIL_BYTES).unwrap_or_else(|_| String::from("(stderr not kept)"))
+    }
+}
+
+fn read_tail(path: &Path, bytes: u64) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
+    let length = file.metadata()?.len();
+    if length > bytes {
+        file.seek(SeekFrom::Start(length - bytes))?;
+    }
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    let text = String::from_utf8_lossy(&buffer).trim().to_owned();
+    Ok(if text.is_empty() {
+        String::from("(empty)")
+    } else {
+        text
+    })
 }
 impl Processes for NativeProcesses {
     fn spawn(&self, spec: &ProcessSpec) -> Result<u32> {
+        let stderr = match self.stderr_path(&spec.name) {
+            Some(path) => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("create log directory for {}", spec.name))?;
+                }
+                let file = File::create(&path)
+                    .with_context(|| format!("open stderr log for {}", spec.name))?;
+                Stdio::from(file)
+            }
+            None => Stdio::null(),
+        };
         let mut command = Command::new(&spec.executable);
         command
             .args(&spec.arguments)
             .envs(&spec.environment)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(stderr)
             .current_dir(
                 spec.executable
                     .parent()
@@ -105,7 +176,10 @@ impl Processes for NativeProcesses {
             .with_context(|| format!("managed child {name} is not owned by this supervisor"))?
             .try_wait()?
         {
-            bail!("managed child {name} exited before readiness with {status}");
+            bail!(
+                "managed child {name} exited before readiness with {status}; stderr tail: {}",
+                self.stderr_tail(name)
+            );
         }
         Ok(TcpStream::connect_timeout(address, Duration::from_millis(250)).is_ok())
     }
@@ -257,23 +331,24 @@ pub struct Supervisor<P> {
     pub processes: P,
 }
 impl<P: Processes> Supervisor<P> {
-    pub fn run<F>(&self, specs: &[ProcessSpec], mut checkpoint: F) -> Result<()>
+    pub fn run<F>(&self, specs: &[ProcessSpec], mut progress: F) -> Result<()>
     where
-        F: FnMut(u32, &str) -> Result<()>,
+        F: FnMut(&str, StartProgress) -> Result<()>,
     {
         if specs.is_empty() {
             bail!("managed runtime plan has no children");
         }
         let mut started = Vec::new();
-        for (index, spec) in specs.iter().enumerate() {
+        for spec in specs {
             let name = spec.name.as_str();
             if let Err(error) = self.processes.spawn(spec) {
                 self.stop_names(&started)?;
                 return Err(error);
             }
             started.push(name.to_owned());
-            checkpoint((index + 1) as u32, name)?;
+            progress(name, StartProgress::Spawned)?;
             let deadline = Instant::now() + START_TIMEOUT;
+            let mut next_progress = Instant::now() + START_PROGRESS_INTERVAL;
             loop {
                 let ready = match self.processes.ready(name, &spec.ready_at) {
                     Ok(ready) => ready,
@@ -295,6 +370,10 @@ impl<P: Processes> Supervisor<P> {
                         "managed child {name} did not become ready within {} seconds",
                         START_TIMEOUT.as_secs()
                     );
+                }
+                if Instant::now() >= next_progress {
+                    progress(name, StartProgress::Waiting)?;
+                    next_progress = Instant::now() + START_PROGRESS_INTERVAL;
                 }
                 thread::sleep(Duration::from_millis(250));
             }

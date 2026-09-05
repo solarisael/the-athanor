@@ -47,7 +47,8 @@ The native installer and the managed runtime for Windows. It builds the `athanor
 `src/supervisor.rs`. The managed child processes of the House.
 
 - **`Processes` trait.** Five operations: spawn, test readiness, request a stop, wait for exit, and kill a verified child.
-- **Start order.** `run` starts each child in order, reports a checkpoint, then waits up to 90 seconds for readiness. A failure stops every child it already started.
+- **Start order.** `run` starts each child in order, reports `Spawned`, then waits up to 90 seconds for readiness. While it waits it reports `Waiting` every 5 seconds. A failure stops every child it already started.
+- **Startup evidence.** Each child's stderr lands in `<data>/logs/<name>.stderr.log`. A child that exits before readiness fails the start with its name, its exit status, and the last 2 KiB of that file.
 - **Stop order.** `stop` reverses the start order. It requests a graceful stop, waits up to 30 seconds, then kills the child.
 - **Verified kill.** The supervisor refuses to kill a name it does not own. It never touches an unverified process identifier.
 - **Graceful stop.** On Windows it sends a break event to the process group of the child.
@@ -100,10 +101,11 @@ The native installer and the managed runtime for Windows. It builds the `athanor
 
 - **`dispatch`.** It hands the service name and the entry function to the service control dispatcher.
 - **`run`.** It registers the control handler, reports a pending start, prepares the console, reads the pointer, the configuration, and the secrets, builds the runtime plan, then starts the supervisor.
-- **Checkpoints.** Each started child advances the start checkpoint, so a slow start never looks hung.
+- **Checkpoints.** Every `Spawned` and `Waiting` report advances the start checkpoint, so a slow start never looks hung.
 - **Control handler.** Stop and shutdown signal the channel. Interrogate succeeds. Anything else reports that it is not implemented.
 - **Shutdown.** The service waits on the channel, reports a pending stop, stops every child, then reports the stopped state.
 - **Status.** Every status carries the type, the state, the accepted controls, the checkpoint, and a 30-second wait hint while pending.
+- **Failed start.** When `run` fails, the service reports `STOPPED` with `ERROR_SERVICE_SPECIFIC_ERROR` and service code 1, and writes the reason to `service-startup-trace.log` and `service-startup-error.log`. SCM never stays in `START_PENDING`.
 - Outside Windows `dispatch` fails with a clear message.
 
 ### omp

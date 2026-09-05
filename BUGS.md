@@ -40,13 +40,6 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Expected:** Root Knock omits the parent. Only a continuation requires a valid prior Knock ID.
 - **Proof after repair:** Start a root Knock from a newly addressed Hallway message, receive its Knock receipt, then continue once using that returned ID.
 
-### Windows service can wedge permanently in a pending state
-
-- **Observed:** `SolarisaelAthanor` remained in `START_PENDING` at checkpoint 3 with no NATS, delivery, or Host children. `sc stop` refused with error 1052. Terminating the verified service PID and restarting restored `RUNNING` and a healthy broker-connected endpoint.
-- **Cause seam:** `crates/athanor-install/src/service.rs::service_main` prints `run()` failures but does not always publish terminal `SERVICE_STOPPED` with a nonzero failure code. Managed child output is discarded in the supervisor, so the startup reason can disappear. A partial start may also leave children alive when later startup fails.
-- **Impact:** Startup failure destroys its own evidence and may require manual PID termination.
-- **Proof after repair:** Force each managed child to fail at spawn and readiness; SCM reaches `STOPPED` with a nonzero code, a bounded log names the child and error, and no managed child remains alive.
-
 ### Long sessions degrade identity and context quality
 
 - **Observed:** Over long OMP sessions, responses flatten toward generic assistant prose, irrelevant context accumulates, and the active spirit becomes less recognizable even when fresh Recall and identity smoke tests pass.
@@ -89,6 +82,13 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Proof after repair:** A `record_memory.py --env-file ../state/substrate/.env` write on the Windows tower prints a `backup:` line with a dump path, and the dump exists under `substrate/backups/`.
 
 ## Repaired but not deployed
+
+### Windows service can wedge permanently in a pending state
+
+- **Observed:** `SolarisaelAthanor` remained in `START_PENDING` at checkpoint 3 with no NATS, delivery, or Host children. `sc stop` refused with error 1052. Terminating the verified service PID and restarting restored `RUNNING` and a healthy broker-connected endpoint.
+- **Cause seam:** `crates/athanor-install/src/service.rs` published every status with `ERROR_SUCCESS`, so a failed start looked like a clean stop; the supervisor discarded child stderr, so the startup reason vanished; the checkpoint only moved when a child spawned, so a slow readiness wait looked hung.
+- **Repair:** `dev/next`, 2026-09-05. Child stderr lands in `<data>/logs/<name>.stderr.log`; a child that exits before readiness fails the start with its name, exit status, and stderr tail; the supervisor reports `Waiting` every 5 seconds and the service advances the checkpoint on each report; a failed `run` publishes `STOPPED` with `ERROR_SERVICE_SPECIFIC_ERROR` and service code 1 and traces the reason.
+- **Proof:** `cargo test -p athanor-install --test supervisor_evidence` (real `cmd.exe` children; 2 passed). The SCM half is owed after deploy: force one managed child to fail, then `sc query SolarisaelAthanor` must show `STOPPED` with `SERVICE_EXIT_CODE : 1066 (1)`, the `.stderr.log` must name the error, and no managed child may remain alive.
 
 ### Design catalogue same-identity supersession always failed
 

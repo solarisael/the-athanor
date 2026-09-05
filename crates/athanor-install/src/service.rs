@@ -4,7 +4,8 @@ mod windows {
         installer::CurrentRelease,
         layout::{InstallLayout, SERVICE_NAME},
         supervisor::{
-            NativeProcesses, RuntimeConfig, Supervisor, prepare_service_console, runtime_plan,
+            NativeProcesses, RuntimeConfig, StartProgress, Supervisor, prepare_service_console,
+            runtime_plan,
         },
     };
     use anyhow::{Context, Result, bail};
@@ -18,9 +19,16 @@ mod windows {
         sync::{Mutex, OnceLock, mpsc},
     };
     use windows_sys::Win32::{
-        Foundation::{ERROR_CALL_NOT_IMPLEMENTED, ERROR_SUCCESS, GetLastError},
+        Foundation::{
+            ERROR_CALL_NOT_IMPLEMENTED, ERROR_SERVICE_SPECIFIC_ERROR, ERROR_SUCCESS, GetLastError,
+        },
         System::Services::*,
     };
+
+    /// The service-specific code SCM shows when the Athanor failed to start or
+    /// stop cleanly. `sc query` then reports `SERVICE_EXIT_CODE : 1066` with
+    /// this value, instead of a clean stop.
+    pub const SERVICE_FAILURE_CODE: u32 = 1;
 
     static STOP_SENDER: OnceLock<Mutex<mpsc::Sender<()>>> = OnceLock::new();
 
@@ -110,6 +118,21 @@ mod windows {
     }
 
     fn set_status(handle: SERVICE_STATUS_HANDLE, state: u32, checkpoint: u32) -> Result<()> {
+        publish_status(handle, state, checkpoint, None)
+    }
+
+    /// Report `SERVICE_STOPPED` with a nonzero service-specific code, so SCM
+    /// and `sc query` show a failure instead of a clean stop.
+    fn set_stopped_failed(handle: SERVICE_STATUS_HANDLE) -> Result<()> {
+        publish_status(handle, SERVICE_STOPPED, 0, Some(SERVICE_FAILURE_CODE))
+    }
+
+    fn publish_status(
+        handle: SERVICE_STATUS_HANDLE,
+        state: u32,
+        checkpoint: u32,
+        failure: Option<u32>,
+    ) -> Result<()> {
         let pending = state == SERVICE_START_PENDING || state == SERVICE_STOP_PENDING;
         let status = SERVICE_STATUS {
             dwServiceType: SERVICE_WIN32_OWN_PROCESS,
@@ -119,8 +142,12 @@ mod windows {
             } else {
                 0
             },
-            dwWin32ExitCode: ERROR_SUCCESS,
-            dwServiceSpecificExitCode: 0,
+            dwWin32ExitCode: if failure.is_some() {
+                ERROR_SERVICE_SPECIFIC_ERROR
+            } else {
+                ERROR_SUCCESS
+            },
+            dwServiceSpecificExitCode: failure.unwrap_or(0),
             dwCheckPoint: checkpoint,
             dwWaitHint: if pending { 30_000 } else { 0 },
         };
@@ -153,8 +180,9 @@ mod windows {
         set_status(handle, SERVICE_START_PENDING, 1)?;
         trace_service_start("start pending reported");
         let result = run_registered(handle);
-        if result.is_err() {
-            let _ = set_status(handle, SERVICE_STOPPED, 0);
+        if let Err(error) = &result {
+            trace_service_start(&format!("service failed: {error:#}"));
+            let _ = set_stopped_failed(handle);
         }
         result
     }
@@ -178,11 +206,20 @@ mod windows {
         let specs = runtime_plan(&layout.version(&current.version), &layout.data, &config)?;
         trace_service_start(&format!("runtime plan built: {} children", specs.len()));
         let supervisor = Supervisor {
-            processes: NativeProcesses::default(),
+            processes: NativeProcesses::with_log_dir(layout.data.join("logs")),
         };
-        supervisor.run(&specs, |checkpoint, name| {
-            trace_service_start(&format!("managed child spawned: {name}"));
-            set_status(handle, SERVICE_START_PENDING, checkpoint + 1)
+        let mut checkpoint = 1u32;
+        supervisor.run(&specs, |name, progress| {
+            checkpoint += 1;
+            match progress {
+                StartProgress::Spawned => {
+                    trace_service_start(&format!("managed child spawned: {name}"));
+                }
+                StartProgress::Waiting => {
+                    trace_service_start(&format!("managed child starting: {name}"));
+                }
+            }
+            set_status(handle, SERVICE_START_PENDING, checkpoint)
         })?;
         trace_service_start("all managed children ready");
         set_status(handle, SERVICE_RUNNING, 0)?;

@@ -73,6 +73,19 @@ if (-not $SkipTests) {
 }
 
 # --- payload ---
+# The native build compiles pgvector with the Visual Studio toolset, and its
+# preflight refuses a shell that is not an x64 developer shell. Enter one here
+# when the caller did not; the child build inherits it.
+if ([string]::IsNullOrWhiteSpace($env:VCToolsInstallDir) -or ([string]$env:VSCMD_ARG_TGT_ARCH) -ne "x64") {
+  $VsWhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+  if (-not (Test-Path -LiteralPath $VsWhere -PathType Leaf)) { throw "Visual Studio is required for the native build; vswhere is missing at $VsWhere" }
+  $VsRoot = (& $VsWhere -latest -products "*" -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+  if ([string]::IsNullOrWhiteSpace($VsRoot)) { throw "no Visual Studio with the x64 C++ toolset is installed" }
+  $VsRoot = $VsRoot.Trim()
+  Write-Host "==> Visual Studio x64 developer shell ($VsRoot)"
+  Import-Module (Join-Path $VsRoot "Common7/Tools/Microsoft.VisualStudio.DevShell.dll")
+  Enter-VsDevShell -VsInstallPath $VsRoot -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
+}
 $Out = Join-Path $Root "target/deploy/$Release"
 Invoke-Checked -Label "native release payload" -FilePath "pwsh" -ArgumentList @(
   "-NoProfile", "-File", (Join-Path $Root "installer/build-native-release.ps1"),

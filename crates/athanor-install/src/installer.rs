@@ -306,7 +306,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                 let is_current =
                     self.fs.exists(&target) && self.fs.read(&target)? == self.fs.read(&source)?;
                 if !is_current {
-                    self.fs.copy(&source, &target)?;
+                    self.fs.replace_file(&source, &target)?;
                 }
             }
             self.write_configuration(&request, &house)?;
@@ -838,10 +838,15 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         Ok(FileSnapshot { path, bytes })
     }
 
-    fn stable_binaries(&self) -> [(&'static str, PathBuf); 2] {
+    // Every file the program root serves outside a version directory: what
+    // the service, the OMP loader, and a room's keeper start before they know
+    // which version is current. A running one is retired, never overwritten.
+    fn stable_binaries(&self) -> [(&'static str, PathBuf); 4] {
         [
             ("bin/athanor-manage.exe", self.layout.manager()),
             ("bin/athanor.exe", self.layout.app()),
+            ("bin/athanor-omp-loader.ts", self.layout.omp_loader()),
+            ("bin/omp-keeper.exe", self.layout.keeper()),
         ]
     }
 

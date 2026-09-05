@@ -27,6 +27,11 @@ pub trait FileSystem {
     }
     fn create_dir_all(&self, path: &Path) -> Result<()>;
     fn copy(&self, from: &Path, to: &Path) -> Result<()>;
+    /// Installs `from` at `to` while `to` may be a running image. Windows
+    /// refuses to overwrite a running executable and allows renaming it, so a
+    /// live `to` moves aside as `<name>.retired-<n>` first. Retired siblings
+    /// are deleted once nothing holds them, on this call or a later one.
+    fn replace_file(&self, from: &Path, to: &Path) -> Result<()>;
     fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<()>;
     fn rename(&self, from: &Path, to: &Path) -> Result<()>;
     fn remove_file(&self, path: &Path) -> Result<()>;
@@ -212,6 +217,31 @@ fn validate_physical_entry(path: &Path, final_entry: bool) -> Result<()> {
     Ok(())
 }
 
+const RETIRED_MARK: &str = ".retired-";
+
+fn retired_sibling(path: &Path) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis());
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    path.with_file_name(format!("{name}{RETIRED_MARK}{stamp}"))
+}
+
+// A retired image stays locked while a session still runs it; a failed
+// delete here is that session, and the next replacement tries again.
+fn sweep_retired(directory: &Path) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().contains(RETIRED_MARK) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct NativeFileSystem;
 
@@ -289,6 +319,18 @@ impl FileSystem for NativeFileSystem {
     fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         fs::rename(from, to)
             .with_context(|| format!("rename {} to {}", from.display(), to.display()))
+    }
+    fn replace_file(&self, from: &Path, to: &Path) -> Result<()> {
+        if to.exists() {
+            let retired = retired_sibling(to);
+            fs::rename(to, &retired)
+                .with_context(|| format!("retire {} to {}", to.display(), retired.display()))?;
+        }
+        self.copy(from, to)?;
+        if let Some(parent) = to.parent() {
+            sweep_retired(parent);
+        }
+        Ok(())
     }
     fn remove_file(&self, path: &Path) -> Result<()> {
         if path.exists() {
@@ -504,5 +546,59 @@ impl ServiceManager for ScServiceManager {
             let _ = name;
             Ok(false)
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    // The deploy case: a session still runs the stable image while the
+    // installer lands the next one at the same path. Plain fs::copy fails
+    // with a sharing violation; replace_file must not.
+    #[test]
+    fn replace_file_lands_over_a_running_image_and_retires_the_old_one() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let bin = temporary.path().join("bin");
+        fs::create_dir_all(&bin)?;
+        let system32 = PathBuf::from(std::env::var("SystemRoot")?).join("System32");
+        let live = bin.join("athanor.exe");
+        fs::copy(system32.join("ping.exe"), &live)?;
+        let mut running = Command::new(&live)
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let next = temporary.path().join("next.exe");
+        fs::copy(system32.join("timeout.exe"), &next)?;
+
+        let plain = NativeFileSystem.copy(&next, &live);
+        assert!(plain.is_err(), "fs::copy over a running image must fail");
+        NativeFileSystem.replace_file(&next, &live)?;
+
+        assert_eq!(fs::read(&live)?, fs::read(&next)?);
+        assert!(
+            running.try_wait()?.is_none(),
+            "the old session must keep running"
+        );
+        let retired: Vec<PathBuf> = fs::read_dir(&bin)?
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.to_string_lossy().contains(RETIRED_MARK))
+            .collect();
+        assert_eq!(retired.len(), 1, "the live image moved aside exactly once");
+
+        running.kill()?;
+        running.wait()?;
+        NativeFileSystem.replace_file(&next, &live)?;
+        let remaining = fs::read_dir(&bin)?
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(RETIRED_MARK))
+            .count();
+        assert_eq!(
+            remaining, 0,
+            "nothing holds the retired images, so the sweep removes them"
+        );
+        Ok(())
     }
 }

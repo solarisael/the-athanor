@@ -153,6 +153,20 @@ fn release(version: &str, bytes: &[u8]) -> ReleaseManifest {
             },
             Artifact {
                 component: "omp-adapter".into(),
+                path: "bin/athanor-omp-loader.ts".into(),
+                sha256: hex::encode(Sha256::digest(bytes)),
+                size: bytes.len() as u64,
+                executable: false,
+            },
+            Artifact {
+                component: "omp-keeper".into(),
+                path: "bin/omp-keeper.exe".into(),
+                sha256: hex::encode(Sha256::digest(bytes)),
+                size: bytes.len() as u64,
+                executable: true,
+            },
+            Artifact {
+                component: "omp-adapter".into(),
                 path: "components/omp-adapter/component-manifest.json".into(),
                 sha256: hex::encode(Sha256::digest(&component_manifest)),
                 size: component_manifest.len() as u64,
@@ -208,9 +222,7 @@ fn write_native_root(root: &Path, manifest: &ReleaseManifest, manager: &[u8]) ->
     let adapter = b"adapter";
     let component_manifest = serde_json::to_vec_pretty(&component(adapter))?;
     for artifact in &manifest.artifacts {
-        let bytes: &[u8] = if artifact.path.ends_with("athanor-manage.exe") {
-            manager
-        } else if artifact.path.ends_with("athanor.exe") {
+        let bytes: &[u8] = if artifact.path.starts_with("bin/") {
             manager
         } else if artifact.path.ends_with("component-manifest.json") {
             &component_manifest

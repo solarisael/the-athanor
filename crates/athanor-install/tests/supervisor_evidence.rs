@@ -5,7 +5,7 @@
 #![cfg(windows)]
 
 use athanor_install::supervisor::{
-    NativeProcesses, ProcessSpec, StartProgress, Supervisor, START_PROGRESS_INTERVAL,
+    NativeProcesses, ProcessSpec, START_PROGRESS_INTERVAL, StartProgress, Supervisor,
 };
 use std::{
     collections::BTreeMap,
@@ -31,7 +31,11 @@ fn spec(name: &str, script: &str, ready_at: SocketAddr) -> ProcessSpec {
     ProcessSpec {
         name: name.to_owned(),
         executable: cmd_exe(),
-        arguments: vec![OsString::from("/d"), OsString::from("/c"), OsString::from(script)],
+        arguments: vec![
+            OsString::from("/d"),
+            OsString::from("/c"),
+            OsString::from(script),
+        ],
         environment: BTreeMap::new(),
         ready_at,
     }
@@ -58,7 +62,10 @@ fn a_child_that_exits_before_readiness_names_itself_and_keeps_its_stderr() {
         .expect_err("a child that exits with 3 must fail the start");
 
     let message = format!("{error:#}");
-    assert!(message.contains("broken-child"), "error names the child: {message}");
+    assert!(
+        message.contains("broken-child"),
+        "error names the child: {message}"
+    );
     assert!(
         message.contains("exit code: 3"),
         "error carries the exit status: {message}"
@@ -70,7 +77,10 @@ fn a_child_that_exits_before_readiness_names_itself_and_keeps_its_stderr() {
     let kept = std::fs::read_to_string(logs.path().join("broken-child.stderr.log"))
         .expect("stderr file stays on disk");
     assert!(kept.contains("boom: the database is missing"));
-    assert_eq!(progress, vec![(String::from("broken-child"), StartProgress::Spawned)]);
+    assert_eq!(
+        progress,
+        vec![(String::from("broken-child"), StartProgress::Spawned)]
+    );
 }
 
 #[test]
@@ -97,8 +107,7 @@ fn a_slow_child_reports_waiting_progress_before_it_is_ready() {
             if phase == StartProgress::Waiting {
                 waiting += 1;
                 if listener.is_none() {
-                    listener =
-                        Some(TcpListener::bind(ready_at).expect("open the readiness port"));
+                    listener = Some(TcpListener::bind(ready_at).expect("open the readiness port"));
                 }
             }
             Ok(())

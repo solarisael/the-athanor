@@ -51,19 +51,29 @@ const LEGACY_MIGRATIONS: &[&str] = &[
 ];
 
 fn known_migration_lineage(versions: &[String]) -> bool {
+    unknown_migrations(versions).is_empty()
+}
+
+/// The versions in `versions` that no known lineage explains, in order. An
+/// empty result means the lineage is an ordered prefix of the consolidated
+/// or the legacy registry. A database ahead of this binary reports only the
+/// versions past what the binary knows; a database off the lineage reports
+/// from the first divergence.
+fn unknown_migrations(versions: &[String]) -> Vec<String> {
     if versions.is_empty() {
-        return false;
+        return vec!["<none>".to_owned()];
     }
-    let prefix_of = |lineage: &[String]| {
-        versions.len() <= lineage.len()
-            && versions
-                .iter()
-                .zip(lineage)
-                .all(|(actual, expected)| actual == expected)
-    };
     let consolidated = crate::migrations::consolidated_version_labels();
     let legacy: Vec<String> = LEGACY_MIGRATIONS.iter().map(|s| (*s).to_owned()).collect();
-    prefix_of(&consolidated) || prefix_of(&legacy)
+    let divergence = |lineage: &[String]| {
+        versions
+            .iter()
+            .zip(lineage)
+            .position(|(actual, expected)| actual != expected)
+            .unwrap_or(versions.len().min(lineage.len()))
+    };
+    let best = divergence(&consolidated).max(divergence(&legacy));
+    versions[best..].to_vec()
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -658,10 +668,15 @@ pub fn backup_with_migrations(
     if keep == 0 {
         return Err(BackupError::Config("keep must be at least 1".into()));
     }
-    if !known_migration_lineage(&source) {
+    let unknown = unknown_migrations(&source);
+    if !unknown.is_empty() {
         return Err(BackupError::Manifest(format!(
-            "database schema migrations are unsupported: {}",
-            source.join(", ")
+            "database schema migrations are unsupported by this binary: {} (known lineage ends at {})",
+            unknown.join(", "),
+            crate::migrations::consolidated_version_labels()
+                .last()
+                .cloned()
+                .unwrap_or_default()
         )));
     }
     let pg_dump = resolve_pg_tool("pg_dump")?;
@@ -1030,6 +1045,29 @@ mod tests {
         assert!(!known_migration_lineage(&[]));
         assert!(!known_migration_lineage(&["0001".into(), "0002".into()]));
         assert!(!known_migration_lineage(&["1".into(), "3".into()]));
+    }
+
+    // 2026-09-05, live: a session bound to the previous release wrote its
+    // paper boat after the deploy migrated the database to 30. The refusal
+    // was right; the message named all thirty versions as unsupported.
+    #[test]
+    fn a_database_ahead_of_the_binary_names_only_what_the_binary_does_not_know() {
+        let mut ahead = crate::migrations::consolidated_version_labels();
+        let next = ahead.last().and_then(|v| v.parse::<u32>().ok()).unwrap() + 1;
+        ahead.push(next.to_string());
+        ahead.push((next + 1).to_string());
+        assert_eq!(
+            unknown_migrations(&ahead),
+            [next.to_string(), (next + 1).to_string()]
+        );
+        assert!(!known_migration_lineage(&ahead));
+        // Off the lineage: report from the first divergence.
+        assert_eq!(
+            unknown_migrations(&["1".into(), "3".into(), "4".into()]),
+            ["3", "4"]
+        );
+        assert_eq!(unknown_migrations(&[]), ["<none>"]);
+        assert!(unknown_migrations(&crate::migrations::consolidated_version_labels()).is_empty());
     }
 
     #[test]

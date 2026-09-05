@@ -39,6 +39,19 @@ the exact implementation record.
   `gui-prototype/` as the operator door, documents its nine POST-only Host
   read routes and the separate Bun server, marks the Godot client as parked,
   and corrects the Start-menu launch description.
+- Recall answers an explicit memory reference (`memory 4197`, `#4197`,
+  `[4197]`, a lone ID, or a comma list after one of those) by room-scoped
+  primary key before ranked search. The row leads `retrievalCandidates` as
+  `exact_id`, its ID never appears under `missing_terms`, an ID from another
+  room is refused by number without leaking content, and an unknown ID is
+  reported in `warnings`. A year in prose is never a reference.
+- A canon entity the caller names (whole phrase, token, alias, or in-sentence
+  mention) returns its complete active assertion; only similarity-tier hints
+  are excerpted. Every cut, in Akasha or in the Host viewport (raised from 480
+  to 6000 characters for named rows), is marked `truncated: true` with
+  `full_read: canon_read <id>`. Automatic recall suppresses a canon row only
+  when the same entity version was already shown in the session; compaction
+  clears that memory.
 - `athanor.exe` now runs as the independent multi-room Host and local manager
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified

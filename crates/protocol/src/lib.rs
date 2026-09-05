@@ -390,6 +390,9 @@ pub struct RecallCanonFile {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecallCanonEntry {
+    /// Entity row ID. Canon writes never overwrite, so the ID is the version.
+    #[serde(default)]
+    pub id: Option<i64>,
     #[serde(rename = "type")]
     pub entry_type: String,
     pub summary: String,
@@ -397,6 +400,15 @@ pub struct RecallCanonEntry {
     pub aliases: Vec<String>,
     #[serde(default)]
     pub weighty: bool,
+    /// The caller named this entity (whole phrase, token, or in-query mention);
+    /// `summary` is then the complete active assertion.
+    #[serde(default)]
+    pub exact: bool,
+    /// `summary` was cut; `full_read` names the deterministic complete read.
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(default)]
+    pub full_read: Option<String>,
     #[serde(default)]
     pub files: Vec<RecallCanonFile>,
 }
@@ -595,9 +607,19 @@ pub struct RecallPresentationCandidate {
 pub struct RecallPresentationCanonMatch {
     #[serde(rename = "termKey")]
     pub term_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
     #[serde(rename = "type")]
     pub entry_type: String,
+    #[serde(default)]
+    pub weighty: bool,
+    #[serde(default)]
+    pub exact: bool,
     pub summary: String,
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_read: Option<String>,
     pub files: Vec<RecallCanonFile>,
 }
 

@@ -12,26 +12,12 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Expected:** Warm native recall over this corpus completes in well under one second. Investigate a shared long-lived Akasha service, concurrent request dispatch, and service-owned pool sizing.
 - **Proof after repair:** Repeat the same instrumented matrix and show warm end-to-end latency close to measured embed plus query cost without multiplied child or connection fleets.
 
-### Numeric memory IDs are not resolvable through Recall
-
-- **Observed:** On 2026-08-28 in room `kodo`, `memory 4197 — analysis Sol made with Kintsu` did not return memory 4197 even though the House-scoped row exists. The ID was treated as an ordinary retrieval term and appeared under `missing_terms`.
-- **Impact:** Paper boats, supersession links, and continuation edges use memory IDs, but Recall cannot follow its own cheapest cross-reference.
-- **Expected:** An explicit memory reference such as `memory 4197`, `#4197`, or a bare ID in memory context performs an exact room-scoped primary-key lookup before ranked fallback.
-- **Proof after repair:** Exact references resolve the in-scope row, reject an out-of-scope row, and preserve ordinary ranked search for non-ID queries.
-
 ### OMP keeper does not provide a working restart/resume plane
 
 - **Observed:** Sol reported on 2026-08-28 that the keeper “isn't working at all.” A keeper process was running and owned an OMP child, so launch itself works; the failure is in restart/resume behavior. The canonical line also has a direct-parent `athanor.exe` restart path, leaving the keeper potentially half-superseded.
 - **Impact:** Restart continuity requires manual relaunch.
 - **Expected:** Decide the authority boundary first: either complete the direct-parent cutover and retire the keeper, or make the keeper the tested restart owner.
 - **Proof after repair:** A live request-restart exercise exits, relaunches, and resumes exactly once through the chosen owner, with no orphaned sidecar or competing restart path.
-
-### Weighty House canon is clipped during reorientation
-
-- **Observed:** On 2026-08-29 in room `kintsu`, automatic Recall exact-matched the weighty House entity `The Athanor` but projected only a clipped summary ending at `silent ty`. The semantic lane also returned no result because its top score was 0.35 against a 0.40 floor. A House-scoped canonical read returned the complete entity.
-- **Impact:** Exact authority resolution reports success while omitting the platform definition and authority rules needed for an informed decision.
-- **Expected:** Exact alias mentions resolve the House entity and inject the complete active assertion when its current version is absent after wake, compaction, or explicit reorientation. Any forced truncation is marked and includes a deterministic full-read path.
-- **Proof after repair:** Reorientation by canonical name or alias delivers the complete current assertion, suppresses only a version already present in context, and never substitutes adjacent semantic matches.
 
 ### Long sessions degrade identity and context quality
 
@@ -75,6 +61,20 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Proof after repair:** A `record_memory.py --env-file ../state/substrate/.env` write on the Windows tower prints a `backup:` line with a dump path, and the dump exists under `substrate/backups/`.
 
 ## Repaired but not deployed
+
+### Numeric memory IDs are not resolvable through Recall
+
+- **Observed:** On 2026-08-28 in room `kodo`, `memory 4197 — analysis Sol made with Kintsu` did not return memory 4197 even though the House-scoped row exists. The ID was treated as an ordinary retrieval term and appeared under `missing_terms`.
+- **Cause seam:** `crates/akasha/src/recall/mod.rs` tokenized the ID into `query_terms` and BM25F terms like any word; no lane ever read `memories.id`.
+- **Repair:** `dev/next`, 2026-09-05. `crates/akasha/src/recall/memory_reference.rs` resolves `memory N`, `#N`, `[N]`, a lone `N`, and a comma list that continues an explicit reference, by primary key inside `[room, house]` before any ranked lane. The row leads `retrievalCandidates` as `exact_id`, the ID tokens leave the ranked vocabulary, an out-of-scope row is refused as `memory N refused: outside room scope` with no content, and the Host viewport counts the exact row as evidence. A year in prose (`memories from 2026`) is never a reference.
+- **Proof:** `cargo test -p akasha --test recall_reference_integration exact_memory_reference_leads_evidence_inside_room_scope -- --ignored` (1 passed, isolated schema); `cargo test -p akasha --lib recall::memory_reference` (3 passed); `cargo test -p host --lib viewport` (3 passed). Live half owed after deploy: `recall` of `memory 4197` from room `kodo` returns #4197 first.
+
+### Weighty House canon is clipped during reorientation
+
+- **Observed:** On 2026-08-29 in room `kintsu`, automatic Recall exact-matched the weighty House entity `The Athanor` but projected only a clipped summary ending at `silent ty`. The semantic lane also returned no result because its top score was 0.35 against a 0.40 floor. A House-scoped canonical read returned the complete entity.
+- **Cause seam:** `crates/host/src/viewport.rs::compact_canon` cut every canon summary at 480 characters with no marker, after `crates/akasha/src/recall/mod.rs` had already excerpted it at 1200; a multi-word name mentioned inside a sentence only reached the similarity tier.
+- **Repair:** `dev/next`, 2026-09-05. An in-query mention of a full name or alias is an exact tier; exact rows carry the complete active assertion from Akasha and through the viewport (ceiling 6000). Any cut is marked `truncated: true` with `full_read: canon_read <id>`. Automatic mode suppresses a canon row only when `canon:<id>` (the version) is already exposed in the session; compaction clears exposures.
+- **Proof:** `cargo test -p akasha --test recall_reference_integration named_weighty_canon_returns_its_complete_assertion -- --ignored` (1 passed); `cargo test -p host --lib viewport` (3 passed: whole assertion, same-version suppression and reset, explicit cut marker). Live half owed after deploy: automatic recall in `kintsu` mentioning `The Athanor` shows the full assertion once.
 
 ### Hallway root Knock cannot be created through the OMP tool
 

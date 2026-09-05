@@ -249,24 +249,3 @@ pub(super) async fn load_bm25f_candidates_for_terms(
     candidates.truncate(BM25F_TOP_K);
     Ok(candidates)
 }
-
-pub(super) async fn load_bm25f_candidates(
-    pool: &PgPool,
-    rooms: &[String],
-    query: &str,
-    temporal_decay: bool,
-    decay_now: DateTime<Utc>,
-    settings: &RoomSettings,
-    warnings: &mut Vec<String>,
-) -> Result<Vec<serde_json::Value>, AppError> {
-    load_bm25f_candidates_for_terms(
-        pool,
-        rooms,
-        &bm25f::query_terms(query),
-        temporal_decay,
-        decay_now,
-        settings,
-        warnings,
-    )
-    .await
-}

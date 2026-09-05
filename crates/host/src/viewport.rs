@@ -107,6 +107,13 @@ const MAX_TERM_CHARS: usize = 128;
 const MAX_REASONS: usize = 5;
 const MAX_REASON_CHARS: usize = 256;
 const MAX_CANDIDATE_EXCERPT_CHARS: usize = 900;
+// A canon row the caller named is authority, not a card: it is shown whole.
+// This ceiling exists only so one pathological row cannot swallow a turn, and
+// crossing it is always marked with the deterministic full read.
+const MAX_CANON_ASSERTION_CHARS: usize = 6000;
+// A similarity-tier canon row is a hint the caller did not name; it stays a
+// short card, and the cut is marked the same way.
+const MAX_CANON_HINT_CHARS: usize = 480;
 
 #[derive(Debug, Default)]
 pub struct ViewportSession {
@@ -226,6 +233,11 @@ fn exact_signals(
     {
         signals.insert("date");
     }
+    if sources.iter().any(|value| value == "exact_id")
+        || reasons.iter().any(|value| value == "exact memory id")
+    {
+        signals.insert("id");
+    }
     if sources.iter().any(|value| value.contains("project"))
         || reasons.iter().any(|value| value.contains("project"))
     {
@@ -312,29 +324,88 @@ fn direct_canon_match(entry: &RecallCanonMatch, query: &str) -> bool {
         .any(|term| contains_term(query, term))
 }
 
+fn canon_identity(entry: &RecallCanonMatch) -> String {
+    match entry.entry.id {
+        Some(id) => format!("canon:{id}"),
+        None => format!("canon:{}", key(&entry.term_key)),
+    }
+}
+
+fn canon_summary(entry: &RecallCanonMatch, exact: bool) -> (String, bool, Option<String>) {
+    let limit = if exact {
+        MAX_CANON_ASSERTION_CHARS
+    } else {
+        MAX_CANON_HINT_CHARS
+    };
+    let upstream_cut = entry.entry.truncated;
+    let cut_here = entry.entry.summary.chars().count() > limit;
+    let truncated = upstream_cut || cut_here;
+    let full_read = if truncated {
+        entry
+            .entry
+            .full_read
+            .clone()
+            .or_else(|| entry.entry.id.map(|id| format!("canon_read {id}")))
+            .or_else(|| Some(format!("canon_read name={}", entry.term_key)))
+    } else {
+        None
+    };
+    (bounded(&entry.entry.summary, limit), truncated, full_read)
+}
+
 fn compact_canon(
     matches: &[RecallCanonMatch],
     query: &str,
     candidate_paths: &HashSet<String>,
+    session: &mut ViewportSession,
+    mode: RecallViewportMode,
+    suppressions: &mut Vec<RecallViewportSuppression>,
+    reason_counts: &mut HashMap<String, u64>,
 ) -> Vec<RecallPresentationCanonMatch> {
-    matches
-        .iter()
-        .filter(|entry| {
-            direct_canon_match(entry, query)
-                || entry
-                    .entry
-                    .files
-                    .iter()
-                    .any(|file| candidate_paths.contains(&path_key(&file.file)))
-        })
-        .take(6)
-        .map(|entry| RecallPresentationCanonMatch {
+    let mut kept = Vec::new();
+    for entry in matches {
+        let exact = entry.entry.exact || direct_canon_match(entry, query);
+        let by_file = entry
+            .entry
+            .files
+            .iter()
+            .any(|file| candidate_paths.contains(&path_key(&file.file)));
+        if !(exact || by_file) {
+            continue;
+        }
+        if kept.len() >= 6 {
+            break;
+        }
+        // The same entity version already sits in this session's context;
+        // repeating a whole assertion says nothing new. Compaction clears the
+        // session, so a reorientation after it sees the row again in full.
+        let identity = canon_identity(entry);
+        let exposures = session.exposures.get(&identity).copied().unwrap_or(0);
+        if mode == RecallViewportMode::Automatic && exposures >= 1 {
+            suppressions.push(RecallViewportSuppression {
+                identity,
+                reason: "saturated".into(),
+            });
+            *reason_counts.entry("saturated".into()).or_default() += 1;
+            continue;
+        }
+        if mode == RecallViewportMode::Automatic {
+            session.exposures.insert(identity, exposures + 1);
+        }
+        let (summary, truncated, full_read) = canon_summary(entry, exact);
+        kept.push(RecallPresentationCanonMatch {
             term_key: bounded(&entry.term_key, 512),
+            id: entry.entry.id,
             entry_type: bounded(&entry.entry.entry_type, 128),
-            summary: bounded(&entry.entry.summary, 480),
+            weighty: entry.entry.weighty,
+            exact,
+            summary,
+            truncated,
+            full_read,
             files: entry.entry.files.iter().take(3).cloned().collect(),
-        })
-        .collect()
+        });
+    }
+    kept
 }
 
 fn compact_raw_chunks(
@@ -420,7 +491,15 @@ pub fn apply_viewport(
         .iter()
         .map(|entry| path_key(&entry.source_path))
         .collect::<HashSet<_>>();
-    let canon_matches = compact_canon(&result.canon_matches, &result.query, &candidate_paths);
+    let canon_matches = compact_canon(
+        &result.canon_matches,
+        &result.query,
+        &candidate_paths,
+        session,
+        mode,
+        &mut suppressions,
+        &mut reason_counts,
+    );
     let include_raw = kept.is_empty();
     let semantic_chunks = include_raw
         .then(|| compact_raw_chunks(&result.semantic_chunks, true))
@@ -570,5 +649,146 @@ pub fn apply_viewport(
             reasons: reason_counts,
         },
         presentation,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_CANON_ASSERTION_CHARS, ViewportSession, apply_viewport};
+    use protocol::{RecallResultInput, RecallViewportMode};
+
+    fn result(query: &str, canon: serde_json::Value, candidates: serde_json::Value) -> RecallResultInput {
+        serde_json::from_value(serde_json::json!({
+            "ok": true,
+            "query": query,
+            "found": true,
+            "source": "rust-postgres",
+            "retrievalCandidates": candidates,
+            "canonMatches": canon,
+            "semanticChunks": [],
+            "contentChunks": [],
+            "dateMatches": [],
+            "queryDates": [],
+            "taxonomy": {},
+        }))
+        .expect("fixture must deserialize")
+    }
+
+    fn athanor(summary: &str) -> serde_json::Value {
+        serde_json::json!([{
+            "termKey": "The Athanor",
+            "entry": {
+                "id": 41,
+                "type": "platform",
+                "summary": summary,
+                "aliases": ["Athanor"],
+                "weighty": true,
+                "exact": true,
+                "truncated": false,
+                "full_read": null,
+                "files": []
+            }
+        }])
+    }
+
+    #[test]
+    fn exact_canon_is_shown_whole_and_suppressed_only_for_the_same_version() {
+        let summary = "The Athanor is the House platform; silent typing is not a truncation. "
+            .repeat(20);
+        assert!(summary.chars().count() > 480);
+        let mut session = ViewportSession::default();
+        let first = apply_viewport(
+            result("reorient me on The Athanor", athanor(&summary), serde_json::json!([])),
+            &mut session,
+            RecallViewportMode::Automatic,
+        );
+        let entry = &first.presentation.canon_matches[0];
+        assert_eq!(entry.id, Some(41));
+        assert!(entry.exact && entry.weighty);
+        assert_eq!(entry.summary, summary, "a named entity is never clipped");
+        assert!(!entry.truncated);
+        assert_eq!(entry.full_read, None);
+
+        let repeat = apply_viewport(
+            result("reorient me on The Athanor", athanor(&summary), serde_json::json!([])),
+            &mut session,
+            RecallViewportMode::Automatic,
+        );
+        assert!(repeat.presentation.canon_matches.is_empty());
+        assert!(
+            repeat
+                .suppressions
+                .iter()
+                .any(|s| s.identity == "canon:41" && s.reason == "saturated")
+        );
+
+        let manual = apply_viewport(
+            result("reorient me on The Athanor", athanor(&summary), serde_json::json!([])),
+            &mut session,
+            RecallViewportMode::Manual,
+        );
+        assert_eq!(manual.presentation.canon_matches[0].summary, summary);
+
+        let mut fresh = ViewportSession::default();
+        let after_compaction = apply_viewport(
+            result("reorient me on The Athanor", athanor(&summary), serde_json::json!([])),
+            &mut fresh,
+            RecallViewportMode::Automatic,
+        );
+        assert_eq!(after_compaction.presentation.canon_matches[0].summary, summary);
+    }
+
+    #[test]
+    fn a_forced_canon_cut_is_marked_with_its_full_read() {
+        let summary = "x".repeat(MAX_CANON_ASSERTION_CHARS + 10);
+        let viewport = apply_viewport(
+            result("The Athanor", athanor(&summary), serde_json::json!([])),
+            &mut ViewportSession::default(),
+            RecallViewportMode::Automatic,
+        );
+        let entry = &viewport.presentation.canon_matches[0];
+        assert_eq!(entry.summary.chars().count(), MAX_CANON_ASSERTION_CHARS);
+        assert!(entry.truncated);
+        assert_eq!(entry.full_read.as_deref(), Some("canon_read 41"));
+
+        let mut upstream = athanor("clipped upstream…");
+        upstream[0]["entry"]["exact"] = serde_json::json!(false);
+        upstream[0]["entry"]["truncated"] = serde_json::json!(true);
+        upstream[0]["entry"]["full_read"] = serde_json::json!("canon_read 41");
+        let viewport = apply_viewport(
+            result("The Athanor", upstream, serde_json::json!([])),
+            &mut ViewportSession::default(),
+            RecallViewportMode::Automatic,
+        );
+        let entry = &viewport.presentation.canon_matches[0];
+        assert!(entry.truncated);
+        assert_eq!(entry.full_read.as_deref(), Some("canon_read 41"));
+    }
+
+    #[test]
+    fn an_exact_memory_id_row_survives_automatic_evidence_gating() {
+        let candidates = serde_json::json!([{
+            "memory_id": 4197,
+            "source_path": "kodo/2026-08-28-analysis.md",
+            "title": "analysis with Kintsu",
+            "heading_path": "",
+            "excerpt": "Analysis Sol made with Kintsu.",
+            "sources": ["kodo/2026-08-28-analysis.md"],
+            "term_coverage": 1.0,
+            "matched_terms": ["4197"],
+            "missing_terms": [],
+            "score": 1.0,
+            "reasons": ["exact memory id"],
+            "source": "exact_id",
+            "chunk_index": 0
+        }]);
+        let viewport = apply_viewport(
+            result("memory 4197", serde_json::json!([]), candidates),
+            &mut ViewportSession::default(),
+            RecallViewportMode::Automatic,
+        );
+        assert_eq!(viewport.kept_candidates.len(), 1);
+        assert_eq!(viewport.kept_candidates[0].memory_id, Some(4197));
+        assert!(viewport.suppressions.is_empty());
     }
 }

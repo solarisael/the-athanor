@@ -1,5 +1,6 @@
 mod bm25f_candidates;
 mod embedding;
+mod memory_reference;
 mod pointer_files;
 mod semantic_vocabulary;
 mod temporal;
@@ -7,13 +8,15 @@ mod thread_neighbors;
 
 pub use semantic_vocabulary::refresh_semantic_vocabulary;
 
+use crate::bm25f;
 use crate::cluster::{cluster_resonance, cluster_staleness};
 use crate::config::{AppError, Config, EMBED_DIMENSION, EmbeddingMode, HTTP_CLIENT, QUERY_DATE_RE};
 use crate::settings::RoomSettings;
-use bm25f_candidates::{load_bm25f_candidates, load_bm25f_candidates_for_terms};
+use bm25f_candidates::load_bm25f_candidates_for_terms;
 use chrono::{NaiveDate, Utc};
 use embedding::embed_query;
 use hearth::RecallRequest;
+use memory_reference::{memory_references, resolve_memory_references};
 use pointer_files::protocol_pointer_files;
 use semantic_vocabulary::{load_semantic_vocabulary_concepts, semantic_vocabulary_terms};
 use serde::Serialize;
@@ -95,10 +98,15 @@ pub(crate) fn term_evidence(terms: &[String], fields: &[&str]) -> (Vec<String>, 
     (matched, missing)
 }
 
+const EXCERPT_MAX_CHARS: usize = 1200;
+
+pub(crate) fn exceeds_excerpt(body: &str) -> bool {
+    body.chars().count() > EXCERPT_MAX_CHARS
+}
+
 pub(crate) fn bounded_excerpt(body: &str) -> String {
-    const MAX: usize = 1200;
-    let excerpt: String = body.chars().take(MAX).collect();
-    if body.chars().count() > MAX {
+    let excerpt: String = body.chars().take(EXCERPT_MAX_CHARS).collect();
+    if exceeds_excerpt(body) {
         format!("{excerpt}…")
     } else {
         excerpt
@@ -131,14 +139,21 @@ pub async fn recall(
     let semantic_min_similarity = request.semantic_min_similarity();
     let content_min_similarity = request.content_min_similarity();
     let settings = RoomSettings::load(pool, room).await?;
+    let rooms = vec![room.to_owned(), "house".to_owned()];
+    let mut warnings = Vec::new();
+    // An explicit memory reference is the cheapest cross-reference the House
+    // has, so it is answered by primary key before any ranked lane runs; the
+    // reference tokens then leave the ranked vocabulary so a resolved ID can
+    // never be reported as a missing term.
+    let references = memory_references(query);
+    let exact_candidates =
+        resolve_memory_references(pool, &rooms, &references, &mut warnings).await?;
     let query_dates = query_dates(query);
-    let query_terms = query_terms(query);
+    let query_terms = references.strip_terms(query_terms(query));
     let content_patterns = query_terms
         .iter()
         .map(|term| format!("%{term}%"))
         .collect::<Vec<_>>();
-    let rooms = vec![room.to_owned(), "house".to_owned()];
-    let mut warnings = Vec::new();
     let vector_text = match (cfg.embedding_mode, cfg.embed_url.as_deref()) {
         (EmbeddingMode::Disabled, _) => {
             warnings.push("semantic lane absent: embedding disabled in production".to_string());
@@ -170,10 +185,10 @@ pub async fn recall(
         }
     };
     let decay_now = Utc::now();
-    let bm25f_candidates = load_bm25f_candidates(
+    let bm25f_candidates = load_bm25f_candidates_for_terms(
         pool,
         &rooms,
-        query,
+        &references.strip_terms(bm25f::query_terms(query)),
         temporal_decay,
         decay_now,
         &settings,
@@ -588,7 +603,21 @@ pub async fn recall(
             serde_json::json!({"memory_id":memory_id,"source_path":source_path.clone(),"title":title,"heading_path":"","excerpt":bounded_excerpt(&body),"sources":[source_path],"term_coverage":coverage,"matched_terms":matched_terms,"missing_terms":missing_terms,"score":score,"thread_key":thread_key,"reasons":["lexical thread key"],"source":"thread","chunk_index":0}),
         );
     }
-    let mut retrieval_candidates: Vec<_> = fused.into_values().collect();
+    // An exact reference already owns its memory: a ranked chunk of the same
+    // row would only repeat it below, so the exact row takes the memory's one
+    // seat and leads the evidence ahead of the ranked cap.
+    let exact_memory_ids = exact_candidates
+        .iter()
+        .filter_map(|candidate| candidate["memory_id"].as_i64())
+        .collect::<BTreeSet<_>>();
+    let mut retrieval_candidates: Vec<_> = fused
+        .into_values()
+        .filter(|candidate| {
+            candidate["memory_id"]
+                .as_i64()
+                .is_none_or(|memory_id| !exact_memory_ids.contains(&memory_id))
+        })
+        .collect();
     retrieval_candidates.sort_by(|a, b| {
         b["score"]
             .as_f64()
@@ -600,6 +629,7 @@ pub async fn recall(
             .then_with(|| a["memory_id"].as_i64().cmp(&b["memory_id"].as_i64()))
     });
     retrieval_candidates.truncate(semantic_top_k.max(content_top_k) as usize);
+    retrieval_candidates.splice(0..0, exact_candidates);
     let memory_ids = retrieval_candidates
         .iter()
         .filter_map(|candidate| candidate["memory_id"].as_i64())
@@ -615,21 +645,85 @@ pub async fn recall(
     // Canon lookup matches three ways, ranked. Tokens alone can never match a
     // multi-word name or a hyphenated alias, which is how 42 of 109 rows went
     // dark; widening to ILIKE/tsvector then lets fuzzy hits evict the row the
-    // caller literally named. So: whole-phrase exact, then token exact, then
-    // similarity — and only the last tier competes for leftover LIMIT slots.
+    // caller literally named. So: whole-phrase exact, then token or in-query
+    // mention exact, then similarity — and only the last tier competes for
+    // leftover LIMIT slots. An exact row is authority the caller named, so it
+    // carries its complete active assertion; only the similarity tier is
+    // excerpted, and that excerpt says so.
     let query_phrase = query.trim().to_lowercase();
-    let canon_rows = sqlx::query("SELECT name,kind,summary,aliases,weighty,pointer_files, (CASE WHEN lower(name) = $5 OR EXISTS (SELECT 1 FROM unnest(aliases) a1 WHERE lower(a1) = $5) THEN 0 WHEN lower(name) = ANY($2::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) a2 WHERE lower(a2) = ANY($2::text[])) THEN 1 ELSE 2 END) AS exactness FROM named_entities, websearch_to_tsquery($6::regconfig, $3) AS tsq WHERE room = ANY($1::text[]) AND authority = 'active' AND (lower(name) = $5 OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = $5) OR lower(name) = ANY($2::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = ANY($2::text[])) OR name ILIKE ANY($4::text[]) OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE alias ILIKE ANY($4::text[])) OR summary_tsv @@ tsq) ORDER BY exactness, weighty DESC, name LIMIT 12")
-        .bind(&rooms).bind(&query_terms).bind(query).bind(&content_patterns).bind(&query_phrase).bind(&settings.house_language).fetch_all(pool).await?;
+    let canon_rows = sqlx::query(
+        r#"WITH tiered AS (
+             SELECT id,name,kind,summary,aliases,weighty,pointer_files,
+                    (CASE
+                       WHEN lower(name) = $5
+                         OR EXISTS (SELECT 1 FROM unnest(aliases) a1 WHERE lower(a1) = $5)
+                       THEN 0
+                       WHEN lower(name) = ANY($2::text[])
+                         OR EXISTS (SELECT 1 FROM unnest(aliases) a2 WHERE lower(a2) = ANY($2::text[]))
+                         OR (length(name) >= 3 AND strpos($5, lower(name)) > 0)
+                         OR EXISTS (SELECT 1 FROM unnest(aliases) a3
+                                    WHERE length(a3) >= 3 AND strpos($5, lower(a3)) > 0)
+                       THEN 1
+                       ELSE 2
+                     END) AS exactness
+             FROM named_entities, websearch_to_tsquery($6::regconfig, $3) AS tsq
+             WHERE room = ANY($1::text[])
+               AND authority = 'active'
+               AND (lower(name) = $5
+                    OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = $5)
+                    OR lower(name) = ANY($2::text[])
+                    OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE lower(alias) = ANY($2::text[]))
+                    OR (length(name) >= 3 AND strpos($5, lower(name)) > 0)
+                    OR EXISTS (SELECT 1 FROM unnest(aliases) alias
+                               WHERE length(alias) >= 3 AND strpos($5, lower(alias)) > 0)
+                    OR name ILIKE ANY($4::text[])
+                    OR EXISTS (SELECT 1 FROM unnest(aliases) alias WHERE alias ILIKE ANY($4::text[]))
+                    OR summary_tsv @@ tsq)
+           )
+           SELECT id,name,kind,summary,aliases,weighty,pointer_files,exactness
+           FROM tiered
+           ORDER BY exactness, weighty DESC, name
+           LIMIT 12"#,
+    )
+    .bind(&rooms)
+    .bind(&query_terms)
+    .bind(query)
+    .bind(&content_patterns)
+    .bind(&query_phrase)
+    .bind(&settings.house_language)
+    .fetch_all(pool)
+    .await?;
     let mut canon_matches = Vec::new();
     let mut named_entities = Vec::new();
     for row in canon_rows {
+        let id: i64 = row.try_get("id")?;
         let name: String = row.try_get("name")?;
         let kind: String = row.try_get("kind")?;
         let summary: String = row.try_get("summary")?;
         let aliases: Vec<String> = row.try_get("aliases")?;
         let weighty: bool = row.try_get("weighty")?;
         let files: serde_json::Value = row.try_get("pointer_files")?;
-        canon_matches.push(serde_json::json!({"termKey":name,"entry":{"type":kind,"summary":bounded_excerpt(&summary),"aliases":aliases,"weighty":weighty,"files":protocol_pointer_files(&files)}}));
+        let exact = row.try_get::<i32, _>("exactness")? <= 1;
+        let truncated = !exact && exceeds_excerpt(&summary);
+        let projected = if truncated {
+            bounded_excerpt(&summary)
+        } else {
+            summary.clone()
+        };
+        canon_matches.push(serde_json::json!({
+            "termKey": name,
+            "entry": {
+                "id": id,
+                "type": kind,
+                "summary": projected,
+                "aliases": aliases,
+                "weighty": weighty,
+                "exact": exact,
+                "truncated": truncated,
+                "full_read": truncated.then(|| format!("canon_read {id}")),
+                "files": protocol_pointer_files(&files),
+            }
+        }));
         named_entities.push(name);
     }
     let memory_types: Vec<String> = sqlx::query_scalar(

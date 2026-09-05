@@ -2415,6 +2415,10 @@ fn receipt_snapshot(
 /// which is a client-liveness question, and it is free to move without touching
 /// how long a delivered receipt has to be acknowledged.
 const RECEIPT_CONSUMER_IDLE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+/// How long the server may hold one receipt pull before answering it empty,
+/// and how much longer the client waits before deciding the server is gone.
+const RECEIPT_BATCH_EXPIRES: std::time::Duration = std::time::Duration::from_secs(5);
+const RECEIPT_BATCH_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 async fn run_receipt_bridge(state: AppState, nats_url: String) {
     loop {
@@ -2525,7 +2529,7 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
             let mut messages = match consumer
                 .fetch()
                 .max_messages(64)
-                .expires(std::time::Duration::from_secs(5))
+                .expires(RECEIPT_BATCH_EXPIRES)
                 .messages()
                 .await
             {
@@ -2539,9 +2543,16 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                     break 'replay;
                 }
             };
+            // `expires` is the server's promise to end the batch. A broker
+            // that died holding the request never keeps it, and the client
+            // reconnects underneath a `next()` that would wait forever. The
+            // deadline is ours, so a silent batch ends here regardless.
+            let deadline = tokio::time::sleep(RECEIPT_BATCH_EXPIRES + RECEIPT_BATCH_GRACE);
+            tokio::pin!(deadline);
             loop {
                 tokio::select! {
                     _ = state.cancellation.cancelled() => return,
+                    _ = &mut deadline => break,
                     incoming = messages.next() => {
                         let Some(incoming) = incoming else {
                             break;

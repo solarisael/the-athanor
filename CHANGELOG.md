@@ -81,6 +81,25 @@ the exact implementation record.
   `neighbors`, `canon`, `taxonomy`, `cluster`), each ending ok, degraded, or
   error with a duration. `recall.embed` carries the query byte count. The
   emitter gains `EmitterSpan::child` and `parent_span_id`.
+- `recall.content` now scores only the chunks that can appear in its result:
+  the lane scopes to the room first, computes `word_similarity` once per
+  surviving chunk, spends one parameter per query term instead of
+  `ILIKE ANY(array)`, and branches the empty-pattern guard in Rust. Same rows
+  in the same order for the same inputs. On the live corpus the lane went
+  from 1,421 ms to 111 ms and a warm recall from 2.0 s to 0.75 s.
+- Recall's query embedding is bounded by its own `RECALL_EMBED_TIMEOUT` (3 s)
+  instead of the 20 s ingest timeout. A timeout degrades the recall to its
+  lexical lanes and ends `recall.embed` with error class `embed_timeout`.
+- The Insula exit flush waits up to 5 s for the in-flight batch instead of
+  750 ms, and when the ceiling hits it writes the dropped count to stderr.
+  The substrate now bootstraps the pool, schema check, and emitter before
+  the first span, and records a `substrate.bootstrap` point with that cost,
+  so the first recall of every child is observed.
+- Idle Hallway Knock polls no longer flood Insula. An empty poll emits one
+  body-free `knock_poll` heartbeat per Host every five minutes; real claims,
+  failures, cancellations, the first empty result after a claim, and every
+  settle keep their spans. Measured before: 12,744 `knock_claim` rows in one
+  idle hour across two Hosts; expected after: 24.
 - `athanor.exe` now runs as the independent multi-room Host and local manager
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified

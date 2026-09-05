@@ -2,7 +2,7 @@ use crate::insula::{
     INSULA_MAX_BATCH_EVENTS, IdempotencyScope, IngestBatch, ObservationEvent, ObservationPhase,
     OutcomeClass, TrustedBinding, ingest_batch,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -14,7 +14,12 @@ use uuid::Uuid;
 const QUEUE_CAPACITY: usize = 512; // enough: 512 pending observations; widen only with an explicit memory budget.
 const MAX_DROP_COUNT: i64 = 1_000_000_000;
 const MAX_DURATION_US: i64 = 86_400_000_000;
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(750); // enough: 750ms shutdown grace; move persistence out of process for stronger delivery.
+/// Exit flush ceiling. One ingest batch against a multi-GB insula.log costs
+/// 0.8–2 s (measured 2026-09-05, 3 GB log), so the old 750 ms grace lost the
+/// last recall of every short-lived child. Bounded by the real ingest cost;
+/// when the ceiling hits, the dropped count goes to stderr — Insula cannot
+/// record its own loss.
+pub const SHUTDOWN_FLUSH_CEILING: Duration = Duration::from_secs(5);
 
 static EMITTER: OnceLock<Emitter> = OnceLock::new();
 
@@ -26,6 +31,9 @@ struct QueuedObservation {
 struct WriterState {
     writer_id: Uuid,
     sequence: AtomicI64,
+    /// Observations whose ingest attempt the drain has completed. Sequence
+    /// minus settled is the tail still queued or in flight.
+    settled: AtomicI64,
     dropped: AtomicI64,
     accepting: AtomicBool,
     sender: mpsc::Sender<QueuedObservation>,
@@ -71,6 +79,10 @@ pub struct EmitterSpan {
     parent_span_id: Option<Uuid>,
     bytes_in: i64,
     started_at: Instant,
+    /// Set by `defer_span`: the Start row has not been enqueued and is
+    /// emitted at `end_span` with this begin time, or never if the span is
+    /// dropped.
+    deferred_start: Option<DateTime<Utc>>,
 }
 
 impl EmitterSpan {
@@ -114,6 +126,7 @@ impl EmitterSpan {
             parent_span_id: Some(self.span_id),
             bytes_in: 0,
             started_at,
+            deferred_start: None,
         })
     }
 
@@ -145,6 +158,7 @@ pub fn init_insula_emitter(pool: PgPool) {
         let state = Arc::new(WriterState {
             writer_id: Uuid::new_v4(),
             sequence: AtomicI64::new(0),
+            settled: AtomicI64::new(0),
             dropped: AtomicI64::new(0),
             accepting: AtomicBool::new(true),
             sender,
@@ -209,6 +223,42 @@ pub fn start_span(
         parent_span_id: None,
         bytes_in: 0,
         started_at,
+        deferred_start: None,
+    })
+}
+
+/// A span whose Start row is withheld until `end_span`, which then emits the
+/// Start (at the real begin time) and the End together. Dropping the span
+/// without ending it emits nothing. For polls that are usually empty: the
+/// caller decides after the fact whether this turn was worth a row.
+pub fn defer_span(
+    binding: &TrustedBinding,
+    component: &'static str,
+    layer: &'static str,
+    operation: &'static str,
+) -> Option<EmitterSpan> {
+    if ![component, layer, operation]
+        .into_iter()
+        .all(mechanical_name)
+    {
+        return None;
+    }
+    let emitter = EMITTER.get()?;
+    if !emitter.state.accepting.load(Ordering::Acquire) {
+        return None;
+    }
+    Some(EmitterSpan {
+        state: Arc::clone(&emitter.state),
+        binding: binding.clone(),
+        component,
+        layer,
+        operation,
+        trace_id: Uuid::new_v4(),
+        span_id: Uuid::new_v4(),
+        parent_span_id: None,
+        bytes_in: 0,
+        started_at: Instant::now(),
+        deferred_start: Some(Utc::now()),
     })
 }
 
@@ -221,6 +271,29 @@ pub fn end_span(span: Option<EmitterSpan>, outcome: OutcomeClass, error_class: O
         .elapsed()
         .as_micros()
         .min(MAX_DURATION_US as u128) as i64;
+    if let Some(began_at) = span.deferred_start {
+        let mut start = observation(
+            &span.state,
+            span.trace_id,
+            span.span_id,
+            span.component,
+            span.layer,
+            span.operation,
+            ObservationPhase::Start,
+            span.parent_span_id,
+            None,
+            OutcomeClass::Unknown,
+            None,
+            None,
+            0,
+            0,
+        );
+        start.observed_at = began_at;
+        span.state.enqueue(QueuedObservation {
+            binding: span.binding.clone(),
+            event: start,
+        });
+    }
     let event = observation(
         &span.state,
         span.trace_id,
@@ -287,22 +360,90 @@ pub fn record_point(
     });
 }
 
+/// A point that carries the duration of work already finished — for cost
+/// paid before the emitter existed (the bootstrap that creates it) and so
+/// impossible to span. `elapsed` is clamped to the schema's one-day maximum.
+pub fn record_timed_point(
+    binding: &TrustedBinding,
+    component: &'static str,
+    layer: &'static str,
+    operation: &'static str,
+    elapsed: Duration,
+    outcome: OutcomeClass,
+    error_class: Option<&str>,
+) {
+    if ![component, layer, operation]
+        .into_iter()
+        .all(mechanical_name)
+    {
+        return;
+    }
+    let Some(emitter) = EMITTER.get() else {
+        return;
+    };
+    if !emitter.state.accepting.load(Ordering::Acquire) {
+        return;
+    }
+    let duration_us = elapsed.as_micros().min(MAX_DURATION_US as u128) as i64;
+    let event = observation(
+        &emitter.state,
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        component,
+        layer,
+        operation,
+        ObservationPhase::Point,
+        None,
+        Some(duration_us),
+        outcome,
+        error_class,
+        None,
+        0,
+        0,
+    );
+    emitter.state.enqueue(QueuedObservation {
+        binding: binding.clone(),
+        event,
+    });
+}
+
 pub async fn flush_insula_emitter() {
     let Some(emitter) = EMITTER.get() else {
         return;
     };
     emitter.state.accepting.store(false, Ordering::Release);
     let _ = emitter.shutdown.send(true);
-    let Some(mut drain) = emitter.drain.lock().ok().and_then(|mut task| task.take()) else {
+    let Some(drain) = emitter.drain.lock().ok().and_then(|mut task| task.take()) else {
         return;
     };
-    if tokio::time::timeout(SHUTDOWN_TIMEOUT, &mut drain)
-        .await
-        .is_err()
-    {
-        drain.abort();
-        let _ = drain.await;
+    let unflushed = drain_with_ceiling(drain, SHUTDOWN_FLUSH_CEILING, &emitter.state).await;
+    if unflushed > 0 {
+        eprintln!(
+            "insula_writer: exit flush ceiling {} ms hit; {unflushed} observation(s) dropped (writer {})",
+            SHUTDOWN_FLUSH_CEILING.as_millis(),
+            emitter.state.writer_id
+        );
     }
+}
+
+/// Waits for the drain task to settle, at most `ceiling`. On the ceiling the
+/// task is aborted and the count of observations it never persisted is
+/// returned: everything still queued plus the batch it had in hand.
+async fn drain_with_ceiling(
+    mut drain: JoinHandle<()>,
+    ceiling: Duration,
+    state: &WriterState,
+) -> i64 {
+    if tokio::time::timeout(ceiling, &mut drain).await.is_ok() {
+        return 0;
+    }
+    drain.abort();
+    let _ = drain.await;
+    // Sequences are handed out at enqueue; the drain counts each batch as it
+    // settles. The gap is the tail that never landed, plus queue-full drops
+    // whose drop row was never written.
+    state.sequence.load(Ordering::Acquire) - state.settled.load(Ordering::Acquire)
+        + state.dropped.load(Ordering::Acquire)
 }
 
 fn disabled_by_environment() -> bool {
@@ -451,7 +592,9 @@ async fn drain_loop(
                 Err(_) => break,
             }
         }
+        let settled = batch.len() as i64;
         persist_groups(&pool, batch).await;
+        state.settled.fetch_add(settled, Ordering::AcqRel);
     }
 }
 
@@ -510,12 +653,98 @@ mod tests {
         assert!(status.success());
     }
 
+    fn test_state(sender: mpsc::Sender<QueuedObservation>) -> Arc<WriterState> {
+        Arc::new(WriterState {
+            writer_id: Uuid::new_v4(),
+            sequence: AtomicI64::new(0),
+            settled: AtomicI64::new(0),
+            dropped: AtomicI64::new(0),
+            accepting: AtomicBool::new(true),
+            sender,
+        })
+    }
+
+    /// A drain stuck in an ingest POST is abandoned at the ceiling, and the
+    /// count reported is exactly the tail it never settled: queued plus
+    /// in-hand observations, plus drops whose row was never written.
+    #[tokio::test]
+    async fn flush_ceiling_abandons_stuck_drain_and_counts_the_tail() {
+        let (sender, _receiver) = mpsc::channel(QUEUE_CAPACITY);
+        let state = test_state(sender);
+        for _ in 0..9 {
+            state.next_sequence();
+        }
+        state.settled.store(6, Ordering::Release);
+        state.dropped.store(2, Ordering::Release);
+        let stuck = tokio::spawn(std::future::pending::<()>());
+        let started = Instant::now();
+        let unflushed = drain_with_ceiling(stuck, Duration::from_millis(40), &state).await;
+        assert!(started.elapsed() >= Duration::from_millis(40));
+        assert!(started.elapsed() < Duration::from_secs(2), "ceiling is bounded");
+        assert_eq!(unflushed, 9 - 6 + 2);
+    }
+
+    /// A drain that settles inside the ceiling reports no loss, however far
+    /// the counters are apart when the wait began.
+    #[tokio::test]
+    async fn flush_within_ceiling_reports_no_loss() {
+        let (sender, _receiver) = mpsc::channel(QUEUE_CAPACITY);
+        let state = test_state(sender);
+        state.next_sequence();
+        let settling = tokio::spawn(async {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        });
+        let unflushed = drain_with_ceiling(settling, Duration::from_secs(2), &state).await;
+        assert_eq!(unflushed, 0);
+    }
+
+    /// A deferred span is silent until ended, then emits its Start at the
+    /// real begin time followed by its End; dropped, it emits nothing.
+    #[tokio::test]
+    async fn deferred_span_emits_start_and_end_only_when_ended() {
+        let (sender, mut receiver) = mpsc::channel(QUEUE_CAPACITY);
+        let state = test_state(sender);
+        let began_at = Utc::now() - chrono::Duration::milliseconds(250);
+        let deferred = |operation: &'static str| EmitterSpan {
+            state: Arc::clone(&state),
+            binding: system_binding(),
+            component: "akasha",
+            layer: "substrate",
+            operation,
+            trace_id: Uuid::new_v4(),
+            span_id: Uuid::new_v4(),
+            parent_span_id: None,
+            bytes_in: 0,
+            started_at: Instant::now(),
+            deferred_start: Some(began_at),
+        };
+
+        drop(deferred("knock_poll_empty"));
+        assert!(receiver.try_recv().is_err(), "a dropped deferred span emits nothing");
+
+        let span = deferred("knock_poll_claimed");
+        let span_id = span.span_id.to_string();
+        end_span(Some(span), OutcomeClass::Ok, None);
+        let start = receiver.try_recv().expect("start row").event;
+        let end = receiver.try_recv().expect("end row").event;
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(start.phase, ObservationPhase::Start);
+        assert_eq!(start.observed_at, began_at);
+        assert_eq!(start.span_id, span_id);
+        assert!(start.duration_us.is_none());
+        assert_eq!(end.phase, ObservationPhase::End);
+        assert_eq!(end.span_id, span_id);
+        assert!(end.duration_us.is_some());
+        assert!(start.writer_sequence < end.writer_sequence);
+    }
+
     #[test]
     fn drop_counter_accumulates_when_queue_is_full() {
         let (sender, _receiver) = mpsc::channel(QUEUE_CAPACITY);
         let state = WriterState {
             writer_id: Uuid::new_v4(),
             sequence: AtomicI64::new(0),
+            settled: AtomicI64::new(0),
             dropped: AtomicI64::new(0),
             accepting: AtomicBool::new(true),
             sender,
@@ -551,6 +780,7 @@ mod tests {
         let state = Arc::new(WriterState {
             writer_id: Uuid::new_v4(),
             sequence: AtomicI64::new(0),
+            settled: AtomicI64::new(0),
             dropped: AtomicI64::new(0),
             accepting: AtomicBool::new(true),
             sender,

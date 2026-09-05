@@ -1,4 +1,5 @@
 mod bm25f_candidates;
+mod content_lane;
 mod embedding;
 mod memory_reference;
 mod pointer_files;
@@ -16,7 +17,8 @@ use crate::insula_writer::{EmitterSpan, end_span};
 use crate::settings::RoomSettings;
 use bm25f_candidates::load_bm25f_candidates_for_terms;
 use chrono::{NaiveDate, Utc};
-use embedding::embed_query;
+use content_lane::content_lane_rows;
+use embedding::{EmbedError, embed_query};
 use hearth::RecallRequest;
 use memory_reference::{memory_references, resolve_memory_references};
 use pointer_files::protocol_pointer_files;
@@ -221,7 +223,10 @@ pub async fn recall(
                     ))
                 }
                 Err(e) => {
-                    phase.degraded("app_error.embedding");
+                    phase.degraded(match e {
+                        EmbedError::Timeout(_) => "embed_timeout",
+                        EmbedError::Failed(_) => "app_error.embedding",
+                    });
                     warnings.push(format!("semantic lane absent: {e}"));
                     None
                 }
@@ -367,28 +372,15 @@ pub async fn recall(
         phase.ok();
     }
     let phase = Phase::start(span, "recall.content");
-    let content_rows = sqlx::query(
-        "SELECT m.id AS memory_id,m.source_path,coalesce(m.title,'') AS title,
-                coalesce(c.heading_path,'') AS heading_path,c.body,c.char_start,c.char_end,
-                c.chunk_index,m.meta AS meta,word_similarity($1,c.body)::double precision AS sim
-         FROM memory_chunks c
-         JOIN memories m ON m.id=c.memory_id
-         WHERE m.room = ANY($2::text[])
-           AND m.archived_at IS NULL
-           AND m.superseded_by IS NULL
-           AND COALESCE(m.type,'') <> $6
-           AND ($5::text[] = '{}'::text[] OR c.body ILIKE ANY($5::text[]))
-           AND word_similarity($1,c.body) >= $3
-         ORDER BY sim DESC,m.source_path,c.chunk_index
-         LIMIT $4",
+    let content_rows = content_lane_rows(
+        pool,
+        query,
+        &rooms,
+        content_min_similarity,
+        content_fetch_limit,
+        &content_patterns,
+        origami::boats::MEMORY_KIND,
     )
-    .bind(query)
-    .bind(&rooms)
-    .bind(content_min_similarity)
-    .bind(content_fetch_limit)
-    .bind(&content_patterns)
-    .bind(origami::boats::MEMORY_KIND)
-    .fetch_all(pool)
     .await?;
     phase.ok();
     let mut content_chunks = Vec::new();

@@ -14,7 +14,7 @@ use crate::store::{
     state_hash, timestamp,
 };
 use crate::viewport::{ViewportSession, apply_viewport};
-use akasha::insula_writer::{end_span, record_point, start_span};
+use akasha::insula_writer::{EmitterSpan, defer_span, end_span, record_point, start_span};
 use akasha::{
     AppError, Config as SubstrateConfig, LessonFamily, LessonQueryParams, OutcomeClass,
     TrustedBinding, hallway_inbox, hallway_knock_claim, hallway_knock_settle, lesson_query, recall,
@@ -67,6 +67,7 @@ use sqlx::PgPool;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use summoning::presence::{
     PresenceAuthentication, PresenceBinding, PresenceCloseRequest, PresenceOpenRequest,
     PresenceResult, PresenceSettleRequest, PresenceTurnRequest,
@@ -76,12 +77,59 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use uuid::Uuid;
 
+// Idle doormen report liveness once per Host, not once per session or poll.
+// There is no poll-count column: bytes/tokens/drop_count retain their units;
+// Vitals event_count measures these five-minute heartbeat points instead.
+const KNOCK_POLL_OBSERVATION_WINDOW: Duration = Duration::from_secs(5 * 60);
+
+#[derive(Default)]
+struct KnockPollObservations {
+    last_summary: Option<Instant>,
+    was_nonempty: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum KnockPollObservation {
+    ClaimSpan,
+    PollPoint,
+    Quiet,
+}
+// A cancelled claim may already have acquired a candidate. Only a completed
+// empty result may discard its deferred span; cancellation remains visible.
+struct PendingKnockObservation(Option<EmitterSpan>);
+
+impl Drop for PendingKnockObservation {
+    fn drop(&mut self) {
+        end_span(self.0.take(), OutcomeClass::Error, Some("claim_aborted"));
+    }
+}
+
+
+impl KnockPollObservations {
+    fn observe(&mut self, nonempty: bool, now: Instant) -> KnockPollObservation {
+        let changed_to_empty = self.was_nonempty && !nonempty;
+        self.was_nonempty = nonempty;
+        if nonempty || changed_to_empty {
+            return KnockPollObservation::ClaimSpan;
+        }
+        if self.last_summary.is_none_or(|last| {
+            now.saturating_duration_since(last) >= KNOCK_POLL_OBSERVATION_WINDOW
+        }) {
+            self.last_summary = Some(now);
+            KnockPollObservation::PollPoint
+        } else {
+            KnockPollObservation::Quiet
+        }
+    }
+}
+
 struct RuntimeState {
     projection: RecallPolicyState,
     sessions: HashMap<String, RecallPolicySession>,
     presence: PresenceRuntime,
     viewport_sessions: HashMap<String, ViewportSession>,
     hallway_inbox_fingerprints: HashMap<String, String>,
+    knock_poll: KnockPollObservations,
     chat: ChatLog,
     cursor: ProjectionCursor,
     durable: HostDurableStore,
@@ -157,6 +205,7 @@ impl Host {
                     presence: PresenceRuntime::default(),
                     viewport_sessions: HashMap::new(),
                     hallway_inbox_fingerprints: HashMap::new(),
+                    knock_poll: KnockPollObservations::default(),
                     chat: ChatLog::default(),
                     cursor,
                     durable,
@@ -1274,7 +1323,7 @@ async fn query_akasha_recall(
             return akasha_failed(state, &meta, format!("Akasha recall refused: {error}")).await;
         }
     };
-    let result = match recall(pool, &config, request).await {
+    let result = match recall(pool, &config, request, None).await {
         Ok(result) => serde_json::to_value(&result).expect("Akasha recall result serializes"),
         Err(error) => {
             return akasha_failed(state, &meta, format!("Akasha recall failed: {error}")).await;
@@ -1368,13 +1417,18 @@ async fn query_akasha_lessons(
 }
 
 async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
-    let span = start_span(state.insula_binding.as_ref(), "host", "host", "knock_claim");
+    let mut span = PendingKnockObservation(defer_span(
+        state.insula_binding.as_ref(),
+        "host",
+        "host",
+        "knock_claim",
+    ));
     if let Err(error) = knock_authority(&state.config, &meta) {
-        end_span(span, app_error_outcome(&error), Some("app_error"));
+        end_span(span.0.take(), app_error_outcome(&error), Some("app_error"));
         return hallway_knock_error(state, &meta, "claim", error).await;
     }
     let Some(pool) = state.hallway_pool.as_ref() else {
-        end_span(span, OutcomeClass::Degraded, None);
+        end_span(span.0.take(), OutcomeClass::Degraded, None);
         let failed = outcome(
             state,
             &meta,
@@ -1400,7 +1454,24 @@ async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
         Ok(result) => {
             let result_value =
                 serde_json::to_value(&result).expect("Hallway Knock claim serializes");
-            let runtime = state.runtime.lock().await;
+            let mut runtime = state.runtime.lock().await;
+            let observation = runtime
+                .knock_poll
+                .observe(result.knock.is_some(), Instant::now());
+            let span = span.0.take();
+            match observation {
+                KnockPollObservation::ClaimSpan => end_span(span, OutcomeClass::Ok, None),
+                KnockPollObservation::PollPoint => record_point(
+                    state.insula_binding.as_ref(),
+                    "host",
+                    "host",
+                    "knock_poll",
+                    OutcomeClass::Ok,
+                    None,
+                    None,
+                ),
+                KnockPollObservation::Quiet => {}
+            }
             let event = HallwayKnockClaimedEvent {
                 meta: event_meta_for_projection(
                     state,
@@ -1415,14 +1486,13 @@ async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
                 ),
                 result,
             };
-            end_span(span, OutcomeClass::Ok, None);
             Responses {
                 direct: vec![serialize(&event)],
                 delta: None,
             }
         }
         Err(error) => {
-            end_span(span, app_error_outcome(&error), Some("app_error"));
+            end_span(span.0.take(), app_error_outcome(&error), Some("app_error"));
             hallway_knock_error(state, &meta, "claim", error).await
         }
     }
@@ -2595,11 +2665,12 @@ fn new_id() -> String {
 mod tests {
     use super::{
         app_error_outcome, hallway_projection_changed, host_insula_binding, knock_authority,
-        resolve_room_dir,
+        resolve_room_dir, KnockPollObservation, KnockPollObservations, KNOCK_POLL_OBSERVATION_WINDOW,
     };
     use crate::config::{HostConfig, KnockAutonomy};
     use akasha::{AppError, OutcomeClass};
     use protocol::CommandMeta;
+    use std::time::{Duration, Instant};
 
     fn config(knock_autonomy: KnockAutonomy) -> HostConfig {
         HostConfig {
@@ -2646,6 +2717,42 @@ mod tests {
             AppError::Refusal { code, .. } => code,
             other => panic!("expected a typed refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn empty_knock_polls_are_bounded_but_claims_and_transitions_keep_spans() {
+        let start = Instant::now();
+        let mut observations = KnockPollObservations::default();
+        // Many sessions share this one Host state; polling faster must not
+        // increase the heartbeat rate.
+        for window in 0..3 {
+            let base = start + KNOCK_POLL_OBSERVATION_WINDOW * window;
+            assert_eq!(observations.observe(false, base), KnockPollObservation::PollPoint);
+            for millis in [0, 1, 2_000, 50_000, 299_999] {
+                assert_eq!(
+                    observations.observe(false, base + Duration::from_millis(millis)),
+                    KnockPollObservation::Quiet
+                );
+            }
+        }
+        let claimed_at = start + KNOCK_POLL_OBSERVATION_WINDOW * 3;
+        for _ in 0..2 {
+            assert_eq!(
+                observations.observe(true, claimed_at),
+                KnockPollObservation::ClaimSpan
+            );
+        }
+        assert_eq!(
+            observations.observe(false, claimed_at),
+            KnockPollObservation::ClaimSpan,
+            "the first empty poll after a claim is an observed transition"
+        );
+        assert_eq!(observations.observe(false, claimed_at), KnockPollObservation::PollPoint);
+        assert_eq!(observations.observe(false, claimed_at), KnockPollObservation::Quiet);
+        assert_eq!(
+            observations.observe(false, claimed_at + KNOCK_POLL_OBSERVATION_WINDOW),
+            KnockPollObservation::PollPoint
+        );
     }
 
     #[test]

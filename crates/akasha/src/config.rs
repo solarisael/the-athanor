@@ -28,7 +28,16 @@ const DEFAULT_EMBED_MODEL: &str = "hf.co/zenmagnets/Nemotron-3-Embed-1B-Q4_K_M-G
 const DEFAULT_GIGA_MODEL_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_GIGA_KEEP_ALIVE: &str = "30m";
 const DEFAULT_GIGA_NUM_CTX: u32 = 32_768;
+/// Ingest-side embedding timeout (remember, chunk batches): a batch of
+/// passages may legitimately take this long. Recall does not share it — see
+/// `RECALL_EMBED_TIMEOUT`.
 const DEFAULT_EMBEDDING_MODEL_TIMEOUT_SECS: u64 = 20;
+/// How long a recall waits for its one query embedding before the semantic
+/// lane is given up and the lexical lanes answer alone. Warm embed is ~0.1 s,
+/// contended 0.6–2.2 s; under the old shared 20 s every stuck-Ollama recall
+/// became a 21 s recall (three per day, measured 2026-09-05). Past 3 s the
+/// lexical answer now is worth more than the semantic answer later.
+pub(crate) const RECALL_EMBED_TIMEOUT: Duration = Duration::from_secs(3);
 pub(crate) const EMBED_DIMENSION: usize = 2048;
 pub(crate) static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 pub(crate) static ROOM_KEY_RE: LazyLock<Regex> = LazyLock::new(|| {

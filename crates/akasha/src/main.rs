@@ -1,11 +1,13 @@
 use akasha::backup::{BackupError, backup_with_migrations, restore_checked, source_migrations};
 use akasha::insula_writer::{
-    end_span, flush_insula_emitter, init_insula_emitter, record_point, start_span, system_binding,
+    end_span, flush_insula_emitter, init_insula_emitter, record_point, record_timed_point,
+    start_span, system_binding,
 };
 use akasha::migrations::{migration_pool, run_migrations};
 use akasha::{
     AppError, Config, DesignDocumentQueryParams, DesignDocumentWriteParams, EntityResolveParams,
-    LessonContextParams, LessonDeleteParams, LessonQueryParams, LessonTriggerMatchParams,
+    GigaWorkerHandle, LessonContextParams, LessonDeleteParams, LessonQueryParams,
+    LessonTriggerMatchParams,
     LessonUpdateParams, OutcomeClass, QuestBoardParams, QuestChargebookParams, QuestClaimParams,
     QuestClockParams, QuestEvidenceParams, QuestPostParams, QuestReportParams,
     SubstrateHealthOptions, TrustedBinding, anamnesis, anamnesis_write, canon_read, canon_write,
@@ -49,6 +51,7 @@ use std::{
     env,
     path::PathBuf,
     process::{Child, Command, Stdio},
+    time::Instant,
 };
 use summoning::{
     AnamnesisReadRequest, AnamnesisWriteRequest, PaperBoatSleepRequest, PaperBoatWakeRequest,
@@ -830,6 +833,43 @@ fn spawn_retention_service() {
     });
 }
 
+type Runtime = (Config, sqlx::PgPool, Option<GigaWorkerHandle>);
+
+/// Methods answered without the shared pool: they never bootstrap it.
+fn needs_runtime(request: &ProtocolRequest) -> bool {
+    !matches!(
+        request,
+        ProtocolRequest::VaultRecall(_)
+            | ProtocolRequest::SubstrateHealth(_)
+            | ProtocolRequest::SubstrateMigrations(_)
+    )
+}
+
+/// Pool connect, schema check, GIGA worker, then the emitter — before the
+/// first request's span starts, so the first recall of every process lands
+/// in Insula with its children instead of being the one nobody sees. The
+/// bootstrap's own cost is the `substrate.bootstrap` point: it is inside the
+/// wall time the caller waited and would otherwise be invisible.
+async fn bootstrap_runtime(binding: &TrustedBinding) -> Result<Runtime, AppError> {
+    let started = Instant::now();
+    let config = Config::from_env()?;
+    let pool = config.pool().await?;
+    // enough: the GIGA worker's own claim and finish seams stay unobserved;
+    // door: spawn_giga_worker in giga_worker.rs.
+    let worker = spawn_giga_worker(&pool, &config)?;
+    init_insula_emitter(pool.clone());
+    record_timed_point(
+        binding,
+        INSULA_COMPONENT,
+        INSULA_LAYER,
+        "substrate.bootstrap",
+        started.elapsed(),
+        OutcomeClass::Ok,
+        None,
+    );
+    Ok((config, pool, worker))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _wsl_keepalive = WslKeepalive::start()?;
@@ -842,7 +882,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter("warn")
         .init();
     spawn_retention_service();
-    let mut runtime = None;
+    let mut runtime: Option<Runtime> = None;
     let stdin = BufReader::new(io::stdin());
     let mut lines = stdin.lines();
     let mut stdout = io::BufWriter::new(io::stdout());
@@ -856,6 +896,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(request) => {
                 let operation = operation_name(&request);
                 let binding = insula_binding(&request);
+                let bootstrap_error = if runtime.is_none() && needs_runtime(&request) {
+                    match bootstrap_runtime(&binding).await {
+                        Ok(ready) => {
+                            runtime = Some(ready);
+                            None
+                        }
+                        Err(error) => Some(error),
+                    }
+                } else {
+                    None
+                };
                 let span = start_span(&binding, INSULA_COMPONENT, INSULA_LAYER, operation);
                 let validation = match &request {
                     ProtocolRequest::CanonWrite(_) | ProtocolRequest::CanonRead(_) => Ok(()),
@@ -974,36 +1025,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Err(error) => app_error(id, operation, error),
                         },
                         request => {
-                            let initialization_error = if runtime.is_none() {
-                                match Config::from_env() {
-                                    Ok(config) => match config.pool().await {
-                                        // enough: the GIGA worker's own claim and
-                                        // finish seams stay unobserved; door:
-                                        // spawn_giga_worker in giga_worker.rs.
-                                        Ok(pool) => match spawn_giga_worker(&pool, &config) {
-                                            Ok(worker) => {
-                                                // Observation begins with the pool;
-                                                // methods answered above this
-                                                // door stay unobserved.
-                                                init_insula_emitter(pool.clone());
-                                                runtime = Some((config, pool, worker));
-                                                None
-                                            }
-                                            Err(error) => Some(error),
-                                        },
-                                        Err(error) => Some(error),
-                                    },
-                                    Err(error) => Some(error),
-                                }
-                            } else {
-                                None
-                            };
-                            if let Some(error) = initialization_error {
+                            if let Some(error) = bootstrap_error {
                                 app_error(id, operation, error)
                             } else {
                                 let (config, pool, _) = runtime
                                     .as_ref()
-                                    .expect("successful initialization stores the runtime");
+                                    .expect("bootstrap stores the runtime before dispatch");
                                 match request {
                                     ProtocolRequest::CanonWrite(request) => {
                                         match canon_write(pool, request).await {

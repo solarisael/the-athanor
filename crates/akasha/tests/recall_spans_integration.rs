@@ -1,6 +1,11 @@
+//! Two proofs about the cost of recall, on one isolated corpus.
+//!
 //! Every phase of a recall lands in `insula.log` as a child span of the
 //! request's `recall` span, with a duration and an outcome, so the cost of
-//! recall can be read from Insula instead of guessed.
+//! recall can be read from Insula instead of guessed. And the content lane,
+//! rewritten to keep `word_similarity` off rows that cannot appear in the
+//! result, still returns the rows the statement it replaced returned, in the
+//! same order.
 //!
 //! Run with the isolated PostgreSQL pair:
 //! `ATHANOR_SUBSTRATE_TEST_DATABASE_URL=... ATHANOR_SUBSTRATE_TEST_SCHEMA=solarisael_tuner_test_<you>`
@@ -358,5 +363,143 @@ async fn every_recall_phase_is_a_child_span_with_a_duration() -> TestResult {
         wall_us as f64 / 1000.0
     );
 
+    db.close().await
+}
+
+/// The statement `recall.content` ran before the trigram cut, kept verbatim
+/// as the oracle for the rewrite. `$5` is the term-pattern array, which the
+/// new lane spends as one parameter per pattern instead.
+const CONTENT_LANE_BEFORE_THE_CUT: &str =
+    "SELECT m.id AS memory_id,c.chunk_index,
+            word_similarity($1,c.body)::double precision AS sim
+     FROM memory_chunks c
+     JOIN memories m ON m.id=c.memory_id
+     WHERE m.room = ANY($2::text[])
+       AND m.archived_at IS NULL
+       AND m.superseded_by IS NULL
+       AND COALESCE(m.type,'') <> $6
+       AND ($5::text[] = '{}'::text[] OR c.body ILIKE ANY($5::text[]))
+       AND word_similarity($1,c.body) >= $3
+     ORDER BY sim DESC,m.source_path,c.chunk_index
+     LIMIT $4";
+
+/// One case: the query, the floor, and the `%term%` patterns `query_terms`
+/// derives from that query. The patterns are written out because they are an
+/// input to the oracle statement; a change to `query_terms` must show up here
+/// as a failure rather than as a silently different comparison.
+struct LaneCase {
+    query: &'static str,
+    floor: f64,
+    patterns: &'static [&'static str],
+    expect_rows: bool,
+}
+
+const LANE_CASES: &[LaneCase] = &[
+    LaneCase {
+        query: "substrate lattice",
+        floor: 0.30,
+        patterns: &["%lattice%", "%substrate%"],
+        expect_rows: true,
+    },
+    LaneCase {
+        query: "shadowboxing porch",
+        floor: 0.30,
+        patterns: &["%porch%", "%shadowboxing%"],
+        expect_rows: true,
+    },
+    // A term that matches nearly every body, next to two that do not: the
+    // case where no index can narrow the lane.
+    LaneCase {
+        query: "the tuner ledger",
+        floor: 0.30,
+        patterns: &["%ledger%", "%the%", "%tuner%"],
+        expect_rows: true,
+    },
+    // No token reaches two characters, so recall derives no patterns at all.
+    // The old statement passed its `$5 = '{}'` guard; the new lane omits the
+    // term group. Floor 0.0 keeps the case honest: every scoped chunk
+    // qualifies, so the whole ordering is compared, ties included.
+    LaneCase {
+        query: "a b",
+        floor: 0.0,
+        patterns: &[],
+        expect_rows: true,
+    },
+    LaneCase {
+        query: "notebook",
+        floor: 0.05,
+        patterns: &["%notebook%"],
+        expect_rows: true,
+    },
+];
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
+async fn the_content_lane_returns_what_the_statement_it_replaced_returned() -> TestResult {
+    let db = Isolated::open("contentlane").await?;
+    db.seed().await?;
+    let rooms = vec![ROOM.to_string(), "house".to_string()];
+
+    for case in LANE_CASES {
+        let patterns: Vec<String> = case.patterns.iter().map(|p| (*p).to_string()).collect();
+        let before = sqlx::query(CONTENT_LANE_BEFORE_THE_CUT)
+            .bind(case.query)
+            .bind(&rooms)
+            .bind(case.floor)
+            .bind(Some(8i64))
+            .bind(&patterns)
+            .bind(origami::boats::MEMORY_KIND)
+            .fetch_all(&db.pool)
+            .await?;
+        let expected: Vec<(i64, i32, f64)> = before
+            .iter()
+            .map(|row| {
+                Ok((
+                    row.try_get("memory_id")?,
+                    row.try_get("chunk_index")?,
+                    row.try_get("sim")?,
+                ))
+            })
+            .collect::<Result<_, sqlx::Error>>()?;
+
+        let request = RecallRequest::new(
+            RoomKey::new(ROOM)?,
+            case.query.into(),
+            8,
+            0.4,
+            8,
+            case.floor,
+        )?;
+        let result = recall(&db.pool, &db.cfg, request, None).await?;
+        let observed: Vec<(i64, i32, f64)> = result
+            .content_chunks
+            .iter()
+            .map(|chunk| {
+                (
+                    chunk["memory_id"].as_i64().unwrap_or(-1),
+                    chunk["chunk_index"].as_i64().unwrap_or(-1) as i32,
+                    chunk["ws"].as_f64().unwrap_or(f64::NAN),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            case.expect_rows,
+            !expected.is_empty(),
+            "case {:?}: the oracle statement returned {} rows, so the comparison would prove nothing",
+            case.query,
+            expected.len()
+        );
+        assert_eq!(
+            observed, expected,
+            "case {:?}: the content lane and the statement it replaced disagree",
+            case.query
+        );
+    }
+
+    println!(
+        "content lane matches the statement it replaced on {} cases ({SEEDED_MEMORIES} memories)",
+        LANE_CASES.len()
+    );
     db.close().await
 }

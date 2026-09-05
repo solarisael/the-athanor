@@ -318,15 +318,26 @@ All times are -03. Full observations, including the ones that failed, are in
 | Mechanics category chips | Headless Chrome 152 on the served prototype against the installed Host | 1440 × 1000: max right edge 1305 px, none past the edge; 390 × 844: 362 px |
 | Pulse lane spans drawer | Lane `knock_claim`, newest span, then `/live/insula/trace` for the same id | Drawer and direct route return the same two rows |
 | Windows service failed-start evidence | Port 4222 held by a dummy listener, then `sc start` | `STOPPED`, `WIN32_EXIT_CODE 1066`, `SERVICE_EXIT_CODE 1`, `nats.stderr.log` names the bind error, zero children |
-| Durable-write backup receipt | `remember` #4469 through the installed OMP tool | `backup.status: skipped` — the write never asked; protocol default cut on `dev/next`, live half owed again after the next session starts on a new release |
-| pg_dump route on the tower | Same write | Not reached (see above) |
-| OMP keeper restart/resume plane | Room `kodo` provisioned (four grants, `omp-keeper.json`, harness `kodo-omp`) | Live `request_restart` with `mode: resume` owed; needs the next kodo session started through the keeper |
+| Durable-write backup receipt | `remember` #4469 through the installed OMP tool | `backup.status: skipped` — the write never asked; protocol default cut on `dev/next` (`b639752`) |
+| Durable-write backup receipt, second pass | `remember` #4472 from the first session started on `0.5.4+dev.202609051730.9c21acf`, no `backup` field sent | `backup.status: ok`, `tool: pg_bin_dir:pg_dump`, 586,910,234 bytes in 47.2 s; `sha256sum` of the dump file matches the receipt |
+| pg_dump route on the tower | Same write | `pg_bin_dir:pg_dump` named in the receipt; the old `program not found` did not recur |
+| OMP keeper restart/resume plane | Room `kodo` provisioned (four grants, `omp-keeper.json`, harness `kodo-omp`) | The next kodo session started through the keeper (`restart-capability` present, claimant `omp-keeper`); live `request_restart` with `mode: resume` still owed |
 
 The service restarts during the pointer-flip deploy exposed a further
 defect: the running Host reconnected its sockets to the new broker and kept
 reporting `broker_status: degraded`, because the restarted broker had
 forgotten the Host's memory-only replay consumer. Cut on `dev/next`
-(`ad5ec25`); live half owed after a Host runs that build.
+(`ad5ec25`, `9c21acf`). Live, on the installed `9c21acf` Host: the first
+`/health` poll after `sc start` showed `connected` (14:48), and the next
+session read `latest_original_stream_sequence: 188` against the 187 the
+dead consumer had held (evening). Both halves done.
+
+The same investigation showed that the OMP loader ensured the scoped Host
+once, at session start. A Host that died mid-session stayed dead until some
+session started. `dev/next` `f54d65e` adds `watchScopedHost`: the loader
+probes scoped health every 30 s for the life of the OMP process and runs the
+same start sequence when the probe fails. Tests: 27 in
+`installed-loader.test.ts`, three new. Live half owed after deploy.
 
 Deployment shape observed on the first pointer-flip release: `current.json`
 flipped to `0.5.4+dev.202609051650.4d98e0d` with `previousVersion: 0.5.4` and

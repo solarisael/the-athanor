@@ -605,7 +605,7 @@ the complete report.
 | Native product version, native `current.json`, service, and product rollback | Rust installer | Validates and atomically activates native releases |
 | Adapter source bundle and `component-manifest.json` | Shared PowerShell component builder | Builds source artifacts only; does not write Program Files |
 | Installed adapter versions and `components/omp-adapter/current.json` | Rust installer | Stages, validates, atomically activates, rolls back, and diagnoses components |
-| Stable `bin/athanor-omp-loader.ts` | Product payload | Reads native environment and component pointer; refuses invalid or incompatible imports |
+| Stable `bin/athanor-omp-loader.ts` | Product payload | Reads native environment and component pointer; refuses invalid or incompatible imports; starts the scoped Host when health fails and keeps it alive for the whole session |
 | Adapter-only deployment | Native manager | Installs a built component with `install-omp-adapter --source <component-root>` without rebuilding or mutating a native release |
 
 The component pointer is

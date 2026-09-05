@@ -1,11 +1,13 @@
-# Godot Client and Spatial Presentation Architecture
+> Status: Godot is parked since 2026-08-28 (project lesson 462), not the operator door.
 
-Status: Three functional 2D screens ship in the late beta; the operator client and spatial presentation remain incomplete
+# Godot Client and Spatial Presentation Architecture — Historical Specification
+
+The remaining sections preserve the historical specification.
+The web prototype at `gui-prototype/` is the read-only operator surface.
+`bun gui-prototype/serve.ts` serves it and proxies Host reads over loopback.
 Last updated: 2026-08-13
 
-This document defines how the thin Godot client inherits Solarisael's visual
-system, remains a replaceable presentation body, and grows from functional 2D
-controls into an in-world spatial interface and GPU-particle constellation.
+This historical specification defines the parked Godot client, not the current operator surface.
 
 ## 1. Current boundary
 
@@ -41,9 +43,7 @@ Godot does not invent a second Athanor theme and does not copy scattered CSS or
 current screenshots by hand.
 
 The website's WebGPU/WASM effects are visual provenance, not this client's
-renderer. The Athanor operator client remains Godot; ideas cross that boundary
-only after translation into Godot-native controls, meshes, materials, or
-shaders.
+renderer. The following parked Godot design translates ideas into native controls, meshes, materials, or shaders.
 
 ## 2. Runtime boundary
 
@@ -51,7 +51,7 @@ Godot communicates only with the Athanor Host through authenticated, versioned
 WebSocket commands and projection deltas.
 
 ```text
-Godot client <-> Athanor Host <-> core/adapters/AKASHA
+Parked Godot client <-> Athanor Host <-> core/adapters/AKASHA
 ```
 
 The client does not subscribe to NATS, query PostgreSQL, call Ollama, open OMP

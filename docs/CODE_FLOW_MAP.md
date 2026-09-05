@@ -7,10 +7,12 @@ without crossing the whole repository at once.
 
 **Snapshot:** current working tree on 2026-08-17.
 
-**Scope:** production Rust, the OMP adapter, authored Godot code, and operational
-build/install scripts. Tests are proof satellites rather than runtime nodes.
-`gui/addons/juicee/` is one third-party plugin boundary. `gui-prototype/` is a
-standalone mock/specimen and has no production runtime edge.
+**Scope:** production Rust, the OMP adapter, parked Godot code, and operational build/install scripts.
+Tests are proof satellites rather than runtime nodes.
+`gui/addons/juicee/` is a third-party plugin boundary for the parked client.
+`gui-prototype/` is the read-only web operator surface.
+It has one runtime read edge: nine POST-only `/live/*` routes through `serve.ts` to the Host.
+Run `bun gui-prototype/serve.ts` to serve the surface and its loopback proxy.
 
 ## Reading the map
 
@@ -64,7 +66,7 @@ The Windows service starts PostgreSQL when managed, then NATS and delivery.
 `athanor.exe` independently owns the one multi-room Host and may start or stop
 without owning OMP sessions. OMP can use both boundaries: Host commands for
 interactive room state and substrate JSONL for durable organs. The dormant
-Godot prototype is not launched by this runtime path.
+Godot prototype is parked and is not launched by this runtime path.
 
 NATS never opens a PostgreSQL connection. `athanor-delivery` is the
 transactional-outbox bridge: it claims durable rows from PostgreSQL, publishes
@@ -97,7 +99,7 @@ flowchart BT
     Keeper["omp-keeper"]
     Interactive["interactive-process"]
     Install["athanor-install"]
-    Godot["athanor-godot<br/>gui/src"]
+    Godot["parked athanor-godot<br/>gui/src"]
 
     Origami --> Hearth
     Summoning --> Hearth
@@ -122,7 +124,7 @@ flowchart BT
     Install --> Protocol
     Install --> Interactive
     Install --> Keeper
-    Godot --> Protocol
+    Godot -->|parked client dependency| Protocol
 ```
 
 `hearth`, `vault`, and `interactive-process` have no internal workspace crate
@@ -491,7 +493,7 @@ sequenceDiagram
     participant Delivery as DeliveryService
     participant NATS as JetStream
     participant Host as Host receipt bridge
-    participant Godot as Godot client
+    participant Godot as Parked Godot client
 
     Tool->>Sub: room + standalone Boat body
     Sub->>Sub: hash db-only source path and prepare memory
@@ -519,7 +521,7 @@ sequenceDiagram
     Delivery->>NATS: acknowledge consumed event
     NATS-->>Host: receipt stream
     Host->>Host: ReceiptTracker classification
-    Host-->>Godot: subscribed receipt snapshot / delta
+    Host-->>Godot: historical client receipt snapshot / delta
 ```
 
 `paper_boat_wake` does not trust a NATS payload as continuity. It reloads the
@@ -578,11 +580,11 @@ Sources: `adapters/omp/giga.ts`, `crates/akasha/src/giga/`,
 
 ```mermaid
 flowchart LR
-    Pins["installer/dependencies.json"] --> Fetch["fetch pinned PostgreSQL,<br/>pgvector, NATS, Godot"]
+    Pins["installer/dependencies.json"] --> Fetch["fetch pinned PostgreSQL,<br/>pgvector, NATS, parked Godot"]
     Fetch --> Verify["hash verification + cache"]
-    Verify --> Cargo["cargo release-build<br/>five binaries + Godot cdylib"]
-    Cargo --> Stage["stage runtime, adapter, Godot, manager"]
-    Stage --> Import["Godot headless import"]
+    Verify --> Cargo["cargo release-build<br/>five binaries + parked Godot cdylib"]
+    Cargo --> Stage["stage runtime, adapter, parked Godot, manager"]
+    Stage --> Import["parked Godot headless import"]
     Import --> Manifest["hash payload and emit release manifest"]
 ```
 
@@ -673,11 +675,11 @@ Sources: `package.json`, `rust-toolchain.toml`,
 `crates/athanor-install/src/installer.rs`, `manifest.rs`, `layout.rs`,
 `boundaries.rs`, `omp.rs`, `service.rs`, and `supervisor.rs`.
 
-## 12. Godot client and authored UI
+## 12. Web operator surface and parked Godot specification
 
 ```mermaid
 flowchart TD
-    Host["Athanor Host WebSocket"] <--> Session["AthanorHostSession"]
+    Host["Athanor Host"] <-->|WebSocket: parked client| Session["AthanorHostSession"]
     Session -->|"owns credentials and transport"| Link["HostLink"]
     Session --> Protocol["protocol.rs<br/>wire vocabulary, parsers, delta application"]
     Protocol --> Shell["shell.rs router"]
@@ -704,7 +706,8 @@ flowchart TD
     Shell --> Nav["ReliquaryNavigator"]
 
     Effects["Effects Lab"] -.-> Juicee["third-party Juicee plugin"]
-    Prototype["gui-prototype/<br/>disconnected mock/specimen"]
+    Prototype["gui-prototype/<br/>read-only operator surface"] --> Proxy["serve.ts: loopback proxy"]
+    Proxy -->|nine POST-only /live/* read routes| Host
 ```
 
 The Rust extension owns Host protocol state. GDScript composes the visible
@@ -742,7 +745,7 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 | Transport and capture | `rust-transport.ts`, `giga.ts`, `kitten-lineage.ts` | Long-lived substrate child, transcript/source-ledger ingestion, task lifecycle bridge |
 | Standalone guard | `hygiene.ts` | Repository/packaging hygiene check; not a session runtime import |
 | House proof runtime | `tools.ts`, `host.ts`, `context.ts`, `recall-policy.ts`, `recall.ts`, `substrate.ts`, `room.ts`, `conversation-log.ts`, `lesson-context.ts`, `lesson-ttsr.ts`, `routing.ts`, `lineage.ts`, `entity-resolution.ts`, `anamnesis.ts`, `recall-telemetry.ts`, `feedback.ts`, `text.ts`, `constants.ts` | Tool registration, Host clients, context assembly, retrieval routing, room files, native lesson guards, lineage, entity handling, telemetry, and shared text/constants |
-### Authored Godot GDScript
+### Parked Godot GDScript
 
 | Area | Modules | Boundary |
 |---|---|---|
@@ -751,7 +754,7 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 | Design components | `receipt_card`, `consequence_button`, `composer`, `message_card`, `evidence_card`, `status_channel`, `text_action`, `disclosure_banner`, `field_row`, `reliquary_panel`, `page_header`, `ritual_surface` | Presentation components; no persistence or transport authority |
 | Effects lab | `effects_lab/effects_lab.gd` | Separate visual experiment using the external Juicee plugin |
 | External plugin | `addons/juicee/` | Third-party effect implementation treated as one dependency node |
-| Proof satellites | `navigation/tests/`, `screens/tests/`, `effects_lab/tests/` | Godot smoke and contract checks; not runtime ownership |
+| Proof satellites | `navigation/tests/`, `screens/tests/`, `effects_lab/tests/` | Parked Godot smoke and contract checks; not runtime ownership |
 
 ### Operational surfaces
 
@@ -773,14 +776,14 @@ Sources: `gui/src/`, `gui/screens/s01_chat_center.gd`,
 | `substrate/state_paths.sh` | Shared local state-path resolution for substrate operations |
 | `.github/workflows/ci.yml` | CI proof; not runtime |
 | `tests/`, crate tests, `substrate/tests/` | Cross-boundary proof satellites |
-| `gui-prototype/` | Disconnected HTML/CSS/JS mock and design specimen |
+| `gui-prototype/` | Read-only web operator surface; nine POST-only `/live/*` routes through `serve.ts` to the Host |
 
 ## 14. Fast traversal paths
 
 - **A prompt gains continuity:** section 4 -> section 5 -> section 6 -> section 7
   -> section 8 -> back to the OMP context.
-- **A Boat becomes visible in Godot:** section 9 -> Host receipt bridge in section
-  8 -> Godot receipt projection in section 12.
+- **A Boat becomes visible in parked Godot:** section 9 -> Host receipt bridge in section
+  8 -> parked Godot receipt projection in section 12.
 - **A conversation proposes durable knowledge:** section 4 capture -> section 10
   candidate/review/promotion -> substrate transaction in section 6.
 - **The installed system starts:** section 11 install -> section 3 service plan ->

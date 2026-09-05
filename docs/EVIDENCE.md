@@ -56,9 +56,11 @@ The release manifest and this table are the sanitized artifacts.
 
 ### Boundary
 
-The Godot client remains a presentation child of `athanor.exe`. OMP still owns
-its current substrate transport children. The legacy `omp-keeper.exe` process
-also remains. PostgreSQL, Ollama, and OMP remain external dependencies.
+The Godot client is parked. `athanor.exe` starts the Host without launching a presentation child.
+The web prototype at `gui-prototype/` is the read-only operator surface.
+`bun gui-prototype/serve.ts` serves it and proxies Host reads over loopback.
+OMP owns its substrate transport children. The legacy `omp-keeper.exe` process remains.
+PostgreSQL, Ollama, and OMP remain external dependencies.
 
 
 ## Public retrieval pilot — 2026-07-22
@@ -145,7 +147,7 @@ establish the named runtime and installer behavior, not complete 1.0 product
 maturity.
 
 The converged `1.0.0-rc.1` candidate was exercised on Windows 11 x64 with
-Rust/Cargo 1.95.0, Bun 1.3.14, Python 3.12.10, Godot 4.7.1, PostgreSQL 18, and a
+Rust/Cargo 1.95.0, Bun 1.3.14, Python 3.12.10, historical Godot 4.7.1, PostgreSQL 18, and a
 test-owned NATS 2.14.4 JetStream endpoint.
 
 | Contract | Observed result |
@@ -156,21 +158,21 @@ test-owned NATS 2.14.4 JetStream endpoint.
 | Paper Boat sleep/wake idempotency and room scope | 1 passed |
 | PostgreSQL outbox + NATS restart/dedupe/receipt/poison lane | 1 passed |
 | Receipt published before Host start and replayed from JetStream | 1 passed |
-| Godot project import and scene smoke | passed on Godot 4.7.1 |
-| Live Godot Recall Policy screen | authenticated Host snapshot applied |
-| Live Godot Paper Boat screen | retained sanitized receipt rendered; no body/title |
+| Historical Godot project import and scene smoke | passed on Godot 4.7.1 |
+| Historical Godot Recall Policy screen | authenticated Host snapshot applied |
+| Historical Godot Paper Boat screen | retained sanitized receipt rendered; no body/title |
 | Native payload manifest | 20,643 artifacts; every byte size and SHA-256 matched |
-| Packaged Godot executable | launched the staged project and GDExtension |
+| Historical packaged Godot executable | launched the staged project and GDExtension |
 | Inno Setup installer | compiled successfully |
 
 The release-candidate installer is
 `The-Athanor-1.0.0-rc.1-windows-x64.exe`, SHA-256
 `9956c29799d606adcfbf6c8e51a0603996ef7cfc4404f38ad293828225140ec0`.
 Dependency archives were checksum-pinned before extraction: PostgreSQL 18.4-2,
-pgvector 0.8.6, NATS 2.14.4, and Godot 4.7.1.
+pgvector 0.8.6, NATS 2.14.4, and historical Godot 4.7.1.
 
 This establishes local build, contract, live Host/NATS/PostgreSQL integration,
-Godot rendering, payload integrity, and installer compilation. It does not
+historical Godot rendering, payload integrity, and installer compilation. It does not
 establish a clean-machine elevated install, upgrade from a real 0.10.x
 installation, public signing, or external publication.
 
@@ -193,7 +195,7 @@ the real Solarisael workstation.
 | OMP ownership | exactly one stable Program Files loader; development `index.ts`/`hygiene.ts` entries removed |
 | OMP client secret | user-only ACL; 64-character token; no token in `config.yml` |
 | Installed Host authentication | Kintsu and Kodo each returned the correct independent Recall Policy snapshot |
-| Installed Godot launch | native manager launched Godot 4.7.1 for Kintsu with identity/token only in child environment |
+| Historical installed Godot launch | native manager launched Godot 4.7.1 for Kintsu with identity/token only in child environment |
 
 The exact installed topology reuses the authoritative WSL PostgreSQL database
 and therefore starts no second database on `5432`. Host processes use the real
@@ -277,7 +279,7 @@ the previous release, created a rollback backup, and returned
 `SolarisaelAthanor` to `RUNNING`. Native doctor verified the release manifest,
 all 20,642 packaged artifacts, the Windows service, and persistent data.
 
-The installed Godot 4.7.1 Forward+ client rendered two authenticated live
+The historical installed Godot 4.7.1 Forward+ client rendered two authenticated live
 screens at 1100×760 on the Radeon RX 9070 XT:
 
 - S02 applied Kintsu's Recall Policy snapshot with Host binding, version 881,
@@ -294,7 +296,7 @@ than bypassing them: one-shot delivery health processes did not drain NATS,
 delivery readiness had no process-owned stable signal, and durable pre-cutover
 Recall receipts used snake_case nested state and decision fields. Final focused
 proof passed 83 Rust protocol/Host/installer/delivery tests with three explicit
-integration ignores, plus the Godot receipt-state test.
+integration ignores, plus the historical Godot receipt-state test.
 
 ## Next public evidence
 

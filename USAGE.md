@@ -17,21 +17,16 @@ House loads identity and compact continuity automatically. Durable memory remain
 
 You do not need every tool every day.
 
-## Use the native instrument
+## Use the web operator surface
 
-Open **The Athanor** from the Start menu. The Godot client connects only to the
-authenticated localhost Host.
-
-- **S01 · Retomada** shows the latest sanitized Paper Boat delivery receipt:
-  record/event identity, room, time, delivery state, sequence, and integrity
-  digest. It never loads the Boat body or title.
-- **S02 · Recall Policy** shows the requested and resolved mode, active project,
-  working-set size, refresh/recovery/degraded state, and explicit
-  Auto/Conversation/Work/Quiet override.
-
-If the Host, broker, or authenticated snapshot is unavailable, the client shows
-the refusal or degraded state instead of synthetic data. Run **Athanor Doctor**
-from the Start menu or the native manager when lifecycle state is suspect.
+Open **The Athanor** from the Start menu.
+`athanor.exe` starts the Host. It does not launch the parked Godot client.
+Run `bun gui-prototype/serve.ts` from the repository root.
+Open `http://127.0.0.1:4175` in a browser unless `PULSE_PORT` specifies another port.
+The web prototype at `gui-prototype/` is the read-only operator surface.
+It reads the Host through nine POST-only `/live/*` routes in the loopback proxy.
+Use OMP for writes.
+Run **Athanor Doctor** from the Start menu when you suspect a lifecycle fault.
 
 ## Recall older evidence
 

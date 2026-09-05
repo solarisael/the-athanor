@@ -10,7 +10,7 @@ making the project start from zero again.
 
 **Status:** `0.9.6`, native Windows x64 late beta. OMP is the supported harness.
 One Rust workspace owns the behavioral core, Vault retrieval, AKASHA PostgreSQL
-authority, Athanor Host, NATS delivery, native lifecycle, and Godot client.
+authority, Athanor Host, NATS delivery, native lifecycle, and parked Godot client.
 Vault remains database-free; AKASHA adds durable typed memory, lessons, canon,
 continuity, and governed background work.
 
@@ -124,9 +124,10 @@ knowledge, deeper continuity, and governed cognitive machinery.
 
 ```mermaid
 flowchart TB
-    U[Operator] --> GUI[Godot client]
+    U[Operator] --> GUI[Web prototype: read-only]
     U --> OMP[OMP harness]
-    GUI --> HOST[Athanor Host]
+    GUI --> PROXY[gui-prototype/serve.ts: loopback proxy]
+    PROXY -->|nine POST-only /live/* read routes| HOST[Athanor Host]
     OMP --> AD[Thin OMP adapter]
     AD --> RUST[Shared Rust core and protocol]
     HOST --> RUST
@@ -169,19 +170,19 @@ artifact, includes:
 - NATS JetStream delivery carrying only bounded sanitized pointers and receipts;
 - an authenticated localhost Athanor Host with persisted snapshots, typed
   deltas, resynchronization, idempotency, and restart recovery;
-- a Godot 4.7.1 client with live Recall Policy and sanitized Paper Boat receipt
-  screens;
+- a read-only web operator surface at `gui-prototype/`;
+- a parked Godot 4.7.1 client with Recall Policy and sanitized Paper Boat receipt screens;
 - one native Windows service supervisor, installer, updater/rollback path,
   doctor, uninstall, and explicit purge boundary;
 - 26 named OMP organs whose adapter delegates behavioral authority to Rust.
 
 ## What remains before 1.0
 
-The operator client is not yet a complete control surface. The current Godot
-slice shows Recall Policy and sanitized Paper Boat receipt state, but it does
-not yet expose ordinary conversation, source inspection, memory and canon
-authority, GIGA review, agent and subagent activity, inter-agent messages, or
-the operational metrics needed to understand the state of a House.
+The web prototype at `gui-prototype/` is the read-only operator surface.
+Run `bun gui-prototype/serve.ts` from the repository root.
+It reads the Host through a loopback proxy.
+The Godot client is parked.
+Conversation, authority changes, review actions, and complete operational visibility remain incomplete.
 
 The 1.0 gate also requires healthy live continuity organs, clean generic
 installation, a real legacy upgrade and rollback, signing, and bounded public
@@ -201,7 +202,7 @@ tenancy, or clean-machine installation evidence.
 ## Install
 
 One repository and one release own the substrate, Host, delivery, OMP adapter,
-Godot client, installer, updater, and install contract.
+parked Godot client, installer, updater, and install contract.
 
 The supported ordinary package is one checksum-published native Windows x64
 installer:
@@ -211,9 +212,9 @@ The-Athanor-<version>-windows-x64.exe
 The-Athanor-<version>-windows-x64.exe.sha256
 ```
 
-It carries the Rust runtime binaries, Godot 4.7.1, EnterpriseDB PostgreSQL
+It carries the Rust runtime binaries, parked Godot 4.7.1, EnterpriseDB PostgreSQL
 18.4-2 with pgvector 0.8.6, and NATS Server 2.14.4. The installed service needs
-no WSL, Python, Bun, Cargo, Godot editor, or separately installed database/broker.
+no WSL, Python, Bun, Cargo, or separate database/broker. The bundled Godot client is parked.
 PostgreSQL remains the durable AKASHA authority; Vault retrieval remains
 available as a runtime capability rather than a separate package.
 
@@ -243,7 +244,8 @@ purge contracts.
 | `crates/origami` | The communication layer: paper boats, cranes over the PostgreSQL outbox and JetStream, hallways |
 | `crates/host` | One authenticated multi-room client boundary; runs the crane loop |
 | `crates/athanor-install`, `installer/` | Native lifecycle, immutable release staging, and Windows installer |
-| `gui/` | Thin Godot operator client; no direct database or broker authority |
+| `gui-prototype/` | Read-only web operator surface; `serve.ts` proxies Host reads over loopback |
+| `gui/` | Parked Godot client; no direct database or broker authority |
 | `adapters/omp/` | OMP lifecycle hooks and named tool surface delegated to Rust |
 
 All three live in [`solarisael/the-athanor`](https://github.com/solarisael/the-athanor)
@@ -285,7 +287,7 @@ harness already has a supported adapter.
 - [Changelog](./CHANGELOG.md) — active `0.9.6` work and retained RC build history
 - [Planned Features](./docs/PLANNED_FEATURES.md) — canonical status map
 - [Runtime Architecture](./docs/RUNTIME_ARCHITECTURE.md)
-- [Godot Client](./docs/GODOT_CLIENT.md)
+- [Parked Godot Client](./docs/GODOT_CLIENT.md)
 - [Synthesis Architecture](./docs/SYNTHESIS_ARCHITECTURE.md)
 - [Companion Ecosystem](./docs/COMPANION_ECOSYSTEM.md)
 

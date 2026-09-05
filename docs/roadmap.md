@@ -18,7 +18,7 @@ The previous long-form roadmap is preserved as
 
 The repository now carries the `0.9.6` native Windows x64 late-beta source.
 OMP is the supported harness. One Rust workspace owns the behavioral core,
-Vault, AKASHA, Host, delivery, native lifecycle, and Godot client. Read
+Vault, AKASHA, Host, delivery, native lifecycle, and parked Godot client. Read
 [the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
 
 Implemented in the candidate:
@@ -36,13 +36,13 @@ Implemented in the candidate:
 - a compiled addressed Crane subject/envelope and generic transport-receipt
   path, with no production addressed producer or recipient application handler
   yet;
-- live Godot Recall Policy and Paper Boat receipt screens;
+- historical Godot Recall Policy and Paper Boat receipt screens;
 - native Windows service lifecycle, immutable versions, backup, rollback,
   doctor, uninstall, and explicit purge;
-- one checksum-pinned payload carrying Godot 4.7.1, PostgreSQL 18.4-2,
+- one checksum-pinned payload carrying parked Godot 4.7.1, PostgreSQL 18.4-2,
   pgvector 0.8.6, and NATS 2.14.4.
 
-RC3 passed ordinary suites, isolated PostgreSQL/NATS integrations, live Godot
+RC3 passed ordinary suites, isolated PostgreSQL/NATS integrations, historical Godot
 rendering, 20,659-artifact manifest verification, packaged-client smoke, Inno
 Setup compilation, and an elevated external-authority installation on the real
 Solarisael workstation. The installed service runs NATS, delivery, and separate
@@ -78,7 +78,7 @@ bodies, the GPU-particle constellation, or broader in-world surfaces.
 Before implementation, keep [`../LESSON_MAP.md`](../LESSON_MAP.md), this
 roadmap, [`ARCHITECTURE.md`](./ARCHITECTURE.md),
 [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md),
-[`GODOT_CLIENT.md`](./GODOT_CLIENT.md), and
+[`GODOT_CLIENT.md`](./GODOT_CLIENT.md) (parked historical specification), and
 [`EVIDENCE.md`](./EVIDENCE.md) aligned with the same owners and gates.
 
 ### 2. Capture the 0.11 parity baseline and close known fixes
@@ -176,16 +176,15 @@ Generalized authority references, recipient application handlers, and private
 cross-room subjects belong to the post-1.0 communication spine. Broker
 credentials and subject ACLs are mandatory before that expansion.
 
-### 6. Finish the usable thin Godot GUI
+### 6. Complete the web operator surface
 
-The first GUI is an instrument built from ordinary Godot `Control` nodes. It
-consumes authenticated Host commands, snapshots, deltas, replay, and
-resynchronization. It never connects directly to PostgreSQL, NATS, model
-providers, or harness internals.
-
-The current slice proves that boundary with one shared authenticated Host
-session, Recall Policy, sanitized Paper Boat receipt, and read-only worker-lane
-status. Those three surfaces are the foundation, not the complete 1.0 client.
+The web prototype at `gui-prototype/` is the read-only operator surface.
+Run `bun gui-prototype/serve.ts` from the repository root.
+It reads the Host through a loopback proxy.
+The Godot client is parked.
+The parked native specification describes authenticated Host commands, snapshots, deltas, replay, and resynchronization.
+It prohibits direct connections to PostgreSQL, NATS, model providers, or harness internals.
+Its Recall Policy, sanitized Paper Boat receipt, and worker-lane screens remain historical evidence.
 
 The 1.0 operator gate must make the state of a House legible:
 

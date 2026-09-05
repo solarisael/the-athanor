@@ -161,9 +161,11 @@ includes:
   lessons; state-conditioned eligibility, ranking, and warm activation remain
   planned.
 
-Cingulate, the Athanor Host, the native Godot client, PostgreSQL-outbox/NATS
-mailboxes, Datalog/Lean proof paths, OMEGA, ANON, and the signed marketplace
-remain specified, planned, or research work rather than current release claims.
+The web prototype at `gui-prototype/` is the read-only operator surface.
+Run `bun gui-prototype/serve.ts` from the repository root.
+It reads the Host through a loopback proxy.
+The Godot client is parked.
+Cingulate, Datalog/Lean proof paths, OMEGA, ANON, and the signed marketplace remain specified, planned, or research work.
 
 ## Why the provocative voice exists
 

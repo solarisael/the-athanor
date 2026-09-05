@@ -3,7 +3,7 @@
 Status: 1.0 runtime spine implemented in the 0.9.6 late beta; operator product and release gates remain
 Last updated: 2026-08-17
 
-This document defines the implemented Host, Godot, Recall Policy, Paper Boat,
+This document defines the implemented Host, parked Godot, Recall Policy, Paper Boat,
 and narrow delivery spine together with accepted longer-range contracts for
 dynamic model/room embodiment, explainable rule derivation, Cingulate proof
 routing, selected Lean obligations, governed synthesis, and companion-facing
@@ -27,7 +27,7 @@ The current `0.9.6` source has:
   room-stable unread state, durable Bell notifications, and recipient-authorized
   bounded Knocks; OMP tools expose exact-thread reads while Host owns automatic
   revision-gated inbox projection and claims pointer-only wake requests;
-- Host-owned Recall Policy shared by OMP and Godot;
+- Host-owned Recall Policy shared by OMP and parked Godot;
 - transaction-coupled Paper Boat sleep/wake and `boat.ready` Crane outbox rows;
 - a Crane delivery substrate with one
   `crane_outbox`/`crane_receipts`/`crane_dead_letters` trio, lane-routed
@@ -36,7 +36,7 @@ The current `0.9.6` source has:
   producer, while addressed Crane production and recipient application handlers
   remain structural/test-only;
 - bounded NATS JetStream pointer delivery and sanitized transport-receipt replay;
-- functional Godot Recall Policy and Paper Boat receipt screens;
+- functional parked Godot Recall Policy and Paper Boat receipt screens;
 - native Windows lifecycle and installer.
 
 The following surfaces described later remain specified or planned, not current:
@@ -48,12 +48,12 @@ The following surfaces described later remain specified or planned, not current:
   Wasmtime capability sandboxing;
 - proof-guided repair or offline training-data production;
 - companion-authored models and marketplace artifacts;
-- the in-world Godot renderer and GPU-particle constellation;
+- the in-world parked Godot renderer and GPU-particle constellation;
 - Origami folds, Pawprints, lifecycle states, and room wake behavior on the Crane
   lanes beyond `boat.ready` pointer delivery and its receipt ledger.
 
 The current GIGA queue and all durable receipts remain PostgreSQL-owned. NATS is
-delivery-only; Godot is presentation-only. Neither may be described as memory or
+delivery-only; parked Godot is presentation-only. Neither may be described as memory or
 authority.
 
 ## 2. Load-bearing invariants
@@ -81,7 +81,8 @@ Every implementation must preserve these rules:
 
 ```mermaid
 flowchart TD
-  UI[Godot client] <-->|versioned WebSocket commands and events| HOST[Athanor Host]
+  UI[Web prototype: read-only] --> PROXY[gui-prototype/serve.ts: loopback proxy]
+  PROXY -->|nine POST-only /live/* read routes| HOST[Athanor Host]
   TERM[Harness / terminal adapters] <-->|adapter API| HOST
 
   HOST --> CORE[Core contracts and policy]
@@ -106,13 +107,13 @@ flowchart TD
 ```
 
 This is one control plane with several replaceable execution surfaces. The Host
-is not a new memory authority. JetStream is not a second ledger. Godot is not a
+is not a new memory authority. JetStream is not a second ledger. The parked Godot client is not a
 second harness. A room session is not a model process.
 
 ## 4. Host-facing contracts
 
 The Athanor Host is the stable boundary between interactive clients and the
-runtime. Godot speaks only to the Host over a versioned WebSocket protocol.
+runtime. The parked Godot client uses the versioned Host WebSocket protocol.
 Harness adapters may use the same logical commands and events through their own
 native integration.
 
@@ -328,12 +329,13 @@ Snapshots are recovery and initial-load mechanisms, not the ordinary broadcast
 path. A tiny mutation must not trigger serialization, transmission, parsing,
 scene reconstruction, or redraw of the complete projection.
 
-## 5. Thin Godot control surface
+## 5. Web operator surface and parked native specification
 
-The current UI slice exposes real Recall Policy, Paper Boat delivery state, and
-worker-lane status through one root-owned authenticated Host session while the
-runtime evolves. It is not the final avatar, animation, voice, or marketplace
-surface.
+The web prototype at `gui-prototype/` is the read-only operator surface.
+Run `bun gui-prototype/serve.ts` from the repository root.
+It reads the Host through a loopback proxy.
+The Godot client is parked.
+The following native client requirements remain historical specifications, not current web capabilities.
 
 The product anatomy is fixed before chat transport lands: room/session
 navigation on the left, active conversation in the center, contextual
@@ -368,7 +370,7 @@ The client must never:
 The UI should deepen after every backend phase. Finishing an ornamental client
 before the underlying contracts stabilize would freeze the wrong architecture.
 
-The Godot client maps each projection to a bounded view-model or scene subtree.
+The parked Godot client maps each projection to a bounded view-model or scene subtree.
 One `AthanorHostSession` owns credentials and the WebSocket for the Control
 tree. Screens consume its typed events and keep projection-specific state; a
 new screen must not open a second socket merely because it needs another Host
@@ -387,7 +389,7 @@ constellation uses a GPU-particle field for stable nodes, edges, and motion;
 fine-grained Host deltas update stable GPU records rather than scene nodes.
 
 The full visual, renderer, performance-tier, and companion-body contract lives
-in [`GODOT_CLIENT.md`](./GODOT_CLIENT.md).
+in [`GODOT_CLIENT.md`](./GODOT_CLIENT.md), the parked historical specification.
 
 ## 6. GIGA integrity before distribution
 
@@ -532,11 +534,11 @@ records, kitten work, GIGA jobs, or live conversation turns.
 ### 7.1 Current NATS source census
 
 Only `delivery` and `host` depend on `async-nats`. `akasha`, GIGA, Hallway, the
-OMP adapter, kitten lineage, and the Godot Rust client do not connect to NATS.
+OMP adapter, kitten lineage, and the parked Godot Rust client do not connect to NATS.
 
 The native service starts one loopback JetStream server with file storage, then
 delivery. Independent `athanor.exe` starts one in-process multi-room Host and
-gives it the same NATS URL; it does not launch Godot or own OMP process lifetime.
+gives it the same NATS URL; it does not launch parked Godot or own OMP process lifetime.
 The managed server has no NATS accounts, users, credentials, or subject ACLs.
 Loopback binding is its containment boundary.
 
@@ -569,7 +571,7 @@ flowchart LR
   DELIVERY -->|"commit transport receipt"| RECEIPTS[("PostgreSQL<br/>crane_receipts")]
   DELIVERY -->|"sanitized projection"| RECEIPT_STREAM["JetStream<br/>athanor.boat.receipt.v1"]
   RECEIPT_STREAM --> HOST["room Host<br/>ephemeral replay consumer"]
-  HOST -->|"WebSocket projection"| GODOT["Godot receipt UI"]
+  HOST -->|"WebSocket projection"| GODOT["Parked Godot receipt UI"]
 
   WAKE["explicit wake tool"] --> SUBSTRATE["akasha"]
   SUBSTRATE -->|"reload complete Boat"| PG
@@ -871,7 +873,7 @@ Current production behavior is:
 3. The same generic delivery process consumes and validates it, verifies the
    pointed Boat's room and digest, and commits a transport receipt.
 4. Delivery republishes a sanitized receipt projection.
-5. Host replays and filters those receipt projections for Godot.
+5. Host replays and filters those receipt projections for parked Godot.
 6. An explicit `wake` call still reloads the complete Boat from PostgreSQL.
 
 No current NATS consumer wakes a room, invokes a model, or commits a recipient
@@ -1219,7 +1221,7 @@ TypeScript, SQL, NATS policy, and adapter behavior.
 | 2 | Shared Rust domain, Host, Vault, and AKASHA contracts | Typed commands, receipts, authority transitions, source identity, profile ownership, and conformance cases are versioned and reviewed |
 | 3 | Vertical Rust convergence and clean cutover | Each moved capability passes real-boundary and profile-parity proof; every caller migrates; the displaced Python or TypeScript owner is deleted |
 | 4 | PostgreSQL outbox plus one narrow JetStream delivery and wake lane | Commit ordering, duplicate window, idempotency, restart, permission, privacy, expiry, dead-letter, stale-pointer rejection, recovery, and Host/UI receipts pass |
-| 5 | Thin functional Godot `Control` client | Authenticated Host snapshot, ordered delta, acknowledgement, replay, resync, degraded-state visibility, chat, recall, policy, health, and review work in the rendered scene |
+| 5 | Web operator surface at `gui-prototype/`; Godot is parked | Read-only Host access exists. Conversation, authority changes, and complete operational visibility remain incomplete. |
 | 6 | Native installation and service lifecycle | Clean Vault and AKASHA install, managed or external PostgreSQL, migration, restart, generation replacement, failed replacement, backup, restore, update, and rollback pass |
 | 7 | Comparative evidence and 1.0 release | Both profiles, the pre-cutover runtime, the NATS lane, and the rendered GUI satisfy the bounded claims in `EVIDENCE.md`; every public surface agrees |
 
@@ -1241,7 +1243,7 @@ This table adds only the runtime surfaces above it.
 | Logical Host, invocation, event, refinement, and proof contracts | `crates/hearth` and `crates/protocol` |
 | OMP lifecycle, tool, task, and live-session integration | `adapters/omp` |
 | PostgreSQL authority, outbox rows, code-change facts, materialized derivations, GIGA jobs, outcomes, proof receipts, and health | `crates/akasha` and `substrate/` |
-| Godot rendering and interaction | A separate client package implementing `GODOT_CLIENT.md`; no core authority |
+| Parked Godot rendering and interaction | A separate client package implementing `GODOT_CLIENT.md`; no core authority |
 | NATS deployment and relay | Deployment/runtime integration; behavior remains defined by core contracts |
 | Model-provider implementations | Replaceable adapter/provider modules |
 | Prolog/Datalog rules, dependency graph, and incremental fact-cache contract | Versioned policy package over PostgreSQL fact projections |
@@ -1282,7 +1284,7 @@ This architecture does not:
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current system, component ownership, and installed layout
 - [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — House, room, spirit, custody, and product axes
 - [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — e-graphs, Z3, SyGuS, Wasmtime, proof feedback, and governed promotion
-- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) — in-world Control UI, GPU-particle constellation, and alchemical profiles
+- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) — parked historical specification for spatial controls, GPU particles, and alchemical profiles
 - [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) — room sovereignty, companion-authored models, and marketplace
 - [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) — current GIGA event/candidate/review contract
 - [`LESSONS.md`](./LESSONS.md) — current typed lesson stores

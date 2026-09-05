@@ -40,18 +40,18 @@ House core
 
 ### Host and delivery plane
 
-The Athanor Host is the authenticated versioned boundary between interactive
-clients and the Rust runtime. The thin Godot client uses only Host WebSocket
-commands and events. It does not connect directly to PostgreSQL, NATS, model
-endpoints, or harness internals.
+The Athanor Host is the authenticated, versioned boundary between interactive clients and the Rust runtime.
+The web prototype at `gui-prototype/` is the read-only operator surface.
+Run `bun gui-prototype/serve.ts` from the repository root.
+It reads the Host through a loopback proxy.
+The Godot client is parked.
 
 ```text
-Godot client ───────┐
-                    ├── Athanor Host ── Rust contracts ── Vault / AKASHA
-OMP adapter ─────────┘                         │
-                                              └── PostgreSQL outbox
-                                                          │
-                                                          └── NATS JetStream
+Web prototype ── loopback proxy ── Athanor Host ── Rust contracts ── Vault / AKASHA
+OMP adapter ──────────────────────┘                                  │
+                                                                    └── PostgreSQL outbox
+                                                                                │
+                                                                                └── NATS JetStream
 ```
 
 PostgreSQL remains authoritative. The outbox records durable publication intent
@@ -105,7 +105,7 @@ profile runs without any substrate component. Each boundary stays enforced by
 contract, not by repository distance.
 
 The public API boundaries are `hostApi=1`, `substrateApi=1`, `deliveryApi=1`,
-and `godotApi=4.7`.
+and `godotApi=4.7` for the parked client.
 
 ### Installed layout
 
@@ -114,7 +114,7 @@ Immutable product versions and mutable operator data are separate:
 | Installed path | Content |
 |---|---|
 | `%ProgramFiles%\Solarisael\Athanor\bin` | Stable independent manager and Host owner, lifecycle manager, and OMP loader |
-| `%ProgramFiles%\Solarisael\Athanor\versions\<version>` | Verified immutable runtime, OMP adapter, Godot client, PostgreSQL, and NATS |
+| `%ProgramFiles%\Solarisael\Athanor\versions\<version>` | Verified immutable runtime, OMP adapter, parked Godot client, PostgreSQL, and NATS |
 | `%ProgramData%\Solarisael\Athanor\config` | Non-secret database mode, one Host port, and House room identities |
 | `%ProgramData%\Solarisael\Athanor\secrets` | ACL-restricted service secrets |
 | `%ProgramData%\Solarisael\Athanor\data` | Managed PostgreSQL and NATS durable data |
@@ -128,7 +128,7 @@ broker, and one delivery worker. It reports `RUNNING` after these children pass
 readiness. It drains the same children in reverse order.
 
 `athanor.exe` is an independent local manager and the one in-process multi-room
-Host owner. It binds one loopback listener without launching Godot or becoming
+Host owner. It binds one loopback listener without launching the parked Godot client or becoming
 the parent of OMP sessions. Every WebSocket and HTTP route starts with
 `/room/<room-key>`. One shared PostgreSQL pool serves all room projections.
 
@@ -149,10 +149,10 @@ The-Athanor-<version>-windows-x64.exe
 The-Athanor-<version>-windows-x64.exe.sha256
 ```
 
-The payload pins PostgreSQL 18.4-2, pgvector 0.8.6, NATS 2.14.4, and Godot
-4.7.1. The ordinary managed install needs no WSL, Python, Bun, Cargo, Godot
-editor, or separately installed database/broker. An explicit advanced mode may
-bind an operator-provided compatible PostgreSQL database.
+The payload pins PostgreSQL 18.4-2, pgvector 0.8.6, NATS 2.14.4, and parked Godot
+4.7.1. The service needs no WSL, Python, Bun, Cargo, or separate database/broker.
+The parked Godot client needs no editor.
+An explicit advanced mode may use an operator-provided compatible PostgreSQL database.
 
 The OpenCode adapter line and the two portable Vault/AKASHA archives are
 historical. Vault and AKASHA are runtime authority profiles inside one release,
@@ -424,6 +424,6 @@ lands on the same core contracts, and none becomes a parallel authority path.
 
 Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for runtime order,
 [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) for proof/synthesis,
-[`GODOT_CLIENT.md`](./GODOT_CLIENT.md) for presentation,
+[`GODOT_CLIENT.md`](./GODOT_CLIENT.md) for the parked presentation specification,
 [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) for sovereignty and
 marketplace, and [`roadmap.md`](./roadmap.md) for release gates.

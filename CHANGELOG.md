@@ -35,6 +35,10 @@ the exact implementation record.
   a root exchange and to supply the prior receipt's UUID only for a
   continuation. Root requests omit the parent on the wire. Wire and database
   proofs cover roots, continuations, and wrong-parent refusal.
+- Operator documentation now names the read-only web surface at
+  `gui-prototype/` as the operator door, documents its nine POST-only Host
+  read routes and the separate Bun server, marks the Godot client as parked,
+  and corrects the Start-menu launch description.
 - `athanor.exe` now runs as the independent multi-room Host and local manager
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified

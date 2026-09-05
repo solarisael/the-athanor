@@ -14,13 +14,18 @@ The ordinary managed install requires:
 - Administrator elevation;
 - the checksum-published native installer;
 - a supported OMP installation and its model/provider authentication;
-- sufficient storage for the bundled PostgreSQL, NATS, Godot client, immutable
+- sufficient storage for the bundled PostgreSQL, NATS, parked Godot client, immutable
   release versions, database, and backups.
 
-The installer carries Godot 4.7.1, PostgreSQL 18.4-2, pgvector 0.8.6, NATS
+The installer carries parked Godot 4.7.1, PostgreSQL 18.4-2, pgvector 0.8.6, NATS
 2.14.4, and every Athanor Rust binary. It does not require WSL, Python, Bun,
-Cargo, a Rust toolchain, a Godot editor, or a separately installed database or
+Cargo, a Rust toolchain, a Godot editor (parked client), or a separately installed database or
 broker.
+
+The web prototype at `gui-prototype/` is the read-only operator surface.
+It requires Bun today.
+Run `bun gui-prototype/serve.ts` from the repository root.
+It reads the Host through a loopback proxy.
 
 Vault remains a database-free runtime profile. AKASHA uses managed PostgreSQL by
 default. Existing Houses must use explicit external-database mode when their
@@ -40,7 +45,7 @@ One repository and one release own every installed component. Read
 |---|---|
 | Windows 11 x64 + OMP | Supported late-beta target |
 | Windows 10 x64 | Installer target but not locally re-proved for the current source |
-| Native Linux | Rust components are portable in principle; installer, service, Godot package, and OMP integration require host-specific engineering and verification |
+| Native Linux | Rust components are portable in principle; installer, service, parked Godot package, and OMP integration require host-specific engineering and verification |
 | OpenCode | Historical adapter line; unsupported |
 | macOS | Unsupported |
 | Other harnesses | Require an adapter over the Rust contracts |
@@ -148,14 +153,14 @@ GPU-particle constellation, companion room sovereignty, companion-authored model
 training, or the signed marketplace.
 
 The authenticated Host, typed snapshot/delta/resync path, Recall Policy, narrow
-PostgreSQL-outbox/NATS Paper Boat lane, restart replay, native lifecycle, and
-functional 2D Godot screens are current. NATS remains delivery-only and never
-becomes memory authority.
+PostgreSQL-outbox/NATS Paper Boat lane, restart replay, and native lifecycle are current.
+The Godot screens are parked and retain historical proofs.
+NATS remains delivery-only and never becomes memory authority.
 
 The broader capabilities have accepted dependency and technical contracts in
 [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md),
 [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md),
-[`GODOT_CLIENT.md`](./GODOT_CLIENT.md), and
+[`GODOT_CLIENT.md`](./GODOT_CLIENT.md) (parked historical specification), and
 [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md). Documentation labels them
 as specified, planned, or research until observable implementation gates pass.
 

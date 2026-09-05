@@ -13,18 +13,17 @@ use hearth::{
     BackupOutcome, CanonAttribution, CanonPointer, CanonReadRequest, CanonWriteReceipt,
     CanonWriteRequest, ClusterExecution, ClusterFreshnessPolicy, ClusterMaintenanceOutcome,
     ClusterMaintenanceRequest, ClusterMaintenanceStatus, ClusterStaleness, ClusterSummary,
-    GigaAuthority, GigaCandidate,
-    GigaCandidateKind, GigaClassifierIdentity, GigaCodingLessonPromotionPayload, GigaEvent,
-    GigaEventClaimReceipt, GigaEventClaimRequest, GigaEventFinishOutcome, GigaEventFinishReceipt,
-    GigaEventFinishRequest, GigaEventReplayReceipt, GigaEventReplayRequest, GigaEventType,
-    GigaLifecycle, GigaMemoryPromotionPayload, GigaProjectLessonPromotionPayload,
-    GigaPromotionAuthority, GigaPromotionPayload, GigaPromotionReceipt, GigaPromotionRequest,
-    GigaPublicationConsent, GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest,
-    GigaQueueMaintenanceScope, GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState,
-    GigaRisk, GigaScope, GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType,
-    GigaVisibility, RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails,
-    RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
-    lesson_triggers::LessonTriggerSpec,
+    GigaAuthority, GigaCandidate, GigaCandidateKind, GigaClassifierIdentity,
+    GigaCodingLessonPromotionPayload, GigaEvent, GigaEventClaimReceipt, GigaEventClaimRequest,
+    GigaEventFinishOutcome, GigaEventFinishReceipt, GigaEventFinishRequest, GigaEventReplayReceipt,
+    GigaEventReplayRequest, GigaEventType, GigaLifecycle, GigaMemoryPromotionPayload,
+    GigaProjectLessonPromotionPayload, GigaPromotionAuthority, GigaPromotionPayload,
+    GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
+    GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
+    GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
+    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallRequest,
+    RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberReceipt, RememberRequest,
+    RoomKey, ThreadContinuation, lesson_triggers::LessonTriggerSpec,
 };
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -1675,10 +1674,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                 params.title,
                 params.body,
                 RememberLessonDetails {
-                    backup: params.backup.unwrap_or(matches!(
-                        kind,
-                        RememberKind::ProjectLesson | RememberKind::AudioLesson
-                    )),
+                    backup: params.backup.unwrap_or_else(default_backup),
                     source_memory_path: params.source_memory_path,
                     shape: params.shape,
                     voice: params.voice,
@@ -1712,7 +1708,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                     threads: params.threads,
                     continues,
                     supersedes,
-                    backup: params.backup.unwrap_or(false),
+                    backup: params.backup.unwrap_or_else(default_backup),
                 },
             )
         };
@@ -4455,6 +4451,47 @@ mod tests {
         }
     }
 
+    // 2026-09-05, live: a memory write with no `backup` field came back
+    // `skipped` while the adapter trusted "the substrate default". One rule
+    // for every durable write: back up unless the caller says no.
+    #[test]
+    fn remember_backs_up_unless_the_caller_refuses() {
+        let absent = |kind: &str, fields: &str| {
+            let line = format!(
+                r#"{{"protocol":1,"id":"x","method":"remember","params":{{"room":"lab","kind":"{kind}","title":"T","body":"B"{fields}}}}}"#
+            );
+            RequestEnvelope::parse_line(&line)
+                .unwrap()
+                .remember_request()
+                .unwrap()
+                .backup()
+        };
+        for (kind, fields) in [
+            ("memory", ""),
+            ("coding-lesson", r#","scope":"house""#),
+            ("project-lesson", r#","project":"lab""#),
+            (
+                "writing-lesson",
+                r#","voice":"craft","register":["fiction"]"#,
+            ),
+            ("design-lesson", r#","voice":"craft""#),
+            ("audio-lesson", ""),
+        ] {
+            assert!(
+                absent(kind, fields),
+                "{kind} must back up when the caller is silent"
+            );
+        }
+        let refused = r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"lab","kind":"memory","title":"T","body":"B","backup":false}}"#;
+        assert!(
+            !RequestEnvelope::parse_line(refused)
+                .unwrap()
+                .remember_request()
+                .unwrap()
+                .backup()
+        );
+    }
+
     #[test]
     fn exact_v1_request_and_response_shape() {
         let line = r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"lab","kind":"memory","title":"T","body":"B","backup":true}}"#;
@@ -4608,7 +4645,8 @@ mod tests {
             serde_json::to_value(BackupResult::skipped()).unwrap(),
             serde_json::json!({"status": "skipped"})
         );
-        let round: BackupResult = serde_json::from_value(serde_json::to_value(&ok).unwrap()).unwrap();
+        let round: BackupResult =
+            serde_json::from_value(serde_json::to_value(&ok).unwrap()).unwrap();
         assert_eq!(round, ok);
     }
 

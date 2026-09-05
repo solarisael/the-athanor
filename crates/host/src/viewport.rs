@@ -657,7 +657,11 @@ mod tests {
     use super::{MAX_CANON_ASSERTION_CHARS, ViewportSession, apply_viewport};
     use protocol::{RecallResultInput, RecallViewportMode};
 
-    fn result(query: &str, canon: serde_json::Value, candidates: serde_json::Value) -> RecallResultInput {
+    fn result(
+        query: &str,
+        canon: serde_json::Value,
+        candidates: serde_json::Value,
+    ) -> RecallResultInput {
         serde_json::from_value(serde_json::json!({
             "ok": true,
             "query": query,
@@ -693,12 +697,16 @@ mod tests {
 
     #[test]
     fn exact_canon_is_shown_whole_and_suppressed_only_for_the_same_version() {
-        let summary = "The Athanor is the House platform; silent typing is not a truncation. "
-            .repeat(20);
+        let summary =
+            "The Athanor is the House platform; silent typing is not a truncation. ".repeat(20);
         assert!(summary.chars().count() > 480);
         let mut session = ViewportSession::default();
         let first = apply_viewport(
-            result("reorient me on The Athanor", athanor(&summary), serde_json::json!([])),
+            result(
+                "reorient me on The Athanor",
+                athanor(&summary),
+                serde_json::json!([]),
+            ),
             &mut session,
             RecallViewportMode::Automatic,
         );
@@ -710,7 +718,11 @@ mod tests {
         assert_eq!(entry.full_read, None);
 
         let repeat = apply_viewport(
-            result("reorient me on The Athanor", athanor(&summary), serde_json::json!([])),
+            result(
+                "reorient me on The Athanor",
+                athanor(&summary),
+                serde_json::json!([]),
+            ),
             &mut session,
             RecallViewportMode::Automatic,
         );
@@ -723,7 +735,11 @@ mod tests {
         );
 
         let manual = apply_viewport(
-            result("reorient me on The Athanor", athanor(&summary), serde_json::json!([])),
+            result(
+                "reorient me on The Athanor",
+                athanor(&summary),
+                serde_json::json!([]),
+            ),
             &mut session,
             RecallViewportMode::Manual,
         );
@@ -731,11 +747,18 @@ mod tests {
 
         let mut fresh = ViewportSession::default();
         let after_compaction = apply_viewport(
-            result("reorient me on The Athanor", athanor(&summary), serde_json::json!([])),
+            result(
+                "reorient me on The Athanor",
+                athanor(&summary),
+                serde_json::json!([]),
+            ),
             &mut fresh,
             RecallViewportMode::Automatic,
         );
-        assert_eq!(after_compaction.presentation.canon_matches[0].summary, summary);
+        assert_eq!(
+            after_compaction.presentation.canon_matches[0].summary,
+            summary
+        );
     }
 
     #[test]

@@ -51,6 +51,14 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Expected:** The backup receives the same credentials the write used. Either `run_backup` forwards the resolved `PG*` values into the child environment, or `backup.sh` reads `house/state/substrate/.env` when no sibling `.env` exists.
 - **Proof after repair:** A `record_memory.py --env-file ../state/substrate/.env` write on the Windows tower prints a `backup:` line with a dump path, and the dump exists under `substrate/backups/`.
 
+### Host receipt bridge stays degraded after a broker restart
+
+- **Observed:** 2026-09-05 14:03 -03, room `kodo`. After the service (and NATS) restarted for the deploy and again for the wedge proof, the running `athanor.exe` (pid 38256) reported `/health` `akasha_delivery.broker_status: degraded`, `last_error: AKASHA delivery broker connection was lost`, `latest_original_stream_sequence: 187` for more than three minutes, while `netstat` showed six `ESTABLISHED` sockets from that Host to the new `nats-server.exe`. The transport reconnected; the receipt projection did not.
+- **Cause seam:** `crates/host/src/server.rs::run_receipt_bridge` creates a memory-only ephemeral pull consumer and then fetches in a loop. A restarted broker no longer has that consumer. JetStream answers a pull for a missing consumer with an end-of-batch status, not an error, so every fetch returns an empty batch and the loop never rebuilds the consumer or calls `connected()`.
+- **Cut, `dev/next`:** after an empty batch the bridge asks `consumer.info()`; a lost consumer degrades with `AKASHA delivery receipt replay consumer was lost` and breaks to the outer loop, which reconnects, recreates the consumer, and clears the degraded state. `cargo test -p host --lib` (34).
+- **Proof after repair:** with the repaired Host running, stop and start `SolarisaelAthanor`; within 15 s `/health` must show `broker_status: ok` and a later receipt must advance `latest_original_stream_sequence`.
+- **Impact until deployed:** every deployment restarts the broker, so every Host alive at deploy time reports degraded delivery until that Host is restarted.
+
 ## Repaired but not deployed
 
 ### Mechanics observatory category row overflows its column at 1440 px
@@ -109,6 +117,7 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Cause seam:** `crates/athanor-install/src/service.rs` published every status with `ERROR_SUCCESS`, so a failed start looked like a clean stop; the supervisor discarded child stderr, so the startup reason vanished; the checkpoint only moved when a child spawned, so a slow readiness wait looked hung.
 - **Repair:** `dev/next`, 2026-09-05. Child stderr lands in `<data>/logs/<name>.stderr.log`; a child that exits before readiness fails the start with its name, exit status, and stderr tail; the supervisor reports `Waiting` every 5 seconds and the service advances the checkpoint on each report; a failed `run` publishes `STOPPED` with `ERROR_SERVICE_SPECIFIC_ERROR` and service code 1 and traces the reason.
 - **Proof:** `cargo test -p athanor-install --test supervisor_evidence` (real `cmd.exe` children; 2 passed). The SCM half is owed after deploy: force one managed child to fail, then `sc query SolarisaelAthanor` must show `STOPPED` with `SERVICE_EXIT_CODE : 1066 (1)`, the `.stderr.log` must name the error, and no managed child may remain alive.
+- **Live, 2026-09-05 14:02 -03, installed release `0.5.4+dev.202609051650.4d98e0d`:** with a dummy listener holding 127.0.0.1:4222, `sc start SolarisaelAthanor` returned, then `sc query` showed `STATE: 1 STOPPED`, `WIN32_EXIT_CODE: 1066`, `SERVICE_EXIT_CODE: 1`. `logs/nats.stderr.log` ended with `[FTL] Error listening on port: 127.0.0.1:4222 … bind: Only one usage of each socket address`. `tasklist` showed zero `nats-server.exe`. After the listener closed, `sc start` reached `RUNNING` with one `nats-server.exe`.
 
 ### Design catalogue same-identity supersession always failed
 

@@ -104,7 +104,6 @@ impl Drop for PendingKnockObservation {
     }
 }
 
-
 impl KnockPollObservations {
     fn observe(&mut self, nonempty: bool, now: Instant) -> KnockPollObservation {
         let changed_to_empty = self.was_nonempty && !nonempty;
@@ -112,9 +111,10 @@ impl KnockPollObservations {
         if nonempty || changed_to_empty {
             return KnockPollObservation::ClaimSpan;
         }
-        if self.last_summary.is_none_or(|last| {
-            now.saturating_duration_since(last) >= KNOCK_POLL_OBSERVATION_WINDOW
-        }) {
+        if self
+            .last_summary
+            .is_none_or(|last| now.saturating_duration_since(last) >= KNOCK_POLL_OBSERVATION_WINDOW)
+        {
             self.last_summary = Some(now);
             KnockPollObservation::PollPoint
         } else {
@@ -2475,7 +2475,7 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                 continue;
             }
         };
-        let consumer = match stream
+        let mut consumer = match stream
             .create_consumer(async_nats::jetstream::consumer::pull::Config {
                 name: Some(format!("athanor-host-receipts-{}", Uuid::new_v4().simple())),
                 description: Some(
@@ -2629,6 +2629,20 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                     }
                 }
             }
+            // A broker restart forgets this memory-only consumer while the
+            // client reconnects underneath. The server answers a pull for a
+            // missing consumer with an end-of-batch status, never an error,
+            // so an empty batch is the only tell. Ask before pulling again;
+            // a lost consumer rebuilds through the outer loop, which also
+            // clears the degraded state the disconnect left behind.
+            if consumer.info().await.is_err() {
+                publish_receipt_degradation(
+                    &state,
+                    "AKASHA delivery receipt replay consumer was lost",
+                )
+                .await;
+                break 'replay;
+            }
         }
         if wait_receipt_retry(&state).await {
             return;
@@ -2664,8 +2678,9 @@ fn new_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
+        KNOCK_POLL_OBSERVATION_WINDOW, KnockPollObservation, KnockPollObservations,
         app_error_outcome, hallway_projection_changed, host_insula_binding, knock_authority,
-        resolve_room_dir, KnockPollObservation, KnockPollObservations, KNOCK_POLL_OBSERVATION_WINDOW,
+        resolve_room_dir,
     };
     use crate::config::{HostConfig, KnockAutonomy};
     use akasha::{AppError, OutcomeClass};
@@ -2727,7 +2742,10 @@ mod tests {
         // increase the heartbeat rate.
         for window in 0..3 {
             let base = start + KNOCK_POLL_OBSERVATION_WINDOW * window;
-            assert_eq!(observations.observe(false, base), KnockPollObservation::PollPoint);
+            assert_eq!(
+                observations.observe(false, base),
+                KnockPollObservation::PollPoint
+            );
             for millis in [0, 1, 2_000, 50_000, 299_999] {
                 assert_eq!(
                     observations.observe(false, base + Duration::from_millis(millis)),
@@ -2747,8 +2765,14 @@ mod tests {
             KnockPollObservation::ClaimSpan,
             "the first empty poll after a claim is an observed transition"
         );
-        assert_eq!(observations.observe(false, claimed_at), KnockPollObservation::PollPoint);
-        assert_eq!(observations.observe(false, claimed_at), KnockPollObservation::Quiet);
+        assert_eq!(
+            observations.observe(false, claimed_at),
+            KnockPollObservation::PollPoint
+        );
+        assert_eq!(
+            observations.observe(false, claimed_at),
+            KnockPollObservation::Quiet
+        );
         assert_eq!(
             observations.observe(false, claimed_at + KNOCK_POLL_OBSERVATION_WINDOW),
             KnockPollObservation::PollPoint

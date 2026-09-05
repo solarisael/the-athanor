@@ -13,7 +13,14 @@ use crate::{
 use anyhow::{Context, Result, bail};
 use protocol::{DEFAULT_HOST_URL, DEFAULT_HOST_WS_PORT, LOOPBACK_HOST, is_safe_room_key};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime},
+};
+
+/// How long a release stays after it stops being current or previous: the
+/// longest a session on this tower is expected to keep its loaded version.
+pub const RELEASE_GRACE: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone, Debug)]
 pub struct OperatorIntegration {
@@ -686,12 +693,27 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         staged
     }
 
-    fn prune_native_releases(&self, pointer: &CurrentRelease) -> Result<()> {
+    fn installed_within(&self, release: &Path, now: SystemTime, grace: Duration) -> bool {
+        self.fs
+            .modified(&release.join("release-manifest.json"))
+            .ok()
+            .and_then(|installed| now.duration_since(installed).ok())
+            .is_some_and(|age| age < grace)
+    }
+
+    /// Removes releases nobody can still be running. Current and previous
+    /// stay for rollback. A release installed within `RELEASE_GRACE` also
+    /// stays: a session binds to the version directory it loaded and keeps
+    /// spawning that substrate for as long as it lives, so two deployments
+    /// in one day must not delete the directory under the first one's
+    /// sessions.
+    pub fn prune_native_releases(&self, pointer: &CurrentRelease) -> Result<()> {
         self.read_verified_native_manifest(&pointer.version)?;
         if let Some(previous) = &pointer.previous_version {
             self.read_verified_native_manifest(previous)?;
         }
 
+        let now = SystemTime::now();
         let mut failures = Vec::new();
         for directory in self.fs.list_directories(&self.layout.versions())? {
             if directory.parent() != Some(self.layout.versions().as_path()) {
@@ -706,6 +728,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                     .previous_version
                     .as_deref()
                     .is_some_and(|previous| previous.eq_ignore_ascii_case(version))
+                || self.installed_within(&directory, now, RELEASE_GRACE)
             {
                 continue;
             }

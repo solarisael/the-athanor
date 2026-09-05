@@ -22,6 +22,31 @@ the exact implementation record.
 
 ### Changed
 
+- Local deployment now goes through the product installer. `substrate/deploy-local.ps1`
+  builds one payload with `installer/build-native-release.ps1` under the identity
+  `<version>+dev.<stamp>.<commit>` and hands it to the staged manager's `update`.
+  Each deployment lands in its own `versions/<release>` directory, `current.json`
+  flips to it with the prior release as `previousVersion`, and a session that
+  loaded an earlier release keeps running it. A `+build` suffix over the root
+  `package.json` version is an accepted release identity; a `-prerelease` still
+  has to match the authority.
+- The installer replaces a stable image (`bin/athanor.exe`, `bin/omp-keeper.exe`,
+  `bin/athanor-manage.exe`, `bin/athanor-omp-loader.ts`) by renaming a running
+  one aside as `<name>.retired-<n>` and deleting it once nothing holds it, so a
+  deployment no longer fails while a session runs the stable image. The stable
+  keeper and loader are now part of every update, not only the first install.
+- The installer keeps any release installed within the last 24 hours in addition
+  to current and previous, so two deployments in one day do not delete the
+  directory a still-running session loads its substrate from.
+- The Host receipt bridge rebuilds its replay consumer after a broker restart.
+  Before, a restarted NATS answered every pull with an empty batch and the Host
+  reported `broker_status: degraded` until it was itself restarted.
+- `remember` backs up after the PostgreSQL commit for every kind when the caller
+  does not say otherwise; before, memory writes and coding, writing, and design
+  lessons silently resolved an absent `backup` to `false`.
+- `design_doc_write` keeps every key of `values` and `provenance`. Rows written
+  through the OMP tool between 2026-08-08 and 2026-09-05 (#13–#24) carry `{}`
+  for both and need their own supersession.
 - Every harness tool call now lands in Insula under its own lane,
   `tool.<name>` (for example `tool.room_state`, `tool.house_dispatch`),
   instead of one anonymous `tool_call` row. The adapter cockpit and vitals

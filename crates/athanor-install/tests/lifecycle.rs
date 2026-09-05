@@ -311,6 +311,59 @@ fn component_manifest_identity_paths_and_bytes_are_strict() -> Result<()> {
     Ok(())
 }
 
+// Two deployments in one day: the version the first one's sessions still
+// run must survive the second one's prune. Age is read from the manifest.
+#[test]
+fn prune_keeps_current_previous_and_any_release_younger_than_the_grace() -> Result<()> {
+    let temporary = tempfile::tempdir()?;
+    let layout = InstallLayout::new(
+        &temporary.path().join("Program Files"),
+        &temporary.path().join("ProgramData"),
+    );
+    for version in ["1.0.0", "1.0.1", "1.0.2", "1.0.3"] {
+        std::fs::create_dir_all(layout.version(version))?;
+        write_native_root(
+            &layout.version(version),
+            &release(version, b"manager"),
+            b"manager",
+        )?;
+    }
+    let stale = layout.version("1.0.0").join("release-manifest.json");
+    std::fs::File::options()
+        .write(true)
+        .open(&stale)?
+        .set_modified(
+            std::time::SystemTime::now() - athanor_install::installer::RELEASE_GRACE * 2,
+        )?;
+
+    let services = FakeServices::default();
+    let runtime = FakeRuntime::default();
+    let installer = Installer {
+        fs: &NativeFileSystem,
+        services: &services,
+        runtime: &runtime,
+        secrets: &FixedSecrets,
+        layout: layout.clone(),
+    };
+    installer.prune_native_releases(&CurrentRelease {
+        version: "1.0.3".into(),
+        previous_version: Some("1.0.2".into()),
+        rollback_backup: None,
+    })?;
+
+    assert!(
+        !layout.version("1.0.0").exists(),
+        "a day-old release nobody points at is pruned"
+    );
+    assert!(
+        layout.version("1.0.1").exists(),
+        "a release installed today may still be running"
+    );
+    assert!(layout.version("1.0.2").exists());
+    assert!(layout.version("1.0.3").exists());
+    Ok(())
+}
+
 #[test]
 fn adapter_install_and_rollback_use_independent_real_releases() -> Result<()> {
     let temporary = tempfile::tempdir()?;

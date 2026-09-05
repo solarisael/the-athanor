@@ -12,6 +12,7 @@ pub trait FileSystem {
     fn exists(&self, path: &Path) -> bool;
     fn read(&self, path: &Path) -> Result<Vec<u8>>;
     fn list_directories(&self, path: &Path) -> Result<Vec<PathBuf>>;
+    fn modified(&self, path: &Path) -> Result<std::time::SystemTime>;
     fn validate_regular_file(&self, root: &Path, path: &Path) -> Result<()> {
         if !path.starts_with(root) {
             bail!(
@@ -269,6 +270,11 @@ impl FileSystem for NativeFileSystem {
                 ),
             })
             .collect()
+    }
+    fn modified(&self, path: &Path) -> Result<std::time::SystemTime> {
+        fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .with_context(|| format!("modification time of {}", path.display()))
     }
     fn validate_regular_file(&self, root: &Path, path: &Path) -> Result<()> {
         let relative = path.strip_prefix(root).with_context(|| {

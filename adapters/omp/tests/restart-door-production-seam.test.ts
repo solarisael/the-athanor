@@ -50,6 +50,8 @@ const zodStub = {
   discriminatedUnion: (_key: string, variants: unknown[]) => makeSchema("discriminatedUnion", { variants }),
   object: (shape: Record<string, unknown>) => makeSchema("object", { shape }),
   array: (element: unknown) => makeSchema("array", { element }),
+  record: (key: unknown, value: unknown) => makeSchema("record", { key, value }),
+  unknown: () => makeSchema("unknown"),
 };
 
 const SUBSTRATE_EXE_ENV = "ATHANOR_SUBSTRATE_EXE";

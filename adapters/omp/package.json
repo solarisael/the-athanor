@@ -10,5 +10,8 @@
   "scripts": {
     "test": "bun test --max-concurrency 1 --isolate",
     "deploy": "pwsh -NoProfile -File deploy-local.ps1"
+  },
+  "devDependencies": {
+    "zod": "^4.5.4"
   }
 }

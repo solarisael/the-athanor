@@ -514,6 +514,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       delete process.env[RESTART_INTENT_ENV];
       delete process.env[RESTART_SUCCESSOR_PROOF_ENV];
       ctx?.ui?.notify?.("Athanor restart successor verified.", "info");
+      await continueAfterRestart(ctx, intentId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx?.ui?.notify?.(`Athanor restart successor verification failed: ${message}`, "warning");
@@ -521,6 +522,51 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       verifyingIntent = "";
     }
   };
+
+  // A restart that nobody continues is a cold boot with history (Sol,
+  // 2026-09-05: "nothing triggered continuation after restart"). The successor
+  // owes itself one turn: the reason the requester gave, delivered as the
+  // next turn and triggered, so the spirit picks up what it restarted for
+  // instead of waiting for a human to notice it is back. Once per intent:
+  // the verify above short-circuits on a repeated start, and a bare relaunch
+  // carries no intent id at all.
+  const continueAfterRestart = async (ctx: any, intentId: string) => {
+    const workspace = text(ctx?.cwd) || process.cwd();
+    let intent: Record<string, unknown> | null = null;
+    try {
+      const status = await deps.requestDomain("restart_status", { workspace, intentId }, undefined, true);
+      intent = pendingIntent(status);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx?.ui?.notify?.(`Athanor restart continuation skipped: ${message}`, "warning");
+      return;
+    }
+    const mode = text(intent?.mode) || "resume";
+    const reason = text(intent?.reason);
+    if (typeof pi.sendMessage !== "function") return;
+    pi.sendMessage(continuationMessage(intentId, mode, reason), { deliverAs: "nextTurn", triggerTurn: true });
+  };
+
+  // What the successor is handed. It is a turn, so it is displayed and
+  // attributed to the House, not to the operator.
+  function continuationMessage(intentId: string, mode: string, reason: string): Record<string, unknown> {
+    const why = reason ? `Reason given: ${reason}` : "No reason was recorded.";
+    return {
+      customType: "athanor-restart-continuation",
+      content: [
+        "<athanor-attention>",
+        `You restarted yourself (mode ${mode}, intent ${intentId}); the keeper relaunched this session and the House verified it.`,
+        why,
+        mode === "fresh"
+          ? "Your paper boat is the letter from the session that restarted; orient from it, then continue what the reason names."
+          : "Your history is intact; continue what the reason names. Nobody typed this turn.",
+        "</athanor-attention>",
+      ].join("\n"),
+      display: true,
+      attribution: "agent",
+      details: { intentId, mode, reason },
+    };
+  }
   pi.on("session_start", verifySuccessor);
   pi.on("session_switch", verifySuccessor);
 

@@ -887,7 +887,7 @@ pub async fn restart_verify(
 
 /// The columns one status row carries. Both reads below project exactly this,
 /// so the receipt cannot depend on which question was asked.
-const STATUS_COLUMNS: &str = "intent_id::text AS intent_id,state,mode,session_id,expires_at,exiting_deadline_at,relaunching_deadline_at";
+const STATUS_COLUMNS: &str = "intent_id::text AS intent_id,state,mode,session_id,reason,expires_at,exiting_deadline_at,relaunching_deadline_at";
 
 /// Read one intent, and no capability either way: the id this hands out
 /// authorizes nothing (see [`authority`]).
@@ -947,6 +947,7 @@ pub async fn restart_status(
             state: state_of(&state)?,
             mode: mode_of(&mode)?,
             session_id: row.try_get("session_id")?,
+            reason: row.try_get("reason")?,
             deadlines: RestartStatusDeadlines {
                 expires_at: expires_at.to_rfc3339(),
                 exiting_deadline_at: exiting_deadline_at.map(|at| at.to_rfc3339()),

@@ -428,6 +428,10 @@ pub struct RestartStatusIntent {
     pub mode: RestartMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Why the requester restarted, in its own words. The successor reads it
+    /// to continue what the restart was for.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
     pub deadlines: RestartStatusDeadlines,
 }
 

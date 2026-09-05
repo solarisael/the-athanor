@@ -115,9 +115,17 @@ $Secrets = Get-Content (Join-Path $env:ProgramData "Solarisael/Athanor/secrets/r
 $SavedDatabaseUrl = $env:DATABASE_URL
 try {
   $env:DATABASE_URL = [string]$Secrets.externalDatabaseUrl
-  Invoke-Checked -Label "Full-mode health proof" -FilePath $Substrate -ArgumentList @(
-    "health", "--substrate-dir", (Join-Path $Root "substrate")
-  )
+  # The proof asks the embedder for one real embedding. A cold Ollama model
+  # can refuse the first request while it loads, which is not an install
+  # failure. Three tries, ten seconds apart, before this counts as red.
+  $HealthTries = 3
+  for ($Try = 1; $Try -le $HealthTries; $Try += 1) {
+    Write-Host "==> Full-mode health proof (try $Try of $HealthTries)"
+    & $Substrate health --substrate-dir (Join-Path $Root "substrate")
+    if ($LASTEXITCODE -eq 0) { break }
+    if ($Try -eq $HealthTries) { throw "Full-mode health proof failed (exit code $LASTEXITCODE)" }
+    Start-Sleep -Seconds 10
+  }
 } finally {
   $env:DATABASE_URL = $SavedDatabaseUrl
 }

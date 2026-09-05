@@ -475,7 +475,7 @@ try {
   $RestoredToolchain = Assert-NativeReleaseToolchain -RepositoryRoot $PinnedRepository
   Assert-True (($RestoredToolchain.cacheKeyMaterial -join "|") -ceq $AcceptedCacheKey) "the restored environment must reproduce the accepted cache key"
 
-  # --- guarded local deployment uses one reusable release-profile cache ---
+  # --- the local deploy driver is thin: tests, one payload, one staged install, proofs ---
   $DeployScript = Join-Path $PSScriptRoot "../substrate/deploy-local.ps1"
   $DeployParseErrors = $null
   $DeployTokens = $null
@@ -486,99 +486,40 @@ try {
         $Node -is [Management.Automation.Language.CommandAst] -and
         $Node.GetCommandName() -eq "Invoke-Checked"
       }, $true))
-  $TestCalls = @($DeployCalls | Where-Object { $_.Extent.Text -match '"test"' })
-  $BuildCalls = @($DeployCalls | Where-Object { $_.Extent.Text -match '"build"' })
-  Assert-True ($TestCalls.Count -eq 1) "the guarded deploy script must contain exactly one Cargo test invocation"
-  Assert-True ($BuildCalls.Count -eq 1) "the guarded deploy script must contain exactly one staged Cargo build invocation"
-  foreach ($Call in @($TestCalls[0], $BuildCalls[0])) {
-    Assert-True ($Call.Extent.Text -match '"--release"') "every guarded deploy Cargo invocation must use Cargo's release profile"
-    Assert-True ($Call.Extent.Text -match '"--target-dir"\s*,\s*\$stageTarget') "every guarded deploy Cargo invocation must use the reusable target/deploy cache"
-  }
-  $ExpectedPackages = @("hearth", "protocol", "akasha", "host", "athanor-install", "omp-keeper")
-  foreach ($Call in @($TestCalls[0], $BuildCalls[0])) {
-    $CallPackages = @([Regex]::Matches($Call.Extent.Text, '"-p"\s*,\s*"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
-    Assert-True (($CallPackages -join "|") -ceq ($ExpectedPackages -join "|")) "the guarded test and staged build must select the identical six packages"
-  }
   $DeploySource = Get-Content $DeployScript -Raw
+  $WorkspaceTests = @($DeployCalls | Where-Object { $_.Extent.Text -match '"test",\s*"--workspace"' })
+  $AdapterTests = @($DeployCalls | Where-Object { $_.Extent.Text -match 'adapters/omp/deploy-local\.ps1.*"-TestsOnly"' })
+  $PayloadBuilds = @($DeployCalls | Where-Object { $_.Extent.Text -match 'installer/build-native-release\.ps1' })
+  $Installs = @($DeployCalls | Where-Object { $_.Extent.Text -match '"update",\s*"--staging",\s*\$Payload,\s*"--manifest",\s*\$Manifest' })
   $DoctorCalls = @($DeployCalls | Where-Object { $_.Extent.Text -match '"doctor"' })
+  Assert-True ($WorkspaceTests.Count -eq 1) "the deploy driver must run the whole Cargo workspace test suite exactly once"
+  Assert-True ($AdapterTests.Count -eq 1) "the deploy driver must run the OMP adapter tests exactly once, through the adapter's own driver"
+  Assert-True ($PayloadBuilds.Count -eq 1) "the deploy driver must build exactly one native release payload"
+  Assert-True ($PayloadBuilds[0].Extent.Text -match '"-Version",\s*\$Release,\s*"-OutDir",\s*\$Out') "the payload build must receive the release identity and the deploy output directory"
+  Assert-True ($Installs.Count -eq 1) "the deploy driver must install exactly once, through the staged manager's update command"
+  Assert-True ($Installs[0].Extent.Text -match '-FilePath\s+\$StagedManager') "the staged manager must run the update, because it carries the new installer code"
   Assert-True ($DoctorCalls.Count -eq 1) "installed release manifest proof must retain exactly one Doctor invocation"
-  Assert-True ($DoctorCalls[0].Extent.Text -match '-Label\s+"native release manifest proof"') "installed release manifest proof must retain its checked Doctor label"
-  Assert-True (-not $DeploySource.Contains("FullManifestProof", [StringComparison]::Ordinal)) "installed manifest Doctor proof must not be opt-in"
-  $ResolvedStateExport = $DeploySource.IndexOf('$env:ATHANOR_STATE_DIR = [IO.Path]::GetFullPath($stateRoot)', [StringComparison]::Ordinal)
-  $FullModeHealth = $DeploySource.IndexOf('Full-mode health proof', [StringComparison]::Ordinal)
-  Assert-True ($ResolvedStateExport -ge 0 -and $ResolvedStateExport -lt $FullModeHealth) "the resolved installed state root must reach the substrate health subprocess"
-  $EarlyServicePreflight = $DeploySource.IndexOf('$nativeService = Get-Service', [StringComparison]::Ordinal)
-  $FreshServicePreflight = $DeploySource.LastIndexOf('$nativeService = Get-Service', [StringComparison]::Ordinal)
-  $FirstTest = $DeploySource.IndexOf('if (-not $SkipTests)', [StringComparison]::Ordinal)
-  $ServiceStop = $DeploySource.IndexOf('Stop-Service -Name $nativeServiceName', [StringComparison]::Ordinal)
-  Assert-True ($EarlyServicePreflight -ge 0 -and $EarlyServicePreflight -lt $FirstTest) "service state must be checked before guarded test work"
-  Assert-True ($FreshServicePreflight -gt $FirstTest -and $FreshServicePreflight -lt $ServiceStop) "service state must be refreshed immediately before stopping or swapping binaries"
-  Assert-True ($DeploySource -match '(?s)Status\s+-ne\s+\[System\.ServiceProcess\.ServiceControllerStatus\]::Running.*?Status\s+-ne\s+\[System\.ServiceProcess\.ServiceControllerStatus\]::Stopped.*?recover it to Running or Stopped') "transitional service states must refuse with a recovery instruction"
-  foreach ($RequiredFragment in @("athanor-manage.exe", "previousManagerExe", "previousStableManagerExe", "stableManagerExe", "bin/athanor-manage.exe", "stagedManagerExe")) {
-    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "manager deployment must retain $RequiredFragment"
-  }
-  Assert-True ($DeploySource -match '(?s)Move-Item\s+\$liveManagerExe\s+\$previousManagerExe.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe') "manager deployment must back up both manager copies"
-  Assert-True ($DeploySource -match '(?s)Copy-Item\s+\$stagedManagerExe\s+\$liveManagerExe.*?Copy-Item\s+\$stagedManagerExe\s+\$stableManagerExe') "manager deployment must replace both manager copies"
-  foreach ($RequiredFragment in @("athanor.exe", "stagedAppExe", "liveAppExe", "stableAppExe", "previousAppExe", "previousStableAppExe", "bin/athanor.exe")) {
-    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "app deployment must retain $RequiredFragment"
-  }
-  Assert-True ($DeploySource -match '(?s)Move-Item\s+\$liveAppExe\s+\$previousAppExe.*?Move-Item\s+\$stableAppExe\s+\$previousStableAppExe') "app deployment must back up both app copies"
-  Assert-True ($DeploySource -match '(?s)Copy-Item\s+\$stagedAppExe\s+\$liveAppExe.*?Copy-Item\s+\$stagedAppExe\s+\$stableAppExe') "app deployment must replace both app copies"
-  Assert-True ($DeploySource -match '(?s)foreach\s*\(\$appPath\s+in\s+@\(\$liveAppExe,\s*\$stableAppExe\).*?Get-LiveWorkers\s+-ExecutablePath\s+\$appPath') "deployment must refuse a running installed app by exact executable path"
-  Assert-True ($DeploySource -match '(?s)if\s*\(Test-Path\s+\$liveManifest\s+-PathType\s+Leaf\)\s*\{.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe.*?Move-Item\s+\$stableAppExe\s+\$previousStableAppExe') "stable app backup must stay inside the installed-manifest transaction"
-  Assert-True ($DeploySource -match '(?s)@\{\s*Path\s*=\s*"bin/athanor\.exe";\s*Source\s*=\s*\$liveAppExe\s*\}') "the installed release manifest must be rehashed for the deployed app"
-  foreach ($RequiredFragment in @("stagedKeeperExe", "liveKeeperExe", "stableKeeperExe", "previousKeeperExe", "bin/omp-keeper.exe", "provision-omp-keeper.ps1", "provision-restart-capability.ps1")) {
-    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "keeper deployment must retain $RequiredFragment"
-  }
-  Assert-True ($DeploySource -match '(?s)Move-Item\s+\$liveKeeperExe\s+\$previousKeeperExe.*?Copy-Item\s+\$stagedKeeperExe\s+\$liveKeeperExe') "keeper deployment must back up and replace the version binary"
-  Assert-True ($DeploySource -match '(?s)Copy-Item\s+\$stagedKeeperExe\s+\$stableKeeperExe') "keeper deployment must refresh the stable terminal owner"
-  Assert-True ($DeploySource -match '(?s)foreach\s*\(\$keeperPath\s+in\s+@\(\$liveKeeperExe,\s*\$stableKeeperExe\).*?Get-LiveWorkers\s+-ExecutablePath\s+\$keeperPath') "deployment must refuse both versioned and stable live keeper processes"
-  Assert-True ($DeploySource -match '(?s)if\s*\(Test-Path\s+\$liveManifest\s+-PathType\s+Leaf\)\s*\{.*?Move-Item\s+\$stableKeeperExe\s+\$previousStableKeeperExe.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe') "stable keeper backup must stay inside the installed-manifest transaction"
-  foreach ($RequiredFragment in @("adapters\omp\installed-loader.ts", "sourceOmpLoader", "liveOmpLoader", "stableOmpLoader", "previousOmpLoader", "previousStableOmpLoader", "bin/athanor-omp-loader.ts")) {
-    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "loader deployment must retain $RequiredFragment"
-  }
-  Assert-True ($DeploySource -match 'if\s*\(-not\s*\(Test-Path\s+\$sourceOmpLoader\s+-PathType\s+Leaf\)\)') "deployment must refuse a missing product-owned loader source before touching installed files"
-  $LiveLoaderAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\s*\$liveOmpLoader\s*=' })[0]
-  Assert-True ($LiveLoaderAssignment -match 'GetDirectoryName\(\$liveExe\)' -and $LiveLoaderAssignment -match '"athanor-omp-loader\.ts"') "the versioned loader must resolve beside the active version's substrate binary"
-  $StableLoaderAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\s*\$stableOmpLoader\s*=' })[0]
-  Assert-True ($StableLoaderAssignment -match 'GetDirectoryName\(\$stableKeeperExe\)' -and $StableLoaderAssignment -match '"athanor-omp-loader\.ts"') "the stable loader must resolve from the install root bin, not the versions root"
-  Assert-True ($DeploySource -match '(?s)if\s*\(Test-Path\s+\$liveManifest\s+-PathType\s+Leaf\)\s*\{.*?Move-Item\s+\$liveOmpLoader\s+\$previousOmpLoader.*?Move-Item\s+\$stableOmpLoader\s+\$previousStableOmpLoader.*?Move-Item\s+\$stableManagerExe\s+\$previousStableManagerExe') "both loader backups must stay inside the installed-manifest transaction"
-  $LoaderCopies = @([Regex]::Matches($DeploySource, '(?m)^\s*Copy-Item\s+(\$\w+)\s+(\$liveOmpLoader|\$stableOmpLoader)\s+-Force\s*$'))
-  Assert-True ($LoaderCopies.Count -eq 2) "deployment must install exactly the versioned and the stable loader copy"
-  $LoaderCopyTargets = @($LoaderCopies | ForEach-Object { $_.Groups[2].Value } | Sort-Object -Unique)
-  Assert-True ($LoaderCopyTargets.Count -eq 2) "the versioned and the stable loader copy must be distinct destinations"
-  $LoaderCopySources = @($LoaderCopies | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
-  Assert-True ($LoaderCopySources.Count -eq 1 -and $LoaderCopySources[0] -ceq '$sourceOmpLoader') "both installed loader copies must come from the one product-owned source, so they cannot drift"
-  Assert-True ($DeploySource -match '(?s)@\{\s*Path\s*=\s*"bin/athanor-omp-loader\.ts";\s*Source\s*=\s*\$liveOmpLoader\s*\}') "the installed release manifest must be rehashed from the deployed versioned loader"
-  Assert-True ($DeploySource -match '@\{\s*Live\s*=\s*\$liveOmpLoader;\s*Previous\s*=\s*\$previousOmpLoader;\s*Created\s*=\s*\$copiedOmpLoader\s*\}') "rollback must restore or remove the versioned loader"
-  Assert-True ($DeploySource -match '@\{\s*Live\s*=\s*\$stableOmpLoader;\s*Previous\s*=\s*\$previousStableOmpLoader;\s*Created\s*=\s*\$copiedStableOmpLoader\s*\}') "rollback must restore or remove the stable loader"
-  $LoaderBackupPurge = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\s*foreach\s*\(\$priorPath\s+in\s+@\(\$previousExe' })[0]
-  $LoaderBackupCleanup = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\s*Remove-Item\s+\$previousExe' })[0]
-  foreach ($RequiredFragment in @('$previousOmpLoader', '$previousStableOmpLoader')) {
-    Assert-True ($LoaderBackupPurge.Contains($RequiredFragment, [StringComparison]::Ordinal)) "a stale $RequiredFragment backup must be cleared before the transaction takes a fresh one"
-    Assert-True ($LoaderBackupCleanup.Contains($RequiredFragment, [StringComparison]::Ordinal)) "a successful deployment must clean up $RequiredFragment"
-  }
-  $ClientProjectionFunction = [Regex]::Match($DeploySource, '(?s)function\s+Update-OperatorClientProjection\b.*?(?=\r?\nfunction\s+Import-DeploymentDatabaseEnvironment\b)')
-  Assert-True $ClientProjectionFunction.Success "local deployment must own the operator client projection migration"
-  $ClientProjectionSource = $ClientProjectionFunction.Value
-  foreach ($RequiredFragment in @(
-      'format = 2',
-      'houseId = $houseId',
-      'hostToken = $hostToken',
-      'stateRoot = [IO.Path]::GetFullPath($stateRoot)',
-      'hostUrl = "ws://127.0.0.1:$hostPort"',
-      'defaultRoom = $defaultRoom',
-      'rooms = $rooms')) {
-    Assert-True ($ClientProjectionSource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "client projection must contain the exact format-2 field $RequiredFragment"
-  }
-  Assert-True ($ClientProjectionSource -match '(?s)foreach\s+\(\$entry\s+in\s+@\(\$runtime\.rooms\)\).*?\$rooms\[\$room\]\s*=\s*\[ordered\]@\{\s*spirit\s*=\s*\$spirit') "client projection rooms must derive each room spirit from runtime authority"
-  Assert-True ($ClientProjectionSource -match '(?s)\$temporary\s*=\s*Join-Path\s+\$directory.*?\$backup\s*=\s*Join-Path\s+\$directory.*?\[IO\.File\]::Replace\(\$temporary,\s*\$ClientProjectionPath,\s*\$backup\)') "client projection must write and back up atomically in its ACL-inheriting directory"
-  $StableLoaderCopy = $DeploySource.IndexOf('Copy-Item $sourceOmpLoader $stableOmpLoader', [StringComparison]::Ordinal)
-  $ClientProjectionMutation = $DeploySource.IndexOf('$clientProjection = Update-OperatorClientProjection', [StringComparison]::Ordinal)
-  $ClientProjectionHealthProof = $DeploySource.IndexOf('Full-mode health proof', [StringComparison]::Ordinal)
-  Assert-True ($StableLoaderCopy -ge 0 -and $ClientProjectionMutation -gt $StableLoaderCopy -and $ClientProjectionMutation -lt $ClientProjectionHealthProof) "client projection migration must follow stable loader installation and precede health success"
-  Assert-True ($DeploySource -match '(?s)if\s+\(\$null\s+-ne\s+\$clientProjection\)\s*\{\s*\$clientProjection\s*\}.*?Test-Path\s+\$artifact\.Previous.*?Move-Item\s+\$artifact\.Previous\s+\$artifact\.Live') "rollback must restore the client projection backup after a later failure"
-  Assert-True ($DeploySource -match '(?s)if\s+\(\$null\s+-ne\s+\$clientProjection\)\s*\{\s*Remove-Item\s+\$clientProjection\.Previous') "successful deployment must clean the client projection backup"
+  Assert-True ($DoctorCalls[0].Extent.Text -match '-FilePath\s+\$InstalledManager' -and $DoctorCalls[0].Extent.Text -match '-Label\s+"native release manifest proof"') "the installed manager must run the Doctor proof under its checked label"
+  $TestsAt = $DeploySource.IndexOf('if (-not $SkipTests)', [StringComparison]::Ordinal)
+  $PayloadAt = $DeploySource.IndexOf('installer/build-native-release.ps1', [StringComparison]::Ordinal)
+  $InstallAt = $DeploySource.IndexOf('"update", "--staging"', [StringComparison]::Ordinal)
+  $DoctorAt = $DeploySource.IndexOf('"doctor"', [StringComparison]::Ordinal)
+  $PointerAt = $DeploySource.IndexOf('current.json names', [StringComparison]::Ordinal)
+  $HealthAt = $DeploySource.IndexOf('Full-mode health proof', [StringComparison]::Ordinal)
+  Assert-True ($TestsAt -ge 0 -and $TestsAt -lt $PayloadAt -and $PayloadAt -lt $InstallAt -and $InstallAt -lt $DoctorAt -and $DoctorAt -lt $PointerAt -and $PointerAt -lt $HealthAt) "the driver must order tests, payload, install, Doctor, pointer check, then Full-mode health"
+  $ServicePreflight = $DeploySource.IndexOf('$Service = Get-Service', [StringComparison]::Ordinal)
+  Assert-True ($ServicePreflight -ge 0 -and $ServicePreflight -lt $TestsAt) "service state must be checked before any test or build work"
+  Assert-True ($DeploySource -match '(?s)-notin\s+@\("Running",\s*"Stopped"\).*?recover it to Running or Stopped') "transitional service states must refuse with a recovery instruction"
+  Assert-True ($DeploySource -match 'git -C \$Root rev-parse --short HEAD') "the release build suffix must name the HEAD commit"
+  Assert-True ($DeploySource -match 'status --porcelain --untracked-files=no.*?"\.dirty"') "a release built from modified tracked files must carry the .dirty suffix"
+  Assert-True ($DeploySource -match 'Get-NativeReleaseVersion\s+-RepositoryRoot\s+\$Root\s+-Requested\s+"\$Authority\+\$Build"') "the release identity must be the product version plus one build suffix, validated by the shared contract"
+  Assert-True ($DeploySource -match '\[string\]\$Current\.version\s+-cne\s+\$Release') "the driver must refuse when current.json does not name the release it installed"
+  Assert-True ($DeploySource -match '(?s)VSCMD_ARG_TGT_ARCH.*?Enter-VsDevShell.*?-arch=x64') "the driver must enter an x64 developer shell when the caller did not"
+  Assert-True (-not ($DeploySource -match '\b(Copy|Move)-Item\b')) "the driver must never copy or move files itself; the manager owns the program root"
+  $Removals = @([Regex]::Matches($DeploySource, 'Remove-Item'))
+  Assert-True ($Removals.Count -eq 1 -and $Removals[0].Index -gt $HealthAt) "the driver's only deletion is the payload cleanup after every proof passed"
+  Assert-True ($DeploySource -match '(?s)\$env:DATABASE_URL\s*=\s*\[string\]\$Secrets\.externalDatabaseUrl.*?finally\s*\{\s*\$env:DATABASE_URL\s*=\s*\$SavedDatabaseUrl') "the health proof must borrow the runtime database URL and give it back"
+  Assert-True ($DeploySource -match '(?s)\$HealthTries\s*=\s*3.*?Start-Sleep\s+-Seconds\s+10') "the Full-mode health proof must retry a cold embedder before counting as red"
   $AdapterComponentSource = Get-Content (Join-Path $PSScriptRoot "omp-adapter-component.ps1") -Raw
   $AdapterAllowlist = [Regex]::Match($AdapterComponentSource, '(?s)function\s+Get-OmpAdapterComponentRuntimeAllowlist\b.*?\n\}')
   Assert-True ($AdapterAllowlist.Success) "the adapter component runtime allowlist must remain discoverable"
@@ -612,19 +553,6 @@ try {
   }
   Assert-True ($InnoSource -match '(?m)^Name:\s*"\{group\}\\The Athanor";\s*Filename:\s*"\{app\}\\bin\\athanor\.exe"') "the Start Menu entry must launch the canonical app"
   Assert-True ($InnoSource -match '(?m)^Filename:\s*"\{app\}\\bin\\athanor-manage\.exe";\s*Parameters:\s*"uninstall"') "athanor-manage must remain the installer authority the uninstaller calls"
-  $StableManagerAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\$stableManagerExe\s*=' })[0]
-  Assert-True (([Regex]::Matches($StableManagerAssignment, 'GetDirectoryName')).Count -eq 4 -and $StableManagerAssignment -match '"bin\\athanor-manage\.exe"') "stable manager must resolve from the install root, not the versions root"
-  $StableAppAssignment = @($DeploySource -split "`r?`n" | Where-Object { $_ -match '^\$stableAppExe\s*=' })[0]
-  Assert-True (([Regex]::Matches($StableAppAssignment, 'GetDirectoryName')).Count -eq 4 -and $StableAppAssignment -match '"bin\\athanor\.exe"') "stable app must resolve from the install root, not the versions root"
-  $TransactionCatch = $DeploySource.LastIndexOf("} catch {", [StringComparison]::Ordinal)
-  foreach ($RequiredFragment in @('$copiedExe = $false', '$copiedManager = $false', '$copiedAppExe = $false', '$copiedStableApp = $false', 'elseif ($artifact.Created', 'Test-Path $artifact.Previous', '$restoreFailures = @()', 'Get-Service -Name $nativeServiceName', 'native service stop before rollback failed')) {
-    Assert-True ($DeploySource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "rollback must preserve untouched files, stop a running recovered service, and aggregate failures"
-  }
-  Assert-True ($DeploySource -match '(?s)Get-Service\s+-Name\s+\$nativeServiceName.*?Stop-Service\s+-Name\s+\$nativeServiceName.*?foreach\s+\(\$artifact') "rollback must stop the managed service before restoring artifacts"
-  Assert-True ($DeploySource -match '(?s)\$rollbackServiceStopped\s*=\s*\$true.*?catch\s*\{\s*\$rollbackServiceStopped\s*=\s*\$false.*?if\s*\(\$rollbackServiceStopped\)\s*\{\s*foreach\s+\(\$artifact') "failed rollback service stop must leave artifacts and backups untouched"
-  $HealthProof = $DeploySource.IndexOf('Full-mode health proof', [StringComparison]::Ordinal)
-  $BackupCleanup = $DeploySource.LastIndexOf('Remove-Item $previousExe', [StringComparison]::Ordinal)
-  Assert-True ($HealthProof -ge 0 -and $HealthProof -lt $TransactionCatch -and $BackupCleanup -gt $TransactionCatch) "health and Doctor proofs must remain rollback-protected before backup cleanup"
 
 
   Write-Host "native release contract passed"

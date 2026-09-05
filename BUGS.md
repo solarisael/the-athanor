@@ -64,6 +64,12 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Proof after repair:** with the repaired Host running, stop and start `SolarisaelAthanor`; within 15 s `/health` must show `broker_status: ok` and a later receipt must advance `latest_original_stream_sequence`.
 - **Impact until deployed:** every deployment restarts the broker, so every Host alive at deploy time reports degraded delivery until that Host is restarted.
 
+### The deploy driver reports failure after a landed install, and its contract test pinned a dead script
+
+- **Observed:** 2026-09-05 19:44 UTC, deploy of `1b03882`. The staged manager installed `0.5.4+dev.202609051944.1b03882`, Doctor passed, `current.json` flipped. Then the Full-mode health proof returned `degraded` with `embedding.error: error sending request for url (http://127.0.0.1:11434/api/embed)` and the driver exited 1. Ollama answered `/api/tags` with 200 seconds later, and the same `athanor-substrate.exe health` by hand returned `mode: full`. One cold embed request made a good deploy look red.
+- **Second half:** `installer/native-release-contract.test.ps1` lines 478–627 still asserted the 765-line driver that `db977ac` deleted: staged Cargo builds, `Move-Item` backups, client projection migration, rollback catch blocks. It failed on the committed tree at "exactly one staged Cargo build invocation". Nothing runs it during deploy, so it was red in silence.
+- **Repair, `dev/next`, 2026-09-05:** the Full-mode health proof tries three times, ten seconds apart, before it counts as red. The contract test now pins the thin driver: one workspace test run, one adapter test run through the adapter's driver, one payload build, one `update` through the staged manager, one Doctor through the installed manager, that order, service preflight first, release identity from `HEAD` plus `.dirty`, `current.json` must name the release, no `Copy-Item`/`Move-Item`, one `Remove-Item` after the health proof, the database URL borrowed and returned, and the retry. Proof: `pwsh installer/native-release-contract.test.ps1` (red on the old assertions, green now).
+
 ## Repaired but not deployed
 
 ### Mechanics observatory category row overflows its column at 1440 px

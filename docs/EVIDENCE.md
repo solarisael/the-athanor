@@ -321,7 +321,8 @@ All times are -03. Full observations, including the ones that failed, are in
 | Durable-write backup receipt | `remember` #4469 through the installed OMP tool | `backup.status: skipped` — the write never asked; protocol default cut on `dev/next` (`b639752`) |
 | Durable-write backup receipt, second pass | `remember` #4472 from the first session started on `0.5.4+dev.202609051730.9c21acf`, no `backup` field sent | `backup.status: ok`, `tool: pg_bin_dir:pg_dump`, 586,910,234 bytes in 47.2 s; `sha256sum` of the dump file matches the receipt |
 | pg_dump route on the tower | Same write | `pg_bin_dir:pg_dump` named in the receipt; the old `program not found` did not recur |
-| OMP keeper restart/resume plane | Room `kodo` provisioned (four grants, `omp-keeper.json`, harness `kodo-omp`) | The next kodo session started through the keeper (`restart-capability` present, claimant `omp-keeper`); live `request_restart` with `mode: resume` still owed |
+| OMP keeper restart/resume plane | `request_restart` `mode: resume` from a keeper-launched kodo session | Keeper relaunched `omp.exe --resume <same session id>` in 20 s; `restart.intents` row `verified` with `successor_session = session_id`; the resumed process bound the release installed meanwhile |
+| Loader keeps the Host alive | `taskkill` on `athanor.exe` under the resumed session, no session start | New `athanor.exe` listening on 8787 after 13 s, parented by the session's own process; `/room/kodo/health` `ok`, `connected`, sequence intact |
 
 The service restarts during the pointer-flip deploy exposed a further
 defect: the running Host reconnected its sockets to the new broker and kept
@@ -337,7 +338,9 @@ once, at session start. A Host that died mid-session stayed dead until some
 session started. `dev/next` `f54d65e` adds `watchScopedHost`: the loader
 probes scoped health every 30 s for the life of the OMP process and runs the
 same start sequence when the probe fails. Tests: 27 in
-`installed-loader.test.ts`, three new. Live half owed after deploy.
+`installed-loader.test.ts`, three new. Live, on `1b03882`: the Host was
+killed under a running session and answered again 13 s later, started by
+that session's own process.
 
 Deployment shape observed on the first pointer-flip release: `current.json`
 flipped to `0.5.4+dev.202609051650.4d98e0d` with `previousVersion: 0.5.4` and

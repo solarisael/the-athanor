@@ -441,7 +441,8 @@ pub struct HallwayKnockRequest {
     pub idempotency_key: String,
     pub message_id: i64,
     pub recipient_room: String,
-    #[serde(default)]
+    /// Omit for a root exchange. A continuation supplies its prior Knock UUID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_knock_id: Option<String>,
     #[serde(default = "default_knock_max_turns")]
     pub max_turns: u8,

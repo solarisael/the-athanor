@@ -1698,12 +1698,12 @@ export function registerSolarisaelTools(pi, release) {
   registerHouseTool(pi, {
     name: "hallway_knock",
     label: "Athanor Hallway Knock",
-    description: "Request one bounded turn in an allowed peer room for an existing addressed Hallway message. The recipient's standing policy decides. A child Knock must reverse the prior Knock along the same reply thread and inherits its remaining turn budget.",
+    description: "Request one bounded turn in an allowed peer room for an existing addressed Hallway message. The recipient's standing policy decides. Omit parent_knock_id for a root exchange. For a continuation, supply the prior Knock receipt's UUID. A child Knock reverses the rooms, directly replies in the parent's thread, and inherits its turn budget.",
     parameters: z.object({
       hallway: z.string().describe("Hallway key containing the addressed message."),
       message_id: z.number().describe("Positive Hallway message id authored by this authenticated presence."),
       recipient_room: z.string().describe("Structured recipient room already addressed by the message."),
-      parent_knock_id: z.string().optional().describe("Prior Knock id when continuing the same bounded exchange."),
+      parent_knock_id: z.string().optional().describe("Omit for a root exchange. Supply the prior Knock receipt's UUID only for a continuation. Never use an empty string or nil UUID."),
       max_turns: z.number().optional().describe("Root exchange turn budget, 1-8; default 4. Child Knocks inherit it."),
       idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
     }),

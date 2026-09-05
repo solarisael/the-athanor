@@ -616,18 +616,20 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
         },
     )
     .await?;
-    let root_request = HallwayKnockRequest {
-        hallway: hallway.clone(),
-        room: "kodo".into(),
-        spirit: "Kodo".into(),
-        session: "kodo-knock".into(),
-        idempotency_key: "knock-root".into(),
-        message_id: root_message.message.id,
-        recipient_room: "kintsu".into(),
-        parent_knock_id: None,
-        max_turns: 2,
-    };
+    let root_request: HallwayKnockRequest = serde_json::from_value(serde_json::json!({
+        "hallway": hallway,
+        "room": "kodo",
+        "spirit": "Kodo",
+        "session": "kodo-knock",
+        "idempotencyKey": "knock-root",
+        "messageId": root_message.message.id,
+        "recipientRoom": "kintsu",
+        "maxTurns": 2
+    }))?;
     let root = hallway_knock(pool, root_request.clone()).await?;
+    assert!(root.ok);
+    assert_eq!(root.knock.parent_knock_id, None);
+    assert_eq!(root.knock.root_knock_id, root.knock.knock_id);
     assert_eq!(root.knock.turn_index, 1);
     assert_eq!(root.knock.max_turns, 2);
     assert!(hallway_knock(pool, root_request).await?.duplicate);
@@ -825,23 +827,29 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
         },
     )
     .await?;
-    let child = hallway_knock(
-        pool,
-        HallwayKnockRequest {
-            hallway: hallway.clone(),
-            room: "kintsu".into(),
-            spirit: "Kintsu".into(),
-            session: "kintsu-knock".into(),
-            idempotency_key: "knock-child".into(),
-            message_id: child_message.message.id,
-            recipient_room: "kodo".into(),
-            parent_knock_id: Some(first_claim.knock_id),
-            max_turns: 2,
-        },
-    )
-    .await?;
+    let mut child_request: HallwayKnockRequest = serde_json::from_value(serde_json::json!({
+        "hallway": hallway,
+        "room": "kintsu",
+        "spirit": "Kintsu",
+        "session": "kintsu-knock",
+        "idempotencyKey": "knock-child",
+        "messageId": child_message.message.id,
+        "recipientRoom": "kodo",
+        "parentKnockId": Uuid::nil().to_string(),
+        "maxTurns": 2
+    }))?;
+    assert!(matches!(
+        hallway_knock(pool, child_request.clone()).await,
+        Err(AppError::Refusal {
+            code: "knock_parent_mismatch",
+            ..
+        })
+    ));
+    child_request.parent_knock_id = Some(root.knock.knock_id.clone());
+    let child = hallway_knock(pool, child_request).await?;
     assert_eq!(child.knock.turn_index, 2);
     assert_eq!(child.knock.root_knock_id, root.knock.root_knock_id);
+    assert_eq!(child.knock.parent_knock_id, Some(root.knock.knock_id.clone()));
 
     let claimed_child = hallway_knock_claim(
         pool,

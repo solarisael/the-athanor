@@ -1498,6 +1498,32 @@ mod tests {
     }
 
     #[test]
+    fn hallway_knock_protocol_accepts_an_absent_root_parent_and_preserves_a_continuation() {
+        let mut envelope = serde_json::json!({
+            "protocol": 1, "id": "knock", "method": "hallway_knock",
+            "params": {
+                "hallway": "shared-hallway", "room": "kodo", "spirit": "Kodo",
+                "session": "kodo-knock", "idempotencyKey": "root",
+                "messageId": 42, "recipientRoom": "kintsu", "maxTurns": 2
+            }
+        });
+        let (_, root) = decode_line(&envelope.to_string());
+        let ProtocolRequest::HallwayKnock(root) = root.unwrap() else {
+            panic!("expected root Knock");
+        };
+        assert_eq!(root.parent_knock_id, None);
+        assert!(serde_json::to_value(root).unwrap().get("parentKnockId").is_none());
+
+        let parent = "3d3051cb-aee1-4a2d-9316-15e383374f39";
+        envelope["params"]["parentKnockId"] = serde_json::json!(parent);
+        let (_, child) = decode_line(&envelope.to_string());
+        let ProtocolRequest::HallwayKnock(child) = child.unwrap() else {
+            panic!("expected child Knock");
+        };
+        assert_eq!(child.parent_knock_id.as_deref(), Some(parent));
+    }
+
+    #[test]
     fn paper_boat_dispatch_is_domain_prefixed_and_rejects_empty_rooms() {
         let (_, sleep) = decode_line(
             r#"{"protocol":1,"id":"s1","method":"paper_boat_sleep","params":{"room":"kintsu","body":"letter","backup":true}}"#,

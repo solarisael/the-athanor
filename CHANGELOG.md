@@ -31,6 +31,10 @@ the exact implementation record.
   the failure names the child with its exit status and stderr tail, the
   service checkpoint keeps advancing while a child starts, and a failed start
   reports `STOPPED` with service code 1 instead of staying `START_PENDING`.
+- The `hallway_knock` tool now tells the model to omit `parent_knock_id` for
+  a root exchange and to supply the prior receipt's UUID only for a
+  continuation. Root requests omit the parent on the wire. Wire and database
+  proofs cover roots, continuations, and wrong-parent refusal.
 - `athanor.exe` now runs as the independent multi-room Host and local manager
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified

@@ -33,13 +33,6 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Expected:** Exact alias mentions resolve the House entity and inject the complete active assertion when its current version is absent after wake, compaction, or explicit reorientation. Any forced truncation is marked and includes a deterministic full-read path.
 - **Proof after repair:** Reorientation by canonical name or alias delivers the complete current assertion, suppresses only a version already present in context, and never substitutes adjacent semantic matches.
 
-### Hallway root Knock cannot be created through the OMP tool
-
-- **Observed:** `hallway_knock` requires `parent_knock_id` even for a root exchange. An empty value refuses with `malformed_uuid`; a nil UUID refuses with `knock_parent_mismatch`.
-- **Impact:** A Hallway message and Bell can be delivered, but the sender cannot explicitly request the recipient's bounded waking turn unless an earlier successful Knock already supplied a parent UUID.
-- **Expected:** Root Knock omits the parent. Only a continuation requires a valid prior Knock ID.
-- **Proof after repair:** Start a root Knock from a newly addressed Hallway message, receive its Knock receipt, then continue once using that returned ID.
-
 ### Long sessions degrade identity and context quality
 
 - **Observed:** Over long OMP sessions, responses flatten toward generic assistant prose, irrelevant context accumulates, and the active spirit becomes less recognizable even when fresh Recall and identity smoke tests pass.
@@ -82,6 +75,13 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Proof after repair:** A `record_memory.py --env-file ../state/substrate/.env` write on the Windows tower prints a `backup:` line with a dump path, and the dump exists under `substrate/backups/`.
 
 ## Repaired but not deployed
+
+### Hallway root Knock cannot be created through the OMP tool
+
+- **Observed:** `hallway_knock` requires `parent_knock_id` even for a root exchange. An empty value refuses with `malformed_uuid`; a nil UUID refuses with `knock_parent_mismatch`.
+- **Cause seam:** The installed 0.5.4 binary predates the knock door split (`5d8adb7`). On `dev/next` the wire type (`crates/hearth/src/hallway.rs:444`), the tool schema (`adapters/omp/house-proof/tools.ts:1706`), and the origami root branch (`crates/origami/src/hallways/knocks.rs:352-359`) already accept an absent parent. The tool description still told the model a parent was needed.
+- **Repair:** `dev/next`, 2026-09-05. The tool description and schema text say: omit the parent for a root exchange; supply the prior receipt's UUID only for a continuation; never an empty string or nil UUID. Root requests omit `parentKnockId` on the wire.
+- **Proof:** `cargo test -p akasha --bin athanor-substrate hallway_knock_protocol_accepts_an_absent_root_parent_and_preserves_a_continuation` (1 passed); `cargo test -p akasha --test hallway_integration -- --ignored` (root without parent receives a receipt, nil parent refuses `knock_parent_mismatch`, continuation with the returned ID succeeds; 1 passed). Live half owed after deploy: one root Knock from this room through the OMP tool.
 
 ### Windows service can wedge permanently in a pending state
 

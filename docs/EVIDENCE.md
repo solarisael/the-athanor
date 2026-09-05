@@ -298,6 +298,42 @@ Recall receipts used snake_case nested state and decision fields. Final focused
 proof passed 83 Rust protocol/Host/installer/delivery tests with three explicit
 integration ignores, plus the historical Godot receipt-state test.
 
+### Installed dev/next live halves — 2026-09-05
+
+Eleven repairs landed on `dev/next` on 2026-09-04 and 2026-09-05 with tests as
+their first half. This section records the second half: each repair observed
+through the installed surface that originally failed. Two installed builds
+served the observations: `0.5.4` (bin overwritten in place at 13:00) and
+`0.5.4+dev.202609051650.4d98e0d` (the first pointer-flip release, 13:59).
+All times are -03. Full observations, including the ones that failed, are in
+[`BUGS.md`](../BUGS.md).
+
+| Repair | Observed | Result |
+|---|---|---|
+| Numeric memory IDs resolve through Recall | `recall` of `memory 4467` and `memory 4197` from room `kodo` | Target row first, reason `exact memory id` |
+| Weighty House canon is not clipped | Automatic recall on a turn that mentioned "the Athanor" | Canon #207 complete, `truncated: false` (kodo half; kintsu half not observed from this room) |
+| Design catalogue same-identity supersession | `design_doc_write` `supersedes: "2"` for `solarisael/token/reliquary-palette` | `#24` current, `#2.superseded_by = 24`; exposed that the OMP tool stripped `values` and `provenance` to `{}` (rows #13–#24); cut and repaired by `#25` |
+| Hallway root Knock through the OMP tool | `hallway_knock` on message #262 with no parent | Receipt `d50bb186…`, `parentKnockId: null`, `status: pending` |
+| Recall latency | Nine Insula root spans, 13:04–13:24 | 449–1570 ms; 449 and 603 ms with no build running beside them; `recall.content` 42–179 ms on every one |
+| Mechanics category chips | Headless Chrome 152 on the served prototype against the installed Host | 1440 × 1000: max right edge 1305 px, none past the edge; 390 × 844: 362 px |
+| Pulse lane spans drawer | Lane `knock_claim`, newest span, then `/live/insula/trace` for the same id | Drawer and direct route return the same two rows |
+| Windows service failed-start evidence | Port 4222 held by a dummy listener, then `sc start` | `STOPPED`, `WIN32_EXIT_CODE 1066`, `SERVICE_EXIT_CODE 1`, `nats.stderr.log` names the bind error, zero children |
+| Durable-write backup receipt | `remember` #4469 through the installed OMP tool | `backup.status: skipped` — the write never asked; protocol default cut on `dev/next`, live half owed again after the next session starts on a new release |
+| pg_dump route on the tower | Same write | Not reached (see above) |
+| OMP keeper restart/resume plane | Room `kodo` provisioned (four grants, `omp-keeper.json`, harness `kodo-omp`) | Live `request_restart` with `mode: resume` owed; needs the next kodo session started through the keeper |
+
+The service restarts during the pointer-flip deploy exposed a further
+defect: the running Host reconnected its sockets to the new broker and kept
+reporting `broker_status: degraded`, because the restarted broker had
+forgotten the Host's memory-only replay consumer. Cut on `dev/next`
+(`ad5ec25`); live half owed after a Host runs that build.
+
+Deployment shape observed on the first pointer-flip release: `current.json`
+flipped to `0.5.4+dev.202609051650.4d98e0d` with `previousVersion: 0.5.4` and
+a rollback backup; `versions/0.5.4/` untouched; the running `athanor.exe` and
+`omp-keeper.exe` continued as `.retired-*` images while the stable paths
+carried the new bytes; a session bound to `0.5.4` kept recalling through it.
+
 ## Next public evidence
 
 The post-1.0 public proof program expands the evidence surface in this order.

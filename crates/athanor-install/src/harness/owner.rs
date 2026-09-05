@@ -1,13 +1,9 @@
-use super::{
-    config::{HarnessKind, HarnessRegistry, HarnessSpec, detail},
-    omp::{self, OmpExit, OwnedOmp},
-};
+use super::config::{HarnessLaunch, HarnessRegistry, HarnessSpec, detail};
 use ::protocol::harness::{HarnessCommand, HarnessLifecycle, HarnessStatus};
 use anyhow::{Context, Result, bail};
 use interactive_process::{InteractiveChild, InteractiveCommand};
 use std::{
     collections::BTreeMap,
-    path::PathBuf,
     sync::Mutex,
     thread,
     time::{Duration, Instant},
@@ -15,19 +11,17 @@ use std::{
 
 pub const STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// One shape of child: a console process this Athanor started and waits on.
+/// The OMP keeper is one of these, supervised by program and arguments like
+/// any other; it owns its own console and its own OMP child.
 struct OwnedChild {
     child: InteractiveChild,
     pid: u32,
 }
 
-enum OwnedHarness {
-    Process(OwnedChild),
-    Omp(OwnedOmp),
-}
-
 #[derive(Default)]
 struct OwnedState {
-    children: BTreeMap<String, OwnedHarness>,
+    children: BTreeMap<String, OwnedChild>,
     failures: BTreeMap<String, String>,
 }
 
@@ -40,23 +34,14 @@ enum Observation {
 pub struct HarnessOwner {
     registry: HarnessRegistry,
     token: String,
-    program_root: PathBuf,
-    state_root: PathBuf,
     state: Mutex<OwnedState>,
 }
 
 impl HarnessOwner {
-    pub fn new(
-        registry: HarnessRegistry,
-        token: String,
-        program_root: PathBuf,
-        state_root: PathBuf,
-    ) -> Self {
+    pub fn new(registry: HarnessRegistry, token: String) -> Self {
         Self {
             registry,
             token,
-            program_root,
-            state_root,
             state: Mutex::new(OwnedState::default()),
         }
     }
@@ -137,16 +122,10 @@ impl HarnessOwner {
     }
 
     fn adopt(&self, state: &mut OwnedState, harness_id: &str, spec: &HarnessSpec) -> Result<()> {
-        let started = match &spec.kind {
-            HarnessKind::Process(launch) => start_process(launch).map(|child| {
-                let pid = child.id();
-                OwnedHarness::Process(OwnedChild { child, pid })
-            }),
-            HarnessKind::Omp(launch) => {
-                omp::start(launch, &self.program_root, &self.state_root, STOP_TIMEOUT)
-                    .map(OwnedHarness::Omp)
-            }
-        };
+        let started = start_process(&spec.launch).map(|child| {
+            let pid = child.id();
+            OwnedChild { child, pid }
+        });
         match started {
             Ok(owned) => {
                 state.failures.remove(harness_id);
@@ -166,18 +145,13 @@ impl HarnessOwner {
 fn observe(state: &mut OwnedState, harness_id: &str) {
     let observation = match state.children.get_mut(harness_id) {
         None => Observation::Absent,
-        Some(OwnedHarness::Process(owned)) => match owned.child.try_wait() {
+        Some(owned) => match owned.child.try_wait() {
             Ok(None) => Observation::Alive,
             Ok(Some(status)) if status.success() => Observation::Ended(None),
             Ok(Some(status)) => Observation::Ended(Some(detail(format!("exited with {status}")))),
             Err(error) => {
                 Observation::Ended(Some(detail(format!("exit status unavailable: {error}"))))
             }
-        },
-        Some(OwnedHarness::Omp(owned)) => match owned.observe() {
-            None => Observation::Alive,
-            Some(OmpExit::Stopped) => Observation::Ended(None),
-            Some(OmpExit::Failed(message)) => Observation::Ended(Some(detail(message))),
         },
     };
     if let Observation::Ended(failure) = observation {
@@ -191,13 +165,7 @@ fn observe(state: &mut OwnedState, harness_id: &str) {
 
 fn status(state: &mut OwnedState, spec: &HarnessSpec) -> HarnessStatus {
     observe(state, &spec.harness_id);
-    let pid = state
-        .children
-        .get(&spec.harness_id)
-        .and_then(|owned| match owned {
-            OwnedHarness::Process(owned) => Some(owned.pid),
-            OwnedHarness::Omp(owned) => owned.pid(),
-        });
+    let pid = state.children.get(&spec.harness_id).map(|owned| owned.pid);
     let failure = state.failures.get(&spec.harness_id).cloned();
     let lifecycle = match (pid.is_some(), failure.is_some()) {
         (true, _) => HarnessLifecycle::Running,
@@ -218,16 +186,13 @@ fn stop_owned(state: &mut OwnedState, harness_id: &str) -> Result<()> {
         .children
         .get_mut(harness_id)
         .with_context(|| format!("this Athanor owns no running harness for {harness_id:?}"))?;
-    match owned {
-        OwnedHarness::Process(owned) => stop_process(owned, harness_id)?,
-        OwnedHarness::Omp(owned) => owned.stop(STOP_TIMEOUT)?,
-    }
+    stop_process(owned, harness_id)?;
     state.children.remove(harness_id);
     state.failures.remove(harness_id);
     Ok(())
 }
 
-fn start_process(launch: &super::config::HarnessLaunch) -> Result<InteractiveChild> {
+fn start_process(launch: &HarnessLaunch) -> Result<InteractiveChild> {
     let mut command = InteractiveCommand::new(&launch.program);
     command
         .args(&launch.arguments)

@@ -61,6 +61,20 @@ the exact implementation record.
   names how many rollup rows it summed. Pulse lanes open a trace drawer over
   the Host's `insula/trace` route. The proxy exposes `/live/health` and
   `/live/insula/trace`; the bearer token stays server-side.
+- One owner for OMP restart. `athanor.exe` supervises `omp-keeper.exe` as an
+  ordinary process harness; the keeper owns the console and the OMP child.
+  The in-process OMP driver is removed. A registry entry that declares
+  `"driver": "omp"` is refused with the keeper command to write instead.
+- `request_restart` refuses with `no_restart_owner` in a room no keeper
+  watches. The door proves a provisioned claimant (`omp-keeper.json` and the
+  `restart_claim` capability) before it records or arms an intent, so a
+  keeperless room can no longer strand an `exiting` intent that refuses every
+  later restart with `intent_pending`.
+- An unclaimed `exiting` intent past its deadline expires. `restart_request`
+  moves it to `failed:exit_unclaimed` and proceeds. A `claimed` or
+  `relaunching` intent belongs to a live keeper and is never swept.
+- `omp-keeper` exits 88 when a child armed an exit that no relaunch served.
+  It exited 0 before, so a lost session looked like success to the shell.
 - `athanor.exe` now runs as the independent multi-room Host and local manager
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified

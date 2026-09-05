@@ -1,10 +1,14 @@
-//! A stand-in for omp: it records that it ran, then either arms an exit or
-//! stays alive so the keeper's watch has something to watch.
+//! A stand-in for omp: it records that it ran, then either arms an exit, quits
+//! for good, or stays alive so the keeper's watch has something to watch.
 //!
 //! `FAKE_OMP_SLEEP_SECS` makes a run stay alive instead of exiting, and
 //! `FAKE_OMP_SLEEP_FROM_RUN` says which run (1-based) starts doing that. The
 //! deadline tests need a child that overstays: one that exits at once can only
 //! ever prove the exit path.
+//!
+//! `FAKE_OMP_QUIT_FROM_RUN` says which run (1-based) starts quitting the way an
+//! operator quits: exit 0, no arm, nothing for the keeper to restart. Without
+//! it every run arms an exit, so no test can watch a loop end on purpose.
 
 use std::io::Write;
 
@@ -27,6 +31,12 @@ fn main() {
                     .expect("fake omp survival log");
                 writeln!(file, "survived run {run}").expect("fake omp survival line");
             }
+            return;
+        }
+    }
+    if let Some(quit_from_run) = number("FAKE_OMP_QUIT_FROM_RUN") {
+        if run >= quit_from_run {
+            println!("fake omp: quitting for good (run {run})");
             return;
         }
     }

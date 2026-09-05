@@ -1,21 +1,21 @@
-//! The restart plane against a real PostgreSQL schema. One test, fourteen
+//! The restart plane against a real PostgreSQL schema. One test, fifteen
 //! phases: the full lifecycle, the storm guard's counting query, the exit
 //! fence, expiry of an unclaimed request, the stale-token refusal,
 //! one-verify-only, the storm cap at the moment of arming, a lapsed idempotent
 //! replay, an intent that crosses its TTL behind a row lock, the Insula
 //! divergence read, the capability and session authority of each door, one live
-//! intent per workspace, and the exact-intent read. It is one test on purpose —
-//! it owns the whole `restart` schema and resets it, so it must not race a
-//! sibling that does the same.
+//! intent per workspace, the exact-intent read, and the armed exit no keeper
+//! ever claimed. It is one test on purpose — it owns the whole `restart` schema
+//! and resets it, so it must not race a sibling that does the same.
 //!
 //! Run it against a scratch database only:
 //!   ATHANOR_SUBSTRATE_TEST_DATABASE_URL=postgres://.../restart_intent_scratch \
 //!     cargo test -p akasha --test restart_lifecycle_integration -- --ignored
 
 use akasha::{
-    AppError, EXITING_DEADLINE_SECS, RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS,
-    STORM_MAX_EXITING_PER_WINDOW, query_unverified_exit, restart_claim, restart_request,
-    restart_status, restart_transition, restart_verify,
+    AppError, EXIT_UNCLAIMED_REASON, EXITING_DEADLINE_SECS, RELAUNCHING_DEADLINE_SECS,
+    REQUESTED_TTL_SECS, STORM_MAX_EXITING_PER_WINDOW, query_unverified_exit, restart_claim,
+    restart_request, restart_status, restart_transition, restart_verify,
 };
 use protocol::restart::{
     RestartClaimParams, RestartConsentSource, RestartHarness, RestartMode, RestartRequestParams,
@@ -186,6 +186,19 @@ async fn aged_exit_event(pool: &PgPool, intent_id: &str, age: &str) -> TestResul
     Ok(())
 }
 
+/// Push an armed exit past the deadline the House published for it. The
+/// intents row is not append-only, so moving its clock is the only way a test
+/// can stand where a keeperless room stands a minute after the exit.
+async fn age_exiting_deadline(pool: &PgPool, intent_id: &str) -> TestResult {
+    sqlx::query(
+        "UPDATE restart.intents SET exiting_deadline_at=clock_timestamp()-INTERVAL '1 second' WHERE intent_id=$1::text::uuid",
+    )
+    .bind(intent_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// End an intent's hold on its workspace. A workspace carries one live intent,
 /// so any phase that wants a second restart has to finish the first one; this
 /// is the short way to say "that restart is over" without a whole lifecycle.
@@ -292,6 +305,12 @@ async fn arm_and_exit(pool: &PgPool, workspace: &str, key: &str) -> TestResult<S
 // see its own verified.
 // red-proof: drop refuse_on_live_intent from restart_request, or the partial
 // unique index from 0026; answer the exact-id read from the pending query.
+// Cut three: an armed exit no keeper ever claimed, which holds its workspace
+// and refuses every later restart with intent_pending until somebody edits the
+// database, and a sweep greedy enough to take an exit whose keeper is alive.
+// red-proof: drop expire_stranded_exits_in_workspace from restart_request, or
+// let its read reach a claimed row — both land on intent_pending, the first
+// for the stranded exit and the second for the claimed one.
 #[tokio::test]
 #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated restart schema"]
 async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
@@ -1007,6 +1026,64 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         .intent
         .is_none(),
         "an unknown id reads as none, never as somebody else's intent"
+    );
+
+    // 15. The armed exit nobody claimed. A room with no keeper arms an exit
+    // that no owner can ever claim; that row is dead and it holds the
+    // workspace, so before this fence one request_restart from a keeperless
+    // room refused every later restart with intent_pending forever.
+    let keeperless = "D:/athanor-wt/keeperless";
+    let stranded = arm_and_exit(&pool, keeperless, "keeperless-1").await?;
+    age_exiting_deadline(&pool, &stranded).await?;
+    let after = restart_request(&pool, request_params(keeperless, "keeperless-2")).await?;
+    assert_eq!(
+        after.state,
+        RestartState::Requested,
+        "the request behind a stranded exit proceeds instead of refusing forever"
+    );
+    assert_ne!(after.intent_id, stranded);
+    assert_eq!(
+        stored_state(&pool, &stranded).await?,
+        ("failed".to_string(), Some("exiting".to_string())),
+        "the stranded exit reaches a terminal state, and it names the stage it died in"
+    );
+    let (reason, actor): (Option<String>, String) = sqlx::query_as(
+        "SELECT detail->>'reason', principal FROM restart.intent_events WHERE intent_id=$1::text::uuid AND event_kind=$2 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(&stranded)
+    .bind(RestartState::Failed.as_str())
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        reason.as_deref(),
+        Some(EXIT_UNCLAIMED_REASON),
+        "the ledger says why it failed, not only that it failed"
+    );
+    assert!(
+        actor.starts_with("house:"),
+        "the House expired it: no spirit was in the room to do it ({actor})"
+    );
+    assert!(
+        ledger(&pool, &stranded).await?.contains(&"failed".to_string()),
+        "the terminal move is in the append-only ledger"
+    );
+
+    // The other half: a claimed exit is a live keeper's work, whatever its
+    // exiting deadline says, so the sweep must never take it and the workspace
+    // stays held.
+    let live_keeper = "D:/athanor-wt/live-keeper";
+    let watched = arm_and_exit(&pool, live_keeper, "live-keeper-1").await?;
+    restart_claim(&pool, claim_params(&watched, "live-keeper-claim")).await?;
+    age_exiting_deadline(&pool, &watched).await?;
+    let refused = restart_request(&pool, request_params(live_keeper, "live-keeper-2")).await;
+    assert_eq!(
+        refusal_code(&refused.expect_err("a claimed intent still holds its workspace")),
+        "intent_pending"
+    );
+    assert_eq!(
+        stored_state(&pool, &watched).await?,
+        ("claimed".to_string(), None),
+        "the sweep never touches an intent a keeper already claimed"
     );
     Ok(())
 }

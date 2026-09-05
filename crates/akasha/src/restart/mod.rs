@@ -49,6 +49,15 @@
 //! within seconds of an exit, so a sweep would have no work. enough: a clock
 //! sweep is the upgrade path if the ledger ever needs an `expired` event for a
 //! row no door touched.
+//!
+//! An armed exit nobody claims is the same lazy shape with a harder
+//! consequence. `exiting` is a live state, so a room with no keeper strands a
+//! row that holds the workspace and refuses every later request with
+//! `intent_pending`. `restart_request` therefore also sweeps an unclaimed
+//! `exiting` row past its `exiting_deadline_at` into `failed:exit_unclaimed`
+//! and proceeds. Only the request door sweeps it: a keeper that arrives late
+//! must still be able to claim its own overdue exit, and a `claimed` or
+//! `relaunching` row is a live keeper's work that no sweep may take.
 
 mod authority;
 mod proof;
@@ -317,6 +326,65 @@ async fn expire_lapsed_requests_in_workspace(
     Ok(())
 }
 
+/// The reason recorded when an armed exit stranded. It reads with the state it
+/// lands on: `failed:exit_unclaimed`. The row's `failed_stage` says `exiting`,
+/// because that is the stage the restart died in; this word says why, which
+/// `failed:exiting` alone cannot: nobody ever claimed it.
+pub const EXIT_UNCLAIMED_REASON: &str = "exit_unclaimed";
+
+/// An unclaimed `exiting` intent past `exiting_deadline_at` is a session that
+/// armed its exit in a room no owner watches. That row is dead but it still
+/// holds the workspace, so every later request refuses `intent_pending`
+/// forever until somebody edits the database (Kodo, 2026-09-05). It dies here,
+/// terminally, with its reason in the ledger, and the request behind it
+/// proceeds.
+///
+/// `state = 'exiting'` is what fences a live keeper out: a claim moves the
+/// intent to `claimed`, so a claimed or relaunching row is never in this read.
+/// `claim_epoch = 0` says the same fact structurally, and it is kept because it
+/// is the sweep's actual law — no claim, ever — and a later transition that
+/// re-entered `exiting` would otherwise hand a live keeper's work to this
+/// sweep.
+async fn expire_stranded_exits_in_workspace(
+    tx: &mut Transaction<'_, Postgres>,
+    workspace: &str,
+) -> Result<(), AppError> {
+    // clock_timestamp() and not NOW(): a caller can wait behind FOR UPDATE
+    // long enough to cross the deadline, exactly as lapsed_after_lock reads it.
+    let intent_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT intent_id::text FROM restart.intents WHERE workspace=$1 AND state=$2 AND claim_epoch=0 AND exiting_deadline_at IS NOT NULL AND exiting_deadline_at <= clock_timestamp() FOR UPDATE",
+    )
+    .bind(workspace)
+    .bind(RestartState::Exiting.as_str())
+    .fetch_all(&mut **tx)
+    .await?;
+    for intent_id in intent_ids {
+        sqlx::query(
+            "UPDATE restart.intents SET state=$2,failed_stage=$3,updated_at=NOW() WHERE intent_id=$1::text::uuid",
+        )
+        .bind(&intent_id)
+        .bind(RestartState::Failed.as_str())
+        .bind(RestartState::Exiting.as_str())
+        .execute(&mut **tx)
+        .await?;
+        insert_event(
+            tx,
+            &intent_id,
+            None,
+            RestartState::Failed.as_str(),
+            HOUSE_PRINCIPAL,
+            json!({
+                "reason": EXIT_UNCLAIMED_REASON,
+                "failedStage": RestartState::Exiting.as_str(),
+                "exitingSecs": EXITING_DEADLINE_SECS,
+            }),
+            None,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 fn refuse_expired() -> AppError {
     refusal(
         "intent_expired",
@@ -378,6 +446,7 @@ pub async fn restart_request(
         return Ok(receipt);
     }
     expire_lapsed_requests_in_workspace(&mut tx, &request.workspace).await?;
+    expire_stranded_exits_in_workspace(&mut tx, &request.workspace).await?;
 
     refuse_on_live_intent(&mut tx, &request.workspace).await?;
     refuse_on_storm(reached_exiting_in_window(&mut tx, &request.workspace).await?)?;

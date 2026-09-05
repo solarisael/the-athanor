@@ -58,6 +58,18 @@ The native installer and the managed runtime for Windows. It builds the `athanor
 - **Host environment.** Each Host child receives the token, the room directory, the state directory, the house identifier, the room, the spirit, the session, and the bind address.
 - **`prepare_service_console`.** It ignores console control events, so a break sent to a child never stops the service.
 
+### harness
+
+`src/harness/`. The operator harnesses the canonical app owns, and the loopback door that starts and stops them.
+
+- **Registry.** `config.rs` reads `config/harnesses.json`. Format 1 declares each harness with an identifier, a label, an absolute program, arguments, an absolute workspace, and the console mode.
+- **One console mode.** `new_window` is the only spelling. A harness an operator looks at must not look like a service child of `supervisor.rs`.
+- **No drivers.** A harness is a process. An entry that declares a `driver` field is refused, and the refusal tells the operator to name `omp-keeper.exe` as the program instead. The app holds no OMP driver: the keeper owns the console and the OMP child, and the app supervises the keeper.
+- **Bounds.** An identifier holds ASCII letters, digits, `-`, `_` or `.`. An identifier and a label hold 1 to 128 characters. A duplicate identifier is refused. An absent registry file is an app with no harnesses, and a malformed file is a refusal.
+- **Ownership.** `owner.rs` keeps every child handle. It starts, stops, and restarts one harness by identifier, and it reports one status for each declared harness: running with its process identifier, stopped, or failed with its detail. A stop waits 15 seconds, then reports the child is still alive.
+- **Shutdown.** `shutdown` stops every child this app owns and reports each child that does not stop cleanly.
+- **Control.** `control.rs` binds a loopback socket, answers one request for each connection, and compares the capability token in constant time. The GUI holds no process authority; it asks over this door.
+
 ### native_runtime
 
 `src/native_runtime.rs`. The runtime seam over the installed substrate binary.

@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
 import solarisaelHouseProof from "../index.ts";
 import { RustJsonlTransport } from "../rust-transport.ts";
@@ -54,6 +55,61 @@ const zodStub = {
 const SUBSTRATE_EXE_ENV = "ATHANOR_SUBSTRATE_EXE";
 const EXIT_CAPABILITY_ENV = "ATHANOR_RESTART_EXIT_CAPABILITY";
 const GIGA_ENV = "ATHANOR_GIGA_ENABLED";
+const KEEPER_CONFIG_ENV = "ATHANOR_OMP_KEEPER_CONFIG";
+
+// A provisioned claimant, laid down the way provision-local.ps1 lays it down:
+// omp-keeper.json naming the restart_claim secret file beside it. The door
+// reads the pair and never a running process, so a temporary directory is the
+// whole seam. `KEEPERLESS_CONFIG` is a path that is never written.
+const KEEPER_ROOT = path.join(tmpdir(), "athanor-production-seam-keeper");
+const KEEPER_CONFIG = path.join(KEEPER_ROOT, "omp-keeper.json");
+const KEEPER_CAPABILITY = path.join(KEEPER_ROOT, "restart-capability");
+const KEEPERLESS_CONFIG = path.join(KEEPER_ROOT, "no-keeper-here", "omp-keeper.json");
+
+function provisionKeeper(capabilityPath: string): void {
+  mkdirSync(KEEPER_ROOT, { recursive: true });
+  writeFileSync(KEEPER_CAPABILITY, "seam-keeper-capability\n", "utf8");
+  writeFileSync(
+    KEEPER_CONFIG,
+    JSON.stringify({
+      ompLaunch: [process.execPath],
+      workspace: KEEPER_ROOT,
+      programRoot: KEEPER_ROOT,
+      stateRoot: KEEPER_ROOT,
+      capabilityPath,
+      claimant: "omp-keeper",
+      watchIntervalSecs: 30,
+    }),
+    "utf8",
+  );
+}
+
+// A whole room on disk, so the door's durable answer — the room's own
+// `.omp/runtime` — is exercised and not only the environment override that the
+// tests above use. `active_spirit.md` is what makes room.ts recognize it.
+const SEAM_ROOM = path.join(tmpdir(), "athanor-production-seam-room", "seam-room");
+const SEAM_ROOM_RUNTIME = path.join(SEAM_ROOM, ".omp", "runtime");
+
+function provisionSeamRoom(withCapability: boolean): void {
+  mkdirSync(SEAM_ROOM_RUNTIME, { recursive: true });
+  writeFileSync(path.join(SEAM_ROOM, "active_spirit.md"), "# Active Spirit: Seam\n", "utf8");
+  const capability = path.join(SEAM_ROOM_RUNTIME, "restart-capability");
+  if (withCapability) writeFileSync(capability, "seam-room-keeper-capability\n", "utf8");
+  else rmSync(capability, { force: true });
+  writeFileSync(
+    path.join(SEAM_ROOM_RUNTIME, "omp-keeper.json"),
+    JSON.stringify({
+      ompLaunch: [process.execPath],
+      workspace: SEAM_ROOM,
+      programRoot: SEAM_ROOM,
+      stateRoot: SEAM_ROOM,
+      capabilityPath: capability,
+      claimant: "omp-keeper",
+      watchIntervalSecs: 30,
+    }),
+    "utf8",
+  );
+}
 
 const PENDING_INTENT = {
   ok: true,
@@ -69,6 +125,7 @@ const PENDING_INTENT = {
 const originalRequest = RustJsonlTransport.prototype.request;
 const originalExe = process.env[SUBSTRATE_EXE_ENV];
 const originalGiga = process.env[GIGA_ENV];
+const originalKeeperConfig = process.env[KEEPER_CONFIG_ENV];
 
 let observed: Array<{ method: string; params: any }> = [];
 
@@ -102,6 +159,8 @@ beforeEach(() => {
   process.env[SUBSTRATE_EXE_ENV] = process.execPath;
   process.env[EXIT_CAPABILITY_ENV] = "production-seam-secret";
   process.env[GIGA_ENV] = "1";
+  provisionKeeper(KEEPER_CAPABILITY);
+  process.env[KEEPER_CONFIG_ENV] = KEEPER_CONFIG;
   __gigaTest.resetState();
   RustJsonlTransport.prototype.request = async function (method: string, params: any) {
     observed.push({ method, params });
@@ -120,6 +179,10 @@ afterEach(() => {
   else process.env[SUBSTRATE_EXE_ENV] = originalExe;
   if (originalGiga === undefined) delete process.env[GIGA_ENV];
   else process.env[GIGA_ENV] = originalGiga;
+  if (originalKeeperConfig === undefined) delete process.env[KEEPER_CONFIG_ENV];
+  else process.env[KEEPER_CONFIG_ENV] = originalKeeperConfig;
+  rmSync(KEEPER_ROOT, { recursive: true, force: true });
+  rmSync(SEAM_ROOM, { recursive: true, force: true });
 });
 
 describe("exit door through the production registration seam", () => {
@@ -168,5 +231,70 @@ describe("exit door through the production registration seam", () => {
     expect(buffers.enumerable).toBe(true);
     expect(buffers.turns).toBe(0);
     expect(buffers.sessions).toBe(0);
+  });
+
+  // The named seam of 2026-09-05: Kodo's runtime held all three room secrets
+  // and no keeper, so request_restart armed an exit nobody could claim and
+  // stranded a live `exiting` intent that refused every later restart.
+  test("refuses a room with no provisioned keeper, and records nothing", async () => {
+    const tool = registerRealAdapter();
+    process.env[KEEPER_CONFIG_ENV] = KEEPERLESS_CONFIG;
+
+    const result = await tool.execute("call-1", { mode: "resume", reason: "no keeper is watching" }, undefined, undefined, {
+      cwd: process.cwd(),
+      sessionId: "session-under-restart",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.details.code).toBe("no_restart_owner");
+    expect(result.details.armed).toBeUndefined();
+    expect(result.details.error).toContain("omp-keeper.exe");
+    // Nothing recorded and nothing armed: the refusal lands before
+    // restart_request, so no intent exists to strand.
+    expect(observed.map((call) => call.method)).not.toContain("restart_request");
+    expect(observed.map((call) => call.method)).not.toContain("restart_transition");
+  });
+
+  test("refuses a half-provisioned keeper whose capability file is absent", async () => {
+    const tool = registerRealAdapter();
+    // The config is there and the restart_claim secret it names is not, so the
+    // keeper could start and could never claim.
+    provisionKeeper(path.join(KEEPER_ROOT, "restart-capability-that-was-never-written"));
+
+    const result = await tool.execute("call-1", { mode: "resume", reason: "half a keeper" }, undefined, undefined, {
+      cwd: process.cwd(),
+      sessionId: "session-under-restart",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.details.code).toBe("no_restart_owner");
+    expect(observed.map((call) => call.method)).not.toContain("restart_request");
+  });
+
+  // The durable answer, not the override: the door finds the keeper in the
+  // room's own `.omp/runtime`, which is where provision-local.ps1 writes it.
+  test("finds the keeper in the room runtime, and refuses the same room without it", async () => {
+    delete process.env[KEEPER_CONFIG_ENV];
+    provisionSeamRoom(true);
+
+    const armed = await registerRealAdapter().execute("call-1", { mode: "resume", reason: "the room runtime holds the pair" }, undefined, undefined, {
+      cwd: SEAM_ROOM,
+      sessionId: "session-under-restart",
+    });
+
+    expect(armed.isError).toBeUndefined();
+    expect(armed.details.armed).toBe(true);
+
+    // The same room, one file short. A fresh registration, because an armed
+    // door refuses a second arm by name.
+    provisionSeamRoom(false);
+    const refused = await registerRealAdapter().execute("call-1", { mode: "resume", reason: "the capability is gone" }, undefined, undefined, {
+      cwd: SEAM_ROOM,
+      sessionId: "session-under-restart",
+    });
+
+    expect(refused.isError).toBe(true);
+    expect(refused.details.code).toBe("no_restart_owner");
+    expect(refused.details.keeperConfig).toBe(path.join(SEAM_ROOM_RUNTIME, "omp-keeper.json"));
   });
 });

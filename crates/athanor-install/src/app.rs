@@ -64,8 +64,6 @@ pub fn run() -> Result<()> {
     let owner = Arc::new(HarnessOwner::new(
         HarnessRegistry::load(&registry)?,
         control_token(&OsSecrets)?,
-        layout.program.clone(),
-        config.operator_state_root.clone(),
     ));
     let control = ControlServer::bind(Arc::clone(&owner))?;
     let host =

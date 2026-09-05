@@ -143,7 +143,6 @@ dependencies = [
  "hex",
  "host",
  "interactive-process",
- "omp-keeper",
  "protocol",
  "serde",
  "serde_json",

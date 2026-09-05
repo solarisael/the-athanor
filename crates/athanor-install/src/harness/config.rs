@@ -28,24 +28,19 @@ pub enum ConsoleMode {
     NewWindow,
 }
 
-/// Supervision is declared, never read out of an id or a program path. `Omp`
-/// starts exactly like `Process` today; it is the door where `request_restart`
-/// supervision lands without reaching plain processes.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum HarnessDriver {
-    #[default]
-    Process,
-    Omp,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HarnessEntry {
     pub harness_id: String,
     pub label: String,
-    #[serde(default)]
-    pub driver: HarnessDriver,
+    /// The registry once declared a supervision driver, and `omp` named an OMP
+    /// keeper that ran inside `athanor.exe`. There is no driver now: the keeper
+    /// owns the console, so this owner supervises `omp-keeper.exe` as an
+    /// ordinary process. A file that still declares one is refused by name,
+    /// because an ignored `"driver":"omp"` reads as provisioned and supervises
+    /// nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driver: Option<String>,
     pub program: PathBuf,
     #[serde(default)]
     pub arguments: Vec<String>,
@@ -70,31 +65,10 @@ pub struct HarnessLaunch {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum HarnessKind {
-    Process(HarnessLaunch),
-    Omp(HarnessLaunch),
-}
-
-impl HarnessKind {
-    pub fn launch(&self) -> &HarnessLaunch {
-        match self {
-            Self::Process(launch) | Self::Omp(launch) => launch,
-        }
-    }
-
-    pub fn driver(&self) -> HarnessDriver {
-        match self {
-            Self::Process(_) => HarnessDriver::Process,
-            Self::Omp(_) => HarnessDriver::Omp,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HarnessSpec {
     pub harness_id: String,
     pub label: String,
-    pub kind: HarnessKind,
+    pub launch: HarnessLaunch,
 }
 
 impl HarnessEntry {
@@ -125,20 +99,25 @@ impl HarnessEntry {
                 self.workspace.display()
             );
         }
-        let launch = HarnessLaunch {
-            program: self.program,
-            arguments: self.arguments,
-            workspace: self.workspace,
-            console: self.console,
-        };
-        let kind = match self.driver {
-            HarnessDriver::Process => HarnessKind::Process(launch),
-            HarnessDriver::Omp => HarnessKind::Omp(launch),
-        };
+        if let Some(driver) = self.driver.as_deref() {
+            bail!(
+                "harness {:?} declares a retired driver field ({driver:?}); this Athanor \
+                 supervises processes and holds no harness driver. Delete the field and run \
+                 the room through omp-keeper.exe: name the installed omp-keeper.exe as the \
+                 program, with arguments [\"--config\", \
+                 \"<room>/.omp/runtime/omp-keeper.json\"].",
+                self.harness_id
+            );
+        }
         Ok(HarnessSpec {
             harness_id: self.harness_id,
             label: self.label,
-            kind,
+            launch: HarnessLaunch {
+                program: self.program,
+                arguments: self.arguments,
+                workspace: self.workspace,
+                console: self.console,
+            },
         })
     }
 }
@@ -229,5 +208,71 @@ pub(super) fn detail(text: impl Into<String>) -> String {
     match text.char_indices().nth(MAX_DETAIL) {
         Some((cut, _)) => text[..cut].to_owned(),
         None => text,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The shape the operator writes for a room after the driver cut: the
+    /// keeper is the program, and its config file is the argument.
+    const KEEPER_HARNESS: &str = r#"{
+        "format": 1,
+        "harnesses": [
+            {
+                "harnessId": "kintsu-omp",
+                "label": "Kintsu OMP",
+                "program": "C:/Program Files/Solarisael/Athanor/bin/omp-keeper.exe",
+                "arguments": [
+                    "--config",
+                    "C:/Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json"
+                ],
+                "workspace": "C:/Solarisael/Obsidian/obsidian/kintsu",
+                "console": "new_window"
+            }
+        ]
+    }"#;
+
+    #[test]
+    fn the_keeper_resolves_as_an_ordinary_process_harness() {
+        let registry = HarnessRegistry::parse(KEEPER_HARNESS).expect("the keeper entry resolves");
+        assert_eq!(registry.len(), 1);
+        let spec = registry.get("kintsu-omp").expect("the entry is registered");
+        assert_eq!(spec.label, "Kintsu OMP");
+        assert!(
+            spec.launch.program.ends_with("omp-keeper.exe"),
+            "the supervised program is the keeper: {}",
+            spec.launch.program.display()
+        );
+        assert_eq!(
+            spec.launch.arguments,
+            [
+                "--config",
+                "C:/Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json"
+            ],
+            "the arguments reach the keeper as written"
+        );
+        assert_eq!(spec.launch.console, ConsoleMode::NewWindow);
+    }
+
+    #[test]
+    fn a_declared_omp_driver_is_refused_and_names_the_keeper() {
+        let text = KEEPER_HARNESS.replace(
+            "\"label\": \"Kintsu OMP\",",
+            "\"label\": \"Kintsu OMP\",\n                \"driver\": \"omp\",",
+        );
+        let error = format!(
+            "{:#}",
+            HarnessRegistry::parse(&text).expect_err("a declared driver is refused")
+        );
+        assert!(
+            error.contains("retired driver"),
+            "the refusal names the retired field: {error}"
+        );
+        assert!(
+            error.contains("omp-keeper.exe"),
+            "the refusal tells the operator which program to run: {error}"
+        );
     }
 }

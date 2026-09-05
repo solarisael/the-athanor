@@ -55,6 +55,21 @@ const VERIFY_CAPABILITY_FILENAME = "restart-verify-capability";
 const RESTART_INTENT_ENV = "ATHANOR_RESTART_INTENT_ID";
 const RESTART_SUCCESSOR_PROOF_ENV = "ATHANOR_RESTART_SUCCESSOR_PROOF";
 
+// The claimant's own two files, named the way the keeper names them. Exit code
+// 87 is a request, not a restart: only omp-keeper.exe claims the intent and
+// starts omp again, and `provision-local.ps1` lays the pair down together —
+// `omp-keeper.json` in the room runtime, and the `restart_claim` secret the
+// config's `capabilityPath` names (`crates/omp-keeper/scripts/provision-local.ps1`,
+// `crates/omp-keeper/src/config.rs`: exactly one of `capability` or
+// `capabilityPath`). Neither file alone is an owner. The environment override
+// wins for tests and for a keeper configured outside its room, exactly as the
+// capability overrides above do.
+const KEEPER_CONFIG_ENV = "ATHANOR_OMP_KEEPER_CONFIG";
+const KEEPER_CONFIG_FILENAME = "omp-keeper.json";
+const PROVISION_KEEPER = "run crates/omp-keeper/scripts/provision-local.ps1"
+  + " (an installed release carries the same script as provision-omp-keeper.ps1),"
+  + " then start this room through omp-keeper.exe instead of omp";
+
 // The House records an intent because the room is provisioned to ask for one,
 // and the operator's standing policy is what that provisioning means. The door
 // never lets a caller declare a stronger consent than the room was given.
@@ -166,6 +181,36 @@ function readCapability(
   } catch {
     return null;
   }
+}
+
+// The keeper's provisioned presence, detected where the keeper itself finds it
+// and never asserted from a running process: this door runs inside the child,
+// which cannot see its own parent's authority. The capability is read only to
+// tell a provisioned secret from a blank one, exactly as the keeper's config
+// does; its value is never returned, reported, or logged.
+function restartOwner(
+  effectiveRoomDir: string,
+  environ: NodeJS.ProcessEnv = process.env,
+): { configPath: string; provisioned: boolean } {
+  const configured = String(environ[KEEPER_CONFIG_ENV] || "").trim();
+  const configPath = configured || capabilityPath(effectiveRoomDir, KEEPER_CONFIG_FILENAME);
+  const absent = { configPath, provisioned: false };
+  let config: Record<string, unknown>;
+  try {
+    config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+  } catch {
+    return absent;
+  }
+  // The config's other legal spelling: the secret in the file itself.
+  if (text(config?.capability)) return { configPath, provisioned: true };
+  const named = text(config?.capabilityPath);
+  if (!named) return absent;
+  try {
+    if (!readFileSync(named, "utf8").trim()) return absent;
+  } catch {
+    return absent;
+  }
+  return { configPath, provisioned: true };
 }
 
 // The contract fixes the intent's fields (id, state, mode, sessionId,
@@ -487,7 +532,8 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       "The exit never fires inside a turn: it falls at agent_end, after the current agent loop finishes.",
       "It records the intent itself when the House holds none and this room is provisioned to ask,",
       "then arms that intent in the same call. It refuses unless this room holds the restart_exit",
-      "capability that proves the exit to the substrate; an unprovisioned room cannot self-restart.",
+      "capability that proves the exit to the substrate, and unless an omp-keeper is provisioned to",
+      "claim the exit; a room with no keeper cannot self-restart, because nothing would start omp again.",
       "On arming it reports what dies with the exit: this session's async jobs, buffered GIGA turns,",
       "open substrate transports, and every casualty class it cannot see, named as unseen.",
     ].join("\n"),
@@ -541,6 +587,27 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
           {
             workspace,
             provision: `provision the room's restart_exit capability: set ${EXIT_CAPABILITY_ENV} or write ${capabilityPath(effectiveRoomDir, EXIT_CAPABILITY_FILENAME)}`,
+          },
+        );
+      }
+
+      // Ownership, before an intent is recorded OR armed. Authority above says
+      // this room may ask; this says somebody is listening. Without a
+      // provisioned keeper the arm still reaches `exiting`, nothing can ever
+      // claim it, and that dead row holds the workspace: every later restart
+      // from this workspace then refuses `intent_pending` until the row is
+      // edited by hand (Kodo, 2026-09-05). One request would cost the room its
+      // restart capability, so this refuses instead of warning.
+      const owner = restartOwner(effectiveRoomDir);
+      if (!owner.provisioned) {
+        return refuse(
+          "no_restart_owner",
+          `request_restart refuses: no omp-keeper is provisioned for this workspace, so nothing could start this session again after the exit; ${PROVISION_KEEPER}.`,
+          {
+            workspace,
+            missingPrerequisite: `${KEEPER_CONFIG_FILENAME} and the restart_claim capability it names`,
+            keeperConfig: owner.configPath,
+            provision: PROVISION_KEEPER,
           },
         );
       }

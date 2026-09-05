@@ -196,13 +196,18 @@ fn the_full_loop_runs_from_an_armed_exit_to_a_verified_successor() {
             ("ATHANOR_RESTART_INTENT_ID", "stale-inherited-intent"),
             ("ATHANOR_RESTART_SUCCESSOR_PROOF", "stale-inherited-proof"),
             ("FAKE_SUBSTRATE_EXPECT_STATE_ROOT", &state_root),
+            // The relaunched session quits the way an operator quits, so the
+            // loop ends on a deliberate exit and the keeper's own code answers
+            // the shell for a restart that verified.
+            ("FAKE_OMP_QUIT_FROM_RUN", "2"),
         ],
     );
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
-    assert!(
-        ran.output.status.success(),
-        "the loop must close cleanly: {:?}\nstdout: {stdout}\nstderr: {stderr}",
-        ran.output.status.code()
+    assert_eq!(
+        ran.output.status.code(),
+        Some(0),
+        "a relaunch that verified, then a deliberate quit, is success: \
+         \nstdout: {stdout}\nstderr: {stderr}"
     );
     assert_eq!(
         methods(&tree.transcript),
@@ -292,11 +297,15 @@ fn a_verified_successor_stays_supervised_when_its_substrate_close_fails() {
     let ran = run_keeper_timed(
         &tree,
         "full-loop",
-        &[("FAKE_SUBSTRATE_CLOSE_ERROR_AT_STATUSES", "3")],
+        &[
+            ("FAKE_SUBSTRATE_CLOSE_ERROR_AT_STATUSES", "3"),
+            ("FAKE_OMP_QUIT_FROM_RUN", "2"),
+        ],
     );
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
-    assert!(
-        ran.output.status.success(),
+    assert_eq!(
+        ran.output.status.code(),
+        Some(0),
         "the keeper must outlive the failed close: {:?}\nstdout: {stdout}\nstderr: {stderr}",
         ran.output.status.code()
     );
@@ -559,10 +568,11 @@ fn a_cmd_shim_launch_starts_omp_with_its_console_and_arguments_intact() {
 
     let ran = run_keeper_timed(&tree, "no-intent", &[]);
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
-    assert!(
-        ran.output.status.success(),
-        "the documented .cmd invocation must start: {:?}\nstdout: {stdout}\nstderr: {stderr}",
-        ran.output.status.code()
+    assert_eq!(
+        ran.output.status.code(),
+        Some(88),
+        "the shim started and armed, and an arm the House had nothing for is not \
+         success: \nstdout: {stdout}\nstderr: {stderr}"
     );
     assert!(
         stdout.contains("fake omp cmd: arming an exit"),

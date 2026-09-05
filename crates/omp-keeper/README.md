@@ -4,6 +4,15 @@ The keeper owns the console seam. It starts omp as a child, waits for the exit,
 asks the House for a restart intent, and starts omp again. No service can do
 this work, because the terminal belongs to the operator, not to a service.
 
+## Who owns the keeper
+
+The keeper owns omp. The operator starts the keeper. On an installed House,
+`athanor.exe` can also start it, as an ordinary process harness: the registry
+entry names `omp-keeper.exe` as the program and `--config <room
+runtime>/omp-keeper.json` as the arguments. `athanor.exe` holds no OMP driver.
+The stable loader starts `athanor.exe` from inside omp, so `athanor.exe` can
+never be the parent of a session the operator started, and only the keeper can.
+
 ## What the keeper does
 
 1. Start omp with the exact command from the config file. The child inherits the
@@ -15,7 +24,8 @@ this work, because the terminal belongs to the operator, not to a service.
    path again for every ask, so a release change during a session takes effect.
 4. Start the substrate as a child and speak newline-delimited JSON to it.
 5. Read the answer:
-   - No pending intent: print one line and exit.
+   - No pending intent: print one line and exit. The exit code says whether the
+     child had armed an exit that nobody served.
    - Pending intent in `requested` or `exiting`: claim it, transition it to
      `relaunching`, then start omp again with the same command.
    - Pending intent in another state: print one line and exit. Only `requested`
@@ -28,6 +38,22 @@ this work, because the terminal belongs to the operator, not to a service.
    deadline is killed, and the attempt counts as failed.
 7. Stop when the House refuses. A storm-guard refusal ends the loop with a plain
    message that says omp is not running.
+
+## The exit code
+
+The keeper reports one code to the shell.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | The keeper stopped after a child exit that asked for no restart. A relaunch that verified, and then an ordinary quit, reports 0. |
+| 88 | The child armed an exit and the keeper did not relaunch it. The House held no claimable intent, or the intent was not this keeper's to claim. |
+| 1 | The keeper refused or failed. It prints one sentence before it stops. A child code that is not one byte also reports 1. |
+| other | The exact code of a child that asked for no restart. |
+
+The keeper never reports 87. The 87 code is the child's request. The 88 code is
+the keeper's answer that the request was not served, which the shell must not
+read as success. A child that exits 88 by itself reports 88 too, because the
+keeper reports the code of a child it did not relaunch.
 
 ## The config file
 
@@ -68,6 +94,13 @@ pwsh crates/omp-keeper/scripts/provision-local.ps1 `
 
 The script provisions four operation secrets. It writes `omp-keeper.json` in
 the room runtime directory. Start the printed keeper command instead of `omp`.
+
+The pair of files this script writes — `omp-keeper.json` and the
+`restart-capability` it names — is what the OMP adapter reads to know that a
+claimant exists. A room without the pair cannot self-restart: `request_restart`
+refuses it with `no_restart_owner` and records nothing. Before that refusal
+existed, one such request armed an exit that nobody could claim and left a live
+`exiting` intent that refused every later restart for that workspace.
 
 An installed release carries the same door in its keeper component:
 

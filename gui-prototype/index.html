@@ -51,11 +51,7 @@
                 <span class="account-avatar" aria-hidden="true">S</span>
                 <div><strong>Sol</strong><span>Local operator · this device</span></div>
               </section>
-              <section class="account-state" aria-label="Account state">
-                <div><span>Surface</span><strong>Local only</strong></div>
-                <div><span>Host</span><strong>Offline</strong></div>
-                <div><span>Persistence</span><strong>Unavailable</strong></div>
-              </section>
+              <section class="account-state" aria-label="Account state" data-account-state></section>
               <nav class="drawer-menu" aria-label="Account">
                 <button type="button" data-open-drawer="settings" aria-controls="settings-pane" aria-expanded="false">
                   <span class="drawer-menu-icon" aria-hidden="true">⌘</span>
@@ -210,11 +206,11 @@
     <div class="profile-layer" hidden></div>
 
     <footer class="status-bar" aria-label="House status">
-      <button type="button" data-status="host" aria-label="Host offline"><span class="status-dot"></span><span class="status-full">Host offline</span><span class="status-compact" aria-hidden="true">Host off</span></button>
-      <button type="button" data-status="recall" aria-label="Recall unavailable"><span class="status-full">Recall unavailable</span><span class="status-compact" aria-hidden="true">Recall off</span></button>
-      <button type="button" data-status="body" aria-label="No active body"><span class="status-full">No active body</span><span class="status-compact" aria-hidden="true">No body</span></button>
-      <button type="button" data-status="kittens" aria-label="Kittens: 0"><span class="status-full">Kittens: 0</span><span class="status-compact" aria-hidden="true">0 kittens</span></button>
-      <button type="button" data-status="delivery" aria-label="Delivery offline"><span class="status-dot"></span><span class="status-full">Delivery offline</span><span class="status-compact" aria-hidden="true">Delivery off</span></button>
+      <button type="button" data-status="host"><span class="status-dot"></span><span class="status-full"></span><span class="status-compact" aria-hidden="true"></span></button>
+      <button type="button" data-status="recall"><span class="status-full"></span><span class="status-compact" aria-hidden="true"></span></button>
+      <button type="button" data-status="body"><span class="status-full"></span><span class="status-compact" aria-hidden="true"></span></button>
+      <button type="button" data-status="kittens"><span class="status-full"></span><span class="status-compact" aria-hidden="true"></span></button>
+      <button type="button" data-status="delivery"><span class="status-dot"></span><span class="status-full"></span><span class="status-compact" aria-hidden="true"></span></button>
       <button type="button" data-status="about" aria-label="About this local surface">?</button>
       <div class="status-popover" hidden></div>
     </footer>

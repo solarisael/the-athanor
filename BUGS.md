@@ -38,6 +38,19 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Impact:** A local green or red count is not portable evidence without naming environment and attribution.
 - **Proof after repair:** The same hermetic test command produces the same result on both machines, or every environment-dependent cluster declares and provisions its dependency explicitly.
 
+### Mechanics observatory category row overflows its column at 1440 px
+
+- **Observed:** 2026-09-05, Chromium at 1440 × 1000, House slot 2. `.mechanics-categories` puts two elements past the viewport's right edge: the Advanced Guardrails button to 1457 px and its count `<small>` to 1447 px. Measured identically on the unmodified prototype, so it predates the status-strip wave.
+- **Impact:** The last category button and its count are clipped at the default working viewport. No horizontal document overflow, so the page looks correct until the operator tries to reach that category.
+- **Proof after repair:** At 1440 × 1000 and 390 × 844, every `.mechanics-categories` button's right edge sits inside the viewport, with zero elements past the right edge and the count badge fully visible.
+
+### Pulse trace drawer has no operator-reachable trace id
+
+- **Observed:** 2026-09-05. The Pulse lane trace drawer renders real Host spans when given a trace id, but a lane derived from `insula.vitals_minute` rollups carries no trace id, and no Host route lists spans or traces. `query_trace` filters `WHERE trace_id = $2::uuid` only.
+- **Impact:** The drawer's live branch is proven but unreachable from the surface; an operator cannot drill from a lane to its spans.
+- **Expected:** One bounded Host read that lists recent spans (or trace ids) for a lane: house, room, operation, phase, window, capped rows. The drawer asks it, then `insula/trace`.
+- **Proof after repair:** From House slot 2, click a lane, receive its latest trace, and see the same spans `insula/trace` returns for that id.
+
 ### A durable write's backup leaves no receipt on success and only a string on failure
 
 - **Observed:** `backup::run_post_write` (`crates/akasha/src/backup.rs`) returns `Result<(), _>` and discards the `Manifest` that `backup_with_migrations` produced. Every caller (`remember`, `remember_lesson`, `anamnesis_write`, `paper_boat_sleep`) turns an error into one warning string and records nothing on success. Kintsu's cartography audit of 2026-08-30 (`backup/format-day-2026-08-30`, `architecture/cartography/pilots/run-post-write/audit/judgments.tsv`, J07) found this; it still holds on `dev/next`.

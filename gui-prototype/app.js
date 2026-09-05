@@ -3,6 +3,11 @@ import { initPulse, ensurePulseQueried, handlePulseClick } from "./pulse.js";
 import { initBoard, ensureBoardQueried, handleBoardClick, renderHouseBoard, hallwayInboxRound } from "./board/index.js";
 import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSediment, renderRoomSediment, liveShelfCounts } from "./sediment/index.js";
 import {
+  initHealth, ensureHealthQueried, queryHealthHost,
+  STATUS_CHANNELS, statusChannel, healthSourceLine, healthSourceTone,
+  accountStateRows, persistenceDetail
+} from "./health.js";
+import {
   initMechanics, resetMechanicsView, saveMechanicsScroll, mechanicsScrollTop,
   handleMechanicsClick, handleMechanicsInput, renderHouseMechanics, renderMechanicsResults,
   HOUSE_MECHANICS_SNAPSHOT
@@ -428,14 +433,13 @@ Object.values(projectSurfaces).forEach(project => {
   });
 });
 
-const statusDetails = {
-  host: ["Host offline", "This surface is not connected to the Host."],
-  recall: ["Recall unavailable", "No Recall state is available in this surface."],
-  body: ["No active body", "No embodied-session state is available in this surface."],
-  kittens: ["Kittens: 0", "No kitten activity is available in this surface."],
-  delivery: ["Delivery offline", "No delivery state is available in this surface."],
-  about: ["About", "This local surface is not connected. Displayed conversations and state are not durable records."]
-};
+// The strip's five channels are read from the Host's health round in health.js.
+// Only the About door keeps fixed copy, because it describes this surface's own
+// authority rather than anything the Host reports.
+const ABOUT_STATUS = [
+  "About this surface",
+  "This page reads one room Host through a local proxy and writes nothing. Displayed conversations are local and are not durable records."
+];
 const modeLabels = {
   direct: "Direct messages",
   hallway: "Hallways",
@@ -543,6 +547,7 @@ const memberDockScrim = document.querySelector(".member-dock-scrim");
 const profileLayer = document.querySelector(".profile-layer");
 let drawerFocusGeneration = 0;
 const statusPopover = document.querySelector(".status-popover");
+const accountState = document.querySelector("[data-account-state]");
 const switcherLayer = document.querySelector(".switcher-layer");
 const bellToggle = document.querySelector(".bell-toggle");
 const bellLayer = document.querySelector(".bell-layer");
@@ -2196,6 +2201,8 @@ function render() {
   renderMemberDock(item);
   renderPresenceProfile(item);
   renderBellToggle();
+  renderStatusStrip();
+  renderAccountState();
   syncMobileSidebarAccessibility();
   syncMemberDockAccessibility();
   window.requestAnimationFrame(() => revealActiveViewButton(activeViewButton));
@@ -2836,16 +2843,66 @@ document.addEventListener("keydown", event => {
 });
 
 document.addEventListener("click", event => {
+  // A node this click already removed — the popover's own re-query verb, once a
+  // fresh round re-renders it — is not a click outside the strip.
+  if (!event.target.isConnected) return;
   if (!event.target.closest(".status-bar")) {
     statusPopover.hidden = true;
     document.querySelectorAll("[data-status]").forEach(button => button.setAttribute("aria-expanded", "false"));
   }
 });
 
+// The chip text, its narrow twin, and the accessible name all come from the one
+// health round, so a chip can never read connected while its label says off.
+function renderStatusStrip() {
+  STATUS_CHANNELS.forEach(name => {
+    const button = document.querySelector(`[data-status="${name}"]`);
+    const channel = statusChannel(name);
+    button.querySelector(".status-full").textContent = channel.full;
+    button.querySelector(".status-compact").textContent = channel.compact;
+    button.setAttribute("aria-label", channel.full);
+    button.dataset.tone = channel.tone;
+    button.querySelector(".status-dot")?.setAttribute("data-tone", channel.tone);
+  });
+
+  // A re-query fired from inside the popover must move the popover too, or its
+  // detail would keep speaking for a round the strip has already replaced.
+  const expanded = document.querySelector('[data-status][aria-expanded="true"]');
+  if (!expanded || statusPopover.hidden) return;
+  const held = statusPopover.contains(document.activeElement);
+  statusPopover.innerHTML = statusPopoverMarkup(expanded.dataset.status);
+  if (held) statusPopover.querySelector("[data-status-requery]")?.focus({ preventScroll: true });
+}
+
+// The block carries its own source line, and the Host's insula reading is spoken
+// in full underneath rather than left buried in the round.
+function renderAccountState() {
+  const detail = persistenceDetail();
+  accountState.innerHTML = accountStateRows()
+    .map(row => `<div><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(row.value)}</strong></div>`)
+    .join("")
+    + `<p class="account-state-source" data-tone="${escapeHtml(healthSourceTone())}">${escapeHtml(healthSourceLine())}</p>`
+    + (detail ? `<p class="account-state-note">${escapeHtml(detail)}</p>` : "");
+}
+
+// Every popover ends with the source line, so the reason for an unreachable
+// Host is one click from the chip that reports it.
+function statusPopoverMarkup(name) {
+  const [title, detail] = name === "about"
+    ? ABOUT_STATUS
+    : [statusChannel(name).full, statusChannel(name).detail];
+  return `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(detail)}</p>`
+    + `<p class="status-popover-source" data-tone="${escapeHtml(healthSourceTone())}">${escapeHtml(healthSourceLine())}</p>`
+    + `<button class="card-verb" type="button" data-status-requery>Query Host</button>`;
+}
+
 document.querySelector(".status-bar").addEventListener("click", event => {
+  if (event.target.closest("[data-status-requery]")) {
+    queryHealthHost();
+    return;
+  }
   const button = event.target.closest("[data-status]");
   if (!button) return;
-  const [title, detail] = statusDetails[button.dataset.status];
   const wasOpen = button.getAttribute("aria-expanded") === "true" && !statusPopover.hidden;
   document.querySelectorAll("[data-status]").forEach(item => item.setAttribute("aria-expanded", "false"));
   if (wasOpen) {
@@ -2853,7 +2910,7 @@ document.querySelector(".status-bar").addEventListener("click", event => {
     return;
   }
   button.setAttribute("aria-expanded", "true");
-  statusPopover.innerHTML = `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(detail)}</p>`;
+  statusPopover.innerHTML = statusPopoverMarkup(button.dataset.status);
   statusPopover.hidden = false;
 });
 const subjectViews = document.querySelector(".subject-views");
@@ -2890,4 +2947,9 @@ initSediment({
   renderFixtureRows: renderDurableRows
 });
 initMechanics({ timeline });
+initHealth({ requestRender: render });
 render();
+
+// The status strip is on screen from the first frame, so its round opens with
+// the page rather than waiting for a door the operator may never enter.
+ensureHealthQueried();

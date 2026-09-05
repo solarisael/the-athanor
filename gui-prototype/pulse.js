@@ -55,10 +55,23 @@ const PULSE_SNAPSHOT = {
 
 const KNOCK_NOTE = "Doorman claim poll, roughly one span per host every two seconds, aggregated to one lane at render.";
 const RAW_ONLY = "raw rows only — not carried in rollups";
+const TRACE_LIMIT = 100;
+
+// Why a lane may have no trace to open. The Host's trace route reads one exact
+// trace id; nothing it serves lists the spans behind a lane, and a minute
+// rollup is an aggregate over many traces. So the drawer names the missing
+// identity rather than inventing a uuid to ask with.
+const ROLLUP_NO_TRACE = "insula.vitals.minute v1 rollups aggregate many spans and carry no trace id. The Host's trace route reads one exact trace id, and it serves no route that lists a lane's spans, so this lane has no trace to open.";
+const SNAPSHOT_NO_TRACE = "This lane comes from the stamped PostgreSQL snapshot, which recorded rollups only. Query the Host first — and a live lane still needs a trace id the Host does not publish.";
 
 // Pulse-local source state: idle → pending → live | failed. Nothing outside
 // this module reads it; the shell sees rendered markup and a render request.
 let live = { status: "idle" };
+
+// The drilldown drawer, one lane at a time: idle → pending → live | failed |
+// unavailable. The open lane lives here rather than in the <details> element,
+// so an async trace answer can re-render without closing the drawer it fills.
+let trace = { key: null, status: "idle" };
 let requestRender = () => {};
 
 export function initPulse(options) {
@@ -70,10 +83,88 @@ export function ensurePulseQueried() {
 }
 
 export function handlePulseClick(event) {
-  if (!event.target.closest("[data-pulse-refresh]")) return false;
+  if (event.target.closest("[data-pulse-refresh]")) {
+    queryPulseHost();
+    return true;
+  }
 
-  queryPulseHost();
+  const summary = event.target.closest("[data-pulse-lane]");
+  if (!summary) return false;
+
+  // The drawer owns the open state, so the native <details> toggle stands down.
+  event.preventDefault();
+  const key = summary.dataset.pulseLane;
+  if (trace.key === key) {
+    trace = { key: null, status: "idle" };
+    renderWithLaneFocus(key);
+    return true;
+  }
+
+  openLaneTrace(key, summary.dataset.pulseTrace || null);
   return true;
+}
+
+// The shell re-renders the whole panel, so the lane the operator activated has
+// to be handed its focus back or a keyboard drawer cycle would strand it. The
+// double frame outlasts the shell's own scheduled focus.
+function renderWithLaneFocus(key) {
+  requestRender();
+  window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+    document.querySelector(`[data-pulse-lane="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+  }));
+}
+
+// One lane's spans, read from the Host's trace route. A missing identity, a
+// refusal, an unparsable body, and an empty answer are four different states,
+// and each one says which it is instead of borrowing another's words.
+async function openLaneTrace(key, traceId) {
+  if (!traceId) {
+    trace = {
+      key,
+      status: "unavailable",
+      reason: live.status === "live" ? ROLLUP_NO_TRACE : SNAPSHOT_NO_TRACE
+    };
+    renderWithLaneFocus(key);
+    return;
+  }
+
+  trace = { key, status: "pending", traceId };
+  renderWithLaneFocus(key);
+
+  try {
+    const response = await fetch("/live/insula/trace", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ traceId, limit: TRACE_LIMIT })
+    });
+    const raw = await response.text();
+    let answer = null;
+    try {
+      answer = JSON.parse(raw);
+    } catch {
+      throw new Error(`Host answered an unparsable body: ${raw.slice(0, 80)}`);
+    }
+    if (!response.ok) throw new Error(`Host refused: ${answer?.error ?? response.status}`);
+    if (!Array.isArray(answer.rows)) throw new Error("Host answered without a rows collection");
+
+    trace = {
+      key,
+      status: "live",
+      traceId,
+      rows: answer.rows,
+      truncated: answer.truncated === true,
+      queryName: `${answer.queryName} v${answer.queryVersion}`,
+      queriedAt: new Date().toTimeString().slice(0, 5)
+    };
+  } catch (error) {
+    trace = {
+      key,
+      status: "failed",
+      traceId,
+      reason: error instanceof Error ? error.message : "no route to Host"
+    };
+  }
+  renderWithLaneFocus(key);
 }
 
 function pulseCount(value) {
@@ -174,7 +265,9 @@ function derivePulseLive(vitals, retention, queriedAt) {
       settled: laneSettled,
       maxDuration: lane.maxUs == null ? "" : formatMicroseconds(lane.maxUs),
       errorClasses: RAW_ONLY,
-      note: lane.operation === "knock_claim" ? KNOCK_NOTE : undefined
+      note: lane.operation === "knock_claim" ? KNOCK_NOTE : undefined,
+      // Rollups carry no trace identity; the drawer says so rather than guessing.
+      traceId: null
     });
   }
   laneList.sort((a, b) => b.settled - a.settled);
@@ -191,8 +284,26 @@ function derivePulseLive(vitals, retention, queriedAt) {
     spirit: vitals.spirit,
     truncated: vitals.truncated,
     lanes: laneList,
-    channels: { settled, window, tokensIn, tokensOut, usagePoints, drops, retentionReceipts: retention.rows.length }
+    channels: { settled, window, tokensIn, tokensOut, usagePoints, drops, rows: vitals.rows.length, retentionReceipts: retention.rows.length }
   };
+}
+
+// Zero drops and unknown drops are different answers. drop_count_sum only means
+// zero when there were rollup rows to sum; with no rows the honest reading is
+// that this window reports nothing about loss.
+function lossValue(facts) {
+  if (facts.rows === 0) return "Not known";
+  return facts.drops === 0 ? "0 dropped" : `${pulseCount(facts.drops)} dropped`;
+}
+
+function lossDetail(facts) {
+  if (facts.rows === 0) {
+    return "No rollup rows in window · nothing to sum, so drops are unknown, not zero";
+  }
+  if (facts.drops === 0) {
+    return `No writer drops · drop_count_sum summed to zero across ${pulseCount(facts.rows)} rollup rows`;
+  }
+  return `writer-side drop_count_sum across ${pulseCount(facts.rows)} rollup rows · duplicates live in raw rows`;
 }
 
 function liveChannels() {
@@ -204,7 +315,7 @@ function liveChannels() {
   return [
     { label: "Settled events", value: `${pulseCount(facts.settled)} events`, detail: `${live.room} room · last 24 h · ${facts.window}` },
     { label: "Tokens", value: `${pulseCount(facts.tokensIn)} in`, detail: `${pulseCount(facts.tokensOut)} out · ${pulseCount(facts.usagePoints)} provider usage points` },
-    { label: "Loss", value: `${pulseCount(facts.drops)} dropped`, detail: "writer-side drop receipts · duplicates live in raw rows" },
+    { label: "Loss", value: lossValue(facts), detail: lossDetail(facts) },
     { label: "Retention", value: retentionValue, detail: `house-wide · insula.retention.receipts v1 · ${PULSE_SNAPSHOT.retention.days}-day law` }
   ];
 }
@@ -217,7 +328,7 @@ function snapshotChannels() {
   return [
     { label: "Observations", value: `${pulseCount(totals.spans)} spans`, detail: `${pulseCount(totals.writers)} writers · ${totals.components} components · ${totals.window}` },
     { label: "Tokens", value: `${pulseCount(tokens.tokensIn)} in`, detail: `${pulseCount(tokens.tokensOut)} out · ${pulseCount(tokens.usagePoints)} provider usage points` },
-    { label: "Loss", value: `${pulseCount(totals.drops)} dropped`, detail: `${pulseCount(totals.duplicates)} duplicate deliveries collapsed at ingest` },
+    { label: "Loss", value: totals.drops === 0 ? "0 dropped" : `${pulseCount(totals.drops)} dropped`, detail: `${totals.drops === 0 ? "No writer drops in the captured window" : "writer-side drop receipts"} · ${pulseCount(totals.duplicates)} duplicate deliveries collapsed at ingest` },
     { label: "Retention", value: "No rows expired", detail: `${pulseCount(retention.sweepRuns)} sweep runs · first expiry ${retention.firstExpiry} · ${retention.days}-day law` }
   ];
 }
@@ -229,6 +340,12 @@ function renderChannel(channel) {
       <strong>${escapeHtml(channel.value)}</strong>
       <p>${escapeHtml(channel.detail)}</p>
     </article>`;
+}
+
+// A lane is keyed by the pair its rollup was grouped on, so the same lane keeps
+// its drawer across a re-query.
+function laneKey(lane) {
+  return `${lane.component} ${lane.operation}`;
 }
 
 function renderLane(lane) {
@@ -243,10 +360,15 @@ function renderLane(lane) {
   if (flags.length === 0) flags.push('<span data-tone="steady">all ok</span>');
 
   const note = lane.note ? `<p>${escapeHtml(lane.note)}</p>` : "";
+  const key = laneKey(lane);
+  const open = trace.key === key ? " open" : "";
+  // Present only when the lane's source actually carries a trace identity, so
+  // the door is never advertised where there is nothing behind it.
+  const identity = lane.traceId ? ` data-pulse-trace="${escapeHtml(lane.traceId)}"` : "";
 
   return `
-    <details class="mechanics-row">
-      <summary>
+    <details class="mechanics-row"${open}>
+      <summary data-pulse-lane="${escapeHtml(key)}"${identity}>
         <span class="mechanics-row-title"><strong>${escapeHtml(lane.operation)}</strong><small>${escapeHtml(lane.component)}</small></span>
         <span class="mechanics-row-value"><small>Settled</small><code>${pulseCount(settled)} events</code></span>
         <span class="mechanics-row-flags">${flags.join("")}</span>
@@ -259,8 +381,76 @@ function renderLane(lane) {
           <div><dt>Recompute</dt><dd>${escapeHtml(PULSE_SNAPSHOT.vitalsQuery)}</dd></div>
         </dl>
         ${note}
+        ${renderLaneTrace(key)}
       </div>
     </details>`;
+}
+
+// The drawer under the open lane: exactly what the Host said about its spans.
+function renderLaneTrace(key) {
+  if (trace.key !== key) return "";
+
+  if (trace.status === "pending") {
+    return traceDrawer(
+      '<span data-tone="quiet">Reading trace…</span>',
+      `<p>Asked the Host for trace ${escapeHtml(trace.traceId)}.</p>`
+    );
+  }
+  if (trace.status === "unavailable") {
+    return traceDrawer(
+      '<span data-tone="attention">No trace to open</span>',
+      `<p>${escapeHtml(trace.reason)}</p>`
+    );
+  }
+  if (trace.status === "failed") {
+    return traceDrawer(
+      '<span data-tone="attention">Trace refused</span>',
+      `<p>${escapeHtml(trace.reason)}</p><p>Requested trace ${escapeHtml(trace.traceId)}.</p>`
+    );
+  }
+  if (trace.rows.length === 0) {
+    return traceDrawer(
+      '<span data-tone="quiet">No spans</span>',
+      `<p>${escapeHtml(trace.queryName)} answered zero rows for trace ${escapeHtml(trace.traceId)} inside this room's scope.</p>`
+    );
+  }
+
+  const truncation = trace.truncated ? ` · truncated at ${TRACE_LIMIT}` : "";
+  return traceDrawer(
+    `<span data-tone="steady">${pulseCount(trace.rows.length)} spans</span>`,
+    `<p>${escapeHtml(trace.queryName)} · trace ${escapeHtml(trace.traceId)} · queried ${escapeHtml(trace.queriedAt)} local${escapeHtml(truncation)}</p>
+        <div class="pulse-trace-spans">${trace.rows.map(renderTraceSpan).join("")}</div>`
+  );
+}
+
+function traceDrawer(chip, body) {
+  return `
+        <section class="pulse-trace" aria-label="Lane trace">
+          <header class="pulse-block-lead">
+            <h5>Trace</h5>
+            <div class="mechanics-snapshot-status">${chip}</div>
+          </header>
+          ${body}
+        </section>`;
+}
+
+// Spans render flat rather than as nested disclosures: a trace is read in
+// order, and a nested toggle would lose its state on the next render.
+function renderTraceSpan(row) {
+  const duration = row.durationUs == null ? "open" : formatMicroseconds(row.durationUs);
+  const errorFlag = row.errorClass
+    ? `<span data-tone="attention">${escapeHtml(row.errorClass)}</span>`
+    : "";
+  const dropFlag = row.dropCount > 0
+    ? `<span data-tone="attention">${pulseCount(row.dropCount)} dropped</span>`
+    : "";
+
+  return `
+            <div class="pulse-trace-span">
+              <span class="mechanics-row-title"><strong>${escapeHtml(row.operation)}</strong><small>${escapeHtml(row.component)} · ${escapeHtml(row.phase)} · ${escapeHtml(row.observedAt)}</small><code>${escapeHtml(row.spanId)}</code></span>
+              <span class="mechanics-row-value"><small>Duration</small><code>${escapeHtml(duration)}</code></span>
+              <span class="mechanics-row-flags"><span data-tone="${outcomeTone(row.outcomeClass)}">${escapeHtml(row.outcomeClass)}</span>${errorFlag}${dropFlag}</span>
+            </div>`;
 }
 
 function renderReceipt(receipt) {

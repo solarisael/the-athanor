@@ -52,6 +52,15 @@ the exact implementation record.
   `full_read: canon_read <id>`. Automatic recall suppresses a canon row only
   when the same entity version was already shown in the session; compaction
   clears that memory.
+- The web prototype's status strip and Account block read the room Host's
+  live health round instead of five hardcoded chips. Each channel shows one
+  of five states: not queried, querying, connected with a value, unreachable
+  with the named reason, or not reported by the Host. Body and kitten state
+  stay unreported because the health contract carries no such field.
+- The Pulse Loss channel tells measured zero drops from unknown drops and
+  names how many rollup rows it summed. Pulse lanes open a trace drawer over
+  the Host's `insula/trace` route. The proxy exposes `/live/health` and
+  `/live/insula/trace`; the bearer token stays server-side.
 - `athanor.exe` now runs as the independent multi-room Host and local manager
   without launching Godot or owning OMP session lifetime.
 - The stable OMP loader now checks scoped Host health and starts the verified

@@ -12,16 +12,23 @@ const CONFIG_PATH = "C:/ProgramData/Solarisael/Athanor/config/runtime.json";
 const SECRETS_PATH = "C:/ProgramData/Solarisael/Athanor/secrets/runtime-secrets.json";
 
 // [gui/prototype/proxy] [security/allowlist]
+//
+// One page-facing path per Host read the prototype may perform, each carrying
+// the method its Host route actually answers. The page always POSTs; a GET
+// route upstream is called without a body. Nothing outside this map is
+// reachable, and the bearer never leaves this process.
 const LIVE_ROUTES = new Map([
-  ["/live/insula/vitals", "/athanor/v1/insula/vitals"],
-  ["/live/insula/retention", "/athanor/v1/insula/retention"],
-  ["/live/docket/board", "/athanor/v1/docket/board"],
-  ["/live/docket/evidence", "/athanor/v1/docket/evidence"],
-  ["/live/hallway/inbox", "/athanor/v1/hallway/inbox"],
-  ["/live/hallway/messages", "/athanor/v1/hallway/messages"],
-  ["/live/memory/timeline", "/athanor/v1/memory/timeline"],
-  ["/live/memory/read", "/athanor/v1/memory/read"],
-  ["/live/lesson/timeline", "/athanor/v1/lesson/timeline"],
+  ["/live/health", { path: "/health", method: "GET" }],
+  ["/live/insula/vitals", { path: "/athanor/v1/insula/vitals", method: "POST" }],
+  ["/live/insula/trace", { path: "/athanor/v1/insula/trace", method: "POST" }],
+  ["/live/insula/retention", { path: "/athanor/v1/insula/retention", method: "POST" }],
+  ["/live/docket/board", { path: "/athanor/v1/docket/board", method: "POST" }],
+  ["/live/docket/evidence", { path: "/athanor/v1/docket/evidence", method: "POST" }],
+  ["/live/hallway/inbox", { path: "/athanor/v1/hallway/inbox", method: "POST" }],
+  ["/live/hallway/messages", { path: "/athanor/v1/hallway/messages", method: "POST" }],
+  ["/live/memory/timeline", { path: "/athanor/v1/memory/timeline", method: "POST" }],
+  ["/live/memory/read", { path: "/athanor/v1/memory/read", method: "POST" }],
+  ["/live/lesson/timeline", { path: "/athanor/v1/lesson/timeline", method: "POST" }],
 ]);
 
 const runtime = await Bun.file(CONFIG_PATH).json();
@@ -42,17 +49,17 @@ Bun.serve({
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/live/")) {
-      const upstreamPath = LIVE_ROUTES.get(url.pathname);
-      if (!upstreamPath) return new Response("unknown live route", { status: 404 });
+      const route = LIVE_ROUTES.get(url.pathname);
+      if (!route) return new Response("unknown live route", { status: 404 });
       if (request.method !== "POST") return new Response("POST only", { status: 405 });
 
-      const upstream = await fetch(`http://127.0.0.1:${hostPort}${roomPath}${upstreamPath}`, {
-        method: "POST",
+      const upstream = await fetch(`http://127.0.0.1:${hostPort}${roomPath}${route.path}`, {
+        method: route.method,
         headers: {
           "content-type": "application/json",
           authorization: `Bearer ${secrets.hostToken}`,
         },
-        body: await request.text(),
+        body: route.method === "GET" ? undefined : await request.text(),
       });
       return new Response(await upstream.text(), {
         status: upstream.status,

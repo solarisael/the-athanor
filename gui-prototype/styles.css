@@ -570,6 +570,24 @@ input:focus-visible {
   color: var(--fg-account-state-value);
 }
 
+/* The block states its own source, and the Host's persistence reading in full,
+   so neither is left buried in the round it came from. */
+.account-state-source,
+.account-state-note {
+  margin: 9px 2px 0;
+
+  font-size: 11px;
+  line-height: 1.45;
+
+  color: var(--fg-account-state-label);
+}
+
+.account-state-note {
+  margin-top: 6px;
+
+  font-size: 10px;
+}
+
 .drawer-menu {
   margin-top: 12px;
 }
@@ -2488,6 +2506,25 @@ input:focus-visible {
   border-radius: 50%;
 }
 
+/* The dot carries the source state the chip's words already name. */
+.status-dot[data-tone="steady"] {
+  border-color: var(--fg-main);
+
+  background: var(--fg-main);
+}
+
+.status-dot[data-tone="attention"] {
+  border-color: var(--bd-active);
+
+  background: var(--bg-clear);
+}
+
+.status-dot[data-tone="quiet"] {
+  border-color: var(--bd-control);
+
+  background: var(--bg-clear);
+}
+
 
 
 .status-popover {
@@ -2521,6 +2558,18 @@ input:focus-visible {
   line-height: 1.45;
 
   color: var(--fg-overlay-meta);
+}
+
+.status-popover-source {
+  margin-top: 9px;
+
+  font-size: 11px;
+}
+
+.status-popover .card-verb {
+  display: block;
+
+  margin-top: 10px;
 }
 
 .settings-content {
@@ -3295,7 +3344,8 @@ input:focus-visible {
   padding-inline: 2px;
 }
 
-.pulse-block-lead h4 {
+.pulse-block-lead h4,
+.pulse-block-lead h5 {
   margin: 0;
 
   font-size: 11px;
@@ -3334,6 +3384,46 @@ input:focus-visible {
 
 .mechanics-row-body dl.pulse-receipt-detail {
   grid-template-columns: minmax(0, 0.35fr) minmax(0, 1fr);
+}
+
+/* The lane drilldown: one drawer under the open lane, carrying whatever the
+   Host answered about its spans — including the refusal. */
+.pulse-trace {
+  display: grid;
+
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--bd-row);
+  border-radius: 6px;
+
+  background: var(--bg-row);
+}
+
+.pulse-trace p {
+  margin: 0;
+
+  font-size: 11px;
+  line-height: 1.45;
+
+  color: var(--fg-dim);
+}
+
+.pulse-trace-spans {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+
+  border-top: 1px solid var(--bd-section);
+}
+
+.pulse-trace-span {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(160px, 0.8fr) auto;
+  align-items: center;
+
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--bd-section);
 }
 
 /* Slots 1 and 3 stack their instrument above the rest of the page: same column,
@@ -4266,6 +4356,11 @@ input:focus-visible {
 
   .insula-observation-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .pulse-trace-span {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
   }
 
   .member-dock-scrim {

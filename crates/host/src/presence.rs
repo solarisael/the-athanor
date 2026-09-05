@@ -128,6 +128,7 @@ impl PresenceRuntime {
     /// (compaction, restart, resume after a close); the Host owns the ledger,
     /// so the door answers with the truth it holds and refuses only an
     /// impostor binding or a key that belongs to another operation.
+    #[cfg(test)]
     pub fn open(
         &mut self,
         authentication: &PresenceAuthentication,

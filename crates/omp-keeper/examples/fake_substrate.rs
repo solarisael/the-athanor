@@ -264,6 +264,7 @@ fn verified_intent() -> RestartStatusIntent {
         state: RestartState::Verified,
         mode: RestartMode::Resume,
         session_id: Some(SESSION_ID.to_string()),
+        reason: String::new(),
         deadlines: RestartStatusDeadlines {
             expires_at: instant(REQUESTED_TTL_SECS),
             exiting_deadline_at: None,
@@ -278,6 +279,7 @@ fn stranger_intent() -> RestartStatusIntent {
         state: RestartState::Relaunching,
         mode: RestartMode::Resume,
         session_id: Some("session-2".to_string()),
+        reason: String::new(),
         deadlines: RestartStatusDeadlines {
             expires_at: instant(REQUESTED_TTL_SECS),
             exiting_deadline_at: None,
@@ -292,6 +294,7 @@ fn exiting_intent(exiting_offset_secs: i64) -> RestartStatusIntent {
         state: RestartState::Exiting,
         mode: RestartMode::Resume,
         session_id: Some(SESSION_ID.to_string()),
+        reason: String::new(),
         deadlines: RestartStatusDeadlines {
             expires_at: instant(REQUESTED_TTL_SECS),
             exiting_deadline_at: Some(instant(exiting_offset_secs)),
@@ -312,6 +315,7 @@ fn relaunching_intent(script: &Script, deadlines: &RestartStageDeadlines) -> Res
         state: RestartState::Relaunching,
         mode: RestartMode::Resume,
         session_id: Some(SESSION_ID.to_string()),
+        reason: String::new(),
         deadlines: RestartStatusDeadlines {
             expires_at: instant(REQUESTED_TTL_SECS),
             exiting_deadline_at: None,

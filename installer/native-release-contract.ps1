@@ -66,9 +66,13 @@ function Get-NativeReleaseVersion {
     # Shape before equality: a malformed request must be refused as malformed,
     # never compared and never carried into a build or a package name.
     Assert-NativeReleaseProductVersion -Version $Normalized -Description "requested release version"
-    if ($Normalized -cne $Authority) {
+    # A '+build' suffix names one build of the authority's version and is the
+    # requested identity; a '-prerelease' is product lineage and must match.
+    $Product = $Normalized.Split('+', 2)[0]
+    if ($Product -cne $Authority) {
       throw "requested release version '$Normalized' does not match the root package.json authority '$Authority'"
     }
+    return $Normalized
   }
   return $Authority
 }

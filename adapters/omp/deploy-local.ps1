@@ -1,5 +1,6 @@
 param(
-  [string]$ProgramRoot = "$env:ProgramFiles\Solarisael\Athanor"
+  [string]$ProgramRoot = "$env:ProgramFiles\Solarisael\Athanor",
+  [switch]$TestsOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,6 +60,10 @@ try {
   foreach ($Name in $GuardedEnvironment) {
     [Environment]::SetEnvironmentVariable($Name, $SavedEnvironment[$Name], "Process")
   }
+}
+if ($TestsOnly) {
+  Write-Host "==> OMP adapter tests passed"
+  return
 }
 
 $Work = Join-Path ([IO.Path]::GetTempPath()) "athanor-omp-component-$PID-$([Guid]::NewGuid().ToString('N'))"

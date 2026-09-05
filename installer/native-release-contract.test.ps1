@@ -75,6 +75,9 @@ try {
   Assert-Refused { Get-NativeReleaseVersion -RepositoryRoot $Authority -Requested "9.9.9" } "a requested version that disagrees with the authority must be refused"
   Assert-Refused { Get-NativeReleaseVersion -RepositoryRoot $Authority -Requested "1.2.3.0" } "a near-miss requested version must be refused"
   Assert-Refused { Get-NativeReleaseVersion -RepositoryRoot $Authority -Requested "v1.2.3" } "a tag-shaped requested version must be refused rather than silently normalised"
+  Assert-True ((Get-NativeReleaseVersion -RepositoryRoot $Authority -Requested "1.2.3+dev.202609051700.b639752") -ceq "1.2.3+dev.202609051700.b639752") "a build suffix over the authority must be accepted and kept as the release identity"
+  Assert-Refused { Get-NativeReleaseVersion -RepositoryRoot $Authority -Requested "9.9.9+dev1" } "a build suffix must not excuse a product version that disagrees with the authority"
+  Assert-Refused { Get-NativeReleaseVersion -RepositoryRoot $Authority -Requested "1.2.3-rc1" } "a prerelease is product lineage and must match the authority exactly"
 
   $Mismatch = Get-Refusal { Get-NativeReleaseVersion -RepositoryRoot $Authority -Requested "9.9.9" }
   Assert-True ($Mismatch -like "*9.9.9*" -and $Mismatch -like "*1.2.3*") "a mismatch refusal must name both versions"

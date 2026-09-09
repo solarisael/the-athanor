@@ -29,10 +29,6 @@ export function onHostRecovered(listener) {
   recoveredListeners.add(listener);
 }
 
-export function reconnectState() {
-  return { attempt: retry.attempt, delayMs: retry.delayMs, down: round.status === "failed" };
-}
-
 // Chat and the other doors report a transport-class failure here so one loop
 // owns the retry clock instead of every door polling a dead Host.
 export function noteHostFailure(reason) {
@@ -42,8 +38,11 @@ export function noteHostFailure(reason) {
   requestRender();
 }
 
-// One error shape for every /live door: status, the proxy's hop when it names
-// one, and whether the class is transport (502, 5xx, no response) or refusal.
+// The one door to a /live route. Every failure comes back as one error shape:
+// `status` (undefined when nothing answered), the proxy's `hop` when it names
+// one, and `transport` for the class the reconnect loop owns — no answer, a
+// 502 from the proxy, or a 5xx from the Host. A 4xx is the Host refusing and
+// stays with the caller.
 const HOP_REASONS = {
   host_unreachable: "Host not reachable",
   host_timeout: "Host did not answer in 20 s",
@@ -51,7 +50,18 @@ const HOP_REASONS = {
   proxy: "local proxy failed"
 };
 
-export async function hostError(response) {
+export async function askHost(path, body = {}) {
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  } catch (error) {
+    throw Object.assign(new Error("no route to Host"), { status: undefined, hop: null, transport: true, cause: error });
+  }
+  if (response.ok) return response.json();
   let reason = `Host answered ${response.status}`;
   let hop = null;
   if (response.headers.get("content-type")?.includes("application/json")) {
@@ -62,11 +72,7 @@ export async function hostError(response) {
       reason = HOP_REASONS[hop] ?? reason;
     }
   }
-  return Object.assign(new Error(reason), { status: response.status, hop, transport: response.status >= 500 });
-}
-
-export function isTransportFailure(error) {
-  return error instanceof Error && (error.transport === true || error.status === undefined);
+  throw Object.assign(new Error(reason), { status: response.status, hop, transport: response.status >= 500 });
 }
 
 function scheduleRetry() {
@@ -107,31 +113,21 @@ async function queryRoomStateHost() {
   if (roomRound.status !== "live") roomRound = { ...roomRound, status: "pending" };
   requestRender();
   try {
-    const response = await fetch("/live/room/state", {
-      method: "POST", headers: { "content-type": "application/json" }, body: "{}"
-    });
-    // A reached Host with no door is a missing fact, never an unreachable Host;
-    // the footer must not say connected while this line says offline. A 502 or
-    // 5xx is the opposite case: the Host was not reached, or broke answering.
-    if (!response.ok) {
-      const error = await hostError(response);
-      if (!error.transport) {
-        error.message = `this Host answers no room-state door (${response.status})`;
-        error.reached = true;
-      }
-      throw error;
-    }
-    const room = await response.json();
+    const room = await askHost("/live/room/state");
     if (!room || typeof room.room !== "string" || !Array.isArray(room.presences)) {
       throw new Error("Host answered without room state");
     }
     roomRound = { ...room, status: "live", queriedAt: new Date().toTimeString().slice(0, 5) };
   } catch (error) {
+    // A reached Host with no door is a missing fact, never an unreachable Host;
+    // the footer must not say connected while this line says offline. A
+    // transport failure is the opposite case: the Host was not reached.
+    const reached = error.status !== undefined && !error.transport;
     roomRound = {
       ...roomRound,
       status: "failed",
-      reached: error instanceof Error && error.reached === true,
-      reason: error instanceof Error ? error.message : "no route to Host"
+      reached,
+      reason: reached ? `this Host answers no room-state door (${error.status})` : error.message
     };
   }
   roomInFlight = false;
@@ -163,13 +159,7 @@ export async function queryHealthHost() {
   requestRender();
 
   try {
-    const response = await fetch("/live/health", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}"
-    });
-    if (!response.ok) throw await hostError(response);
-    const health = await response.json();
+    const health = await askHost("/live/health");
     if (!health || typeof health !== "object" || typeof health.status !== "string") {
       throw new Error("Host answered without a health status");
     }
@@ -177,10 +167,7 @@ export async function queryHealthHost() {
     retry = { timer: setTimeout(() => { void queryHealthHost(); }, HEARTBEAT_MS), attempt: 0, delayMs: null };
     if (recovering) for (const listener of recoveredListeners) listener();
   } catch (error) {
-    round = {
-      status: "failed",
-      reason: error instanceof Error ? error.message : "no route to Host"
-    };
+    round = { status: "failed", reason: error.message };
     scheduleRetry();
   }
   healthInFlight = false;

@@ -62,6 +62,10 @@ import {
   stopHallwayKnockDoorman,
 } from "./house-proof/knock.ts";
 import {
+  noteChatMessageStart,
+  noteChatMessageUpdate,
+  noteChatToolEnd,
+  noteChatToolStart,
   noteChatTurnEnd,
   startChatDoorman,
   stopChatDoorman,
@@ -741,6 +745,23 @@ export default function solarisaelHouseProof(pi, release) {
     } catch {
       // Observation is never load-bearing.
     }
+  });
+
+  // Chat draft. While the doorman's say is being answered, the assistant text
+  // and the tools it uses are mirrored to the Host so the chat surface shows
+  // the answer forming. Observation only: a failed report is warned about by
+  // the doorman and changes nothing here.
+  pi.on("message_start", (event) => {
+    noteChatMessageStart(event?.message);
+  });
+  pi.on("message_update", (event) => {
+    noteChatMessageUpdate(event?.message);
+  });
+  pi.on("tool_execution_start", (event) => {
+    noteChatToolStart(event);
+  });
+  pi.on("tool_execution_end", (event) => {
+    noteChatToolEnd(event);
   });
 
   // Insula provider lifecycle. The main loop emits turn_start immediately

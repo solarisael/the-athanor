@@ -48,7 +48,7 @@ fn payload<T>(value: Result<Json<T>, JsonRejection>) -> Result<T, Response> {
 async fn snapshot(State(state): State<AppState>, body: Result<Json<EmptyRequest>, JsonRejection>) -> Response {
     if let Err(response) = payload(body) { return response; }
     let runtime = state.runtime.lock().await;
-    Json(json!({ "room": state.config.room, "messages": runtime.chat.snapshot() })).into_response()
+    Json(json!({ "room": state.config.room, "messages": runtime.chat.snapshot(), "drafts": runtime.chat.drafts() })).into_response()
 }
 
 async fn say(State(state): State<AppState>, body: Result<Json<SayRequest>, JsonRejection>) -> Response {

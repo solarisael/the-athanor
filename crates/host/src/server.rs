@@ -49,7 +49,7 @@ use protocol::{
     AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent,
     AkashaRecallQueryPayload, AkashaRecallResultEvent, CHAT_COMMAND_ACCEPTED, CHAT_COMMAND_REFUSED,
     CHAT_DELTA, CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, CONTEXT_ANALYZED,
-    CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ChatEvent, ChatMessage, ClientCommand, CommandMeta,
+    CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ChatDraft, ChatEvent, ChatMessage, ClientCommand, CommandMeta,
     CommandOutcomeEvent, ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest,
     DEFAULT_HOST_WS_PATH, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED,
     HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED,
@@ -870,6 +870,7 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
                 Some(&meta),
                 CHAT_SNAPSHOT,
                 runtime.chat.snapshot(),
+                runtime.chat.drafts(),
                 runtime.cursor.sequence,
             );
             Responses {
@@ -903,11 +904,35 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
                 &identity.spirit,
                 &payload.text,
                 &payload.turn_id,
+                payload.steps,
                 now_rfc3339(),
             );
             let sequence = runtime.cursor.sequence;
             drop(runtime);
             chat_appended(state, &meta, appended, sequence).await
+        }
+        ClientCommand::ChatDraft { meta, payload } => {
+            let identity = match chat_identity(state, &meta, &payload.room).await {
+                Ok(identity) => identity,
+                Err(responses) => return *responses,
+            };
+            let mut runtime = state.runtime.lock().await;
+            let draft = runtime.chat.draft(
+                &identity.spirit,
+                &payload.text,
+                &payload.turn_id,
+                payload.steps,
+                now_rfc3339(),
+            );
+            let sequence = runtime.cursor.sequence;
+            drop(runtime);
+            // A late draft for a settled turn changes nothing and is still
+            // accepted: the adapter's report was honest when it left.
+            if let Some(draft) = draft {
+                let delta = chat_event(state, Some(&meta), CHAT_DELTA, vec![], vec![draft], sequence);
+                let _ = state.chat_deltas.send(serialize(&delta));
+            }
+            chat_appended(state, &meta, None, sequence).await
         }
     }
 }
@@ -992,7 +1017,7 @@ async fn chat_refusal(state: &AppState, meta: &CommandMeta, reason: &str) -> Res
 }
 
 fn publish_chat(state: &AppState, meta: Option<&CommandMeta>, message: ChatMessage, sequence: u64) {
-    let delta = chat_event(state, meta, CHAT_DELTA, vec![message], sequence);
+    let delta = chat_event(state, meta, CHAT_DELTA, vec![message], vec![], sequence);
     let _ = state.chat_deltas.send(serialize(&delta));
 }
 
@@ -1001,9 +1026,11 @@ fn chat_event(
     meta: Option<&CommandMeta>,
     kind: &str,
     messages: Vec<ChatMessage>,
+    drafts: Vec<ChatDraft>,
     sequence: u64,
 ) -> ChatEvent {
-    let body_hash = body_hash(&json!({ "messages": messages.len() })).expect("chat frame hashes");
+    let body_hash = body_hash(&json!({ "messages": messages.len(), "drafts": drafts.len() }))
+        .expect("chat frame hashes");
     ChatEvent {
         meta: event_meta_for_projection(
             state,
@@ -1018,6 +1045,7 @@ fn chat_event(
         ),
         room: state.config.room.clone(),
         messages,
+        drafts,
     }
 }
 

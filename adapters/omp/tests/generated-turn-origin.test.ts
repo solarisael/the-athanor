@@ -103,6 +103,10 @@ function fakeHost() {
           reply("athanor.chat.command_accepted", {});
           return;
         }
+        if (type === "athanor.chat.draft") {
+          reply("athanor.chat.command_accepted", {});
+          return;
+        }
         if (type === "athanor.presence.open") {
           reply("athanor.presence.opened", {
             result: { operation: "open", value: { frameId: "frame-1", rendered: "FRAME", version: 1 } },
@@ -134,6 +138,9 @@ function fakeHost() {
     chatTurns: () => commands
       .filter((command) => command.command_or_event_type === "athanor.chat.turn")
       .map((command) => command.chat_turn),
+    chatDrafts: () => commands
+      .filter((command) => command.command_or_event_type === "athanor.chat.draft")
+      .map((command) => command.chat_draft),
     compiles: () => commands
       .filter((command) => command.command_or_event_type === "athanor.presence.compile")
       .map((command) => command.presence_compile as { turnId: string; userText: string }),
@@ -498,7 +505,7 @@ test("chat consumes its own final response once, not a preceding end or a tool s
   await agentEnd(messages);
   expect(host.chatTurns()).toEqual([{
     room: ROOM_KEY, turnId: "say-first", authorName: "Origin",
-    text: "Hello Sol.\nHere is the final body.",
+    text: "Hello Sol.\nHere is the final body.", steps: [],
   }]);
 
   host.chatLines.push({ author: "operator", authorName: "Sol", turnId: "say-second", sequence: 2, text: "again" });
@@ -520,4 +527,68 @@ test("chat consumes its own final response once, not a preceding end or a tool s
     ["say-first", "Hello Sol.\nHere is the final body."],
     ["say-second", "Second answer."],
   ]);
+});
+
+test("a say being answered keeps a draft on the Host: text throttled, tools at once, steps on the settled turn", async () => {
+  const binding = { room: ROOM_KEY, spirit: "Origin", session };
+  const sent: any[] = [];
+  let poll!: () => Promise<void>;
+  startChatDoorman(
+    { sendMessage: (message: any) => sent.push({ ...message, role: "custom" }) },
+    { isIdle: () => true, setInterval: (callback: typeof poll) => { poll = callback; return 1; }, clearInterval() {} },
+    binding,
+  );
+  const fire = async (type: string, event: Record<string, unknown>) => {
+    for (const handler of handlers.get(type) ?? []) await handler({ type, ...event }, ctx());
+  };
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // No say pending: assistant events are nobody's draft.
+  await fire("message_update", { message: assistant("idle chatter") });
+  await fire("tool_execution_start", { toolCallId: "t-0", toolName: "read", args: { path: "x" } });
+  await sleep(20);
+  expect(host.chatDrafts()).toEqual([]);
+
+  host.chatLines.push({ author: "operator", authorName: "Sol", turnId: "say-draft", sequence: 3, text: "read the map" });
+  await poll();
+  const before = host.chatDrafts().length;
+
+  // Token updates within the throttle window collapse into one report.
+  await fire("message_start", { message: assistant("") });
+  await fire("message_update", { message: assistant("Let me") });
+  await fire("message_update", { message: assistant("Let me look") });
+  await sleep(400);
+  const textReports = host.chatDrafts().slice(before);
+  expect(textReports.map((draft: any) => draft.text)).toEqual(["Let me look"]);
+  expect(textReports[0]).toMatchObject({ room: ROOM_KEY, turnId: "say-draft", authorName: "Origin", steps: [] });
+
+  // A tool reports at once, with its stated intent, and again when it ends.
+  await fire("tool_execution_start", { toolCallId: "t-1", toolName: "read", intent: "Read the map", args: { path: "map.md" } });
+  await sleep(30);
+  await fire("tool_execution_end", { toolCallId: "t-1", toolName: "read", result: "…", isError: false });
+  await sleep(30);
+  const toolReports = host.chatDrafts().slice(before + 1);
+  expect(toolReports.map((draft: any) => draft.steps.map((step: any) => [step.tool, step.summary, step.status]))).toEqual([
+    [["read", "Read the map", "running"]],
+    [["read", "Read the map", "ok"]],
+  ]);
+  expect(typeof toolReports[1].steps[0].elapsedMs).toBe("number");
+
+  // The next assistant message starts fresh text; the steps stay.
+  await fire("message_start", { message: assistant("") });
+  await fire("message_update", { message: assistant("The map says hi.") });
+  await sleep(400);
+  const last = host.chatDrafts().at(-1);
+  expect(last.text).toBe("The map says hi.");
+  expect(last.steps).toHaveLength(1);
+
+  // The settled turn carries the steps and ends the draft.
+  const drafted = host.chatDrafts().length;
+  await agentEnd([sent.at(-1), { ...assistant("The map says hi."), stopReason: "stop" }]);
+  const turn = host.chatTurns().at(-1);
+  expect(turn.turnId).toBe("say-draft");
+  expect(turn.steps.map((step: any) => step.toolCallId)).toEqual(["t-1"]);
+  await fire("message_update", { message: assistant("after the turn") });
+  await sleep(400);
+  expect(host.chatDrafts()).toHaveLength(drafted);
 });

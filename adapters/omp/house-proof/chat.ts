@@ -5,6 +5,12 @@
 // settled turn's response back as the spirit line. One say at a time, in
 // ring order; a say already answered by a spirit line with the same turn id
 // never injects again, so restarts re-answer nothing.
+//
+// While a say is being answered the doorman also keeps a draft on the Host:
+// the assistant text so far and every tool the turn used, so the surface can
+// show the answer forming instead of a silent gap. Text reports are
+// throttled; tool steps report at once. The draft is a courtesy, never
+// evidence: a lost draft report costs nothing, the settled turn is the truth.
 
 import { hostCommand, sendHostCommand, HostUnavailable, type HostBinding } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
@@ -14,10 +20,31 @@ import { generatedTurnKey } from "./turn-origin.ts";
 const CHAT_PROJECTION_ID = "chat";
 const CHAT_SUBSCRIBE = "athanor.chat.subscribe";
 const CHAT_TURN = "athanor.chat.turn";
+const CHAT_DRAFT = "athanor.chat.draft";
 const SNAPSHOT = new Set(["athanor.chat.snapshot"]);
 const ACCEPTED = new Set(["athanor.chat.command_accepted"]);
 const CHAT_POLL_MS = 2_000;
+const CHAT_DRAFT_THROTTLE_MS = 250;
 const CHAT_WARNING_COOLDOWN_MS = 60_000;
+const STEP_SUMMARY_CHARS = 120;
+
+type ChatStep = {
+  toolCallId: string;
+  tool: string;
+  summary: string;
+  status: "running" | "ok" | "error";
+  startedAt: string;
+  elapsedMs?: number;
+};
+
+type ChatDraft = {
+  text: string;
+  steps: ChatStep[];
+  reports: number;
+  dirty: boolean;
+  flushing: boolean;
+  timer: ReturnType<typeof setTimeout> | null;
+};
 
 type ChatLine = {
   sequence: number;
@@ -33,6 +60,7 @@ type ChatDoormanState = {
   binding: HostBinding;
   timer: unknown;
   pendingSayId: string | null;
+  draft: ChatDraft | null;
   ticking: boolean;
   reporting: boolean;
   stopped: boolean;
@@ -105,6 +133,7 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     const next = unanswered[0];
     if (!next) return;
     state.pendingSayId = next.turnId;
+    state.draft = { text: "", steps: [], reports: 0, dirty: false, flushing: false, timer: null };
     state.pi.sendMessage(sayMessage(next), { deliverAs: "nextTurn", triggerTurn: true });
   } catch (error) {
     if (!(error instanceof HostUnavailable)) {
@@ -130,6 +159,7 @@ export function startChatDoorman(pi: any, ctx: any, binding: HostBinding): void 
     binding,
     timer: null,
     pendingSayId: null,
+    draft: null,
     ticking: false,
     reporting: false,
     stopped: false,
@@ -175,6 +205,8 @@ export async function noteChatTurnEnd(
   if (!assistant) return;
   const responseText = conversationText(assistant);
   state.reporting = true;
+  const steps = state.draft?.steps ?? [];
+  clearDraftTimer(state);
   try {
     await sendHostCommand(
       hostCommand(
@@ -187,6 +219,7 @@ export async function noteChatTurnEnd(
             turnId: sayId,
             authorName: state.binding.spirit,
             text: responseText,
+            steps,
           },
         },
         `chat-turn:${sayId}`,
@@ -194,6 +227,7 @@ export async function noteChatTurnEnd(
       ACCEPTED,
     );
     state.pendingSayId = null;
+    state.draft = null;
   } catch (error) {
     warn(state, error instanceof Error ? error.message : String(error));
   } finally {
@@ -201,10 +235,126 @@ export async function noteChatTurnEnd(
   }
 }
 
+// The doorman answering right now. One OMP process carries one top-level
+// session, so the say being answered names the draft without reading the room
+// from disk on every token.
+function draftingDoorman(): ChatDoormanState | null {
+  for (const state of chatDoormen.values()) {
+    if (state.pendingSayId && state.draft && !state.stopped) return state;
+  }
+  return null;
+}
+
+function clearDraftTimer(state: ChatDoormanState): void {
+  if (state.draft?.timer) clearTimeout(state.draft.timer);
+  if (state.draft) state.draft.timer = null;
+}
+
+function scheduleDraftFlush(state: ChatDoormanState, now: boolean): void {
+  const draft = state.draft;
+  if (!draft) return;
+  draft.dirty = true;
+  if (draft.timer) return;
+  draft.timer = setTimeout(() => {
+    draft.timer = null;
+    void flushDraft(state);
+  }, now ? 0 : CHAT_DRAFT_THROTTLE_MS);
+}
+
+async function flushDraft(state: ChatDoormanState): Promise<void> {
+  const draft = state.draft;
+  const sayId = state.pendingSayId;
+  if (!draft || !sayId || draft.flushing || state.reporting) return;
+  draft.flushing = true;
+  draft.dirty = false;
+  draft.reports += 1;
+  try {
+    await sendHostCommand(
+      hostCommand(
+        state.binding,
+        CHAT_DRAFT,
+        CHAT_PROJECTION_ID,
+        {
+          chat_draft: {
+            room: state.binding.room,
+            turnId: sayId,
+            authorName: state.binding.spirit,
+            text: draft.text,
+            steps: draft.steps,
+          },
+        },
+        `chat-draft:${sayId}:${draft.reports}`,
+      ),
+      ACCEPTED,
+    );
+  } catch (error) {
+    if (!(error instanceof HostUnavailable)) {
+      warn(state, error instanceof Error ? error.message : String(error));
+    }
+  } finally {
+    draft.flushing = false;
+    // Text that arrived while this report was in flight goes on the next one.
+    if (draft.dirty && state.draft === draft) scheduleDraftFlush(state, false);
+  }
+}
+
+/// A new assistant message starts a fresh draft text; the steps stay.
+export function noteChatMessageStart(message: { role?: string }): void {
+  const state = draftingDoorman();
+  if (!state?.draft || message?.role !== "assistant") return;
+  state.draft.text = "";
+}
+
+export function noteChatMessageUpdate(message: { role?: string }): void {
+  const state = draftingDoorman();
+  if (!state?.draft || message?.role !== "assistant") return;
+  const text = conversationText(message);
+  if (text === state.draft.text) return;
+  state.draft.text = text;
+  scheduleDraftFlush(state, false);
+}
+
+function stepSummary(intent: unknown, args: unknown): string {
+  const stated = typeof intent === "string" ? intent.trim() : "";
+  if (stated) return stated.slice(0, STEP_SUMMARY_CHARS);
+  if (args && typeof args === "object") {
+    for (const value of Object.values(args as Record<string, unknown>)) {
+      if (typeof value === "string" && value.trim()) return value.trim().slice(0, STEP_SUMMARY_CHARS);
+    }
+  }
+  return "";
+}
+
+export function noteChatToolStart(event: { toolCallId?: unknown; toolName?: unknown; intent?: unknown; args?: unknown }): void {
+  const state = draftingDoorman();
+  const toolCallId = String(event?.toolCallId ?? "").trim();
+  if (!state?.draft || !toolCallId) return;
+  if (state.draft.steps.some((step) => step.toolCallId === toolCallId)) return;
+  state.draft.steps.push({
+    toolCallId,
+    tool: String(event?.toolName ?? "tool"),
+    summary: stepSummary(event?.intent, event?.args),
+    status: "running",
+    startedAt: new Date().toISOString(),
+  });
+  scheduleDraftFlush(state, true);
+}
+
+export function noteChatToolEnd(event: { toolCallId?: unknown; isError?: unknown }): void {
+  const state = draftingDoorman();
+  const toolCallId = String(event?.toolCallId ?? "").trim();
+  const step = state?.draft?.steps.find((entry) => entry.toolCallId === toolCallId);
+  if (!state || !step) return;
+  step.status = event?.isError ? "error" : "ok";
+  step.elapsedMs = Math.max(0, Date.now() - Date.parse(step.startedAt));
+  scheduleDraftFlush(state, true);
+}
+
 export function stopChatDoorman(binding: HostBinding): void {
   const state = chatDoormen.get(doormanKey(binding));
   if (!state) return;
   state.stopped = true;
+  clearDraftTimer(state);
   if (state.timer !== null && typeof state.ctx?.clearInterval === "function") {
     state.ctx.clearInterval(state.timer);
   }

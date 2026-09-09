@@ -79,6 +79,7 @@ pub const CHAT_PROJECTION_ID: &str = "chat";
 pub const CHAT_SUBSCRIBE: &str = "athanor.chat.subscribe";
 pub const CHAT_SAY: &str = "athanor.chat.say";
 pub const CHAT_TURN: &str = "athanor.chat.turn";
+pub const CHAT_DRAFT: &str = "athanor.chat.draft";
 pub const CHAT_SNAPSHOT: &str = "athanor.chat.snapshot";
 pub const CHAT_DELTA: &str = "athanor.chat.delta";
 pub const CHAT_COMMAND_ACCEPTED: &str = "athanor.chat.command_accepted";
@@ -569,6 +570,8 @@ struct RawClientCommand {
     chat_say: Option<ChatSayPayload>,
     #[serde(default)]
     chat_turn: Option<ChatTurnPayload>,
+    #[serde(default)]
+    chat_draft: Option<ChatDraftPayload>,
 }
 
 /// One conversation-capture request: the visible window as the harness renders
@@ -613,6 +616,30 @@ pub enum ChatAuthor {
     Spirit,
 }
 
+/// Where one tool step of a spirit answer stands.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatStepStatus {
+    Running,
+    Ok,
+    Error,
+}
+
+/// One tool the spirit used while answering a say, as the chat surface shows
+/// it: the tool's own stated intent or a short argument summary, never the
+/// full input or result.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ChatStep {
+    pub tool_call_id: String,
+    pub tool: String,
+    pub summary: String,
+    pub status: ChatStepStatus,
+    pub started_at: String,
+    #[serde(default)]
+    pub elapsed_ms: Option<u64>,
+}
+
 /// One line of the room conversation as the chat projection serves it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -625,6 +652,23 @@ pub struct ChatMessage {
     /// The say id for operator lines; the settled turn id for spirit lines.
     /// The room's doorman dedupes injections against it.
     pub turn_id: String,
+    /// The tools a spirit line used on its way to this text; empty for
+    /// operator lines.
+    #[serde(default)]
+    pub steps: Vec<ChatStep>,
+}
+
+/// The spirit side of a say still being answered: the text so far and the
+/// tools used so far. Every report replaces the whole draft; the settled
+/// turn retires it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ChatDraft {
+    pub turn_id: String,
+    pub author_name: String,
+    pub text: String,
+    pub steps: Vec<ChatStep>,
+    pub at: String,
 }
 
 /// An operator surface asking the room to hear one message.
@@ -645,6 +689,20 @@ pub struct ChatTurnPayload {
     pub turn_id: String,
     pub author_name: String,
     pub text: String,
+    #[serde(default)]
+    pub steps: Vec<ChatStep>,
+}
+
+/// The room's adapter reporting the spirit side of a turn still running.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ChatDraftPayload {
+    pub room: String,
+    pub turn_id: String,
+    pub author_name: String,
+    pub text: String,
+    #[serde(default)]
+    pub steps: Vec<ChatStep>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -719,7 +777,7 @@ impl RawClientCommand {
             SHELL_CONVERSATION_LOG | SHELL_LESSON_PLAN | SHELL_PROCESS_LESSONS => {
                 SHELL_PROJECTION_ID
             }
-            CHAT_SUBSCRIBE | CHAT_SAY | CHAT_TURN => CHAT_PROJECTION_ID,
+            CHAT_SUBSCRIBE | CHAT_SAY | CHAT_TURN | CHAT_DRAFT => CHAT_PROJECTION_ID,
             _ => RECALL_POLICY_PROJECTION_ID,
         };
         if self.projection_id != expected_projection {
@@ -907,6 +965,10 @@ pub enum ClientCommand {
         meta: CommandMeta,
         payload: ChatTurnPayload,
     },
+    ChatDraft {
+        meta: CommandMeta,
+        payload: ChatDraftPayload,
+    },
 }
 
 impl ClientCommand {
@@ -942,6 +1004,7 @@ impl ClientCommand {
             | Self::ChatSubscribe { meta }
             | Self::ChatSay { meta, .. }
             | Self::ChatTurn { meta, .. }
+            | Self::ChatDraft { meta, .. }
             | Self::Acknowledge { meta, .. } => meta,
         }
     }
@@ -1332,7 +1395,7 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
         }
         CHAT_SUBSCRIBE => {
             raw.no_command_payload(&meta)?;
-            if raw.chat_say.is_some() || raw.chat_turn.is_some() {
+            if raw.chat_say.is_some() || raw.chat_turn.is_some() || raw.chat_draft.is_some() {
                 return Err(CommandParseError::from_meta(
                     &meta,
                     "chat subscribe carries fields not allowed for its type",
@@ -1366,6 +1429,18 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
                 ));
             }
             Ok(ClientCommand::ChatTurn { meta, payload })
+        }
+        CHAT_DRAFT => {
+            let payload = raw.chat_draft.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "chat draft requires chat_draft")
+            })?;
+            if payload.room.trim().is_empty() || payload.turn_id.trim().is_empty() {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "chat draft requires a nonblank room and turn_id",
+                ));
+            }
+            Ok(ClientCommand::ChatDraft { meta, payload })
         }
         ROUTING_DISPATCH => {
             let request = raw.routing_request.ok_or_else(|| {
@@ -1542,12 +1617,16 @@ pub struct ShellResultEvent {
 }
 
 /// One chat frame: the whole ring for a snapshot, the new lines for a delta.
+/// Drafts ride beside the lines: every open spirit draft on a snapshot, the
+/// changed one on a delta.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ChatEvent {
     #[serde(flatten)]
     pub meta: EventMeta,
     pub room: String,
     pub messages: Vec<ChatMessage>,
+    #[serde(default)]
+    pub drafts: Vec<ChatDraft>,
 }
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct EventMeta {

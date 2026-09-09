@@ -1,4 +1,5 @@
 import { escapeHtml } from "./text.js";
+import { renderMarkdown } from "./markdown.js";
 import { renderDirectStatus } from "./mechanics-live.js";
 import { initChat, syncChatPanel, isLiveChat, chatState, chatMessages, chatBlockReason, say } from "./chat.js";
 import { syncHallwaySubjects, hallwayEmptySubject, hallwaySourceLine, hallwayMembers, hallwayParticipants, queryHallway, renderHallwayThread, renderHallwayStatus, renderHallwayRecord } from "./hallways.js";
@@ -462,20 +463,41 @@ function renderSubjectRow(item, active, live) {
   `;
 }
 
+// A wire stamp becomes the local clock time; anything else (the prototype's
+// own "09:47", "now") is shown as written.
+function messageTime(time) {
+  const stamp = Date.parse(time);
+  if (!Number.isFinite(stamp) || !/\d{4}-\d{2}-\d{2}T/.test(String(time))) return { text: String(time ?? ""), title: "" };
+  const at = new Date(stamp);
+  return { text: at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), title: at.toLocaleString() };
+}
+
+function renderSteps(steps) {
+  if (!steps?.length) return "";
+  return `<ol class="message-steps" aria-label="Tools used">${steps.map(step => `
+    <li data-status="${escapeHtml(step.status)}" title="${escapeHtml(step.summary)}">
+      <span class="message-step-tool">${escapeHtml(step.tool)}</span>
+      ${step.summary ? `<span class="message-step-summary">${escapeHtml(step.summary)}</span>` : ""}
+      <span class="message-step-outcome">${step.status === "running" ? "…" : step.status === "error" ? "failed" : Number.isFinite(step.elapsedMs) ? `${(step.elapsedMs / 1000).toFixed(1)} s` : "ok"}</span>
+    </li>`).join("")}</ol>`;
+}
+
 function renderMessage(message, index, selected) {
   const recipients = message.toRooms?.map(roomRecipientLabel).join(", ");
+  const time = messageTime(message.time);
   return `
-    <article class="message ${selected ? "is-selected" : ""}" data-author="${escapeHtml(message.author)}" data-message-index="${index}">
+    <article class="message ${selected ? "is-selected" : ""} ${message.draft ? "is-draft" : ""}" data-author="${escapeHtml(message.author)}" data-message-index="${index}">
       ${renderAvatar(message.glyph)}
       <div class="message-body">
         <p class="message-meta">
           <strong>${escapeHtml(message.author)}</strong>
-          <span>${escapeHtml(message.time)}</span>
+          <span title="${escapeHtml(time.title)}">${escapeHtml(time.text)}</span>
           ${recipients ? `<span class="message-recipient">To ${escapeHtml(recipients)}</span>` : ""}
           ${message.local ? '<span class="message-delivery">Local-only · undelivered</span>' : ""}
-          ${message.undelivered ? '<span class="message-delivery">Not delivered · send again to retry</span>' : message.pending ? '<span class="message-delivery">Pending · awaiting Host confirmation</span>' : ""}
+          ${message.undelivered ? '<span class="message-delivery">Not delivered · send again to retry</span>' : message.pending ? '<span class="message-delivery">Pending · awaiting Host confirmation</span>' : message.draft ? '<span class="message-delivery">Answering…</span>' : ""}
         </p>
-        <div class="message-bubble" tabindex="0" role="button" aria-label="Inspect message from ${escapeHtml(message.author)}">${escapeHtml(message.text)}</div>
+        ${renderSteps(message.steps)}
+        <div class="message-bubble" tabindex="0" role="button" aria-label="Inspect message from ${escapeHtml(message.author)}">${renderMarkdown(message.text)}${message.draft ? '<span class="message-cursor" aria-hidden="true"></span>' : ""}</div>
       </div>
     </article>
   `;

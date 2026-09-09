@@ -1,6 +1,6 @@
-import { roomState, hostError, isTransportFailure, noteHostFailure, onHostRecovered } from "./health.js";
+import { roomState, askHost, noteHostFailure, onHostRecovered } from "./health.js";
 
-let round = { status: "idle", messages: [], reason: null };
+let round = { status: "idle", messages: [], drafts: [], reason: null };
 let optimistic = [];
 let retry = null;
 let sending = false;
@@ -24,12 +24,17 @@ export function chatState() {
   return { ...round, sending, refusal, unanswered: hasUnanswered() };
 }
 
+// The ring's lines, then the Host's open drafts as spirit lines still
+// forming, then this surface's own unconfirmed says.
 export function chatMessages() {
-  return [...round.messages, ...optimistic].map(message => ({
+  const drafts = (round.drafts ?? []).map(draft => ({ ...draft, author: "spirit", draft: true }));
+  return [...round.messages, ...drafts, ...optimistic].map(message => ({
     ...message,
     author: message.authorName,
     glyph: message.authorName.slice(0, 1),
     time: message.at,
+    steps: Array.isArray(message.steps) ? message.steps : [],
+    draft: message.draft === true,
     pending: message.pending === true,
     undelivered: message.undelivered === true
   }));
@@ -64,26 +69,17 @@ function hasUnanswered() {
 }
 
 // A dead Host is not polled; the health loop owns that clock and recovery
-// asks for the ring again.
+// asks for the ring again. An answer forming is read at reading pace.
 function schedulePoll() {
   clearTimeout(poll);
   poll = null;
-  if (hasUnanswered() && !round.reason) poll = setTimeout(() => { void querySnapshot(); }, 2000);
-}
-
-async function post(path, body) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  if (!response.ok) throw await hostError(response);
-  return response.json();
+  if (round.reason || !hasUnanswered()) return;
+  poll = setTimeout(() => { void querySnapshot(); }, round.drafts?.length ? 400 : 2000);
 }
 
 function failRound(error) {
-  round = { ...round, status: "failed", reason: error.message };
-  if (isTransportFailure(error)) noteHostFailure(error.message);
+  round = { ...round, status: "failed", reason: error.message, drafts: [] };
+  if (error.transport) noteHostFailure(error.message);
 }
 
 export function querySnapshot() {
@@ -96,14 +92,17 @@ async function readSnapshot() {
   round = { ...round, status: "pending" };
   queueMicrotask(requestRender);
   try {
-    const result = await post("/live/chat/snapshot", {});
+    const result = await askHost("/live/chat/snapshot");
+    const drafts = result.drafts ?? [];
     if (result.room !== roomState().room || !Array.isArray(result.messages) || result.messages.some(message =>
       !Number.isFinite(message.sequence) || !["operator", "spirit"].includes(message.author) ||
       typeof message.authorName !== "string" || typeof message.text !== "string" ||
-      typeof message.turnId !== "string" || !Number.isFinite(Date.parse(message.at)))) {
+      typeof message.turnId !== "string" || !Number.isFinite(Date.parse(message.at))) ||
+      !Array.isArray(drafts) || drafts.some(draft =>
+      typeof draft.turnId !== "string" || typeof draft.authorName !== "string" || typeof draft.text !== "string")) {
       throw new Error("Host answered without a valid room chat snapshot");
     }
-    round = { status: "live", reason: null, messages: result.messages.sort((a, b) => a.sequence - b.sequence) };
+    round = { status: "live", reason: null, messages: result.messages.sort((a, b) => a.sequence - b.sequence), drafts };
     optimistic = optimistic.filter(message => !round.messages.some(row => row.author === "operator" && row.turnId === message.turnId));
   } catch (error) {
     failRound(error);
@@ -131,7 +130,7 @@ export async function say(text) {
   }
   requestRender();
   try {
-    await post("/live/chat/say", attempt);
+    await askHost("/live/chat/say", attempt);
     retry = null;
     await querySnapshot();
     return true;

@@ -7,19 +7,29 @@ use super::rows;
 use crate::sea::idempotency_digest;
 use chrono::{DateTime, Duration, Utc};
 use hearth::hallway::{
-    HallwayKnockClaimReceipt, HallwayKnockClaimRequest, HallwayKnockOutcome, HallwayKnockPointer,
-    HallwayKnockPolicyMode, HallwayKnockPolicyReceipt, HallwayKnockPolicyRequest,
-    HallwayKnockReceipt, HallwayKnockRequest, HallwayKnockSettleReceipt, HallwayKnockSettleRequest,
+    HALLWAY_DEFAULT_KNOCK_TURNS, HallwayKnockClaimReceipt, HallwayKnockClaimRequest,
+    HallwayKnockOutcome, HallwayKnockPointer, HallwayKnockPolicyMode, HallwayKnockPolicyReceipt,
+    HallwayKnockPolicyRequest, HallwayKnockReceipt, HallwayKnockRequest, HallwayKnockSettleReceipt,
+    HallwayKnockSettleRequest,
 };
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
-/// How long a fresh Knock waits for an answer before it expires unanswered.
+/// How long one turn of an exchange may wait before the whole exchange
+/// expires. The root Knock sets the clock as this window times its turn
+/// budget; every child inherits that same instant. Budgets of five or fewer
+/// keep the earlier fifteen minutes; twenty turns get one hour.
 ///
 /// A Knock is a request for one bounded turn, so its lifetime is a courtesy
 /// window for a peer room that may not be awake, not a lease on work.
-pub const KNOCK_REQUEST_LIFETIME: Duration = Duration::minutes(15);
+pub const KNOCK_TURN_WINDOW: Duration = Duration::minutes(3);
+pub const KNOCK_MIN_LIFETIME: Duration = Duration::minutes(15);
+
+fn knock_lifetime(max_turns: i16) -> Duration {
+    let scaled = KNOCK_TURN_WINDOW * i32::from(max_turns);
+    if scaled > KNOCK_MIN_LIFETIME { scaled } else { KNOCK_MIN_LIFETIME }
+}
 
 // The lease seconds live in a macro because the claim statement splices the
 // number into its `INTERVAL` literal at compile time; this keeps one
@@ -266,6 +276,7 @@ async fn admit(
     tx: &mut Transaction<'_, Postgres>,
     hallway_id: i64,
     request: &HallwayKnockRequest,
+    max_turns: i16,
 ) -> Result<PgRow, HallwayError> {
     let message = sqlx::query(
         "SELECT m.room,m.spirit,m.session_id,m.reply_to,m.to_rooms,m.thread_id
@@ -326,13 +337,16 @@ async fn admit(
     };
     let allowed_rooms: Vec<String> = standing.try_get("allowed_rooms")?;
     let policy_max: i16 = standing.try_get("max_turns")?;
-    if mode != "allow_list"
-        || !allowed_rooms.iter().any(|room| room == &request.room)
-        || i16::from(request.max_turns) > policy_max
-    {
+    if mode != "allow_list" || !allowed_rooms.iter().any(|room| room == &request.room) {
         return Err(refusal(
             "knock_policy_denied",
             "recipient room policy does not allow this Hallway Knock",
+        ));
+    }
+    if max_turns > policy_max {
+        return Err(refusal(
+            "knock_turns_exceed_policy",
+            "requested maxTurns exceeds the recipient room policy ceiling; retry with fewer turns",
         ));
     }
     Ok(message)
@@ -350,11 +364,12 @@ async fn chain_position(
     parent_knock_id: Option<&str>,
 ) -> Result<ChainPosition, HallwayError> {
     let Some(parent_knock_id) = parent_knock_id else {
+        let max_turns = i16::from(request.max_turns.unwrap_or(HALLWAY_DEFAULT_KNOCK_TURNS));
         return Ok(ChainPosition {
             root_knock_id: knock_id.to_string(),
             turn_index: 1,
-            max_turns: i16::from(request.max_turns),
-            expires_at: Utc::now() + KNOCK_REQUEST_LIFETIME,
+            max_turns,
+            expires_at: Utc::now() + knock_lifetime(max_turns),
         });
     };
     let parent = sqlx::query(
@@ -391,7 +406,10 @@ async fn chain_position(
             "Hallway Knock exchange has reached its maximum turns",
         ));
     }
-    if i16::from(request.max_turns) != max_turns {
+    if request
+        .max_turns
+        .is_some_and(|value| i16::from(value) != max_turns)
+    {
         return Err(refusal(
             "knock_parent_mismatch",
             "child Knock must inherit maxTurns from its parent",
@@ -437,6 +455,29 @@ pub async fn knock(
                 .map_err(|_| refusal("malformed_uuid", "parentKnockId must be a UUID"))
         })
         .transpose()?;
+    let mut tx = pool.begin().await?;
+    let id = lookup_id(&mut tx, &request.hallway).await?;
+    // Preserve omission until the stored parent can supply its authority.
+    // Resolve before policy admission and digesting so retries with the same
+    // effective budget remain equivalent to explicitly naming that budget.
+    let max_turns = match (request.max_turns, parent_knock_id.as_deref()) {
+        (Some(value), _) => i16::from(value),
+        (None, None) => 4,
+        (None, Some(parent)) => sqlx::query_scalar::<_, i16>(
+            "SELECT max_turns FROM hallway_knocks
+             WHERE knock_id=$1::uuid AND hallway_id=$2 FOR SHARE",
+        )
+        .bind(parent)
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| {
+            refusal(
+                "knock_parent_mismatch",
+                "parent Knock does not belong to this hallway",
+            )
+        })?,
+    };
     let request_digest = idempotency_digest(&[
         &request.hallway,
         &request.room,
@@ -445,10 +486,8 @@ pub async fn knock(
         &request.message_id.to_string(),
         &request.recipient_room,
         parent_knock_id.as_deref().unwrap_or(""),
-        &request.max_turns.to_string(),
+        &max_turns.to_string(),
     ]);
-    let mut tx = pool.begin().await?;
-    let id = lookup_id(&mut tx, &request.hallway).await?;
     ensure_presence(
         &mut tx,
         id,
@@ -487,7 +526,7 @@ pub async fn knock(
         });
     }
 
-    let message = admit(&mut tx, id, &request).await?;
+    let message = admit(&mut tx, id, &request, max_turns).await?;
     let knock_id = Uuid::new_v4().to_string();
     let position = chain_position(
         &mut tx,

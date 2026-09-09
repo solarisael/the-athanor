@@ -1,9 +1,10 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import installedAthanor, { configureInstalledAthanor } from "../installed-loader.ts";
+import * as childProcess from "node:child_process";
 
 type NativePointer = {
   version: unknown;
@@ -345,7 +346,6 @@ test("loads the integrity-checked component release while native current.json ow
     userProfile: tree.profile,
     env: tree.env,
     healthProbe: async () => true,
-    startAthanor: () => { throw new Error("healthy Host must not start Athanor"); },
   });
   expect([...(runtime().__installedLoaderImports ?? [])].sort()).toEqual(["hygiene", "index"]);
   expect(runtime().__installedLoaderCalls).toEqual(["index", "hygiene"]);
@@ -464,60 +464,34 @@ test("parses pointer and component manifest objects exactly", async () => {
   }
 });
 
-test("starts the verified stable launcher after scoped health fails, then loads after concurrent readiness", async () => {
-  const tree = await makeInstalledTree();
-  const events: string[] = [];
-  let probes = 0;
-  resetRuntime();
-
-  await installedAthanor(null, {
-    programRoot: tree.program,
-    userProfile: tree.profile,
-    env: tree.env,
-    healthProbe: async (endpoint) => {
-      events.push(`probe:${endpoint}`);
-      return ++probes === 2;
-    },
-    startAthanor: (launcher, args) => {
-      events.push(`start:${launcher}:${JSON.stringify(args)}`);
-    },
-    sleep: async (milliseconds) => {
-      events.push(`sleep:${milliseconds}`);
-    },
-  });
-
-  const endpoint = "http://127.0.0.1:8787/room/kintsu/health";
-  expect(events).toEqual([
-    `probe:${endpoint}`,
-    `start:${path.join(tree.program, "bin", "athanor.exe")}:[]`,
-    "sleep:100",
-    `probe:${endpoint}`,
-  ]);
-  expect(runtime().__installedLoaderCalls).toEqual(["index", "hygiene"]);
-});
-
-test("fails open with one actionable warning when the scoped Host stays unhealthy", async () => {
+test("loads without starting a process and warns once through a continuing Host outage", async () => {
   const tree = await makeInstalledTree();
   const warnings: unknown[][] = [];
-  const warn = console.warn;
-  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  const warn = spyOn(console, "warn").mockImplementation((...args) => { warnings.push(args); });
+  const spawn = spyOn(childProcess, "spawn").mockImplementation(() => { throw new Error("adapter must not spawn"); });
+  const watch = new AbortController();
+  let probes = 0;
+  resetRuntime();
   try {
     await installedAthanor(null, {
       programRoot: tree.program,
       userProfile: tree.profile,
       env: tree.env,
-      healthProbe: async () => false,
-      startAthanor: () => {},
-      sleep: async () => {},
+      healthProbe: async () => { probes += 1; return false; },
+      watchIntervalMs: 5,
+      signal: watch.signal,
     });
+    await until(() => probes >= 4);
+    expect(warnings).toEqual([[
+      "Athanor Host is not running at http://127.0.0.1:8787/room/kintsu/health. Start the Athanor.",
+    ]]);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(runtime().__installedLoaderCalls).toEqual(["index", "hygiene"]);
   } finally {
-    console.warn = warn;
+    watch.abort();
+    spawn.mockRestore();
+    warn.mockRestore();
   }
-
-  expect(warnings).toEqual([[
-    `Athanor launcher ${path.join(tree.program, "bin", "athanor.exe")} did not recover scoped health at http://127.0.0.1:8787/room/kintsu/health; OMP will continue without Host.`,
-  ]]);
-  expect(runtime().__installedLoaderCalls).toEqual(["index", "hygiene"]);
 });
 
 async function until(condition: () => boolean, timeoutMs = 2_000): Promise<void> {
@@ -528,60 +502,13 @@ async function until(condition: () => boolean, timeoutMs = 2_000): Promise<void>
   }
 }
 
-test("restarts the scoped Host when it stops answering mid-session", async () => {
-  const tree = await makeInstalledTree();
-  const events: string[] = [];
-  const warnings: string[] = [];
-  const warn = console.warn;
-  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
-  // Healthy at session start, dead on the first watch tick, alive again once
-  // the launcher has been started.
-  const answers = [true, false, true];
-  const watch = new AbortController();
-  resetRuntime();
-  try {
-    await installedAthanor(null, {
-      programRoot: tree.program,
-      userProfile: tree.profile,
-      env: tree.env,
-      healthProbe: async () => {
-        const answer = answers.length > 1 ? answers.shift()! : answers[0]!;
-        events.push(`probe:${answer}`);
-        return answer;
-      },
-      startAthanor: (launcher) => { events.push(`start:${launcher}`); },
-      sleep: async () => {},
-      watchIntervalMs: 5,
-      signal: watch.signal,
-    });
-    expect(events).toEqual(["probe:true"]);
-    await until(() => events.length >= 4);
-    // A settled watch probes again and finds the Host healthy; give it time
-    // to prove it says nothing more.
-    await new Promise((resolve) => setTimeout(resolve, 30));
-  } finally {
-    watch.abort();
-    console.warn = warn;
-  }
-
-  const endpoint = "http://127.0.0.1:8787/room/kintsu/health";
-  const launcher = path.join(tree.program, "bin", "athanor.exe");
-  expect(events.slice(0, 4)).toEqual(["probe:true", "probe:false", `start:${launcher}`, "probe:true"]);
-  expect(events.slice(4).every((event) => event === "probe:true")).toBe(true);
-  expect(warnings).toEqual([
-    `Athanor Host stopped answering scoped health at ${endpoint}; restarting it.`,
-    `Athanor Host restarted and answers scoped health at ${endpoint}.`,
-  ]);
-});
-
-test("keeps retrying a Host that stays down, warns once per outage, and reports recovery", async () => {
+test("observes recovery and warns once for each new outage without starting a process", async () => {
   const tree = await makeInstalledTree();
   const warnings: string[] = [];
-  const warn = console.warn;
-  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
-  let sessionStarted = false;
+  const warn = spyOn(console, "warn").mockImplementation((...args) => { warnings.push(args.map(String).join(" ")); });
+  const spawn = spyOn(childProcess, "spawn").mockImplementation(() => { throw new Error("adapter must not spawn"); });
   let hostAlive = true;
-  let starts = 0;
+  let probes = 0;
   const watch = new AbortController();
   resetRuntime();
   try {
@@ -589,28 +516,31 @@ test("keeps retrying a Host that stays down, warns once per outage, and reports 
       programRoot: tree.program,
       userProfile: tree.profile,
       env: tree.env,
-      healthProbe: async () => hostAlive,
-      startAthanor: () => { starts += 1; },
-      sleep: async () => {},
+      healthProbe: async () => { probes += 1; return hostAlive; },
       watchIntervalMs: 5,
       signal: watch.signal,
     });
-    sessionStarted = true;
     hostAlive = false;
-    await until(() => starts >= 3);
+    await until(() => warnings.length === 1);
+    const firstOutage = probes;
+    await until(() => probes >= firstOutage + 3);
+    expect(warnings).toHaveLength(1);
     hostAlive = true;
-    await until(() => warnings.length >= 2);
+    await until(() => warnings.length === 2);
+    hostAlive = false;
+    await until(() => warnings.length === 3);
+    const endpoint = "http://127.0.0.1:8787/room/kintsu/health";
+    expect(warnings).toEqual([
+      `Athanor Host is not running at ${endpoint}. Start the Athanor.`,
+      `Athanor Host answers scoped health again at ${endpoint}.`,
+      `Athanor Host is not running at ${endpoint}. Start the Athanor.`,
+    ]);
+    expect(spawn).not.toHaveBeenCalled();
   } finally {
     watch.abort();
-    console.warn = warn;
+    spawn.mockRestore();
+    warn.mockRestore();
   }
-
-  const endpoint = "http://127.0.0.1:8787/room/kintsu/health";
-  expect(sessionStarted).toBe(true);
-  expect(warnings).toEqual([
-    `Athanor Host stopped answering scoped health at ${endpoint}; restarting it.`,
-    `Athanor Host answers scoped health again at ${endpoint}.`,
-  ]);
 });
 
 test("aborting the loader signal stops the Host watch", async () => {
@@ -661,24 +591,6 @@ test("refuses malformed format-2 client projections before probing or importing"
   expect(runtime().__installedLoaderImports ?? []).toEqual([]);
 });
 
-test("refuses a tampered stable launcher before probing or importing", async () => {
-  const tree = await makeInstalledTree();
-  await writeFile(path.join(tree.program, "bin", "athanor.exe"), "tampered");
-  const probes: string[] = [];
-
-  await expect(installedAthanor(null, {
-    programRoot: tree.program,
-    userProfile: tree.profile,
-    env: tree.env,
-    healthProbe: async (endpoint) => {
-      probes.push(endpoint);
-      return true;
-    },
-  })).rejects.toThrow("stable athanor.exe launcher size mismatch");
-
-  expect(probes).toEqual([]);
-  expect(runtime().__installedLoaderImports ?? []).toEqual([]);
-});
 
 test("refuses a non-loopback Host before probing or importing", async () => {
   const tree = await makeInstalledTree();

@@ -24,6 +24,10 @@ const KNOCK_MIGRATION: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../substrate/migrations/0021_hallway_knock.sql"
 ));
+const KNOCK_TURNS_MIGRATION: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../substrate/migrations/0031_hallway_knock_turns.sql"
+));
 
 fn bell_config() -> Config {
     Config {
@@ -35,6 +39,7 @@ fn bell_config() -> Config {
         giga_source_ledger_dir: None,
         giga_source_room: None,
         house_tz: "America/Sao_Paulo".into(),
+        nats_url: None,
     }
 }
 
@@ -81,6 +86,7 @@ async fn hallway_temp_session_exchanges_messages_without_persistent_state() -> T
     sqlx::raw_sql(HALLWAY_MIGRATION).execute(&pool).await?;
     sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
     sqlx::raw_sql(KNOCK_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(KNOCK_TURNS_MIGRATION).execute(&pool).await?;
     let result = async {
         run_contract(&pool).await?;
         run_knock_contract(&pool).await
@@ -119,13 +125,15 @@ async fn hallway_supports_multiple_spirit_instances_and_ordered_messages() -> Te
             })
             .connect_with(options)
             .await?;
-        // Double application pins idempotency for both migrations.
+        // Double application pins idempotency for every migration.
         sqlx::raw_sql(HALLWAY_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(KNOCK_MIGRATION).execute(&pool).await?;
+        sqlx::raw_sql(KNOCK_TURNS_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(HALLWAY_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(KNOCK_MIGRATION).execute(&pool).await?;
+        sqlx::raw_sql(KNOCK_TURNS_MIGRATION).execute(&pool).await?;
         run_contract(&pool).await?;
         run_knock_contract(&pool).await?;
         pool.close().await;
@@ -355,6 +363,7 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
         .iter()
         .find(|entry| entry.hallway == hallway)
         .expect("author inbox lists the hallway");
+    assert_eq!(author_entry.members, Some(vec!["kintsu".into(), "kodo".into()]));
     assert_eq!(author_entry.latest_sequence, 5);
     assert_eq!(author_entry.unread, 0);
     let author_read_sequence: i64 = sqlx::query_scalar(
@@ -599,7 +608,33 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
             .duplicate
     );
     assert!(hallway_knock_policy(pool, kodo_policy).await?.duplicate);
-    hallway_knock_policy(pool, kintsu_policy).await?;
+    hallway_knock_policy(pool, kintsu_policy.clone()).await?;
+
+    // The ceiling is 20: a policy at 20 stands, 21 is refused before the database.
+    let wide_policy = HallwayKnockPolicyRequest {
+        idempotency_key: "policy-kintsu-wide".into(),
+        max_turns: 20,
+        ..kintsu_policy.clone()
+    };
+    assert_eq!(hallway_knock_policy(pool, wide_policy).await?.max_turns, 20);
+    let over_policy = HallwayKnockPolicyRequest {
+        idempotency_key: "policy-kintsu-over".into(),
+        max_turns: 21,
+        ..kintsu_policy.clone()
+    };
+    assert!(matches!(
+        hallway_knock_policy(pool, over_policy).await,
+        Err(AppError::Invalid(_))
+    ));
+    // Back to the two-turn policy the rest of this contract is written against.
+    hallway_knock_policy(
+        pool,
+        HallwayKnockPolicyRequest {
+            idempotency_key: "policy-kintsu-narrow".into(),
+            ..kintsu_policy.clone()
+        },
+    )
+    .await?;
 
     let root_message = hallway_post(
         pool,
@@ -626,6 +661,15 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
         "recipientRoom": "kintsu",
         "maxTurns": 2
     }))?;
+    let mut default_root = root_request.clone();
+    default_root.max_turns = None;
+    assert!(matches!(
+        hallway_knock(pool, default_root).await,
+        Err(AppError::Refusal {
+            code: "knock_turns_exceed_policy",
+            ..
+        })
+    ));
     let root = hallway_knock(pool, root_request.clone()).await?;
     assert!(root.ok);
     assert_eq!(root.knock.parent_knock_id, None);
@@ -645,7 +689,7 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
             message_id: root_message.message.id,
             recipient_room: "kintsu".into(),
             parent_knock_id: None,
-            max_turns: 2,
+            max_turns: Some(2),
         }
     };
     assert!(matches!(
@@ -683,7 +727,7 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
                 message_id: premature_message.message.id,
                 recipient_room: "kodo".into(),
                 parent_knock_id: Some(root.knock.knock_id.clone()),
-                max_turns: 2,
+                max_turns: None,
             },
         )
         .await,
@@ -835,8 +879,7 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
         "idempotencyKey": "knock-child",
         "messageId": child_message.message.id,
         "recipientRoom": "kodo",
-        "parentKnockId": Uuid::nil().to_string(),
-        "maxTurns": 2
+        "parentKnockId": Uuid::nil().to_string()
     }))?;
     assert!(matches!(
         hallway_knock(pool, child_request.clone()).await,
@@ -846,10 +889,27 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
         })
     ));
     child_request.parent_knock_id = Some(root.knock.knock_id.clone());
-    let child = hallway_knock(pool, child_request).await?;
+    let mut contradictory_child = child_request.clone();
+    contradictory_child.max_turns = Some(1);
+    assert!(matches!(
+        hallway_knock(pool, contradictory_child).await,
+        Err(AppError::Refusal {
+            code: "knock_parent_mismatch",
+            ..
+        })
+    ));
+    let child = hallway_knock(pool, child_request.clone()).await?;
+    assert_eq!(child.knock.max_turns, 2);
+    assert_eq!(child.knock.expires_at, root.knock.expires_at);
+    assert!(hallway_knock(pool, child_request.clone()).await?.duplicate);
+    child_request.max_turns = Some(2);
+    assert!(hallway_knock(pool, child_request).await?.duplicate);
     assert_eq!(child.knock.turn_index, 2);
     assert_eq!(child.knock.root_knock_id, root.knock.root_knock_id);
-    assert_eq!(child.knock.parent_knock_id, Some(root.knock.knock_id.clone()));
+    assert_eq!(
+        child.knock.parent_knock_id,
+        Some(root.knock.knock_id.clone())
+    );
 
     let claimed_child = hallway_knock_claim(
         pool,
@@ -913,7 +973,7 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
             message_id: overflow_message.message.id,
             recipient_room: "kintsu".into(),
             parent_knock_id: Some(claimed_child.knock_id),
-            max_turns: 2,
+            max_turns: None,
         },
     )
     .await;
@@ -951,7 +1011,7 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
             message_id: expiring_message.message.id,
             recipient_room: "kintsu".into(),
             parent_knock_id: None,
-            max_turns: 1,
+            max_turns: Some(1),
         },
     )
     .await?;

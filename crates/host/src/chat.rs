@@ -47,6 +47,10 @@ impl ChatLog {
         self.entries.iter().cloned().collect()
     }
 
+    pub(crate) fn summary(&self) -> (usize, Option<&str>) {
+        (self.entries.len(), self.entries.back().map(|message| message.at.as_str()))
+    }
+
     fn append(
         &mut self,
         author: ChatAuthor,

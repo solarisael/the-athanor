@@ -1,6 +1,6 @@
 # The Athanor Roadmap
 
-_Last updated: 2026-08-17_
+_Last updated: 2026-09-06_
 
 This page is the current release path. It does not duplicate completed history or
 turn accepted architecture documents into one giant checklist.
@@ -14,14 +14,16 @@ turn accepted architecture documents into one giant checklist.
 The previous long-form roadmap is preserved as
 [`history/2026-08-06-roadmap-snapshot.md`](./history/2026-08-06-roadmap-snapshot.md).
 
-## Current late-beta state
+## Recorded late-beta baseline
 
-The repository now carries the `0.9.6` native Windows x64 late-beta source.
+The `0.9.6` native Windows x64 late-beta source label is historical evidence.
+Read the current product version from [`../package.json`](../package.json)
+and installed artifact identity from its immutable release manifest.
 OMP is the supported harness. One Rust workspace owns the behavioral core,
 Vault, AKASHA, Host, delivery, native lifecycle, and parked Godot client. Read
 [the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
 
-Implemented in the candidate:
+The historical candidate included:
 
 - file-authoritative Rust Vault and PostgreSQL-authoritative Rust AKASHA;
 - typed canon, memory, lessons, GIGA, Recall Policy, and Paper Boat sleep/wake;
@@ -42,27 +44,149 @@ Implemented in the candidate:
 - one checksum-pinned payload carrying parked Godot 4.7.1, PostgreSQL 18.4-2,
   pgvector 0.8.6, and NATS 2.14.4.
 
-RC3 passed ordinary suites, isolated PostgreSQL/NATS integrations, historical Godot
-rendering, 20,659-artifact manifest verification, packaged-client smoke, Inno
-Setup compilation, and an elevated external-authority installation on the real
-Solarisael workstation. The installed service runs NATS, delivery, and separate
+The RC3 record reports ordinary suites, isolated PostgreSQL/NATS integrations,
+historical Godot rendering, 20,659-artifact manifest verification, packaged-client
+smoke, Inno Setup compilation, and an elevated external-authority installation.
+That Solarisael workstation installation ran NATS, delivery, and separate
 Kintsu/Kodo Hosts while reusing the existing PostgreSQL authority.
+This is dated installation evidence, not a census of the current topology.
 
 Current NATS traffic is narrower than the surrounding House surfaces. It does
 not carry Hallway posts, GIGA jobs, kitten lifecycle, project records, or live
 conversation. The current Paper Boat receipt proves transport validation; it
 does not prove room wake, model consumption, or human reading.
 
-The installed artifact still identifies as `1.0.0-rc.3`; that immutable label is
-retained as historical evidence, not current product maturity. Final `1.0.0`
-remains gated on the complete operator GUI, healthy continuity organs, a clean
-generic managed install, real legacy upgrade and rollback, signing, and the
-broader public evaluations in [`EVIDENCE.md`](./EVIDENCE.md).
+That installation record identifies the artifact as `1.0.0-rc.3`.
+Keep the immutable label as historical evidence, not today's installed version or product maturity.
+Final `1.0.0` still requires a complete operator GUI and healthy continuity organs.
+It also requires a clean managed installation, real legacy upgrade and rollback, signing, and the public evaluations in [`EVIDENCE.md`](./EVIDENCE.md).
 
-The dependency path below records the completed implementation order and the
-still-open final release gates. Where the phase table in
-`RUNTIME_ARCHITECTURE.md` differs, this roadmap is authoritative.
+The release path below retains the implementation sequence and final release
+gates. The dated planning update orders the remaining repairs by dependency
+and outcome. Where the phase table in `RUNTIME_ARCHITECTURE.md` differs, this
+roadmap is authoritative.
 
+
+## Planning update: 2026-09-06
+
+Sol accepted the critical review as a records and planning update, not runtime
+implementation or activation of deferred work. The House preserves records and
+governs changes more reliably than it turns those records into useful continuity,
+judgment, and completed work. Success means recognition, growth, agency,
+cooperation, and operator custody; autonomy is one contributing property.
+
+The [dated critical organ review](./ARCHITECTURE.md#critical-organ-review-2026-09-06)
+owns the evidence census and its uncertainties. The order proposed here is
+**coherent orientation → trustworthy visible outcomes → cooperative completion
+→ useful learning**. Repair existing paths first; do not make GIGA the prerequisite
+for every other improvement.
+
+### 1. Coherent orientation at every turn entrance
+
+Base context-pressure policy on the active model's capacity, not room-name
+assumptions. Coordinate an aggregate context budget and select applicable
+identity, evidence, lessons, and counsel within it. Carry that context through
+typed prompts, restart continuation, and other synthetic or requested turns.
+
+Presence reopen, persistence, and restart continuation have live repair evidence.
+The generated-turn adapter repair is installed with isolated component proof.
+See the [dated evidence](./EVIDENCE.md#generated-turn-presence-repair-2026-09-07).
+Real restart, chat, and root Knock turns now have live incoming Presence observations.
+The separate Host-side attribution repair remains outstanding.
+Treat boat age, newer memories, and cycle recency explicitly.
+Preserve authored pillars and counsel authority.
+The outcome is an oriented turn with attributable, timely context, not merely
+a larger injection.
+
+### 2. Trustworthy outcomes, visible through Pulse
+
+Preserve content and provenance from the authoritative record through adapters,
+retrieval, and presentation. Design catalogue supersession has live proof;
+adapter field preservation and the affected historical rows are separate work.
+Keep database commit, backup result, transport receipt, recipient application,
+and human reading distinct.
+
+Review the blocking post-write backup policy without treating a slow backup as
+a failed commit. Sleep and backup have installed-path receipts; those receipts
+do not prove every continuation relationship or a fresh restore.
+Make Pulse expose each repaired path's attribution, result, degradation, and
+next required decision alongside the work, not as a final cosmetic phase.
+The current web surface is read-only; authenticated writes remain gated work.
+
+### 3. Carry work from request to disposition
+
+Use coherent turn entry and visible receipts to connect Hallway, Docket,
+dispatch, and execution. Hallway's domain, Bell projection, and bounded
+recipient-authorized Knocks are current. Repair request-to-disposition gaps on
+existing Host/harness paths, including refusal, interruption, application, and
+an honest unavailable state for idle or headless recipients.
+New idle/headless delivery remains deferred. Posting alone must not wake a model.
+NATS absence alone does not make Hallway defective.
+
+Dispatch prepares packets and the main model spawns explicitly. Connect those
+executions and their evidence to existing Docket attempts, not a parallel work
+store. Preserve room-owned familiars and recipient consent.
+Ground reviewer identity in supported capabilities, with an explicit independent
+reviewer or operator arrangement for a single-room House.
+Host-only Hallway Knock claim and settlement remain intentional authority boundaries.
+
+### 4. Useful learning from reliable evidence
+
+First make existing lessons applicable to the work and its observed outcomes.
+The current deterministic Striatum triggers are not complete learned behavior.
+Establish fresh GIGA classifier liveness and useful classification before
+claiming commanded consolidation or later benefit. Stage 1 infrastructure and
+explicit review remain current; queue health and purged dismissals are not
+reviewed learning outcomes.
+
+Curios retention is current; bounded automatic resurfacing still needs delivery.
+Connect source evidence, review disposition, any authorized promotion, and later
+useful retrieval before claiming improvement. Cingulate remains planned and
+depends on reliable evidence; it must not judge work from incomplete lifecycle
+records. Broader refinement and additional cognitive workers remain deferred.
+
+### Existing work and unchanged gates
+
+The review input already covers much of this work through existing Docket entries:
+
+| Outcome | Existing coverage to reconcile, not newly assign |
+|---|---|
+| Orientation | “Recall authority vertical”; “Investigate intermittent auto-Recall misses — trace the Tyler case”; the restart-intent, keeper, and adapter-exit quests |
+| Visible outcomes | “Pulse panel — the GUI becomes the House's main usage surface”; “Pulse rung 2 — read everything”; “Insula watches every organ — failures ride Origami to a durable ledger”; “Release proof — source ancestry, immutable attestation, and exercised gates” |
+| Cooperative completion | “M1 — Docket v1 completion”; “Census and strengthen every Athanor tool contract”; the draft “Pulse rung 3 — the talking door (operator write path)” |
+| Useful learning | “GIGA health must prove liveness”; “Commanded GIGA consolidation door”; “Gardener proof harness — revive evidence, replay regressions, and roll back”; “Project lessons become a project map” |
+
+These references supplement planning; they do not replace frozen acceptance,
+change deadlines, claim work, settle attempts, or activate drafts.
+The offered “Write two chapters before more House quests” remains a blocker.
+The accepted workspace-search adapter remains separate from AKASHA; its older
+Whiskers draft is not a new replacement obligation.
+
+### Recorded Docket supplements
+
+House memory **#4509** holds the accepted analysis in PostgreSQL.
+Draft goal `69d2e256-30c8-499f-b1db-061ab8aca84e` groups these planning supplements:
+
+| Supplement | Draft quest ID | Planning predecessor |
+|---|---|---|
+| Coherent orientation | `bc479caf-3850-40f0-87c7-99e659d36703` | Existing identity, Recall, and handoff work |
+| Attributable outcomes and custody | `b69dc109-17a8-4ee6-8224-8c1ebad4f6fb` | Orientation where attribution is required |
+| Cooperative completion | `ea2a050e-7e99-484b-be54-a9727099410a` | Orientation and attributable outcomes |
+| Useful learning | `656e526e-09af-472d-8e5a-8a6cfbae9b1b` | Reliable orientation and evidence; cooperation when review uses another participant |
+
+Each draft cites the existing quests that retain their implementation scope.
+The posting contract has no existing-quest edit action.
+These additive drafts preserve earlier records instead of rewriting them through SQL.
+Their acceptance candidates remain prose until an explicit activation freezes them.
+Their dependency references do not create scheduler-enforced gates.
+This pass activates no goal or quest and claims no work.
+
+This order does not expand the `1.0.0` boundary. Keep the complete operator GUI,
+continuity health, installation, migration, rollback, signing, and evidence gates
+below explicit. Complete export, restore, and migration need their own evidence,
+with operator-controlled retention and deletion choices; no fresh restore is
+claimed here. Prolog/Datalog, Cingulate, broader NATS delivery, spatial
+work, marketplace, OMEGA, Relay, and ANON remain deferred.
 
 ## 1.0 dependency path
 
@@ -81,11 +205,12 @@ roadmap, [`ARCHITECTURE.md`](./ARCHITECTURE.md),
 [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) (parked historical specification), and
 [`EVIDENCE.md`](./EVIDENCE.md) aligned with the same owners and gates.
 
-### 2. Capture the 0.11 parity baseline and close known fixes
+### 2. Retain the historical 0.11 parity baseline and close known fixes
 
-The current `0.11.0` runtime is the observed parity reference, not the target
-topology. Inventory each TypeScript, Python, and Rust capability with its owner,
-callers, tests, persistence effects, failure behavior, and migration surface.
+The historical `0.11.0` runtime is a recorded parity reference, not the current
+version or target topology. Inventory each TypeScript, Python, and Rust
+capability with its owner, callers, tests, persistence effects, failure behavior,
+and migration surface.
 
 Record:
 

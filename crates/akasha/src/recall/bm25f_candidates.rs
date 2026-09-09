@@ -146,14 +146,18 @@ pub(super) async fn load_bm25f_candidates_for_terms(
     .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
-    if terms.len() == 1
-        && rows
-            .first()
-            .and_then(|row| row.try_get::<i64, _>("total_matches").ok())
-            .is_some_and(|total| total > BM25F_MAX_CANDIDATES)
+    // `count(*) OVER()` is evaluated before LIMIT, so `total_matches` is the
+    // whole matching pool. A pool wider than the prefilter ceiling means the
+    // ranker never saw part of it: say so for any term count, since a
+    // multi-term query is prefiltered by tsquery rank, not by BM25F.
+    if let Some(total) = rows
+        .first()
+        .and_then(|row| row.try_get::<i64, _>("total_matches").ok())
+        .filter(|total| *total > BM25F_MAX_CANDIDATES)
     {
         warnings.push(format!(
-            "BM25F single-term candidate pool truncated at {BM25F_MAX_CANDIDATES} documents"
+            "BM25F candidate pool truncated at {BM25F_MAX_CANDIDATES} of {total} matching chunks ({} query terms); ranking never saw the rest",
+            terms.len()
         ));
     }
 

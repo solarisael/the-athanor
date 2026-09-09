@@ -31,12 +31,14 @@ let askDoor;
 let absence;
 let countedNoun;
 let ledgerStamp;
+let requestRender = () => {};
 
 export function initHallwayMessages(options) {
   askDoor = options.askDoor;
   absence = options.absence;
   countedNoun = options.countedNoun;
   ledgerStamp = options.ledgerStamp;
+  requestRender = options.requestRender ?? (() => {});
 }
 
 export function handleHallwayMessagesClick(event) {
@@ -63,6 +65,14 @@ function toggleDrawer(drawer) {
   return true;
 }
 
+export function hallwayMessagesRound(hallway) {
+  return rounds.get(hallway);
+}
+
+export function queryHallwayMessages(hallway) {
+  if (hallway && rounds.get(hallway)?.status !== "pending") return askMessagesDoor(hallway);
+}
+
 // One Hallway per open, never with the board round: the inbox row above already
 // carries the counts and the latest excerpt, and pulling every peer's prose in
 // every Hallway is a read nobody asked for.
@@ -74,6 +84,7 @@ async function askMessagesDoor(hallway) {
 
   rounds.set(hallway, { status: "answered", ...answer });
   paintDrawer(hallway);
+  requestRender();
 }
 
 // Painted into the live drawer by hand: a full re-render rebuilds the row and

@@ -20,7 +20,9 @@ use chrono::{NaiveDate, Utc};
 use content_lane::content_lane_rows;
 use embedding::{EmbedError, embed_query};
 use hearth::RecallRequest;
-use memory_reference::{memory_references, resolve_memory_references};
+use memory_reference::{
+    apply_manual_record_cap, hydrate_record_bodies, memory_references, resolve_memory_references,
+};
 use pointer_files::protocol_pointer_files;
 use semantic_vocabulary::{load_semantic_vocabulary_concepts, semantic_vocabulary_terms};
 use serde::Serialize;
@@ -35,6 +37,8 @@ pub struct RecallResult {
     pub query: String,
     pub found: bool,
     pub source: &'static str,
+    /// `auto` or `manual`: which projection shaped `retrievalCandidates`.
+    pub projection: &'static str,
     pub warnings: Vec<String>,
     #[serde(rename = "retrievalCandidates")]
     pub retrieval_candidates: Vec<serde_json::Value>,
@@ -174,6 +178,7 @@ pub async fn recall(
     let room = request.room().as_str();
     let query = request.query();
     let temporal_decay = request.temporal_decay();
+    let projection = request.projection();
     let semantic_top_k = request.semantic_top_k();
     let content_top_k = request.content_top_k();
     let semantic_min_similarity = request.semantic_min_similarity();
@@ -189,9 +194,38 @@ pub async fn recall(
     // never be reported as a missing term.
     let phase = Phase::start(span, "recall.reference");
     let references = memory_references(query);
-    let exact_candidates =
-        resolve_memory_references(pool, &rooms, &references, &mut warnings).await?;
+    let mut exact_candidates =
+        resolve_memory_references(pool, &rooms, &references, projection, &mut warnings).await?;
     phase.ok();
+    // A request that names references and nothing else (`memories 4520, 4516
+    // and 999`) is a primary-key read: the resolved records in reference
+    // order, the missing/refused warnings, their thread neighbors, and no
+    // ranked lane. The words `memories` and `and` are not evidence of
+    // anything, so they must never rank unrelated filler under the answer.
+    if references.only_references(query) {
+        if projection.is_manual() {
+            apply_manual_record_cap(&mut exact_candidates, &mut warnings);
+        }
+        let mut retrieval_candidates = exact_candidates;
+        attach_thread_neighbors(pool, span, &mut retrieval_candidates).await?;
+        return Ok(RecallResult {
+            ok: true,
+            query: query.to_owned(),
+            found: !retrieval_candidates.is_empty(),
+            source: "rust-postgres",
+            projection: projection.as_str(),
+            warnings,
+            retrieval_candidates,
+            canon_matches: Vec::new(),
+            semantic_chunks: Vec::new(),
+            content_chunks: Vec::new(),
+            date_matches: Vec::new(),
+            query_dates: Vec::new(),
+            taxonomy: serde_json::json!({"rooms":rooms,"memoryTypes":[],"threadKeys":[],"namedEntities":[]}),
+            cluster_staleness: None,
+            cluster_resonance: None,
+        });
+    }
     let query_dates = query_dates(query);
     let query_terms = references.strip_terms(query_terms(query));
     let content_patterns = query_terms
@@ -691,20 +725,16 @@ pub async fn recall(
     retrieval_candidates.truncate(semantic_top_k.max(content_top_k) as usize);
     retrieval_candidates.splice(0..0, exact_candidates);
     phase.ok();
-    let memory_ids = retrieval_candidates
-        .iter()
-        .filter_map(|candidate| candidate["memory_id"].as_i64())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let phase = Phase::start(span, "recall.neighbors");
-    let mut neighbors = load_thread_neighbors(pool, &memory_ids).await?;
-    for candidate in &mut retrieval_candidates {
-        let memory_id = candidate["memory_id"].as_i64().unwrap_or_default();
-        candidate["thread_neighbors"] =
-            serde_json::Value::Array(neighbors.remove(&memory_id).unwrap_or_default());
+    // A manual projection reads records, not chunks: the selected memories are
+    // capped by count and then carry their complete bodies. The auto
+    // projection keeps the bounded excerpt under the working-set budget.
+    if projection.is_manual() {
+        apply_manual_record_cap(&mut retrieval_candidates, &mut warnings);
+        let phase = Phase::start(span, "recall.hydrate");
+        hydrate_record_bodies(pool, &rooms, &mut retrieval_candidates, &mut warnings).await?;
+        phase.ok();
     }
-    phase.ok();
+    attach_thread_neighbors(pool, span, &mut retrieval_candidates).await?;
     // Canon lookup matches three ways, ranked. Tokens alone can never match a
     // multi-word name or a hyphenated alias, which is how 42 of 109 rows went
     // dark; widening to ILIKE/tsvector then lets fuzzy hits evict the row the
@@ -846,6 +876,7 @@ pub async fn recall(
             || !canon_matches.is_empty()
             || !date_matches.is_empty(),
         source: "rust-postgres",
+        projection: projection.as_str(),
         warnings,
         retrieval_candidates,
         canon_matches,
@@ -860,4 +891,28 @@ pub async fn recall(
         cluster_staleness,
         cluster_resonance,
     })
+}
+
+/// Thread neighbors for every candidate that owns a memory: the visible
+/// shoulder of the thread a record sits in, keyed by memory ID.
+async fn attach_thread_neighbors(
+    pool: &PgPool,
+    span: Option<&EmitterSpan>,
+    retrieval_candidates: &mut [serde_json::Value],
+) -> Result<(), AppError> {
+    let memory_ids = retrieval_candidates
+        .iter()
+        .filter_map(|candidate| candidate["memory_id"].as_i64())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let phase = Phase::start(span, "recall.neighbors");
+    let mut neighbors = load_thread_neighbors(pool, &memory_ids).await?;
+    for candidate in retrieval_candidates.iter_mut() {
+        let memory_id = candidate["memory_id"].as_i64().unwrap_or_default();
+        candidate["thread_neighbors"] =
+            serde_json::Value::Array(neighbors.remove(&memory_id).unwrap_or_default());
+    }
+    phase.ok();
+    Ok(())
 }

@@ -87,6 +87,7 @@ async fn run_contract(pool: &sqlx::PgPool, url: &str) -> TestResult {
         giga_source_ledger_dir: None,
         giga_source_room: None,
         house_tz: "America/Sao_Paulo".into(),
+        nats_url: None,
     };
     let room = RoomKey::new(format!("anamnesis-test-{}", Uuid::new_v4().simple()))?;
 

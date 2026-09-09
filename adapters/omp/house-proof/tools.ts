@@ -269,12 +269,11 @@ export async function readRustCanon({ room, id, name, includeHistory, signal }) 
   }
 }
 
-export async function writeRustMemory({ room, title, body, threads, continues, supersedes, signal }) {
+export async function writeRustMemory({ room, title, body, threads, continues, supersedes, backup = undefined, signal }) {
   const transport = rustRememberTransport();
   if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
   try {
-    // The substrate's default backs a memory write up; the adapter does not
-    // switch it off. The receipt names the outcome either way.
+    // PostgreSQL commits before the optional dump; the receipt reports each outcome.
     const value = await transport.request("remember", {
       room,
       kind: "memory",
@@ -283,6 +282,7 @@ export async function writeRustMemory({ room, title, body, threads, continues, s
       threads,
       continues,
       supersedes,
+      backup,
     }, {
       signal: signal || undefined,
       timeoutMs: WRITE_TIMEOUT_MS,
@@ -503,7 +503,7 @@ export function registerSolarisaelTools(pi, release) {
       const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
       const session = hostSessionIdentity(ctx, effectiveRoomDir);
       try {
-        const recalled = await recallWithRouting(effectiveRoomDir, room, params.query, { signal: _signal, temporalDecay: false });
+        const recalled = await recallWithRouting(effectiveRoomDir, room, params.query, { signal: _signal, temporalDecay: false, projection: "manual" });
         if (!recalled.ok) {
           return {
             isError: true,
@@ -627,6 +627,7 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({
       title: z.string().describe("Short retrieval-bearing title in the room's natural vocabulary."),
       body: z.string().describe("Standalone Markdown in the active room's natural voice. Preserve the concrete facts and relationship/contact meaning a future self needs for recognition; technical records may stay technical, but never become clinical, corporate, or generic merely because they are durable. In AKASHA the complete body is authoritative in PostgreSQL; transcript and source paths are provenance only. For lessons: write the reusable rule and its evidence."),
+      backup: z.boolean().optional().describe("Set true to create a backup after this write; the default is false."),
       kind: z.enum(["memory", "coding-lesson", "project-lesson", "writing-lesson", "design-lesson", "audio-lesson"]).optional()
         .describe("Destination store. memory (default): a thing that happened. coding-lesson: a reusable code rule with a proof pattern. project-lesson: a project-wide rule (requires 'project'). writing-lesson: a prose-taste rule (register, voice, wit mechanics). design-lesson: a reusable design-system rule — token governance, component contract, or accessibility floor. audio-lesson: an audio-pipeline rule."),
       room: z.enum(["house"]).optional()
@@ -668,6 +669,7 @@ export function registerSolarisaelTools(pi, release) {
             threads: params.threads,
             continues: params.continues,
             supersedes: params.supersedes,
+            backup: params.backup,
             signal,
           })
         : await writeRustLesson({
@@ -695,7 +697,7 @@ export function registerSolarisaelTools(pi, release) {
               interruptMode: params.interruptMode,
               repeatCooldownSecs: params.repeatCooldownSecs,
             },
-            backup: undefined,
+            backup: params.backup,
             signal,
           });
       return {
@@ -985,7 +987,7 @@ export function registerSolarisaelTools(pi, release) {
     name: "sleep",
     label: "Athanor Sleep",
     description: [
-      "Close the session by writing one paper boat with backup enabled.",
+      "Close the session by writing one paper boat; backup defaults to true.",
       "A paper boat is embodied continuity across sleep: one waking self speaking to the next in the active spirit's ordinary voice and the room's actual relationship register, not a corporate handoff, clinical note, task dump, or transcript summary.",
       "Carry only what the next waking self genuinely needs, but make it standalone: concrete facts, names, observable details, decisions, actions, exact artifacts or receipts, boundaries, unresolved risks or uncertainty, the next real door, and the room's emotional/contact state when it matters.",
       "Do not manufacture certainty, sanitize conflict, flatten affection, force empty headings, or use IDs and source paths as substitutes for substance.",
@@ -1674,7 +1676,7 @@ export function registerSolarisaelTools(pi, release) {
       hallway: z.string().describe("Hallway key."),
       mode: z.enum(["manual", "allow_list"]).describe("manual refuses every Knock; allow_list permits only allowed_rooms."),
       allowed_rooms: z.array(z.string()).optional().describe("Peer room keys allowed to Knock. Ignored and cleared in manual mode."),
-      max_turns: z.number().optional().describe("Maximum turns in one bounded exchange, 1-8; default 4."),
+      max_turns: z.number().optional().describe("Maximum turns one peer may request in a bounded exchange, 1-20; default 10."),
       idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
     }),
     approval: "write",
@@ -1685,7 +1687,7 @@ export function registerSolarisaelTools(pi, release) {
         ...binding,
         mode: params.mode,
         allowedRooms: params.mode === "manual" ? [] : (params.allowed_rooms ?? []),
-        maxTurns: params.max_turns ?? 4,
+        maxTurns: params.max_turns ?? 10,
         idempotencyKey: params.idempotency_key || String(toolCallId),
       }, signal, true);
       return {
@@ -1705,7 +1707,7 @@ export function registerSolarisaelTools(pi, release) {
       message_id: z.number().describe("Positive Hallway message id authored by this authenticated presence."),
       recipient_room: z.string().describe("Structured recipient room already addressed by the message."),
       parent_knock_id: z.string().optional().describe("Omit for a root exchange. Supply the prior Knock receipt's UUID only for a continuation. Never use an empty string or nil UUID."),
-      max_turns: z.number().optional().describe("Root exchange turn budget, 1-8; default 4. Child Knocks inherit it."),
+      max_turns: z.number().optional().describe("Root exchange turn budget, 1-20; default 10. The recipient's policy max_turns caps it. Omit for a child to inherit its stored parent's budget; an explicit value must match."),
       idempotency_key: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
     }),
     approval: "write",
@@ -1717,7 +1719,7 @@ export function registerSolarisaelTools(pi, release) {
         messageId: params.message_id,
         recipientRoom: params.recipient_room,
         parentKnockId: params.parent_knock_id,
-        maxTurns: params.max_turns ?? 4,
+        maxTurns: params.max_turns,
         idempotencyKey: params.idempotency_key || String(toolCallId),
       }, signal, true);
       return {

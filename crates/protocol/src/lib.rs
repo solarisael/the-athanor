@@ -21,9 +21,9 @@ use hearth::{
     GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
     GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
     GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
-    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallRequest,
-    RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberReceipt, RememberRequest,
-    RoomKey, ThreadContinuation, lesson_triggers::LessonTriggerSpec,
+    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallProjection,
+    RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberReceipt,
+    RememberRequest, RoomKey, ThreadContinuation, lesson_triggers::LessonTriggerSpec,
 };
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -73,7 +73,7 @@ pub struct SubstrateMigrationsParams {}
 pub struct PaperBoatSleepParams {
     pub room: String,
     pub body: String,
-    #[serde(default = "default_backup")]
+    #[serde(default = "default_sleep_backup")]
     pub backup: bool,
 }
 
@@ -164,8 +164,14 @@ pub struct RememberParams {
     pub backup: Option<bool>,
 }
 
-fn default_backup() -> bool {
+/// Paper boats keep a backup at the session boundary.
+fn default_sleep_backup() -> bool {
     true
+}
+
+/// Memory receipts do not wait for a dump unless the caller asks.
+fn default_remember_backup() -> bool {
+    false
 }
 
 fn default_semantic_top_k() -> u32 {
@@ -200,6 +206,11 @@ pub struct RecallParams {
     pub content_min_similarity: f64,
     #[serde(default)]
     pub temporal_decay: bool,
+    /// `auto` (default) keeps the bounded passive working set; `manual` returns
+    /// the selected records whole under `hearth::MANUAL_RECORD_CAP`. Skipped on
+    /// the wire while `auto` so older peers read the same bytes as before.
+    #[serde(default, skip_serializing_if = "RecallProjection::is_auto")]
+    pub projection: RecallProjection,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -377,6 +388,9 @@ pub struct RecallCandidate {
     pub durability: Option<String>,
     #[serde(default)]
     pub temporal_weight: Option<f64>,
+    /// Complete authoritative record body; present only under a manual projection.
+    #[serde(default)]
+    pub body: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -556,6 +570,8 @@ pub struct RecallResultInput {
     pub memory_handle: Option<RecallMemoryHandle>,
     #[serde(default)]
     pub warnings: Vec<String>,
+    #[serde(default)]
+    pub projection: Option<RecallProjection>,
 }
 
 pub type RecallResult = RecallResultInput;
@@ -600,6 +616,9 @@ pub struct RecallPresentationCandidate {
     pub missing_terms: Vec<String>,
     pub reasons: Vec<String>,
     pub excerpt: String,
+    /// Complete authoritative record body; carried only by a manual projection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -724,6 +743,8 @@ pub struct RecallPresentation {
     pub cluster_resonance: Option<RecallPresentationClusterResonance>,
     #[serde(skip_serializing_if = "Option::is_none", rename = "memoryHandle")]
     pub memory_handle: Option<RecallPresentationMemoryHandle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection: Option<RecallProjection>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1443,7 +1464,11 @@ impl TryFrom<RecallParams> for RecallRequest {
             params.content_top_k,
             params.content_min_similarity,
         )
-        .map(|request| request.with_temporal_decay(params.temporal_decay))
+        .map(|request| {
+            request
+                .with_temporal_decay(params.temporal_decay)
+                .with_projection(params.projection)
+        })
         .map_err(|e| ProtocolError::InvalidParams(e.to_string()))
     }
 }
@@ -1674,7 +1699,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                 params.title,
                 params.body,
                 RememberLessonDetails {
-                    backup: params.backup.unwrap_or_else(default_backup),
+                    backup: params.backup.unwrap_or_else(default_remember_backup),
                     source_memory_path: params.source_memory_path,
                     shape: params.shape,
                     voice: params.voice,
@@ -1708,7 +1733,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                     threads: params.threads,
                     continues,
                     supersedes,
-                    backup: params.backup.unwrap_or_else(default_backup),
+                    backup: params.backup.unwrap_or_else(default_remember_backup),
                 },
             )
         };
@@ -4451,11 +4476,8 @@ mod tests {
         }
     }
 
-    // 2026-09-05, live: a memory write with no `backup` field came back
-    // `skipped` while the adapter trusted "the substrate default". One rule
-    // for every durable write: back up unless the caller says no.
     #[test]
-    fn remember_backs_up_unless_the_caller_refuses() {
+    fn remember_skips_backup_unless_asked_for_every_kind() {
         let absent = |kind: &str, fields: &str| {
             let line = format!(
                 r#"{{"protocol":1,"id":"x","method":"remember","params":{{"room":"lab","kind":"{kind}","title":"T","body":"B"{fields}}}}}"#
@@ -4477,19 +4499,20 @@ mod tests {
             ("design-lesson", r#","voice":"craft""#),
             ("audio-lesson", ""),
         ] {
-            assert!(
-                absent(kind, fields),
-                "{kind} must back up when the caller is silent"
-            );
+            assert!(!absent(kind, fields), "{kind} must skip an unrequested dump");
+            assert!(absent(kind, &format!("{fields},\"backup\":true")));
+            assert!(!absent(kind, &format!("{fields},\"backup\":false")));
         }
-        let refused = r#"{"protocol":1,"id":"x","method":"remember","params":{"room":"lab","kind":"memory","title":"T","body":"B","backup":false}}"#;
-        assert!(
-            !RequestEnvelope::parse_line(refused)
-                .unwrap()
-                .remember_request()
-                .unwrap()
-                .backup()
-        );
+    }
+
+    #[test]
+    fn sleep_keeps_backup_unless_refused() {
+        for (field, expected) in [("", true), (r#","backup":true"#, true), (r#","backup":false"#, false)] {
+            let params: PaperBoatSleepParams = serde_json::from_str(
+                &format!(r#"{{"room":"lab","body":"boat"{field}}}"#),
+            ).unwrap();
+            assert_eq!(params.backup, expected);
+        }
     }
 
     #[test]
@@ -4979,12 +5002,40 @@ mod tests {
         .recall_request()
         .unwrap();
         assert!(explicit.temporal_decay());
+        assert_eq!(explicit.projection(), RecallProjection::Auto);
+
+        let manual = RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","projection":"manual"}}"#,
+        )
+        .unwrap()
+        .recall_request()
+        .unwrap();
+        assert_eq!(manual.projection(), RecallProjection::Manual);
+        assert!(
+            RequestEnvelope::parse_line(
+                r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","projection":"dossier"}}"#,
+            )
+            .unwrap()
+            .recall_request()
+            .is_err(),
+            "an unknown projection is refused, never defaulted"
+        );
 
         let params: RecallParams =
             serde_json::from_value(serde_json::json!({"room":"lab","query":"alpha"})).unwrap();
         assert_eq!(
             serde_json::to_string(&params).unwrap(),
-            r#"{"room":"lab","query":"alpha","semantic_top_k":8,"semantic_min_similarity":0.4,"content_top_k":8,"content_min_similarity":0.3,"temporal_decay":false}"#
+            r#"{"room":"lab","query":"alpha","semantic_top_k":8,"semantic_min_similarity":0.4,"content_top_k":8,"content_min_similarity":0.3,"temporal_decay":false}"#,
+            "the auto projection leaves the wire bytes unchanged"
+        );
+        let manual_params: RecallParams = serde_json::from_value(
+            serde_json::json!({"room":"lab","query":"alpha","projection":"manual"}),
+        )
+        .unwrap();
+        assert!(
+            serde_json::to_string(&manual_params)
+                .unwrap()
+                .ends_with(r#","projection":"manual"}"#)
         );
     }
 

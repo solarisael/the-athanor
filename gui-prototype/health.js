@@ -1,28 +1,70 @@
-// Health — the room Host's own `/health` round, read once and spoken twice.
-//
-// The status strip and the Account state block both read this single round, so
-// the surface can never say Host ok in the footer and Offline in the drawer.
-// Four source states travel with the round: not queried, querying, connected
-// with a value, unreachable with the named reason.
-//
-// A channel the Host's health contract does not carry keeps a fifth state of
-// its own — not reported — and never borrows a neighbouring number. Body and
-// kitten state are absent from the contract, not merely absent from a failed
-// round, so they say so whether or not the Host answers.
+// The footer, Account, observatory, and Direct Status share these Host rounds.
+// Missing contract fields remain not reported, even when a request fails.
 
-// The exact fields this surface reads out of the round. Anything not listed
-// here is not rendered, and no channel is derived from a field's absence.
+// These fields feed the five footer channels, not the full health payload.
 const HEALTH_FIELDS = [
   "status", "schema_version", "websocket_path", "projection_id",
   "version", "sequence", "state_hash", "akasha_delivery", "insula"
 ];
 
 const NOT_REPORTED = "The room health round carries no such field.";
-const CONTRACT_NOTE = `The Host answers ${HEALTH_FIELDS.length} health fields: ${HEALTH_FIELDS.join(", ")}.`;
+const CONTRACT_NOTE = `The footer reads these health fields: ${HEALTH_FIELDS.join(", ")}.`;
 
 // Source state: idle → pending → live | failed. Nothing outside this module
 // mutates it; the shell asks for rendered channel text and a render request.
 let round = { status: "idle" };
+let roomRound = { status: "idle" };
+
+export function roomState() {
+  return roomRound;
+}
+
+export function healthState() {
+  return round.status === "live" ? round.health : null;
+}
+
+export function roomStateChannel() {
+  if (roomRound.status === "live") return chip("Room state connected", "Room", "steady", `Room ${roomRound.room} · Queried ${roomRound.queriedAt} local`);
+  if (roomRound.status === "failed" && roomRound.reached) return chip("Room state not served", "Room —", "quiet", `${roomRound.reason} · not reported by the Host`);
+  if (roomRound.status === "failed") return chip("Room state unreachable", "Room off", "attention", `${roomRound.reason} · not reported by the Host`);
+  if (roomRound.status === "pending") return chip("Room state querying…", "Room …", "quiet", "The room state round is open.");
+  return chip("Room state not queried", "Room —", "quiet", "Room state not reported by the Host.");
+}
+
+export function ensureRoomStateQueried() {
+  if (roomRound.status === "idle") queryRoomStateHost();
+}
+
+async function queryRoomStateHost() {
+  if (roomRound.status === "pending") return;
+  roomRound = { ...roomRound, status: "pending" };
+  requestRender();
+  try {
+    const response = await fetch("/live/room/state", {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}"
+    });
+    // A reached Host with no door is a missing fact, never an unreachable Host;
+    // the footer must not say connected while this line says offline.
+    if (!response.ok) {
+      const missing = new Error(`this Host answers no room-state door (${response.status})`);
+      missing.reached = true;
+      throw missing;
+    }
+    const room = await response.json();
+    if (!room || typeof room.room !== "string" || !Array.isArray(room.presences)) {
+      throw new Error("Host answered without room state");
+    }
+    roomRound = { ...room, status: "live", queriedAt: new Date().toTimeString().slice(0, 5) };
+  } catch (error) {
+    roomRound = {
+      ...roomRound,
+      status: "failed",
+      reached: error instanceof Error && error.reached === true,
+      reason: error instanceof Error ? error.message : "no route to Host"
+    };
+  }
+  requestRender();
+}
 let requestRender = () => {};
 
 export function initHealth(options) {
@@ -30,10 +72,12 @@ export function initHealth(options) {
 }
 
 export function ensureHealthQueried() {
+  ensureRoomStateQueried();
   if (round.status === "idle") queryHealthHost();
 }
 
 export async function queryHealthHost() {
+  void queryRoomStateHost();
   if (round.status === "pending") return;
   round = { status: "pending" };
   requestRender();
@@ -60,7 +104,7 @@ export async function queryHealthHost() {
 }
 
 function count(value) {
-  return typeof value === "number" ? value.toLocaleString("en-US") : "not a number";
+  return typeof value === "number" ? value.toLocaleString("en-US") : "not reported";
 }
 
 // The Host names its own room inside the WebSocket path it publishes; the page
@@ -84,7 +128,7 @@ const CHANNELS = {
       `Host ${health.status} · ${hostRoom(health)}`,
       `Host ${health.status}`,
       health.status === "ok" ? "steady" : "attention",
-      `Room ${hostRoom(health)} answered its health route with status ${health.status}, schema version ${health.schema_version}, WebSocket path ${health.websocket_path}.`
+      `Room ${hostRoom(health)} answered its health route with status ${health.status}, API schema version ${health.schema_version ?? "not reported"}, WebSocket path ${health.websocket_path ?? "not reported"}.`
     ),
     failed: reason => chip("Host unreachable", "Host off", "attention", `The health read failed: ${reason}.`)
   },
@@ -144,8 +188,8 @@ function deliveryChip(delivery) {
   const status = delivery.broker_status;
   const tone = status === "connected" ? "steady" : status === "degraded" ? "attention" : "quiet";
   const parts = [
-    `AKASHA ${delivery.akasha_enabled ? "enabled" : "disabled"}`,
-    `broker ${delivery.broker_configured ? "configured" : "not configured"}`,
+    `AKASHA ${typeof delivery.akasha_enabled === "boolean" ? delivery.akasha_enabled ? "enabled" : "disabled" : "not reported"}`,
+    `broker ${typeof delivery.broker_configured === "boolean" ? delivery.broker_configured ? "configured" : "not configured" : "not reported"}`,
     `status ${status}`
   ];
   if (delivery.latest_event_id) parts.push(`latest receipt event ${delivery.latest_event_id}`);
@@ -196,7 +240,7 @@ export function accountStateRows() {
   if (round.status === "live") {
     const health = round.health;
     return [
-      { label: "Surface", value: "Live reads · writes none" },
+      { label: "Surface", value: "Live reads · chat writes only" },
       { label: "Host", value: `${health.status} · ${hostRoom(health)} room` },
       { label: "Persistence", value: persistenceValue(health.insula) }
     ];

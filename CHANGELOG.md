@@ -20,8 +20,61 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Added
+
+- Hallway posts publish sanitized room triggers through JetStream after the database commit. Hosts push inbox changes to subscribed sessions.
+  Failed publication preserves the post. OMP keeps its per-turn Bell check until it has a persistent Host connection.
+
+- `athanor.exe` starts the Windows service, waits for PostgreSQL and NATS, then starts room Hosts and opted-in harnesses in registry order.
+  It reports each harness outcome and stops only its own harnesses on exit. OMP now warns when the Host is absent and never starts The Athanor.
+
+- Pulse provides a native desktop window, embedded web assets, and a room-scoped Host proxy.
+  The `pulse` command supports local development, and the install script adds CLI and Start Menu entry points.
+
+- The optional `adapters/workspace-search` adapter provides repository search, explicit indexing, and index status through MCP and a CLI.
+  It uses the public zvec-grep library and local Ollama Nemotron embeddings.
+  Queries and passages use distinct prefixes.
+  A conservative chunk budget keeps source fragments below the model context limit.
+  Search does not create an index or refresh it by default.
+  Discovery returns five hits per query group by default and caps each excerpt at 2000 characters.
+  Clipped excerpts remain marked. Guidance directs subsequent precise inspection to native grep and read.
+  The installer packages compiled JavaScript and pinned dependencies under the user's OMP tools directory.
+  This adapter does not change Vault, AKASHA, or the Host.
+- The room Host answers three authenticated HTTP doors for the operator surface: `chat/snapshot`, `chat/say`, and `room/state`.
+  A say enters the same chat ring the OMP chat doorman reads, so the surface can talk to the room's spirit.
+  Room state reports only the fields the Host can source; absent fields are omitted, never fabricated.
+  The prototype proxy reads its allow-list from `gui-prototype/live-routes.json`.
+
 ### Changed
 
+- `remember` skips backups unless the caller requests one; `sleep` keeps backups enabled by default.
+  Skipped backups return `Skipped`, not `Ok`.
+  PostgreSQL dumps exclude the `insula` schema and still refuse database migrations newer than the binary.
+- Manual OMP Recall returns complete bodies for up to five selected AKASHA memory records.
+  Exact-ID-only queries return requested records and explicit missing, refused, or overflow warnings.
+  Automatic Recall retains its context budgets.
+  The Host reports candidate overflow, and BM25F reports its prefilter ceiling for multi-term queries.
+  These diagnostics do not change ranking.
+
+- Chat replies settle after the complete agent turn.
+  A tool-only step cannot consume a pending message with an empty response.
+  The response must follow its own chat origin and precede the next turn's origin.
+- Child Hallway Knocks inherit an omitted turn budget from their stored parent.
+  Roots retain the default budget of four.
+  An explicit child budget must match its parent.
+  Existing authority, expiry, and exchange limits remain enforced.
+
+- Generated restart, chat, and Hallway Knock turns receive context and Presence anchored to their own stable event identity.
+  Native turns keep their existing memo keys and authority.
+  Queued side messages cannot change the active origin during tool continuations.
+  Generated text cannot apply operator-only identity directives.
+  Passive custom context remains excluded.
+- The dated organ review separates implemented mechanisms, installed observations, unresolved gaps, and proposed outcomes.
+  Documentation follows coherent orientation, visible outcomes, cooperative completion, and useful learning.
+  Historical version labels no longer describe the current installation.
+  GIGA status distinguishes queue operation from useful consolidation.
+  Curios distinguish stored candidates from automatic resurfacing.
+  The review changes records and planning only; runtime behavior and release gates remain unchanged.
 - Local deployment now goes through the product installer. `substrate/deploy-local.ps1`
   builds one payload with `installer/build-native-release.ps1` under the identity
   `<version>+dev.<stamp>.<commit>` and hands it to the staged manager's `update`.

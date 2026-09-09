@@ -91,6 +91,7 @@ pub enum EmbeddingMode {
 #[derive(Clone)]
 pub struct Config {
     pub database_url: String,
+    pub nats_url: Option<String>,
     pub embed_url: Option<String>,
     pub embed_model: String,
     pub embed_dimension: usize,
@@ -918,6 +919,7 @@ impl Config {
             };
         Ok(Self {
             database_url,
+            nats_url: env::var("ATHANOR_NATS_URL").ok().filter(|url| !url.trim().is_empty()),
             embed_model: configured_value("ATHANOR_EMBED_MODEL", &dotenv)
                 .unwrap_or_else(|| DEFAULT_EMBED_MODEL.into()),
             embed_dimension,

@@ -23,6 +23,7 @@ struct OwnedChild {
 struct OwnedState {
     children: BTreeMap<String, OwnedChild>,
     failures: BTreeMap<String, String>,
+    shutting_down: bool,
 }
 
 enum Observation {
@@ -78,6 +79,9 @@ impl HarnessOwner {
     pub fn start(&self, harness_id: &str) -> Result<Vec<HarnessStatus>> {
         let spec = self.spec(harness_id)?;
         let mut state = self.state.lock().unwrap();
+        if state.shutting_down {
+            bail!("Athanor is shutting down; cannot start harness {harness_id:?}");
+        }
         observe(&mut state, harness_id);
         if state.children.contains_key(harness_id) {
             bail!("harness {harness_id:?} is already running");
@@ -97,6 +101,9 @@ impl HarnessOwner {
     pub fn restart(&self, harness_id: &str) -> Result<Vec<HarnessStatus>> {
         let spec = self.spec(harness_id)?;
         let mut state = self.state.lock().unwrap();
+        if state.shutting_down {
+            bail!("Athanor is shutting down; cannot restart harness {harness_id:?}");
+        }
         observe(&mut state, harness_id);
         if state.children.contains_key(harness_id) {
             stop_owned(&mut state, harness_id)?;
@@ -107,6 +114,7 @@ impl HarnessOwner {
 
     pub fn shutdown(&self) {
         let mut state = self.state.lock().unwrap();
+        state.shutting_down = true;
         let owned: Vec<String> = state.children.keys().cloned().collect();
         for harness_id in owned {
             if let Err(error) = stop_owned(&mut state, &harness_id) {
@@ -230,4 +238,38 @@ fn constant_time_eq(expected: &str, provided: &str) -> bool {
         difference |= left ^ right;
     }
     difference == 0
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shutdown_stops_owned_children_and_leaves_external_processes_alone() {
+        let program = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let workspace = std::env::temp_dir();
+        let entry = |id: &str| serde_json::json!({
+            "harnessId": id, "label": id, "program": program,
+            "arguments": ["-NoProfile", "-Command", "Start-Sleep -Seconds 60"],
+            "workspace": workspace, "console": "new_window"
+        });
+        let registry = HarnessRegistry::parse(&serde_json::json!({
+            "format": 1, "harnesses": [entry("owned"), entry("external")]
+        }).to_string()).unwrap();
+        let mut external = start_process(&registry.get("external").unwrap().launch).unwrap();
+        let owner = HarnessOwner::new(registry, "test".into());
+        let result = (|| -> Result<()> {
+            owner.start("owned")?;
+            owner.shutdown();
+            let statuses = owner.list();
+            assert_eq!(statuses.iter().find(|status| status.harness_id == "owned").unwrap().lifecycle, HarnessLifecycle::Stopped);
+            assert!(external.try_wait()?.is_none());
+            assert!(owner.start("external").unwrap_err().to_string().contains("shutting down"));
+            Ok(())
+        })();
+        external.terminate().unwrap();
+        external.wait().unwrap();
+        result.unwrap();
+    }
 }

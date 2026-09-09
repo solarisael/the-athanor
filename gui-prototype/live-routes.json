@@ -1,0 +1,17 @@
+{
+  "/live/health": { "path": "/health", "method": "GET" },
+  "/live/insula/vitals": { "path": "/athanor/v1/insula/vitals", "method": "POST" },
+  "/live/insula/trace": { "path": "/athanor/v1/insula/trace", "method": "POST" },
+  "/live/insula/spans": { "path": "/athanor/v1/insula/spans", "method": "POST" },
+  "/live/insula/retention": { "path": "/athanor/v1/insula/retention", "method": "POST" },
+  "/live/docket/board": { "path": "/athanor/v1/docket/board", "method": "POST" },
+  "/live/docket/evidence": { "path": "/athanor/v1/docket/evidence", "method": "POST" },
+  "/live/hallway/inbox": { "path": "/athanor/v1/hallway/inbox", "method": "POST" },
+  "/live/hallway/messages": { "path": "/athanor/v1/hallway/messages", "method": "POST" },
+  "/live/memory/timeline": { "path": "/athanor/v1/memory/timeline", "method": "POST" },
+  "/live/memory/read": { "path": "/athanor/v1/memory/read", "method": "POST" },
+  "/live/lesson/timeline": { "path": "/athanor/v1/lesson/timeline", "method": "POST" },
+  "/live/chat/snapshot": { "path": "/athanor/v1/chat/snapshot", "method": "POST" },
+  "/live/chat/say": { "path": "/athanor/v1/chat/say", "method": "POST" },
+  "/live/room/state": { "path": "/athanor/v1/room/state", "method": "POST" }
+}

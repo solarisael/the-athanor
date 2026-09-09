@@ -1,7 +1,9 @@
 # Runtime Evolution Architecture
 
-Status: 1.0 runtime spine implemented in the 0.9.6 late beta; operator product and release gates remain
-Last updated: 2026-08-17
+Status: the runtime spine has implemented paths and dated evidence.
+Orientation, visible outcomes, cooperative completion, and useful learning remain incomplete.
+Operator product and release gates remain.
+Last updated: 2026-09-06
 
 This document defines the implemented Host, parked Godot, Recall Policy, Paper Boat,
 and narrow delivery spine together with accepted longer-range contracts for
@@ -15,7 +17,9 @@ and contracts created by earlier layers. The public release order lives in
 
 ## 1. Current boundary
 
-The current `0.9.6` source has:
+The source label `0.9.6` is historical; see the
+[release note](./ARCHITECTURE.md#release-and-support-target).
+The examined source has:
 
 - one Rust domain/protocol workspace;
 - file-authoritative Vault and PostgreSQL-authoritative AKASHA;
@@ -27,6 +31,8 @@ The current `0.9.6` source has:
   room-stable unread state, durable Bell notifications, and recipient-authorized
   bounded Knocks; OMP tools expose exact-thread reads while Host owns automatic
   revision-gated inbox projection and claims pointer-only wake requests;
+- PostgreSQL-authoritative Docket quests with capability-gated claim and report
+  operations and room-fenced review independence;
 - Host-owned Recall Policy shared by OMP and parked Godot;
 - transaction-coupled Paper Boat sleep/wake and `boat.ready` Crane outbox rows;
 - a Crane delivery substrate with one
@@ -56,6 +62,29 @@ The current GIGA queue and all durable receipts remain PostgreSQL-owned. NATS is
 delivery-only; parked Godot is presentation-only. Neither may be described as memory or
 authority.
 
+### 1.1 Accepted review, 2026-09-06
+
+Sol accepted a critical organ review on 2026-09-06. The dated census of every
+organ family, with current behavior, remaining gap, and recommended outcome,
+lives in
+[`ARCHITECTURE.md`](./ARCHITECTURE.md#critical-organ-review-2026-09-06).
+Its planning order is coherent orientation, trustworthy visible outcomes,
+carrying work between participants, then useful learning. Release order stays in
+[`roadmap.md`](./roadmap.md); this document adds no second roadmap.
+
+The review preserves the authority boundaries below.
+PostgreSQL is authoritative. NATS carries delivery.
+Host-only Hallway Knock claim and settlement remain intentional boundaries.
+Docket settlement retains its separate room-level independence fence.
+Cingulate remains planned over reliable evidence.
+
+The [2026-09-07 adapter repair](./EVIDENCE.md#generated-turn-presence-repair-2026-09-07) adds generated-turn origins to context preparation.
+It preserves native prompt authority and stable memo keys.
+The component is installed and passes isolated replay.
+Real restart, chat, and root Knock turns now have live incoming Presence observations.
+Host-side attribution remains separate repair work.
+Model routing, headless rooms, Prolog/Datalog, Lean, and companion work remain deferred.
+
 ## 2. Load-bearing invariants
 
 Every implementation must preserve these rules:
@@ -82,7 +111,7 @@ Every implementation must preserve these rules:
 ```mermaid
 flowchart TD
   UI[Web prototype: read-only] --> PROXY[gui-prototype/serve.ts: loopback proxy]
-  PROXY -->|nine POST-only /live/* read routes| HOST[Athanor Host]
+  PROXY -->|allowlisted POST-only /live/* read routes: health, Insula, Docket, Hallway, memory, lessons| HOST[Athanor Host]
   TERM[Harness / terminal adapters] <-->|adapter API| HOST
 
   HOST --> CORE[Core contracts and policy]

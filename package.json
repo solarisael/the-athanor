@@ -18,6 +18,8 @@
     "deploy:omp-adapter": "pwsh -NoProfile -File adapters/omp/deploy-local.ps1",
     "build:pages": "node scripts/build-pages.mjs",
     "build:substrate": "cargo build --release -p akasha",
+    "build:pulse": "cargo build --release -p athanor-pulse",
+    "install:pulse": "pwsh -NoProfile -File scripts/install-pulse.ps1",
     "build:godot": "cargo build -p athanor-godot --target-dir gui/target",
     "build:native": "pwsh -File installer/build-native-release.ps1 -OutDir dist/native"
   },

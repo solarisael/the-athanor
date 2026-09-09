@@ -1,0 +1,36 @@
+{
+  "name": "@solarisael/athanor-workspace-search",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "Local Nemotron workspace search through the public zvec library.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist",
+    "npm-shrinkwrap.json",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "start": "node dist/cli.js server",
+    "index": "node dist/cli.js index",
+    "status": "node dist/cli.js status",
+    "search": "node dist/cli.js search",
+    "test": "node --test src/*.test.ts",
+    "install:omp": "pwsh -NoProfile -File install.ps1"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@zvec/zvec-grep": "0.2.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}

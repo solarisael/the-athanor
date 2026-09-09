@@ -117,6 +117,10 @@ impl fmt::Display for PresenceRuntimeError {
 impl std::error::Error for PresenceRuntimeError {}
 
 impl PresenceRuntime {
+    pub(crate) fn frames(&self) -> impl Iterator<Item = &PresenceFrame> {
+        self.sessions.values().map(|session| &session.frame)
+    }
+
     /// Open the one live frame for an authenticated session.
     ///
     /// A presence is its session. An exact retry of the original key and

@@ -6,8 +6,8 @@ pub const HALLWAY_MAX_BODY_BYTES: usize = 32 * 1024;
 pub const HALLWAY_MAX_ALLOWED_ROOMS: usize = 32;
 pub const HALLWAY_MAX_READ_LIMIT: u32 = 200;
 pub const HALLWAY_DEFAULT_MESSAGES_LIMIT: u32 = 30;
-pub const HALLWAY_MAX_KNOCK_TURNS: u8 = 8;
-pub const HALLWAY_DEFAULT_KNOCK_TURNS: u8 = 4;
+pub const HALLWAY_MAX_KNOCK_TURNS: u8 = 20;
+pub const HALLWAY_DEFAULT_KNOCK_TURNS: u8 = 10;
 pub const HALLWAY_MAX_KNOCK_REASON_BYTES: usize = 2048;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -316,6 +316,8 @@ pub struct HallwayInboxNotification {
 #[serde(rename_all = "camelCase")]
 pub struct HallwayInboxEntry {
     pub hallway: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub members: Option<Vec<String>>,
     /// Derived: next_sequence - 1 - room read_sequence. Never stored.
     pub unread: i64,
     /// Pending targeted notifications for this room.
@@ -444,8 +446,9 @@ pub struct HallwayKnockRequest {
     /// Omit for a root exchange. A continuation supplies its prior Knock UUID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_knock_id: Option<String>,
-    #[serde(default = "default_knock_max_turns")]
-    pub max_turns: u8,
+    /// Omitted roots use four turns; omitted children inherit the stored parent ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -760,7 +763,7 @@ impl HallwayKnockRequest {
         if self.recipient_room == self.room {
             return Err("recipientRoom must name a different room".into());
         }
-        validate_knock_max_turns(self.max_turns)
+        self.max_turns.map_or(Ok(()), validate_knock_max_turns)
     }
 }
 

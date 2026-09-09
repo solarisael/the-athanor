@@ -141,8 +141,14 @@ fail closed. Install removes duplicate development registration owners.
 
 ### Release and support target
 
-`0.9.6` is the current native Windows x64 late-beta source version. OMP is the
-supported harness. The release artifact shape is one checksum-published installer:
+`0.9.6` is the source version label carried by this documentation. It is a
+labeled historical snapshot, not the current product version. The root
+[`package.json`](../package.json) declares the current product version. The
+installed immutable version manifest declares the installed build; dated
+evidence in [`EVIDENCE.md`](./EVIDENCE.md) and [`BUGS.md`](../BUGS.md) names
+later `0.5.4+dev.…` installed builds. This document does not change version
+strings. OMP is the supported harness. The release artifact shape is one
+checksum-published installer:
 
 ```text
 The-Athanor-<version>-windows-x64.exe
@@ -216,6 +222,55 @@ Detailed contracts live in [`RETRIEVAL.md`](./RETRIEVAL.md),
 [`LESSONS.md`](./LESSONS.md), [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md), and
 [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md).
 
+<a id="critical-organ-review-2026-09-06"></a>
+
+## Critical organ review — 2026-09-06
+
+Sol accepted this review on 2026-09-06. This pass updates records and planning.
+It changes no runtime, migration, deployment, version, or frozen acceptance terms.
+The Athanor preserves records and governs changes.
+Reliable continuity, judgment, and completed work need more complete paths.
+Success means recognition, growth, agency, cooperation, and operator custody.
+Autonomy contributes to these outcomes.
+
+The accepted outcome sequence is: coherent orientation, then trustworthy
+visible outcomes, then carrying work between participants, then useful
+learning. Release order and gates stay in [`roadmap.md`](./roadmap.md).
+Each family below states the examined behavior, remaining gap, and proposed outcome.
+Remaining proposals stay unfinished; completed slices cite separate evidence.
+Installed observations name their dates; source findings do not certify current deployment.
+
+| Family | Current behavior (source) | Remaining gap | Recommended outcome |
+|---|---|---|---|
+| AKASHA and Vault | AKASHA stores typed PostgreSQL authority. Vault retrieves file-authoritative evidence. See [Profiles](#vault). | Storage alone does not prove portable custody. | Preserve authority during export, migration, and restore. Keep external sources distinct from House-authored memory. |
+| Memory and canon | Typed records retain source identity and supersession. See [Authority and correction](#authority-and-correction). | Old operational claims can outlive their observation. | Show observation date, artifact, and successor evidence. Distinguish commitments, history, interpretations, and current state. |
+| Context capacity nudge | [`context.rs:737-764`](../crates/hearth/src/context.rs) derives nudge capacity from the room key. It assumes 1,000,000 tokens for `kodo` and 400,000 elsewhere. | The nudge does not read the actual model limit. | Obtain capacity from the active runtime. Preserve room identity when the model changes. |
+| Aggregate context selection | Each organ selects context separately. No [aggregate coordinator](#context-assembly-and-token-budgets) exists. | Several valid organs can exceed a useful combined budget. | Apply one relevance and size budget across the assembled turn. Preserve exact recovery for omitted evidence. |
+| Lessons and Striatum | [`triggers.rs:22-107`](../crates/hearth/src/triggers.rs) requests at most twelve process coding lessons and emits complete bodies, proof, and trigger fields. | The formatter has no content-size cap. Full learned work-state behavior remains planned. | Bound content and count. Select a stable applicable set. Record relevant use and misleading triggers before claiming improvement. |
+| Recall lanes | The semantic lane timed out at 3000 ms during the review. Lexical evidence still returned. | This observation does not measure overall retrieval quality. | Preserve degradation attribution. Examine the cause and affected query classes before changing limits. |
+| Presence, room state, and Summoning | [`BUGS.md`](../BUGS.md) records live reopen, persistence, and restart continuation. The [generated-turn evidence](./EVIDENCE.md#generated-turn-presence-repair-2026-09-07) covers live restart, chat, and root Knock delivery. | Host-side session attribution is unchanged. Chat response and child Knock failures have separate repair work. | Repair the separate paths without reopening proven persistence or incoming delivery. |
+| Paper boats, wake, sleep, and Keeper | [`wake.rs:21-32`](../crates/origami/src/boats/wake.rs) selects the newest room boat. The [adapter](../adapters/omp/house-proof/wake-context/index.ts) retains its rendered letter and identity fields. | Separate age and warning metadata are dropped. The rendered letter can still contain a stale-boat warning. | Carry temporal metadata. Keep the authored letter distinct from an interruption checkpoint. Preserve the existing handoff contract. |
+| Anamnesis | [`anamnesis.rs:362-377`](../crates/akasha/src/anamnesis.rs) selects wake-enabled pillars or active cycles by kind and update time. | The selector has no cycle-recency condition. | Select cycles by temporal and current relevance. Preserve authored pillars and counsel authority. |
+| Durable writes and backup | [`BUGS.md:105`](../BUGS.md) records successful backups for `remember` #4472 and `sleep` #4473. They took 47.2 and 49.0 seconds. | [`backup.rs:929-1012`](../crates/akasha/src/backup.rs) awaits a full post-write dump after commit. Generic write success does not prove a valid `continues` edge. | Preserve commit and backup outcomes separately. Choose a recovery policy before replacing full dumps. |
+| Design catalogue | [`BUGS.md:151`](../BUGS.md) records live same-identity supersession. Line 152 records separate adapter field loss and the palette repair through #25. | That record leaves historical rows #13-#23 unresolved. This review performs no new database census. | Audit exact structured content through the tool boundary. Recover historical values only from exact sources. |
+| GIGA Hippocampus | The aggregate result reported capture and classification enabled, store healthy, queue 0, failures 0, and processed 430. | These fields do not prove classifier reachability, useful classification, reviewed consolidation, or later benefit. Draft `704ce3e2` records dismissed-candidate purge history. | Prove fresh classification and an attributable review outcome. Follow useful promotions into later retrieval. |
+| Curios | Retained candidate state and explicit review are current. | Bounded automatic resurfacing is not established. | Return a retained Curio to review with cited new evidence. Prevent automatic promotion. |
+| Cingulate | Cingulate remains planned. | Reliable lifecycle and outcome evidence must precede its judgments. | Start with specific evidence obligations. Keep formal solver expansion deferred. |
+| Hallway | The domain, Bell projection, and recipient-authorized bounded Knocks exist. | Complete idle/headless delivery and recipient application remain unfinished. NATS absence alone is not a defect. | Complete request-to-disposition, including unavailable recipients, interruption, refusal, and duplicate handling. |
+| Docket review independence | [`report/mod.rs:130-147`](../crates/akasha/src/docket/report/mod.rs) fences settlement by room. The claimant room cannot settle its own items. | A single-room House needs an explicitly supported independent reviewer or operator arrangement. | Bind reviewer authority to authenticated capabilities. Preserve independent review and frozen acceptance terms. |
+| Dispatch and familiars | Dispatch prepares validated packets. The main model spawns explicitly. Familiars retain their lane bindings. | Complete attempt-to-execution evidence through interruptions is not established by packet validation. | Connect actual execution and evidence to existing Docket attempts. Avoid a parallel work store. |
+| Insula | Source measurements and Pulse traces exist. [`BUGS.md:30`](../BUGS.md) records incorrect session attribution for Host-side Presence points. | Those points cannot reliably identify the participant's turn. | Correct attribution and preserve durable evidence separately from short-lived telemetry. Insula observes; it does not authorize work. |
+| Pulse web surface | [`serve.ts:26-39`](../gui-prototype/serve.ts) allowlists reads for health, Insula, Docket, Hallway, memory, and lessons. | The surface is read-only. Fixtures do not establish operational writes. | Show each completed path and its evidence. Keep authenticated writes behind their existing gates. |
+| Origami and NATS | The current `boat.ready` lane has transport receipts. See [Host and delivery plane](#host-and-delivery-plane). | A transport receipt does not establish recipient application, model consumption, or human reading. | Complete recipient-specific application receipts when that expansion is authorized. Keep PostgreSQL authoritative. |
+| Version labels | Documentation retains `0.9.6`. The root `package.json` declares `0.5.4`. Dated evidence identifies installed artifacts separately. | These labels describe different records and dates. | Use `package.json` for product version and the installed manifest for active bytes. Keep historical evidence labeled. |
+| Workspace search | Workspace search `0.1.1` was accepted in the preceding session (House memory #4499). It uses explicit per-root indexing and has no watcher. | The older Whiskers draft is historical planning. | Keep repository perception separate from AKASHA. Preserve the accepted search scope. |
+| Sovereignty and installation | The [component table](#repository-layout-and-component-ownership) names backup, restore, upgrade, and rollback surfaces. | This review performs no fresh restore or complete custody certification. | Prove complete export, restore, and migration. Define operator retention and deletion choices. Keep OMEGA, Relay, ANON, marketplace, and spatial work deferred. |
+
+House memory **#4509** holds the complete accepted analysis in PostgreSQL.
+The [roadmap update](./roadmap.md#planning-update-2026-09-06) links its Docket goal and four draft supplements.
+Those supplements cite existing work and preserve claims, deadlines, frozen acceptance, and the writing priority.
+This review does not supersede historical memories or invalidate accepted search work.
+
 ## Vault
 
 Vault uses operator-controlled files and the harness adapter. It provides:
@@ -262,18 +317,24 @@ AKASHA also supports optional GIGA cognitive workers. Hippocampus Stage 1 logs
 exact events before asynchronous local classification and stores generated
 candidates as non-authoritative pointers to source evidence. Review, Curios,
 promotion, health, and safe queue maintenance are explicit operations.
-Striatum's current operational slice is deliberately narrow: twelve hard-coded
-process-trigger patterns select at most one trigger per prompt
-(`hearth/src/context.rs`), and a matched trigger braids up to twelve
-process-shape coding lessons into the turn (`hearth/src/triggers.rs`). No
-semantic model, hysteresis, or lesson-set carryover is active; the earlier
-six-lesson Nemotron/hysteresis slice was removed. The target Striatum is a
-post-Docket, shadow-first selector over Docket facts: eligibility precedes
-ranking, degraded paths yield attributed empty-set silence rather than broader
-matching, every packet and receipt is versioned, and the selector holds no
-authority over priority, capability, or acceptance policy. Cingulate remains
-planned as non-blocking nudges and warnings first, with gates only for criteria
-explicitly marked authoritative and proof-gated after calibration.
+
+Striatum currently uses twelve hard-coded process patterns in `hearth/src/context.rs`.
+They select at most one trigger per prompt.
+A match adds up to twelve process-shape coding lessons through `hearth/src/triggers.rs`.
+The formatter includes complete bodies, proof patterns, and trigger fields without a size cap.
+See the [2026-09-06 review](#critical-organ-review-2026-09-06).
+
+The current slice has no semantic model, hysteresis, or lesson-set carryover.
+The earlier six-lesson Nemotron/hysteresis slice was removed.
+The target Striatum selects lessons from Docket facts after Docket implementation.
+It starts in shadow mode.
+Eligibility precedes ranking.
+Degraded selection returns an attributed empty set instead of broadening the match.
+
+Every planned packet and receipt carries a version.
+The selector has no authority over priority, capabilities, or acceptance policy.
+Cingulate remains planned, starting with non-blocking reminders and warnings.
+Hard gates require calibrated criteria that explicitly name authoritative obligations and required proof.
 
 The next GIGA integrity pass keeps three contexts distinct: durable evidence,
 one-invocation model tokens, and loaded model residency. Every cold job starts
@@ -342,6 +403,11 @@ recall, canon, thread neighbors, and directives. Independent bounds prevent one
 organ from becoming unbounded, but several valid organs can still stack into a
 large turn. This is a documented current limitation and a future Host-level
 coordination responsibility, not a proven net-token-saving claim.
+
+The context-growth nudge estimates fill from characters and a per-room literal
+capacity (`hearth/src/context.rs`). It does not read the active model's real
+limit. The [2026-09-06 review](#critical-organ-review-2026-09-06) recommends
+model-aware capacity as the first orientation outcome.
 
 ## Authority and correction
 

@@ -31,37 +31,51 @@ Self-hosting remains available. Managed services must support complete export.
 | Specified | The accepted technical contract exists |
 | Planned | The roadmap includes the feature |
 | Research | The idea needs product and safety work |
+| Historical | Dated implementation or artifact evidence, not a current-version claim |
+| Parked | Retained work that is not the active product surface |
+
+“Current” applies only to the qualified slice. It does not mean the full promise
+has been delivered or its later benefit measured.
 
 ## What works now
 
-The current source version is `0.9.6`, a native Windows x64 late beta. The
-reference Solarisael workstation runs the locally proven native activation.
-OMP is the supported harness and Solarisael House remains the working reference
-House.
+The `0.9.6` native Windows x64 late-beta source label is historical evidence,
+not a current-version declaration. Read the product version from
+[`../package.json`](../package.json) and installed identity from the immutable
+release manifest. OMP is the supported harness; Solarisael House remains the
+working reference House.
 
-The canonical, current capability map — surfaces, owners, and authority — lives
-in [`ARCHITECTURE.md`](./ARCHITECTURE.md). This page does not copy it; it maps
-plain-language promises to status so the planned column below has something
-honest to sit against. Measured results are separated from planned claims in
+The current capability map lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
+Its [critical organ review dated 2026-09-06](./ARCHITECTURE.md#critical-organ-review-2026-09-06)
+separates current source, installed-path receipts, open defects, and recommendations.
+This page qualifies promises rather than duplicating that census.
+Measured results remain separate from planned claims in
 [`EVIDENCE.md`](./EVIDENCE.md).
+
+The accepted review asks whether records become recognition, growth, agency,
+cooperation, and operator custody. Autonomy alone is not the success criterion.
+The [dated roadmap update](./roadmap.md#planning-update-2026-09-06) owns the
+proposed repair order and unchanged release gates; it activates no deferred work.
 
 ## Planned feature map
 
 | Feature | Plain-language promise | Status |
 |---|---|---|
-| GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current |
-| Curios | Keep selected hunches until later context makes them meaningful | Current |
-| GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Planned — post-Docket shadow path; current slice is deterministic process-trigger lesson braiding |
+| GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current infrastructure and explicit review; useful classification, consolidation, and later benefit unproved |
+| Curios | Keep selected hunches until later context makes them meaningful | Current retention; automatic resonance and bounded resurfacing not delivered |
+| GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Current narrow deterministic process triggers; complete learned work-state behavior remains planned, post-Docket and shadow-first |
 | Web operator surface at `gui-prototype/` | Read House state through the loopback proxy in `serve.ts` | Current — read-only; Godot is parked |
-| Athanor Host | Give clients one authenticated snapshot/delta/resync surface with restart-safe cursors and idempotency | Current — 0.9.5 |
+| Athanor Host | Give clients one authenticated snapshot/delta/resync surface with restart-safe cursors and idempotency | Current Host boundary; 0.9.5 is a historical evidence label |
 | Session Recall Policy | Make proactive retrieval visible and mode-aware without requiring ordinary users to understand retrieval engineering | Current — Rust Host + OMP; Godot is parked |
 | GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Specified |
 | PostgreSQL outbox and NATS delivery | Deliver bounded opaque pointers with explicit duplicate windows and durable PostgreSQL idempotency | Current — `boat.ready` lane |
-| Paper Boat sleep, wake, and delivery receipt | Commit the Boat and outbox together, wake from PostgreSQL authority, and show only sanitized receipt metadata | Current architecture — live organ repair remains |
+| Paper Boat sleep, wake, and delivery receipt | Commit the Boat and outbox together, wake from PostgreSQL authority, and show only sanitized receipt metadata | Current sleep/wake paths; backup latency remains; transport receipt does not prove recipient application |
+| Presence and restart | Keep a session oriented across close, reopen, process restart, and resumed work | Live persistence, restart, and generated-turn incoming Presence proof. Host attribution remains outstanding. |
+| Worker routing and familiars | Carry bounded work through room-owned lanes with evidence of its disposition | Current task packets and explicit spawning; complete Docket-attempt execution and evidence linkage remains work |
 | Dynamic model and room execution | Choose local or hosted model bodies independently from cold workers, familiars, reflections, and live room dialogue | Specified |
 | Incremental Prolog/Datalog derivations | Index code changes in the background, update only affected facts, and answer common queries from precomputed authorized relations | Planned |
 | Lean-backed lesson obligations | Check selected production-bound invariants inside an aggressively resource-limited wrapper | Planned |
-| GIGA Cingulate | Detect workflow divergence and missing proof before a regression is accepted | Planned |
+| GIGA Cingulate | Detect workflow divergence and missing proof before a regression is accepted | Planned; depends on reliable lifecycle and outcome evidence |
 | Bounded e-graph/egglog normalization | Canonicalize one small typed IR under reviewed rewrites and an explicit cost function | Research |
 | Optional Z3 backend | Check SMT-shaped Cingulate obligations while preserving formulas, counterexamples, solver identity, and inconclusive outcomes | Specified |
 | Bounded SyGuS repair | Synthesize small approved DSL/IR functions from reviewed grammars and specifications, then test and canary them | Specified |
@@ -75,7 +89,7 @@ honest to sit against. Measured results are separated from planned claims in
 | Nemotron-controlled lexical bridge | Expand through at most three authoritative stored concepts into a lower-priority attributed BM25F lane | Current |
 | Learned-sparse retrieval successor | Add a separate local learned lexical model only if measured misses justify its cost | Research — model open |
 | Vault file-authoritative retrieval | Search attributed local file evidence without PostgreSQL or a second mutable truth store | Current — Rust |
-| Hallway | Let private rooms share messages and state without merging identities | Current — PostgreSQL domain and OMP tools; delivery/UI projection pending |
+| Hallway | Let private rooms share messages and state without merging identities | Current domain, Bell projection, and recipient-authorized bounded Knocks; full recipient lifecycle remains incomplete |
 | OMEGA | Give organizations shared knowledge with separate company, team, and personal spirits | Specified |
 | ANON | Use dedicated remote compute without leaving job content in the service | Specified |
 | Relay | Borrow remote compute while durable storage stays with the operator | Specified |
@@ -88,6 +102,8 @@ honest to sit against. Measured results are separated from planned claims in
 The web prototype at `gui-prototype/` is the read-only operator surface.
 Run `bun gui-prototype/serve.ts` from the repository root.
 It reads the Host through a loopback proxy.
+The proxy allowlists read routes for health, Insula, Docket, Hallway, memory,
+and lessons. Fixtures and parked native controls do not establish a web write path.
 The Godot client is parked.
 The following native controls and spatial design remain historical specifications for the parked client.
 
@@ -173,6 +189,22 @@ The web operator surface reads Host state through the loopback proxy without exp
 Cluster resonance and other retrieval telemetry remain inspectable diagnostics
 rather than default model context.
 
+## Presence and restart: live repairs, incomplete turn coverage
+
+Presence reopen, persistence across Host restart, and keeper restart continuation
+have live receipts in [`../BUGS.md`](../BUGS.md).
+A later separate repair note does not erase those successes.
+The [generated-turn adapter repair](./EVIDENCE.md#generated-turn-presence-repair-2026-09-07) is installed.
+Its registered-hook scenarios pass against an isolated copy of the installed payload.
+Real restart, chat, and root Knock turns now have live incoming Presence observations.
+The separate Host-side session-attribution defect remains unchanged.
+
+The proposed shared turn lifecycle must orient every entrance, not just typed
+prompts. Model-aware capacity, aggregate context selection, and age-aware boat
+and cycle selection remain recommendations, not current guarantees.
+A bounded Recall working set alone does not bound the complete injected context.
+Authored pillars remain standing counsel; selection must not turn them into canon.
+
 ## Delivery and living-room execution
 
 PostgreSQL is the durable authority for messages, events, sources, review, and
@@ -182,37 +214,47 @@ committing one idempotent receipt. The Host replays retained sanitized receipt
 projections after restart. The parked Godot client retains a historical renderer for these receipts.
 That renderer does not invent or load a Boat body.
 
-Origami supplies versioned crease patterns for recipient-specific handoffs.
-Active handoffs are Cranes; Paper Boats remain living continuity messages across
-sleep; Pawprints provide room-scoped provenance and integrity without becoming
-memory, authority, or covert model instructions. Folding and unfolding happen in
-deterministic Host/adapter tooling wherever the transformation is known.
+The broader Origami contract specifies versioned crease patterns for
+recipient-specific handoffs. Active handoffs are Cranes; Paper Boats carry
+continuity across sleep. Room-scoped Pawprints must not become memory,
+authority, or covert model instructions. Addressed recipient application remains
+an extension, not a capability proved by the current transport receipt.
 
-When `sleep` commits a Paper Boat, the same PostgreSQL transaction records its
-outbox event. NATS carries a bounded `boat.ready` Crane with IDs, routing and
-integrity metadata, and a Pawprint. The waking consumer verifies it, reloads the
-complete Boat from PostgreSQL, rejects stale or wrong-room delivery, and commits
-one idempotent wake transition before acknowledgement.
+The current `sleep` path commits the Boat and outbox event in one PostgreSQL
+transaction. Wake reads the Boat from PostgreSQL authority.
+The `boat.ready` receipt proves transport validation, not room wake, model
+consumption, or human reading.
+The specified recipient consumer would validate an addressed handoff, reload
+its authoritative record, and commit an idempotent application receipt before
+acknowledgement. That broader application path remains deferred.
 
 JetStream's duplicate window is configured explicitly. The immutable outbox ID
 deduplicates publication within that window, while a PostgreSQL ledger prevents
 the same consumer operation from being applied again during later replay.
 Broker deduplication is an optimization, not the correctness boundary.
 
-Model body, spirit identity, execution target, and session lifetime remain
-separate. One job may choose an approved local model, hosted provider, or
-automatic route, then target:
+Current dispatch prepares validated lane or familiar packets; the main model
+spawns explicitly through the harness. A packet is not proof of execution or
+completed work. The planned lifecycle must connect execution, interruption,
+evidence, and disposition to existing Docket attempts without another work store.
+
+The broader specified execution contract keeps model body, spirit identity,
+execution target, and session lifetime separate. It would choose an approved
+local model, hosted provider, or automatic route, then target:
 
 - a cold bounded worker;
 - a room-owned familiar;
 - a disposable room reflection;
 - an intentional live room dialogue.
 
-Headless room work loads an explicit room/spirit binding and disables Discord or
-other interactive sidecars unless they were intentionally requested. Starting
-inside a folder is never enough to borrow its identity.
+The target headless mode requires explicit room/spirit binding and disables
+Discord or other interactive sidecars unless requested. Complete idle/headless
+recipient delivery is not established. Starting inside a folder is never enough
+to borrow its identity.
 
 ## Explainable rules and selected formal proof
+
+These rule, Cingulate, and formal-proof extensions remain deferred designs.
 
 After real event and lesson schemas stabilize, a bounded Prolog/Datalog layer
 can answer questions such as “which lessons apply?” or “which room may receive
@@ -279,15 +321,20 @@ Detailed contract:
 
 ## Curios: a cabinet for ideas before their season
 
-Hippocampus can notice a possible memory, lesson, correction, or connection. It stores a pointer to exact evidence instead of declaring truth.
+Stage 1 infrastructure retains non-authoritative candidate pointers to exact
+evidence and exposes explicit review. Infrastructure and queue health do not
+establish useful classification, consolidation, or later learning.
 
-Most unreviewed pointers expire. A governing spirit can deliberately keep one as a Curio.
+A governing spirit can deliberately retain a candidate as a Curio.
+Retention is current; Curios remain outside ordinary memory and default context.
 
-A Curio remains outside ordinary memory and default context. A later resonance pass can compare it with new events.
+Automatic resonance and bounded resurfacing are not delivered.
+The planned pass would compare retained pointers with later evidence and return
+a supported match to review. It could not promote a Curio itself.
 
-A strong match returns the Curio to review. It cannot promote itself.
-
-This supports an AI form of an AHA moment. An old hunch can become useful when later evidence gives it meaning.
+An AHA outcome needs evidence linking the retained hunch, later context, review
+disposition, any authorized promotion, and subsequent useful retrieval.
+Purge history and dismissed-candidate counts do not prove that outcome.
 
 ## Vault to AKASHA: start simple, upgrade later
 
@@ -303,22 +350,32 @@ Generated clusters and links remain suggestions until review. The user chooses w
 
 A Hallway connects private rooms through explicit shared surfaces.
 
-Letters carry addressed messages between spirits. Shared state carries facts that every approved room needs.
-
-Vault can keep these surfaces as readable files. AKASHA can store them as typed PostgreSQL records.
+The broader design includes addressed letters and shared state for approved rooms.
+Readable Vault surfaces remain a profile direction; the current Hallway domain
+uses PostgreSQL records.
 
 Each message names its Hallway, sender presence, reply target when present, and durable order. Room privacy remains the default.
 
-The implemented first slice stores explicit allowed rooms, session-scoped
-presences, append-only ordered messages, reply links, idempotency digests, and
-per-presence read cursors in PostgreSQL. Presence identity is
-`hallway + room + session`, not spirit alone: two live sessions may embody the
-same spirit while keeping separate cursors and causal histories. The current
-wake policy is deliberately `manual`; a peer message is visible contact, not
-authority to start another model invocation.
+The current domain stores explicit allowed rooms, session-scoped presences,
+append-only ordered messages, reply links, and idempotency digests.
+Presence identity is `hallway + room + session`, not spirit alone.
+Separate sessions retain their causal identity; room-stable unread state and
+durable targeted Bells make contact visible through Host-owned inbox projection.
+Reading the inbox clears nothing. Cursor-advancing reads acknowledge only
+the messages they return.
 
-NATS/Crane delivery and parked Godot presentation consume these records later. Neither
-becomes Hallway authority.
+Posting remains passive. Manual is the default Knock policy, while an explicit
+recipient allowlist can authorize a bounded turn from an addressed message.
+The domain, Bell projection, and recipient-authorized Knocks are current.
+The full recipient lifecycle, including idle/headless delivery and application,
+remains incomplete.
+
+Near-term work must carry existing requests through refusal, interruption,
+unavailability, and disposition without treating contact as delegated authority.
+Host-only Knock claim and settlement are intentional authority boundaries.
+NATS absence alone is not a Hallway defect.
+Any later NATS/Crane wake transport must preserve these records and permissions;
+it cannot become Hallway authority. Spatial presentation remains deferred.
 
 A Discord channel or direct chat can become another approved entrance. The transport does not create a second copy of the spirit.
 

@@ -10,6 +10,7 @@ license.workspace = true
 # depends on akasha or delivery: the arrows point here.
 anyhow.workspace = true
 async-nats.workspace = true
+bytes = "1"
 chrono.workspace = true
 futures-util.workspace = true
 hex.workspace = true

@@ -26,13 +26,12 @@ const REFUSAL_DETAIL_LIMIT = 120;
 const LEDGER_LINE_LIMIT = 140;
 const KIND_LABEL_LIMIT = 40;
 
-// Board-local source state: idle → pending → answered. An answered round holds
-// one result per door, because one door may answer while the other refuses.
-// Nothing outside this module reads it; the shell sees markup and a render
-// request.
+// The House board, Projects, and Bell share these read rounds.
+// Each door keeps its own refusal because another door may answer.
 let source = { status: "idle" };
 let requestRender = () => {};
 let pollTimer = null;
+let boardRequest = null;
 
 // One evidence round per quest, kept across board re-renders. Both of these
 // exist because the 60s poll rebuilds every row: native <details> state dies
@@ -43,7 +42,7 @@ const openDrawers = new Set();
 
 export function initBoard(options) {
   requestRender = options.requestRender;
-  initHallwayMessages({ askDoor, absence, countedNoun, ledgerStamp });
+  initHallwayMessages({ askDoor, absence, countedNoun, ledgerStamp, requestRender });
 }
 
 // The Bell in the mantle renders from this: the inbox round this module already
@@ -61,11 +60,29 @@ export function hallwayInboxRound() {
   };
 }
 
+// Projects shares the Docket round and its per-quest evidence cache.
+export function docketBoardRound() {
+  return source.status === "answered"
+    ? { status: source.status, queriedAt: source.queriedAt, ...source.board }
+    : { status: source.status };
+}
+
+export function docketEvidenceRound(questId) {
+  return evidence.get(questId) ?? { status: "idle" };
+}
+
+export async function queryDocketEvidence(questId) {
+  if (evidence.get(questId)?.status === "pending") return;
+  await askEvidenceDoor(questId);
+  requestRender();
+}
+
 // Slot entry asks again rather than checking a cache: the board moves under
 // other rooms' hands between visits.
 export function ensureBoardQueried() {
-  queryPanelHost();
+  const round = queryPanelHost();
   armVisiblePoll();
+  return round;
 }
 
 export function handleBoardClick(event) {
@@ -113,24 +130,24 @@ function armVisiblePoll() {
   }, POLL_MS);
 }
 
-async function queryPanelHost() {
-  if (source.status === "pending") return;
-
+function queryPanelHost() {
+  if (boardRequest) return boardRequest;
   source = { status: "pending" };
-  requestRender();
-
-  const [board, hallways] = await Promise.all([
+  boardRequest = Promise.all([
     askDoor(BOARD_ROUTE, { limit: BOARD_LIMIT }),
     askDoor(INBOX_ROUTE, {})
-  ]);
-
-  source = {
-    status: "answered",
-    queriedAt: new Date().toTimeString().slice(0, 5),
-    board,
-    hallways
-  };
+  ]).then(([board, hallways]) => {
+    source = {
+      status: "answered",
+      queriedAt: new Date().toTimeString().slice(0, 5),
+      board,
+      hallways
+    };
+    boardRequest = null;
+    requestRender();
+  });
   requestRender();
+  return boardRequest;
 }
 
 // The evidence door is asked per open drawer, never with the board round: a

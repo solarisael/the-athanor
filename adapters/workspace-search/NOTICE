@@ -1,0 +1,6 @@
+The Athanor
+Copyright 2026 Sol
+
+This adapter uses the public zvec-grep library under Apache-2.0.
+Its npm dependencies retain their own license and attribution files.
+The Nemotron model stays in the local Ollama installation and is not redistributed.

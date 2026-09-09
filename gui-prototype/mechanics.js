@@ -1,14 +1,12 @@
-// Mechanical observatory — the configuration census in House slot 2.
-//
-// Owns the source-census snapshot, the category/query/scroll view state, and
-// every observatory render. The shell delegates its clicks and input here and
-// asks for the scroll position at render time. Pulse renders inside the
-// observatory frame, so this module composes it.
+// House slot 2 combines dated configuration with the shared Host rounds.
+// Pulse keeps its own source; observatory runtime rows use health.js.
 
 import { escapeHtml } from "./text.js";
-import { renderHousePulse, hostLinkChip } from "./pulse.js";
+import { renderHousePulse } from "./pulse.js";
+import { healthSourceLine, healthSourceTone, roomStateChannel } from "./health.js";
+import { liveMechanic } from "./mechanics-live.js";
 
-// local interaction snapshot from the 2026-08-18 source census; Host authority remains disconnected
+// The dated census supplies configuration; liveMechanic replaces runtime fixtures.
 function mechanic(id, label, value, {
   defaultValue = value,
   scope = "House",
@@ -368,6 +366,7 @@ function mechanicsEntries() {
     : HOUSE_MECHANICS_SNAPSHOT.categories.filter(candidate => candidate.id === category);
 
   return categories.flatMap(group => group.rows
+    .map(liveMechanic)
     .filter(row => {
       if (!needle) return true;
       return [group.label, group.summary, ...Object.values(row)].join(" ").toLowerCase().includes(needle);
@@ -382,7 +381,7 @@ function renderMechanicRow({ category: group, row }) {
         <span class="mechanics-row-title"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(group.label)}</small></span>
         <span class="mechanics-row-value"><small>Effective</small><code>${escapeHtml(row.value)}</code></span>
         <span class="mechanics-row-flags" aria-label="${escapeHtml(`${row.health}; ${row.mutability}`)}">
-          <span data-tone="${mechanicsHealthTone(row.health)}">${escapeHtml(row.health)}</span>
+          <span data-tone="${row.tone ?? mechanicsHealthTone(row.health)}">${escapeHtml(row.health)}</span>
           <span data-tone="quiet">${escapeHtml(row.mutability)}</span>
         </span>
       </summary>
@@ -410,9 +409,10 @@ export function renderHouseMechanics() {
       <header class="mechanics-lead">
         <span class="eyebrow">House mechanics</span>
         <h2 id="mechanics-title">Mechanical observatory</h2>
-        <p>Effective values, ownership, health, and consequence from the current source census.</p>
+        <p>Host-reported runtime values and dated source-census configuration. Missing runtime facts stay not reported.</p>
         <div class="mechanics-snapshot-status" aria-label="Snapshot status">
-          ${hostLinkChip()}
+          <span data-tone="${healthSourceTone()}">${escapeHtml(healthSourceLine())}</span>
+          <span data-tone="${roomStateChannel().tone}">${escapeHtml(roomStateChannel().full)} · ${escapeHtml(roomStateChannel().detail)}</span>
           <span>Source census · ${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.capturedAt)}</span>
           <span>${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.revision)}</span>
         </div>
@@ -432,7 +432,7 @@ export function renderHouseMechanics() {
       </div>
       <p class="mechanics-results-status" role="status" aria-live="polite"></p>
       <div class="mechanics-results"></div>
-      <footer>Disconnected surface · PostgreSQL-backed controls may be Host-writable later; every control remains read-only here.</footer>
+      <footer>Runtime facts come from shared Host rounds. Source-census configuration is dated above. Every control remains read-only here.</footer>
     </section>`;
 }
 

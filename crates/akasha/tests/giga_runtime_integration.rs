@@ -1660,6 +1660,7 @@ async fn queue_and_atomic_promotion_contracts() {
         giga_source_ledger_dir: None,
         giga_source_room: None,
         house_tz: "America/Sao_Paulo".into(),
+        nats_url: None,
     };
     let admin = PgPoolOptions::new()
         .max_connections(1)

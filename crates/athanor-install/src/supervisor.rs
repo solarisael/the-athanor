@@ -319,7 +319,7 @@ impl RuntimeConfig {
     }
 }
 
-fn loopback_address(host: &str, port: u16) -> Result<SocketAddr> {
+pub(crate) fn loopback_address(host: &str, port: u16) -> Result<SocketAddr> {
     let address: SocketAddr = format!("{host}:{port}").parse()?;
     if !address.ip().is_loopback() {
         bail!("managed service address {address} must be loopback");

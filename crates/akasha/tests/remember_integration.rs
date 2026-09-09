@@ -120,6 +120,7 @@ async fn isolated_database_guard() {
         giga_source_ledger_dir: None,
         giga_source_room: None,
         house_tz: "America/Sao_Paulo".into(),
+        nats_url: None,
     };
     let source_path = format!("isolated-test/{}", Uuid::new_v4());
     let body = "This mutation proves the dedicated PostgreSQL authority path.";
@@ -213,6 +214,7 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
         giga_source_ledger_dir: None,
         giga_source_room: None,
         house_tz: "America/Sao_Paulo".into(),
+        nats_url: None,
     };
     let suffix = Uuid::new_v4();
     let root_source = format!("thread-integration/{suffix}/root");
@@ -320,6 +322,7 @@ async fn lesson_write_lands_typed_columns_and_trigger_spec() {
         giga_source_ledger_dir: None,
         giga_source_room: None,
         house_tz: "America/Sao_Paulo".into(),
+        nats_url: None,
     };
     let title = format!("lesson door proof {}", Uuid::new_v4());
     let receipt = remember(
@@ -494,6 +497,7 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     giga_source_ledger_dir: None,
                     giga_source_room: None,
                     house_tz: "America/Sao_Paulo".into(),
+                    nats_url: None,
                 };
                 let params = RecallRequest::new(RoomKey::new(room)?, body.into(), 1, 0.0, 8, 0.0)?
                     .with_temporal_decay(true);
@@ -809,6 +813,7 @@ async fn remember_with_backup_returns_a_verifiable_dump_receipt() {
         giga_source_ledger_dir: None,
         giga_source_room: None,
         house_tz: "America/Sao_Paulo".into(),
+        nats_url: None,
     };
     let source_path = format!("isolated-test/backup-{}", Uuid::new_v4());
     let receipt = remember(

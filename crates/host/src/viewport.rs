@@ -1,3 +1,4 @@
+use hearth::MANUAL_RECORD_CAP;
 use protocol::{
     RecallCandidate, RecallCanonMatch, RecallPresentation, RecallPresentationCandidate,
     RecallPresentationCanonMatch, RecallPresentationClusterProfile,
@@ -107,6 +108,17 @@ const MAX_TERM_CHARS: usize = 128;
 const MAX_REASONS: usize = 5;
 const MAX_REASON_CHARS: usize = 256;
 const MAX_CANDIDATE_EXCERPT_CHARS: usize = 900;
+// Seats one presentation keeps. The automatic working set and the manual
+// record read share the count; only the manual read fills each seat with the
+// whole record (`hearth::MANUAL_RECORD_CAP`, the same number, owned upstream
+// so the substrate and this viewport can never disagree on how many).
+const MAX_KEPT_CANDIDATES: usize = 5;
+// Warnings are one line each. An automatic turn reads a handful under its
+// budget; a manual read keeps every warning whole, because each missing,
+// refused, or dropped ID line is part of the answer.
+const MAX_WARNINGS_AUTOMATIC: usize = 8;
+const MAX_WARNING_CHARS_AUTOMATIC: usize = 300;
+const MAX_DATE_BODY_EXCERPT_CHARS: usize = 900;
 // A canon row the caller named is authority, not a card: it is shown whole.
 // This ceiling exists only so one pathological row cannot swallow a turn, and
 // crossing it is always marked with the deterministic full read.
@@ -263,7 +275,10 @@ fn exact_signals(
     signals
 }
 
-fn compact_candidate(candidate: &RecallCandidate) -> RecallPresentationCandidate {
+fn compact_candidate(
+    candidate: &RecallCandidate,
+    mode: RecallViewportMode,
+) -> RecallPresentationCandidate {
     RecallPresentationCandidate {
         source_path: bounded(&candidate.source_path, MAX_SOURCE_PATH_CHARS),
         title: bounded(&candidate.title, MAX_TITLE_CHARS),
@@ -315,6 +330,12 @@ fn compact_candidate(candidate: &RecallCandidate) -> RecallPresentationCandidate
             .map(|value| bounded(value, MAX_REASON_CHARS))
             .collect(),
         excerpt: bounded(&candidate.excerpt, MAX_CANDIDATE_EXCERPT_CHARS),
+        // A manual read is the whole selected record; the count cap upstream
+        // is the only budget. An automatic working set never carries a body.
+        body: match mode {
+            RecallViewportMode::Manual => candidate.body.clone(),
+            RecallViewportMode::Automatic => None,
+        },
     }
 }
 
@@ -440,6 +461,18 @@ pub fn apply_viewport(
     let mut kept = Vec::new();
     let mut suppressions = Vec::new();
     let mut reason_counts = HashMap::<String, u64>::new();
+    let mut overflow = Vec::<String>::new();
+    let keep_cap = match mode {
+        RecallViewportMode::Manual => MANUAL_RECORD_CAP,
+        RecallViewportMode::Automatic => MAX_KEPT_CANDIDATES,
+    };
+    // Only `retrievalCandidates[].body` carries a whole record, and only in a
+    // manual read. Date and canon lanes keep their pre-existing bounds in both
+    // modes so the record cap cannot be bypassed through a second lane.
+    let (warning_cap, warning_chars) = match mode {
+        RecallViewportMode::Manual => (usize::MAX, usize::MAX),
+        RecallViewportMode::Automatic => (MAX_WARNINGS_AUTOMATIC, MAX_WARNING_CHARS_AUTOMATIC),
+    };
 
     for (index, candidate) in result.retrieval_candidates.iter().enumerate() {
         let identity = candidate_identity(candidate, index);
@@ -479,11 +512,25 @@ pub fn apply_viewport(
                 reason: reason.into(),
             });
             *reason_counts.entry(reason.into()).or_default() += 1;
-        } else if kept.len() < 5 {
+        } else if kept.len() < keep_cap {
             if mode == RecallViewportMode::Automatic {
                 session.exposures.insert(identity, exposures + 1);
             }
-            kept.push(compact_candidate(candidate));
+            kept.push(compact_candidate(candidate, mode));
+        } else {
+            // Every seat is taken. The overflow is still accounted: a
+            // suppression per row, never a silent drop.
+            overflow.push(
+                candidate
+                    .memory_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| identity.clone()),
+            );
+            suppressions.push(RecallViewportSuppression {
+                identity,
+                reason: "record-cap".into(),
+            });
+            *reason_counts.entry("record-cap".into()).or_default() += 1;
         }
     }
 
@@ -520,15 +567,24 @@ pub fn apply_viewport(
                 .take(16)
                 .map(|value| bounded(value, 32))
                 .collect(),
-            body_excerpt: bounded(&entry.body_excerpt, 900),
+            body_excerpt: bounded(&entry.body_excerpt, MAX_DATE_BODY_EXCERPT_CHARS),
         })
         .collect::<Vec<_>>();
-    let warnings = result
+    let mut warnings = result
         .warnings
         .iter()
-        .take(8)
-        .map(|value| bounded(value, 300))
+        .take(warning_cap)
+        .map(|value| bounded(value, warning_chars))
         .collect::<Vec<_>>();
+    if mode == RecallViewportMode::Manual && !overflow.is_empty() {
+        // A manual read names what did not fit; requested IDs beyond the cap
+        // are listed here whole rather than vanishing under the last kept card.
+        warnings.push(format!(
+            "record cap {keep_cap}: {} more selected records not shown ({})",
+            overflow.len(),
+            overflow.join(", ")
+        ));
+    }
     let taxonomy = (mode == RecallViewportMode::Manual).then(|| RecallPresentationTaxonomy {
         rooms: result
             .taxonomy
@@ -639,6 +695,7 @@ pub fn apply_viewport(
         cluster_nudge,
         cluster_resonance,
         memory_handle,
+        projection: result.projection,
     };
     RecallViewportResult {
         kept_candidates: kept,
@@ -654,7 +711,11 @@ pub fn apply_viewport(
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_CANON_ASSERTION_CHARS, ViewportSession, apply_viewport};
+    use super::{
+        MAX_CANDIDATE_EXCERPT_CHARS, MAX_CANON_ASSERTION_CHARS, MAX_WARNINGS_AUTOMATIC,
+        ViewportSession, apply_viewport,
+    };
+    use hearth::{MANUAL_RECORD_CAP, RecallProjection};
     use protocol::{RecallResultInput, RecallViewportMode};
 
     fn result(
@@ -813,5 +874,170 @@ mod tests {
         assert_eq!(viewport.kept_candidates.len(), 1);
         assert_eq!(viewport.kept_candidates[0].memory_id, Some(4197));
         assert!(viewport.suppressions.is_empty());
+    }
+
+    fn record(id: i64, body: &str) -> serde_json::Value {
+        serde_json::json!({
+            "memory_id": id,
+            "source_path": format!("kodo/record-{id}.md"),
+            "title": format!("record {id}"),
+            "heading_path": "",
+            "excerpt": body.chars().take(1200).collect::<String>(),
+            "body": body,
+            "sources": [format!("kodo/record-{id}.md")],
+            "term_coverage": 1.0,
+            "matched_terms": [id.to_string()],
+            "missing_terms": [],
+            "score": 1.0,
+            "reasons": ["exact memory id"],
+            "source": "exact_id",
+            "chunk_index": 0
+        })
+    }
+
+    #[test]
+    fn a_manual_read_carries_the_whole_record_and_the_auto_working_set_never_does() {
+        let body = "tail marker follows the twelve-hundredth character ".repeat(60);
+        assert!(body.chars().count() > 1200 + MAX_CANDIDATE_EXCERPT_CHARS);
+        let mut input = result(
+            "memory 4520",
+            serde_json::json!([]),
+            serde_json::json!([record(4520, &body)]),
+        );
+        input.projection = Some(RecallProjection::Manual);
+        let manual = apply_viewport(
+            input,
+            &mut ViewportSession::default(),
+            RecallViewportMode::Manual,
+        );
+        let card = &manual.presentation.retrieval_candidates[0];
+        assert_eq!(
+            card.body.as_deref(),
+            Some(body.as_str()),
+            "manual keeps the full body"
+        );
+        assert!(
+            card.body
+                .as_deref()
+                .is_some_and(|value| value.ends_with(&body[body.len() - 40..])),
+            "the tail past 1200 characters survives"
+        );
+        assert_eq!(card.excerpt.chars().count(), MAX_CANDIDATE_EXCERPT_CHARS);
+        assert_eq!(
+            manual.presentation.projection,
+            Some(RecallProjection::Manual)
+        );
+
+        let mut input = result(
+            "memory 4520",
+            serde_json::json!([]),
+            serde_json::json!([record(4520, &body)]),
+        );
+        input.projection = Some(RecallProjection::Auto);
+        let auto = apply_viewport(
+            input,
+            &mut ViewportSession::default(),
+            RecallViewportMode::Automatic,
+        );
+        let card = &auto.presentation.retrieval_candidates[0];
+        assert_eq!(
+            card.body, None,
+            "an automatic working set stays excerpt-bounded"
+        );
+        assert_eq!(card.excerpt.chars().count(), MAX_CANDIDATE_EXCERPT_CHARS);
+        let rendered = serde_json::to_string(&auto.presentation).expect("presentation serializes");
+        assert!(
+            !rendered.contains("\"body\":"),
+            "no body key leaks into the auto presentation"
+        );
+    }
+
+    #[test]
+    fn a_manual_read_keeps_the_record_cap_and_every_id_warning() {
+        let candidates = (1..=(MANUAL_RECORD_CAP as i64 + 3))
+            .map(|id| record(id, "short body"))
+            .collect::<Vec<_>>();
+        let mut input = result(
+            "memories 1, 2, 3, 4, 5, 6, 7 and 8",
+            serde_json::json!([]),
+            serde_json::json!(candidates),
+        );
+        input.projection = Some(RecallProjection::Manual);
+        input.warnings = (100..100 + MAX_WARNINGS_AUTOMATIC as i64 + 4)
+            .map(|id| format!("memory {id} not found"))
+            .collect();
+        let expected_warnings = input.warnings.clone();
+        let manual = apply_viewport(
+            input.clone(),
+            &mut ViewportSession::default(),
+            RecallViewportMode::Manual,
+        );
+        assert_eq!(
+            manual.presentation.retrieval_candidates.len(),
+            MANUAL_RECORD_CAP
+        );
+        assert_eq!(
+            manual
+                .presentation
+                .retrieval_candidates
+                .iter()
+                .map(|card| card.memory_id)
+                .collect::<Vec<_>>(),
+            (1..=(MANUAL_RECORD_CAP as i64))
+                .map(Some)
+                .collect::<Vec<_>>(),
+            "reference order leads and the cap trims the tail"
+        );
+        let overflow_ids = ((MANUAL_RECORD_CAP as i64 + 1)..=(MANUAL_RECORD_CAP as i64 + 3))
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>();
+        let mut expected_with_overflow = expected_warnings.clone();
+        expected_with_overflow.push(format!(
+            "record cap {MANUAL_RECORD_CAP}: 3 more selected records not shown ({})",
+            overflow_ids.join(", ")
+        ));
+        assert_eq!(
+            manual.presentation.warnings, expected_with_overflow,
+            "a manual read drops no ID warning and names what did not fit"
+        );
+        assert_eq!(manual.diagnostics.reasons.get("record-cap"), Some(&3));
+        assert!(
+            manual
+                .suppressions
+                .iter()
+                .filter(|s| s.reason == "record-cap")
+                .count()
+                == 3,
+            "overflow rows are suppressions, never silent drops: {:?}",
+            manual.suppressions
+        );
+
+        let auto = apply_viewport(
+            input,
+            &mut ViewportSession::default(),
+            RecallViewportMode::Automatic,
+        );
+        assert_eq!(
+            auto.presentation.warnings.len(),
+            MAX_WARNINGS_AUTOMATIC,
+            "the automatic budget stays"
+        );
+        assert_eq!(
+            auto.presentation.retrieval_candidates.len(),
+            MANUAL_RECORD_CAP
+        );
+        assert_eq!(
+            auto.diagnostics.reasons.get("record-cap"),
+            Some(&3),
+            "automatic overflow is accounted in diagnostics"
+        );
+        assert!(
+            !auto
+                .presentation
+                .warnings
+                .iter()
+                .any(|w| w.starts_with("record cap")),
+            "the automatic working set keeps its warning budget for substrate warnings"
+        );
     }
 }

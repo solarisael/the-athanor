@@ -5,9 +5,13 @@ This document records current support boundaries and non-goals. The product READ
 ## Supported installation path
 
 Windows 11 x64 with OMP is the only supported late-beta target.
-`0.9.6` is the current source version. The reference workstation runs a locally
-proven native `0.9.6.1` activation; historical RC artifact labels remain only as
-immutable build identities and evidence.
+`0.9.6` is the source version label carried by this documentation. It is a
+labeled historical snapshot. The root `package.json` declares the current
+product version. The installed immutable manifest declares the installed build;
+dated evidence in [`EVIDENCE.md`](./EVIDENCE.md) and [`../BUGS.md`](../BUGS.md)
+names `0.5.4+dev.…` builds installed on 2026-09-05. The earlier `0.9.6.1`
+activation and RC artifact labels remain immutable build identities and
+evidence, not current installed state.
 
 The ordinary managed install requires:
 
@@ -29,9 +33,11 @@ It reads the Host through a loopback proxy.
 
 Vault remains a database-free runtime profile. AKASHA uses managed PostgreSQL by
 default. Existing Houses must use explicit external-database mode when their
-authoritative PostgreSQL endpoint already owns the configured port. RC2 takes a
-first-install backup, starts no PostgreSQL child in that mode, and still requires
-schema 17 plus `vector`, `pg_trgm`, and `pgcrypto`.
+authoritative PostgreSQL endpoint already owns the configured port. That mode
+takes a first-install backup, starts no PostgreSQL child, and still requires the
+release's current migration schema plus `vector`, `pg_trgm`, and `pgcrypto`.
+The 2026-09-05 installed build ran schema 30 (`BUGS.md:106`); the earlier
+schema 17 requirement is historical.
 
 Local semantic embeddings still require a compatible configured embedding
 endpoint. No GPU or embedding model is bundled in the current late beta.
@@ -67,17 +73,65 @@ claim.
 
 ## Known late-beta blockers
 
-The reference House has reproduced two live continuity-path defects that must
-be repaired before 1.0:
+The earlier blocker record names a `remember` failure on a valid `continues` edge.
+It reports a bogus `params.room` validation error.
+This review examines no edge-specific installed proof.
+Generic `remember` successes do not resolve that recorded defect.
+Keep its repair status open until the affected edge is exercised.
 
-- `remember` rejects a valid `continues` edge with a bogus `params.room`
-  validation error;
-- the live `sleep` tool path is not healthy, despite the implemented and tested
-  Rust Paper Boat transaction architecture.
+The live `sleep` path has a dated success receipt.
+On 2026-09-05, the installed OMP tool wrote paper boat #4473 with `backup.status: ok`.
+Its backup took 49.0 seconds.
+The backup for `remember` #4472 took 47.2 seconds.
+See `BUGS.md:105` and [`EVIDENCE.md`](./EVIDENCE.md).
+The PostgreSQL commit precedes the full post-write dump.
+The remaining sleep and wake gaps are:
 
-The operator GUI also remains incomplete. It does not yet provide the House,
-agent, message, Recall, authority, work, health, and failure views required for
-ordinary operation without terminal archaeology.
+- the wake presentation keeps rendered `wake_context`, title, source, and id,
+  and drops the separate boat age and warning fields;
+- the [generated-turn adapter repair](./EVIDENCE.md#generated-turn-presence-repair-2026-09-07) is installed, with isolated component proof;
+  real restart, chat, and root Knock turns now have live incoming Presence observations;
+- Host-side Presence points still require correct session attribution (`BUGS.md:25-30`);
+- requested backups wait for a dump that excludes `insula`; `remember` defaults to no backup, while `sleep` keeps backups enabled.
+
+The operator GUI remains read-only and incomplete. The web prototype allowlists
+POST-only `/live/*` read routes for health, Insula, Docket, Hallway, memory,
+and lesson reads (`gui-prototype/serve.ts`). It does not yet provide the
+agent, message, authority, work, and failure views required for ordinary
+operation without terminal archaeology.
+
+## Review-derived boundaries — 2026-09-06
+
+Sol accepted a critical organ review on 2026-09-06. The dated census lives in
+[`ARCHITECTURE.md`](./ARCHITECTURE.md#critical-organ-review-2026-09-06). The
+bounded facts below are current boundaries, not defects to be inferred beyond
+their evidence.
+
+- The context-growth nudge derives capacity from the room key
+  (`crates/hearth/src/context.rs:737-764`): 1,000,000 tokens for `kodo`,
+  400,000 otherwise. It is an assumption about the model, not a measured limit.
+- A matched process trigger emits up to twelve coding lessons with complete
+  bodies, proof, and trigger fields (`crates/hearth/src/triggers.rs`). No size
+  cap applies.
+- Wake metadata carries `created_at` and warnings in the substrate
+  (`crates/origami/src/boats/wake.rs:21-32`). The OMP presentation drops those
+  separate fields. Age-aware orientation is a recommendation.
+- The Anamnesis wake selector loads pillars and active cycles by kind and update
+  time without a cycle recency gate (`crates/akasha/src/anamnesis.rs:362-377`).
+  An active cycle that loads is not thereby relevant to the live turn.
+- Requested post-write backups use a full dump.
+  The recorded backups took about 47–49 seconds.
+  Commit and backup remain distinct outcomes.
+- The reviewed GIGA aggregate reported enabled capture and classification, a healthy store, and an empty queue.
+  It listed only dismissed candidate states.
+  These fields do not prove classifier reachability, useful review, or later benefit.
+- Docket settlement is fenced by room (`crates/akasha/src/docket/report/mod.rs:130-147`).
+  A single-room House needs an explicit independent reviewer or operator
+  arrangement. This is an authority boundary, not an exploit.
+- Workspace search `0.1.1` indexes only explicitly requested roots and has no
+  watcher. It is perception over a consented workspace, not AKASHA memory.
+- This review performs no fresh restore or complete custody certification.
+  Complete export, restore, and operator retention/deletion journeys require their own evidence.
 
 ## Retrieval boundary
 

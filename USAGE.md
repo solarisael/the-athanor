@@ -8,6 +8,32 @@ together, preserve what matters, and leave a handoff when the session ends.
 
 House loads identity and compact continuity automatically. Durable memory remains deliberate by default so important trails do not disappear inside indiscriminate transcript storage.
 
+## Start the House
+
+Run this command in PowerShell:
+
+```powershell
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe"
+```
+
+The Athanor starts these parts in this order:
+
+1. Start the `SolarisaelAthanor` Windows service if it is stopped.
+   Wait for the configured PostgreSQL and NATS ports to answer.
+   An external PostgreSQL server must already be available.
+2. Start the room Hosts inside `athanor.exe`.
+3. Start each harness with `"autoStart": true` in `config/harnesses.json`, in file order.
+   An absent `autoStart` field means false.
+
+The command prints service progress every five seconds while it waits.
+It stops with a named error if the service or ports are not ready within 90 seconds.
+After startup, it prints one JSON object with the process ID, Host address,
+control address, registry path, room list, `harnessesStarted`, and `harnessesFailed`.
+Each failed harness has an `id` and a `reason`. A harness failure does not stop the Host.
+On exit, The Athanor stops only the harnesses that it started.
+The OMP adapter never starts The Athanor. If the Host is absent, OMP stays usable
+and reports: `Athanor Host is not running at <endpoint>. Start the Athanor.`
+
 ## Everyday loop
 
 1. **Enter the room.** Start OMP from the configured room under `%ProgramData%\Solarisael\Athanor\rooms`. Identity and compact continuity load with the session.
@@ -17,15 +43,25 @@ House loads identity and compact continuity automatically. Durable memory remain
 
 You do not need every tool every day.
 
-## Use the web operator surface
+## Open the Pulse desktop app
 
-Open **The Athanor** from the Start menu.
-`athanor.exe` starts the Host. It does not launch the parked Godot client.
-Run `bun gui-prototype/serve.ts` from the repository root.
-Open `http://127.0.0.1:4175` in a browser unless `PULSE_PORT` specifies another port.
-The web prototype at `gui-prototype/` is the read-only operator surface.
-It reads the Host through nine POST-only `/live/*` routes in the loopback proxy.
-Use OMP for writes.
+Open **The Athanor** from the Start menu to start the Host.
+Run these commands from the repository root:
+
+```powershell
+bun run build:pulse
+bun run install:pulse
+pulse
+```
+
+Use `pulse --room <key>` to select a configured room.
+The default room is `kodo`.
+Installation uses the current Windows profile.
+Use `scripts/install-pulse.ps1 -Profile C:\Users\Solarisael -NoDesktop` to select that profile explicitly.
+The app reads the live Host and sends chat through its authenticated proxy.
+Other pages remain read-only.
+Use `pulse --serve-only --dev-dir gui-prototype` for local web development.
+The existing `bun gui-prototype/serve.ts` command remains available.
 Run **Athanor Doctor** from the Start menu when you suspect a lifecycle fault.
 
 ## Recall older evidence

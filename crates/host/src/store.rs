@@ -134,7 +134,7 @@ impl RoomStateStore {
         atomic_json_write(&self.path, &root)
     }
 
-    fn read_root(&self) -> Result<Value, String> {
+    pub(crate) fn read_root(&self) -> Result<Value, String> {
         let bytes = fs::read(&self.path)
             .map_err(|error| format!("cannot read room state {}: {error}", self.path.display()))?;
         let root: Value = serde_json::from_slice(&bytes).map_err(|error| {

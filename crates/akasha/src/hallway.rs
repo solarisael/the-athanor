@@ -41,9 +41,55 @@ pub async fn hallway_post(
     request: HallwayPostRequest,
 ) -> Result<HallwayPostReceipt, AppError> {
     let house_tz = config.house_timezone(pool, &request.room).await?;
-    messages::post(pool, &house_tz, request)
-        .await
-        .map_err(app_error)
+    let idempotency_key = request.idempotency_key.clone();
+    let receipt = messages::post(pool, &house_tz, request).await.map_err(app_error)?;
+    // The write stands when the sea is down; turn-boundary inbox reads reconcile it.
+    let published = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        publish_hallway_post(pool, config.nats_url.as_deref(), &receipt, &idempotency_key),
+    ).await;
+    let reason = match published {
+        Ok(Ok(())) => None,
+        Ok(Err(reason)) => Some(reason),
+        Err(_) => Some("publish_timeout".into()),
+    };
+    if let Some(reason) = reason {
+        let mut binding = crate::insula_writer::system_binding();
+        binding.room = receipt.message.room.clone();
+        binding.spirit = receipt.message.spirit.clone();
+        crate::insula_writer::record_point(
+            &binding, "akasha", "origami", "hallway.publish",
+            crate::OutcomeClass::Error, Some(&reason), None,
+        );
+    }
+    Ok(receipt)
+}
+
+async fn publish_hallway_post(
+    pool: &PgPool,
+    nats_url: Option<&str>,
+    receipt: &HallwayPostReceipt,
+    idempotency_key: &str,
+) -> Result<(), String> {
+    let url = nats_url.ok_or_else(|| "nats_not_configured".to_string())?;
+    let broker = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        origami::cranes::broker::Broker::connect(url),
+    ).await.map_err(|_| "connect_timeout".to_string())?
+        .map_err(|_| "connect_failed".to_string())?;
+    let projection = origami::hallways::sea::HallwayPostProjection::from_receipt(receipt);
+    let allowed_rooms: Vec<String> = if projection.to_rooms.is_empty() {
+        sqlx::query_scalar(
+            "SELECT a.room FROM hallway_allowed_rooms a JOIN hallway_channels c ON c.id=a.hallway_id WHERE c.hallway_key=$1 ORDER BY a.room",
+        ).bind(&projection.hallway).fetch_all(pool).await
+            .map_err(|_| "recipient_lookup_failed".to_string())?
+    } else {
+        Vec::new()
+    };
+    let published = broker.publish_hallway(&projection, &allowed_rooms, idempotency_key).await;
+    let drained = broker.drain().await;
+    published.map_err(|_| "publish_failed".to_string())?;
+    drained.map_err(|_| "drain_failed".to_string())
 }
 
 pub async fn hallway_read(

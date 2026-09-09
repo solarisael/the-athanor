@@ -1,3 +1,6 @@
+#[path = "surface.rs"]
+mod surface;
+
 use crate::chat::ChatLog;
 use crate::config::{HOST_RECIPIENT, HostConfig};
 use crate::insula::InsulaHost;
@@ -130,6 +133,7 @@ struct RuntimeState {
     presence: PresenceRuntime,
     viewport_sessions: HashMap<String, ViewportSession>,
     hallway_inbox_fingerprints: HashMap<String, String>,
+    hallway_subscriptions: HashMap<String, (CommandMeta, usize)>,
     knock_poll: KnockPollObservations,
     chat: ChatLog,
     cursor: ProjectionCursor,
@@ -150,6 +154,8 @@ struct AppState {
     deltas: broadcast::Sender<String>,
     receipts: broadcast::Sender<String>,
     chat_deltas: broadcast::Sender<String>,
+    hallway_deltas: broadcast::Sender<(String, String)>,
+    hallway_operations: Arc<tokio::sync::Semaphore>,
     receipt_tracker: Arc<Mutex<ReceiptTracker>>,
 }
 
@@ -192,6 +198,7 @@ impl Host {
         let (deltas, _) = broadcast::channel(64);
         let (receipts, _) = broadcast::channel(64);
         let (chat_deltas, _) = broadcast::channel(64);
+        let (hallway_deltas, _) = broadcast::channel(64);
         let receipt_tracker = Arc::new(Mutex::new(ReceiptTracker::new(
             config.akasha_enabled(),
             config.nats_url.is_some(),
@@ -206,6 +213,7 @@ impl Host {
                     presence: PresenceRuntime::default(),
                     viewport_sessions: HashMap::new(),
                     hallway_inbox_fingerprints: HashMap::new(),
+                    hallway_subscriptions: HashMap::new(),
                     knock_poll: KnockPollObservations::default(),
                     chat: ChatLog::default(),
                     cursor,
@@ -220,6 +228,8 @@ impl Host {
                 deltas,
                 receipts,
                 chat_deltas,
+                hallway_deltas,
+                hallway_operations: Arc::new(tokio::sync::Semaphore::new(4)),
                 receipt_tracker,
             },
         })
@@ -231,6 +241,7 @@ impl Host {
                 .tasks
                 .spawn(run_receipt_bridge(self.state.clone(), url));
         }
+        self.state.tasks.spawn(run_hallway_bridge(self.state.clone()));
     }
 
     // [host/routing] [security/auth]
@@ -241,6 +252,7 @@ impl Host {
             .with_state(self.state.clone())
             .merge(self.state.insula.router())
             .merge(self.state.panel.router())
+            .merge(surface::router(self.state.clone()))
     }
 }
 
@@ -309,6 +321,29 @@ fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
 }
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
+    let mut session = None;
+    handle_socket_inner(socket, state.clone(), &mut session).await;
+    set_hallway_subscription(&state, &mut session, None).await;
+}
+
+async fn set_hallway_subscription(state: &AppState, current: &mut Option<String>, next: Option<String>) {
+    if *current == next { return; }
+    let mut runtime = state.runtime.lock().await;
+    if let Some(previous) = current.take() {
+        if let Some((_, count)) = runtime.hallway_subscriptions.get_mut(&previous) {
+            *count -= 1;
+            if *count == 0 { runtime.hallway_subscriptions.remove(&previous); }
+        }
+    }
+    if let Some(session) = next {
+        if let Some((_, count)) = runtime.hallway_subscriptions.get_mut(&session) {
+            *count += 1;
+            *current = Some(session);
+        }
+    }
+}
+
+async fn handle_socket_inner(socket: WebSocket, state: AppState, hallway_session: &mut Option<String>) {
     let (mut sink, mut source) = socket.split();
     let mut deltas = state.deltas.subscribe();
     let mut receipts = state.receipts.subscribe();
@@ -316,11 +351,28 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     let mut receipts_subscribed = false;
     let mut chat_deltas = state.chat_deltas.subscribe();
     let mut chat_subscribed = false;
+    let mut hallway_deltas = state.hallway_deltas.subscribe();
     loop {
         tokio::select! {
             _ = state.cancellation.cancelled() => {
                 let _ = sink.send(Message::Close(None)).await;
                 return;
+            }
+            broadcast = hallway_deltas.recv(), if hallway_session.is_some() => {
+                match broadcast {
+                    Ok((session, text)) if hallway_session.as_ref() == Some(&session) => {
+                        let fingerprint = serde_json::from_str::<Value>(&text).ok().and_then(|event| {
+                            (event["command_or_event_type"] == HALLWAY_INBOX_PROJECTED)
+                                .then(|| event["state_hash"].as_str().map(str::to_owned)).flatten()
+                        });
+                        if sink.send(Message::Text(text.into())).await.is_err() { return; }
+                        if let Some(fingerprint) = fingerprint {
+                            state.runtime.lock().await.hallway_inbox_fingerprints.insert(session, fingerprint);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => return,
+                }
             }
             broadcast = deltas.recv(), if recall_subscribed => {
                 match broadcast {
@@ -385,6 +437,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             && contains_event(&responses.direct, CHAT_SNAPSHOT)
                         {
                             chat_subscribed = true;
+                        }
+                        if contains_event(&responses.direct, HALLWAY_INBOX_PROJECTED) {
+                            let session = serde_json::from_str::<Value>(text.as_str()).ok()
+                                .and_then(|value| value.get("sender_session").and_then(Value::as_str).map(str::to_owned));
+                            set_hallway_subscription(&state, hallway_session, session).await;
                         }
                         for response in responses.direct {
                             if sink.send(Message::Text(response.into())).await.is_err() {
@@ -810,7 +867,7 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             let runtime = state.runtime.lock().await;
             let event = chat_event(
                 state,
-                &meta,
+                Some(&meta),
                 CHAT_SNAPSHOT,
                 runtime.chat.snapshot(),
                 runtime.cursor.sequence,
@@ -882,8 +939,7 @@ async fn chat_appended(
     sequence: u64,
 ) -> Responses {
     if let Some(message) = appended {
-        let delta = chat_event(state, meta, CHAT_DELTA, vec![message], sequence);
-        let _ = state.chat_deltas.send(serialize(&delta));
+        publish_chat(state, Some(meta), message, sequence);
     }
     let outcome_hash = body_hash(&json!({ "ok": true })).expect("chat outcome hashes");
     let event = CommandOutcomeEvent {
@@ -935,9 +991,14 @@ async fn chat_refusal(state: &AppState, meta: &CommandMeta, reason: &str) -> Res
     }
 }
 
+fn publish_chat(state: &AppState, meta: Option<&CommandMeta>, message: ChatMessage, sequence: u64) {
+    let delta = chat_event(state, meta, CHAT_DELTA, vec![message], sequence);
+    let _ = state.chat_deltas.send(serialize(&delta));
+}
+
 fn chat_event(
     state: &AppState,
-    meta: &CommandMeta,
+    meta: Option<&CommandMeta>,
     kind: &str,
     messages: Vec<ChatMessage>,
     sequence: u64,
@@ -946,9 +1007,9 @@ fn chat_event(
     ChatEvent {
         meta: event_meta_for_projection(
             state,
-            Some(meta),
-            &meta.message_id,
-            &meta.idempotency_key,
+            meta,
+            meta.map_or("", |meta| meta.message_id.as_str()),
+            meta.map_or("", |meta| meta.idempotency_key.as_str()),
             kind,
             CHAT_PROJECTION_ID,
             sequence,
@@ -1317,7 +1378,25 @@ fn hallway_projection_changed(previous: Option<&str>, current: &str, ringing: bo
     previous != Some(current) && (ringing || previous.is_some())
 }
 
+fn observe_hallway_projection(
+    fingerprints: &mut HashMap<String, String>,
+    session: &str,
+    fingerprint: &str,
+    ringing: bool,
+    advance: bool,
+) -> bool {
+    let changed = hallway_projection_changed(fingerprints.get(session).map(String::as_str), fingerprint, ringing);
+    // A queued push is not delivery; offline clients must still see reconciliation.
+    if advance { fingerprints.insert(session.to_owned(), fingerprint.to_owned()); }
+    changed
+}
+
 async fn project_hallway_inbox(state: &AppState, meta: CommandMeta) -> Responses {
+    project_hallway_inbox_inner(state, meta, true).await
+}
+
+async fn project_hallway_inbox_inner(state: &AppState, meta: CommandMeta, advance: bool) -> Responses {
+    let _permit = state.hallway_operations.acquire().await;
     let Some(pool) = state.hallway_pool.as_ref() else {
         record_point(
             state.insula_binding.as_ref(),
@@ -1381,10 +1460,12 @@ async fn project_hallway_inbox(state: &AppState, meta: CommandMeta) -> Responses
         .iter()
         .any(|entry| entry.unread > 0 || entry.mentions > 0);
     let mut runtime = state.runtime.lock().await;
-    let previous = runtime
-        .hallway_inbox_fingerprints
-        .insert(meta.sender_session.clone(), fingerprint.clone());
-    let changed = hallway_projection_changed(previous.as_deref(), &fingerprint, ringing);
+    if advance {
+        runtime.hallway_subscriptions.entry(meta.sender_session.clone()).or_insert((meta.clone(), 0));
+    }
+    let changed = observe_hallway_projection(
+        &mut runtime.hallway_inbox_fingerprints, &meta.sender_session, &fingerprint, ringing, advance,
+    );
     let event = HallwayInboxProjectionEvent {
         meta: event_meta_for_projection(
             state,
@@ -2583,6 +2664,116 @@ const RECEIPT_CONSUMER_IDLE_TTL: std::time::Duration = std::time::Duration::from
 const RECEIPT_BATCH_EXPIRES: std::time::Duration = std::time::Duration::from_secs(5);
 const RECEIPT_BATCH_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
+fn hallway_sea_failure(state: &AppState, operation: &'static str, reason: &str) {
+    record_point(
+        state.insula_binding.as_ref(), "host", "origami", operation,
+        OutcomeClass::Error, Some(reason), None,
+    );
+}
+
+async fn run_hallway_bridge(state: AppState) {
+    let Some(url) = state.config.nats_url.as_deref() else {
+        hallway_sea_failure(&state, "hallway.consume", "nats_not_configured");
+        return;
+    };
+    let mut last_failure = None;
+    let mut retry = 0usize;
+    loop {
+        let result = tokio::select! {
+            _ = state.cancellation.cancelled() => return,
+            result = consume_hallway(&state, url) => result,
+        };
+        if let Err(reason) = result {
+            if last_failure != Some(reason) {
+                hallway_sea_failure(&state, "hallway.consume", reason);
+                last_failure = Some(reason);
+            }
+        }
+        let backoff = origami::cranes::broker::CONSUMER_BACKOFF;
+        tokio::select! {
+            _ = state.cancellation.cancelled() => return,
+            _ = tokio::time::sleep(backoff[retry.min(backoff.len() - 1)]) => {}
+        }
+        retry = retry.saturating_add(1);
+    }
+}
+
+async fn consume_hallway(state: &AppState, url: &str) -> Result<(), &'static str> {
+    use origami::cranes::broker::Broker;
+    let client = async_nats::ConnectOptions::new()
+        .connection_timeout(Duration::from_secs(1)).connect(url).await
+        .map_err(|_| "connect_failed")?;
+    let context = async_nats::jetstream::new(client);
+    let consumer = Broker::hallway_consumer(&context, &state.config.room).await
+        .map_err(|_| "consumer_configuration_failed")?;
+    loop {
+        let mut messages = consumer.fetch().max_messages(1).expires(MAX_EXPIRES)
+            .messages().await.map_err(|_| "pull_failed")?;
+        while let Some(message) = messages.next().await {
+            let message = message.map_err(|_| "receive_failed")?;
+            consume_hallway_message(state, message).await?;
+        }
+    }
+}
+
+async fn consume_hallway_message(
+    state: &AppState,
+    message: async_nats::jetstream::Message,
+) -> Result<(), &'static str> {
+    use origami::hallways::sea::{HallwayPostProjection, hallway_room_subject};
+    let projection = serde_json::from_slice::<HallwayPostProjection>(&message.payload);
+    let valid = projection.as_ref().is_ok_and(|projection| {
+        projection.schema_version == 1 && projection.message_id > 0 && projection.sequence > 0
+            && message.subject.as_str() == hallway_room_subject(&state.config.room)
+            && projection.from_room != state.config.room
+            && (projection.to_rooms.is_empty() || projection.to_rooms.contains(&state.config.room))
+    });
+    if !valid {
+        // Insula retains the poison reason, never the untrusted payload.
+        hallway_sea_failure(state, "hallway.dead_letter", "invalid_projection");
+        message.ack_with(async_nats::jetstream::message::AckKind::Term).await
+            .map_err(|_| "term_failed")?;
+        return Ok(());
+    }
+    let sessions: Vec<_> = {
+        let runtime = state.runtime.lock().await;
+        runtime.hallway_inbox_fingerprints.keys()
+            .filter_map(|session| runtime.hallway_subscriptions.get(session))
+            .filter(|(_, count)| *count > 0)
+            .map(|(meta, _)| meta.clone())
+            .collect()
+    };
+    let push = async {
+        let mut projections = futures_util::stream::iter(sessions).map(|meta| async move {
+            let session = meta.sender_session.clone();
+            let responses = match tokio::time::timeout(ACK_WAIT, project_hallway_inbox_inner(state, meta, false)).await {
+                Ok(responses) => responses,
+                Err(_) => {
+                    hallway_sea_failure(state, "hallway.push", "projection_timeout");
+                    return;
+                }
+            };
+            for response in responses.direct {
+                let _ = state.hallway_deltas.send((session.clone(), response));
+            }
+        }).buffer_unordered(4);
+        while projections.next().await.is_some() {}
+    };
+    tokio::pin!(push);
+    // AckWait is a lease; renew while bounded database/push attempts are in flight.
+    let mut lease = tokio::time::interval(ACK_WAIT / 2);
+    loop {
+        tokio::select! {
+            _ = &mut push => break,
+            _ = lease.tick() => {
+                message.ack_with(async_nats::jetstream::message::AckKind::Progress).await
+                    .map_err(|_| "lease_failed")?;
+            }
+        }
+    }
+    message.ack().await.map_err(|_| "ack_failed")
+}
+
 async fn run_receipt_bridge(state: AppState, nats_url: String) {
     loop {
         if state.cancellation.is_cancelled() {
@@ -3055,4 +3246,14 @@ mod tests {
         ));
         assert!(hallway_projection_changed(Some("ringing"), "quiet", false));
     }
+
+    #[test]
+    fn undelivered_push_does_not_silence_next_turn_reconciliation() {
+        let mut fingerprints = std::collections::HashMap::new();
+        assert!(super::observe_hallway_projection(&mut fingerprints, "session", "first", true, true));
+        assert!(super::observe_hallway_projection(&mut fingerprints, "session", "second", true, false));
+        assert!(super::observe_hallway_projection(&mut fingerprints, "session", "second", true, true));
+        assert!(!super::observe_hallway_projection(&mut fingerprints, "session", "second", true, true));
+    }
+
 }

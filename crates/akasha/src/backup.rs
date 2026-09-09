@@ -659,6 +659,14 @@ fn rotate(dir: &Path, db: &str, keep: usize) -> Result<(), BackupError> {
     Ok(())
 }
 
+const PG_DUMP_ARGS: [&str; 5] = [
+    "--format=custom",
+    "--no-owner",
+    "--no-acl",
+    "--exclude-schema=insula",
+    "--file",
+];
+
 pub fn backup_with_migrations(
     database_url: &str,
     output_dir: &Path,
@@ -688,7 +696,7 @@ pub fn backup_with_migrations(
     let dump = output_dir.join(&dump_name);
     let tmp = output_dir.join(format!(".{stem}.tmp"));
     let mut c = pg_dump.command();
-    c.args(["--format=custom", "--no-owner", "--no-acl", "--file"])
+    c.args(PG_DUMP_ARGS)
         .arg(pg_dump.path_arg(&tmp)?)
         .args(["--dbname"])
         .arg(&safe);
@@ -981,10 +989,18 @@ pub async fn post_write_outcome(
     room_keep: usize,
     requested: bool,
 ) -> hearth::BackupOutcome {
+    post_write_outcome_with(requested, || run_post_write(pool, database_url, room_keep)).await
+}
+
+async fn post_write_outcome_with<F, Fut>(requested: bool, runner: F) -> hearth::BackupOutcome
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<BackupReceipt, BackupFailure>>,
+{
     if !requested {
         return hearth::BackupOutcome::Skipped;
     }
-    match run_post_write(pool, database_url, room_keep).await {
+    match runner().await {
         Ok(receipt) => hearth::BackupOutcome::Ok(receipt),
         Err(failure) => hearth::BackupOutcome::Failed(failure),
     }
@@ -1014,6 +1030,36 @@ async fn post_write_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dump_arguments_exclude_insula() {
+        let mut command = Command::new("pg_dump");
+        command.args(PG_DUMP_ARGS);
+        assert!(command.get_args().any(|arg| arg == "--exclude-schema=insula"));
+    }
+
+    #[tokio::test]
+    async fn unrequested_backup_skips_runner() {
+        let outcome = post_write_outcome_with(false, || -> std::future::Ready<Result<BackupReceipt, BackupFailure>> {
+            panic!("an unrequested backup must not invoke the runner");
+        }).await;
+        assert!(matches!(outcome, hearth::BackupOutcome::Skipped));
+    }
+
+    #[tokio::test]
+    async fn requested_backup_runs_once_and_returns_its_receipt() {
+        let mut calls = 0;
+        let outcome = post_write_outcome_with(true, || {
+            calls += 1;
+            std::future::ready(BackupReceipt::new(
+                "memory.dump".into(), "a".repeat(64), 42, 1, "path:pg_dump".into(),
+            ).map_err(|error| BackupFailure::new(
+                BackupFailureCode::Manifest, error.to_string(), 1, None,
+            )))
+        }).await;
+        assert_eq!(calls, 1);
+        assert!(matches!(outcome, hearth::BackupOutcome::Ok(_)));
+    }
     #[test]
     fn encoded_password() {
         let (_, p, s) = db_parts("postgres://u:p%40ss%2Fword@host/db").unwrap();

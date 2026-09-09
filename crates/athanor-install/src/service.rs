@@ -36,6 +36,80 @@ mod windows {
         value.encode_utf16().chain(Some(0)).collect()
     }
 
+
+    pub fn ensure_running(config: &RuntimeConfig) -> Result<()> {
+        use crate::supervisor::{START_PROGRESS_INTERVAL, START_TIMEOUT, loopback_address};
+        use std::{net::TcpStream, thread, time::{Duration, Instant}};
+        let ports = [
+            ("PostgreSQL", loopback_address(&config.database_host, config.database_port)?),
+            ("NATS", loopback_address(&config.nats_host, config.nats_port)?),
+        ];
+        let started = Instant::now();
+        let manager = unsafe { OpenSCManagerW(ptr::null(), ptr::null(), SC_MANAGER_CONNECT) };
+        if manager.is_null() {
+            bail!("service {SERVICE_NAME}: OpenSCManagerW failed after 0 seconds: {}", unsafe { GetLastError() });
+        }
+        let name = wide(SERVICE_NAME);
+        let service = unsafe { OpenServiceW(manager, name.as_ptr(), SERVICE_QUERY_STATUS) };
+        let result = (|| -> Result<()> {
+            if service.is_null() {
+                bail!("service {SERVICE_NAME}: OpenServiceW failed after 0 seconds: {}", unsafe { GetLastError() });
+            }
+            let mut next_progress = START_PROGRESS_INTERVAL;
+            let mut requested = false;
+            loop {
+                let mut status: SERVICE_STATUS = unsafe { std::mem::zeroed() };
+                if unsafe { QueryServiceStatus(service, &mut status) } == 0 {
+                    bail!("service {SERVICE_NAME}: QueryServiceStatus failed after {} seconds: {}", started.elapsed().as_secs(), unsafe { GetLastError() });
+                }
+                if status.dwCurrentState == SERVICE_STOPPED {
+                    if requested {
+                        bail!("service {SERVICE_NAME} stopped before readiness after {} seconds (Win32 {}, service {})", started.elapsed().as_secs(), status.dwWin32ExitCode, status.dwServiceSpecificExitCode);
+                    }
+                    let starter = unsafe { OpenServiceW(manager, name.as_ptr(), SERVICE_START) };
+                    if starter.is_null() {
+                        bail!("service {SERVICE_NAME}: cannot obtain start access after {} seconds: {}", started.elapsed().as_secs(), unsafe { GetLastError() });
+                    }
+                    let accepted = unsafe { StartServiceW(starter, 0, ptr::null()) };
+                    let error = unsafe { GetLastError() };
+                    unsafe { CloseServiceHandle(starter); }
+                    if accepted == 0 {
+                        if error != windows_sys::Win32::Foundation::ERROR_SERVICE_ALREADY_RUNNING {
+                            bail!("service {SERVICE_NAME}: StartServiceW failed after {} seconds: {error}", started.elapsed().as_secs());
+                        }
+                    }
+                    requested = true;
+                }
+                let ready = ports.map(|(_, address)| TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok());
+                if status.dwCurrentState == SERVICE_RUNNING && ready.iter().all(|ready| *ready) {
+                    return Ok(());
+                }
+                let elapsed = started.elapsed();
+                if elapsed >= START_TIMEOUT || elapsed >= next_progress {
+                    let unavailable: Vec<String> = ports.iter().zip(ready)
+                        .filter(|(_, ready)| !ready)
+                        .map(|((name, address), _)| format!("{name} port {address}"))
+                        .collect();
+                    let waiting = if unavailable.is_empty() {
+                        format!("service RUNNING state (current {})", status.dwCurrentState)
+                    } else {
+                        unavailable.join(", ")
+                    };
+                    if elapsed >= START_TIMEOUT {
+                        bail!("service {SERVICE_NAME}: {waiting} not ready after {} seconds", elapsed.as_secs());
+                    }
+                    eprintln!("athanor: service {SERVICE_NAME}: waiting for {waiting}; {} of {} seconds", elapsed.as_secs(), START_TIMEOUT.as_secs());
+                    next_progress += START_PROGRESS_INTERVAL;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        })();
+        unsafe {
+            if !service.is_null() { CloseServiceHandle(service); }
+            CloseServiceHandle(manager);
+        }
+        result
+    }
     pub fn dispatch() -> Result<()> {
         let mut name = wide(SERVICE_NAME);
         let table = [
@@ -235,9 +309,14 @@ mod windows {
 }
 
 #[cfg(windows)]
-pub use windows::dispatch;
+pub use windows::{dispatch, ensure_running};
 
 #[cfg(not(windows))]
 pub fn dispatch() -> anyhow::Result<()> {
     anyhow::bail!("the managed service is supported only on Windows")
+}
+
+#[cfg(not(windows))]
+pub fn ensure_running(_: &crate::supervisor::RuntimeConfig) -> anyhow::Result<()> {
+    anyhow::bail!("service {} startup is supported only on Windows", crate::layout::SERVICE_NAME)
 }

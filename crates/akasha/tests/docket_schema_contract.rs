@@ -613,6 +613,7 @@ fn clock_config() -> Config {
         giga_source_ledger_dir: None,
         giga_source_room: None,
         house_tz: "America/Sao_Paulo".into(),
+        nats_url: None,
     }
 }
 

@@ -434,6 +434,8 @@ pub async fn inbox(
     request.validate().map_err(invalid)?;
     let rows = sqlx::query(
         "SELECT c.hallway_key,
+                ARRAY(SELECT member.room FROM hallway_allowed_rooms member
+                      WHERE member.hallway_id=c.id ORDER BY member.room) AS members,
                 c.next_sequence - 1 AS latest_sequence,
                 (SELECT COUNT(*) FROM hallway_messages unread_message
                   WHERE unread_message.hallway_id=c.id
@@ -486,6 +488,7 @@ pub async fn inbox(
             .map_err(|error| invalid(format!("hallway notification row is malformed: {error}")))?;
             Ok(HallwayInboxEntry {
                 hallway: row.try_get("hallway_key")?,
+                members: Some(row.try_get("members")?),
                 unread: row.try_get("unread")?,
                 mentions: row.try_get("mentions")?,
                 notification_revision: row.try_get("notification_revision")?,

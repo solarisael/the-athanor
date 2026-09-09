@@ -12,6 +12,7 @@ members = [
     "crates/interactive-process",
     "crates/omp-keeper",
     "gui",
+    "gui-desktop",
 ]
 
 [workspace.package]

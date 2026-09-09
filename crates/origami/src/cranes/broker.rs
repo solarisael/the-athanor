@@ -23,6 +23,8 @@ pub const CRANE_CONSUMER_NAME: &str = "athanor-crane-receipts-v1";
 pub const RECEIPT_STREAM_NAME: &str = "ATHANOR_BOAT_RECEIPTS";
 pub const RECEIPT_SUBJECT: &str = "athanor.boat.receipt.v1";
 pub const RECEIPT_SCHEMA_VERSION: u8 = 1;
+pub const HALLWAY_STREAM_NAME: &str = "ATHANOR_HALLWAY";
+pub const HALLWAY_SUBJECT_PREFIX: &str = "athanor.hallway.room.";
 pub const STREAM_MAX_MESSAGES: i64 = 100_000;
 pub const STREAM_MAX_BYTES: i64 = 512 * 1024 * 1024;
 pub const STREAM_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -80,6 +82,15 @@ impl Broker {
             .drain()
             .await
             .context("drain NATS delivery connection")
+    }
+
+    pub async fn publish_hallway(
+        &self,
+        projection: &crate::hallways::sea::HallwayPostProjection,
+        allowed_rooms: &[String],
+        idempotency_key: &str,
+    ) -> Result<()> {
+        crate::hallways::sea::publish(&self.context, projection, allowed_rooms, idempotency_key).await
     }
 
     pub fn boat_ready_stream_config() -> jetstream::stream::Config {
@@ -145,6 +156,34 @@ impl Broker {
             deny_purge: true,
             ..Default::default()
         }
+    }
+
+    pub fn hallway_stream_config() -> jetstream::stream::Config {
+        jetstream::stream::Config {
+            name: HALLWAY_STREAM_NAME.to_owned(),
+            description: Some("Sanitized triggers for PostgreSQL hallway inbox projections".into()),
+            subjects: vec!["athanor.hallway.>".into()],
+            ..Self::receipt_stream_config()
+        }
+    }
+
+    pub async fn hallway_stream(context: &jetstream::Context) -> Result<jetstream::stream::Stream> {
+        let expected = Self::hallway_stream_config();
+        let stream = context.get_or_create_stream(expected.clone()).await?;
+        verify_stream_config(&stream.cached_info().config, &expected)?;
+        Ok(stream)
+    }
+
+    pub async fn hallway_consumer(context: &jetstream::Context, room: &str) -> Result<consumer::PullConsumer> {
+        let stream = Self::hallway_stream(context).await?;
+        let name = format!("athanor-hallway-{room}-v1");
+        let expected = Self::lane_consumer_config(
+            &name, "Durable trigger for PostgreSQL hallway inbox projection",
+            &crate::hallways::sea::hallway_room_subject(room),
+        );
+        let consumer = stream.get_or_create_consumer(&name, expected.clone()).await?;
+        verify_consumer_config(&consumer.cached_info().config, &expected)?;
+        Ok(consumer)
     }
 
     pub fn boat_ready_consumer_config() -> consumer::pull::Config {
@@ -406,6 +445,7 @@ mod tests {
         for stream in [
             Broker::boat_ready_stream_config(),
             Broker::crane_stream_config(),
+            Broker::hallway_stream_config(),
         ] {
             assert_eq!(stream.storage, StorageType::File);
             assert_eq!(stream.retention, RetentionPolicy::Limits);
@@ -427,6 +467,9 @@ mod tests {
         assert_eq!(receipt_stream.duplicate_window, DUPLICATE_WINDOW);
         assert_eq!(receipt_stream.max_message_size, 4096);
         assert_eq!(receipt_stream.max_consumers, 64);
+        let hallway = Broker::hallway_stream_config();
+        assert_eq!(hallway.name, HALLWAY_STREAM_NAME);
+        assert_eq!(hallway.subjects, vec!["athanor.hallway.>"]);
 
         for consumer in [
             Broker::boat_ready_consumer_config(),
@@ -457,5 +500,9 @@ mod tests {
         ));
         assert!(!subject_owns(BOAT_READY_SUBJECT, CRANE_SUBJECT_FILTER));
         assert!(!subject_owns("athanor.crane.", CRANE_SUBJECT_FILTER));
+        let room = crate::hallways::sea::hallway_room_subject("kodo");
+        assert!(subject_owns(&room, &room));
+        assert!(!subject_owns("athanor.hallway.room.kintsu", &room));
+        assert!(!subject_owns("athanor.hallway.room.kodo.extra", &room));
     }
 }

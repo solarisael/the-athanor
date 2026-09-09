@@ -125,12 +125,8 @@ impl PanelHost {
     }
 
     pub(crate) fn router(&self) -> Router {
-        let auth = AuthState {
-            bearer_token: self.bearer_token.clone(),
-            observer_binding: self.observer_binding.clone(),
-            operations: self.operations.clone(),
-        };
-        Router::new()
+        self.protect(Router::new()
+
             .route(BOARD_PATH, post(read_board))
             .route(INBOX_PATH, post(read_inbox))
             .route(MESSAGES_PATH, post(read_messages))
@@ -138,9 +134,18 @@ impl PanelHost {
             .route(MEMORY_TIMELINE_PATH, post(read_memory_timeline))
             .route(MEMORY_READ_PATH, post(read_memory))
             .route(LESSON_TIMELINE_PATH, post(read_lesson_timeline))
+            .with_state(self.clone()))
+    }
+
+    pub(crate) fn protect(&self, router: Router) -> Router {
+        let auth = AuthState {
+            bearer_token: self.bearer_token.clone(),
+            observer_binding: self.observer_binding.clone(),
+            operations: self.operations.clone(),
+        };
+        router
             .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
             .route_layer(middleware::from_fn_with_state(auth, require_bearer))
-            .with_state(self.clone())
     }
 
     fn pool(&self) -> Option<&PgPool> {

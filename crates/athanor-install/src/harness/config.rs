@@ -33,6 +33,8 @@ pub enum ConsoleMode {
 pub struct HarnessEntry {
     pub harness_id: String,
     pub label: String,
+    #[serde(default)]
+    pub auto_start: bool,
     /// The registry once declared a supervision driver, and `omp` named an OMP
     /// keeper that ran inside `athanor.exe`. There is no driver now: the keeper
     /// owns the console, so this owner supervises `omp-keeper.exe` as an
@@ -125,6 +127,7 @@ impl HarnessEntry {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct HarnessRegistry {
     entries: BTreeMap<String, HarnessSpec>,
+    auto_start: Vec<String>,
 }
 
 impl HarnessRegistry {
@@ -135,7 +138,11 @@ impl HarnessRegistry {
             bail!("unsupported harness registry format {}", file.format);
         }
         let mut entries = BTreeMap::new();
+        let mut auto_start = Vec::new();
         for entry in file.harnesses {
+            if entry.auto_start {
+                auto_start.push(entry.harness_id.clone());
+            }
             let spec = entry.resolve()?;
             if entries.contains_key(&spec.harness_id) {
                 bail!(
@@ -145,7 +152,7 @@ impl HarnessRegistry {
             }
             entries.insert(spec.harness_id.clone(), spec);
         }
-        Ok(Self { entries })
+        Ok(Self { entries, auto_start })
     }
 
     /// An absent file is an Athanor with no harnesses yet, which must still
@@ -160,6 +167,10 @@ impl HarnessRegistry {
                 Err(error).with_context(|| format!("read harness registry {}", path.display()))
             }
         }
+    }
+
+    pub fn auto_start_ids(&self) -> &[String] {
+        &self.auto_start
     }
 
     pub fn get(&self, harness_id: &str) -> Option<&HarnessSpec> {
@@ -214,6 +225,26 @@ pub(super) fn detail(text: impl Into<String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn autostart_is_opt_in_and_keeps_file_order() {
+        let mut file: serde_json::Value = serde_json::from_str(KEEPER_HARNESS).unwrap();
+        let entry = file["harnesses"][0].clone();
+        file["harnesses"] = serde_json::json!([
+            { "harnessId": "z-first", "autoStart": true },
+            { "harnessId": "manual" },
+            { "harnessId": "a-last", "autoStart": true },
+            { "harnessId": "disabled", "autoStart": false }
+        ]);
+        for item in file["harnesses"].as_array_mut().unwrap() {
+            let overrides = item.as_object().unwrap().clone();
+            *item = entry.clone();
+            item.as_object_mut().unwrap().extend(overrides);
+        }
+        let registry = HarnessRegistry::parse(&file.to_string()).unwrap();
+        assert_eq!(registry.auto_start_ids(), &["z-first", "a-last"]);
+        assert!(HarnessRegistry::parse(KEEPER_HARNESS).unwrap().auto_start_ids().is_empty());
+    }
 
     /// The shape the operator writes for a room after the driver cut: the
     /// keeper is the program, and its config file is the argument.

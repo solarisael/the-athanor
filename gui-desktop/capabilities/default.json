@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "The external Pulse page uses the loopback proxy, not native commands.",
+  "windows": ["main"],
+  "permissions": []
+}

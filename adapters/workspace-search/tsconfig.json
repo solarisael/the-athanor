@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "skipLibCheck": true,
+    "rewriteRelativeImportExtensions": true,
+    "noEmitOnError": true
+  },
+  "include": ["src/cli.ts", "src/mcp.ts", "src/service.ts", "src/nemotron.ts"]
+}

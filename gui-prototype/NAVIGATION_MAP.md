@@ -13,9 +13,9 @@ subgraph WALK["The walk — one downward pass"]
   direction TB
   door["APP DOOR"]
   start["STARTING PLACE<br>Direct · Kintsu · Session"]
-  panel["SELECTED PANEL<br><b>Direct</b> — Kintsu · Kodo · Tuner<br><b>Hallways</b> — dated gatherings, recent-first · date · hallway · people<br><b>Projects</b> — The Athanor · Multistock"]
+  panel["SELECTED PANEL<br><b>Direct</b> — Kintsu · Kodo · Tuner<br><b>Hallways</b> — Host inbox · latest first · members · unread counts<br><b>Projects</b> — This House · live Docket"]
   view["SELECTED SLOT · KEYS 1–3<br><b>1 live</b> — Session / Thread / Overview<br><b>2 state</b> — Status / Mechanics<br><b>3 durable</b> — Memories / Record / Evidence / Memories & Lessons"]
-  deeper["PANEL-SPECIFIC PLACE<br><b>Direct · header toggle ▾</b> — sessions menu: New session · dated rows<br><b>Project · header toggle ▾</b> — linked sessions<br><b>Hallway · member column</b> — members only → presence profile<br><b>Hallway · header badge</b> — routes to Record (slot 3)<br><b>Account · Settings</b> — Mechanical observatory → House slot 2<br><b>Bell</b> — global Hallway inbox → routed thread (slot 1)"]
+  deeper["PANEL-SPECIFIC PLACE<br><b>Direct · header toggle</b> — sessions menu<br><b>Project · header fact</b> — No linked sessions reported<br><b>Hallway · member column</b> — allowed rooms when reported; presence not reported<br><b>Hallway · header badge</b> — Record (slot 3)<br><b>Account · Settings</b> — House slot 2<br><b>Bell</b> — same live Hallway subject (slot 1)"]
 
   door -->|"open the app"| start
   start -->|"choose a subject row · same slot<br>or a mode button · first subject, same slot"| panel
@@ -28,7 +28,7 @@ subgraph CARRY["Carried quietly — available from every place"]
   keys["Three slot tabs · keys 1–3<br>same layers everywhere, labels per panel<br>switching panels keeps your slot"]
   chords["Ctrl+↑/↓ · subjects, clamped<br>Ctrl+←/→ · modes, clamped"]
   switcher["Ctrl+Space — House Switcher<br>any panel · any slot · start session<br>settings · Recall (offline)"]
-  bell["Bell icon — Hallway inbox<br>round ordinary unread · squared explicit attention<br>routes to thread, then acknowledges covered rows"]
+  bell["Bell icon — Host Hallway inbox<br>round unread · squared explicit attention<br>opens the same live thread · reading clears nothing"]
   drawer["Account › Settings drawer<br>local interface controls · Mechanical observatory door<br>Esc walks back one pane"]
   status["Status strip — five popovers<br>host · recall · body · kittens · delivery"]
   esc["Esc — one step outward:<br>Bell → session menu → switcher → profile<br>→ drawer → visible mobile sidebar → leave House"]
@@ -49,25 +49,25 @@ flowchart LR
 subgraph LIVE["1 · LIVE — where you stand and speak"]
   direction TB
   dLive["DIRECT · Session<br>current conversation, newest by default<br>header toggle ▾ older sessions · New session"]
-  hLive["HALLWAY · Thread<br>gathering timeline · catch-up boundary<br>actions inline · header badge → Record"]
-  pLive["PROJECT · Overview<br>hero · project conversation<br>header toggle ▾ linked sessions"]
+  hLive["HALLWAY · Thread<br>Host messages · newest first<br>date · hallway · observed authors · Query Host"]
+  pLive["PROJECT · Overview<br>live Docket · quests grouped by state<br>deadlines soonest first · Query Host"]
   houseLive["HOUSE · Overview<br>shared shelf hero · doors"]
 end
 
 subgraph DUR["3 · DURABLE — dated timeline, newest first"]
   direction TB
   dDur["DIRECT · Memories<br>dated specimens · threads"]
-  hDur["HALLWAY · Record<br>membership card on top<br>seals and folds as dated entries"]
-  pDur["PROJECT · Evidence<br>dated receipts · what each can prove"]
+  hDur["HALLWAY · Record<br>allowed member rooms when reported<br>Host reports no seals or folds"]
+  pDur["PROJECT · Evidence<br>live dated receipts · receipt claims and sources<br>Query Host · up to 50 receipts per quest"]
   houseDur["HOUSE · Memories and Lessons<br>two shelves, one dated stream"]
 end
 
 subgraph STATE["2 · STATE — machinery underneath, no flow"]
   direction TB
-  dState["DIRECT · Status<br>runtime · attention · context · substrate"]
-  hState["HALLWAY · Status<br>live channels · embodied session · substrate"]
-  pState["PROJECT · Status<br>work state · activity · involved rooms"]
-  houseState["HOUSE · Mechanics<br>Insula Pulse — snapshot channels, lanes, receipts<br>seven categories · all-category search<br>typed source-census rows · Host offline"]
+  dState["DIRECT · Status<br>runtime · attention · context · substrate<br>Host room only · absent facts stay not reported"]
+  hState["HALLWAY · Status<br>inbox counts · latest timestamp · message read count<br>source lines · Query Host · absent facts stay not reported"]
+  pState["PROJECT · Status<br>quest counts · latest returned receipt<br>claimant rooms · missing facts named"]
+  houseState["HOUSE · Mechanics<br>Insula Pulse · seven categories · all-category search<br>shared health and room state · dated configuration"]
 end
 
 dState ~~~ hState ~~~ pState ~~~ houseState
@@ -91,7 +91,7 @@ Keys `1`–`3` are positional and semantic at once: slot 1 is always the live la
 | 2 | state | Status | Status | Status | Mechanics |
 | 3 | durable | Memories | Record | Evidence | Memories & Lessons |
 
-When a project has an active linked session, slot 1's label reads `Conversation` (`subjectViewLabels`).
+Projects has one subject, `This House`. The board has no project or scope field. Slot 1 stays `Overview`.
 
 ## The two waists (machinery, out of the graphs)
 
@@ -108,14 +108,17 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 | sidebar drawer | `setDrawerView`, `openDrawerView`, `returnDrawerView`, `closeMobileSidebar` |
 | inspector | `setInspector`, inspector doors via `renderInspectorDoors` |
 | direct sessions | `openDirectSession`, `startDirectSession` |
-| project sessions | `selectProjectSession`, `closeProjectSession` |
+| chat ring | `chat.js` queries snapshots and sends operator lines. It polls unanswered turns. `syncChatPanel` queries each live panel opening. |
+| project Docket | `projects.js`: `queryProjects`, `projectMarkup`; `board/index.js` owns the shared reads |
 | presence profile | `renderPresenceProfile`, `closePresenceProfile` |
 | durable views | `renderRoomMemories`, `renderHallwayRecordView`, `renderDurableEntry`, `durableControls`, `durableEntries`, `renderDurableResults` |
 | switcher | `openSwitcher`, `closeSwitcher`, `executeSwitcherCommand`, `switcherCommandRegistry` |
 | Hallway Bell | `renderBellToggle`, `renderHallwayInbox`, `openBell`, `closeBell`, `openBoardFromBell`; rows come from `board/index.js` — `hallwayInboxRound` |
-| House mechanics | `mechanics.js` — `openHouseMechanics` (shell door), `renderHouseMechanics`, `mechanicsEntries`, `renderMechanicsResults`, `handleMechanicsClick`, `handleMechanicsInput` |
+| Hallway subjects | `hallways.js` maps the shared inbox round. `board/hallway-messages.js` owns each message read. |
+| House mechanics | `mechanics.js` renders categories and search. `mechanics-live.js` maps shared Host facts. Missing fields stay not reported. |
+| Direct Status | `renderSubjectState` delegates direct rooms to `renderDirectStatus`. Only the Host's room has live status cards. |
 | Insula Pulse | `pulse.js` — `renderHousePulse`, `queryPulseHost` via `ensurePulseQueried` (slot waists) and `handlePulseClick` (Query Host); lane trace drawer via `openLaneTrace`, `renderLaneTrace`, `renderWithLaneFocus` |
-| House status | `health.js` — `queryHealthHost` via `ensureHealthQueried` (page load) and the popover's `Query Host` verb; `statusChannel` feeds `renderStatusStrip`, `accountStateRows` feeds `renderAccountState` |
+| House status | `health.js` owns health and room-state rounds. Page load queries both. `Query Host` refreshes both. Five footer channels remain. |
 | composer | `updateComposerState`, `composerBlockReason`, `beginLocalResponse` |
 
 ## Keyboard doors
@@ -133,10 +136,10 @@ When a project has an active linked session, slot 1's label reads `Conversation`
 
 - **The House door toggles; everything else selects.** `toggleHouse` stashes `houseReturn`; Esc walks back out. A fourth panel kind with a return pointer, deliberately outside the list grammar.
 - **The switcher is a router, not a surface.** Registry emits existing transitions; it never owns rendering. The Recall entry is live: it routes to House slot 3 and hands focus to the shelf search — the durable slot owns searching (`durableControls`, `renderDurableResults`), the switcher only opens the door.
-- **A hallway subject is a gathering, never a container.** Threads carry date · hallway · participants; sealed and folded threads refuse the composer with a stated reason; the Record is the gathering's durable slot, membership card on top. Rulings 2026-08-17, LESSONS_MAP product grammar.
+- **Hallways use one subject per Host key.** The list and Bell open the same message surface. Reading clears nothing.
 - **Sessions are a header fact, not a slot.** The picker's rows are the history; `New session` rides on top; Esc closes the menu before anything else falls back.
-- **The header's right slot belongs to the view's own verb.** One owner, `renderHeaderContext`: live gets the session control (or thread meta), and each other view gets a verb button only where an honest act exists — `Record memory` (direct durable, prepends a marked local draft), `Seal gathering` (open hallway durable, seals live), `Interface settings` (house state) — else its quietest fact as a non-focusable `.header-chip`. A button with nothing true to do is the deleted noun-pill disease.
-- **Doors open; they never summon.** Membership verbs live where membership lives — `Extend access` on the hallway record's membership card (invited rooms read `may see and enter · has not entered`; presence appears only when they join), `Involve room` on the project's involved-rooms card — and never in the member dock, because the dock shows presence, and presence is not permission. Collections own their create-doors: `New spirit` at the foot of the Direct list (`welcomeSpirit`), the session menu's `New session` on top. One verb species (`.header-verb`/`.card-verb`), placed by whoever owns the fact it mutates.
+- **Header verbs require real doors.** Hallway headers open Record. The composer states: `Watching only · no Hallway write door in this surface`.
+- **Doors open; they never summon.** Projects reports no linked sessions or involved rooms. The Host has no involvement write door.
 - **Continuity actions are substance-gated.** Fold paper boat / Record memory appear only when the conversation holds ≥2 messages and accepts input — presence is state (`updateComposerState`).
 - **The Bell is the authenticated presence's global router.** Selecting Kodo, Tuner, a Hallway, or a Project changes the subject in view and leaves Kintsu's Bell scope intact. An explicit embodied room/spirit switch may replace that scope. Hallway attention feeds the Bell today; future Project assignments, failures, and mentions use typed rows in the same inbox while subject rows and tabs retain contextual badges. Opening a result routes through the owning subject and acknowledges only covered rows.
 - **Status channels stay separate.** Five buttons, five popovers, no combined verdict. Each chip carries one of five source states — not queried, querying, connected with a value, unreachable with the named reason, or not reported by the Host's health contract at all. `body` and `kittens` hold the last state permanently, because the absence is in the contract rather than in the round: a failed read never converts them into a zero. Every popover ends with the shared source line and the `Query Host` verb, so the reason for an unreachable Host is one click from the chip reporting it.

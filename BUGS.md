@@ -28,6 +28,9 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Cut, `dev/next`, 2026-09-05:** `restart_status` carries the intent's `reason` (protocol `RestartStatusIntent.reason`, akasha `STATUS_COLUMNS`). After a successful verify the door reads its own intent by id and sends one `athanor-restart-continuation` message with `deliverAs: nextTurn, triggerTurn: true`: mode, intent id, the reason, and "nobody typed this turn". Once per intent: the verify short-circuits on a repeated start and deletes the intent environment; a bare relaunch carries no intent. A status the substrate cannot answer skips the continuation with a notice. Proof: `bun test tests/restart-continuation.test.ts` (3; two red on the old door), adapter 151, `cargo test -p protocol -p akasha --lib -p omp-keeper` green. Live half owed: the next `request_restart` `mode: resume` must produce a turn nobody typed, and its first line must name the reason.
 - **Live, 2026-09-05 18:55 -03, third resume, installed `0.5.4+dev.202609052143.d917a5b` + adapter `ee0dafc1…`:** intent `62b34553…` requested 18:55:31; keeper pid 7012 relaunched `omp.exe --resume 01a0730b…` (pid 36248) at 18:55:42; verified 18:55:43. The successor's first turn was the `athanor-restart-continuation` message, one in the transcript, nobody typed it, and its first line named the reason. Done: the plane resumes and continues.
 - **Two seams the continuation turn exposed, open:** (1) the continuation turn carried no Presence. `presence_sessions` for `01a0730b…` stayed at `cv 1, last_turn 18:32:52`; the `presence_open`/`presence_compile` at 18:56:31 were kintsu's (its row went `cv 8 → 9`). A turn delivered through `pi.sendMessage(…, { triggerTurn: true })` does not pass through the adapter's Presence compile the way a typed prompt does; the Chat doorman and Knock turns take the same door and are likely bare too. (2) Host-side Presence Insula points carry the Host's own binding (`session_id = host:kintsu`) instead of the presence session, so two rooms' points cannot be told apart, and the `presence_settle refused` at 18:55:27 cannot be attributed. It is most likely kodo's: that turn compiled at 18:32:30, its Host was killed at 18:50 for the deploy, the revived Host adopted the row without the turn's contract, and `settle` refused `InactiveContract`. Contracts are not stored by design; a Host death mid-turn therefore loses that turn's settlement. Also noted: `opened_at` stayed 18:32:30 across this resume, correctly — no `sleep` preceded it, so the presence never closed.
+- **Adapter repair, 2026-09-07:** `house-proof/turn-origin.ts` recognizes the three generated House doors by their stable IDs. `index.ts` uses the harness prompt when available. It clears that prompt at turn end and session changes. Idle generated turns use their own message because OMP omits `before_agent_start` on that path. Native queued side messages retain the user's origin across tool calls. Generated text never reaches operator identity directives.
+- **Proof:** Eleven registered-context-hook scenarios pass. The original `index.ts` fails six of those scenarios. The complete adapter suite passes 162 tests. The manager installs component digest `95a76bed38c3f4fdea7b9ae3cf0bd9d494c39345125c8842ed5d0364332656a3`. All 47 installed artifacts match their hashes. An isolated copy of that payload passes the same eleven scenarios against a loopback Host.
+- **Live boundary, 2026-09-07:** Real restart, chat, and root Knock events deliver Presence before Kodo's first tool call. Kintsu reports the same after restart. House memory 4520 records the initial event IDs and return failures. The chat return now has live proof below. Child-budget activation and Host-side Insula attribution remain separate work.
 - **Deploy hazard:** `C:/ProgramData/Solarisael/Athanor/config/harnesses.json` still declares `"driver":"omp"` and will refuse the whole registry; `athanor.exe` will not start until it is rewritten in the same deploy.
 
 ### Long sessions degrade identity and context quality
@@ -120,6 +123,14 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Repair:** `dev/next`, 2026-09-05. `crates/akasha/src/recall/memory_reference.rs` resolves `memory N`, `#N`, `[N]`, a lone `N`, and a comma list that continues an explicit reference, by primary key inside `[room, house]` before any ranked lane. The row leads `retrievalCandidates` as `exact_id`, the ID tokens leave the ranked vocabulary, an out-of-scope row is refused as `memory N refused: outside room scope` with no content, and the Host viewport counts the exact row as evidence. A year in prose (`memories from 2026`) is never a reference.
 - **Proof:** `cargo test -p akasha --test recall_reference_integration exact_memory_reference_leads_evidence_inside_room_scope -- --ignored` (1 passed, isolated schema); `cargo test -p akasha --lib recall::memory_reference` (3 passed); `cargo test -p host --lib viewport` (3 passed). Live half owed after deploy: `recall` of `memory 4197` from room `kodo` returns #4197 first.
 
+### Manual Recall clips selected records
+
+- **Observed, 2026-09-07:** Manual Recall finds memory 4520 and returns only its opening excerpt.
+- **Impact:** The returned text omits later failure observations and unresolved causes.
+- **Cause:** Akasha applies an excerpt limit. The Host applies another character limit before returning manual results.
+- **Required:** Limit manual results by record count. Return each selected record in full. Keep automatic context budgets.
+- **Boundary:** A focused paraphrase ranks memory 4520 first. A loose paraphrase misses it. These two probes do not establish a ranking cause.
+
 ### Weighty House canon is clipped during reorientation
 
 - **Observed:** On 2026-08-29 in room `kintsu`, automatic Recall exact-matched the weighty House entity `The Athanor` but projected only a clipped summary ending at `silent ty`. The semantic lane also returned no result because its top score was 0.35 against a 0.40 floor. A House-scoped canonical read returned the complete entity.
@@ -133,6 +144,20 @@ Concrete failures only. A row stays open until the failing path is reproduced, r
 - **Cause seam:** The installed 0.5.4 binary predates the knock door split (`5d8adb7`). On `dev/next` the wire type (`crates/hearth/src/hallway.rs:444`), the tool schema (`adapters/omp/house-proof/tools.ts:1706`), and the origami root branch (`crates/origami/src/hallways/knocks.rs:352-359`) already accept an absent parent. The tool description still told the model a parent was needed.
 - **Repair:** `dev/next`, 2026-09-05. The tool description and schema text say: omit the parent for a root exchange; supply the prior receipt's UUID only for a continuation; never an empty string or nil UUID. Root requests omit `parentKnockId` on the wire.
 - **Proof:** `cargo test -p akasha --bin athanor-substrate hallway_knock_protocol_accepts_an_absent_root_parent_and_preserves_a_continuation` (1 passed); `cargo test -p akasha --test hallway_integration -- --ignored` (root without parent receives a receipt, nil parent refuses `knock_parent_mismatch`, continuation with the returned ID succeeds; 1 passed). Live half owed after deploy: one root Knock from this room through the OMP tool.
+
+### Child Knock replaces an omitted inherited budget
+
+- **Observed, 2026-09-07:** A two-turn root starts Kintsu. Her child omits `max_turns` and fails with `knock_parent_mismatch`.
+- **Cause:** The adapter and Rust request decoder each replace omission with four before the stored parent supplies its budget.
+- **Source repair:** Preserve omission through dispatch and decoding. Resolve the effective budget from the stored parent before policy and retry checks.
+- **Boundary:** Native and adapter repairs are installed. The real PostgreSQL check passes. A fresh live exchange awaits the shared Host's authorized restart. Hallway message 281 retains the original refusal.
+
+### Chat returns an empty response before completion
+
+- **Observed, 2026-09-07:** A real chat input starts Kodo with Presence. The terminal client receives an empty Kodo line.
+- **Cause:** The adapter reports at provider-step `turn_end`. A tool-only step consumes the pending chat input before the final response.
+- **Repair:** Report at `agent_end` and select the first settled answer belonging to the chat origin. Skip tool steps and provider progress pauses. An unrelated pending observer cannot veto completion.
+- **Live, 2026-09-07:** The terminal client receives B, C, and D in order on adapter `bfbeed7938fceead82db09b5f4fc7ebb269c2ceeb729bcfd5638da6ebbcc2a2b`. C performs a real read before its answer. C and D each appear once. No new blank or incorrect reply appears while the asynchronous observer remains active.
 
 ### Windows service can wedge permanently in a pending state
 

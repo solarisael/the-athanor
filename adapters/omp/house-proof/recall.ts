@@ -68,13 +68,29 @@ function temporalDecayUnsupported(error: unknown) {
     && error.message.includes("temporal_decay");
 }
 
+export type RecallProjection = "auto" | "manual";
+
+/**
+ * One AKASHA/Vault recall over the Rust transport.
+ *
+ * `projection` is named by the caller, never inferred from the query:
+ * `"auto"` (default) is the passive working set with bounded excerpts;
+ * `"manual"` is an operator-visible tool read whose selected records carry
+ * their complete database bodies under the substrate's record cap
+ * (`hearth::MANUAL_RECORD_CAP`, 5). A manual read never downgrades: a
+ * substrate that refuses the `projection` field answers with its own
+ * `invalid_params` failure, which is returned whole (`ok: false`) rather than
+ * retried for clipped records. Only the automatic `temporal_decay` field keeps
+ * its older retry-without-field path.
+ */
 export async function recallWithRouting(
   effectiveRoomDir: string,
   room: string,
   query: string,
-  { signal, temporalDecay = false, timeoutMs = RECALL_TIMEOUT_MS }: {
+  { signal, temporalDecay = false, projection = "auto", timeoutMs = RECALL_TIMEOUT_MS }: {
     signal?: AbortSignal;
     temporalDecay?: boolean;
+    projection?: RecallProjection;
     timeoutMs?: number;
   } = {},
 ) {
@@ -103,15 +119,23 @@ export async function recallWithRouting(
       content_top_k: 8,
       content_min_similarity: RECALL_CONTENT_MIN_SIM,
     };
-  const params = temporalDecay && !vaultProfile ? { ...baseParams, temporal_decay: true } : baseParams;
+  const decayParams = temporalDecay && !vaultProfile ? { ...baseParams, temporal_decay: true } : baseParams;
+  const manual = projection === "manual" && !vaultProfile;
+  const params = manual ? { ...decayParams, projection: "manual" } : decayParams;
   const requestOptions = { signal, timeoutMs };
   try {
     let result;
     try {
       result = await transport.request(vaultProfile ? "vault_recall" : "recall", params, requestOptions);
     } catch (error) {
+      // A manual read keeps its projection on the retry: dropping it would
+      // hand back clipped records under a request that asked for whole ones.
       if (vaultProfile || !temporalDecay || !temporalDecayUnsupported(error)) throw error;
-      result = await transport.request("recall", baseParams, requestOptions);
+      result = await transport.request(
+        "recall",
+        manual ? { ...baseParams, projection: "manual" } : baseParams,
+        requestOptions,
+      );
     }
     return { ok: true, result };
   } catch (error) {

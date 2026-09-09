@@ -348,6 +348,163 @@ a rollback backup; `versions/0.5.4/` untouched; the running `athanor.exe` and
 `omp-keeper.exe` continued as `.retired-*` images while the stable paths
 carried the new bytes; a session bound to `0.5.4` kept recalling through it.
 
+### Critical organ review and records update — 2026-09-06
+
+Sol accepted a critical review of the House's intended outcomes and each organ.
+The review examines source and dated installed receipts.
+It does not run a new runtime certification, restore drill, or performance benchmark.
+The [organ review](./ARCHITECTURE.md#critical-organ-review-2026-09-06) separates observations from proposed changes.
+
+The reviewed source establishes these bounded findings:
+
+| Surface | Source observation | Evidence boundary |
+|---|---|---|
+| Model capacity | [`context.rs:737-764`](../crates/hearth/src/context.rs) derives the context nudge from a room-name assumption. | This does not change the provider's actual model limit. |
+| Lesson context | [`triggers.rs:22-107`](../crates/hearth/src/triggers.rs) queries at most twelve lessons and emits complete bodies, proof, and trigger fields. | A count limit does not establish a content-size budget. |
+| Wake | The [wake adapter](../adapters/omp/house-proof/wake-context/index.ts) retains the rendered letter and identity fields. It drops separate age and warning metadata. | The rendered letter can still contain a stale-boat warning. |
+| Cabinet | [`anamnesis.rs:362-377`](../crates/akasha/src/anamnesis.rs) selects wake-enabled pillars or active cycles without a cycle-recency condition. | A selected cycle does not establish the operator's current state. |
+| Pulse | [`serve.ts:26-39`](../gui-prototype/serve.ts) allows twelve read routes. | The web surface remains read-only. |
+| Docket | [`report/mod.rs:130-147`](../crates/akasha/src/docket/report/mod.rs) separates claimant and reviewer by room. | A single-room review arrangement requires an explicit supported authority path. |
+
+The session's Recall result reports a semantic timeout at 3000 ms.
+Lexical evidence still returns.
+The GIGA aggregate reports capture and classification enabled, store healthy, queue 0, failures 0, and processed 430.
+It lists only dismissed candidate states.
+These observations establish neither classifier reachability nor useful consolidation.
+The existing GIGA-liveness draft distinguishes purge history from review outcomes.
+
+The records update produces these receipts:
+
+- House memory **#4509** stores the accepted analysis under PostgreSQL authority.
+  Its receipt reports a successful backup of 597,627,271 bytes in 49,458 ms.
+  This is one write observation, not a backup benchmark.
+- Draft goal `69d2e256-30c8-499f-b1db-061ab8aca84e` groups four planning supplements.
+  Their IDs and dependencies are in the [roadmap](./roadmap.md#recorded-docket-supplements).
+- A board read before the update returns 65 quests.
+  A read after the update returns 69.
+  All 65 prior board rows match exactly.
+  The four new rows are drafts with no deadlines and claim epoch zero.
+
+The posting contract exposes no existing-quest edit action.
+Additive supplements preserve existing claims, deadlines, frozen acceptance, and the writing priority.
+Their acceptance candidates and dependency references remain prose until separate authorized transitions.
+This pass activates no work and changes no runtime, schema, installed artifact, or product version.
+
+<a id="generated-turn-presence-repair-2026-09-07"></a>
+
+### Generated-turn Presence repair — 2026-09-07
+
+The adapter previously selected only the last user message for context preparation.
+A generated turn could return no Presence or reuse an earlier user turn's memo.
+The repair changes `adapters/omp/index.ts` and adds `house-proof/turn-origin.ts`.
+It recognizes restart, chat, and Hallway Knock messages through their respective intent, say, and Knock IDs.
+
+OMP emits `before_agent_start` for native prompts and queued-message drains.
+Its idle agent-initiated path skips that hook.
+The adapter holds the emitted prompt for the active turn and clears it at turn end and session changes.
+Without a held prompt, it selects the latest recognized origin.
+Passive custom messages never become origins.
+Generated text cannot apply operator-only identity directives.
+
+| Check | Result | Boundary |
+|---|---|---|
+| Original adapter replay | 6 failures and 5 passes | The new tests run against an isolated original `index.ts`. No worktree rollback occurs. |
+| Repaired registered hook | 11 passes, 91 assertions | A loopback Host answers Presence. Other services intentionally refuse. |
+| Complete adapter suite | 162 passes, 820 assertions | The normal deployment script removes live topology from the test environment. |
+| Manager installation | Component digest `95a76bed38c3f4fdea7b9ae3cf0bd9d494c39345125c8842ed5d0364332656a3` selected | Previous digest `ee0dafc19fc5ff26b061a90cd8c4fd546cdb1bab78434a577ed7e8682989adf3` retained. No product version changes. |
+| Installed artifact integrity | All 47 file sizes and SHA-256 hashes match | The installed entry and origin helper also match the source bytes. |
+| Installed payload replay | 11 passes, 91 assertions | An isolated copy of the verified installed payload runs the same registered-hook scenarios. |
+
+The scenarios cover fresh idle restart and continuation after an unanswered user prompt.
+They also cover queued messages during native turns, later tool requests, distinct event IDs, and memo replay.
+Negative cases cover passive messages, inherited object names, unmatched prompts, and generated identity directives.
+Native user keys remain unchanged.
+
+Live observations now cover all three generated entrances in the resumed Kodo session.
+Each entrance delivers Presence before the first tool call.
+
+| Live event | Receipt | Observed boundary |
+|---|---|---|
+| Hallway root Knock | `d60c6f17-3ad0-4b1d-9ab8-b06a79d50ee8`; Hallway message 277 | The event starts a Kodo turn without an intervening operator message. |
+| Resume continuation | `764aea81-0c3c-42c4-9f7d-667711dd356d`; Hallway message 278 | The keeper resumes the same session and verifies the successor. |
+| Chat input | `say-5ef700e2-fb29-414b-a508-152a9b89add0` | The real Host accepts a labeled probe from the existing build-output chat client. |
+| Kintsu after restart | `d592ce24-22d9-4b06-81e0-f83964dd39ae`; Hallway message 280 | Kintsu reports Presence before her first tool call on the generated turn. |
+
+These observations establish incoming delivery, not every internal memo or retry condition.
+The chat client receives an empty response line instead of the final text.
+The child Knock fails when its omitted budget should inherit the parent's two-turn budget.
+Hallway message 281 records that refusal.
+House memory 4520 retains the observations and unresolved causes.
+These return-path failures remain separate from incoming Presence delivery.
+The separate Host-side Insula attribution defect remains outside this adapter repair.
+No Rust change, database migration, or expanded autonomy policy is included.
+
+### Manual Recall and return-path repairs — 2026-09-07
+
+The source repairs manual Recall completeness, chat completion ownership, and child Knock budget inheritance.
+Manual OMP Recall returns complete selected AKASHA bodies under a five-record cap.
+Automatic Recall retains its existing context budgets.
+The Host reports record overflow, and BM25F reports its prefilter ceiling for multi-term queries.
+No ranking weights change.
+
+The isolated PostgreSQL proof uses a new disposable database.
+Administrative setup installs `vector` and `pg_trgm` only in that database.
+The application role runs the behavior checks.
+All three Recall reference checks pass.
+The Hallway integration check also passes, including omitted child-budget inheritance.
+Cleanup removes the disposable database.
+
+The first canonical deployment attempt stops at the existing supervisor readiness check.
+That check expects a waiting notification and receives none.
+The same check passes in isolation without source changes.
+The deployment is retried with serial test scheduling.
+This observation does not establish the cause of that intermittent failure.
+
+The serial workspace run and adapter suite pass.
+The canonical driver installs native release `0.5.4+dev.202609071827.ce13780.dirty`.
+It selects adapter `0.9.3-00f709bfcce927c1c24103abdfcdc572c06638552c85f20382b08bb67f1fef5d`.
+The manager verifies 20,711 native artifacts and all 47 adapter artifacts.
+The initial embedding health checks fail after installation.
+The running Ollama endpoint later returns a real 2,048-dimensional embedding.
+The installed health command then reports `ok: true` and `mode: full`.
+The deployment script's earlier nonzero result remains recorded.
+The resumed live manual Recall fails because the serving Host rejects the new `projection` response field.
+The listener remains owned by an earlier session.
+Kintsu preserves active work and defers the shared Host restart to an operator-approved boundary.
+This blocks the complete manual Recall path despite successful installed-file checks.
+
+The repaired chat adapter receives probe A and produces its requested final text in the model transcript.
+The actual terminal client receives no spirit response during the 300-second observation.
+Probe B remains queued, and the observer stops the client.
+No premature empty response appears in this attempt.
+The chat completion failure remains open; transcript text alone does not prove a client round trip.
+
+The remaining chat failure is traced to the harness's pending-wake rule.
+OMP emits `agent_end` with `willContinue: true` while an unrelated asynchronous observer remains pending.
+The chat guard incorrectly treats that flag as proof that its own final answer is incomplete.
+The observer waits for the reply, while the reply waits for the observer.
+The correction removes that veto and retains the owned-origin and settled-assistant checks.
+A delayed completion also selects a later async reply under the earlier last-answer rule.
+The final correction selects the first settled answer after the chat origin.
+It skips tool-use messages and provider progress pauses.
+
+Adapter `0.9.3-bfbeed7938fceead82db09b5f4fc7ebb269c2ceeb729bcfd5638da6ebbcc2a2b` is installed and resumed.
+The actual chat client then prints these new spirit lines:
+
+```text
+[19:04] Kodo: CHAT-REPAIR-B-OBSERVED
+[19:04] Kodo: CHAT-REPAIR-C-OBSERVED
+[19:05] Kodo: CHAT-REPAIR-D-OBSERVED
+```
+
+C uses the real read tool before its final answer.
+C and D each appear once, in order, with no new blank or incorrect reply.
+The asynchronous observer remains active until both replies arrive.
+Kodo independently reads the same client output.
+The observer stops the client afterward.
+This establishes the exercised chat round trip.
+Manual Recall and child Knock live verification still await shared Host activation.
+
 ## Next public evidence
 
 The post-1.0 public proof program expands the evidence surface in this order.

@@ -1,12 +1,14 @@
 //! Recall answers an explicit memory reference by primary key inside the
-//! room's scope, and hands a named canon entity back whole.
+//! room's scope, and hands a named canon entity back whole. A manual
+//! projection reads the selected records whole; an exact-ID-only query is
+//! answered by those records and their warnings alone.
 //!
 //! Run with the isolated PostgreSQL pair:
 //! `ATHANOR_SUBSTRATE_TEST_DATABASE_URL=... ATHANOR_SUBSTRATE_TEST_SCHEMA=solarisael_tuner_test_<you>`
 //! `cargo test -p akasha --test recall_reference_integration -- --ignored`
 
 use akasha::{Config, EmbeddingMode, RecallResult, recall};
-use hearth::{RecallRequest, RoomKey};
+use hearth::{MANUAL_RECORD_CAP, RecallProjection, RecallRequest, RoomKey};
 use sqlx::{
     PgPool,
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -121,6 +123,7 @@ impl Isolated {
             giga_source_ledger_dir: None,
             giga_source_room: None,
             house_tz: "America/Sao_Paulo".into(),
+            nats_url: None,
         };
         Ok(Self { schema, pool, cfg })
     }
@@ -161,10 +164,20 @@ impl Isolated {
     }
 
     async fn recall(&self, room: &str, query: &str) -> TestResult<RecallResult> {
+        self.recall_with(room, query, RecallProjection::Auto).await
+    }
+
+    async fn recall_with(
+        &self,
+        room: &str,
+        query: &str,
+        projection: RecallProjection,
+    ) -> TestResult<RecallResult> {
         Ok(recall(
             &self.pool,
             &self.cfg,
-            RecallRequest::new(RoomKey::new(room)?, query.into(), 8, 0.4, 8, 0.3)?,
+            RecallRequest::new(RoomKey::new(room)?, query.into(), 8, 0.4, 8, 0.3)?
+                .with_projection(projection),
             None,
         )
         .await?)
@@ -247,7 +260,10 @@ async fn exact_memory_reference_leads_evidence_inside_room_scope() -> TestResult
         "the exact row owns its memory's single seat"
     );
     assert!(
-        !result.warnings.iter().any(|w| w.contains(&target.to_string())),
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.contains(&target.to_string())),
         "an in-scope resolution raises no warning: {:?}",
         result.warnings
     );
@@ -265,7 +281,10 @@ async fn exact_memory_reference_leads_evidence_inside_room_scope() -> TestResult
     // The House room is inside every room's scope; the word `memory` itself
     // still ranks rows by type below the exact row.
     let result = db.recall(ROOM, &format!("memory {house}")).await?;
-    assert_eq!(memory_ids(&result.retrieval_candidates).first(), Some(&house));
+    assert_eq!(
+        memory_ids(&result.retrieval_candidates).first(),
+        Some(&house)
+    );
     assert_eq!(
         result.retrieval_candidates[0]["source"].as_str(),
         Some("exact_id")
@@ -330,6 +349,249 @@ async fn exact_memory_reference_leads_evidence_inside_room_scope() -> TestResult
 
 #[tokio::test]
 #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
+async fn manual_projection_reads_whole_records_and_exact_only_queries_skip_ranked_lanes()
+-> TestResult {
+    let db = Isolated::open("manual_projection").await?;
+    let tail = "TAIL-MARKER-PAST-TWELVE-HUNDRED";
+    let long_body = format!(
+        "{}{tail}",
+        "The lattice record Sol and Kodo kept about the porch plan. ".repeat(40)
+    );
+    assert!(long_body.chars().count() > 1200 + 100);
+    let long = db.memory(ROOM, "long lattice record", &long_body).await?;
+    let second = db
+        .memory(
+            ROOM,
+            "second lattice record",
+            "A shorter lattice record about the same porch.",
+        )
+        .await?;
+    let foreign = db
+        .memory(
+            OTHER_ROOM,
+            "foreign lattice",
+            "Zanzibar lattice that must never leak.",
+        )
+        .await?;
+    let missing = 999_999_999_999_999_999_i64;
+
+    // Exact-ID-only, manual: the named records whole, in order, plus warnings,
+    // and nothing ranked under them for the words `memories` and `and`.
+    let query = format!("memories {long}, {second}, {foreign} and {missing}");
+    let result = db
+        .recall_with(ROOM, &query, RecallProjection::Manual)
+        .await?;
+    assert_eq!(result.projection, "manual");
+    assert!(result.found);
+    assert_eq!(memory_ids(&result.retrieval_candidates), vec![long, second]);
+    assert!(
+        result
+            .retrieval_candidates
+            .iter()
+            .all(|candidate| candidate["source"].as_str() == Some("exact_id")),
+        "an exact-only query carries no ranked filler: {:?}",
+        result.retrieval_candidates
+    );
+    assert!(result.canon_matches.is_empty() && result.date_matches.is_empty());
+    assert!(
+        result
+            .warnings
+            .contains(&format!("memory {missing} not found")),
+        "missing IDs are named: {:?}",
+        result.warnings
+    );
+    assert!(
+        result
+            .warnings
+            .contains(&format!("memory {foreign} refused: outside room scope")),
+        "refused IDs are named: {:?}",
+        result.warnings
+    );
+    let first = &result.retrieval_candidates[0];
+    assert_eq!(
+        first["body"].as_str(),
+        Some(long_body.as_str()),
+        "manual carries the whole record"
+    );
+    assert!(
+        first["body"]
+            .as_str()
+            .is_some_and(|body| body.ends_with(tail))
+    );
+    let excerpt = first["excerpt"].as_str().unwrap_or_default();
+    assert_eq!(
+        excerpt.chars().count(),
+        1201,
+        "the excerpt stays bounded beside the body"
+    );
+    assert!(excerpt.ends_with('…') && !excerpt.contains(tail));
+    assert!(!serde_json::to_string(&result)?.contains("Zanzibar"));
+
+    // The same exact-only query under the auto projection: same records and
+    // warnings, excerpt only, no body key at all.
+    let auto = db.recall(ROOM, &query).await?;
+    assert_eq!(auto.projection, "auto");
+    assert_eq!(memory_ids(&auto.retrieval_candidates), vec![long, second]);
+    assert!(
+        auto.retrieval_candidates
+            .iter()
+            .all(|candidate| candidate.get("body").is_none() && candidate["source"] == "exact_id"),
+        "auto stays excerpt-bounded and unranked for an exact-only query"
+    );
+    assert!(
+        auto.warnings
+            .contains(&format!("memory {missing} not found"))
+    );
+
+    // A single explicit reference is also exact-only in both projections.
+    for projection in [RecallProjection::Auto, RecallProjection::Manual] {
+        let result = db
+            .recall_with(ROOM, &format!("memory {long}"), projection)
+            .await?;
+        assert_eq!(memory_ids(&result.retrieval_candidates), vec![long]);
+        assert_eq!(
+            result.retrieval_candidates[0].get("body").is_some(),
+            projection.is_manual()
+        );
+    }
+
+    // A mixed query keeps its ranked lanes: the exact row leads and the
+    // natural words still rank the other record beneath it.
+    let mixed = db
+        .recall_with(
+            ROOM,
+            &format!("memory {long} lattice porch"),
+            RecallProjection::Manual,
+        )
+        .await?;
+    assert_eq!(memory_ids(&mixed.retrieval_candidates).first(), Some(&long));
+    assert_eq!(mixed.retrieval_candidates[0]["source"], "exact_id");
+    assert!(
+        memory_ids(&mixed.retrieval_candidates).contains(&second),
+        "ranked lanes still run for a mixed query: {:?}",
+        mixed.retrieval_candidates
+    );
+
+    // Natural search, manual: every selected record is hydrated to its whole
+    // body by primary key inside room scope; no exact row is invented.
+    let natural = db
+        .recall_with(ROOM, "lattice record porch", RecallProjection::Manual)
+        .await?;
+    assert!(natural.found);
+    assert!(natural.retrieval_candidates.len() <= MANUAL_RECORD_CAP);
+    assert!(
+        natural
+            .retrieval_candidates
+            .iter()
+            .all(|candidate| candidate["source"] != "exact_id")
+    );
+    let hydrated_long = natural
+        .retrieval_candidates
+        .iter()
+        .find(|candidate| candidate["memory_id"].as_i64() == Some(long))
+        .ok_or("natural search must select the long record by its words")?;
+    assert_eq!(hydrated_long["body"].as_str(), Some(long_body.as_str()));
+    assert!(
+        natural
+            .retrieval_candidates
+            .iter()
+            .filter(|candidate| candidate["memory_id"].is_i64())
+            .all(|candidate| candidate["body"].is_string()),
+        "every manual candidate with a memory carries its body: {:?}",
+        natural.retrieval_candidates
+    );
+    assert!(!serde_json::to_string(&natural)?.contains("Zanzibar"));
+
+    // Natural search, auto: the same selection stays excerpt-bounded.
+    let natural_auto = db.recall(ROOM, "lattice record porch").await?;
+    assert!(
+        natural_auto
+            .retrieval_candidates
+            .iter()
+            .all(|candidate| candidate.get("body").is_none()),
+        "auto never carries a body: {:?}",
+        natural_auto.retrieval_candidates
+    );
+    assert!(
+        natural_auto
+            .retrieval_candidates
+            .iter()
+            .filter(|candidate| candidate["memory_id"].as_i64() == Some(long))
+            .all(|candidate| !candidate["excerpt"]
+                .as_str()
+                .unwrap_or_default()
+                .contains(tail)),
+        "the auto excerpt of the long record stops before its tail"
+    );
+
+    // The record cap trims by count and names what it dropped, for a long
+    // exact list and for a wide natural selection alike.
+    let mut many = vec![long, second];
+    for index in 0..MANUAL_RECORD_CAP {
+        many.push(
+            db.memory(
+                ROOM,
+                &format!("lattice record {index}"),
+                &format!("Lattice record number {index} about the porch plan."),
+            )
+            .await?,
+        );
+    }
+    let list = many
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let capped = db
+        .recall_with(ROOM, &format!("memories {list}"), RecallProjection::Manual)
+        .await?;
+    assert_eq!(
+        memory_ids(&capped.retrieval_candidates),
+        many[..MANUAL_RECORD_CAP].to_vec(),
+        "reference order leads; the tail past the cap is dropped"
+    );
+    let dropped = many[MANUAL_RECORD_CAP..]
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        capped.warnings.contains(&format!(
+            "manual record cap {MANUAL_RECORD_CAP}: {} selected records dropped (memories {dropped})",
+            many.len() - MANUAL_RECORD_CAP
+        )),
+        "the cap names every dropped record: {:?}",
+        capped.warnings
+    );
+    let uncapped_auto = db.recall(ROOM, &format!("memories {list}")).await?;
+    assert_eq!(
+        memory_ids(&uncapped_auto.retrieval_candidates),
+        many,
+        "the auto projection keeps every resolved reference; the viewport budgets it"
+    );
+    let wide = db
+        .recall_with(ROOM, "lattice record porch plan", RecallProjection::Manual)
+        .await?;
+    assert_eq!(wide.retrieval_candidates.len(), MANUAL_RECORD_CAP);
+    assert!(
+        wide.warnings
+            .iter()
+            .any(|w| w.starts_with(&format!("manual record cap {MANUAL_RECORD_CAP}:"))),
+        "a wide natural selection reports its trim: {:?}",
+        wide.warnings
+    );
+    assert!(
+        wide.retrieval_candidates
+            .iter()
+            .all(|candidate| candidate["body"].is_string()),
+        "every kept record is whole"
+    );
+
+    db.close().await
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
 async fn named_weighty_canon_returns_its_complete_assertion() -> TestResult {
     let db = Isolated::open("canon_assertion").await?;
     let sentence = "The Athanor is the House platform: PostgreSQL is authoritative, canon outranks loose memory, and markdown on disk is provenance. ";
@@ -371,10 +633,7 @@ async fn named_weighty_canon_returns_its_complete_assertion() -> TestResult {
 
     // Reorientation by alias, as the whole query.
     let result = db.recall(ROOM, "Athanor").await?;
-    let entry = result
-        .canon_matches
-        .first()
-        .ok_or("alias must resolve")?;
+    let entry = result.canon_matches.first().ok_or("alias must resolve")?;
     assert_eq!(entry["termKey"].as_str(), Some("The Athanor"));
     assert_eq!(entry["entry"]["exact"], serde_json::json!(true));
     assert_eq!(

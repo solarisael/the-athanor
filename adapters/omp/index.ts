@@ -70,6 +70,7 @@ import { resolveEntities } from "./house-proof/entity-resolution.ts";
 import { recordRecallTelemetry } from "./house-proof/recall-telemetry.ts";
 import {
   applyPromptDirectives,
+  loadRoomState,
   roomContext,
   writeActiveSpiritSnapshot,
 } from "./house-proof/room.ts";
@@ -81,6 +82,7 @@ import {
 } from "./house-proof/substrate.ts";
 import { receiveAutomaticWake } from "./house-proof/wake-context/index.ts";
 import { messageText } from "./house-proof/text.ts";
+import { anchorTurnAdditions, currentTurnOrigin, turnKeysByMessage } from "./house-proof/turn-origin.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
 import { installLessonTtsrBridge, syncLessonTtsr } from "./house-proof/lesson-ttsr.ts";
@@ -288,6 +290,13 @@ function trimOldestMap<K, V>(map: Map<K, V>, limit: number): void {
   if (!oldest.done) map.delete(oldest.value);
 }
 
+// before_agent_start prompt per room+session, held for one turn only.
+const activeTurnPrompts = new Map<string, string>();
+
+function activeTurnPromptKey(room: string, session: string): string {
+  return `${room}\0${session}`;
+}
+
 function trimOldestSet<T>(set: Set<T>, limit: number): void {
   if (set.size <= limit) return;
   const oldest = set.values().next();
@@ -452,35 +461,6 @@ function turnAdditionMemo(sessionKey: string, effectiveRoomDir: string): TurnAdd
 function conversationTokenEstimate(messages: any[]): number {
   const characters = messages.reduce((total, message) => total + messageText(message).length, 0);
   return Math.ceil(characters / 4);
-}
-
-function turnKeysByMessage(messages: any[]) {
-  const keys = new Map();
-  let ordinal = 0;
-  for (const message of messages) {
-    if (message?.role !== "user") continue;
-    ordinal += 1;
-    const identity = typeof message?.id === "string" && message.id
-      ? `id:${message.id}`
-      : `ord:${ordinal}:${Bun.hash(messageText(message)).toString(36)}`;
-    keys.set(message, identity);
-  }
-  return keys;
-}
-
-function anchorTurnAdditions(messages: any[], turnKeys: Map<any, string>, memo: Map<string, Array<Record<string, any>>>) {
-  const output = [];
-  let inserted = false;
-  for (const message of messages) {
-    output.push(message);
-    if (message?.role !== "user") continue;
-    const additions = memo.get(turnKeys.get(message));
-    if (additions?.length) {
-      output.push(...additions);
-      inserted = true;
-    }
-  }
-  return inserted ? { messages: output } : undefined;
 }
 
 const STABLE_CONTEXT_TYPES = new Set([
@@ -666,6 +646,7 @@ export default function solarisaelHouseProof(pi, release) {
   pi.on("session_switch", (event, ctx) => {
     const { room, effectiveRoomDir } = roomContext(ctx.cwd);
     const session = hostSessionIdentity(ctx, effectiveRoomDir);
+    activeTurnPrompts.delete(activeTurnPromptKey(room, session));
     retireStaleInsulaSessions(room, session);
     registerTopLevelSession(room, session);
     return showReadyFeedback(event, ctx);
@@ -673,10 +654,35 @@ export default function solarisaelHouseProof(pi, release) {
   pi.on("session_shutdown", async (_event, ctx) => {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
     const session = hostSessionIdentity(ctx, effectiveRoomDir);
+    activeTurnPrompts.delete(activeTurnPromptKey(room, session));
     retireInsulaSession(room, session);
     retireTopLevelSession(room, session);
     await stopHallwayKnockDoorman({ room, spirit, session });
     stopChatDoorman({ room, spirit, session });
+  });
+
+  // The turn's own prompt, as the harness names it. OMP emits
+  // before_agent_start with the prompt text for a native prompt and for a door
+  // message drained from its hidden next-turn queue; the idle agent-initiated
+  // path emits nothing. The context hook resolves the turn's origin against
+  // this text when it is held and falls back to the latest recognized message
+  // when it is not. It lives exactly one turn: agent_end clears it first thing,
+  // so a prior user prompt can never outlive its turn and be matched again.
+  pi.on("before_agent_start", (event, ctx) => {
+    try {
+      const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
+      const key = activeTurnPromptKey(room, hostSessionIdentity(ctx, effectiveRoomDir));
+      const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+      if (!prompt) {
+        activeTurnPrompts.delete(key);
+        return;
+      }
+      activeTurnPrompts.delete(key);
+      activeTurnPrompts.set(key, prompt);
+      trimOldestMap(activeTurnPrompts, 128);
+    } catch {
+      // An unreadable start leaves no active prompt; the context hook falls back.
+    }
   });
 
   // Insula tool lifecycle. These two taps observe and nothing else: they read
@@ -783,15 +789,6 @@ export default function solarisaelHouseProof(pi, release) {
     // `emitted` decides whether anything was said; the digest still covers the
     // response exactly as the provider returned it.
     const emitted = Boolean(response.trim());
-    // The chat doorman reports the settled turn before the presence block's
-    // early return can skip it; the report is a no-op without a pending say.
-    try {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const session = hostSessionIdentity(ctx, effectiveRoomDir);
-      await noteChatTurnEnd({ room, spirit, session }, response);
-    } catch {
-      // The doorman degrades on its own warning cadence.
-    }
     try {
       const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
       const session = hostSessionIdentity(ctx, effectiveRoomDir);
@@ -945,7 +942,18 @@ export default function solarisaelHouseProof(pi, release) {
   ) => {
     let messages = Array.isArray(event?.messages) ? event.messages : [];
     const originalMessages = messages;
-    const promptMessage = [...messages].reverse().find((message) => message?.role === "user");
+    const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx.cwd);
+    // The turn's origin is the recognized message (native user, or the door
+    // message of a restart continuation, chat say, or Hallway Knock) that
+    // opened this turn: matched against the before_agent_start prompt when the
+    // harness emitted one, else the latest recognized message. Passive custom
+    // context never becomes the prompt, and a held prompt that matches no
+    // recognized message resolves to nothing rather than an older user turn.
+    const activePrompt = activeTurnPrompts.get(
+      activeTurnPromptKey(room, hostSessionIdentity(ctx, effectiveRoomDir)),
+    );
+    const origin = currentTurnOrigin(messages, activePrompt ?? null);
+    const promptMessage = origin?.message;
     const prompt = messageText(promptMessage);
     if (!prompt.trim()) return;
 
@@ -955,7 +963,6 @@ export default function solarisaelHouseProof(pi, release) {
         .map((message) => message.customType),
     );
 
-    const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx.cwd);
     // Context assembly is this adapter's own work before a request exists, not
     // the provider request itself: the real request span opens at the provider
     // tap, and a tool call parents to that one.
@@ -971,8 +978,12 @@ export default function solarisaelHouseProof(pi, release) {
     let houseState = null;
 
     try {
-      const stateResult = await applyPromptDirectives(ctx, prompt);
-      houseState = stateResult.state;
+      // Operator/EMBODY/DISMISS directives are operator authority. Only a
+      // native user turn may apply them; a generated or peer-originated turn
+      // reads the room's current state and changes nothing.
+      houseState = origin?.native
+        ? (await applyPromptDirectives(ctx, prompt)).state
+        : await loadRoomState(effectiveRoomDir, room, spirit);
       await writeActiveSpiritSnapshot(effectiveRoomDir, houseState);
     } catch {
       warnings.push("room state maintenance degraded");
@@ -1601,6 +1612,13 @@ export default function solarisaelHouseProof(pi, release) {
       spirit,
       session: hostSessionIdentity(ctx, effectiveRoomDir),
     };
+    // The turn is over: its prompt must not be matched by the next one.
+    activeTurnPrompts.delete(activeTurnPromptKey(room, binding.session));
+    try {
+      await noteChatTurnEnd(binding, event);
+    } catch {
+      // The doorman degrades on its own warning cadence.
+    }
     try {
       const capture = await logConversationWindow(
         binding,

@@ -55,10 +55,17 @@ impl NativeRuntimeControl {
     }
     fn run(&self, arguments: &[&str]) -> Result<String> {
         let root = self.maintenance_root()?;
+        // The staged substrate sits under the checkout's target directory, so
+        // without an explicit state root it resolves the developer checkout and
+        // judges its stale backups. Name the installed state root and the
+        // directory that holds the pre-upgrade dump this installer just wrote,
+        // so readiness judges the installed tree and never a build-machine path.
         let output = Command::new(root.join("bin/athanor-substrate.exe"))
             .args(arguments)
             .env("DATABASE_URL", self.database_url()?)
             .env("PG_BIN_DIR", root.join("runtime/postgresql/bin"))
+            .env("ATHANOR_STATE_DIR", self.config()?.operator_state_root)
+            .env("ATHANOR_BACKUP_DIR", self.layout.backups())
             .stdin(Stdio::null())
             .output()
             .context("run substrate maintenance command")?;

@@ -1,0 +1,24 @@
+[package]
+name = "athanor-pulse"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pulse"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rust-embed = { version = "8", features = ["include-exclude", "debug-embed"] }
+mime_guess = "2"
+percent-encoding = "2"
+tauri = "2"
+
+[build-dependencies]
+tauri-build = "2"

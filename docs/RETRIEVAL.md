@@ -16,6 +16,20 @@ Sharp queries work best. Use distinctive terms, dates, entities, project names, 
 
 The evidence viewport depends on the active storage profile.
 
+Manual OMP Recall returns up to five selected AKASHA memory records.
+Each selected record carries its complete authoritative text in `retrievalCandidates[].body`.
+The existing `excerpt` remains a preview.
+Automatic Recall retains its character and context budgets.
+
+An exact-ID-only query returns the requested records in order, without unrelated ranked matches.
+Duplicate IDs use one record slot.
+Warnings identify missing, refused, and overflow records.
+Natural queries select ranked records and load their complete bodies within the same record-count limit.
+
+The transport can refuse an oversized response under its existing message-size safety limit.
+Such a refusal is an error, never a successful partial record.
+Vault results, canon summaries, and related-record previews retain their existing contracts.
+
 Vault can return:
 
 - exact source paths;

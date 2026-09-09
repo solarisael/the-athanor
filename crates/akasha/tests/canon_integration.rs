@@ -234,6 +234,7 @@ async fn canon_write_correction_history_and_active_recall_are_postgres_authorita
         giga_source_ledger_dir: None,
         giga_source_room: None,
         house_tz: "America/Sao_Paulo".into(),
+        nats_url: None,
     };
     let recalled_old = recall(
         &pool,

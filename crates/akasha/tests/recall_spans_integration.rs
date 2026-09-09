@@ -149,6 +149,7 @@ impl Isolated {
             giga_source_ledger_dir: None,
             giga_source_room: None,
             house_tz: "America/Sao_Paulo".into(),
+            nats_url: None,
         };
         Ok(Self { schema, pool, cfg })
     }

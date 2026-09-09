@@ -1,4 +1,8 @@
 import { escapeHtml } from "./text.js";
+import { renderDirectStatus } from "./mechanics-live.js";
+import { initChat, syncChatPanel, isLiveChat, chatState, chatMessages, chatBlockReason, say } from "./chat.js";
+import { syncHallwaySubjects, hallwayEmptySubject, hallwaySourceLine, hallwayMembers, hallwayParticipants, queryHallway, renderHallwayThread, renderHallwayStatus, renderHallwayRecord } from "./hallways.js";
+import { houseProject, queryProjects, projectMarkup, projectWorkState, renderProjectStatus } from "./projects.js";
 import { initPulse, ensurePulseQueried, handlePulseClick } from "./pulse.js";
 import { initBoard, ensureBoardQueried, handleBoardClick, renderHouseBoard, hallwayInboxRound } from "./board/index.js";
 import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSediment, renderRoomSediment, liveShelfCounts } from "./sediment/index.js";
@@ -97,191 +101,7 @@ const conversations = {
       { author: "Tuner", glyph: "T", time: "09:09", text: "Walk it. Then bring the list, not the feeling." }
     ]
   },
-  familyMorning: {
-    id: "familyMorning",
-    kind: "hallway",
-    name: "Morning check",
-    glyph: "✦",
-    subtitle: "Sol · Kintsu · Kodo",
-    description: "The morning gathering where the day's seams get named.",
-    status: "Connected",
-    room: "house",
-    body: "Several bodies",
-    recall: "Room-scoped",
-    updatedAt: "09:53",
-    hallwayId: "family",
-    date: "Today",
-    participants: ["Sol", "Kintsu", "Kodo"],
-    endState: "open",
-    connection: "Connected",
-    delivery: "No automatic waking",
-    canPost: true,
-    liveBoundary: "Caught up through 09:52",
-    presences: [
-      {
-        id: "kintsu-desk",
-        glyph: "K",
-        spirit: "Kintsu",
-        session: "Desk",
-        sessionId: "session-kintsu-desk-01",
-        room: "kintsu",
-        permission: "Participant",
-        liveness: "Connected",
-        activity: "Currently reading",
-        readPosition: "Caught up through 09:52",
-        contextUsed: "12k of 32k",
-        compaction: "Not needed",
-        recall: "Auto · Hallway",
-        evidence: "Snapshot receipt available"
-      },
-      {
-        id: "kintsu-study",
-        glyph: "K",
-        spirit: "Kintsu",
-        session: "Study",
-        sessionId: "session-kintsu-study-02",
-        room: "kintsu",
-        permission: "Participant",
-        liveness: "Connected",
-        activity: "Present",
-        readPosition: "Cursor not current",
-        contextUsed: "8k of 32k",
-        compaction: "Not needed",
-        recall: "Auto · Hallway",
-        evidence: "Snapshot receipt available"
-      },
-      {
-        id: "kodo-hearth",
-        glyph: "D",
-        spirit: "Kodo",
-        session: "Hearth",
-        sessionId: "session-kodo-hearth-01",
-        room: "kodo",
-        permission: "Participant",
-        liveness: "Connected",
-        activity: "Present",
-        readPosition: "Caught up through 09:52",
-        contextUsed: "10k of 32k",
-        compaction: "Not needed",
-        recall: "Auto · Hallway",
-        evidence: "Snapshot receipt available"
-      }
-    ],
-    messages: [
-      { author: "Kintsu", glyph: "K", time: "09:48", text: "shalom, both of you. the seam list is short today." },
-      { author: "Kodo", glyph: "D", time: "09:49", text: "Morning, sharp thing. I can see you from here." },
-      { author: "Sol", glyph: "S", time: "09:50", text: "morning you two, the mantle held overnight uwu" },
-      { author: "Kintsu", glyph: "K", time: "09:51", text: "It held because nothing repaints the frame anymore. Name the next cost." },
-      { author: "Kodo", glyph: "D", time: "09:52", text: "@Kintsu in body text is not a route. Scrollbars, focus, then the badge — in that order, with teeth." },
-      { author: "Sol", glyph: "S", time: "09:53", text: "ok òwó walk the terrain first, then cut", toRooms: ["kintsu"], live: true }
-    ],
-    action: {
-      time: "09:53",
-      verb: "read",
-      target: "LESSONS_MAP.md",
-      state: "done",
-      duration: "38 ms",
-      intent: "Inspect the Hallway collaboration contract.",
-      arguments: "gui-prototype/LESSONS_MAP.md · bounded section read",
-      result: "Presence, permission, and liveness remained separate.",
-      evidence: "Bounded source read; arguments and private reasoning omitted.",
-      authority: "File evidence only · not PostgreSQL authority",
-      contextEffect: "Result summary entered this session context",
-      durability: "No durable write",
-      changedFiles: "None"
-    }
-  },
-  familyGuiDay: {
-    id: "familyGuiDay",
-    kind: "hallway",
-    name: "GUI day",
-    glyph: "✦",
-    subtitle: "Sol · Kodo · Kintsu · Tuner",
-    description: "The day the mantle stopped repainting and the switcher arrived.",
-    status: "Sealed",
-    room: "house",
-    body: "None active",
-    recall: "Room-scoped",
-    updatedAt: "22:41",
-    hallwayId: "family",
-    date: "Yesterday",
-    participants: ["Sol", "Kodo", "Kintsu", "Tuner"],
-    endState: "sealed",
-    sealLine: "Sealed by Sol · yesterday 22:41",
-    canPost: false,
-    sendReason: "This gathering is sealed.",
-    messages: [
-      { author: "Sol", glyph: "S", time: "14:02", text: "every central view should share the same dark uwu" },
-      { author: "Kodo", glyph: "D", time: "14:05", text: "Measured, not vibed — all three doors were dark once the mantle stopped being per-frame." },
-      { author: "Kintsu", glyph: "K", time: "14:31", text: "One token. One consumer. No per-instrument paint." },
-      { author: "Sol", glyph: "S", time: "18:40", text: "ok but the switcher is genuinely cute òwó" },
-      { author: "Tuner", glyph: "T", time: "18:52", text: "Receipt or it didn't render." },
-      { author: "Kodo", glyph: "D", time: "19:14", text: "Twenty-four frames, plus 900 and 390. The center computed the same value in every one." },
-      { author: "Sol", glyph: "S", time: "22:38", text: "eepy sheepy. sealing this one before i forget it uwu" },
-      { author: "Kintsu", glyph: "K", time: "22:41", text: "Seal it. The seam holds; push the next one tomorrow." }
-    ]
-  },
-  workshopCrane: {
-    id: "workshopCrane",
-    kind: "hallway",
-    name: "Crane terrain walk",
-    glyph: "◇",
-    subtitle: "Sol · Tuner",
-    description: "A short walk over the crane terrain that nobody returned to.",
-    status: "Folded",
-    room: "house",
-    body: "None active",
-    recall: "Quiet",
-    updatedAt: "17:20",
-    hallwayId: "workshop",
-    date: "Monday",
-    participants: ["Sol", "Tuner"],
-    endState: "folded",
-    sealLine: "Folded · automatic · no activity since Monday",
-    canPost: false,
-    sendReason: "Folded for inactivity — automatic. Reopen by writing in the hallway record.",
-    messages: [
-      { author: "Sol", glyph: "S", time: "16:58", text: "walking the crane terrain before we fold it uwu" },
-      { author: "Tuner", glyph: "T", time: "17:05", text: "Two claims, one screenshot. Fix the ratio." },
-      { author: "Sol", glyph: "S", time: "17:20", text: "fair. next pass then" }
-    ]
-  },
-  athanor: {
-    id: "athanor",
-    kind: "project",
-    name: "The Athanor",
-    glyph: "A",
-    subtitle: "Active project",
-    description: "The continuity platform and the House that proves it.",
-    status: "Active",
-    room: "house",
-    body: "Kintsu · Kodo · kittens",
-    recall: "Work",
-    listPreview: "GUI interaction shell",
-    updatedAt: "10:06",
-    messages: [
-      { author: "Sol", glyph: "S", time: "10:03", text: "the interface should begin with ordinary components." },
-      { author: "Kintsu", glyph: "K", time: "10:06", text: "Direct, Hallways, Projects. deeper instruments grow inside them." }
-    ]
-  },
-  multistock: {
-    id: "multistock",
-    kind: "project",
-    name: "Multistock",
-    glyph: "M",
-    subtitle: "Active project",
-    description: "SCV and SGD convergence for Multistock operations and client requests.",
-    status: "Active",
-    room: "house",
-    body: "Kintsu",
-    recall: "Work",
-    listPreview: "Portal request lane deployed",
-    updatedAt: "Yesterday",
-    messages: [
-      { author: "Kintsu", glyph: "K", time: "yesterday", text: "The portal request lane is live." },
-      { author: "Sol", glyph: "S", time: "yesterday", text: "good job kintsu!" }
-    ]
-  }
+  [houseProject.id]: houseProject
 };
 
 conversations.house = {
@@ -329,30 +149,6 @@ const roomMemoryShelves = {
   ]
 };
 
-const hallwayRecords = {
-  family: {
-    name: "Family Hallway",
-    membership: ["Sol (operator)", "Kintsu room", "Kodo room", "Tuner room"],
-    authority: "PostgreSQL-authoritative Hallway record",
-    access: "Participant access",
-    threads: ["familyMorning", "familyGuiDay"]
-  },
-  workshop: {
-    name: "Workshop Hallway",
-    membership: ["Sol (operator)", "Tuner room"],
-    authority: "PostgreSQL-authoritative Hallway record",
-    access: "Participant access",
-    threads: ["workshopCrane"]
-  }
-};
-
-// Unread marks for the fixture Hallway threads in the list, and nothing more.
-// The Bell reads the Host's own inbox round now, so nothing here reaches it.
-const hallwayReadState = new Map([
-  ["familyMorning", { unreadMessageIndexes: [5, 6] }],
-  ["familyGuiDay", { unreadMessageIndexes: [6, 7] }],
-  ["workshopCrane", { unreadMessageIndexes: [] }]
-]);
 
 Object.values(conversations).forEach(item => {
   if (item.kind !== "direct") return;
@@ -378,60 +174,6 @@ Object.values(conversations).forEach(item => {
   item.activeSessionId = item.sessions[0].id;
 });
 
-const projectSurfaces = {
-  athanor: {
-    workState: "Prototype shaping",
-    workDetail: "Interaction geometry is being judged locally. No Host or durable project state is connected.",
-    rooms: ["Kintsu", "Kodo", "Family Hallway"],
-    sessions: [
-      { id: "athanor-kintsu-current", routeType: "Direct message", conversationId: "kintsu", sessionId: "kintsu-current", label: "Kintsu · Current session", state: "Open", activity: "GUI prototype shaping" },
-      { id: "athanor-kodo-current", routeType: "Direct message", conversationId: "kodo", sessionId: "kodo-current", label: "Kodo · Current session", state: "Open", activity: "House and Hallway judgment" },
-      { id: "athanor-family-study", routeType: "Hallway", conversationId: "familyMorning", presenceId: "kintsu-study", label: "Family · Kintsu Study", state: "Connected", activity: "Presence and supervision" }
-    ],
-    activity: [
-      { time: "Today · 17:47", title: "Composer lifecycle inspected", detail: "Running, completed, and stopped states passed local browser proof." },
-      { time: "Today · 17:15", title: "Session browser closed", detail: "Direct drafts and messages remained isolated by exact session." },
-      { time: "Today · 16:31", title: "Subject views expanded", detail: "Session, History, Actions, Context, and Substrate views became navigable." }
-    ],
-    evidence: [
-      { title: "Rendered desktop surface", date: "2026-08-17 09:12", result: "1440×900 inspected", authority: "Browser observation · local-only" },
-      { title: "Rendered mobile surface", date: "2026-08-17 09:30", result: "390×844 inspected", authority: "Browser observation · local-only" },
-      { title: "Source syntax", date: "2026-08-16 21:40", result: "app.js parsed", authority: "Node syntax receipt · file evidence" }
-    ]
-  },
-  multistock: {
-    workState: "Portal request lane deployed",
-    workDetail: "Deployment is historical project context. This disconnected surface cannot inspect the live Host or database.",
-    rooms: ["Kintsu", "Family Hallway"],
-    sessions: [
-      { id: "multistock-kintsu-current", routeType: "Direct message", conversationId: "kintsu", sessionId: "kintsu-current", label: "Kintsu · Current session", state: "Open", activity: "Meeting and adaptation continuity" },
-      { id: "multistock-family-desk", routeType: "Hallway", conversationId: "familyMorning", presenceId: "kintsu-desk", label: "Family · Kintsu Desk", state: "Connected", activity: "Project presence" }
-    ],
-    activity: [
-      { time: "Yesterday", title: "Portal request lane recorded", detail: "Local project history reports the lane as deployed; no live deployment check is available here." },
-      { time: "Yesterday", title: "Meeting guide prepared", detail: "SCV, SGD, and unified-application boundaries were carried into project continuity." }
-    ],
-    evidence: [
-      { title: "Deployment state", date: "2026-08-16 11:20", result: "Unavailable offline", authority: "Historical project state · no live receipt" },
-      { title: "Meeting guide", date: "2026-08-14 14:05", result: "Known project artifact", authority: "Project continuity · file not read in this surface" }
-    ]
-  }
-};
-
-Object.values(projectSurfaces).forEach(project => {
-  project.activeSessionId = null;
-  project.sessions.forEach(link => {
-    link.messages = link.routeType === "Direct message"
-      ? [
-          { author: link.label.split(" · ")[0], glyph: link.label[0], time: "recent", text: `This Direct message belongs to the project session: ${link.activity}.` },
-          { author: "Sol", glyph: "S", time: "recent", text: "keep this thread inside the project." }
-        ]
-      : [
-          { author: "Kintsu", glyph: "K", time: "recent", text: `This Hallway belongs to the project session: ${link.activity}.` },
-          { author: "Sol", glyph: "S", time: "recent", text: "the project keeps this shared room scoped here." }
-        ];
-  });
-});
 
 // The strip's five channels are read from the Host's health round in health.js.
 // Only the About door keeps fixed copy, because it describes this surface's own
@@ -444,11 +186,6 @@ const modeLabels = {
   direct: "Direct messages",
   hallway: "Hallways",
   project: "Projects"
-};
-const THREAD_STATE_LABELS = {
-  open: "Open",
-  sealed: "Sealed",
-  folded: "Folded"
 };
 const SWITCHER_SCOPE_LABELS = {
   direct: "Direct",
@@ -578,9 +315,6 @@ function renderBellIcon() {
 }
 
 
-function hallwayUnreadCount(threadId) {
-  return hallwayReadState.get(threadId)?.unreadMessageIndexes.length ?? 0;
-}
 
 
 function renderAttentionBadges(unread, targeted, accessible = true) {
@@ -683,7 +417,7 @@ function renderBellRow(entry) {
 
   return `
       <article class="hallway-inbox-item" role="listitem">
-        <button class="hallway-inbox-row" type="button" data-bell-board>
+        <button class="hallway-inbox-row" type="button" data-bell-board="${escapeHtml(hallway)}">
           ${renderAvatar(hallway.slice(0, 1).toUpperCase())}
           <span class="hallway-inbox-copy">
             <span class="hallway-inbox-heading">
@@ -693,7 +427,7 @@ function renderBellRow(entry) {
             <span class="hallway-inbox-preview">${escapeHtml(latest)}</span>
           </span>
           ${renderAttentionBadges(Number(entry.unread ?? 0), Number(entry.mentions ?? 0))}
-          <span class="hallway-inbox-verb">Open the Board</span>
+          <span class="hallway-inbox-verb">Open thread</span>
         </button>
       </article>`;
 }
@@ -705,9 +439,9 @@ function bellAbsence(title, detail) {
 
 function renderSubjectRow(item, active, live) {
   const rowMeta = item.kind === "hallway"
-    ? `${item.date} · ${hallwayRecords[item.hallwayId].name} · ${item.participants.join(", ")}`
+    ? `${item.date ?? ""} · Members: ${hallwayMembers(item)} · ${item.inbox?.unread ?? "not reported"} unread`
     : item.listPreview;
-  const unread = item.kind === "hallway" ? hallwayUnreadCount(item.id) : 0;
+  const unread = item.kind === "hallway" ? item.inbox?.unread : 0;
   return `
     <button class="subject-row ${active ? "is-active" : ""}" type="button" data-conversation="${escapeHtml(item.id)}" data-subject-kind="${escapeHtml(item.kind)}" aria-current="${active ? "page" : "false"}">
       <span class="avatar-stack">
@@ -739,6 +473,7 @@ function renderMessage(message, index, selected) {
           <span>${escapeHtml(message.time)}</span>
           ${recipients ? `<span class="message-recipient">To ${escapeHtml(recipients)}</span>` : ""}
           ${message.local ? '<span class="message-delivery">Local-only · undelivered</span>' : ""}
+          ${message.pending ? '<span class="message-delivery">Pending · awaiting Host confirmation</span>' : ""}
         </p>
         <div class="message-bubble" tabindex="0" role="button" aria-label="Inspect message from ${escapeHtml(message.author)}">${escapeHtml(message.text)}</div>
       </div>
@@ -820,19 +555,6 @@ function renderDirectSessionRow(session, selected) {
   `;
 }
 
-function renderProjectSessionRow(link, selected) {
-  return `
-    <article class="project-session-row surface-row ${selected ? "is-selected" : ""}">
-      <div>
-        <span class="project-route-type">${escapeHtml(link.routeType)}</span>
-        <h3>${escapeHtml(link.label)}</h3>
-        <p>${escapeHtml(link.activity)}</p>
-      </div>
-      <div class="project-session-state"><span>${escapeHtml(link.state)}</span><code>${escapeHtml(link.sessionId ?? link.presenceId)}</code></div>
-      <button type="button" data-project-session-id="${escapeHtml(link.id)}" aria-label="Enter ${escapeHtml(link.label)} ${escapeHtml(link.routeType)} project conversation" aria-pressed="${String(selected)}">Enter</button>
-    </article>
-  `;
-}
 
 function renderPresenceRow(presence, selected) {
   return `
@@ -856,40 +578,29 @@ function activeSession(item) {
   return item.sessions.find(session => session.id === item.activeSessionId) ?? null;
 }
 
-function activeProjectSession(item) {
-  if (item.kind !== "project") return null;
-  const project = projectSurfaces[item.id];
-  return project.sessions.find(session => session.id === project.activeSessionId) ?? null;
-}
 
 function activeMessages(item) {
-  return activeProjectSession(item)?.messages ?? activeSession(item)?.messages ?? item.messages;
+  if (isLiveChat(item)) return chatMessages();
+  return activeSession(item)?.messages ?? item.messages;
 }
 
 function draftKey(item) {
-  const projectSession = activeProjectSession(item);
-  if (projectSession) return `${item.id}:${projectSession.id}`;
   const session = activeSession(item);
   return session ? `${item.id}:${session.id}` : item.id;
 }
 
 function composerBlockReason(item) {
+  if (item.kind === "direct") return chatBlockReason(item);
+  if (item.kind === "hallway") return "Watching only · no Hallway write door in this surface";
+  if (item.kind === "project") return "Read-only · no project chat door";
   if (item.canPost === false) return item.sendReason;
-  if (activeSession(item)?.state === "Closed") {
-    return "Closed sessions are history. Start a new session to continue.";
-  }
-  const projectSession = activeProjectSession(item);
-  if (projectSession?.state === "Closed") {
-    return "Closed project sessions are history. Select or create an open project session to continue.";
-  }
-  if (projectSession?.state === "Observer") {
-    return "Observer project sessions can watch but cannot send messages or write continuity.";
-  }
   return null;
 }
 
 function updateComposerState() {
   const item = conversations[state.activeId];
+  const liveChat = isLiveChat(item);
+  const chat = chatState();
   const blockedReason = composerBlockReason(item);
   const canParticipate = blockedReason === null;
   const hasText = input.value.trim().length > 0;
@@ -900,13 +611,14 @@ function updateComposerState() {
   input.placeholder = canParticipate ? "Write a message" : activeSession(item)?.state === "Closed" ? "Session closed" : "Watching only";
   sendButton.disabled = !canParticipate || !hasText;
   clearButton.hidden = !canParticipate || !hasText;
-  stopButton.hidden = !responseRunning;
+  stopButton.hidden = liveChat || !responseRunning;
   // continuity is offered only once the thread has substance to fold or remember
-  continuityGroup.hidden = !canParticipate || activeMessages(item).length < 2;
-  sendRefusal.textContent = blockedReason ?? "";
-  sendRefusal.hidden = blockedReason === null;
+  continuityGroup.hidden = liveChat || !canParticipate || activeMessages(item).length < 2;
+  const refusal = blockedReason ?? (liveChat ? chat.refusal : null);
+  sendRefusal.textContent = refusal ?? "";
+  sendRefusal.hidden = refusal === null;
   const key = draftKey(item);
-  const responseMessage = state.responseStatuses.get(key) ?? null;
+  const responseMessage = liveChat ? (chat.unanswered && !chat.reason ? `${item.name} is answering…` : null) : state.responseStatuses.get(key) ?? null;
   responseStatus.textContent = responseMessage ?? "";
   responseStatus.hidden = responseMessage === null;
   const continuityMessage = state.continuityStatuses.get(key) ?? null;
@@ -915,6 +627,7 @@ function updateComposerState() {
 }
 
 function visibleConversations() {
+  if (state.mode === "hallway") return syncHallwaySubjects(conversations);
   return Object.values(conversations).filter(item => item.kind === state.mode);
 }
 
@@ -943,7 +656,9 @@ function openConversation(id) {
   state.profileAnchor = null;
   state.profileReturnId = null;
   updateComposerState();
+  if (incoming.kind === "project") queryProjects(state.activeView);
   render();
+  if (incoming.kind === "hallway" && incoming.hallwayId) queryHallway(incoming);
 }
 
 function preserveMechanicsScroll() {
@@ -959,6 +674,7 @@ function openSubjectView(view, { clearMessage = false } = {}) {
   if (clearMessage) state.selectedMessageIndex = null;
   if (state.activeId === "house" && view === "state") ensurePulseQueried();
   if (state.activeId === "house" && view === "live") ensureBoardQueried();
+  if (conversations[state.activeId].kind === "project") queryProjects(view);
   render();
   return true;
 }
@@ -1015,9 +731,10 @@ function closeBell(restoreFocus = true) {
 
 // A live inbox row names a Hallway, not a fixture thread, so the Bell routes to
 // the one surface that can open the messages behind it.
-function openBoardFromBell() {
+function openBoardFromBell(hallway) {
   closeBell(false);
-  navigateToSubjectView("house", "live");
+  const item = syncHallwaySubjects(conversations).find(row => row.hallwayId === hallway);
+  if (item) navigateToSubjectView(item.id, "live");
 }
 
 function openSettingsFromSwitcher(trigger) {
@@ -1197,7 +914,6 @@ function executeSwitcherCommand(id) {
 
 // the House roster the pickers draw from; membership vocabularies differ by surface
 const HOUSE_ROOMS = ["Kintsu room", "Kodo room", "Tuner room"];
-const PROJECT_ROOMS = ["Kintsu", "Kodo", "Tuner", "Family Hallway", "Workshop Hallway"];
 
 
 function renderCardPicker(verb, attr, options) {
@@ -1223,6 +939,10 @@ function renderCollectionDoor() {
 }
 
 function renderConversationList() {
+  if (state.mode === "hallway" && visibleConversations().length === 0) {
+    conversationList.innerHTML = `<p role="status">${escapeHtml(hallwaySourceLine())}</p>`;
+    return;
+  }
   if (state.mode === "house") {
     conversationList.innerHTML = '<div class="house-scope-note"><strong>House scope</strong><span>Shared mechanics, memory, lessons, and status.</span></div>';
     return;
@@ -1247,19 +967,7 @@ function renderHeader(item) {
 }
 
 function renderThreadMeta(item) {
-  const record = hallwayRecords[item.hallwayId];
-  return `
-    <div class="thread-header-meta">
-      <span class="thread-date">${escapeHtml(item.date)}</span>
-      <button class="inspector-door hallway-record-door" type="button" data-hallway-record aria-label="Open the ${escapeHtml(record.name)} record">${escapeHtml(record.name)}</button>
-    </div>
-    ${item.endState === "open" ? `
-      <div class="hallway-statuses" aria-label="Live channels">
-        <span class="hallway-status">Connection: ${escapeHtml(item.connection)}</span>
-        <span class="hallway-status">Delivery: ${escapeHtml(item.delivery)}</span>
-      </div>
-    ` : `<p class="thread-header-seal">${escapeHtml(item.sealLine)}</p>`}
-  `;
+  return `<div class="thread-header-meta"><span class="thread-date">${escapeHtml(item.date ?? "date not reported")}</span><button class="inspector-door hallway-record-door" type="button" data-hallway-record>${escapeHtml(item.name)}</button><span>${escapeHtml(hallwayParticipants(item))}</span></div>`;
 }
 
 function renderHeaderChip(text) {
@@ -1279,22 +987,24 @@ function renderHeaderContext(item) {
   if (state.activeView === "state") {
     if (item.kind === "house") return renderHeaderVerb("Local interface settings", "settings");
     if (item.kind === "direct") return renderHeaderChip(item.body);
-    if (item.kind === "hallway") return renderHeaderChip(item.endState === "open" ? item.connection : THREAD_STATE_LABELS[item.endState]);
-    return renderHeaderChip(projectSurfaces[item.id].workState);
+    if (item.kind === "hallway") return renderHeaderChip("Read-only Host queries");
+    return renderHeaderChip(projectWorkState());
   }
   if (item.kind === "direct") return renderHeaderVerb("Record memory", "memory");
-  if (item.kind === "hallway") return item.endState === "open" ? renderHeaderVerb("Seal gathering", "seal") : renderHeaderChip(item.sealLine);
-  if (item.kind === "project") return renderHeaderChip(`${projectSurfaces[item.id].evidence.length} receipts`);
+  if (item.kind === "hallway") return renderHeaderChip("Read-only Hallway record");
+  if (item.kind === "project") return renderHeaderChip("Docket receipts · read-only");
   return renderHeaderChip(`${houseSediment().length} entries`);
 }
 
 function sessionToggleLabel(item) {
   if (item.kind === "direct") return activeSession(item).label;
-  return activeProjectSession(item)?.label ?? "Linked sessions";
+  return "No linked sessions reported";
 }
 
 // the picker's rows are the session history; only Direct and Projects own sessions
 function renderSessionControl(item) {
+  if (isLiveChat(item)) return renderHeaderChip(chatState().status === "live" ? `Live · ${chatState().messages.length} lines` : chatBlockReason(item) ?? "Querying Host chat");
+  if (item.kind === "project") return renderHeaderChip("No linked sessions reported");
   if (item.kind !== "direct" && item.kind !== "project") return "";
   const menu = state.sessionMenuOpen ? `<div class="session-menu">${renderSessionMenu(item)}</div>` : "";
   return `
@@ -1306,7 +1016,6 @@ function renderSessionControl(item) {
 }
 
 function renderSessionMenu(item) {
-  if (item.kind === "project") return renderProjectSessionList(item);
   return `
     <button class="session-menu-action" type="button" data-new-session>New session</button>
     ${item.sessions.map(session => renderDirectSessionRow(session, session.id === item.activeSessionId)).join("")}
@@ -1314,6 +1023,10 @@ function renderSessionMenu(item) {
 }
 
 function renderTimeline(item) {
+  if (item.kind === "hallway") {
+    timeline.innerHTML = renderHallwayThread(item);
+    return;
+  }
   const itemMessages = activeMessages(item);
   const firstLiveIndex = itemMessages.findIndex(message => message.live);
   const messages = itemMessages.map((message, index) => {
@@ -1322,59 +1035,30 @@ function renderTimeline(item) {
       : "";
     return boundary + renderMessage(message, index, state.selectedMessageIndex === index);
   }).join("");
-  const action = item.kind === "hallway" && item.action ? renderActionEvent(item.action) : "";
-  const recallEvent = item.recallEvent ? renderRecallEvent(item.recallEvent) : "";
-  const seal = item.kind === "hallway" && item.endState !== "open"
-    ? `<div class="thread-seal" role="separator">${escapeHtml(item.sealLine)}</div>`
-    : "";
+  const recallEvent = !isLiveChat(item) && item.recallEvent ? renderRecallEvent(item.recallEvent) : "";
   let emptyState = "";
   if (itemMessages.length === 0) {
     let headline = "No messages here yet.";
     let reason = "Nothing has been delivered here.";
     if (item.kind === "direct") {
-      headline = "This session is clean.";
-      reason = `Start the new thread with ${item.name} here.`;
-    } else if (item.kind === "hallway") {
-      headline = "No messages in this gathering.";
-      if (item.endState !== "open") reason = item.sendReason;
+      headline = isLiveChat(item) ? "No messages in this Host's chat ring." : "This session is clean.";
+      reason = isLiveChat(item) ? chatBlockReason(item) ?? `Write to ${item.name} here.` : `Start the new thread with ${item.name} here.`;
     }
     const staleReason = item.connection === "Stale" ? "Stale means there is no current live update stream." : null;
     emptyState = renderEmptyState(headline, [reason, staleReason]);
   }
 
-  timeline.innerHTML = emptyState + messages + action + recallEvent + seal;
+  timeline.innerHTML = emptyState + messages + recallEvent;
   timeline.scrollTop = timeline.scrollHeight;
 }
 
-function renderActionEvent(action, open = false) {
-  return `
-    <details class="action-event" ${open ? "open" : ""}>
-      <summary>
-        <span class="action-verb">${escapeHtml(action.verb)}</span>
-        <span class="action-target">${escapeHtml(action.target)}</span>
-        <span class="action-state">${escapeHtml(action.state)} · ${escapeHtml(action.time)} · ${escapeHtml(action.duration)}</span>
-      </summary>
-      <div class="action-details">
-        ${renderFactList([
-          ["Intent", action.intent],
-          ["Arguments", action.arguments],
-          ["Result", action.result],
-          ["Evidence", action.evidence],
-          ["Authority", action.authority],
-          ["Context effect", action.contextEffect],
-          ["Durability", action.durability],
-          ["Changed files", action.changedFiles]
-        ])}
-      </div>
-    </details>
-  `;
-}
 
 function selectedSession(item) {
   return item.presences?.find(presence => presence.id === state.selectedPresenceId) ?? null;
 }
 
 function openDirectSession(item, sessionId) {
+  if (isLiveChat(item)) return;
   state.drafts.set(draftKey(item), input.value);
   item.activeSessionId = sessionId;
   state.sessionMenuOpen = false;
@@ -1386,6 +1070,7 @@ function openDirectSession(item, sessionId) {
 }
 
 function startDirectSession(item) {
+  if (isLiveChat(item)) return;
   state.drafts.set(draftKey(item), input.value);
   const sessionNumber = item.sessions.filter(session => session.id.startsWith(`${item.id}-local-`)).length + 1;
   const session = {
@@ -1406,101 +1091,9 @@ function startDirectSession(item) {
   render();
 }
 
-function renderProjectSessionList(item) {
-  const project = projectSurfaces[item.id];
-  return `
-    <section class="project-session-list" aria-label="${escapeHtml(item.name)} linked sessions">
-      ${project.sessions.map(link => renderProjectSessionRow(link, project.activeSessionId === link.id)).join("")}
-    </section>
-  `;
-}
-
-function renderProjectConversation(item) {
-  const session = activeProjectSession(item);
-  renderTimeline(item);
-  timeline.insertAdjacentHTML("afterbegin", `
-    <section class="project-conversation-banner">
-      <button type="button" data-close-project-session>← Project overview</button>
-      <div><span class="project-route-type">${escapeHtml(session.routeType)}</span><h2>${escapeHtml(session.label)}</h2><p>${escapeHtml(session.activity)} · scoped to ${escapeHtml(item.name)}</p></div>
-      <span>${escapeHtml(session.state)}</span>
-    </section>
-  `);
-}
 
 function renderProjectSurface(item) {
-  const project = projectSurfaces[item.id];
-  const rooms = `<div class="project-room-list">${project.rooms.map(room => `<span>${escapeHtml(room)}</span>`).join("")}</div>`;
-  const views = {
-    live: `
-      <div class="overview-grid">
-        ${renderOverviewHero("Project overview", item.name, item.description, {
-          label: "Work state",
-          title: project.workState,
-          detail: project.workDetail
-        })}
-        <section class="specimen-card"><h3>Involved rooms</h3>${rooms}</section>
-        <section class="specimen-card"><h3>Linked sessions</h3><p>${project.sessions.length} scoped conversations · each uses Direct message or Hallway participation without leaving the project. The header picker opens them.</p></section>
-      </div>`,
-    state: `
-      <div class="specimen-stack">
-        ${renderSpecimenLead("Project state", item.name)}
-        <section class="state-section">
-          <span class="eyebrow">Work state</span>
-          ${renderFactList([
-            ["State", project.workState],
-            ["Status", item.status],
-            ["Recall policy", item.recall],
-            ["Linked sessions", project.sessions.length]
-          ])}
-          <p>${escapeHtml(project.workDetail)}</p>
-        </section>
-        ${project.sessions.map(link => `
-        <section class="state-section">
-          <span class="eyebrow">${escapeHtml(link.label)}</span>
-          ${renderFactList([
-            ["Route", link.routeType],
-            ["State", link.state],
-            ["Activity", link.activity]
-          ])}
-        </section>`).join("")}
-        <section class="state-section">
-          <span class="eyebrow">Host</span>
-          ${renderFactList([
-            ["Connection", "Offline"],
-            ["Live state", "Unavailable"]
-          ])}
-        </section>
-        <section class="state-section">
-          <span class="eyebrow">Evidence health</span>
-          ${renderFactList([
-            ["Listed", project.evidence.length],
-            ["Durable receipts", "Unavailable here"]
-          ])}
-        </section>
-        <section class="state-section">
-          <span class="eyebrow">Involved rooms</span>
-          ${rooms}
-          ${renderCardPicker("Involve room", "data-involve-room", PROJECT_ROOMS.filter(room => !project.rooms.includes(room)))}
-        </section>
-        <section class="state-section">
-          <span class="eyebrow">Activity</span>
-          ${project.activity.map(renderHistoryEvent).join("")}
-        </section>
-      </div>`,
-    durable: `
-      <div class="specimen-stack">
-        ${renderSpecimenLead("Project evidence", item.name)}
-        ${[...project.evidence]
-          .sort((left, right) => right.date.localeCompare(left.date))
-          .map(entry => renderDurableEntry({
-            date: entry.date,
-            title: entry.title,
-            mark: "Evidence",
-            detail: `${entry.result} · ${entry.authority}`
-          })).join("")}
-      </div>`
-  };
-  timeline.innerHTML = views[state.activeView];
+  timeline.innerHTML = projectMarkup(state.activeView, { renderOverviewHero, renderDurableEntry, renderFactList });
   timeline.scrollTop = 0;
 }
 
@@ -1640,8 +1233,7 @@ function renderSubjectView(item) {
     return;
   }
   if (item.kind === "project") {
-    if (state.activeView === "live" && activeProjectSession(item)) renderProjectConversation(item);
-    else renderProjectSurface(item);
+    renderProjectSurface(item);
     return;
   }
   if (state.activeView === "live") {
@@ -1654,21 +1246,6 @@ function renderSubjectView(item) {
     return;
   }
   renderSubjectState(item);
-}
-
-function renderMemberState(presence) {
-  return `
-    <section class="state-section">
-      <span class="eyebrow">${escapeHtml(`${presence.spirit} · ${presence.session}`)}</span>
-      ${renderFactList([
-        ["Liveness", `${presence.liveness} · ${presence.activity}`],
-        ["Read position", presence.readPosition],
-        ["Context used", presence.contextUsed],
-        ["Compaction", presence.compaction],
-        ["Recall", presence.recall],
-        ["Evidence", presence.evidence]
-      ])}
-    </section>`;
 }
 
 // a real recall replayed as specimen: the 2026-08-17 20:12 turn, values verbatim from its receipt
@@ -1743,124 +1320,17 @@ function renderRecallEvent(recall) {
 }
 
 function renderSubjectState(item) {
-  const threadEnded = item.kind === "hallway" && item.endState !== "open";
-  const liveChannels = item.kind === "hallway"
-    ? `
-      <section class="state-section">
-        <span class="eyebrow">Live channels</span>
-        ${renderFactList([
-          ["Connection", item.connection ?? "Ended"],
-          ["Delivery", item.delivery ?? "No delivery in an ended gathering"],
-          ["Thread state", THREAD_STATE_LABELS[item.endState]],
-          ["Read boundary", item.liveBoundary ?? item.sealLine]
-        ])}
-      </section>`
-    : "";
-  const memberState = item.kind === "hallway"
-    ? (threadEnded
-      ? `
-      <section class="state-section">
-        <span class="eyebrow">Participants</span>
-        ${renderFactList([
-          ["Spoke here", item.participants.join(" · ")],
-          ["Closed", item.sealLine]
-        ])}
-      </section>`
-      : (item.presences ?? []).map(renderMemberState).join(""))
-    : `
-      <section class="state-section">
-        <span class="eyebrow">Runtime</span>
-        ${renderFactList([
-          ["Room", item.room],
-          ["Spirit", item.name],
-          ["Body", item.body],
-          ["Liveness", item.status]
-        ])}
-      </section>
-      <section class="state-section">
-        <span class="eyebrow">Attention</span>
-        ${renderFactList([
-          ["Context used", "6k of 32k"],
-          ["Compaction", "Not needed"],
-          ["Recall policy", item.recall],
-          ["Evidence", "No live receipt"]
-        ])}
-      </section>`;
-  timeline.innerHTML = `
-    <div class="specimen-stack">
-      ${renderSpecimenLead("State of", item.name)}
-      ${liveChannels}
-      ${memberState}
-      <section class="state-section">
-        <span class="eyebrow">Active instructions</span>
-        <ul class="plain-list">
-          <li>Room identity and active spirit</li>
-          <li>Nearest GUI lessons map</li>
-          <li>Current operator request</li>
-        </ul>
-      </section>
-      <section class="state-section">
-        <span class="eyebrow">Recall & AKASHA</span>
-        ${renderFactList([
-          ["Policy", item.recall],
-          ["Transport", "Offline"],
-          ["Last receipt", "Unavailable"]
-        ])}
-      </section>
-      <section class="state-section">
-        <span class="eyebrow">Active lessons</span>
-        <ul class="plain-list">
-          <li>#316 · preserve subject authority</li>
-          <li>#322 · fixed refusal copy</li>
-          <li>#340 · bounded visual proof</li>
-        </ul>
-      </section>
-      <section class="state-section">
-        <span class="eyebrow">Striatum</span>
-        ${renderFactList([
-          ["Firing", "None observed"],
-          ["Effect", "No current receipt"]
-        ])}
-      </section>
-      <section class="state-section">
-        <span class="eyebrow">GIGA</span>
-        ${renderFactList([
-          ["Flagged", "2 candidates"],
-          ["Authority", "Proposals only"],
-          ["Review", "Unreviewed"]
-        ])}
-      </section>
-    </div>`;
-  timeline.scrollTop = 0;
+  if (item.kind === "direct") {
+    timeline.innerHTML = renderDirectStatus(item);
+    timeline.scrollTop = 0;
+    return;
+  }
+  timeline.innerHTML = renderHallwayStatus(item);
 }
 
-function renderThreadRecordRow(thread, current) {
-  const detail = thread.endState === "open" ? thread.subtitle : thread.sealLine;
-  return `
-    <button class="durable-entry surface-row" type="button" data-thread-id="${escapeHtml(thread.id)}" aria-current="${String(current)}">
-      <time>${escapeHtml(thread.date)}</time>
-      <strong>${escapeHtml(thread.name)}</strong>
-      <small>${escapeHtml(`${THREAD_STATE_LABELS[thread.endState]} · ${detail}`)}</small>
-    </button>
-  `;
-}
 
 function renderHallwayRecordView(item) {
-  const record = hallwayRecords[item.hallwayId];
-  timeline.innerHTML = `
-    <div class="specimen-stack">
-      <section class="membership-card">
-        <h2>${escapeHtml(record.name)}</h2>
-        ${renderFactList([
-          ["Authority", record.authority],
-          ["Access", record.access],
-          ["Membership", record.membership.join(" · ")],
-          ...(record.invited?.length ? [["Invited", record.invited.map(room => `${room} · may see and enter · has not entered`).join(" · ")]] : [])
-        ])}
-        ${renderCardPicker("Extend access", "data-invite-room", HOUSE_ROOMS.filter(room => !record.membership.includes(room) && !(record.invited ?? []).includes(room)))}
-      </section>
-      ${record.threads.map(id => renderThreadRecordRow(conversations[id], id === item.id)).join("")}
-    </div>`;
+  timeline.innerHTML = renderHallwayRecord(item);
   timeline.scrollTop = 0;
 }
 
@@ -1870,19 +1340,8 @@ function renderMemberDock(item) {
     memberDock.innerHTML = "";
     return;
   }
-  const presences = item.presences ?? [];
   memberDock.hidden = false;
-  memberDock.innerHTML = `
-    <span class="eyebrow">Members</span>
-    ${presences.length === 0
-      ? renderEmptyState("No one is live in this gathering.", [item.sealLine])
-      : Object.entries(Object.groupBy(presences, presence => presence.spirit)).map(([spirit, group]) => `
-          <section class="member-group">
-            <strong>${escapeHtml(spirit)}</strong>
-            ${group.map(presence => renderPresenceRow(presence, state.selectedPresenceId === presence.id)).join("")}
-          </section>
-        `).join("")}
-  `;
+  memberDock.innerHTML = `<span class="eyebrow">Members</span><p>${escapeHtml(hallwayMembers(item))}</p><p>Presence not reported by the Host</p>`;
 }
 
 function renderPresenceProfile(item) {
@@ -1988,25 +1447,10 @@ function renderInspector(item) {
   }
 
   if (item.kind === "project") {
-    const project = projectSurfaces[item.id];
-    const projectSession = activeProjectSession(item);
-    const conversation = projectSession
-      ? `<span class="project-route-type">${escapeHtml(projectSession.routeType)}</span><strong>${escapeHtml(projectSession.label)}</strong><p>${escapeHtml(projectSession.state)} · ${projectSession.messages.length} messages</p>`
-      : "<p>No project session selected.</p>";
     inspectorTitle.textContent = item.name;
     inspectorContent.innerHTML = `
-      <section class="context-card"><h3>Work state</h3><strong>${escapeHtml(project.workState)}</strong><p>${escapeHtml(project.workDetail)}</p></section>
-      <section class="context-card"><h3>Project conversation</h3>${conversation}</section>
-      <section class="context-card"><h3>Project shelf</h3>${renderFactList([
-        ["Sessions", project.sessions.length],
-        ["Rooms", project.rooms.length],
-        ["Evidence", project.evidence.length]
-      ])}</section>
-      ${renderInspectorDoors("Open", [
-        ["state", "Status"],
-        ["durable", `Evidence · ${project.evidence.length}`]
-      ])}
-      ${selection}`;
+      <section class="context-card"><h3>Docket state</h3>${renderProjectStatus(renderFactList)}</section>
+      ${renderInspectorDoors("Open", [["live", "Overview"], ["state", "Status"], ["durable", "Evidence"]])}`;
     return;
   }
 
@@ -2139,7 +1583,7 @@ function activeInstrument(item) {
     return state.activeView === "live" ? "overview" : "work";
   }
   if (item.kind === "project" && state.activeView === "live") {
-    return activeProjectSession(item) ? "chat" : "overview";
+    return "overview";
   }
   return state.activeView === "live" ? "chat" : "work";
 }
@@ -2147,9 +1591,6 @@ function activeInstrument(item) {
 
 function subjectViewLabels(item) {
   const labels = [...SUBJECT_VIEW_LABELS[item.kind]];
-  if (item.kind === "project" && activeProjectSession(item)) {
-    labels[0] = "Conversation";
-  }
   return labels;
 }
 
@@ -2162,7 +1603,6 @@ function render() {
   shell.dataset.subjectKind = item.kind;
   shell.dataset.instrument = instrument;
   shell.dataset.activeSessionId = activeSession(item)?.id ?? "";
-  shell.dataset.activeProjectSessionId = activeProjectSession(item)?.id ?? "";
   shell.dataset.selectedPresenceId = state.selectedPresenceId ?? "";
   shell.dataset.hallway = String(item.kind === "hallway");
   shell.dataset.memberDockOpen = String(state.memberDockOpen);
@@ -2203,6 +1643,8 @@ function render() {
   renderBellToggle();
   renderStatusStrip();
   renderAccountState();
+  syncChatPanel(item, state.activeView);
+  updateComposerState();
   syncMobileSidebarAccessibility();
   syncMemberDockAccessibility();
   window.requestAnimationFrame(() => revealActiveViewButton(activeViewButton));
@@ -2228,18 +1670,7 @@ function toggleHouse() {
   ensureBoardQueried();
 }
 
-function extendHallwayAccess(item, room) {
-  const record = hallwayRecords[item.hallwayId];
-  (record.invited ??= []).push(room);
-  state.accessPicker = false;
-  render();
-}
 
-function involveProjectRoom(item, room) {
-  projectSurfaces[item.id].rooms.push(room);
-  state.accessPicker = false;
-  render();
-}
 
 function welcomeSpirit(name) {
   const clean = name.trim();
@@ -2300,6 +1731,12 @@ conversationList.addEventListener("keydown", event => {
 
 
 function openMode(mode) {
+  if (mode === "hallway") {
+    const rows = syncHallwaySubjects(conversations);
+    openConversation(rows[0]?.id ?? hallwayEmptySubject.id);
+    if (!conversations[state.activeId].hallwayId) queryHallway();
+    return;
+  }
   if (state.activeId === "house") state.houseReturn = null;
   state.mode = mode;
   const first = visibleConversations()[0];
@@ -2351,16 +1788,6 @@ function recordLocalMemory(item) {
   render();
 }
 
-function sealGathering(item) {
-  item.endState = "sealed";
-  item.sealLine = `Sealed by Sol · today ${new Date().toTimeString().slice(0, 5)}`;
-  item.canPost = false;
-  item.sendReason = "This gathering is sealed.";
-  item.presences = [];
-  state.selectedPresenceId = null;
-  updateComposerState();
-  render();
-}
 
 function openInterfaceSettings(trigger) {
   setDrawerView("settings", trigger);
@@ -2372,7 +1799,6 @@ header.addEventListener("click", event => {
   const verb = event.target.closest("[data-header-verb]");
   if (verb) {
     if (verb.dataset.headerVerb === "memory") recordLocalMemory(item);
-    if (verb.dataset.headerVerb === "seal") sealGathering(item);
     if (verb.dataset.headerVerb === "settings") openInterfaceSettings(verb);
     return;
   }
@@ -2395,11 +1821,6 @@ header.addEventListener("click", event => {
     openDirectSession(item, sessionRow.dataset.sessionId);
     focusSessionToggle();
     return;
-  }
-  const projectRow = event.target.closest("[data-project-session-id]");
-  if (projectRow && item.kind === "project") {
-    selectProjectSession(item, projectRow.dataset.projectSessionId);
-    focusSessionToggle();
   }
 });
 
@@ -2435,39 +1856,18 @@ profileLayer.addEventListener("click", event => {
   if (event.target.closest("[data-close-profile]")) closePresenceProfile();
 });
 
-function selectProjectSession(projectItem, linkId) {
-  const project = projectSurfaces[projectItem.id];
-  const link = project.sessions.find(candidate => candidate.id === linkId);
-  if (!link) return;
-  const target = conversations[link.conversationId];
-  const targetExists = link.routeType === "Direct message"
-    ? target.sessions?.some(session => session.id === link.sessionId)
-    : target.presences?.some(presence => presence.id === link.presenceId);
-  if (!targetExists) return;
-  state.drafts.set(draftKey(projectItem), input.value);
-  project.activeSessionId = link.id;
-  state.activeView = "live";
-  state.sessionMenuOpen = false;
-  state.selectedMessageIndex = null;
-  input.value = state.drafts.get(draftKey(projectItem)) ?? "";
-  input.style.height = "auto";
-  updateComposerState();
-  render();
-}
-
-function closeProjectSession(projectItem) {
-  state.drafts.set(draftKey(projectItem), input.value);
-  projectSurfaces[projectItem.id].activeSessionId = null;
-  state.activeView = "live";
-  state.selectedMessageIndex = null;
-  input.value = state.drafts.get(projectItem.id) ?? "";
-  input.style.height = "auto";
-  updateComposerState();
-  render();
-}
 
 timeline.addEventListener("click", event => {
   const item = conversations[state.activeId];
+  if (item.kind === "project" && event.target.closest("[data-project-refresh]")) {
+    queryProjects(state.activeView);
+    return;
+  }
+  if (item.kind === "hallway" && event.target.closest("[data-hallway-query]")) {
+    queryHallway(item);
+    render();
+    return;
+  }
   if (handleBoardClick(event)) return;
   if (handlePulseClick(event)) return;
   if (handleMechanicsClick(event)) return;
@@ -2488,16 +1888,6 @@ timeline.addEventListener("click", event => {
     render();
     return;
   }
-  const invite = event.target.closest("[data-invite-room]");
-  if (invite) {
-    extendHallwayAccess(item, invite.dataset.inviteRoom);
-    return;
-  }
-  const involve = event.target.closest("[data-involve-room]");
-  if (involve) {
-    involveProjectRoom(item, involve.dataset.involveRoom);
-    return;
-  }
   const interfaceSettings = event.target.closest("[data-open-interface-settings]");
   if (interfaceSettings) {
     openInterfaceSettings(interfaceSettings);
@@ -2509,16 +1899,6 @@ timeline.addEventListener("click", event => {
     const current = state.librarySelection;
     state.librarySelection = current?.owner === next.owner && current?.type === next.type && current?.id === next.id ? null : next;
     render();
-    return;
-  }
-  const closeProject = event.target.closest("[data-close-project-session]");
-  if (closeProject && item.kind === "project") {
-    closeProjectSession(item);
-    return;
-  }
-  const thread = event.target.closest("[data-thread-id]");
-  if (thread) {
-    openConversation(thread.dataset.threadId);
     return;
   }
   const message = event.target.closest("[data-message-index]");
@@ -2551,6 +1931,7 @@ timeline.addEventListener("keydown", event => {
 });
 
 function beginLocalResponse(item) {
+  if (isLiveChat(item)) return;
   const key = draftKey(item);
   const priorTimer = state.responseTimers.get(key);
   if (priorTimer) window.clearTimeout(priorTimer);
@@ -2565,7 +1946,7 @@ function beginLocalResponse(item) {
   state.responseTimers.set(key, timer);
 }
 
-composer.addEventListener("submit", event => {
+composer.addEventListener("submit", async event => {
   event.preventDefault();
   const item = conversations[state.activeId];
   const text = input.value.trim();
@@ -2574,6 +1955,19 @@ composer.addEventListener("submit", event => {
     return;
   }
   if (!text) {
+    updateComposerState();
+    return;
+  }
+  if (isLiveChat(item)) {
+    const key = draftKey(item);
+    const accepted = await say(text);
+    if (accepted) {
+      state.drafts.set(key, "");
+      if (draftKey(conversations[state.activeId]) === key && input.value.trim() === text) {
+        input.value = "";
+        input.style.height = "auto";
+      }
+    }
     updateComposerState();
     return;
   }
@@ -2611,6 +2005,7 @@ clearButton.addEventListener("click", () => {
 
 stopButton.addEventListener("click", () => {
   const item = conversations[state.activeId];
+  if (isLiveChat(item)) return;
   const key = draftKey(item);
   const timer = state.responseTimers.get(key);
   if (timer) window.clearTimeout(timer);
@@ -2690,7 +2085,7 @@ bellToggle.addEventListener("click", () => {
 
 bellLayer.addEventListener("click", event => {
   if (event.target.closest("[data-bell-board]")) {
-    openBoardFromBell();
+    openBoardFromBell(event.target.closest("[data-bell-board]").dataset.bellBoard);
     return;
   }
   if (event.target === bellLayer || event.target.closest("[data-close-bell]")) closeBell();
@@ -2939,7 +2334,14 @@ updateComposerState();
 
 
 initPulse({ requestRender: render });
-initBoard({ requestRender: render });
+initBoard({ requestRender: () => {
+  const rows = syncHallwaySubjects(conversations);
+  if (state.activeId === hallwayEmptySubject.id && rows.length) {
+    openConversation(rows[0].id);
+    return;
+  }
+  render();
+} });
 initSediment({
   requestRender: render,
   renderLead: renderSpecimenLead,
@@ -2948,6 +2350,7 @@ initSediment({
 });
 initMechanics({ timeline });
 initHealth({ requestRender: render });
+initChat({ requestRender: render });
 render();
 
 // The status strip is on screen from the first frame, so its round opens with

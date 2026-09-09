@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -17,19 +16,12 @@ type ClientProjection = {
   rooms: Record<string, ClientRoom>;
 };
 
-type LauncherArtifact = {
-  path: string;
-  sha256: string;
-  size: number;
-};
 
 type LoaderOptions = {
   programRoot?: string;
   userProfile?: string;
   env?: NodeJS.ProcessEnv;
   healthProbe?: (endpoint: string) => Promise<boolean>;
-  startAthanor?: (launcher: string, args: readonly string[]) => void;
-  sleep?: (milliseconds: number) => Promise<void>;
   /** Host watch period; default HOST_WATCH_INTERVAL_MS. */
   watchIntervalMs?: number;
   /** Aborting stops the Host watch. */
@@ -515,53 +507,9 @@ function parseClientProjection(value: unknown): ClientProjection {
   };
 }
 
-const HEALTH_ATTEMPTS = 50;
-const HEALTH_WAIT_MS = 100;
 const HEALTH_REQUEST_TIMEOUT_MS = 500;
 const HOST_WATCH_INTERVAL_MS = 30_000;
 
-function nativeLauncherArtifact(value: unknown): LauncherArtifact {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("installed Athanor active native release manifest has no artifacts");
-  }
-  const artifacts = (value as Record<string, unknown>).artifacts;
-  if (!Array.isArray(artifacts)) {
-    throw new Error("installed Athanor active native release manifest has no artifacts");
-  }
-  const matches = artifacts.filter((artifact) => (
-    artifact
-    && typeof artifact === "object"
-    && !Array.isArray(artifact)
-    && (artifact as Record<string, unknown>).path === "bin/athanor.exe"
-  ));
-  if (matches.length !== 1) {
-    throw new Error("installed Athanor active native release manifest must bind bin/athanor.exe exactly once");
-  }
-  const artifact = matches[0] as Record<string, unknown>;
-  if (typeof artifact.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(artifact.sha256)) {
-    throw new Error("installed Athanor active native release manifest has invalid bin/athanor.exe SHA-256");
-  }
-  return {
-    path: "bin/athanor.exe",
-    sha256: artifact.sha256,
-    size: unsignedInteger(artifact.size, "active native release manifest bin/athanor.exe size"),
-  };
-}
-
-function verifiedStableLauncher(
-  programRoot: PhysicalDirectory,
-  artifact: LauncherArtifact,
-): string {
-  const launcher = regularFileWithin(programRoot, artifact.path, "stable athanor.exe launcher");
-  const bytes = readFileSync(launcher);
-  if (bytes.length !== artifact.size) {
-    throw new Error("installed Athanor stable athanor.exe launcher size mismatch");
-  }
-  if (createHash("sha256").update(bytes).digest("hex") !== artifact.sha256) {
-    throw new Error("installed Athanor stable athanor.exe launcher SHA-256 mismatch");
-  }
-  return launcher;
-}
 
 async function defaultHealthProbe(endpoint: string): Promise<boolean> {
   try {
@@ -579,67 +527,10 @@ async function defaultHealthProbe(endpoint: string): Promise<boolean> {
   }
 }
 
-function defaultStartAthanor(launcher: string, args: readonly string[]) {
-  const child = spawn(launcher, [...args], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  // Detached spawn reports launch failure asynchronously; name it so a missing
-  // or unrunnable launcher never masquerades as a health timeout.
-  child.once("error", (error) => {
-    console.warn(`Athanor launcher ${launcher} failed to start: ${String(error)}`);
-  });
-  child.unref();
-}
-
-function defaultSleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-// Starts the launcher and waits for scoped health. Null when the Host answers;
-// otherwise the reason it does not. The caller decides how loudly to say so:
-// at session start the absence is one warning, inside the watch it is one
-// warning per outage.
-async function startScopedHost(
-  launcher: string,
-  endpoint: string,
-  options: LoaderOptions,
-): Promise<string | null> {
-  const probe = options.healthProbe ?? defaultHealthProbe;
-  try {
-    (options.startAthanor ?? defaultStartAthanor)(launcher, []);
-  } catch (error) {
-    return `could not be started: ${String(error)}`;
-  }
-  const sleep = options.sleep ?? defaultSleep;
-  for (let attempt = 0; attempt < HEALTH_ATTEMPTS; attempt += 1) {
-    await sleep(HEALTH_WAIT_MS);
-    if (await probe(endpoint)) return null;
-  }
-  return `did not recover scoped health at ${endpoint}`;
-}
-
-async function ensureScopedHost(
-  launcher: string,
-  endpoint: string,
-  options: LoaderOptions,
-): Promise<string | null> {
-  const probe = options.healthProbe ?? defaultHealthProbe;
-  if (await probe(endpoint)) return null;
-  return await startScopedHost(launcher, endpoint, options);
-}
-
-// Session start only ensures the Host once; a Host that dies later would stay
-// dead for every running session until some session starts. This watch keeps
-// ensuring it for the life of the OMP process. Cost: one loopback GET per
-// interval per session, plus the start sequence during an outage. The timer
-// is unref'd so it never holds the process open.
-function watchScopedHost(launcher: string, endpoint: string, options: LoaderOptions): void {
+function watchScopedHost(endpoint: string, options: LoaderOptions, lost: boolean): void {
   const probe = options.healthProbe ?? defaultHealthProbe;
   const intervalMs = options.watchIntervalMs ?? HOST_WATCH_INTERVAL_MS;
   let busy = false;
-  let lost = false;
   const tick = async () => {
     if (busy) return;
     busy = true;
@@ -649,13 +540,8 @@ function watchScopedHost(launcher: string, endpoint: string, options: LoaderOpti
         lost = false;
         return;
       }
-      if (!lost) console.warn(`Athanor Host stopped answering scoped health at ${endpoint}; restarting it.`);
+      if (!lost) console.warn(`Athanor Host is not running at ${endpoint}. Start the Athanor.`);
       lost = true;
-      const reason = await startScopedHost(launcher, endpoint, options);
-      if (reason === null) {
-        lost = false;
-        console.warn(`Athanor Host restarted and answers scoped health at ${endpoint}.`);
-      }
     } finally {
       busy = false;
     }
@@ -692,7 +578,6 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
     "active native release manifest",
   );
   const native = nativeCompatibility(nativeManifest, version);
-  const launcher = verifiedStableLauncher(programRoot, nativeLauncherArtifact(nativeManifest));
 
   const componentRoot = directoryWithin(
     programRoot,
@@ -754,17 +639,14 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
     releaseId: pointer.releaseId,
     previousReleaseId: pointer.previousReleaseId,
     healthEndpoint: scopedHealthEndpoint(client.hostUrl, client.defaultRoom),
-    launcher,
   };
 }
 
 export default async function installedAthanor(pi: unknown, options: LoaderOptions = {}) {
   const modules = configureInstalledAthanor(options);
-  const absent = await ensureScopedHost(modules.launcher, modules.healthEndpoint, options);
-  if (absent !== null) {
-    // Host startup is advisory: the OMP adapter remains usable without it, but
-    // the reason it is absent must be visible.
-    console.warn(`Athanor launcher ${modules.launcher} ${absent}; OMP will continue without Host.`);
+  const absent = !await (options.healthProbe ?? defaultHealthProbe)(modules.healthEndpoint);
+  if (absent) {
+    console.warn(`Athanor Host is not running at ${modules.healthEndpoint}. Start the Athanor.`);
   }
   const [athanor, hygiene] = await Promise.all([import(modules.index), import(modules.hygiene)]);
   if (typeof athanor.default !== "function" || typeof hygiene.default !== "function") {
@@ -777,5 +659,5 @@ export default async function installedAthanor(pi: unknown, options: LoaderOptio
     previousReleaseId: modules.previousReleaseId,
   });
   await hygiene.default(pi);
-  watchScopedHost(modules.launcher, modules.healthEndpoint, options);
+  watchScopedHost(modules.healthEndpoint, options, absent);
 }

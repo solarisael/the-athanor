@@ -8,17 +8,19 @@ its source attached. Corrected knowledge can replace stale guidance without
 erasing history. The model or provider carrying the work can change without
 making the project start from zero again.
 
-**Status:** `0.9.6`, native Windows x64 late beta. OMP is the supported harness.
+**Status:** native Windows x64 late beta. OMP is the supported harness.
+The earlier source snapshot used `0.9.6`.
+Read [`package.json`](./package.json) for the current product version.
 One Rust workspace owns the behavioral core, Vault retrieval, AKASHA PostgreSQL
 authority, Athanor Host, NATS delivery, native lifecycle, and parked Godot client.
 Vault remains database-free; AKASHA adds durable typed memory, lessons, canon,
 continuity, and governed background work.
 
-The reference Solarisael workstation currently runs the locally proven build
-labeled `1.0.0-rc.3` in external-authority mode with separate Kintsu and Kodo
-Hosts and one stable OMP loader. That premature label remains attached to the
-immutable installed artifact and its evidence; it is not the active product
-version or a claim that the product has reached 1.0.
+The historical installation proof used the build labeled `1.0.0-rc.3`.
+It used external database authority, separate Kintsu and Kodo Hosts, and one stable OMP loader.
+That label identifies the retained artifact and its evidence.
+It does not identify the current installation or establish product maturity.
+Read the installed manifest for active bytes and [dated evidence](./docs/EVIDENCE.md) for exercised behavior.
 
 **See it:** [open the public interface specimen](https://solarisael.github.io/the-athanor/).
 It uses sanitized browser-only fixtures and makes no Host, database, delivery,
@@ -100,6 +102,64 @@ top-level `.gitignore`, and does not follow symlinks.
 Read [Retrieval](./docs/RETRIEVAL.md) for the exact query, attribution, and limit
 contracts.
 
+## Local workspace search for OMP
+
+The optional Node adapter in `adapters/workspace-search` uses zvec-grep with local Ollama Nemotron embeddings.
+It searches repository files. It does not change Vault, AKASHA, or the Host.
+Node 24 or later and the following installed Ollama model are required:
+
+```text
+hf.co/zenmagnets/Nemotron-3-Embed-1B-Q4_K_M-GGUF:latest
+```
+
+Install the adapter from the repository root:
+
+```powershell
+pwsh -NoProfile -File adapters/workspace-search/install.ps1
+```
+
+The installer retains a hashed package archive under `~/.omp/tools/athanor-workspace-search`.
+It installs pinned dependencies and replaces the `zvec_grep` entry in the OMP MCP configuration.
+Restart OMP to load the installed server.
+
+Index one repository explicitly:
+
+```powershell
+$entry = "$HOME/.omp/tools/athanor-workspace-search/node_modules/@solarisael/athanor-workspace-search/dist/cli.js"
+node $entry index --root C:/Projects/my-repository
+node $entry search --root C:/Projects/my-repository --query "Which module owns request cancellation?"
+node $entry status --root C:/Projects/my-repository
+```
+
+Repeat the index command to update changed files.
+Use another absolute root to index another repository.
+Search never creates an index. A missing index returns `INDEX_MISSING`.
+An ordinary search does not refresh the index or check every file.
+Returned snippets carry their own freshness state.
+Search returns five hits per query group by default, with at most 2000 characters of content per hit.
+The `contentTruncated` flag marks clipped excerpts. Metadata is additional.
+Use zvec for discovery, then native grep and read once the relevant path or symbol is known.
+Set `--limit` explicitly when you need more results.
+Use `--autoUpdate` for an inline refresh before a search.
+Use `status` to inspect changes and failed files.
+
+**Warning:** `index --rebuild` discards the existing derived index.
+Use this option only when you explicitly need a rebuild.
+The adapter never changes repository source files.
+The model uses 2048 dimensions, a 4096-token context, and distinct query and passage prefixes.
+The index uses a smaller 1024-token chunk budget because zvec estimates size from characters.
+Oversized embedding inputs fail instead of being silently truncated.
+
+The MCP server exposes `zvec_grep_search`, `zvec_grep_index`, and `zvec_grep_status`.
+Use the CLI for long initial builds.
+There is no background watcher.
+Keep Lumen enabled until the new adapter passes an index and search check.
+Then disable its OMP plugin:
+
+```powershell
+omp plugin disable lumen@claude-plugins-official
+```
+
 ## Grow into AKASHA when the work needs it
 
 AKASHA adds a durable PostgreSQL authority layer, `pgvector`, `pg_trgm`, local
@@ -127,7 +187,7 @@ flowchart TB
     U[Operator] --> GUI[Web prototype: read-only]
     U --> OMP[OMP harness]
     GUI --> PROXY[gui-prototype/serve.ts: loopback proxy]
-    PROXY -->|nine POST-only /live/* read routes| HOST[Athanor Host]
+    PROXY -->|allowlisted POST-only /live/* read routes| HOST[Athanor Host]
     OMP --> AD[Thin OMP adapter]
     AD --> RUST[Shared Rust core and protocol]
     HOST --> RUST
@@ -160,8 +220,8 @@ contracts and [Hippocampus](./docs/HIPPOCAMPUS.md) for candidate authority.
 
 ## What exists now
 
-The current `0.9.6` source, including behavior proven in the installed native
-artifact, includes:
+These capabilities have source implementations and dated installation evidence.
+The `0.9.6` label belongs to an earlier source snapshot.
 
 - one shared Rust contract layer and Rust-owned Vault/AKASHA behavior;
 - strict database-free Vault retrieval with attributed bounded evidence;
@@ -174,7 +234,32 @@ artifact, includes:
 - a parked Godot 4.7.1 client with Recall Policy and sanitized Paper Boat receipt screens;
 - one native Windows service supervisor, installer, updater/rollback path,
   doctor, uninstall, and explicit purge boundary;
-- 26 named OMP organs whose adapter delegates behavioral authority to Rust.
+- named OMP organs whose adapter delegates behavioral authority to Rust.
+
+### Critical organ review — 2026-09-06
+
+The House must turn preserved records into useful continuity, judgment, and completed work.
+A stored record, a delivered message, and a useful outcome require separate evidence.
+The review proposes this dependency sequence:
+
+1. Make orientation coherent across models, turn sources, and interrupted sessions.
+2. Make outcomes attributable and visible through Pulse.
+3. Complete permitted exchanges through Hallway, Docket, and worker dispatch.
+4. Connect reviewed learning to later useful behavior.
+
+Current gaps include combined context size, temporal orientation, and full backups after individual writes.
+GIGA's queue status does not establish useful consolidation.
+Curio storage does not establish automatic resurfacing.
+The web operator surface remains read-only.
+
+The [generated-turn Presence repair](./docs/EVIDENCE.md#generated-turn-presence-repair-2026-09-07) is installed and passes isolated component checks.
+A new OMP session must load it.
+Real restart, chat, and root Knock turns now have live incoming Presence observations.
+Host-side session attribution remains separate work.
+
+Read the [organ review](./docs/ARCHITECTURE.md#critical-organ-review-2026-09-06) for each organ's evidence, gap, and proposed outcome.
+The 2026-09-06 review changed records and planning.
+Later implementation receipts remain separately dated.
 
 ## What remains before 1.0
 

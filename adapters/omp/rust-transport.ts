@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -52,6 +53,19 @@ const OWNER = { component: "RustJsonlTransport", path: "rust-transport.ts", symb
 const MAX_DIAGNOSTIC_TEXT_BYTES = 4 * 1024;
 const MAX_DIAGNOSTIC_ITEMS = 64;
 const MAX_DIAGNOSTIC_DEPTH = 8;
+
+function installedNatsUrl(): string | undefined {
+  try {
+    // The installed Host reads this same runtime authority, not client.json.
+    const config = JSON.parse(readFileSync("C:/ProgramData/Solarisael/Athanor/config/runtime.json", "utf8"));
+    if (typeof config.natsHost !== "string" || !/^[a-zA-Z0-9.:[\]-]+$/.test(config.natsHost)
+      || !Number.isInteger(config.natsPort) || config.natsPort < 1 || config.natsPort > 65535) return undefined;
+    return `nats://${config.natsHost}:${config.natsPort}`;
+  } catch {
+    // An absent or invalid installation cannot supply a broker endpoint.
+    return undefined;
+  }
+}
 
 function isObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -547,9 +561,14 @@ export class RustJsonlTransport {
   private ensureStarted(): void {
     if (this.child) return;
     this.childStarted = false;
+    const env = { ...process.env, ...this.options.env };
+    if (env.ATHANOR_NATS_URL === undefined) {
+      const url = installedNatsUrl();
+      if (url !== undefined) env.ATHANOR_NATS_URL = url;
+    }
     const child = (this.options.spawnProcess ?? spawn)(this.options.executable, this.options.args ?? [], {
       cwd: this.options.cwd,
-      env: { ...process.env, ...this.options.env },
+      env,
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
       windowsHide: true,

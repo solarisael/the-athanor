@@ -19,24 +19,15 @@ const SECRETS_PATH = "C:/ProgramData/Solarisael/Athanor/secrets/runtime-secrets.
 
 // [gui/prototype/proxy] [security/allowlist]
 //
-// One page-facing path per Host read the prototype may perform, each carrying
-// the method its Host route actually answers. The page always POSTs; a GET
-// route upstream is called without a body. Nothing outside this map is
-// reachable, and the bearer never leaves this process.
-const LIVE_ROUTES = new Map([
-  ["/live/health", { path: "/health", method: "GET" }],
-  ["/live/insula/vitals", { path: "/athanor/v1/insula/vitals", method: "POST" }],
-  ["/live/insula/trace", { path: "/athanor/v1/insula/trace", method: "POST" }],
-  ["/live/insula/spans", { path: "/athanor/v1/insula/spans", method: "POST" }],
-  ["/live/insula/retention", { path: "/athanor/v1/insula/retention", method: "POST" }],
-  ["/live/docket/board", { path: "/athanor/v1/docket/board", method: "POST" }],
-  ["/live/docket/evidence", { path: "/athanor/v1/docket/evidence", method: "POST" }],
-  ["/live/hallway/inbox", { path: "/athanor/v1/hallway/inbox", method: "POST" }],
-  ["/live/hallway/messages", { path: "/athanor/v1/hallway/messages", method: "POST" }],
-  ["/live/memory/timeline", { path: "/athanor/v1/memory/timeline", method: "POST" }],
-  ["/live/memory/read", { path: "/athanor/v1/memory/read", method: "POST" }],
-  ["/live/lesson/timeline", { path: "/athanor/v1/lesson/timeline", method: "POST" }],
-]);
+// One page-facing path per Host call the prototype may perform, each carrying
+// the method its Host route actually answers. The table lives in
+// live-routes.json so the desktop app (gui-desktop) and this dev server hold
+// one allow-list. The page always POSTs; a GET route upstream is called
+// without a body. Nothing outside this map is reachable, and the bearer never
+// leaves this process.
+const LIVE_ROUTES = new Map<string, { path: string; method: string }>(
+  Object.entries(await Bun.file(`${ROOT}/live-routes.json`).json()),
+);
 
 const runtime = await Bun.file(CONFIG_PATH).json();
 const secrets = await Bun.file(SECRETS_PATH).json();

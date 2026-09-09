@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "The Athanor — Pulse",
+  "identifier": "com.solarisael.athanor.pulse",
+  "build": {},
+  "app": {
+    "windows": [],
+    "security": { "csp": null }
+  },
+  "bundle": { "active": false, "icon": ["../crates/athanor-install/assets/athanor.ico"] }
+}

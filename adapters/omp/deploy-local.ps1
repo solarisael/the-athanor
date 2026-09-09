@@ -26,9 +26,9 @@ if (-not [IO.Path]::GetFullPath($ProgramRoot).Equals(
   throw "ProgramRoot must match the installed manager target derived from ProgramFiles: $ExpectedProgramRoot"
 }
 
-$Manager = Join-Path $ProgramRoot "bin/athanor-manage.exe"
+$Manager = Join-Path $ProgramRoot "bin/athanor.exe"
 if (-not (Test-Path -LiteralPath $Manager -PathType Leaf)) {
-  throw "The installed Athanor manager is missing: $Manager"
+  throw "The installed athanor.exe is missing: $Manager"
 }
 
 $GuardedEnvironment = @(
@@ -79,7 +79,7 @@ try {
   Write-Host "releaseId: $($Component.ReleaseId)"
   Write-Host "artifacts: $($Component.ArtifactCount)"
 
-  Write-Host "==> install the OMP adapter release through the Athanor manager"
+  Write-Host "==> install the OMP adapter release through athanor.exe"
   & $Manager install-omp-adapter --source $Source
   if ($LASTEXITCODE -ne 0) {
     throw "install-omp-adapter refused the component bundle (exit code $LASTEXITCODE)"

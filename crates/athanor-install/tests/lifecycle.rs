@@ -138,13 +138,6 @@ fn release(version: &str, bytes: &[u8]) -> ReleaseManifest {
         },
         artifacts: vec![
             Artifact {
-                component: "installer".into(),
-                path: "bin/athanor-manage.exe".into(),
-                sha256: hex::encode(Sha256::digest(bytes)),
-                size: bytes.len() as u64,
-                executable: true,
-            },
-            Artifact {
                 component: "app".into(),
                 path: "bin/athanor.exe".into(),
                 sha256: hex::encode(Sha256::digest(bytes)),
@@ -157,13 +150,6 @@ fn release(version: &str, bytes: &[u8]) -> ReleaseManifest {
                 sha256: hex::encode(Sha256::digest(bytes)),
                 size: bytes.len() as u64,
                 executable: false,
-            },
-            Artifact {
-                component: "omp-keeper".into(),
-                path: "bin/omp-keeper.exe".into(),
-                sha256: hex::encode(Sha256::digest(bytes)),
-                size: bytes.len() as u64,
-                executable: true,
             },
             Artifact {
                 component: "omp-adapter".into(),
@@ -661,9 +647,9 @@ fn native_filesystem_rejects_reparse_artifacts_and_owned_ancestors() -> Result<(
 
     let staging = temporary.path().join("native-stage");
     std::fs::create_dir_all(staging.join("bin"))?;
-    let native_manager = temporary.path().join("foreign-manager.exe");
-    std::fs::write(&native_manager, b"manager-two")?;
-    symlink_file(&native_manager, staging.join("bin/athanor-manage.exe"))?;
+    let native_app = temporary.path().join("foreign-app.exe");
+    std::fs::write(&native_app, b"manager-two")?;
+    symlink_file(&native_app, staging.join("bin/athanor.exe"))?;
     let native_two = release("2.0.0", b"manager-two");
     let adapter = b"adapter";
     let adapter_manifest = serde_json::to_vec_pretty(&component(adapter))?;

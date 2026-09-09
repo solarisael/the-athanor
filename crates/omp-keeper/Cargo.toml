@@ -8,10 +8,6 @@ license.workspace = true
 name = "omp_keeper"
 path = "src/lib.rs"
 
-[[bin]]
-name = "omp-keeper"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
 # absolute House instants: restart_status publishes RFC3339 text, the keeper compares it to now

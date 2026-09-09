@@ -35,17 +35,17 @@ foreach ($argument in $OmpArgs) {
         throw "OmpArgs must not select a session; the keeper applies resume or fresh mode"
     }
 }
-$keeper = Join-Path $ProgramRoot "bin/omp-keeper.exe"
+$keeper = Join-Path $ProgramRoot "bin/athanor.exe"
 if (-not (Test-Path $keeper -PathType Leaf)) {
     $currentPath = Join-Path $ProgramRoot "current.json"
     if (-not (Test-Path $currentPath -PathType Leaf)) {
         throw "Installed release pointer does not exist: $currentPath"
     }
     $current = Get-Content $currentPath -Raw | ConvertFrom-Json
-    $keeper = Join-Path $ProgramRoot "versions/$([string]$current.version)/bin/omp-keeper.exe"
+    $keeper = Join-Path $ProgramRoot "versions/$([string]$current.version)/bin/athanor.exe"
 }
 if (-not (Test-Path $keeper -PathType Leaf)) {
-    throw "Installed keeper does not exist: $keeper"
+    throw "Installed athanor.exe does not exist: $keeper"
 }
 if ([string]::IsNullOrWhiteSpace($Workspace)) {
     $Workspace = [IO.Path]::GetFullPath($RoomDir)
@@ -129,4 +129,4 @@ try {
 
 Write-Host "keeper configured for room '$room': $configPath"
 Write-Host "start this room through:"
-Write-Host "& '$keeper' --config '$configPath'"
+Write-Host "& '$keeper' keeper --config '$configPath'"

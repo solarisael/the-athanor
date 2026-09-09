@@ -36,11 +36,11 @@ pub struct HarnessEntry {
     #[serde(default)]
     pub auto_start: bool,
     /// The registry once declared a supervision driver, and `omp` named an OMP
-    /// keeper that ran inside `athanor.exe`. There is no driver now: the keeper
-    /// owns the console, so this owner supervises `omp-keeper.exe` as an
-    /// ordinary process. A file that still declares one is refused by name,
-    /// because an ignored `"driver":"omp"` reads as provisioned and supervises
-    /// nothing.
+    /// keeper that ran inside the Host. There is no driver now: the keeper
+    /// mode owns the console, so this owner supervises `athanor.exe keeper`
+    /// as an ordinary process. A file that still declares one is refused by
+    /// name, because an ignored `"driver":"omp"` reads as provisioned and
+    /// supervises nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub driver: Option<String>,
     pub program: PathBuf,
@@ -105,8 +105,8 @@ impl HarnessEntry {
             bail!(
                 "harness {:?} declares a retired driver field ({driver:?}); this Athanor \
                  supervises processes and holds no harness driver. Delete the field and run \
-                 the room through omp-keeper.exe: name the installed omp-keeper.exe as the \
-                 program, with arguments [\"--config\", \
+                 the room through the keeper mode: name the installed athanor.exe as the \
+                 program, with arguments [\"keeper\", \"--config\", \
                  \"<room>/.omp/runtime/omp-keeper.json\"].",
                 self.harness_id
             );
@@ -246,16 +246,17 @@ mod tests {
         assert!(HarnessRegistry::parse(KEEPER_HARNESS).unwrap().auto_start_ids().is_empty());
     }
 
-    /// The shape the operator writes for a room after the driver cut: the
-    /// keeper is the program, and its config file is the argument.
+    /// A room's keeper is the one exe in keeper mode: `athanor.exe` is the
+    /// program, and the mode plus its config file are the arguments.
     const KEEPER_HARNESS: &str = r#"{
         "format": 1,
         "harnesses": [
             {
                 "harnessId": "kintsu-omp",
                 "label": "Kintsu OMP",
-                "program": "C:/Program Files/Solarisael/Athanor/bin/omp-keeper.exe",
+                "program": "C:/Program Files/Solarisael/Athanor/bin/athanor.exe",
                 "arguments": [
+                    "keeper",
                     "--config",
                     "C:/Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json"
                 ],
@@ -272,17 +273,18 @@ mod tests {
         let spec = registry.get("kintsu-omp").expect("the entry is registered");
         assert_eq!(spec.label, "Kintsu OMP");
         assert!(
-            spec.launch.program.ends_with("omp-keeper.exe"),
-            "the supervised program is the keeper: {}",
+            spec.launch.program.ends_with("athanor.exe"),
+            "the supervised program is the one exe: {}",
             spec.launch.program.display()
         );
         assert_eq!(
             spec.launch.arguments,
             [
+                "keeper",
                 "--config",
                 "C:/Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json"
             ],
-            "the arguments reach the keeper as written"
+            "the arguments reach the keeper mode as written"
         );
         assert_eq!(spec.launch.console, ConsoleMode::NewWindow);
     }
@@ -302,8 +304,8 @@ mod tests {
             "the refusal names the retired field: {error}"
         );
         assert!(
-            error.contains("omp-keeper.exe"),
-            "the refusal tells the operator which program to run: {error}"
+            error.contains("athanor.exe") && error.contains("\"keeper\""),
+            "the refusal tells the operator which program and mode to run: {error}"
         );
     }
 }

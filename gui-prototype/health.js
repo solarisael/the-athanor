@@ -93,6 +93,10 @@ export function healthState() {
   return round.status === "live" ? round.health : null;
 }
 
+export function healthRoundStatus() {
+  return round.status;
+}
+
 export function roomStateChannel() {
   if (roomRound.status === "live") return chip("Room state connected", "Room", "steady", `Room ${roomRound.room} · Queried ${roomRound.queriedAt} local`);
   if (roomRound.status === "failed" && roomRound.reached) return chip("Room state not served", "Room —", "quiet", `${roomRound.reason} · not reported by the Host`);

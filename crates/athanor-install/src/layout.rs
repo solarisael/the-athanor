@@ -54,17 +54,13 @@ impl InstallLayout {
     pub fn version(&self, version: &str) -> PathBuf {
         self.versions().join(version)
     }
-    pub fn manager(&self) -> PathBuf {
-        self.program.join("bin/athanor-manage.exe")
-    }
+    /// The one exe: Host, service, installer, keeper, chat, status, and
+    /// start are its modes.
     pub fn app(&self) -> PathBuf {
         self.program.join("bin/athanor.exe")
     }
     pub fn omp_loader(&self) -> PathBuf {
         self.program.join("bin/athanor-omp-loader.ts")
-    }
-    pub fn keeper(&self) -> PathBuf {
-        self.program.join("bin/omp-keeper.exe")
     }
     pub fn current(&self) -> PathBuf {
         self.program.join(CURRENT_POINTER)

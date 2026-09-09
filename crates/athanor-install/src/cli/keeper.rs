@@ -1,4 +1,9 @@
-use anyhow::{Context, Result};
+//! The keeper mode: `athanor keeper --config <room>/.omp/runtime/omp-keeper.json`.
+//! It owns the console and the OMP child for one room. The keeper's own
+//! logic lives in the `omp_keeper` crate; this door only chooses the config
+//! and turns the outcome into an exit code.
+
+use anyhow::{Result, bail};
 use omp_keeper::config;
 use omp_keeper::keeper::{self, Outcome};
 use std::process::ExitCode;
@@ -13,26 +18,15 @@ use std::process::ExitCode;
 /// ordinary quit after a verified restart still reports 0.
 const ARMED_EXIT_UNSERVED: u8 = 88;
 
-fn main() -> ExitCode {
-    match keeper_main() {
-        Ok(code) => code,
-        Err(error) => {
-            eprintln!("omp-keeper stopped: {error:#}");
-            ExitCode::from(1)
-        }
-    }
-}
-
-fn keeper_main() -> Result<ExitCode> {
-    let arguments: Vec<String> = std::env::args().skip(1).collect();
-    let path = match config::config_path_from_args(arguments)? {
-        Some(path) => path,
-        None => config::default_config_path(
-            &std::env::current_exe().context("the keeper executable path is unknown")?,
-        ),
+pub fn run(arguments: &[String]) -> Result<ExitCode> {
+    // A room's config never sits beside the installed exe, so the path is
+    // always named; the old beside-the-exe default belonged to a per-room copy
+    // of a binary that no longer exists.
+    let Some(path) = config::config_path_from_args(arguments.to_vec())? else {
+        bail!("usage: athanor keeper --config <room>/.omp/runtime/omp-keeper.json");
     };
-    let config = config::load(&path)?;
-    match keeper::run(&config)? {
+    let loaded = config::load(&path)?;
+    match keeper::run(&loaded, &path)? {
         Outcome::Stopped { exit_code } => Ok(ExitCode::from(stopped_code(exit_code))),
         Outcome::Refused { message } | Outcome::Failed { message } => {
             println!("{message}");
@@ -63,7 +57,8 @@ mod tests {
         );
         assert_ne!(stopped_code(87), 0);
         assert_ne!(
-            stopped_code(87), 87,
+            stopped_code(87),
+            87,
             "87 is the child's request; the keeper's verdict carries its own code"
         );
     }

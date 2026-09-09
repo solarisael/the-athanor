@@ -544,18 +544,22 @@ try {
   Assert-True ($SecretRemoval -ge 0 -and $SecretRemoval -lt $DatabaseRemoval) "capability rollback must remove plaintext before deleting its authority row"
   & (Join-Path $PSScriptRoot "../crates/omp-keeper/scripts/provision-local.test.ps1")
   $ReleaseBuilderSource = Get-Content (Join-Path $PSScriptRoot "build-native-release.ps1") -Raw
-  foreach ($RequiredFragment in @("-p omp-keeper", "omp-keeper.exe", "components/omp-keeper", '"omp-keeper"', "-p athanor-install", "athanor.exe", "bin/athanor.exe", '"app"')) {
+  foreach ($RequiredFragment in @("components/omp-keeper", '"omp-keeper"', "-p athanor-install", "athanor.exe", "bin/athanor.exe", '"app"')) {
     Assert-True ($ReleaseBuilderSource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "native release builder must package $RequiredFragment"
+  }
+  foreach ($RetiredFragment in @("athanor-manage.exe", "omp-keeper.exe", "-p omp-keeper")) {
+    Assert-True (-not $ReleaseBuilderSource.Contains($RetiredFragment, [StringComparison]::Ordinal)) "one exe: the native release builder must not package $RetiredFragment"
   }
   $InnoSource = Get-Content (Join-Path $PSScriptRoot "athanor.iss") -Raw
   foreach ($ForbiddenFragment in @("payload\bin\omp-keeper.exe", "payload\components\omp-keeper\provision-omp-keeper.ps1", "payload\components\omp-keeper\provision-restart-capability.ps1")) {
     Assert-True (-not $InnoSource.Contains($ForbiddenFragment, [StringComparison]::OrdinalIgnoreCase)) "native installer must not activate $ForbiddenFragment before the manager accepts the payload"
   }
-  foreach ($RequiredFragment in @('payload\bin\athanor.exe', '{app}\bin\athanor.exe', '{app}\bin\athanor-manage.exe')) {
+  foreach ($RequiredFragment in @('payload\bin\athanor.exe', '{app}\bin\athanor.exe')) {
     Assert-True ($InnoSource.Contains($RequiredFragment, [StringComparison]::Ordinal)) "native installer must ship $RequiredFragment"
   }
   Assert-True ($InnoSource -match '(?m)^Name:\s*"\{group\}\\The Athanor";\s*Filename:\s*"\{app\}\\bin\\athanor\.exe"') "the Start Menu entry must launch the canonical app"
-  Assert-True ($InnoSource -match '(?m)^Filename:\s*"\{app\}\\bin\\athanor-manage\.exe";\s*Parameters:\s*"uninstall"') "athanor-manage must remain the installer authority the uninstaller calls"
+  Assert-True ($InnoSource -match '(?m)^Filename:\s*"\{app\}\\bin\\athanor\.exe";\s*Parameters:\s*"uninstall"') "athanor.exe must be the installer authority the uninstaller calls"
+  Assert-True (-not $InnoSource.Contains("athanor-manage", [StringComparison]::OrdinalIgnoreCase)) "one exe: the native installer must not name athanor-manage"
 
 
   Write-Host "native release contract passed"

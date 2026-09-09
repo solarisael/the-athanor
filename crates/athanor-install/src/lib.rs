@@ -1,5 +1,6 @@
 pub mod app;
 pub mod boundaries;
+pub mod cli;
 pub mod component;
 pub mod endpoints;
 pub mod harness;

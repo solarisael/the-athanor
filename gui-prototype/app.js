@@ -1,4 +1,5 @@
 import { escapeHtml } from "./text.js";
+import { initRepair, queryRepairStatus, startRepair, renderRepair } from "./repair.js";
 import { renderMarkdown } from "./markdown.js";
 import { renderDirectStatus } from "./mechanics-live.js";
 import { initChat, syncChatPanel, isLiveChat, chatState, chatMessages, chatBlockReason, say } from "./chat.js";
@@ -10,7 +11,7 @@ import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSe
 import {
   initHealth, ensureHealthQueried, queryHealthHost, onHostRecovered,
   STATUS_CHANNELS, statusChannel, healthSourceLine, healthSourceTone,
-  accountStateRows, persistenceDetail
+  accountStateRows, persistenceDetail, healthRoundStatus
 } from "./health.js";
 import {
   initMechanics, resetMechanicsView, saveMechanicsScroll, mechanicsScrollTop,
@@ -1618,6 +1619,12 @@ function subjectViewLabels(item) {
 
 
 function render() {
+  const repairBanner = document.querySelector("[data-repair-banner]");
+  repairBanner.hidden = healthRoundStatus() !== "failed";
+  if (!repairBanner.hidden) {
+    const markup = `<span>${escapeHtml(healthSourceLine())}</span> ${renderRepair()}`;
+    if (repairBanner.innerHTML !== markup) repairBanner.innerHTML = markup;
+  }
   const item = conversations[state.activeId];
   const instrument = activeInstrument(item);
   state.mode = item.kind;
@@ -2372,6 +2379,13 @@ initSediment({
 });
 initMechanics({ timeline });
 initHealth({ requestRender: render });
+initRepair({ requestRender: render });
+document.querySelector("[data-repair-banner]").addEventListener("click", event => {
+  const button = event.target.closest("[data-repair]");
+  if (!button) return;
+  if (button.dataset.repair === "status") void queryRepairStatus();
+  else void startRepair(button.dataset.repair === "service");
+});
 initChat({ requestRender: render });
 render();
 

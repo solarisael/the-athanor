@@ -7,7 +7,7 @@
 //!
 //! This folder keeps each harness concern in one file. `config` reads the
 //! registry, `owner` keeps process ownership, and `control` carries requests
-//! over loopback. There is no OMP driver here: `omp-keeper.exe` owns the
+//! over loopback. There is no OMP driver here: the keeper mode (`athanor.exe keeper`) owns the
 //! console and the OMP child, and this owner supervises the keeper as an
 //! ordinary process.
 

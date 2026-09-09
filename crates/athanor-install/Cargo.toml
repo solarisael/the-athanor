@@ -8,17 +8,11 @@ license.workspace = true
 name = "athanor_install"
 path = "src/lib.rs"
 
+# The one exe. Every mode (Host, service, install, keeper, chat, status,
+# start) is a door of this binary; see src/cli/mod.rs.
 [[bin]]
 name = "athanor"
 path = "src/bin/athanor.rs"
-
-[[bin]]
-name = "athanor-manage"
-path = "src/main.rs"
-
-[[bin]]
-name = "athanor-chat"
-path = "src/bin/athanor-chat.rs"
 
 [dependencies]
 anyhow.workspace = true
@@ -27,6 +21,7 @@ host = { path = "../host" }
 hearth = { path = "../hearth" }
 protocol = { path = "../protocol" }
 interactive-process = { path = "../interactive-process" }
+omp-keeper = { path = "../omp-keeper" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

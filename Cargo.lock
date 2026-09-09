@@ -164,6 +164,7 @@ dependencies = [
  "hex",
  "host",
  "interactive-process",
+ "omp-keeper",
  "protocol",
  "serde",
  "serde_json",
@@ -192,7 +193,10 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
  "tokio",
+ "tower",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

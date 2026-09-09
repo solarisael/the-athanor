@@ -1,6 +1,6 @@
 # athanor-install
 
-The native installer and the managed runtime for Windows. It builds the `athanor-manage` binary.
+The native installer and the managed runtime for Windows. It builds the one exe, `athanor.exe`. Every mode is a door of that binary.
 
 ### installer
 
@@ -64,9 +64,9 @@ The native installer and the managed runtime for Windows. It builds the `athanor
 
 - **Registry.** `config.rs` reads `config/harnesses.json`. Format 1 declares each harness with an identifier, a label, an absolute program, arguments, an absolute workspace, and the console mode.
 - **One console mode.** `new_window` is the only spelling. A harness an operator looks at must not look like a service child of `supervisor.rs`.
-- **No drivers.** A harness is a process. An entry that declares a `driver` field is refused, and the refusal tells the operator to name `omp-keeper.exe` as the program instead. The app holds no OMP driver: the keeper owns the console and the OMP child, and the app supervises the keeper.
+- **No drivers.** A harness is a process. An entry that declares a `driver` field is refused, and the refusal tells the operator to name `athanor.exe` as the program with `keeper` as its first argument. The app holds no OMP driver: the keeper owns the console and the OMP child, and the app supervises the keeper.
 - **Bounds.** An identifier holds ASCII letters, digits, `-`, `_` or `.`. An identifier and a label hold 1 to 128 characters. A duplicate identifier is refused. An absent registry file is an app with no harnesses, and a malformed file is a refusal.
-- **Ownership.** `owner.rs` keeps every child handle. It starts, stops, and restarts one harness by identifier, and it reports one status for each declared harness: running with its process identifier, stopped, or failed with its detail. A stop waits 15 seconds, then reports the child is still alive.
+- **Ownership.** `owner.rs` keeps every child handle. Before it spawns a keeper it tries the room's `omp-keeper.lock`; a lock another process holds is reported as running with the detail `held by another owner`, and nothing is spawned. It starts, stops, and restarts one harness by identifier, and it reports one status for each declared harness: running with its process identifier, stopped, or failed with its detail. A stop waits 15 seconds, then reports the child is still alive.
 - **Shutdown.** `shutdown` stops every child this app owns and reports each child that does not stop cleanly.
 - **Control.** `control.rs` binds a loopback socket, answers one request for each connection, and compares the capability token in constant time. The GUI holds no process authority; it asks over this door.
 
@@ -149,14 +149,14 @@ The native installer and the managed runtime for Windows. It builds the `athanor
 - **Honesty.** A missing or unparsable file becomes a failed check with the reason. `doctor` never guesses a version.
 - The report carries the installed version, the service state, the data state, and every check with its own detail.
 
-### main
+### cli
 
-`src/main.rs`. The `athanor-manage` binary.
+`src/cli/`. The one exe's doors. `athanor.exe` with no arguments is the Host; the first argument names every other mode.
 
-- **Commands.** `install`, `update`, `install-omp-adapter`, `rollback-omp-adapter`, `gui`, `doctor`, `rollback`, `uninstall`, `purge`, and `service`.
-- **Wiring.** It builds the layout from `ProgramFiles` and `ProgramData`, then hands the four native seams to the installer.
-- **Install flags.** `--staging` and `--manifest` are required. `--external-database-file`, `--house-config-file`, and the three operator flags are optional.
-- **Operator flags.** `--omp-config`, `--client-config`, and `--operator-principal` must arrive together.
-- **`gui`.** It reads and validates the client projection, picks the room or the default one, then starts the installed Godot client with the token, the house, the address, the room, and the spirit.
-- **Output.** Every command prints one JSON result. `doctor` fails the process when a check fails.
-- **Help.** `help` prints the command list with every flag.
+- **Modes.** `status`, `start [--service]`, `keeper --config FILE`, `chat [--room ROOM]`, `doctor`, `install`, `update`, `install-omp-adapter`, `rollback-omp-adapter`, `rollback`, `uninstall`, `purge --confirm-data-loss`, `service`, and `help`.
+- **`status`.** One JSON matrix. Each component reports installed, running, reachable, and healthy, or `null` when the mode has no honest way to know. The service is read through `sc query`; PostgreSQL, NATS, and Ollama through their ports; the Host through its port and its room health route; each registered keeper through its lock. `missing` lists what the House needs and does not have; `elevationRequired` lists the part of `missing` that needs administrator rights.
+- **`start`.** Starts only what `status` reports missing, in order. The service starts only with `--service`, through `sc start`; a denied start is the typed refusal `needs_elevation` and exit code 3. PostgreSQL and NATS are waited for after the service. The Host starts detached and is waited for on its port. Keepers are never started; the report names the command.
+- **`keeper`.** The `omp_keeper` crate's loop for one room. The config path is required.
+- **`chat`.** The terminal mouth for the chat projection.
+- **Installation modes.** They build the layout from `ProgramFiles` and `ProgramData`, then hand the four native seams to the installer. `--staging` and `--manifest` are required for install and update. `--external-database-file`, `--house-config-file`, and the three operator flags are optional; `--omp-config`, `--client-config`, and `--operator-principal` must arrive together.
+- **Help.** `help` prints the mode list with every flag.

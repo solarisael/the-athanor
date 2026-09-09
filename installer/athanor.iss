@@ -20,22 +20,21 @@ SolidCompression=yes
 WizardStyle=modern
 OutputDir={#SourceRoot}
 OutputBaseFilename=The-Athanor-{#Version}-windows-x64
-UninstallDisplayIcon={app}\bin\athanor-manage.exe
+UninstallDisplayIcon={app}\bin\athanor.exe
 DisableProgramGroupPage=yes
 
 [Files]
 Source: "{#SourceRoot}\payload\bin\athanor.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
-Source: "{#SourceRoot}\payload\bin\athanor-manage.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#SourceRoot}\payload\bin\athanor-omp-loader.ts"; DestDir: "{app}\bin"; Flags: ignoreversion
 Source: "{#SourceRoot}\payload\*"; DestDir: "{tmp}\athanor-payload"; Flags: recursesubdirs createallsubdirs deleteafterinstall
 
 
 [UninstallRun]
-Filename: "{app}\bin\athanor-manage.exe"; Parameters: "uninstall"; RunOnceId: "AthanorPreserveDataUninstall"; Flags: runhidden waituntilterminated
+Filename: "{app}\bin\athanor.exe"; Parameters: "uninstall"; RunOnceId: "AthanorPreserveDataUninstall"; Flags: runhidden waituntilterminated
 
 [Icons]
 Name: "{group}\The Athanor"; Filename: "{app}\bin\athanor.exe"; WorkingDir: "{app}\bin"
-Name: "{group}\Athanor Doctor"; Filename: "{app}\bin\athanor-manage.exe"; Parameters: "doctor"
+Name: "{group}\Athanor Doctor"; Filename: "{app}\bin\athanor.exe"; Parameters: "doctor"
 
 [Code]
 function ExternalDatabaseArgument(Param: String): String;
@@ -88,15 +87,15 @@ begin
       HouseConfigArgument('') + ' ' +
       OmpIntegrationArguments('');
     if not Exec(
-      ExpandConstant('{app}\bin\athanor-manage.exe'),
+      ExpandConstant('{app}\bin\athanor.exe'),
       Parameters,
       ExpandConstant('{app}\bin'),
       SW_HIDE,
       ewWaitUntilTerminated,
       ResultCode
     ) then
-      RaiseException('Failed to start the native Athanor manager.');
+      RaiseException('Failed to start athanor.exe install.');
     if ResultCode <> 0 then
-      RaiseException(Format('The native Athanor manager refused installation (exit %d).', [ResultCode]));
+      RaiseException(Format('athanor.exe refused installation (exit %d).', [ResultCode]));
   end;
 end;

@@ -1,10 +1,12 @@
-use anyhow::{Result, bail};
-use athanor_install::app;
-use std::env;
+use std::process::ExitCode;
 
-fn main() -> Result<()> {
-    if env::args_os().nth(1).is_some() {
-        bail!("usage: athanor");
+fn main() -> ExitCode {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    match athanor_install::cli::run(arguments) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("athanor: {error:#}");
+            ExitCode::from(1)
+        }
     }
-    app::run()
 }

@@ -334,7 +334,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.services.install_or_update(
                 SERVICE_NAME,
                 SERVICE_DISPLAY_NAME,
-                &self.layout.manager(),
+                &self.layout.app(),
             )?;
             self.services.start(SERVICE_NAME)?;
             self.runtime.wait_ready()?;
@@ -864,12 +864,10 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
     // Every file the program root serves outside a version directory: what
     // the service, the OMP loader, and a room's keeper start before they know
     // which version is current. A running one is retired, never overwritten.
-    fn stable_binaries(&self) -> [(&'static str, PathBuf); 4] {
+    fn stable_binaries(&self) -> [(&'static str, PathBuf); 2] {
         [
-            ("bin/athanor-manage.exe", self.layout.manager()),
             ("bin/athanor.exe", self.layout.app()),
             ("bin/athanor-omp-loader.ts", self.layout.omp_loader()),
-            ("bin/omp-keeper.exe", self.layout.keeper()),
         ]
     }
 
@@ -883,7 +881,6 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         for (root, path) in [
             (self.layout.program.clone(), self.layout.current()),
             (self.layout.omp_adapter(), self.layout.omp_adapter_current()),
-            (self.layout.program.clone(), self.layout.manager()),
             (self.layout.program.clone(), self.layout.omp_loader()),
             (self.layout.program.clone(), self.layout.app()),
         ] {
@@ -896,7 +893,6 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.layout.omp_adapter_current(),
             self.layout.config(),
             self.layout.secrets(),
-            self.layout.manager(),
             self.layout.app(),
             self.layout.omp_loader(),
         ];
@@ -1017,7 +1013,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
                 self.services.install_or_update(
                     SERVICE_NAME,
                     SERVICE_DISPLAY_NAME,
-                    &self.layout.manager(),
+                    &self.layout.app(),
                 ),
             );
             attempt("restart prior service", self.services.start(SERVICE_NAME));

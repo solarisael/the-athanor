@@ -142,7 +142,7 @@ Invoke-NativeReleaseStage -Name "cargo-build" -OutDir $Out -Action {
   $env:RUSTC = $Toolchain.rustcPath
   Push-Location $Root
   try {
-    & $Toolchain.cargoPath build --release --locked -p athanor-install -p akasha -p host -p athanor-godot -p omp-keeper
+    & $Toolchain.cargoPath build --release --locked -p athanor-install -p akasha -p host -p athanor-godot
     if ($LASTEXITCODE -ne 0) { throw "Rust release build failed" }
   } finally {
     Pop-Location
@@ -162,10 +162,9 @@ Invoke-NativeReleaseStage -Name "payload-materialization" -OutDir $Out -Action {
   New-Item (Join-Path $Runtime "nats") -ItemType Directory -Force | Out-Null
   New-Item (Join-Path $GodotProject "target/debug") -ItemType Directory -Force | Out-Null
   New-Item (Join-Path $GodotProject "target/release") -ItemType Directory -Force | Out-Null
+  # One exe: Host, service, installer, keeper, chat, status, and start are modes of athanor.exe.
   Copy-Item (Join-Path $ReleaseBin "athanor.exe") $Bin
-  Copy-Item (Join-Path $ReleaseBin "athanor-manage.exe") $Bin
   Copy-Item (Join-Path $ReleaseBin "athanor-substrate.exe") $Bin
-  Copy-Item (Join-Path $ReleaseBin "omp-keeper.exe") $Bin
   Copy-Item (Join-Path $Root "adapters/omp/installed-loader.ts") (Join-Path $Bin "athanor-omp-loader.ts")
   Copy-Item $GodotExe.FullName (Join-Path $Bin "athanor-gui.exe")
   $GodotSource = Join-Path $Root "gui"
@@ -206,11 +205,9 @@ Invoke-NativeReleaseStage -Name "manifest-hashing" -OutDir $Out -Action {
   Get-ChildItem $Stage -File -Recurse | Sort-Object FullName | ForEach-Object {
     $Relative = [IO.Path]::GetRelativePath($Stage, $_.FullName).Replace("\", "/")
     $Component = if ($Relative -eq "bin/athanor.exe") { "app" }
-      elseif ($Relative -eq "bin/athanor-manage.exe") { "installer" }
       elseif ($Relative -like "runtime/postgresql/*") { "postgresql-pgvector" }
       elseif ($Relative -like "runtime/nats/*") { "nats-server" }
       elseif ($Relative -like "bin/athanor-substrate.exe") { "substrate" }
-      elseif ($Relative -like "bin/omp-keeper.exe") { "omp-keeper" }
       elseif ($Relative -like "components/omp-keeper/*") { "omp-keeper" }
       elseif ($Relative -eq "bin/athanor-gui.exe" -or $Relative -like "runtime/godot/*") { "godot-client" }
       else { "omp-adapter" }

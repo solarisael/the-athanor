@@ -56,7 +56,9 @@ fn main() -> anyhow::Result<()> {
     let secrets: Secrets = serde_json::from_slice(&std::fs::read("C:/ProgramData/Solarisael/Athanor/secrets/runtime-secrets.json").context("read runtime-secrets.json")?)?;
     let host_port = options.host_port.unwrap_or(config.host_port);
     if host_port == 0 { bail!("no usable hostPort"); }
-    let proxy = proxy::Proxy::new(host_port, &options.room, secrets.host_token, options.dev_dir)?;
+    let app_exe = env::var_os("ATHANOR_APP_EXE").map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("C:/Program Files/Solarisael/Athanor/bin/athanor.exe"));
+    let proxy = proxy::Proxy::new(host_port, &options.room, secrets.host_token, options.dev_dir, app_exe)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let listener = runtime.block_on(tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, options.port)))?;
     println!("prototype on http://127.0.0.1:{} · live House reads via /room/{} on Host :{host_port}", options.port, options.room);

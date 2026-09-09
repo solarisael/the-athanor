@@ -87,7 +87,7 @@ product release.
 Deploy an already-built component with the stable manager:
 
 ```powershell
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" `
   install-omp-adapter --source <component-root>
 ```
 
@@ -97,10 +97,10 @@ release. It reuses an identical valid component release when one exists.
 Roll back the adapter without changing the native product:
 
 ```powershell
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" `
   rollback-omp-adapter
 
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" `
   rollback-omp-adapter --release-id <releaseId>
 ```
 
@@ -125,7 +125,7 @@ native version identity.
 ## Verify an installed tree
 
 ```powershell
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" doctor
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" doctor
 ```
 
 Doctor validates the activation pointer, release manifest and every installed

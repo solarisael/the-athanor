@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
 };
 
-fn installed_runtime(layout: &InstallLayout) -> Result<(RuntimeConfig, RuntimeSecrets)> {
+pub(crate) fn installed_runtime(layout: &InstallLayout) -> Result<(RuntimeConfig, RuntimeSecrets)> {
     let config: RuntimeConfig = serde_json::from_slice(
         &fs::read(layout.config())
             .with_context(|| format!("read {}", layout.config().display()))?,

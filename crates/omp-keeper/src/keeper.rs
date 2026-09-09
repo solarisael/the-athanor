@@ -16,7 +16,9 @@ use crate::session::{Answer, SubstrateSession};
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use interactive_process::{InteractiveChild, InteractiveCommand};
+use std::fs::{File, OpenOptions};
 use std::io;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
@@ -100,12 +102,71 @@ struct RestartLaunch<'a> {
     successor_proof: &'a str,
 }
 
-pub fn run(config: &KeeperConfig) -> Result<Outcome> {
+pub fn lock_path(config_path: &Path) -> PathBuf {
+    config_path.with_file_name("omp-keeper.lock")
+}
+
+#[cfg(windows)]
+pub fn try_hold_lock(config_path: &Path) -> io::Result<Option<File>> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    match OpenOptions::new()
+        .create(true)
+        .write(true)
+        .share_mode(0)
+        .open(lock_path(config_path))
+    {
+        Ok(file) => Ok(Some(file)),
+        Err(error) if error.raw_os_error() == Some(32) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(not(windows))]
+pub fn try_hold_lock(config_path: &Path) -> io::Result<Option<File>> {
+    // Keeper exclusion uses Windows sharing rules; other platforms only create the file.
+    OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(lock_path(config_path))
+        .map(Some)
+}
+
+pub fn run(config: &KeeperConfig, config_path: &Path) -> Result<Outcome> {
+    let Some(_lock) = try_hold_lock(config_path)
+        .with_context(|| format!("hold keeper lock {}", lock_path(config_path).display()))?
+    else {
+        return Ok(Outcome::Refused {
+            message: format!("another keeper already holds {}", lock_path(config_path).display()),
+        });
+    };
     let control = StopControl::new();
     let observer = NoopObserver;
     match run_controlled(config, ConsoleMode::Inherit, &control, &observer)? {
         ControlledOutcome::Completed(outcome) => Ok(outcome),
         ControlledOutcome::Stopped => unreachable!("the standalone keeper has no stop requester"),
+    }
+}
+
+#[cfg(all(test, windows))]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn lock_excludes_another_handle_until_dropped() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let config_path = temp.path().join("omp-keeper.json");
+        let held = try_hold_lock(&config_path).unwrap().unwrap();
+        assert!(try_hold_lock(&config_path).unwrap().is_none());
+        let config: KeeperConfig = serde_json::from_value(serde_json::json!({
+            "ompLaunch": ["must-not-spawn.exe"],
+            "workspace": temp.path(),
+            "programRoot": temp.path(),
+            "stateRoot": temp.path()
+        })).unwrap();
+        assert!(matches!(run(&config, &config_path).unwrap(), Outcome::Refused { .. }));
+        drop(held);
+        assert!(try_hold_lock(&config_path).unwrap().is_some());
     }
 }
 

@@ -1,6 +1,7 @@
-//! Smoke tests: the real keeper program, real child processes, real spawning,
-//! and a fake substrate that answers with real `protocol::restart` structs
-//! and refuses any request the real door would refuse.
+//! Smoke tests: the real keeper mode of the one exe (`athanor keeper`), real
+//! child processes, real spawning, and a fake substrate that answers with
+//! real `protocol::restart` structs and refuses any request the real door
+//! would refuse.
 //!
 //! No database. What these defend is the keeper's own seam: what it launches,
 //! which clock it obeys, when it kills, when it retries, and what it says to Sol
@@ -47,7 +48,7 @@ fn example(name: &str) -> PathBuf {
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     assert!(
         path.exists(),
-        "the {name} fixture must be built first: cargo test -p omp-keeper builds examples"
+        "the {name} fixture must be built first: cargo test -p athanor-install builds examples"
     );
     path
 }
@@ -119,8 +120,9 @@ fn write_config(tree: &Tree, launch: &[String], watch_interval_secs: u64) {
 }
 
 fn run_keeper_with(tree: &Tree, mode: &str, extra: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_omp-keeper"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_athanor"));
     command
+        .arg("keeper")
         .arg("--config")
         .arg(&tree.config)
         .env("FAKE_OMP_RUNS", &tree.runs)

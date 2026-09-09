@@ -250,7 +250,7 @@ describe("exit door through the production registration seam", () => {
     expect(result.isError).toBe(true);
     expect(result.details.code).toBe("no_restart_owner");
     expect(result.details.armed).toBeUndefined();
-    expect(result.details.error).toContain("omp-keeper.exe");
+    expect(result.details.error).toContain("athanor.exe keeper");
     // Nothing recorded and nothing armed: the refusal lands before
     // restart_request, so no intent exists to strand.
     expect(observed.map((call) => call.method)).not.toContain("restart_request");

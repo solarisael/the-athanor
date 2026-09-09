@@ -19,6 +19,13 @@ rust-embed = { version = "8", features = ["include-exclude", "debug-embed"] }
 mime_guess = "2"
 percent-encoding = "2"
 tauri = "2"
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_System_Registry", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 
 [build-dependencies]
 tauri-build = "2"

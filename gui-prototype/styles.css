@@ -75,7 +75,7 @@ input:focus-visible {
   position: relative;
   display: grid;
   grid-template-columns: 280px minmax(420px, 1fr) 320px;
-  grid-template-rows: minmax(0, 1fr) 34px;
+  grid-template-rows: minmax(0, 1fr) 34px auto;
 
   width: 100vw;
   height: 100vh;
@@ -84,12 +84,40 @@ input:focus-visible {
 }
 
 .app-shell[data-status-visible="false"] {
-  grid-template-rows: minmax(0, 1fr) 0;
+  grid-template-rows: minmax(0, 1fr) 0 auto;
 }
 
 .app-shell[data-status-visible="false"] .status-bar {
   display: none;
 }
+
+.repair-banner {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  max-height: 40vh;
+  overflow: auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--bd-region);
+  background: var(--bg-status);
+  color: var(--fg-soft);
+  font-size: 0.8125rem;
+}
+
+.repair-banner[hidden] { display: none; }
+.repair-banner button {
+  margin: 2px 4px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  line-height: 1.4;
+  border: 1px solid var(--bd-control);
+  background: var(--bg-card);
+  cursor: pointer;
+}
+.repair-banner button:disabled { opacity: 0.6; cursor: wait; }
+.repair-matrix { margin: 8px 0; padding-left: 20px; }
+.repair-matrix li { padding: 3px 0; overflow-wrap: anywhere; }
+.repair-dots { white-space: nowrap; color: var(--fg-main); }
+.repair-result { margin: 6px 0 0; overflow-wrap: anywhere; }
 
 .sidebar,
 .mantle,

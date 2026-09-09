@@ -18,7 +18,7 @@ try {
     $mock = Join-Path $root "mock-capability.ps1"
     $log = Join-Path $root "calls.log"
     New-Item $runtime, (Join-Path $programRoot "bin"), (Split-Path $substrateEnv -Parent) -ItemType Directory -Force | Out-Null
-    Set-Content (Join-Path $programRoot "bin/omp-keeper.exe") "keeper"
+    Set-Content (Join-Path $programRoot "bin/athanor.exe") "keeper"
     Set-Content $omp "omp"
     Set-Content $substrateEnv "fixture"
     $env:OMP_KEEPER_PROVISION_TEST_LOG = $log

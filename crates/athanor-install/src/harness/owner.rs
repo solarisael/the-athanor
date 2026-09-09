@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use interactive_process::{InteractiveChild, InteractiveCommand};
 use std::{
     collections::BTreeMap,
+    path::{Path, PathBuf},
     sync::Mutex,
     thread,
     time::{Duration, Instant},
@@ -130,6 +131,17 @@ impl HarnessOwner {
     }
 
     fn adopt(&self, state: &mut OwnedState, harness_id: &str, spec: &HarnessSpec) -> Result<()> {
+        if let Some(config_path) = keeper_config_path(&spec.launch) {
+            match omp_keeper::keeper::try_hold_lock(&config_path)
+                .with_context(|| format!("check keeper lock for {}", config_path.display()))?
+            {
+                None => {
+                    state.failures.remove(harness_id);
+                    return Ok(());
+                }
+                Some(file) => drop(file),
+            }
+        }
         let started = start_process(&spec.launch).map(|child| {
             let pid = child.id();
             OwnedChild { child, pid }
@@ -174,8 +186,25 @@ fn observe(state: &mut OwnedState, harness_id: &str) {
 fn status(state: &mut OwnedState, spec: &HarnessSpec) -> HarnessStatus {
     observe(state, &spec.harness_id);
     let pid = state.children.get(&spec.harness_id).map(|owned| owned.pid);
-    let failure = state.failures.get(&spec.harness_id).cloned();
-    let lifecycle = match (pid.is_some(), failure.is_some()) {
+    let mut failure = state.failures.get(&spec.harness_id).cloned();
+    let mut held_elsewhere = false;
+    if pid.is_none() {
+        if let Some(config_path) = keeper_config_path(&spec.launch) {
+            match omp_keeper::keeper::try_hold_lock(&config_path) {
+                Ok(None) => {
+                    held_elsewhere = true;
+                    failure = Some("held by another owner".to_owned());
+                }
+                Ok(Some(file)) => drop(file),
+                Err(error) => {
+                    failure = Some(detail(format!(
+                        "check keeper lock for {}: {error}", config_path.display()
+                    )));
+                }
+            }
+        }
+    }
+    let lifecycle = match (pid.is_some() || held_elsewhere, failure.is_some()) {
         (true, _) => HarnessLifecycle::Running,
         (false, true) => HarnessLifecycle::Failed,
         (false, false) => HarnessLifecycle::Stopped,
@@ -198,6 +227,12 @@ fn stop_owned(state: &mut OwnedState, harness_id: &str) -> Result<()> {
     state.children.remove(harness_id);
     state.failures.remove(harness_id);
     Ok(())
+}
+
+fn keeper_config_path(launch: &HarnessLaunch) -> Option<PathBuf> {
+    let arguments = launch.arguments.windows(2).find(|pair| pair[0] == "--config")?;
+    let path = Path::new(&arguments[1]);
+    Some(launch.workspace.join(path))
 }
 
 fn start_process(launch: &HarnessLaunch) -> Result<InteractiveChild> {
@@ -243,6 +278,33 @@ fn constant_time_eq(expected: &str, provided: &str) -> bool {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn start_reports_external_keeper_without_spawning() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("omp-keeper.json");
+        let registry_path = temp.path().join("harnesses.json");
+        std::fs::write(&registry_path, serde_json::json!({
+            "format": 1,
+            "harnesses": [{
+                "harnessId": "held", "label": "held",
+                "program": temp.path().join("must-not-spawn.exe"),
+                "arguments": ["keeper", "--config", config_path],
+                "workspace": temp.path(), "console": "new_window"
+            }]
+        }).to_string()).unwrap();
+        let registry = HarnessRegistry::parse(&std::fs::read_to_string(registry_path).unwrap()).unwrap();
+        let held = omp_keeper::keeper::try_hold_lock(&config_path).unwrap().unwrap();
+        let owner = HarnessOwner::new(registry, "test".into());
+        let statuses = owner.start("held").unwrap();
+        assert_eq!(statuses[0].lifecycle, HarnessLifecycle::Running);
+        assert_eq!(statuses[0].detail.as_deref(), Some("held by another owner"));
+        assert_eq!(statuses[0].pid, None);
+        assert_eq!(owner.list()[0].lifecycle, HarnessLifecycle::Running);
+        drop(held);
+        assert_eq!(owner.list()[0].lifecycle, HarnessLifecycle::Stopped);
+        assert!(owner.start("held").is_err());
+    }
 
     #[test]
     fn shutdown_stops_owned_children_and_leaves_external_processes_alone() {

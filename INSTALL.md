@@ -40,8 +40,7 @@ installed immutable component. Operator data and secrets are separate:
 ```text
 %ProgramFiles%\Solarisael\Athanor\
   bin\
-    athanor-manage.exe
-    athanor.exe                  stable desktop and Host owner
+    athanor.exe                  the one exe: Host, service, installer, keeper, chat, status, start
     athanor-omp-loader.ts        stable product-owned loader
   current.json                     native product activation pointer
   versions\<version>\
@@ -109,7 +108,7 @@ starts with `/room/<room-key>`.
 Run the native doctor from an elevated terminal:
 
 ```powershell
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" doctor
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" doctor
 ```
 
 Doctor exits nonzero if a native or component activation pointer, a native
@@ -122,7 +121,7 @@ The manager is the only installed writer. To install a prebuilt adapter
 component, run:
 
 ```powershell
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" `
   install-omp-adapter --source <component-root>
 ```
 
@@ -133,7 +132,7 @@ renames the release directory and atomically updates the component pointer.
 To roll back the adapter only, run:
 
 ```powershell
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" `
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" `
   rollback-omp-adapter [--release-id <releaseId>]
 ```
 
@@ -219,7 +218,7 @@ the pre-update database backup is restored. A retained release can also be
 selected explicitly:
 
 ```powershell
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" rollback
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" rollback
 ```
 
 Rollback also takes a backup first. It restores the newer pointer and database
@@ -235,7 +234,7 @@ Data destruction is a different, explicit command and is never run by Inno
 Setup:
 
 ```powershell
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor-manage.exe" purge --confirm-data-loss
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" purge --confirm-data-loss
 ```
 
 Export required rooms and backups before purge. Purge removes both product and

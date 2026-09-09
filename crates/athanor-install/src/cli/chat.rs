@@ -1,15 +1,14 @@
 //! A terminal mouth for the chat projection.
 //!
-//! `athanor-chat [--room ROOM]` connects to the room's Host, prints the
+//! `athanor chat [--room ROOM]` connects to the room's Host, prints the
 //! conversation ring, and turns each stdin line into a say. The room's
 //! doorman answers through the same projection, so this is the whole talk
 //! loop with no GUI in the path.
 
+use crate::omp::ClientProjection;
 use anyhow::{Context, Result, bail};
-use athanor_install::omp::ClientProjection;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use std::env;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -76,13 +75,15 @@ fn render(message: &Value) {
     println!("[{clock}] {name}: {text}");
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let arguments: Vec<String> = env::args().skip(1).collect();
-    let requested_room = match arguments.as_slice() {
+pub fn run(arguments: &[String]) -> Result<()> {
+    tokio::runtime::Runtime::new()?.block_on(talk(arguments))
+}
+
+async fn talk(arguments: &[String]) -> Result<()> {
+    let requested_room = match arguments {
         [] => None,
         [flag, value] if flag == "--room" => Some(value.clone()),
-        _ => bail!("usage: athanor-chat [--room ROOM]"),
+        _ => bail!("usage: athanor chat [--room ROOM]"),
     };
     let client = ClientProjection::installed()?;
     let room = requested_room.unwrap_or_else(|| client.default_room.clone());

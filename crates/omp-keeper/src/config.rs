@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn defaults_the_config_beside_the_executable() {
-        let path = default_config_path(Path::new("D:/install/omp-keeper.exe"));
+        let path = default_config_path(Path::new("D:/install/athanor.exe"));
         assert_eq!(path, PathBuf::from("D:/install").join(CONFIG_FILE_NAME));
     }
 }

@@ -4,14 +4,24 @@ The keeper owns the console seam. It starts omp as a child, waits for the exit,
 asks the House for a restart intent, and starts omp again. No service can do
 this work, because the terminal belongs to the operator, not to a service.
 
+This crate is a library. The keeper runs as one mode of the one exe:
+
+```powershell
+& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" keeper --config <room>\.omp\runtime\omp-keeper.json
+```
+
 ## Who owns the keeper
 
-The keeper owns omp. The operator starts the keeper. On an installed House,
-`athanor.exe` can also start it, as an ordinary process harness: the registry
-entry names `omp-keeper.exe` as the program and `--config <room
-runtime>/omp-keeper.json` as the arguments. `athanor.exe` holds no OMP driver.
-The stable loader starts `athanor.exe` from inside omp, so `athanor.exe` can
-never be the parent of a session the operator started, and only the keeper can.
+The keeper owns omp. The operator starts the keeper. While it runs, the keeper
+holds `<room>/.omp/runtime/omp-keeper.lock` open with no sharing, so a second
+keeper for the same room refuses to start and names the lock. On an installed
+House, the Host can also start a keeper as an ordinary process harness: the
+registry entry names `athanor.exe` as the program and `keeper --config <room
+runtime>/omp-keeper.json` as the arguments. Before it spawns, the Host tries
+the same lock; a room whose keeper is alive elsewhere is reported as running
+and spawned again never. The Host holds no OMP driver. The stable loader starts
+the Host from inside omp, so the Host can never be the parent of a session the
+operator started, and only the keeper can.
 
 ## What the keeper does
 

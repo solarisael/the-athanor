@@ -56,7 +56,7 @@ const RESTART_INTENT_ENV = "ATHANOR_RESTART_INTENT_ID";
 const RESTART_SUCCESSOR_PROOF_ENV = "ATHANOR_RESTART_SUCCESSOR_PROOF";
 
 // The claimant's own two files, named the way the keeper names them. Exit code
-// 87 is a request, not a restart: only omp-keeper.exe claims the intent and
+// 87 is a request, not a restart: only the keeper (`athanor.exe keeper`) claims the intent and
 // starts omp again, and `provision-local.ps1` lays the pair down together —
 // `omp-keeper.json` in the room runtime, and the `restart_claim` secret the
 // config's `capabilityPath` names (`crates/omp-keeper/scripts/provision-local.ps1`,
@@ -68,7 +68,7 @@ const KEEPER_CONFIG_ENV = "ATHANOR_OMP_KEEPER_CONFIG";
 const KEEPER_CONFIG_FILENAME = "omp-keeper.json";
 const PROVISION_KEEPER = "run crates/omp-keeper/scripts/provision-local.ps1"
   + " (an installed release carries the same script as provision-omp-keeper.ps1),"
-  + " then start this room through omp-keeper.exe instead of omp";
+  + " then start this room through `athanor.exe keeper --config <room>/.omp/runtime/omp-keeper.json` instead of omp";
 
 // The House records an intent because the room is provisioned to ask for one,
 // and the operator's standing policy is what that provisioning means. The door

@@ -47,7 +47,7 @@ const OPERATION_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 /// across processes, not just across threads.
 ///
 /// enough: the `Global\` prefix and the `.v1` suffix are the contract with
-/// every other installed copy of this binary -- an older `athanor-manage.exe`
+/// every other installed copy of this binary -- an older installed `athanor.exe`
 /// already running holds this exact name, so renaming it would let two
 /// installers mutate one House at once. Changing it is a release-day migration.
 #[cfg(windows)]

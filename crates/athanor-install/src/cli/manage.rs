@@ -1,57 +1,21 @@
-use anyhow::{Context, Result, bail};
-use athanor_install::{
+//! The installation modes: install, update, adapter install and rollback,
+//! doctor, rollback, uninstall, purge. Each takes the same four native
+//! seams the installer always took; only the door moved.
+
+use super::{optional_value, value};
+use crate::{
     boundaries::{NativeFileSystem, OsSecrets, ScServiceManager},
     doctor,
     installer::{HouseInstallConfig, InstallRequest, Installer, OperatorIntegration},
     layout::InstallLayout,
     manifest::ReleaseManifest,
     native_runtime::NativeRuntimeControl,
-    service,
 };
-use std::{env, fs, path::PathBuf};
+use anyhow::{Context, Result, bail};
+use std::{fs, path::PathBuf};
 
-fn value(arguments: &[String], flag: &str) -> Result<String> {
-    let index = arguments
-        .iter()
-        .position(|argument| argument == flag)
-        .with_context(|| format!("{flag} is required"))?;
-    arguments
-        .get(index + 1)
-        .cloned()
-        .with_context(|| format!("{flag} requires a value"))
-}
-
-fn optional_value(arguments: &[String], flag: &str) -> Result<Option<String>> {
-    arguments
-        .iter()
-        .position(|argument| argument == flag)
-        .map(|index| {
-            arguments
-                .get(index + 1)
-                .cloned()
-                .with_context(|| format!("{flag} requires a value"))
-        })
-        .transpose()
-}
-
-fn layout() -> Result<InstallLayout> {
-    InstallLayout::from_environment()
-}
-
-fn main() -> Result<()> {
-    let arguments: Vec<String> = env::args().skip(1).collect();
-    let command = arguments.first().map(String::as_str).unwrap_or("help");
-    if command == "service" {
-        return service::dispatch();
-    }
-    if matches!(command, "help" | "--help" | "-h") {
-        println!(
-            "Athanor native runtime manager\n\nCommands:\n  install --staging DIR --manifest FILE [--external-database-file FILE] [--house-config-file FILE] [--omp-config FILE --client-config FILE --operator-principal NAME]\n  update --staging DIR --manifest FILE [same options]\n  install-omp-adapter --source DIR\n  rollback-omp-adapter [--release-id ID]\n  doctor\n  rollback\n  uninstall\n  purge --confirm-data-loss\n  service"
-        );
-        return Ok(());
-    }
-
-    let layout = layout()?;
+pub fn run(command: &str, arguments: &[String]) -> Result<()> {
+    let layout = InstallLayout::from_environment()?;
     let fs_boundary = NativeFileSystem;
     let services = ScServiceManager;
     let runtime = NativeRuntimeControl {
@@ -67,12 +31,12 @@ fn main() -> Result<()> {
     };
     match command {
         "install" | "update" => {
-            let staging = PathBuf::from(value(&arguments, "--staging")?);
+            let staging = PathBuf::from(value(arguments, "--staging")?);
             // Lets the pre-upgrade backup run on the staged substrate, which
             // knows at least the installed lineage (see NativeRuntimeControl).
             // SAFETY: single-threaded at this point — set before any installer work spawns.
             unsafe { std::env::set_var("ATHANOR_INSTALL_STAGING_BIN", staging.join("bin")) };
-            let manifest_path = PathBuf::from(value(&arguments, "--manifest")?);
+            let manifest_path = PathBuf::from(value(arguments, "--manifest")?);
             let manifest: ReleaseManifest = serde_json::from_slice(
                 &fs::read(&manifest_path)
                     .with_context(|| format!("read {}", manifest_path.display()))?,
@@ -100,9 +64,9 @@ fn main() -> Result<()> {
                 })
                 .transpose()?;
             let operator_integration = match (
-                optional_value(&arguments, "--omp-config")?,
-                optional_value(&arguments, "--client-config")?,
-                optional_value(&arguments, "--operator-principal")?,
+                optional_value(arguments, "--omp-config")?,
+                optional_value(arguments, "--client-config")?,
+                optional_value(arguments, "--operator-principal")?,
             ) {
                 (None, None, None) => None,
                 (Some(omp_config), Some(client_config), Some(operator_principal)) => {
@@ -131,14 +95,14 @@ fn main() -> Result<()> {
             );
         }
         "install-omp-adapter" => {
-            let source = PathBuf::from(value(&arguments, "--source")?);
+            let source = PathBuf::from(value(arguments, "--source")?);
             println!(
                 "{}",
                 serde_json::to_string_pretty(&installer.install_omp_adapter(&source)?)?
             );
         }
         "rollback-omp-adapter" => {
-            let release_id = optional_value(&arguments, "--release-id")?;
+            let release_id = optional_value(arguments, "--release-id")?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(
@@ -166,7 +130,7 @@ fn main() -> Result<()> {
             )?;
             println!("{{\"ok\":true,\"dataPreserved\":false}}");
         }
-        unknown => bail!("unknown command {unknown:?}; run athanor-manage help"),
+        unknown => bail!("unknown mode {unknown:?}; run athanor help"),
     }
     Ok(())
 }

@@ -26,9 +26,9 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 . (Join-Path $Root "installer/native-release-contract.ps1")
 
 $ProgramRoot = Join-Path $env:ProgramFiles "Solarisael/Athanor"
-$InstalledManager = Join-Path $ProgramRoot "bin/athanor-manage.exe"
+$InstalledManager = Join-Path $ProgramRoot "bin/athanor.exe"
 if (-not (Test-Path -LiteralPath $InstalledManager -PathType Leaf)) {
-  throw "The installed Athanor manager is missing: $InstalledManager"
+  throw "The installed athanor.exe is missing: $InstalledManager"
 }
 $Service = Get-Service -Name "SolarisaelAthanor" -ErrorAction SilentlyContinue
 if ($null -ne $Service -and $Service.Status -notin @("Running", "Stopped")) {
@@ -93,7 +93,7 @@ Invoke-Checked -Label "native release payload" -FilePath "pwsh" -ArgumentList @(
 )
 $Payload = Join-Path $Out "payload"
 $Manifest = Join-Path $Payload "release-manifest.json"
-$StagedManager = Join-Path $Payload "bin/athanor-manage.exe"
+$StagedManager = Join-Path $Payload "bin/athanor.exe"
 foreach ($Required in @($Manifest, $StagedManager)) {
   if (-not (Test-Path -LiteralPath $Required -PathType Leaf)) { throw "payload is missing $Required" }
 }

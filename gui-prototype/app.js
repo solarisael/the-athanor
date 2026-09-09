@@ -3,11 +3,11 @@ import { renderDirectStatus } from "./mechanics-live.js";
 import { initChat, syncChatPanel, isLiveChat, chatState, chatMessages, chatBlockReason, say } from "./chat.js";
 import { syncHallwaySubjects, hallwayEmptySubject, hallwaySourceLine, hallwayMembers, hallwayParticipants, queryHallway, renderHallwayThread, renderHallwayStatus, renderHallwayRecord } from "./hallways.js";
 import { houseProject, queryProjects, projectMarkup, projectWorkState, renderProjectStatus } from "./projects.js";
-import { initPulse, ensurePulseQueried, handlePulseClick } from "./pulse.js";
+import { initPulse, ensurePulseQueried, handlePulseClick, recoverPulse } from "./pulse.js";
 import { initBoard, ensureBoardQueried, handleBoardClick, renderHouseBoard, hallwayInboxRound } from "./board/index.js";
 import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSediment, renderRoomSediment, liveShelfCounts } from "./sediment/index.js";
 import {
-  initHealth, ensureHealthQueried, queryHealthHost,
+  initHealth, ensureHealthQueried, queryHealthHost, onHostRecovered,
   STATUS_CHANNELS, statusChannel, healthSourceLine, healthSourceTone,
   accountStateRows, persistenceDetail
 } from "./health.js";
@@ -473,7 +473,7 @@ function renderMessage(message, index, selected) {
           <span>${escapeHtml(message.time)}</span>
           ${recipients ? `<span class="message-recipient">To ${escapeHtml(recipients)}</span>` : ""}
           ${message.local ? '<span class="message-delivery">Local-only · undelivered</span>' : ""}
-          ${message.pending ? '<span class="message-delivery">Pending · awaiting Host confirmation</span>' : ""}
+          ${message.undelivered ? '<span class="message-delivery">Not delivered · send again to retry</span>' : message.pending ? '<span class="message-delivery">Pending · awaiting Host confirmation</span>' : ""}
         </p>
         <div class="message-bubble" tabindex="0" role="button" aria-label="Inspect message from ${escapeHtml(message.author)}">${escapeHtml(message.text)}</div>
       </div>
@@ -608,7 +608,7 @@ function updateComposerState() {
 
   input.readOnly = !canParticipate;
   input.setAttribute("aria-readonly", String(!canParticipate));
-  input.placeholder = canParticipate ? "Write a message" : activeSession(item)?.state === "Closed" ? "Session closed" : "Watching only";
+  input.placeholder = canParticipate ? "Write a message" : liveChat ? blockedReason : activeSession(item)?.state === "Closed" ? "Session closed" : "Watching only";
   sendButton.disabled = !canParticipate || !hasText;
   clearButton.hidden = !canParticipate || !hasText;
   stopButton.hidden = liveChat || !responseRunning;
@@ -2356,3 +2356,11 @@ render();
 // The status strip is on screen from the first frame, so its round opens with
 // the page rather than waiting for a door the operator may never enter.
 ensureHealthQueried();
+// A Host that comes back is asked for every open door again: room state and
+// health ride the reconnect round itself, chat asks inside chat.js, and the
+// House board and Pulse ask here. Nothing is re-sent.
+onHostRecovered(() => {
+  ensureBoardQueried();
+  recoverPulse();
+  render();
+});

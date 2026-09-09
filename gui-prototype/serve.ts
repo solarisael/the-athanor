@@ -51,14 +51,23 @@ Bun.serve({
       if (!route) return new Response("unknown live route", { status: 404 });
       if (request.method !== "POST") return new Response("POST only", { status: 405 });
 
-      const upstream = await fetch(`http://127.0.0.1:${hostPort}${roomPath}${route.path}`, {
-        method: route.method,
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${secrets.hostToken}`,
-        },
-        body: route.method === "GET" ? undefined : await request.text(),
-      });
+      // Parity with gui-desktop/src/proxy.rs: a transport failure is 502 with
+      // the hop named; a Host error passes through with its own status.
+      let upstream: Response;
+      try {
+        upstream = await fetch(`http://127.0.0.1:${hostPort}${roomPath}${route.path}`, {
+          method: route.method,
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${secrets.hostToken}`,
+          },
+          body: route.method === "GET" ? undefined : await request.text(),
+          signal: AbortSignal.timeout(20_000),
+        });
+      } catch (error) {
+        const hop = error instanceof Error && error.name === "TimeoutError" ? "host_timeout" : "host_unreachable";
+        return Response.json({ error: `Host request failed: ${error instanceof Error ? error.message : String(error)}`, hop }, { status: 502 });
+      }
       return new Response(await upstream.text(), {
         status: upstream.status,
         headers: { "content-type": "application/json" },

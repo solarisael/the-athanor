@@ -15,6 +15,70 @@ const CONTRACT_NOTE = `The footer reads these health fields: ${HEALTH_FIELDS.joi
 let round = { status: "idle" };
 let roomRound = { status: "idle" };
 
+// The reconnect loop. A failed health round arms one retry with a growing
+// delay; a live round after any retry is a recovery, and every listener asks
+// its own door again. A live round asks again every 30 s, quietly, so a Host
+// that dies while nobody is typing is noticed before the next send. Nothing
+// here re-sends anything.
+const RETRY_DELAYS_MS = [2000, 4000, 8000, 15000];
+const HEARTBEAT_MS = 30000;
+let retry = { timer: null, attempt: 0, delayMs: null };
+const recoveredListeners = new Set();
+
+export function onHostRecovered(listener) {
+  recoveredListeners.add(listener);
+}
+
+export function reconnectState() {
+  return { attempt: retry.attempt, delayMs: retry.delayMs, down: round.status === "failed" };
+}
+
+// Chat and the other doors report a transport-class failure here so one loop
+// owns the retry clock instead of every door polling a dead Host.
+export function noteHostFailure(reason) {
+  if (round.status === "failed" || round.status === "pending") return;
+  round = { status: "failed", reason };
+  scheduleRetry();
+  requestRender();
+}
+
+// One error shape for every /live door: status, the proxy's hop when it names
+// one, and whether the class is transport (502, 5xx, no response) or refusal.
+const HOP_REASONS = {
+  host_unreachable: "Host not reachable",
+  host_timeout: "Host did not answer in 20 s",
+  host_transport: "Host connection broke",
+  proxy: "local proxy failed"
+};
+
+export async function hostError(response) {
+  let reason = `Host answered ${response.status}`;
+  let hop = null;
+  if (response.headers.get("content-type")?.includes("application/json")) {
+    const result = await response.json().catch(() => null);
+    if (result && typeof result.error === "string") reason = result.error;
+    if (result && typeof result.hop === "string") {
+      hop = result.hop;
+      reason = HOP_REASONS[hop] ?? reason;
+    }
+  }
+  return Object.assign(new Error(reason), { status: response.status, hop, transport: response.status >= 500 });
+}
+
+export function isTransportFailure(error) {
+  return error instanceof Error && (error.transport === true || error.status === undefined);
+}
+
+function scheduleRetry() {
+  clearTimeout(retry.timer);
+  const delayMs = RETRY_DELAYS_MS[Math.min(retry.attempt, RETRY_DELAYS_MS.length - 1)];
+  retry = { timer: setTimeout(() => { void queryHealthHost(); }, delayMs), attempt: retry.attempt + 1, delayMs };
+}
+
+function retrySuffix() {
+  return retry.delayMs ? ` · retry ${retry.attempt} in ${Math.round(retry.delayMs / 1000)} s` : "";
+}
+
 export function roomState() {
   return roomRound;
 }
@@ -35,20 +99,27 @@ export function ensureRoomStateQueried() {
   if (roomRound.status === "idle") queryRoomStateHost();
 }
 
+let roomInFlight = false;
+
 async function queryRoomStateHost() {
-  if (roomRound.status === "pending") return;
-  roomRound = { ...roomRound, status: "pending" };
+  if (roomInFlight) return;
+  roomInFlight = true;
+  if (roomRound.status !== "live") roomRound = { ...roomRound, status: "pending" };
   requestRender();
   try {
     const response = await fetch("/live/room/state", {
       method: "POST", headers: { "content-type": "application/json" }, body: "{}"
     });
     // A reached Host with no door is a missing fact, never an unreachable Host;
-    // the footer must not say connected while this line says offline.
+    // the footer must not say connected while this line says offline. A 502 or
+    // 5xx is the opposite case: the Host was not reached, or broke answering.
     if (!response.ok) {
-      const missing = new Error(`this Host answers no room-state door (${response.status})`);
-      missing.reached = true;
-      throw missing;
+      const error = await hostError(response);
+      if (!error.transport) {
+        error.message = `this Host answers no room-state door (${response.status})`;
+        error.reached = true;
+      }
+      throw error;
     }
     const room = await response.json();
     if (!room || typeof room.room !== "string" || !Array.isArray(room.presences)) {
@@ -63,6 +134,7 @@ async function queryRoomStateHost() {
       reason: error instanceof Error ? error.message : "no route to Host"
     };
   }
+  roomInFlight = false;
   requestRender();
 }
 let requestRender = () => {};
@@ -76,10 +148,18 @@ export function ensureHealthQueried() {
   if (round.status === "idle") queryHealthHost();
 }
 
+let healthInFlight = false;
+
 export async function queryHealthHost() {
   void queryRoomStateHost();
-  if (round.status === "pending") return;
-  round = { status: "pending" };
+  if (healthInFlight) return;
+  healthInFlight = true;
+  const recovering = retry.attempt > 0;
+  clearTimeout(retry.timer);
+  retry = { ...retry, timer: null };
+  // A live round stays live while it refreshes; only a cold or failed round
+  // shows the query, so the heartbeat never flickers the footer.
+  if (round.status !== "live") round = { status: "pending" };
   requestRender();
 
   try {
@@ -88,18 +168,22 @@ export async function queryHealthHost() {
       headers: { "content-type": "application/json" },
       body: "{}"
     });
-    if (!response.ok) throw new Error(`Host answered ${response.status}`);
+    if (!response.ok) throw await hostError(response);
     const health = await response.json();
     if (!health || typeof health !== "object" || typeof health.status !== "string") {
       throw new Error("Host answered without a health status");
     }
     round = { status: "live", health, queriedAt: new Date().toTimeString().slice(0, 5) };
+    retry = { timer: setTimeout(() => { void queryHealthHost(); }, HEARTBEAT_MS), attempt: 0, delayMs: null };
+    if (recovering) for (const listener of recoveredListeners) listener();
   } catch (error) {
     round = {
       status: "failed",
       reason: error instanceof Error ? error.message : "no route to Host"
     };
+    scheduleRetry();
   }
+  healthInFlight = false;
   requestRender();
 }
 
@@ -130,7 +214,7 @@ const CHANNELS = {
       health.status === "ok" ? "steady" : "attention",
       `Room ${hostRoom(health)} answered its health route with status ${health.status}, API schema version ${health.schema_version ?? "not reported"}, WebSocket path ${health.websocket_path ?? "not reported"}.`
     ),
-    failed: reason => chip("Host unreachable", "Host off", "attention", `The health read failed: ${reason}.`)
+    failed: reason => chip("Host unreachable", "Host off", "attention", `The health read failed: ${reason}${retrySuffix()}.`)
   },
 
   recall: {
@@ -224,7 +308,7 @@ export function healthSourceLine() {
     return `Host connected · ${hostRoom(round.health)} room health · Queried ${round.queriedAt} local`;
   }
   if (round.status === "pending") return "Querying Host…";
-  if (round.status === "failed") return `Host unreachable · ${round.reason}`;
+  if (round.status === "failed") return `Host unreachable · ${round.reason}${retrySuffix()}`;
   return "Host not queried";
 }
 
@@ -254,7 +338,7 @@ export function accountStateRows() {
   }
   if (round.status === "failed") {
     return [
-      { label: "Surface", value: "Local only · Host unreachable" },
+      { label: "Surface", value: `Local only · Host unreachable${retrySuffix()}` },
       { label: "Host", value: "Unreachable" },
       { label: "Persistence", value: "Unreachable" }
     ];

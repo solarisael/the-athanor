@@ -1,4 +1,4 @@
-import { roomState } from "./health.js";
+import { roomState, hostError, isTransportFailure, noteHostFailure, onHostRecovered } from "./health.js";
 
 let round = { status: "idle", messages: [], reason: null };
 let optimistic = [];
@@ -12,6 +12,8 @@ let requestRender = () => {};
 
 export function initChat(deps) {
   requestRender = deps.requestRender;
+  // A recovered Host is asked for the ring again; nothing pending is re-sent.
+  onHostRecovered(() => { if (panel) void querySnapshot(); });
 }
 
 export function isLiveChat(item) {
@@ -28,7 +30,8 @@ export function chatMessages() {
     author: message.authorName,
     glyph: message.authorName.slice(0, 1),
     time: message.at,
-    pending: message.pending === true
+    pending: message.pending === true,
+    undelivered: message.undelivered === true
   }));
 }
 
@@ -53,15 +56,19 @@ export function syncChatPanel(item, view) {
   if (next) void querySnapshot();
 }
 
+// An undelivered line never reached the Host, so nobody is answering it; only
+// lines the Host holds (or is still confirming) count as open.
 function hasUnanswered() {
   const answered = new Set(round.messages.filter(message => message.author === "spirit").map(message => message.turnId));
-  return optimistic.length > 0 || round.messages.some(message => message.author === "operator" && !answered.has(message.turnId));
+  return optimistic.some(message => !message.undelivered) || round.messages.some(message => message.author === "operator" && !answered.has(message.turnId));
 }
 
+// A dead Host is not polled; the health loop owns that clock and recovery
+// asks for the ring again.
 function schedulePoll() {
   clearTimeout(poll);
   poll = null;
-  if (hasUnanswered()) poll = setTimeout(() => { void querySnapshot(); }, 2000);
+  if (hasUnanswered() && !round.reason) poll = setTimeout(() => { void querySnapshot(); }, 2000);
 }
 
 async function post(path, body) {
@@ -70,15 +77,13 @@ async function post(path, body) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   });
-  if (!response.ok) {
-    let reason = `Host answered ${response.status}`;
-    if (response.headers.get("content-type")?.includes("application/json")) {
-      const result = await response.json();
-      if (typeof result.error === "string") reason = result.error;
-    }
-    throw Object.assign(new Error(reason), { status: response.status });
-  }
+  if (!response.ok) throw await hostError(response);
   return response.json();
+}
+
+function failRound(error) {
+  round = { ...round, status: "failed", reason: error.message };
+  if (isTransportFailure(error)) noteHostFailure(error.message);
 }
 
 export function querySnapshot() {
@@ -101,7 +106,7 @@ async function readSnapshot() {
     round = { status: "live", reason: null, messages: result.messages.sort((a, b) => a.sequence - b.sequence) };
     optimistic = optimistic.filter(message => !round.messages.some(row => row.author === "operator" && row.turnId === message.turnId));
   } catch (error) {
-    round = { ...round, status: "failed", reason: error.message };
+    failRound(error);
   } finally {
     querying = null;
     schedulePoll();
@@ -115,7 +120,12 @@ export async function say(text) {
   retry = attempt;
   refusal = null;
   sending = true;
-  if (!optimistic.some(message => message.turnId === attempt.sayId)) {
+  // An undelivered line for other text is abandoned; only this text retries.
+  optimistic = optimistic.filter(message => !message.undelivered || message.turnId === attempt.sayId);
+  const line = optimistic.find(message => message.turnId === attempt.sayId);
+  if (line) {
+    line.undelivered = false;
+  } else {
     optimistic.push({ author: "operator", authorName: roomState().operator ?? "Operator", text,
       at: new Date().toISOString(), turnId: attempt.sayId, pending: true });
   }
@@ -131,7 +141,9 @@ export async function say(text) {
       retry = null;
       optimistic = optimistic.filter(message => message.turnId !== attempt.sayId);
     } else {
-      round = { ...round, status: "failed", reason: error.message };
+      const undelivered = optimistic.find(message => message.turnId === attempt.sayId);
+      if (undelivered) undelivered.undelivered = true;
+      failRound(error);
     }
     return false;
   } finally {

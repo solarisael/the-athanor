@@ -96,6 +96,12 @@ export function ensurePulseQueried() {
   if (live.status === "idle") queryPulseHost();
 }
 
+// A failed Pulse round is asked again when the Host comes back; a live or
+// never-opened round is left alone, vitals are not cheap.
+export function recoverPulse() {
+  if (live.status === "failed") queryPulseHost();
+}
+
 export function handlePulseClick(event) {
   if (event.target.closest("[data-pulse-refresh]")) {
     queryPulseHost();

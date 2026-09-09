@@ -27,7 +27,7 @@ impl Proxy {
         let room = percent_encoding::utf8_percent_encode(room, percent_encoding::NON_ALPHANUMERIC);
         Ok(Self {
             routes: serde_json::from_str(include_str!("../../gui-prototype/live-routes.json"))?,
-            client: reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build()?,
+            client: reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(std::time::Duration::from_secs(20)).build()?,
             base: format!("http://127.0.0.1:{host_port}/room/{room}"),
             token,
             dev_dir: dev_dir.map(std::fs::canonicalize).transpose()?,
@@ -45,9 +45,22 @@ impl Proxy {
         if request.method() != Method::POST {
             return (StatusCode::METHOD_NOT_ALLOWED, "POST only").into_response();
         }
+        // The Host answering an error passes through with its own status; only a
+        // transport failure becomes 502 here, and the body names which hop failed.
         match self.forward(route, request).await {
             Ok(response) => response,
-            Err(error) => (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({"error": format!("Host request failed: {error}")}))).into_response(),
+            Err(error) => {
+                let hop = match error.downcast_ref::<reqwest::Error>() {
+                    Some(inner) if inner.is_timeout() => "host_timeout",
+                    Some(inner) if inner.is_connect() => "host_unreachable",
+                    Some(_) => "host_transport",
+                    None => "proxy",
+                };
+                (StatusCode::BAD_GATEWAY, axum::Json(serde_json::json!({
+                    "error": format!("Host request failed: {error}"),
+                    "hop": hop
+                }))).into_response()
+            }
         }
     }
 

@@ -1974,17 +1974,17 @@ input:focus-visible {
   border-color: var(--bd-active);
 }
 
-/* The bubble reads a small Markdown: paragraphs, lists, code. Spacing is the
-   bubble's own line height so a one-paragraph line looks as before. */
-.message-bubble > p,
-.message-bubble > ul,
-.message-bubble > ol,
-.message-bubble > pre {
+/* The bubble reads a small Markdown: paragraphs, lists, code. Every block
+   loses its browser margin, then each block after the first sits one line
+   below its neighbour. Both rules carry the same specificity on purpose: a
+   `> p` reset outranks `> * + *` and silently keeps the gap at zero
+   (2026-09-09, the bubble read as one tight block). */
+.message-bubble > * {
   margin: 0;
 }
 
 .message-bubble > * + * {
-  margin-top: 0.6em;
+  margin-top: 1em;
 }
 
 .message-bubble ul,

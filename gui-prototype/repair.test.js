@@ -21,10 +21,10 @@ test("repair status renders each independent fact and explicit elevation action"
   expect(html).toContain('title="healthy: no"');
   expect(html).toContain("Stopped &lt;service&gt;");
   expect(html).toContain("Start what is missing");
-  expect(html).toContain("Start service (asks for administrator)");
+  expect(html).toContain("Start service (needs administrator rights)");
   globalThis.fetch = async () => Response.json({ ...matrix, elevationRequired: [] });
   await queryRepairStatus();
-  expect(renderRepair()).not.toContain("Start service (asks for administrator)");
+  expect(renderRepair()).not.toContain("Start service (needs administrator rights)");
 });
 
 test("repair hop retains the local executable error instead of blaming Host", async () => {

@@ -61,6 +61,6 @@ export function renderRepair() {
   return `<button type="button" data-repair="status"${disabled}>Repair connection</button>
     ${rows ? `<ul class="repair-matrix">${rows}</ul>` : ""}
     ${round.matrix ? `<button type="button" data-repair="start"${disabled}>Start what is missing</button>` : ""}
-    ${round.matrix?.elevationRequired?.includes("service") ? `<button type="button" data-repair="service"${disabled}>Start service (asks for administrator)</button>` : ""}
+    ${round.matrix?.elevationRequired?.includes("service") ? `<button type="button" data-repair="service"${disabled}>Start service (needs administrator rights)</button>` : ""}
     ${message ? `<p class="repair-result" role="status">${escapeHtml(message)}</p>` : ""}`;
 }

@@ -4,7 +4,6 @@ use anyhow::{Context, Result, bail};
 use interactive_process::{InteractiveChild, InteractiveCommand};
 use std::{
     collections::BTreeMap,
-    path::{Path, PathBuf},
     sync::Mutex,
     thread,
     time::{Duration, Instant},
@@ -131,7 +130,7 @@ impl HarnessOwner {
     }
 
     fn adopt(&self, state: &mut OwnedState, harness_id: &str, spec: &HarnessSpec) -> Result<()> {
-        if let Some(config_path) = keeper_config_path(&spec.launch) {
+        if let Some(config_path) = spec.launch.keeper_config() {
             match omp_keeper::keeper::try_hold_lock(&config_path)
                 .with_context(|| format!("check keeper lock for {}", config_path.display()))?
             {
@@ -189,7 +188,7 @@ fn status(state: &mut OwnedState, spec: &HarnessSpec) -> HarnessStatus {
     let mut failure = state.failures.get(&spec.harness_id).cloned();
     let mut held_elsewhere = false;
     if pid.is_none() {
-        if let Some(config_path) = keeper_config_path(&spec.launch) {
+        if let Some(config_path) = spec.launch.keeper_config() {
             match omp_keeper::keeper::try_hold_lock(&config_path) {
                 Ok(None) => {
                     held_elsewhere = true;
@@ -227,12 +226,6 @@ fn stop_owned(state: &mut OwnedState, harness_id: &str) -> Result<()> {
     state.children.remove(harness_id);
     state.failures.remove(harness_id);
     Ok(())
-}
-
-fn keeper_config_path(launch: &HarnessLaunch) -> Option<PathBuf> {
-    let arguments = launch.arguments.windows(2).find(|pair| pair[0] == "--config")?;
-    let path = Path::new(&arguments[1]);
-    Some(launch.workspace.join(path))
 }
 
 fn start_process(launch: &HarnessLaunch) -> Result<InteractiveChild> {

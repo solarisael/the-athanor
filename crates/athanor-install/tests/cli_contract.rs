@@ -31,17 +31,28 @@ fn help_names_every_door() {
     let output = athanor(&["help"]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    for door in ["status", "start", "keeper --config", "chat", "doctor", "install", "service"] {
+    for door in ["status", "start", "keeper ROOM", "keeper --config", "chat", "doctor", "install", "service"] {
         assert!(stdout.contains(door), "help must name {door}: {stdout}");
     }
 }
 
 #[test]
-fn the_keeper_mode_needs_a_named_config() {
+fn the_keeper_mode_needs_a_room_or_a_named_config() {
     let output = athanor(&["keeper"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("athanor keeper <room>"), "{stderr}");
     assert!(stderr.contains("athanor keeper --config"), "{stderr}");
+}
+
+#[test]
+fn a_room_name_is_answered_by_the_harness_registry() {
+    let output = athanor(&["keeper", "kodo"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("\"kodo\""), "the refusal names the room asked for: {stderr}");
+    assert!(stderr.contains("harnesses.json"), "the refusal names the registry it read: {stderr}");
+    assert!(!stderr.contains("unknown mode"), "{stderr}");
 }
 
 #[test]

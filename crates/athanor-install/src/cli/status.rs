@@ -22,7 +22,7 @@ use serde::Serialize;
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, ExitCode},
     time::Duration,
 };
@@ -231,7 +231,7 @@ fn keeper_components(layout: &InstallLayout) -> Result<Vec<Component>> {
     let registry = HarnessRegistry::load(&registry_path(layout))?;
     let mut components = Vec::new();
     for spec in registry.specs() {
-        let Some(config_path) = keeper_config_path(&spec.launch.arguments) else {
+        let Some(config_path) = spec.launch.keeper_config() else {
             continue;
         };
         let installed = config_path.is_file();
@@ -252,11 +252,6 @@ fn keeper_components(layout: &InstallLayout) -> Result<Vec<Component>> {
     Ok(components)
 }
 
-pub(crate) fn keeper_config_path(arguments: &[String]) -> Option<PathBuf> {
-    let index = arguments.iter().position(|argument| argument == "--config")?;
-    arguments.get(index + 1).map(PathBuf::from)
-}
-
 fn lock_name(config_path: &Path) -> String {
     omp_keeper::keeper::lock_path(config_path).display().to_string()
 }
@@ -264,14 +259,6 @@ fn lock_name(config_path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_keeper_config_is_the_value_after_the_flag() {
-        let arguments = ["keeper".to_owned(), "--config".to_owned(), "C:/room/omp-keeper.json".to_owned()];
-        assert_eq!(keeper_config_path(&arguments), Some(PathBuf::from("C:/room/omp-keeper.json")));
-        assert_eq!(keeper_config_path(&["keeper".to_owned()]), None);
-        assert_eq!(keeper_config_path(&["--config".to_owned()]), None);
-    }
 
     #[test]
     fn a_closed_port_reads_as_not_running_and_a_bad_address_as_unknown() {

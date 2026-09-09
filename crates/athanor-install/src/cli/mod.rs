@@ -19,7 +19,8 @@ Modes:\n  \
 (none)                 Run the Host for this House.\n  \
 status                 Show every component: installed, running, reachable, healthy.\n  \
 start [--service]      Start what is missing. --service starts the Windows service and needs administrator rights.\n  \
-keeper --config FILE   Run the OMP keeper for one room.\n  \
+keeper ROOM            Run the OMP keeper for one room, by its harness registry name.\n  \
+keeper --config FILE   Run the OMP keeper for the room whose config is FILE.\n  \
 chat [--room ROOM]     Talk to a room from this terminal.\n  \
 doctor                 Check the installation.\n  \
 install --staging DIR --manifest FILE [--external-database-file FILE] [--house-config-file FILE] [--omp-config FILE --client-config FILE --operator-principal NAME]\n  \

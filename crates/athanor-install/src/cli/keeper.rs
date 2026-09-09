@@ -1,12 +1,21 @@
-//! The keeper mode: `athanor keeper --config <room>/.omp/runtime/omp-keeper.json`.
-//! It owns the console and the OMP child for one room. The keeper's own
-//! logic lives in the `omp_keeper` crate; this door only chooses the config
-//! and turns the outcome into an exit code.
+//! The keeper mode: `athanor keeper kodo`, or `athanor keeper --config
+//! <room>/.omp/runtime/omp-keeper.json`. It owns the console and the OMP
+//! child for one room. The keeper's own logic lives in the `omp_keeper`
+//! crate; this door only chooses the config and turns the outcome into an
+//! exit code.
 
-use anyhow::{Result, bail};
+use crate::{
+    harness::{HarnessRegistry, registry_path},
+    layout::InstallLayout,
+};
+use anyhow::{Context, Result, bail};
 use omp_keeper::config;
 use omp_keeper::keeper::{self, Outcome};
+use std::path::PathBuf;
 use std::process::ExitCode;
+
+const USAGE: &str =
+    "usage: athanor keeper <room> | athanor keeper --config <room>/.omp/runtime/omp-keeper.json";
 
 /// The keeper reached `Stopped` with the code of a child it did not relaunch.
 /// When that code is the armed 87, the session asked the House for a restart
@@ -19,11 +28,14 @@ use std::process::ExitCode;
 const ARMED_EXIT_UNSERVED: u8 = 88;
 
 pub fn run(arguments: &[String]) -> Result<ExitCode> {
-    // A room's config never sits beside the installed exe, so the path is
-    // always named; the old beside-the-exe default belonged to a per-room copy
-    // of a binary that no longer exists.
-    let Some(path) = config::config_path_from_args(arguments.to_vec())? else {
-        bail!("usage: athanor keeper --config <room>/.omp/runtime/omp-keeper.json");
+    // A room's config never sits beside the installed exe, so the room is
+    // always named: by its registry name, or by the config path itself.
+    let path = match arguments {
+        [room] if !room.starts_with('-') => room_config(room)?,
+        _ => match config::config_path_from_args(arguments.to_vec())? {
+            Some(path) => path,
+            None => bail!("{USAGE}"),
+        },
     };
     let loaded = config::load(&path)?;
     match keeper::run(&loaded, &path)? {
@@ -33,6 +45,17 @@ pub fn run(arguments: &[String]) -> Result<ExitCode> {
             Ok(ExitCode::from(1))
         }
     }
+}
+
+/// A room name is answered by the harness registry of this House, the same
+/// file `status` reads. The registry is read and released before the keeper
+/// starts; nothing here holds it.
+fn room_config(room: &str) -> Result<PathBuf> {
+    let layout = InstallLayout::from_environment()?;
+    let registry = registry_path(&layout);
+    HarnessRegistry::load(&registry)?
+        .keeper_config_for_room(room)
+        .with_context(|| format!("harness registry {}", registry.display()))
 }
 
 /// The one exit-code decision, kept as a byte so it can be read and proven

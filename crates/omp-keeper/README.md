@@ -4,11 +4,16 @@ The keeper owns the console seam. It starts omp as a child, waits for the exit,
 asks the House for a restart intent, and starts omp again. No service can do
 this work, because the terminal belongs to the operator, not to a service.
 
-This crate is a library. The keeper runs as one mode of the one exe:
+This crate is a library. The keeper runs as one mode of the one exe. Name the
+room by its registry name, or name the config file:
 
 ```powershell
-& "$env:ProgramFiles\Solarisael\Athanor\bin\athanor.exe" keeper --config <room>\.omp\runtime\omp-keeper.json
+athanor keeper kodo
+athanor keeper --config <room>\.omp\runtime\omp-keeper.json
 ```
+
+A room word on its own, `kodo`, is a shim `bin\kodo.cmd` beside the exe. The
+operator places one per room. Its body is `@"%~dp0athanor.exe" keeper kodo %*`.
 
 ## Who owns the keeper
 
@@ -67,8 +72,9 @@ keeper reports the code of a child it did not relaunch.
 
 ## The config file
 
-The keeper reads `omp-keeper.json` beside its own program file. The option
-`--config <path>` selects a different file. The file holds one JSON object.
+A room's config is `<room>/.omp/runtime/omp-keeper.json`. `athanor keeper ROOM`
+finds it through the harness registry. `--config <path>` names it directly. The
+file holds one JSON object.
 
 | Field | Need | Meaning |
 | --- | --- | --- |

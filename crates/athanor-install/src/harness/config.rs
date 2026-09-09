@@ -66,11 +66,39 @@ pub struct HarnessLaunch {
     pub console: ConsoleMode,
 }
 
+impl HarnessLaunch {
+    /// The keeper config this launch names after `--config`, made absolute
+    /// against the workspace. `None` for a harness that is not a keeper.
+    pub fn keeper_config(&self) -> Option<PathBuf> {
+        let pair = self.arguments.windows(2).find(|pair| pair[0] == "--config")?;
+        Some(self.workspace.join(&pair[1]))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HarnessSpec {
     pub harness_id: String,
     pub label: String,
     pub launch: HarnessLaunch,
+}
+
+impl HarnessSpec {
+    /// The name an operator says for this room: the last folder of the
+    /// workspace, or the harness id when the workspace has none.
+    pub fn room_name(&self) -> String {
+        self.launch
+            .workspace
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.harness_id.clone())
+    }
+
+    fn answers_to(&self, room: &str) -> bool {
+        let id = &self.harness_id;
+        id.eq_ignore_ascii_case(room)
+            || id.strip_suffix("-omp").is_some_and(|stem| stem.eq_ignore_ascii_case(room))
+            || self.room_name().eq_ignore_ascii_case(room)
+    }
 }
 
 impl HarnessEntry {
@@ -179,6 +207,32 @@ impl HarnessRegistry {
 
     pub fn specs(&self) -> impl Iterator<Item = &HarnessSpec> {
         self.entries.values()
+    }
+
+    /// The keeper config for a room named the way an operator says it at the
+    /// terminal: `kodo`. A registry entry answers to its harness id, to the
+    /// id without the `-omp` suffix, or to the last folder of its workspace,
+    /// case-insensitively. The refusal names every room the registry has.
+    pub fn keeper_config_for_room(&self, room: &str) -> Result<PathBuf> {
+        let keepers: Vec<(&HarnessSpec, PathBuf)> = self
+            .specs()
+            .filter_map(|spec| spec.launch.keeper_config().map(|path| (spec, path)))
+            .collect();
+        let mut matches = keepers
+            .iter()
+            .filter(|(spec, _)| spec.answers_to(room))
+            .map(|(_, path)| path.clone());
+        match (matches.next(), matches.next()) {
+            (Some(path), None) => Ok(path),
+            (Some(_), Some(_)) => bail!("more than one registered room answers to {room:?}"),
+            (None, _) => {
+                let known: Vec<String> = keepers.iter().map(|(spec, _)| spec.room_name()).collect();
+                if known.is_empty() {
+                    bail!("no room is registered, so {room:?} cannot be opened by name");
+                }
+                bail!("no registered room is named {room:?}; the rooms are: {}", known.join(", "))
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -307,5 +361,46 @@ mod tests {
             error.contains("athanor.exe") && error.contains("\"keeper\""),
             "the refusal tells the operator which program and mode to run: {error}"
         );
+    }
+
+    /// Two rooms plus a harness that is not a keeper, as a House registry
+    /// has them; the Kodo config is relative so the workspace join is proven.
+    fn two_rooms() -> HarnessRegistry {
+        let mut file: serde_json::Value = serde_json::from_str(KEEPER_HARNESS).unwrap();
+        let kintsu = file["harnesses"][0].clone();
+        let mut kodo = kintsu.clone();
+        kodo["harnessId"] = "kodo-omp".into();
+        kodo["label"] = "Kodo OMP".into();
+        kodo["workspace"] = "C:/Solarisael/Obsidian/obsidian/kodo".into();
+        kodo["arguments"] = serde_json::json!(["keeper", "--config", ".omp/runtime/omp-keeper.json"]);
+        let mut other = kintsu.clone();
+        other["harnessId"] = "pulse".into();
+        other["arguments"] = serde_json::json!([]);
+        file["harnesses"] = serde_json::json!([kintsu, kodo, other]);
+        HarnessRegistry::parse(&file.to_string()).unwrap()
+    }
+
+    #[test]
+    fn a_room_opens_by_folder_name_id_or_id_stem() {
+        let registry = two_rooms();
+        let kodo = PathBuf::from("C:/Solarisael/Obsidian/obsidian/kodo/.omp/runtime/omp-keeper.json");
+        for name in ["kodo", "Kodo", "kodo-omp", "KODO-OMP"] {
+            assert_eq!(registry.keeper_config_for_room(name).unwrap(), kodo, "{name}");
+        }
+        assert_eq!(
+            registry.keeper_config_for_room("kintsu").unwrap(),
+            PathBuf::from("C:/Solarisael/Obsidian/obsidian/kintsu/.omp/runtime/omp-keeper.json")
+        );
+    }
+
+    #[test]
+    fn an_unknown_room_is_refused_with_the_rooms_that_exist() {
+        let error = format!("{:#}", two_rooms().keeper_config_for_room("tuner").unwrap_err());
+        assert!(error.contains("\"tuner\""), "{error}");
+        assert!(error.contains("kintsu, kodo"), "the refusal lists the rooms: {error}");
+        let error = format!("{:#}", two_rooms().keeper_config_for_room("pulse").unwrap_err());
+        assert!(error.contains("no registered room"), "a harness without a keeper is not a room: {error}");
+        let error = format!("{:#}", HarnessRegistry::default().keeper_config_for_room("kodo").unwrap_err());
+        assert!(error.contains("no room is registered"), "{error}");
     }
 }

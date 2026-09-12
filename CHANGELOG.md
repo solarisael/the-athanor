@@ -52,6 +52,14 @@ the exact implementation record.
   Coverage checks, permanent summaries, tombstones, and historical fourteen-day receipts remain intact.
 - Work-mode Presence includes always-on coding guidance without requiring a trigger.
   Native lesson guards still require explicit approval and a trigger.
+- Chat retains a settled response when the Host is unavailable and retries delivery after recovery.
+  Retries preserve the answer and idempotency identity while refreshing the transport envelope.
+- The public site includes every reviewed GUI module and excludes private telemetry and operator configuration.
+  Public artifact tests and asset checks run before publication. The public specimen makes no Host or model requests.
+- CI removes hosted-runner PostgreSQL credentials before OMP tests without bypassing their safety checks.
+  The keeper smoke fixture waits for successor readiness before it simulates House loss.
+- Native package metadata declares schema 32. A compatibility test keeps that metadata aligned with the runtime.
+  npm and Bun now pin the same tested Zod version.
 
 - `remember` skips backups unless the caller requests one; `sleep` keeps backups enabled by default.
   Skipped backups return `Skipped`, not `Ok`.

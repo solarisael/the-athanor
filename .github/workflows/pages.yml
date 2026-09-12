@@ -5,11 +5,9 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/pages.yml"
-      - "gui-prototype/app.js"
-      - "gui-prototype/colors.css"
-      - "gui-prototype/index.html"
-      - "gui-prototype/styles.css"
+      - "gui-prototype/**"
       - "scripts/build-pages.mjs"
+      - "scripts/build-pages.test.mjs"
       - "docs/**"
       - "README.md"
       - "INSTALL.md"
@@ -51,6 +49,9 @@ jobs:
 
       - name: Install build dependencies
         run: npm ci --ignore-scripts
+
+      - name: Check public artifact boundaries
+        run: node --test scripts/build-pages.test.mjs
 
       - name: Build public artifact
         run: npm run build:pages

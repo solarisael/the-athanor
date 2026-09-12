@@ -20,6 +20,11 @@ fn main() {
         if run >= sleep_from_run {
             println!("fake omp: staying alive for {sleep_secs}s (run {run})");
             let _ = std::io::stdout().flush();
+            // Publish readiness only after the run log and the stay-alive branch.
+            // The disappearing House must not race process startup.
+            if let Ok(path) = std::env::var("FAKE_OMP_READY") {
+                std::fs::write(path, format!("ready run {run}\n")).expect("fake omp readiness");
+            }
             std::thread::sleep(std::time::Duration::from_secs(sleep_secs));
             // Outliving the sleep means nobody killed this child. The smoke reads
             // this file to catch an omp the keeper orphaned instead of putting down.

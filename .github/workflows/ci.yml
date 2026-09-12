@@ -42,4 +42,27 @@ jobs:
       - name: Install workspace dependencies
         run: bun install
       - name: Adapter contract suite
-        run: bun run test:omp
+        shell: pwsh
+        run: |
+          # Remove hosted-runner credentials without bypassing the live-configuration refusal.
+          [Environment]::SetEnvironmentVariable("PGUSER", $null, "Process")
+          [Environment]::SetEnvironmentVariable("PGPASSWORD", $null, "Process")
+          bun run test:omp
+
+  pages:
+    name: Public Pages artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out The Athanor
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install build dependencies
+        run: npm ci --ignore-scripts
+      - name: Test public artifact contract
+        run: node --test scripts/build-pages.test.mjs
+      - name: Build public artifact
+        run: npm run build:pages

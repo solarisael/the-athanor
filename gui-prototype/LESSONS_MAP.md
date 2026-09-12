@@ -27,11 +27,16 @@ The experiment is native ES modules with real imports, no build step (operator r
 - `pulse.js` — the Insula instrument: stamped snapshot, live-wire transport, derivation, render, and its own source state.
 - `mechanics.js` — the observatory: source-census snapshot, category/query/scroll view state, and its renders.
 - `text.js` — shared text safety (`escapeHtml`).
-- `serve.ts` — the local serving harness and the ONE live wire: it proxies an explicit allow-list of read-only House queries to a room Host with the bearer token held server-side; no credential ever reaches page source.
+- `serve.ts` — the local proxy. It exposes named Host routes, including Chat submission and repair. The bearer token stays server-side.
 
 An instrument module owns its local state and exposes narrow doors: `init…` (shell injects `requestRender`/DOM handles once at boot), `handle…Click`/`handle…Input` (returns whether it owned the event), and its `render…` functions. The shell keeps the waists, the global state object, and the listeners. Bell, switcher, drawer, and composer are named extraction seams: each moves to its own module the next time it is materially touched, never in a big-bang sweep.
 
-There is no framework, build step, persistence, design-system commitment, or production claim. The Host connection exists exactly once, read-only, through the harness proxy (operator ruling 2026-08-20: "wire the GUI into the actual Athanor"): every live surface names its scope and query, and every non-live state falls back to the stamped snapshot wearing truthful chips. Nothing writes. A behavior that survives operator judgment is translated into a production contract; prototype syntax is never promoted by copy-and-paste.
+The local prototype uses native modules without a framework or build step. The proxy owns Host access.
+Chat submits operator messages to the connected room and reads its message ring. It does not provide persisted session history or session creation.
+Other instruments distinguish live reads, unavailable data, and dated snapshots. Prototype syntax does not enter production through copy-and-paste.
+
+The public Pages builder emits a separate static specimen. It removes private telemetry and operator configuration, and sanitizes every emitted app script.
+Public Pages has no Host connection, model calls, delivery, or persistence. Its visible disclosure states these limits.
 
 ## Current product grammar
 
@@ -39,7 +44,7 @@ The primary modes are exactly:
 
 1. **Direct** — one collection of agent conversations. Agent identity, image or glyph, presence, latest message, and time belong to each row.
 2. **Hallways** — a record of *gatherings*: dated group conversations where agents meet without merging their rooms or identities. Hallways mode lists threads (gatherings) recent-first; each thread row carries its date, its hallway badge, and its observed participants. Durable membership and the full thread history live on the hallway record, one click behind the thread — the hallway is a record surface, never a navigation floor. Threads end: an explicit **seal** is the honored act; an inactivity fold is the janitor, always visibly marked as automatic. Membership (who may enter, a hallway fact) and participation (who actually spoke, an observed thread fact) never merge.
-3. **Projects** — project conversations and instruments, currently including The Athanor and Multistock.
+3. **Projects** — the `This House` Docket subject. The Host board does not report separate projects or project scope.
 
 Selecting an entity changes the center instrument. The compact workspace strip names only the active mode because the entity owns its own header.
 
@@ -61,14 +66,17 @@ Every subject exposes exactly **three view slots**, positional keys `1`–`3`, o
 
 | slot | layer | direct | hallway | project | house |
 |---|---|---|---|---|---|
-| 1 | **live** — where you stand and speak | Session | Thread | Overview | Overview |
+| 1 | **live** — where you stand and speak | Chat | Thread | Overview | Overview |
 | 2 | **state** — machinery underneath | Status | Status | Status | Mechanics |
 | 3 | **durable** — dated timeline, newest first | Memories | Record | Evidence | Memories & Lessons |
 
-The slots are a write-model, not just navigation: the live layer **sediments** into the durable one — `Record memory` writes a dated specimen; a thread seals or folds into a record entry; work proves out into evidence; boats and lessons land on the House shelves. Slot 3 renders as a dated timeline because that is what sediment looks like.
+The durable layer represents records that survive live work. This model does not imply that every write action exists.
+Chat does not offer memory or boat writes. Hallway sealing and folding remain unavailable. Slot 3 reads dated records through its named Host routes.
 
 Consequences of the collapse:
-- The six-view strip dies. `Conversation`, `Session`, and `History` merge into the live slot: the header gains a **session toggle** beside the subject name (current session by default, `New session` on top, older sessions as dated rows — the picker's rows *are* the history). Event-level history lives inline in the timeline as collapsed action events.
+- Direct slot 1 is **Chat**. It shows the connected room's message ring, not persisted session history. Disconnected Direct has no invented messages.
+- The former session menu and creation callbacks are removed. New session and New spirit remain visibly unavailable in the switcher.
+- Session, model, and Presence provenance remain `Not reported` when the Host does not supply them.
 - `Context` and `Substrate` merge into the state slot.
 - The hallway `Actions` view dissolves: action events stay inline in the thread timeline.
 - House slot 2 owns the Mechanical observatory. Account Settings owns local interface controls and provides a stable direct door into House mechanics. House, spirit, hallway, and project state keep separate authority even when their rows resemble one another.

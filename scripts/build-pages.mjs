@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Marked } from "marked";
@@ -66,7 +66,7 @@ function substitutePublicNames(source) {
 
 function fictionalizeRegistryFixtures(source) {
   const start = source.indexOf("const houseSurface = {");
-  const end = source.indexOf("\nconst hallwayRecords = {", start);
+  const end = source.indexOf("\n// The strip's five channels", start);
   if (start === -1 || end === -1) {
     throw new Error("Public fixture registry boundary was not found");
   }
@@ -136,10 +136,110 @@ function sanitizeFixtureScript(source) {
   return sanitized;
 }
 
+// This is a reviewed browser boundary, not a recursive copy of the checkout.
+// New modules need an explicit privacy review before they enter this list.
+const appFiles = [
+  "index.html", "colors.css", "styles.css", "app.js",
+  "text.js", "repair.js", "markdown.js", "mechanics-live.js", "chat.js",
+  "hallways.js", "projects.js", "pulse.js", "health.js", "mechanics.js",
+  "board/index.js", "board/hallway-messages.js", "sediment/index.js"
+];
+const banned = /\b(?:Sol|Solzinho|Solarisael|Kintsu|Kodo|Tuner|Multistock|Salvia|Hugo|SCV|SGD|uwu|òwó|övö)\b/i;
+const privateConfiguration = /(?:\b[a-z]:[\\/]|\/(?:home|Users)\/|\\\\[a-z0-9._-]+\\|postgres(?:ql)?:\/\/|-----BEGIN [^-]*PRIVATE KEY-----|sk-[a-zA-Z0-9]{20,}|Bearer\s+[a-zA-Z0-9._-]{16,})/i;
+
+function replaceRequired(source, pattern, replacement, boundary) {
+  if (!pattern.test(source)) throw new Error(`Public ${boundary} boundary was not found`);
+  return source.replace(pattern, replacement);
+}
+
+function publicScript(name, source) {
+  let script = name === "app.js" ? sanitizeFixtureScript(source) : substitutePublicNames(source);
+  if (name === "app.js") {
+    script = script.replace(
+      "This page reads one room Host through a local proxy and writes nothing. Displayed conversations are local and are not durable records.",
+      "Public interaction specimen. No Host, model calls, database, delivery, or persistence. Session creation and history are unavailable."
+    );
+  }
+  if (name === "pulse.js") {
+    script = replaceRequired(script, /const PULSE_SNAPSHOT = \{[\s\S]*?\n\};/, `const PULSE_SNAPSHOT = {
+  capturedAt: "not captured",
+  source: "Public specimen · telemetry unavailable",
+  vitalsQuery: "unavailable",
+  retention: { days: "unavailable" },
+  rooms: [], lanes: [], receipts: []
+};`, "Pulse snapshot");
+    script = replaceRequired(script, /function snapshotChannels\(\) \{[\s\S]*?\n\}/, `function snapshotChannels() {
+  return ["Observations", "Tokens", "Loss", "Retention"].map(label => ({
+    label, value: "Unavailable", detail: "No Host or private telemetry in the public specimen."
+  }));
+}`, "Pulse channels");
+    script = script.replace(
+      "Every number recomputable from ${escapeHtml(PULSE_SNAPSHOT.vitalsQuery)} rollups and raw receipt points.",
+      "Telemetry, lanes, and receipts are unavailable in this public specimen."
+    );
+  }
+  if (name === "mechanics.js") {
+    script = replaceRequired(script, /export const HOUSE_MECHANICS_SNAPSHOT = \{[\s\S]*?\n\};/, `export const HOUSE_MECHANICS_SNAPSHOT = {
+  capturedAt: "not published",
+  revision: "Public specimen · operator configuration unavailable",
+  connection: "No Host",
+  categories: []
+};`, "mechanics snapshot");
+  }
+  // Keep the existing refusal paths, but never contact a Host from public Pages.
+  if (/\bfetch\s*\(/.test(script)) {
+    script = `const fetch = async () => {
+  throw new Error("Unavailable in the public specimen: no Host connection.");
+};
+\n${script}`;
+  }
+  return script;
+}
+
+function checkPublicContent(name, body) {
+  const match = body.match(banned) ?? body.match(privateConfiguration);
+  if (match) throw new Error(`${name} still contains private content`);
+}
+
+async function checkAppAssets(files) {
+  for (const [name, body] of files) {
+    const references = [];
+    if (name.endsWith(".js")) {
+      if (/\bimport\s*\(/.test(body)) {
+        throw new Error(`${name}: dynamic imports require public asset review`);
+      }
+      for (const match of body.matchAll(/\b(?:import|export)\s+(?:[^;]*?\s+from\s*)?["']([^"']+)["']/g)) {
+        if (!match[1].startsWith(".")) throw new Error(`${name}: non-local module ${match[1]}`);
+        references.push(match[1]);
+      }
+      for (const match of body.matchAll(/new URL\(\s*["']([^"']+)["']\s*,\s*import\.meta\.url\s*\)/g)) references.push(match[1]);
+    }
+    for (const match of body.matchAll(/\b(?:src|href)=["']([^"']+)["']/g)) references.push(match[1]);
+    for (const match of body.matchAll(/url\(\s*["']?([^"')\s]+)["']?\s*\)/g)) references.push(match[1]);
+    for (const match of body.matchAll(/@import\s+["']([^"']+)["']/g)) references.push(match[1]);
+
+    for (const reference of references) {
+      if (reference.startsWith("#")) continue;
+      if (/^(?:https?:|mailto:|data:)/i.test(reference)) continue;
+      if (reference.includes("${")) throw new Error(`${name}: computed asset requires public review: ${reference}`);
+      const path = decodeURIComponent(reference.split(/[?#]/, 1)[0]);
+      const target = resolve(dirname(join(outputApp, name)), path);
+      const withinOutput = relative(output, target);
+      if (isAbsolute(withinOutput) || withinOutput === ".." || withinOutput.startsWith(`..${sep}`)) {
+        throw new Error(`${name}: asset leaves public output: ${reference}`);
+      }
+      const asset = await lstat(target).catch(() => null);
+      if (!asset || asset.isSymbolicLink() || (!asset.isFile() && !reference.endsWith("/"))) {
+        throw new Error(`${name}: missing public asset: ${reference}`);
+      }
+    }
+  }
+}
+
 function addPublicDisclosure(source) {
   const disclosure = `  <aside class="public-demo-disclosure" role="note" aria-label="Public specimen disclosure">
     <strong>Public interaction specimen.</strong>
-    <span>Fictional fixture records; no Host, database, delivery, or persistence.</span>
+    <span>Fictional fixture records; no Host, model calls, database, delivery, or persistence. Private telemetry and configuration are unavailable.</span>
     <a href="../">About this demo</a>
   </aside>`;
 
@@ -463,26 +563,27 @@ await rm(output, { recursive: true, force: true });
 await mkdir(outputApp, { recursive: true });
 await cp(sourceSite, output, { recursive: true });
 
-for (const file of ["index.html", "colors.css", "styles.css", "app.js"]) {
-  await cp(join(sourceApp, file), join(outputApp, file));
+const publicApp = new Map();
+for (const file of appFiles) {
+  const source = join(sourceApp, file);
+  const info = await lstat(source);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error(`Unsafe public app source: ${file}`);
+  const body = await readFile(source, "utf8");
+  publicApp.set(file, file.endsWith(".js") ? publicScript(file, body) : substitutePublicNames(body));
 }
 
 const siteIndexPath = join(output, "index.html");
 const siteStylesPath = join(output, "site.css");
-const appIndexPath = join(outputApp, "index.html");
-const appColorsPath = join(outputApp, "colors.css");
-const appScriptPath = join(outputApp, "app.js");
-const appStylesPath = join(outputApp, "styles.css");
 
 const siteStyles = await readFile(siteStylesPath, "utf8");
-const appColors = substitutePublicNames(await readFile(appColorsPath, "utf8"));
-const appScript = sanitizeFixtureScript(await readFile(appScriptPath, "utf8"));
-const appStyles = (substitutePublicNames(await readFile(appStylesPath, "utf8")) + publicDemoCss)
+const appColors = publicApp.get("colors.css");
+const appScript = publicApp.get("app.js");
+const appStyles = (publicApp.get("styles.css") + publicDemoCss)
   .replaceAll('url("../site/fonts/', 'url("../fonts/');
 
 const siteIndex = (await readFile(siteIndexPath, "utf8"))
   .replace("href=\"site.css\"", `href=\"site.css?v=${assetRevision(siteStyles)}\"`);
-const appIndex = addPublicDisclosure(substitutePublicNames(await readFile(appIndexPath, "utf8")))
+const appIndex = addPublicDisclosure(publicApp.get("index.html"))
   .replace("href=\"colors.css\"", `href=\"colors.css?v=${assetRevision(appColors)}\"`)
   .replace("href=\"styles.css\"", `href=\"styles.css?v=${assetRevision(appStyles)}\"`)
   .replace("src=\"app.js\"", `src=\"app.js?v=${assetRevision(appScript)}\"`)
@@ -491,17 +592,24 @@ const appIndex = addPublicDisclosure(substitutePublicNames(await readFile(appInd
   .replace(/<span class="settings-avatar" aria-hidden="true">S<\/span>/g, "<span class=\"settings-avatar\" aria-hidden=\"true\">A</span>");
 
 await writeFile(siteIndexPath, siteIndex);
-await writeFile(appIndexPath, appIndex);
-await writeFile(appColorsPath, appColors);
-await writeFile(appScriptPath, appScript);
-await writeFile(appStylesPath, appStyles);
+publicApp.set("index.html", appIndex);
+publicApp.set("styles.css", appStyles);
+for (const [name, body] of publicApp) {
+  checkPublicContent(name, body);
+  const destination = join(outputApp, name);
+  await mkdir(dirname(destination), { recursive: true });
+  await writeFile(destination, body);
+}
+await checkAppAssets(publicApp);
 await buildDocumentation(siteStyles);
 await writeFile(join(output, ".nojekyll"), "");
 
-const banned = /\b(?:Sol|Solzinho|Solarisael|Kintsu|Kodo|Tuner|Multistock|SCV|SGD|uwu|òwó|övö)\b/i;
-for (const [name, body] of [["app/index.html", appIndex], ["app/app.js", appScript], ["app/styles.css", appStyles]]) {
-  const match = body.match(banned);
-  if (match) throw new Error(`${name} still contains a private fixture token: ${match[0]}`);
+// No unreviewed file copied from site/ may add another app entry.
+const emittedAppFiles = await readdir(outputApp, { recursive: true, withFileTypes: true });
+for (const entry of emittedAppFiles) {
+  if (entry.isDirectory()) continue;
+  const name = relative(outputApp, join(entry.parentPath, entry.name)).split(sep).join("/");
+  if (!publicApp.has(name)) throw new Error(`Unreviewed public app file: ${name}`);
 }
 
 console.log(`Built public Pages artifact at ${output}`);

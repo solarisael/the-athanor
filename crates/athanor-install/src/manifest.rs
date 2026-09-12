@@ -176,3 +176,19 @@ impl ReleaseManifest {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::REQUIRED_SCHEMA;
+
+    #[test]
+    fn packaged_schema_metadata_matches_runtime_acceptance() {
+        let metadata: serde_json::Value =
+            serde_json::from_str(include_str!("../../../installer/dependencies.json")).unwrap();
+        assert_eq!(
+            metadata["schemaVersion"].as_u64(),
+            Some(u64::from(REQUIRED_SCHEMA)),
+            "the native runtime must accept the schema declared by its own package"
+        );
+    }
+}

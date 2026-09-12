@@ -610,15 +610,27 @@ fn a_cmd_shim_launch_starts_omp_with_its_console_and_arguments_intact() {
 #[test]
 fn a_house_that_vanishes_after_the_spawn_leaves_no_orphaned_omp() {
     let tree = tree();
+    let ready = tree.root.join("omp-ready");
+    let ready_path = ready.display().to_string();
     let ran = run_keeper_timed(
         &tree,
         "substrate-dies-mid-watch",
         &[
             ("FAKE_OMP_SLEEP_SECS", "6"),
             ("FAKE_OMP_SLEEP_FROM_RUN", "2"),
+            ("FAKE_OMP_READY", &ready_path),
         ],
     );
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert!(
+        !stderr.contains("timed out waiting for relaunch readiness"),
+        "the fixture must reach child readiness before losing the House:\n{stdout}\n{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(&ready).expect("the relaunched child announced readiness"),
+        "ready run 2\n",
+        "the House disappears only after the second child enters its stay-alive branch"
+    );
     assert_ne!(
         ran.output.status.code(),
         Some(0),

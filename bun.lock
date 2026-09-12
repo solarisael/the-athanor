@@ -12,7 +12,7 @@
       "name": "the-athanor-omp",
       "version": "0.9.3",
       "devDependencies": {
-        "zod": "^4.5.4",
+        "zod": "4.5.4",
       },
     },
   },

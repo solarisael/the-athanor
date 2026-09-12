@@ -145,6 +145,7 @@ fn answer(id: &str, method: &str, mode: &str, params: &Value, script: &mut Scrip
             // restarted House looks like to the keeper: the verify poll after the
             // window read gets no answer at all, ever.
             if mode == "substrate-dies-mid-watch" && script.statuses >= 2 {
+                wait_for_relaunched_omp();
                 std::process::exit(0);
             }
             // The retry's window read is refused, so the keeper must keep the
@@ -218,6 +219,23 @@ fn answer(id: &str, method: &str, mode: &str, params: &Value, script: &mut Scrip
             )
         }
         _ => refusal(id, "unknown_method", &format!("unknown method {method}")),
+    }
+}
+
+/// The House disappears only once the successor can testify if it is orphaned.
+/// A missing readiness signal is a fixture failure, not a simulated House loss.
+fn wait_for_relaunched_omp() {
+    let path = std::env::var("FAKE_OMP_READY").expect("fake omp readiness path");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        if std::fs::read_to_string(&path).ok().as_deref() == Some("ready run 2\n") {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "fake substrate: timed out waiting for relaunch readiness"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 

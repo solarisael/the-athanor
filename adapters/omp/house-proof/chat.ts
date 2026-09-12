@@ -57,6 +57,12 @@ type ChatLine = {
   turnId: string;
 };
 
+type SettledChatReport = {
+  binding: HostBinding;
+  idempotencyKey: string;
+  payload: Record<string, unknown>;
+};
+
 type ChatDoormanState = {
   pi: any;
   ctx: any;
@@ -64,6 +70,7 @@ type ChatDoormanState = {
   timer: unknown;
   pendingSayId: string | null;
   draft: ChatDraft | null;
+  settledReport: SettledChatReport | null;
   ticking: boolean;
   reporting: boolean;
   stopped: boolean;
@@ -113,8 +120,13 @@ function parseLines(response: Record<string, any>): ChatLine[] {
 }
 
 async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
-  if (state.stopped || state.ticking || state.pendingSayId || state.reporting) return;
+  if (state.stopped || state.ticking || state.reporting) return;
   if (topLevelSession(state.binding.room) !== state.binding.session) return;
+  if (state.settledReport) {
+    await deliverChatReport(state);
+    return;
+  }
+  if (state.pendingSayId) return;
   if (typeof state.ctx?.isIdle === "function" && !state.ctx.isIdle()) return;
   state.ticking = true;
   try {
@@ -163,6 +175,7 @@ export function startChatDoorman(pi: any, ctx: any, binding: HostBinding): void 
     timer: null,
     pendingSayId: null,
     draft: null,
+    settledReport: null,
     ticking: false,
     reporting: false,
     stopped: false,
@@ -183,7 +196,8 @@ export async function noteChatTurnEnd(
   const messages = Array.isArray(event?.messages) ? event.messages : [];
   // willContinue also names unrelated background jobs that can wake OMP.
   // Waiting for global quiescence deadlocks a chat observer awaiting this reply.
-  if (!state || !state.pendingSayId || state.reporting) return;
+  if (!state || state.stopped || !state.pendingSayId || state.settledReport) return;
+  if (topLevelSession(state.binding.room) !== state.binding.session) return;
   const sayId = state.pendingSayId;
   const originIndex = messages.findLastIndex((message) =>
     message?.role === "custom"
@@ -206,32 +220,42 @@ export async function noteChatTurnEnd(
   const outcome = assistant.stopReason === "error" || assistant.stopReason === "aborted"
     ? assistant.stopReason : "complete";
   const responseText = conversationText(assistant);
-  state.reporting = true;
-  const steps = state.draft?.steps ?? [];
+  // Capture once. Later lifecycle snapshots cannot rewrite a reply awaiting
+  // acknowledgment, and draft events cannot extend its finished tool history.
+  state.settledReport = {
+    binding: { ...state.binding },
+    idempotencyKey: `chat-turn:${sayId}`,
+    payload: {
+      chat_turn: {
+        room: state.binding.room,
+        turnId: sayId,
+        authorName: state.binding.spirit,
+        text: responseText,
+        thinking,
+        outcome,
+        steps: state.draft?.steps.map((step) => ({ ...step })) ?? [],
+      },
+    },
+  };
   clearDraftTimer(state);
+  await deliverChatReport(state);
+}
+
+async function deliverChatReport(state: ChatDoormanState): Promise<void> {
+  const report = state.settledReport;
+  if (!report || state.stopped || state.reporting) return;
+  if (topLevelSession(state.binding.room) !== state.binding.session) return;
+
+  state.reporting = true;
   try {
+    // Refresh transport expiry, not the captured payload or idempotency identity.
     await sendHostCommand(
-      hostCommand(
-        state.binding,
-        CHAT_TURN,
-        CHAT_PROJECTION_ID,
-        {
-          chat_turn: {
-            room: state.binding.room,
-            turnId: sayId,
-            authorName: state.binding.spirit,
-            text: responseText,
-            thinking,
-            outcome,
-            steps,
-          },
-        },
-        `chat-turn:${sayId}`,
-      ),
+      hostCommand(report.binding, CHAT_TURN, CHAT_PROJECTION_ID, report.payload, report.idempotencyKey),
       ACCEPTED,
     );
     state.pendingSayId = null;
     state.draft = null;
+    state.settledReport = null;
   } catch (error) {
     warn(state, error instanceof Error ? error.message : String(error));
   } finally {
@@ -244,7 +268,7 @@ export async function noteChatTurnEnd(
 // from disk on every token.
 function draftingDoorman(): ChatDoormanState | null {
   for (const state of chatDoormen.values()) {
-    if (state.pendingSayId && state.draft?.owned && !state.stopped) return state;
+    if (state.pendingSayId && state.draft?.owned && !state.settledReport && !state.stopped) return state;
   }
   return null;
 }
@@ -256,7 +280,7 @@ function clearDraftTimer(state: ChatDoormanState): void {
 
 function scheduleDraftFlush(state: ChatDoormanState, now: boolean): void {
   const draft = state.draft;
-  if (!draft) return;
+  if (!draft || state.settledReport || state.stopped) return;
   draft.dirty = true;
   if (draft.timer) return;
   draft.timer = setTimeout(() => {
@@ -268,7 +292,7 @@ function scheduleDraftFlush(state: ChatDoormanState, now: boolean): void {
 async function flushDraft(state: ChatDoormanState): Promise<void> {
   const draft = state.draft;
   const sayId = state.pendingSayId;
-  if (!draft || !sayId || draft.flushing || state.reporting) return;
+  if (!draft || !sayId || draft.flushing || state.settledReport || state.stopped) return;
   draft.flushing = true;
   draft.dirty = false;
   draft.reports += 1;
@@ -315,7 +339,7 @@ function displayableThinking(message: any): string[] {
 export function noteChatMessageStart(message: any): void {
   for (const state of chatDoormen.values()) {
     const draft = state.draft;
-    if (!draft || state.stopped) continue;
+    if (!draft || state.stopped || state.settledReport) continue;
     if (message?.role === "user" || generatedTurnKey(message) !== null) {
       draft.owned = message?.role === "custom"
         && message.customType === "athanor-chat-say"

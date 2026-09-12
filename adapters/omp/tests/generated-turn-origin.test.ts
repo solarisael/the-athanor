@@ -12,7 +12,7 @@
 // message owns it when it is not (OMP's idle agent-initiated path emits
 // nothing), and peer text never carries operator authority.
 
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -80,6 +80,7 @@ function fakeHost() {
   const commands: Array<Record<string, any>> = [];
   let contracts = 0;
   const chatLines: Array<Record<string, unknown>> = [];
+  let nextChatTurn: ((reply: { accept: () => void; disconnect: () => void }) => void) | null = null;
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -99,8 +100,14 @@ function fakeHost() {
           return;
         }
         if (type === "athanor.chat.turn") {
-          chatLines.push({ author: "spirit", ...command.chat_turn });
-          reply("athanor.chat.command_accepted", {});
+          const accept = () => {
+            chatLines.push({ author: "spirit", ...command.chat_turn });
+            reply("athanor.chat.command_accepted", {});
+          };
+          const held = nextChatTurn;
+          nextChatTurn = null;
+          if (held) held({ accept, disconnect: () => socket.close() });
+          else accept();
           return;
         }
         if (type === "athanor.chat.draft") {
@@ -135,6 +142,10 @@ function fakeHost() {
   return {
     server,
     chatLines,
+    holdNextChatTurn: () => new Promise<{ accept: () => void; disconnect: () => void }>((resolve) => {
+      nextChatTurn = resolve;
+    }),
+    chatTurnCommands: () => commands.filter((command) => command.command_or_event_type === "athanor.chat.turn"),
     chatTurns: () => commands
       .filter((command) => command.command_or_event_type === "athanor.chat.turn")
       .map((command) => command.chat_turn),
@@ -179,6 +190,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setSystemTime();
   stopChatDoorman({ room: ROOM_KEY, spirit: "Origin", session });
   host.server.stop(true);
   retireTopLevelSession(ROOM_KEY, session);
@@ -655,3 +667,142 @@ test("a say being answered keeps a draft on the Host: text throttled, tools at o
   await sleep(400);
   expect(host.chatDrafts()).toHaveLength(drafted);
 });
+
+async function pendingChatSay() {
+  const binding = { room: ROOM_KEY, spirit: "Origin", session };
+  const sent: any[] = [];
+  let poll!: () => Promise<void>;
+  let idle = true;
+  startChatDoorman(
+    { sendMessage: (message: any) => sent.push({ ...message, role: "custom" }) },
+    { isIdle: () => idle, setInterval: (callback: typeof poll) => { poll = callback; return 1; }, clearInterval() {} },
+    binding,
+  );
+  host.chatLines.push({ author: "operator", authorName: "Sol", turnId: "say-retained", sequence: 1, text: "hello" });
+  await poll();
+  expect(sent.map((message) => message.details.sayId)).toEqual(["say-retained"]);
+  return { binding, sent, poll, setIdle: (value: boolean) => { idle = value; } };
+}
+
+test("chat retries the original settled payload on a poll alone and releases the next say after acknowledgment", async () => {
+  const { sent, poll, setIdle } = await pendingChatSay();
+  const fire = async (type: string, event: Record<string, unknown>) => {
+    for (const handler of handlers.get(type) ?? []) await handler({ type, ...event }, ctx());
+  };
+  await fire("message_start", { message: sent[0] });
+  await fire("tool_execution_start", { toolCallId: "owned-tool", toolName: "read", intent: "Read the map" });
+  await fire("tool_execution_end", { toolCallId: "owned-tool", isError: false });
+  const finished = {
+    role: "assistant", stopReason: "stop", content: [
+      { type: "thinking", thinking: "Original thinking." },
+      { type: "text", text: "Original answer." },
+    ],
+  };
+  setSystemTime(new Date("2026-09-12T12:00:00.000Z"));
+  const firstRequest = host.holdNextChatTurn();
+  const ending = agentEnd([sent[0], finished]);
+  (await firstRequest).disconnect();
+  await ending;
+  const original = structuredClone(host.chatTurnCommands()[0]!);
+  expect(original.chat_turn).toEqual({
+    room: ROOM_KEY, turnId: "say-retained", authorName: "Origin",
+    text: "Original answer.", thinking: ["Original thinking."], outcome: "complete",
+    steps: [{
+      toolCallId: "owned-tool", tool: "read", summary: "Read the map", status: "ok",
+      startedAt: expect.any(String), elapsedMs: expect.any(Number),
+    }],
+  });
+  expect(host.chatLines.filter((line) => line.author === "spirit")).toEqual([]);
+
+  // Even mutated snapshots and late tool events cannot alter captured ownership.
+  finished.content[0]!.thinking = "Changed later thinking.";
+  finished.content[1]!.text = "Changed later answer.";
+  await fire("message_start", { message: sent[0] });
+  await fire("tool_execution_end", { toolCallId: "owned-tool", isError: true });
+  await agentEnd([sent[0], { ...finished, stopReason: "error" }]);
+  expect(host.chatTurns()).toHaveLength(1);
+  const draftsBeforeRecovery = host.chatDrafts().length;
+  host.chatLines.push({ author: "operator", authorName: "Sol", turnId: "say-second", sequence: 2, text: "again" });
+
+  setSystemTime(new Date("2026-09-12T12:01:00.000Z"));
+  // Reporting a finished reply does not wait for unrelated model work to idle.
+  setIdle(false);
+  const recoveryRequest = host.holdNextChatTurn();
+  const recovering = poll();
+  const recovery = await recoveryRequest;
+  await poll();
+  expect(sent).toHaveLength(1);
+  recovery.accept();
+  await recovering;
+  const recovered = host.chatTurnCommands()[1]!;
+  expect(recovered.chat_turn).toEqual(original.chat_turn);
+  expect(recovered.message_id).toBe(original.message_id);
+  expect(recovered.idempotency_key).toBe(original.idempotency_key);
+  expect(Date.parse(recovered.created_at)).toBeGreaterThan(Date.parse(original.expires_at));
+  expect(Date.parse(recovered.expires_at)).toBeGreaterThan(Date.now());
+  expect(host.chatLines.filter((line) => line.author === "spirit")).toEqual([{ author: "spirit", ...original.chat_turn }]);
+  expect(sent).toHaveLength(1);
+  expect(host.chatDrafts()).toHaveLength(draftsBeforeRecovery);
+
+  setIdle(true);
+  await poll();
+  expect(sent.map((message) => message.details.sayId)).toEqual(["say-retained", "say-second"]);
+  await agentEnd([sent[1], { ...assistant("Second answer."), stopReason: "stop" }]);
+  expect(host.chatTurns().at(-1)).toMatchObject({ turnId: "say-second", text: "Second answer." });
+});
+
+test("chat repeated report failures never reinject the say or overlap final reports", async () => {
+  const { sent, poll } = await pendingChatSay();
+  const messages = [sent[0], { ...assistant("Retained answer."), stopReason: "stop" }];
+  const firstRequest = host.holdNextChatTurn();
+  const ending = agentEnd(messages);
+  const first = await firstRequest;
+  await Promise.all([poll(), poll(), agentEnd(messages)]);
+  expect(host.chatTurns()).toHaveLength(1);
+  first.disconnect();
+  await ending;
+
+  for (let attempt = 2; attempt <= 3; attempt += 1) {
+    const nextRequest = host.holdNextChatTurn();
+    const retrying = poll();
+    const held = await nextRequest;
+    await Promise.all([poll(), poll(), agentEnd(messages)]);
+    expect(host.chatTurns()).toHaveLength(attempt);
+    expect(sent.map((message) => message.details.sayId)).toEqual(["say-retained"]);
+    held.disconnect();
+    await retrying;
+  }
+  expect(host.chatLines.filter((line) => line.author === "spirit")).toEqual([]);
+  await poll();
+  expect(host.chatTurns()).toHaveLength(4);
+  expect(host.chatTurnCommands().every((command) =>
+    command.idempotency_key === host.chatTurnCommands()[0]!.idempotency_key
+  )).toBe(true);
+  expect(host.chatLines.filter((line) => line.author === "spirit")).toHaveLength(1);
+  await poll();
+  expect(sent).toHaveLength(1);
+  expect(host.chatTurns()).toHaveLength(4);
+});
+
+for (const retirement of ["stopped", "retired"] as const) {
+  test(`a ${retirement} chat doorman starts no new final report after an in-flight failure`, async () => {
+    const { binding, sent, poll } = await pendingChatSay();
+    const messages = [sent[0], { ...assistant("Keep this answer."), stopReason: "aborted" }];
+    const firstRequest = host.holdNextChatTurn();
+    const ending = agentEnd(messages);
+    const held = await firstRequest;
+    if (retirement === "stopped") stopChatDoorman(binding);
+    else retireTopLevelSession(ROOM_KEY, session);
+    held.disconnect();
+    await ending;
+    await poll();
+    await agentEnd(messages);
+    await poll();
+    expect(host.chatTurns()).toEqual([{
+      room: ROOM_KEY, turnId: "say-retained", authorName: "Origin",
+      text: "Keep this answer.", thinking: [], outcome: "aborted", steps: [],
+    }]);
+    expect(host.chatLines.filter((line) => line.author === "spirit")).toEqual([]);
+    expect(sent.map((message) => message.details.sayId)).toEqual(["say-retained"]);
+  });
+}

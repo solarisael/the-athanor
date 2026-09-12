@@ -12,6 +12,6 @@
     "deploy": "pwsh -NoProfile -File deploy-local.ps1"
   },
   "devDependencies": {
-    "zod": "^4.5.4"
+    "zod": "4.5.4"
   }
 }

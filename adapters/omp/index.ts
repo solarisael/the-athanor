@@ -63,6 +63,7 @@ import {
 } from "./house-proof/knock.ts";
 import {
   noteChatMessageStart,
+  noteChatMessageEnd,
   noteChatMessageUpdate,
   noteChatToolEnd,
   noteChatToolStart,
@@ -756,6 +757,9 @@ export default function solarisaelHouseProof(pi, release) {
   });
   pi.on("message_update", (event) => {
     noteChatMessageUpdate(event?.message);
+  });
+  pi.on("message_end", (event) => {
+    noteChatMessageEnd(event?.message);
   });
   pi.on("tool_execution_start", (event) => {
     noteChatToolStart(event);

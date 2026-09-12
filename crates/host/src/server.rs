@@ -905,6 +905,8 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
                 &payload.text,
                 &payload.turn_id,
                 payload.steps,
+                payload.thinking,
+                payload.outcome,
                 now_rfc3339(),
             );
             let sequence = runtime.cursor.sequence;
@@ -922,6 +924,7 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
                 &payload.text,
                 &payload.turn_id,
                 payload.steps,
+                payload.thinking,
                 now_rfc3339(),
             );
             let sequence = runtime.cursor.sequence;

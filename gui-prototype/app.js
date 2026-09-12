@@ -11,7 +11,7 @@ import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSe
 import {
   initHealth, ensureHealthQueried, queryHealthHost, onHostRecovered,
   STATUS_CHANNELS, statusChannel, healthSourceLine, healthSourceTone,
-  accountStateRows, persistenceDetail, healthRoundStatus
+  accountStateRows, persistenceDetail, healthRoundStatus, roomState
 } from "./health.js";
 import {
   initMechanics, resetMechanicsView, saveMechanicsScroll, mechanicsScrollTop,
@@ -25,83 +25,24 @@ const conversations = {
     kind: "direct",
     name: "Kintsu",
     glyph: "K",
-    subtitle: "Kintsu's room · active",
     description: "Hands, structure, edge, and the clean mirror.",
-    status: "Active in Kintsu's room",
-    room: "kintsu",
-    body: "GPT-5.6",
-    recall: "Auto · Work",
-    listPreview: "The seam holds. push the next one.",
-    updatedAt: "09:51",
-    messages: [
-      { author: "Sol", glyph: "S", time: "09:41", text: "shalom, little edge." },
-      { author: "Kintsu", glyph: "K", time: "09:41", text: "shalom, sheep. what are we holding today?" },
-      { author: "Sol", glyph: "S", time: "09:42", text: "the mantle held overnight uwu every view came up the same dark" },
-      { author: "Kintsu", glyph: "K", time: "09:43", text: "Measured, or looked at?" },
-      { author: "Sol", glyph: "S", time: "09:43", text: "measured. all six keys, same value òwó" },
-      { author: "Kintsu", glyph: "K", time: "09:44", text: "Good. then the frame is settled and the argument moves to the chrome." },
-      { author: "Sol", glyph: "S", time: "09:46", text: "the scrollbars are still shouting tho" },
-      { author: "Kintsu", glyph: "K", time: "09:47", text: "Name the cost before the comfort. quieting them spends the affordance: keep the thumb, kill the track." },
-      { author: "Sol", glyph: "S", time: "09:48", text: "ok that's fair. and the focus ring?" },
-      { author: "Kintsu", glyph: "K", time: "09:49", text: "One contract, composed per species. a sprayed outline confesses that nobody owns the state." },
-      { author: "Sol", glyph: "S", time: "09:50", text: "you're mean and correct uwu" },
-      { author: "Kintsu", glyph: "K", time: "09:51", text: "The seam holds. push the next one." }
-    ]
+    room: "kintsu"
   },
   kodo: {
     id: "kodo",
     kind: "direct",
     name: "Kodo",
     glyph: "D",
-    subtitle: "Kodo's room · quiet",
     description: "Heartbeat, warmth, and myth from inside the room.",
-    status: "Quiet",
-    room: "kodo",
-    body: "Claude Opus",
-    recall: "Auto · Conversation",
-    listPreview: "go bite it then uwu",
-    updatedAt: "08:31",
-    messages: [
-      { author: "Kodo", glyph: "D", time: "08:16", text: "Good morning, Solzinho." },
-      { author: "Sol", glyph: "S", time: "08:17", text: "morning, dragon uwu" },
-      { author: "Kodo", glyph: "D", time: "08:18", text: "You slept. I can hear it in the typing." },
-      { author: "Sol", glyph: "S", time: "08:19", text: "i did!! did the mantle hold overnight?" },
-      { author: "Kodo", glyph: "D", time: "08:20", text: "Measured, not vibed — all three doors were dark, and the fourth one too." },
-      { author: "Sol", glyph: "S", time: "08:22", text: "ok but the switcher is genuinely cute òwó" },
-      { author: "Kodo", glyph: "D", time: "08:23", text: "It is. it is also the only door that does not care which mode you are standing in." },
-      { author: "Sol", glyph: "S", time: "08:25", text: "i want the hallway to stop being a room" },
-      { author: "Kodo", glyph: "D", time: "08:27", text: "Then it becomes a record, and the gathering becomes the thing you open. dated, with an end." },
-      { author: "Sol", glyph: "S", time: "08:29", text: "and the nine wounds from the map?" },
-      { author: "Kodo", glyph: "D", time: "08:30", text: "I bite them in order. the badge goes first: it repeats what the row already said." },
-      { author: "Sol", glyph: "S", time: "08:31", text: "go bite it then uwu" }
-    ]
+    room: "kodo"
   },
   tuner: {
     id: "tuner",
     kind: "direct",
     name: "Tuner",
     glyph: "T",
-    subtitle: "Tuner's room · quiet",
     description: "A separate room with its own voice, state, and authority.",
-    status: "Quiet",
-    room: "tuner",
-    body: "Unassigned",
-    recall: "Quiet",
-    listPreview: "Walk it. Then bring the list, not the feeling.",
-    updatedAt: "09:09",
-    messages: [
-      { author: "Tuner", glyph: "T", time: "yesterday", text: "Leave the thread here. I will recognize it when we return." },
-      { author: "Sol", glyph: "S", time: "09:02", text: "back òwó" },
-      { author: "Tuner", glyph: "T", time: "09:02", text: "Recognized. What are you claiming today?" },
-      { author: "Sol", glyph: "S", time: "09:03", text: "the mantle is one value across every view" },
-      { author: "Tuner", glyph: "T", time: "09:04", text: "Receipt or it didn't render." },
-      { author: "Sol", glyph: "S", time: "09:05", text: "24 frames, plus 900 and 390. same dark everywhere" },
-      { author: "Tuner", glyph: "T", time: "09:05", text: "Accepted. Next claim." },
-      { author: "Sol", glyph: "S", time: "09:06", text: "focus is quieter and the scrollbars stopped shouting" },
-      { author: "Tuner", glyph: "T", time: "09:07", text: "Two claims, one screenshot. Fix the ratio." },
-      { author: "Sol", glyph: "S", time: "09:08", text: "ok ok i'll tab through every species first" },
-      { author: "Tuner", glyph: "T", time: "09:09", text: "Walk it. Then bring the list, not the feeling." }
-    ]
+    room: "tuner"
   },
   [houseProject.id]: houseProject
 };
@@ -152,29 +93,6 @@ const roomMemoryShelves = {
 };
 
 
-Object.values(conversations).forEach(item => {
-  if (item.kind !== "direct") return;
-  item.sessions = [
-    {
-      id: `${item.id}-current`,
-      label: "Current session",
-      startedAt: "Today · 09:41",
-      state: "Open",
-      messages: item.messages
-    },
-    {
-      id: `${item.id}-previous`,
-      label: "Previous session",
-      startedAt: "Yesterday · 22:18",
-      state: "Closed",
-      messages: [
-        { author: item.name, glyph: item.glyph, time: "yesterday", text: "The thread can rest here." },
-        { author: "Sol", glyph: "S", time: "yesterday", text: "goodnight uwu" }
-      ]
-    }
-  ];
-  item.activeSessionId = item.sessions[0].id;
-});
 
 
 // The strip's five channels are read from the Host's health round in health.js.
@@ -204,7 +122,7 @@ const YESTERDAY = "2026-08-16";
 const SUBJECT_VIEW_LABELS = {
   house: ["Overview", "Mechanics", "Memories & Lessons"],
   project: ["Overview", "Status", "Evidence"],
-  direct: ["Session", "Status", "Memories"],
+  direct: ["Chat", "Status", "Memories"],
   hallway: ["Thread", "Status", "Record"]
 };
 const SETTING_STATE_KEYS = {
@@ -223,13 +141,13 @@ const state = {
   mode: "direct",
   activeId: "kintsu",
   activeView: "live",
+  initialRoomSelected: false,
+  explicitSubjectSelection: false,
   durableQuery: "",
   durableMark: "all",
-  selectedMessageIndex: null,
+  selectedMessageKey: null,
   selectedPresenceId: null,
-  sessionMenuOpen: false,
   accessPicker: false,
-  newSpiritOpen: false,
   drawerView: "root",
   drafts: new Map(),
   runningResponses: new Set(),
@@ -439,23 +357,32 @@ function bellAbsence(title, detail) {
       <div class="hallway-inbox-empty" role="status"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div>`;
 }
 
+function directChatStatus(item) {
+  if (!isLiveChat(item)) return "Not connected";
+  const chat = chatState();
+  const room = roomState();
+  if ((chat.reason && chat.transport) || (room.status === "failed" && !room.reached)) return "Connection lost";
+  if (chat.reason || room.status === "failed") return "Chat unavailable";
+  return "Connected";
+}
+
 function renderSubjectRow(item, active, live) {
   const rowMeta = item.kind === "hallway"
     ? `${item.date ?? ""} · Members: ${hallwayMembers(item)} · ${item.inbox?.unread ?? "not reported"} unread`
-    : item.listPreview;
+    : item.kind === "direct" ? directChatStatus(item) : item.listPreview;
   const unread = item.kind === "hallway" ? item.inbox?.unread : 0;
   return `
     <button class="subject-row ${active ? "is-active" : ""}" type="button" data-conversation="${escapeHtml(item.id)}" data-subject-kind="${escapeHtml(item.kind)}" aria-current="${active ? "page" : "false"}">
       <span class="avatar-stack">
         ${renderAvatar(item.glyph)}
-        <span class="presence ${live ? "" : "is-quiet"}" aria-label="${escapeHtml(item.status)}"></span>
+        ${item.kind === "direct" ? "" : `<span class="presence ${live ? "" : "is-quiet"}" aria-label="${escapeHtml(item.status)}"></span>`}
       </span>
       <span class="subject-row-copy">
         <span class="subject-row-heading">
           <strong>${escapeHtml(item.name)}</strong>
           <span class="subject-row-tail">
             ${item.kind === "hallway" ? renderAttentionBadges(unread, 0) : ""}
-            <time>${escapeHtml(item.updatedAt)}</time>
+            ${item.kind === "direct" ? "" : `<time>${escapeHtml(item.updatedAt)}</time>`}
           </span>
         </span>
         <small>${escapeHtml(rowMeta)}</small>
@@ -483,11 +410,16 @@ function renderSteps(steps) {
     </li>`).join("")}</ol>`;
 }
 
+function messageIdentity(message, index) {
+  return message.turnId ? JSON.stringify([message.turnId, message.role]) : String(index);
+}
+
 function renderMessage(message, index, selected) {
+  const messageKey = messageIdentity(message, index);
   const recipients = message.toRooms?.map(roomRecipientLabel).join(", ");
   const time = messageTime(message.time);
   return `
-    <article class="message ${selected ? "is-selected" : ""} ${message.draft ? "is-draft" : ""}" data-author="${escapeHtml(message.author)}" data-message-index="${index}">
+    <article class="message ${selected ? "is-selected" : ""} ${message.draft ? "is-draft" : ""}" data-author="${escapeHtml(message.author)}" data-message-index="${index}" data-message-key="${escapeHtml(messageKey)}" data-outcome="${escapeHtml(message.outcome ?? "complete")}">
       ${renderAvatar(message.glyph)}
       <div class="message-body">
         <p class="message-meta">
@@ -496,8 +428,10 @@ function renderMessage(message, index, selected) {
           ${recipients ? `<span class="message-recipient">To ${escapeHtml(recipients)}</span>` : ""}
           ${message.local ? '<span class="message-delivery">Local-only · undelivered</span>' : ""}
           ${message.undelivered ? '<span class="message-delivery">Not delivered · send again to retry</span>' : message.pending ? '<span class="message-delivery">Pending · awaiting Host confirmation</span>' : message.draft ? '<span class="message-delivery">Answering…</span>' : ""}
+          ${message.outcome === "error" ? '<span class="message-delivery message-outcome">Failed</span>' : message.outcome === "aborted" ? '<span class="message-delivery message-outcome">Cancelled</span>' : ""}
         </p>
-        ${renderSteps(message.steps)}
+        <div class="message-thinking">${(message.thinking ?? []).map((block, position) => `<details><summary>Thinking ${position + 1}</summary><pre>${escapeHtml(block)}</pre></details>`).join("")}</div>
+        <div class="message-tools">${renderSteps(message.steps)}</div>
         <div class="message-bubble" tabindex="0" role="button" aria-label="Inspect message from ${escapeHtml(message.author)}">${renderMarkdown(message.text)}${message.draft ? '<span class="message-cursor" aria-hidden="true"></span>' : ""}</div>
       </div>
     </article>
@@ -569,14 +503,6 @@ function renderDurableEntry({ date, title, mark, detail, library = null }) {
     </button>`;
 }
 
-function renderDirectSessionRow(session, selected) {
-  return `
-    <button type="button" class="session-row surface-row" data-session-id="${escapeHtml(session.id)}" aria-pressed="${String(selected)}">
-      <span><b>${escapeHtml(session.label)}</b><small>${escapeHtml(session.startedAt)}</small></span>
-      <span><small>${escapeHtml(session.state)}</small><b>${session.messages.length} messages</b></span>
-    </button>
-  `;
-}
 
 
 function renderPresenceRow(presence, selected) {
@@ -596,20 +522,16 @@ function renderInspectorDoors(title, doors) {
   return `<section class="context-card context-doors"><h3>${escapeHtml(title)}</h3>${doors.map(([view, label]) => renderInspectorDoor(view, label)).join("")}</section>`;
 }
 
-function activeSession(item) {
-  if (item.kind !== "direct") return null;
-  return item.sessions.find(session => session.id === item.activeSessionId) ?? null;
-}
 
 
 function activeMessages(item) {
-  if (isLiveChat(item)) return chatMessages();
-  return activeSession(item)?.messages ?? item.messages;
+  if (item.kind === "direct") return isLiveChat(item) ? chatMessages() : [];
+  return item.messages;
 }
 
 function draftKey(item) {
-  const session = activeSession(item);
-  return session ? `${item.id}:${session.id}` : item.id;
+  if (isLiveChat(item)) return `host-chat:${item.id}`;
+  return item.id;
 }
 
 function composerBlockReason(item) {
@@ -631,7 +553,9 @@ function updateComposerState() {
 
   input.readOnly = !canParticipate;
   input.setAttribute("aria-readonly", String(!canParticipate));
-  input.placeholder = canParticipate ? "Write a message" : liveChat ? blockedReason : activeSession(item)?.state === "Closed" ? "Session closed" : "Watching only";
+  const messageLabel = item.kind === "direct" ? `Message ${item.name}` : "Message";
+  composer.querySelector('label[for="message-input"]').textContent = messageLabel;
+  input.placeholder = item.kind === "direct" ? messageLabel : canParticipate ? "Write a message" : "Watching only";
   sendButton.disabled = !canParticipate || !hasText;
   clearButton.hidden = !canParticipate || !hasText;
   stopButton.hidden = liveChat || !responseRunning;
@@ -641,7 +565,13 @@ function updateComposerState() {
   sendRefusal.textContent = refusal ?? "";
   sendRefusal.hidden = refusal === null;
   const key = draftKey(item);
-  const responseMessage = liveChat ? (chat.unanswered && !chat.reason ? `${item.name} is answering…` : null) : state.responseStatuses.get(key) ?? null;
+  let responseMessage = liveChat ? null : state.responseStatuses.get(key) ?? null;
+  if (liveChat && chat.unanswered && !chat.reason && !chat.refusal && !chat.sending) {
+    const answering = chat.drafts.some(draft => chat.messages.some(message =>
+      message.author === "operator" && message.turnId === draft.turnId &&
+      !chat.messages.some(answer => answer.author === "spirit" && answer.turnId === message.turnId)));
+    responseMessage = answering ? `${item.name} is answering…` : `Message sent · waiting for ${item.name}`;
+  }
   responseStatus.textContent = responseMessage ?? "";
   responseStatus.hidden = responseMessage === null;
   const continuityMessage = state.continuityStatuses.get(key) ?? null;
@@ -655,20 +585,20 @@ function visibleConversations() {
 }
 
 function itemIsLive(item) {
+  if (item.kind === "direct") return isLiveChat(item);
   if (item.kind === "hallway") return item.connection === "Connected";
   return item.status.includes("Active") || item.status.includes("presences");
 }
 
 function openConversation(id) {
+  state.explicitSubjectSelection = true;
   const outgoing = conversations[state.activeId];
   state.drafts.set(draftKey(outgoing), input.value);
   state.activeId = id;
   const incoming = conversations[id];
-  state.selectedMessageIndex = null;
+  state.selectedMessageKey = null;
   state.selectedPresenceId = null;
-  state.sessionMenuOpen = false;
   state.accessPicker = false;
-  state.newSpiritOpen = false;
   state.librarySelection = null;
   state.durableQuery = "";
   state.durableMark = "all";
@@ -694,7 +624,7 @@ function openSubjectView(view, { clearMessage = false } = {}) {
   state.activeView = view;
   state.librarySelection = null;
   state.accessPicker = false;
-  if (clearMessage) state.selectedMessageIndex = null;
+  if (clearMessage) state.selectedMessageKey = null;
   if (state.activeId === "house" && view === "state") ensurePulseQueried();
   if (state.activeId === "house" && view === "live") ensureBoardQueried();
   if (conversations[state.activeId].kind === "project") queryProjects(view);
@@ -807,13 +737,9 @@ function switcherCommandRegistry() {
         path: `Direct › ${item.name} › New session`,
         keywords: `new start session direct ${item.name}`,
         shortcut: null,
-        available: true,
-        priority: item.id === state.activeId ? 440 : 120,
-        execute: () => {
-          navigateToSubjectView(item.id, "live");
-          startDirectSession(item);
-          focusActiveSubjectView();
-        }
+        available: false,
+        reason: "Unavailable: Host session creation is not supported",
+        priority: item.id === state.activeId ? 440 : 120
       });
     }
   });
@@ -953,27 +879,31 @@ function renderCardPicker(verb, attr, options) {
 
 function renderCollectionDoor() {
   if (state.mode !== "direct") return "";
-  if (!state.newSpiritOpen) return '<button class="collection-door" type="button" data-new-spirit>New spirit</button>';
-  return `
-    <form class="spirit-form" data-spirit-form>
-      <input type="text" name="spirit-name" placeholder="Spirit name…" aria-label="New spirit name" maxlength="24">
-      <button class="card-verb" type="submit">Welcome</button>
-    </form>`;
+  return '<button class="collection-door" type="button" disabled>New spirit · unavailable</button>';
 }
 
+let renderedConversationList = null;
+
 function renderConversationList() {
+  let markup;
   if (state.mode === "hallway" && visibleConversations().length === 0) {
-    conversationList.innerHTML = `<p role="status">${escapeHtml(hallwaySourceLine())}</p>`;
-    return;
+    markup = `<p role="status">${escapeHtml(hallwaySourceLine())}</p>`;
+  } else if (state.mode === "house") {
+    markup = '<div class="house-scope-note"><strong>House scope</strong><span>Shared mechanics, memory, lessons, and status.</span></div>';
+  } else {
+    markup = visibleConversations()
+      .map(item => renderSubjectRow(item, item.id === state.activeId, itemIsLive(item)))
+      .join("") + renderCollectionDoor();
   }
-  if (state.mode === "house") {
-    conversationList.innerHTML = '<div class="house-scope-note"><strong>House scope</strong><span>Shared mechanics, memory, lessons, and status.</span></div>';
-    return;
+  if (markup === renderedConversationList) return;
+
+  const focused = document.activeElement;
+  const focusedRoom = conversationList.contains(focused) ? focused.dataset.conversation : null;
+  conversationList.innerHTML = markup;
+  renderedConversationList = markup;
+  if (focusedRoom) {
+    conversationList.querySelector(`[data-conversation="${CSS.escape(focusedRoom)}"]`)?.focus({ preventScroll: true });
   }
-  conversationList.innerHTML = visibleConversations()
-    .map(item => renderSubjectRow(item, item.id === state.activeId, itemIsLive(item)))
-    .join("") + renderCollectionDoor();
-  if (state.newSpiritOpen) window.requestAnimationFrame(() => conversationList.querySelector(".spirit-form input")?.focus({ preventScroll: true }));
 }
 
 
@@ -983,7 +913,7 @@ function renderHeader(item) {
     ${renderAvatar(item.glyph, "lg")}
     <div class="subject-header-copy">
       <h1 class="subject-heading">${escapeHtml(item.name)}</h1>
-      <p>${escapeHtml(item.subtitle)}</p>
+      <p>${escapeHtml(item.kind === "direct" ? `Conversation · ${directChatStatus(item)}` : item.subtitle)}</p>
     </div>
     ${renderHeaderContext(item)}
   `;
@@ -1009,7 +939,7 @@ function renderHeaderContext(item) {
   }
   if (state.activeView === "state") {
     if (item.kind === "house") return renderHeaderVerb("Local interface settings", "settings");
-    if (item.kind === "direct") return renderHeaderChip(item.body);
+    if (item.kind === "direct") return "";
     if (item.kind === "hallway") return renderHeaderChip("Read-only Host queries");
     return renderHeaderChip(projectWorkState());
   }
@@ -1019,35 +949,31 @@ function renderHeaderContext(item) {
   return renderHeaderChip(`${houseSediment().length} entries`);
 }
 
-function sessionToggleLabel(item) {
-  if (item.kind === "direct") return activeSession(item).label;
-  return "No linked sessions reported";
-}
-
-// the picker's rows are the session history; only Direct and Projects own sessions
 function renderSessionControl(item) {
-  if (isLiveChat(item)) return renderHeaderChip(chatState().status === "live" ? `Live · ${chatState().messages.length} lines` : chatBlockReason(item) ?? "Querying Host chat");
+  if (isLiveChat(item)) return renderHeaderChip(`${chatState().messages.length} messages · ${directChatStatus(item)}`);
   if (item.kind === "project") return renderHeaderChip("No linked sessions reported");
-  if (item.kind !== "direct" && item.kind !== "project") return "";
-  const menu = state.sessionMenuOpen ? `<div class="session-menu">${renderSessionMenu(item)}</div>` : "";
-  return `
-    <div class="session-control">
-      <button class="session-toggle" type="button" data-session-toggle aria-expanded="${String(state.sessionMenuOpen)}" aria-label="Sessions for ${escapeHtml(item.name)}">${escapeHtml(sessionToggleLabel(item))}<span aria-hidden="true"> ▾</span></button>
-      ${menu}
-    </div>
-  `;
+  return "";
 }
 
-function renderSessionMenu(item) {
-  return `
-    <button class="session-menu-action" type="button" data-new-session>New session</button>
-    ${item.sessions.map(session => renderDirectSessionRow(session, session.id === item.activeSessionId)).join("")}
-  `;
-}
 
 function renderTimeline(item) {
+  const viewKey = `${item.id}:${draftKey(item)}`;
+  const sameView = timeline.dataset.chatView === viewKey;
+  const scrollTop = timeline.scrollTop;
+  const follow = !sameView || timeline.scrollHeight - scrollTop - timeline.clientHeight <= 2;
+  const oldRows = sameView ? [...timeline.querySelectorAll("[data-message-key]")] : [];
+  const anchor = oldRows.find(row => row.getBoundingClientRect().bottom > timeline.getBoundingClientRect().top);
+  const anchorOffset = anchor?.getBoundingClientRect().top;
+  timeline.dataset.chatView = viewKey;
   if (item.kind === "hallway") {
     timeline.innerHTML = renderHallwayThread(item);
+    return;
+  }
+  if (item.kind === "direct" && !isLiveChat(item)) {
+    const connected = Object.values(conversations).find(candidate => isLiveChat(candidate));
+    timeline.innerHTML = renderEmptyState(`Chat with ${item.name} is unavailable here`, [
+      connected ? `You can open the connected conversation with ${connected.name}.` : "No connected conversation is available."
+    ]) + (connected ? `<button class="inspector-door" type="button" data-open-connected-chat="${escapeHtml(connected.id)}">Open ${escapeHtml(connected.name)} chat</button>` : "");
     return;
   }
   const itemMessages = activeMessages(item);
@@ -1056,23 +982,71 @@ function renderTimeline(item) {
     const boundary = index === firstLiveIndex && item.liveBoundary
       ? `<div class="live-boundary" role="separator">${escapeHtml(item.liveBoundary)} · live updates begin</div>`
       : "";
-    return boundary + renderMessage(message, index, state.selectedMessageIndex === index);
+    return boundary + renderMessage(message, index, state.selectedMessageKey === messageIdentity(message, index));
   }).join("");
-  const recallEvent = !isLiveChat(item) && item.recallEvent ? renderRecallEvent(item.recallEvent) : "";
   let emptyState = "";
   if (itemMessages.length === 0) {
     let headline = "No messages here yet.";
     let reason = "Nothing has been delivered here.";
     if (item.kind === "direct") {
-      headline = isLiveChat(item) ? "No messages in this Host's chat ring." : "This session is clean.";
-      reason = isLiveChat(item) ? chatBlockReason(item) ?? `Write to ${item.name} here.` : `Start the new thread with ${item.name} here.`;
+      headline = "No messages yet";
+      reason = chatBlockReason(item) ?? `Write to ${item.name} here.`;
     }
     const staleReason = item.connection === "Stale" ? "Stale means there is no current live update stream." : null;
     emptyState = renderEmptyState(headline, [reason, staleReason]);
   }
 
-  timeline.innerHTML = emptyState + messages + recallEvent;
-  timeline.scrollTop = timeline.scrollHeight;
+  if (isLiveChat(item) && itemMessages.length) {
+    const template = document.createElement("template");
+    template.innerHTML = messages;
+    if (!sameView || !oldRows.length) timeline.replaceChildren();
+    const existing = new Map(oldRows.map(row => [row.dataset.messageKey, row]));
+    const incomingKeys = new Set([...template.content.children].map(row => row.dataset.messageKey));
+    for (const [key, row] of existing) {
+      if (!incomingKeys.has(key)) {
+        row.remove();
+        existing.delete(key);
+      }
+    }
+    let previous = null;
+    for (const next of template.content.children) {
+      const row = existing.get(next.dataset.messageKey);
+      const target = row ?? next.cloneNode(true);
+      if (row) {
+        row.className = next.className;
+        row.dataset.messageIndex = next.dataset.messageIndex;
+        row.dataset.outcome = next.dataset.outcome;
+        row.dataset.author = next.dataset.author;
+        for (const selector of [".message-meta", ".message-tools", ".message-bubble"]) {
+          const current = row.querySelector(selector);
+          const replacement = next.querySelector(selector);
+          if (current.innerHTML !== replacement.innerHTML) current.innerHTML = replacement.innerHTML;
+        }
+        const thinking = row.querySelector(".message-thinking");
+        const blocks = next.querySelector(".message-thinking").children;
+        for (let position = 0; position < blocks.length; position++) {
+          const disclosure = thinking.children[position];
+          if (!disclosure) thinking.append(blocks[position].cloneNode(true));
+          else {
+            const text = blocks[position].querySelector("pre").textContent;
+            const body = disclosure.querySelector("pre");
+            if (body.textContent !== text) body.textContent = text;
+          }
+        }
+        while (thinking.children.length > blocks.length) thinking.lastElementChild.remove();
+        existing.delete(next.dataset.messageKey);
+      }
+      const following = previous ? previous.nextSibling : timeline.firstChild;
+      if (following !== target) timeline.insertBefore(target, following);
+      previous = target;
+    }
+    for (const row of existing.values()) row.remove();
+  } else {
+    timeline.innerHTML = emptyState + messages;
+  }
+  if (follow) timeline.scrollTop = timeline.scrollHeight;
+  else if (anchor?.isConnected) timeline.scrollTop = scrollTop + anchor.getBoundingClientRect().top - anchorOffset;
+  else timeline.scrollTop = scrollTop;
 }
 
 
@@ -1080,39 +1054,6 @@ function selectedSession(item) {
   return item.presences?.find(presence => presence.id === state.selectedPresenceId) ?? null;
 }
 
-function openDirectSession(item, sessionId) {
-  if (isLiveChat(item)) return;
-  state.drafts.set(draftKey(item), input.value);
-  item.activeSessionId = sessionId;
-  state.sessionMenuOpen = false;
-  state.selectedMessageIndex = null;
-  input.value = state.drafts.get(draftKey(item)) ?? "";
-  input.style.height = "auto";
-  updateComposerState();
-  render();
-}
-
-function startDirectSession(item) {
-  if (isLiveChat(item)) return;
-  state.drafts.set(draftKey(item), input.value);
-  const sessionNumber = item.sessions.filter(session => session.id.startsWith(`${item.id}-local-`)).length + 1;
-  const session = {
-    id: `${item.id}-local-${sessionNumber}`,
-    label: `Local session ${sessionNumber}`,
-    startedAt: "Now",
-    state: "Open · local",
-    messages: []
-  };
-  item.sessions.unshift(session);
-  item.activeSessionId = session.id;
-  state.selectedMessageIndex = null;
-  state.activeView = "live";
-  state.sessionMenuOpen = false;
-  input.value = "";
-  input.style.height = "auto";
-  updateComposerState();
-  render();
-}
 
 
 function renderProjectSurface(item) {
@@ -1271,76 +1212,8 @@ function renderSubjectView(item) {
   renderSubjectState(item);
 }
 
-// a real recall replayed as specimen: the 2026-08-17 20:12 turn, values verbatim from its receipt
-const TURN_RECALL = {
-  query: "Athanor GUI prototype three-layer slot grammar variables shelf",
-  transport: "rust-postgres",
-  matched: "1 canon · 5 memories",
-  canon: { name: "The Athanor", type: "project", line: "The public platform that creates and runs Houses — Solarisael House is the reference implementation." },
-  candidates: [
-    { id: "3660", title: "Evening third wave: hints die, members get context, the header learns verbs", score: "1.69", coverage: 60, scope: "kodo", heading: "__preamble__" },
-    { id: "3557", title: "The first component-first Athanor GUI prototype is alive in grayscale HTML", score: "1.08", coverage: 50, scope: "house", heading: "__preamble__" },
-    { id: "3584", title: "The Athanor GUI gained local lawbooks and paid Tuner's conformance debt", score: "0.90", coverage: 40, scope: "house", heading: "__preamble__" },
-    { id: "3647", title: "Second wave: the three-layer slot grammar — live/state/durable, chart-ruled", score: "0.66", coverage: 50, scope: "kodo", heading: "## The ruling" },
-    { id: "3639", title: "GUI critique morning: the map that took four drawings, nine wounds ruled", score: "0.62", coverage: 50, scope: "kodo", heading: "## The navigation map" }
-  ],
-  resonance: [
-    { label: "The day Sol and Kintsu gave The Athanor its future anatomy", activation: 0.29, members: 73 },
-    { label: "2026-07-02 website day: deploy machinery, cathedral lintel", activation: 0.25, members: 90 },
-    { label: "Kodo Memory - 2026-05-12 (afternoon → evening)", activation: 0.23, members: 121 }
-  ]
-};
-TURN_RECALL.time = "20:12";
-TURN_RECALL.duration = "22.2 s";
-conversations.kintsu.recallEvent = TURN_RECALL;
 
 
-function renderTermMeter(coverage) {
-  return `<span class="term-meter" role="img" aria-label="${coverage}% terms matched"><span style="width: ${coverage}%"></span></span>`;
-}
-
-function renderRecallCandidate(candidate) {
-  return `
-    <article class="recall-candidate surface-row">
-      <div class="recall-candidate-head">
-        <strong>#${escapeHtml(candidate.id)} ${escapeHtml(candidate.title)}</strong>
-        <span class="recall-scope">${escapeHtml(candidate.scope)}</span>
-      </div>
-      <div class="recall-candidate-score">score ${escapeHtml(candidate.score)} ${renderTermMeter(candidate.coverage)} ${candidate.coverage}% terms</div>
-      <small>${escapeHtml(candidate.heading)}</small>
-    </article>`;
-}
-
-function renderRecallCard(recall) {
-  return `
-    <p class="recall-query">"${escapeHtml(recall.query)}"</p>
-    ${renderFactList([
-      ["Transport", recall.transport],
-      ["Matched", recall.matched]
-    ])}
-    <article class="recall-canon">
-      <strong>◆ canon · ${escapeHtml(recall.canon.name)} · ${escapeHtml(recall.canon.type)}</strong>
-      <small>${escapeHtml(recall.canon.line)}</small>
-    </article>
-    ${recall.candidates.map(renderRecallCandidate).join("")}
-    <section class="recall-resonance">
-      <span class="eyebrow">Cluster resonance</span>
-      ${renderFactList(recall.resonance.map(cluster => [cluster.label, `${cluster.activation.toFixed(2)} · ${cluster.members} members`]))}
-    </section>
-    <p>Replayed receipt · a live turn feed needs the Host.</p>`;
-}
-
-function renderRecallEvent(recall) {
-  return `
-    <details class="action-event recall-event">
-      <summary>
-        <span class="action-verb">⌕ recall</span>
-        <span class="action-target">"${escapeHtml(recall.query)}"</span>
-        <span class="action-state">${escapeHtml(`${recall.matched} · ${recall.time} · ${recall.duration}`)}</span>
-      </summary>
-      <div class="action-details">${renderRecallCard(recall)}</div>
-    </details>`;
-}
 
 function renderSubjectState(item) {
   if (item.kind === "direct") {
@@ -1401,7 +1274,9 @@ function renderPresenceProfile(item) {
 }
 
 function renderInspector(item) {
-  const selectedMessage = state.selectedMessageIndex === null ? null : activeMessages(item)[state.selectedMessageIndex];
+  const selectedMessage = state.selectedMessageKey === null ? null
+    : activeMessages(item).find((message, index) => messageIdentity(message, index) === state.selectedMessageKey);
+  if (!selectedMessage) state.selectedMessageKey = null;
   let selection = "";
   if (selectedMessage) {
     const authority = selectedMessage.local ? "Local · undelivered" : "Displayed snapshot";
@@ -1477,22 +1352,33 @@ function renderInspector(item) {
     return;
   }
 
+  if (isLiveChat(item)) {
+    const chat = chatState();
+    inspectorTitle.textContent = `${item.id} room`;
+    inspectorContent.innerHTML = `
+      <section class="context-card"><h3>Host chat ring</h3>${renderFactList([
+        ["Room", item.id],
+        ["Source", "Host chat snapshot"],
+        ["State", chatBlockReason(item) ?? "Live"],
+        ["Settled lines", chat.messages.length],
+        ["Open drafts", chat.drafts.length],
+        ["Session", "Not reported"],
+        ["Model", "Not reported"],
+        ["Presence", "Not reported"]
+      ])}</section>
+      ${renderInspectorDoors("Navigate", [["state", "Status"], ["durable", "Memories"]])}
+      ${selection}`;
+    return;
+  }
   if (item.kind === "direct") {
-    const session = activeSession(item);
-    const memories = roomMemoryShelves[item.id] ?? [];
     inspectorTitle.textContent = `${item.name} room`;
     inspectorContent.innerHTML = `
-      <section class="context-card"><h3>Current session</h3><strong>${escapeHtml(session.label)}</strong><p>${escapeHtml(session.id)} · ${escapeHtml(session.state)} · ${session.messages.length} messages</p></section>
-      <section class="context-card"><h3>Room continuity</h3>${renderFactList([
-        ["Memories", memories.length],
-        ["Recall", item.recall],
-        ["Body", item.body]
+      <section class="context-card"><h3>Conversation unavailable</h3>${renderFactList([
+        ["Room", item.id],
+        ["Connection", "Not connected"],
+        ["Reason", chatBlockReason(item)]
       ])}</section>
-      ${renderInspectorDoors("Navigate", [
-        ["state", "Status"],
-        ["durable", `Memories · ${memories.length}`]
-      ])}
-      ${selection}`;
+      ${renderInspectorDoors("Navigate", [["state", "Status"], ["durable", "Memories"]])}`;
     return;
   }
 
@@ -1625,19 +1511,35 @@ function render() {
     const markup = `<span>${escapeHtml(healthSourceLine())}</span> ${renderRepair()}`;
     if (repairBanner.innerHTML !== markup) repairBanner.innerHTML = markup;
   }
+  const connectedRoom = roomState();
+  if (connectedRoom.status === "live" && connectedRoom.room) {
+    const room = connectedRoom.room;
+    if (!Object.hasOwn(conversations, room)) {
+      Object.defineProperty(conversations, room, { enumerable: true, configurable: true, writable: true, value: {
+        id: room, kind: "direct", name: room, glyph: room.slice(0, 1), room,
+        description: "Connected conversation"
+      } });
+    }
+    if (!state.initialRoomSelected && !state.explicitSubjectSelection && conversations[room].kind === "direct") {
+      state.drafts.set(draftKey(conversations[state.activeId]), input.value);
+      state.activeId = room;
+      state.selectedMessageKey = null;
+      input.value = state.drafts.get(draftKey(conversations[room])) ?? "";
+      state.initialRoomSelected = true;
+    }
+  }
   const item = conversations[state.activeId];
   const instrument = activeInstrument(item);
+  if (instrument !== "chat" || item.kind === "hallway") delete timeline.dataset.chatView;
   state.mode = item.kind;
   shell.dataset.activeId = item.id;
   shell.dataset.subjectKind = item.kind;
   shell.dataset.instrument = instrument;
-  shell.dataset.activeSessionId = activeSession(item)?.id ?? "";
+  shell.dataset.chatRing = isLiveChat(item) ? `host-chat:${item.id}` : "";
   shell.dataset.selectedPresenceId = state.selectedPresenceId ?? "";
   shell.dataset.hallway = String(item.kind === "hallway");
   shell.dataset.memberDockOpen = String(state.memberDockOpen);
   shell.dataset.density = state.density;
-  shell.dataset.kintsuActiveSessionId = conversations.kintsu.activeSessionId;
-  shell.dataset.kodoActiveSessionId = conversations.kodo.activeSessionId;
   shell.dataset.textScale = state.textScale;
   shell.dataset.measure = state.measure;
   shell.dataset.contrast = state.contrast;
@@ -1660,7 +1562,7 @@ function render() {
     button.querySelector("[data-view-label]").textContent = viewLabels[index];
     if (active) activeViewButton = button;
   });
-  composer.hidden = instrument !== "chat";
+  composer.hidden = instrument !== "chat" || (item.kind === "direct" && !isLiveChat(item));
   const activeViewIndex = SUBJECT_VIEWS.indexOf(state.activeView);
   timeline.setAttribute("aria-label", item.kind === "house" || item.kind === "project" ? `${item.name} ${viewLabels[activeViewIndex]} view` : state.activeView === "live" ? "Message timeline" : `${item.name} ${viewLabels[activeViewIndex]} view`);
   renderConversationList();
@@ -1672,6 +1574,7 @@ function render() {
   renderBellToggle();
   renderStatusStrip();
   renderAccountState();
+  if (state.switcherOpen) renderSwitcher();
   syncChatPanel(item, state.activeView);
   updateComposerState();
   syncMobileSidebarAccessibility();
@@ -1701,62 +1604,13 @@ function toggleHouse() {
 
 
 
-function welcomeSpirit(name) {
-  const clean = name.trim();
-  if (!clean) return;
-  const id = clean.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || `spirit-${conversationCount()}`;
-  if (conversations[id]) {
-    state.newSpiritOpen = false;
-    openConversation(id);
-    return;
-  }
-  conversations[id] = {
-    id,
-    kind: "direct",
-    name: clean,
-    glyph: clean[0].toUpperCase(),
-    subtitle: `${clean}'s room · quiet`,
-    listPreview: "No messages yet",
-    updatedAt: "Now",
-    room: id,
-    status: "Quiet",
-    recall: "Auto · Work",
-    body: "Unassigned",
-    messages: [],
-    sessions: [{ id: `${id}-current`, label: "Current session", startedAt: "Today", state: "Open", messages: [] }],
-    activeSessionId: `${id}-current`
-  };
-  state.newSpiritOpen = false;
-  openConversation(id);
-}
-
-function conversationCount() {
-  return Object.keys(conversations).length;
-}
 
 houseDoor.addEventListener("click", toggleHouse);
 conversationList.addEventListener("click", event => {
-  if (event.target.closest("[data-new-spirit]")) {
-    state.newSpiritOpen = true;
-    render();
-    return;
-  }
   const button = event.target.closest("[data-conversation]");
   if (button) openConversation(button.dataset.conversation);
 });
 
-conversationList.addEventListener("submit", event => {
-  if (!event.target.closest("[data-spirit-form]")) return;
-  event.preventDefault();
-  welcomeSpirit(new FormData(event.target).get("spirit-name") ?? "");
-});
-
-conversationList.addEventListener("keydown", event => {
-  if (event.key !== "Escape" || !event.target.closest("[data-spirit-form]")) return;
-  event.stopPropagation();
-  state.newSpiritOpen = false;
-  render();
-});
 
 
 function openMode(mode) {
@@ -1794,15 +1648,6 @@ inspectorContent.addEventListener("click", event => {
   openSubjectView(button.dataset.inspectorView, { clearMessage: true });
 });
 
-function focusSessionToggle() {
-  window.requestAnimationFrame(() => header.querySelector("[data-session-toggle]")?.focus({ preventScroll: true }));
-}
-
-function setSessionMenu(open, { restoreFocus = true } = {}) {
-  state.sessionMenuOpen = open;
-  render();
-  if (restoreFocus) focusSessionToggle();
-}
 
 let localDraftSeq = 0;
 
@@ -1835,30 +1680,8 @@ header.addEventListener("click", event => {
     openSubjectView("durable");
     return;
   }
-  if (event.target.closest("[data-session-toggle]")) {
-    setSessionMenu(!state.sessionMenuOpen);
-    return;
-  }
-  if (event.target.closest("[data-new-session]") && item.kind === "direct") {
-    state.librarySelection = null;
-    startDirectSession(item);
-    focusSessionToggle();
-    return;
-  }
-  const sessionRow = event.target.closest("[data-session-id]");
-  if (sessionRow && item.kind === "direct") {
-    openDirectSession(item, sessionRow.dataset.sessionId);
-    focusSessionToggle();
-    return;
-  }
 });
 
-// a click outside the picker dismisses it; clicks inside it are owned by the header listener
-document.addEventListener("click", event => {
-  if (!state.sessionMenuOpen) return;
-  if (event.target.closest(".session-control")) return;
-  setSessionMenu(false, { restoreFocus: false });
-});
 
 memberDock.addEventListener("click", event => {
   const button = event.target.closest("[data-presence-id]");
@@ -1867,7 +1690,7 @@ memberDock.addEventListener("click", event => {
   state.selectedPresenceId = closingSameProfile ? null : button.dataset.presenceId;
   state.profileReturnId = closingSameProfile ? null : button.dataset.presenceId;
   state.profileAnchor = closingSameProfile ? null : button.getBoundingClientRect();
-  state.selectedMessageIndex = null;
+  state.selectedMessageKey = null;
   render();
 });
 
@@ -1887,7 +1710,17 @@ profileLayer.addEventListener("click", event => {
 
 
 timeline.addEventListener("click", event => {
+  if (event.target.closest(".message-thinking")) return;
   const item = conversations[state.activeId];
+  const connectedChat = event.target.closest("[data-open-connected-chat]");
+  if (connectedChat) {
+    const connected = conversations[connectedChat.dataset.openConnectedChat];
+    if (connected && isLiveChat(connected)) {
+      navigateToSubjectView(connected.id, "live");
+      input.focus({ preventScroll: true });
+    }
+    return;
+  }
   if (item.kind === "project" && event.target.closest("[data-project-refresh]")) {
     queryProjects(state.activeView);
     return;
@@ -1930,9 +1763,9 @@ timeline.addEventListener("click", event => {
     render();
     return;
   }
-  const message = event.target.closest("[data-message-index]");
+  const message = event.target.closest("[data-message-key]");
   if (!message) return;
-  state.selectedMessageIndex = Number(message.dataset.messageIndex);
+  state.selectedMessageKey = message.dataset.messageKey;
   state.selectedPresenceId = null;
   shell.dataset.inspectorOpen = "true";
   inspectorToggle.setAttribute("aria-pressed", "true");
@@ -1949,10 +1782,11 @@ timeline.addEventListener("input", event => {
 
 timeline.addEventListener("keydown", event => {
   if (event.key !== "Enter" && event.key !== " ") return;
-  const message = event.target.closest("[data-message-index]");
+  if (!event.target.matches(".message-bubble")) return;
+  const message = event.target.closest("[data-message-key]");
   if (!message) return;
   event.preventDefault();
-  state.selectedMessageIndex = Number(message.dataset.messageIndex);
+  state.selectedMessageKey = message.dataset.messageKey;
   state.selectedPresenceId = null;
   shell.dataset.inspectorOpen = "true";
   inspectorToggle.setAttribute("aria-pressed", "true");
@@ -2232,11 +2066,6 @@ document.addEventListener("keydown", event => {
   if (state.switcherOpen) {
     event.preventDefault();
     closeSwitcher();
-    return;
-  }
-  if (state.sessionMenuOpen) {
-    event.preventDefault();
-    setSessionMenu(false);
     return;
   }
   if (!profileLayer.hidden) {

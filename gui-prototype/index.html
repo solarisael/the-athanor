@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <main class="app-shell" data-sidebar-open="false" data-inspector-open="true">
+  <main class="app-shell" data-sidebar-open="false" data-inspector-open="false">
     <aside class="sidebar" aria-label="Conversations and projects">
       <button class="house-mark" type="button" data-house-door aria-pressed="false">
         <span class="house-glyph" aria-hidden="true">✦</span>
@@ -154,7 +154,7 @@
         <button class="icon-button sidebar-toggle" type="button" aria-label="Toggle subject list" aria-pressed="false">☰</button>
         <div class="mantle-context">
           <nav class="subject-views" aria-label="Selected subject views">
-            <button class="tab" type="button" data-subject-view="live" aria-pressed="true"><kbd>1</kbd><span data-view-label>Session</span></button>
+            <button class="tab" type="button" data-subject-view="live" aria-pressed="true"><kbd>1</kbd><span data-view-label>Chat</span></button>
             <button class="tab" type="button" data-subject-view="state" aria-pressed="false"><kbd>2</kbd><span data-view-label>Status</span></button>
             <button class="tab" type="button" data-subject-view="durable" aria-pressed="false"><kbd>3</kbd><span data-view-label>Memories</span></button>
           </nav>
@@ -162,7 +162,7 @@
         <button class="icon-button bell-toggle" type="button" aria-label="Hallway inbox" aria-expanded="false" aria-haspopup="dialog" aria-controls="bell-layer">
           <svg class="bell-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg>
         </button>
-        <button class="icon-button inspector-toggle" type="button" aria-label="Toggle members and context" aria-pressed="true">◫</button>
+        <button class="icon-button inspector-toggle" type="button" aria-label="Toggle details" aria-pressed="false">Details</button>
       </header>
 
       <section class="active-view" aria-live="polite">

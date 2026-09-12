@@ -70,7 +70,10 @@ pub(super) async fn load_bm25f_candidates_for_terms(
     };
 
     let frequency_rows = sqlx::query(
-        r#"WITH corpus AS MATERIALIZED (
+        r#"WITH terms AS MATERIALIZED (
+             SELECT term,plainto_tsquery('simple',term) AS query
+             FROM unnest($2::text[]) AS term
+           ), corpus AS MATERIALIZED (
              SELECT c.bm25f_text_tsv,m.bm25f_meta_tsv
              FROM memory_chunks c
              JOIN memories m ON m.id=c.memory_id
@@ -81,10 +84,10 @@ pub(super) async fn load_bm25f_candidates_for_terms(
            )
            SELECT term,
                   count(*) FILTER (
-                    WHERE corpus.bm25f_text_tsv @@ plainto_tsquery('simple',term)
-                       OR corpus.bm25f_meta_tsv @@ plainto_tsquery('simple',term)
+                    WHERE corpus.bm25f_text_tsv @@ terms.query
+                       OR corpus.bm25f_meta_tsv @@ terms.query
                   )::bigint AS document_frequency
-           FROM unnest($2::text[]) AS term
+           FROM terms
            CROSS JOIN corpus
            GROUP BY term
            ORDER BY term"#,

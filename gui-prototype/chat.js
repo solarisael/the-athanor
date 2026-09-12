@@ -30,10 +30,13 @@ export function chatMessages() {
   const drafts = (round.drafts ?? []).map(draft => ({ ...draft, author: "spirit", draft: true }));
   return [...round.messages, ...drafts, ...optimistic].map(message => ({
     ...message,
+    role: message.author,
     author: message.authorName,
     glyph: message.authorName.slice(0, 1),
     time: message.at,
     steps: Array.isArray(message.steps) ? message.steps : [],
+    thinking: message.thinking ?? [],
+    outcome: message.outcome ?? "complete",
     draft: message.draft === true,
     pending: message.pending === true,
     undelivered: message.undelivered === true
@@ -47,7 +50,7 @@ export function chatBlockReason(item) {
     return room.reached ? `Room state not served · ${room.reason}` : `Host unreachable · ${room.reason}`;
   }
   if (!isLiveChat(item)) return "Not this Host's room";
-  if (round.reason) return `Host unreachable · ${round.reason}`;
+  if (round.reason) return `${round.transport ? "Host unreachable" : "Chat refused"} · ${round.reason}`;
   if (round.status === "idle") return "Chat not queried";
   if (round.status === "pending" && round.messages.length === 0) return "Querying Host chat";
   if (sending) return "Sending to Host…";
@@ -78,7 +81,7 @@ function schedulePoll() {
 }
 
 function failRound(error) {
-  round = { ...round, status: "failed", reason: error.message, drafts: [] };
+  round = { ...round, status: "failed", reason: error.message, transport: error.transport === true, drafts: [] };
   if (error.transport) noteHostFailure(error.message);
 }
 
@@ -102,7 +105,17 @@ async function readSnapshot() {
       typeof draft.turnId !== "string" || typeof draft.authorName !== "string" || typeof draft.text !== "string")) {
       throw new Error("Host answered without a valid room chat snapshot");
     }
-    round = { status: "live", reason: null, messages: result.messages.sort((a, b) => a.sequence - b.sequence), drafts };
+    for (const message of [...result.messages, ...drafts]) {
+      if (message.thinking !== undefined && (!Array.isArray(message.thinking) ||
+        message.thinking.some(block => typeof block !== "string"))) {
+        throw new Error("Invalid chat thinking: expected an array of displayable text blocks");
+      }
+    }
+    if (result.messages.some(message => message.outcome !== undefined &&
+      !["complete", "error", "aborted"].includes(message.outcome))) {
+      throw new Error("Invalid chat outcome: expected complete, error, or aborted");
+    }
+    round = { status: "live", room: result.room, reason: null, messages: result.messages.sort((a, b) => a.sequence - b.sequence), drafts };
     optimistic = optimistic.filter(message => !round.messages.some(row => row.author === "operator" && row.turnId === message.turnId));
   } catch (error) {
     failRound(error);

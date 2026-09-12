@@ -481,6 +481,7 @@ test("chat consumes its own final response once, not a preceding end or a tool s
   await agentEnd([...prior, sent[0]]);
   expect(host.chatTurns()).toEqual([]);
   const toolStep = { ...assistantToolCall(), stopReason: "toolUse" };
+  toolStep.content.unshift({ type: "thinking", thinking: "Checking the map." } as any);
   for (const handler of handlers.get("turn_end") ?? []) {
     await handler({ type: "turn_end", message: toolStep, toolResults: [toolResult()] }, ctx());
   }
@@ -490,7 +491,10 @@ test("chat consumes its own final response once, not a preceding end or a tool s
   expect(host.chatTurns()).toEqual([]);
   const messages = [...prior, sent[0], toolStep, toolResult(), paused, {
     role: "assistant", stopReason: "stop", content: [
-      { type: "thinking", thinking: "private reasoning" },
+      { type: "thinking", thinking: "Visible explanation.", thinkingSignature: "opaque signature", itemId: "opaque id" },
+      { type: "redactedThinking", data: "opaque redacted payload", thinking: "not displayable" },
+      { type: "unknown", thinking: "not a thinking block" },
+      { type: "thinking", thinking: "" },
       { type: "text", text: "Hello Sol." },
       { type: "text", text: "Here is the final body." },
     ],
@@ -498,7 +502,10 @@ test("chat consumes its own final response once, not a preceding end or a tool s
   await agentEnd([...messages, {
     role: "custom", customType: "async-result", content: "An unrelated observer finished.",
   }, {
-    ...assistant("Later async-result response, not the chat answer."), stopReason: "stop",
+    role: "assistant", stopReason: "error", content: [
+      { type: "thinking", thinking: "Unrelated later thinking." },
+      { type: "text", text: "Later async-result response, not the chat answer." },
+    ],
   }, user("later", "another prompt"), {
     ...assistant("Not the chat answer either."), stopReason: "stop",
   }]);
@@ -506,6 +513,7 @@ test("chat consumes its own final response once, not a preceding end or a tool s
   expect(host.chatTurns()).toEqual([{
     room: ROOM_KEY, turnId: "say-first", authorName: "Origin",
     text: "Hello Sol.\nHere is the final body.", steps: [],
+    thinking: ["Checking the map.", "Visible explanation."], outcome: "complete",
   }]);
 
   host.chatLines.push({ author: "operator", authorName: "Sol", turnId: "say-second", sequence: 2, text: "again" });
@@ -527,6 +535,22 @@ test("chat consumes its own final response once, not a preceding end or a tool s
     ["say-first", "Hello Sol.\nHere is the final body."],
     ["say-second", "Second answer."],
   ]);
+
+  for (const outcome of ["error", "aborted"]) {
+    const sayId = `say-${outcome}`;
+    host.chatLines.push({ author: "operator", authorName: "Sol", turnId: sayId, sequence: host.chatLines.length + 1, text: outcome });
+    await poll();
+    const ownSay = sent.at(-1);
+    const failed = { role: "assistant", stopReason: outcome, content: [], errorMessage: "raw provider diagnostics" };
+    await agentEnd([ownSay, knock("unrelated"), failed]);
+    expect(host.chatTurns().some((turn: any) => turn.turnId === sayId)).toBe(false);
+    await agentEnd([ownSay, failed]);
+    expect(host.chatTurns().at(-1)).toEqual({
+      room: ROOM_KEY, turnId: sayId, authorName: "Origin", text: "", steps: [], thinking: [], outcome,
+    });
+    await agentEnd([ownSay, failed]);
+    expect(host.chatTurns().filter((turn: any) => turn.turnId === sayId)).toHaveLength(1);
+  }
 });
 
 test("a say being answered keeps a draft on the Host: text throttled, tools at once, steps on the settled turn", async () => {
@@ -552,22 +576,36 @@ test("a say being answered keeps a draft on the Host: text throttled, tools at o
   host.chatLines.push({ author: "operator", authorName: "Sol", turnId: "say-draft", sequence: 3, text: "read the map" });
   await poll();
   const before = host.chatDrafts().length;
+  // OMP emits input message_start before streaming the dispatched say's reply.
+  await fire("message_start", { message: sent.at(-1) });
 
   // Token updates within the throttle window collapse into one report.
   await fire("message_start", { message: assistant("") });
   await fire("message_update", { message: assistant("Let me") });
   await fire("message_update", { message: assistant("Let me look") });
   await sleep(400);
+  const thinkingSnapshot = {
+    role: "assistant", content: [
+      { type: "thinking", thinking: "Checking the map.", thinkingSignature: "opaque signature" },
+      { type: "redactedThinking", data: "opaque data" },
+      { type: "text", text: "Let me look" },
+    ],
+  };
+  await fire("message_update", { message: thinkingSnapshot });
+  await fire("message_update", { message: thinkingSnapshot });
+  await sleep(400);
+  expect(host.chatDrafts().at(-1).thinking).toEqual(["Checking the map."]);
   const textReports = host.chatDrafts().slice(before);
-  expect(textReports.map((draft: any) => draft.text)).toEqual(["Let me look"]);
-  expect(textReports[0]).toMatchObject({ room: ROOM_KEY, turnId: "say-draft", authorName: "Origin", steps: [] });
+  expect(textReports.map((draft: any) => draft.text)).toEqual(["Let me look", "Let me look"]);
+  expect(textReports[0]).toMatchObject({ room: ROOM_KEY, turnId: "say-draft", authorName: "Origin", thinking: [], steps: [] });
+  await fire("message_end", { message: { ...thinkingSnapshot, stopReason: "toolUse" } });
 
   // A tool reports at once, with its stated intent, and again when it ends.
   await fire("tool_execution_start", { toolCallId: "t-1", toolName: "read", intent: "Read the map", args: { path: "map.md" } });
   await sleep(30);
   await fire("tool_execution_end", { toolCallId: "t-1", toolName: "read", result: "…", isError: false });
   await sleep(30);
-  const toolReports = host.chatDrafts().slice(before + 1);
+  const toolReports = host.chatDrafts().slice(before + 2);
   expect(toolReports.map((draft: any) => draft.steps.map((step: any) => [step.tool, step.summary, step.status]))).toEqual([
     [["read", "Read the map", "running"]],
     [["read", "Read the map", "ok"]],
@@ -576,18 +614,43 @@ test("a say being answered keeps a draft on the Host: text throttled, tools at o
 
   // The next assistant message starts fresh text; the steps stay.
   await fire("message_start", { message: assistant("") });
-  await fire("message_update", { message: assistant("The map says hi.") });
+  await fire("message_end", { message: {
+    ...assistant("Still working."), stopReason: "stop", stopDetails: { type: "pause_turn" },
+  } });
+  await fire("message_start", { message: assistant("") });
+  const finalSnapshot = {
+    role: "assistant", content: [
+      { type: "thinking", thinking: "The route is clear." },
+      { type: "text", text: "The map says hi." },
+    ],
+  };
+  await fire("message_update", { message: finalSnapshot });
+  await fire("message_update", { message: finalSnapshot });
   await sleep(400);
   const last = host.chatDrafts().at(-1);
   expect(last.text).toBe("The map says hi.");
   expect(last.steps).toHaveLength(1);
+  expect(last.thinking).toEqual(["Checking the map.", "The route is clear."]);
+  await fire("message_end", { message: { ...finalSnapshot, stopReason: "stop" } });
 
   // The settled turn carries the steps and ends the draft.
   const drafted = host.chatDrafts().length;
-  await agentEnd([sent.at(-1), { ...assistant("The map says hi."), stopReason: "stop" }]);
+  await fire("message_start", { message: {
+    role: "custom", customType: "async-result", content: "An unrelated observer finished.",
+  } });
+  await fire("message_start", { message: assistant("") });
+  await fire("message_update", { message: {
+    role: "assistant", content: [{ type: "thinking", thinking: "Unrelated generated thinking." }],
+  } });
+  await fire("tool_execution_start", { toolCallId: "unrelated-tool", toolName: "read" });
+  await sleep(400);
+  expect(host.chatDrafts()).toHaveLength(drafted);
+  await agentEnd([sent.at(-1), { ...thinkingSnapshot, stopReason: "toolUse" }, toolResult(), { ...finalSnapshot, stopReason: "stop" }]);
   const turn = host.chatTurns().at(-1);
   expect(turn.turnId).toBe("say-draft");
   expect(turn.steps.map((step: any) => step.toolCallId)).toEqual(["t-1"]);
+  expect(turn.thinking).toEqual(["Checking the map.", "The route is clear."]);
+  expect(turn.outcome).toBe("complete");
   await fire("message_update", { message: assistant("after the turn") });
   await sleep(400);
   expect(host.chatDrafts()).toHaveLength(drafted);

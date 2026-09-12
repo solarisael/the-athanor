@@ -8,9 +8,9 @@
 //!
 //! Beside the ring sit the drafts: the spirit side of says still being
 //! answered. A draft is replaced whole on every report and retired by the
-//! settled turn, which keeps the draft's tool steps when it brings none.
+//! settled turn, whose final content is authoritative.
 
-use protocol::{ChatAuthor, ChatDraft, ChatMessage, ChatStep};
+use protocol::{ChatAuthor, ChatDraft, ChatMessage, ChatOutcome, ChatStep};
 use std::collections::VecDeque;
 
 pub const CHAT_MAX_ENTRIES: usize = 256;
@@ -19,6 +19,8 @@ pub const CHAT_MAX_TEXT_CHARS: usize = 32_768;
 // count; the bounds only cap a misbehaving adapter, never a real conversation.
 const CHAT_MAX_DRAFTS: usize = 8;
 const CHAT_MAX_STEPS: usize = 64;
+const CHAT_MAX_THINKING_BLOCKS: usize = 64;
+const CHAT_MAX_THINKING_CHARS: usize = 32_768;
 
 #[derive(Default)]
 pub struct ChatLog {
@@ -37,7 +39,10 @@ impl ChatLog {
         say_id: &str,
         at: String,
     ) -> Option<ChatMessage> {
-        self.append(ChatAuthor::Operator, author_name, text, say_id, vec![], at)
+        self.append(
+            ChatAuthor::Operator, author_name, text, say_id, vec![], vec![],
+            ChatOutcome::Complete, at,
+        )
     }
 
     /// Append one spirit line for a settled turn. `None` means this turn id
@@ -49,10 +54,15 @@ impl ChatLog {
         text: &str,
         turn_id: &str,
         steps: Vec<ChatStep>,
+        thinking: Vec<String>,
+        outcome: ChatOutcome,
         at: String,
     ) -> Option<ChatMessage> {
         self.retire_draft(turn_id);
-        self.append(ChatAuthor::Spirit, author_name, text, turn_id, bounded_steps(steps), at)
+        self.append(
+            ChatAuthor::Spirit, author_name, text, turn_id, bounded_steps(steps),
+            thinking, outcome, at,
+        )
     }
 
     /// Replace the draft for one turn. `None` means the turn already settled,
@@ -63,6 +73,7 @@ impl ChatLog {
         text: &str,
         turn_id: &str,
         steps: Vec<ChatStep>,
+        thinking: Vec<String>,
         at: String,
     ) -> Option<ChatDraft> {
         if self
@@ -78,6 +89,7 @@ impl ChatLog {
             author_name: author_name.to_owned(),
             text: bounded_text(text),
             steps: bounded_steps(steps),
+            thinking: bounded_thinking(thinking),
             at,
         };
         self.drafts.push(draft.clone());
@@ -110,6 +122,8 @@ impl ChatLog {
         text: &str,
         turn_id: &str,
         steps: Vec<ChatStep>,
+        thinking: Vec<String>,
+        outcome: ChatOutcome,
         at: String,
     ) -> Option<ChatMessage> {
         if self
@@ -127,6 +141,8 @@ impl ChatLog {
             at,
             turn_id: turn_id.to_owned(),
             steps,
+            thinking: bounded_thinking(thinking),
+            outcome,
         };
         self.next_sequence += 1;
         self.entries.push_back(message.clone());
@@ -147,6 +163,32 @@ fn bounded_text(text: &str) -> String {
 fn bounded_steps(mut steps: Vec<ChatStep>) -> Vec<ChatStep> {
     steps.truncate(CHAT_MAX_STEPS);
     steps
+}
+
+fn bounded_thinking(mut blocks: Vec<String>) -> Vec<String> {
+    blocks.truncate(CHAT_MAX_THINKING_BLOCKS);
+    let mut remaining = CHAT_MAX_THINKING_CHARS;
+    blocks.retain_mut(|block| {
+        if remaining == 0 {
+            return false;
+        }
+
+        let mut chars = block.char_indices();
+        let mut kept = 0;
+        for _ in 0..remaining {
+            if chars.next().is_none() {
+                break;
+            }
+            kept += 1;
+        }
+        let end = chars.next().map(|(index, _)| index);
+        if let Some(end) = end {
+            block.truncate(end);
+        }
+        remaining -= kept;
+        !block.is_empty()
+    });
+    blocks
 }
 
 #[cfg(test)]
@@ -172,7 +214,7 @@ mod tests {
     fn a_spirit_line_takes_the_sequence_after_the_operator_line_before_it() {
         let mut log = ChatLog::default();
         let say = log.say("Sol", "hello dragon", "say-1", now()).unwrap();
-        let turn = log.turn("Kodo", "thump thump", "turn-1", vec![], now()).unwrap();
+        let turn = log.turn("Kodo", "thump thump", "turn-1", vec![], vec![], ChatOutcome::Complete, now()).unwrap();
         assert_eq!(turn.sequence, say.sequence + 1);
     }
 
@@ -180,13 +222,13 @@ mod tests {
     fn a_draft_is_replaced_whole_and_retired_by_its_turn() {
         let mut log = ChatLog::default();
         log.say("Sol", "hello", "say-1", now()).unwrap();
-        log.draft("Kodo", "thu", "say-1", vec![], now()).unwrap();
-        let draft = log.draft("Kodo", "thump", "say-1", vec![step("t-1")], now()).unwrap();
+        log.draft("Kodo", "thu", "say-1", vec![], vec![], now()).unwrap();
+        let draft = log.draft("Kodo", "thump", "say-1", vec![step("t-1")], vec![], now()).unwrap();
         assert_eq!(log.drafts(), vec![draft]);
-        let turn = log.turn("Kodo", "thump thump", "say-1", vec![step("t-1")], now()).unwrap();
+        let turn = log.turn("Kodo", "thump thump", "say-1", vec![step("t-1")], vec![], ChatOutcome::Complete, now()).unwrap();
         assert_eq!(turn.steps, vec![step("t-1")]);
         assert!(log.drafts().is_empty());
-        assert!(log.draft("Kodo", "late", "say-1", vec![], now()).is_none());
+        assert!(log.draft("Kodo", "late", "say-1", vec![], vec![], now()).is_none());
     }
 
     #[test]
@@ -203,7 +245,7 @@ mod tests {
         let mut log = ChatLog::default();
         log.say("Sol", "hello", "shared-id", now())
             .expect("the operator side enters the ring");
-        log.turn("Kodo", "answer", "shared-id", vec![], now())
+        log.turn("Kodo", "answer", "shared-id", vec![], vec![], ChatOutcome::Complete, now())
             .expect("the spirit side is not the operator side");
         assert_eq!(log.snapshot().len(), 2);
     }

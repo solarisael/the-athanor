@@ -39,6 +39,9 @@ type ChatStep = {
 
 type ChatDraft = {
   text: string;
+  thinking: string[];
+  completedThinking: string[];
+  owned: boolean;
   steps: ChatStep[];
   reports: number;
   dirty: boolean;
@@ -133,7 +136,7 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     const next = unanswered[0];
     if (!next) return;
     state.pendingSayId = next.turnId;
-    state.draft = { text: "", steps: [], reports: 0, dirty: false, flushing: false, timer: null };
+    state.draft = { text: "", thinking: [], completedThinking: [], owned: false, steps: [], reports: 0, dirty: false, flushing: false, timer: null };
     state.pi.sendMessage(sayMessage(next), { deliverAs: "nextTurn", triggerTurn: true });
   } catch (error) {
     if (!(error instanceof HostUnavailable)) {
@@ -196,13 +199,12 @@ export async function noteChatTurnEnd(
   // A delayed snapshot may include async-result follow-ups after this say's
   // answer. Keep its first settled response, never the latest session reply.
   // OMP re-samples pause_turn stops, so those are progress, not completion.
-  const assistant = ownedMessages.find((message) =>
-    message?.role === "assistant"
-    && message.stopReason
-    && message.stopReason !== "toolUse"
-    && message.stopDetails?.type !== "pause_turn"
-  );
-  if (!assistant) return;
+  const assistantIndex = ownedMessages.findIndex(isSettledAssistant);
+  if (assistantIndex < 0) return;
+  const assistant = ownedMessages[assistantIndex];
+  const thinking = ownedMessages.slice(0, assistantIndex + 1).flatMap(displayableThinking);
+  const outcome = assistant.stopReason === "error" || assistant.stopReason === "aborted"
+    ? assistant.stopReason : "complete";
   const responseText = conversationText(assistant);
   state.reporting = true;
   const steps = state.draft?.steps ?? [];
@@ -219,6 +221,8 @@ export async function noteChatTurnEnd(
             turnId: sayId,
             authorName: state.binding.spirit,
             text: responseText,
+            thinking,
+            outcome,
             steps,
           },
         },
@@ -240,7 +244,7 @@ export async function noteChatTurnEnd(
 // from disk on every token.
 function draftingDoorman(): ChatDoormanState | null {
   for (const state of chatDoormen.values()) {
-    if (state.pendingSayId && state.draft && !state.stopped) return state;
+    if (state.pendingSayId && state.draft?.owned && !state.stopped) return state;
   }
   return null;
 }
@@ -281,6 +285,7 @@ async function flushDraft(state: ChatDoormanState): Promise<void> {
             authorName: state.binding.spirit,
             text: draft.text,
             steps: draft.steps,
+            thinking: [...draft.completedThinking, ...draft.thinking],
           },
         },
         `chat-draft:${sayId}:${draft.reports}`,
@@ -298,20 +303,59 @@ async function flushDraft(state: ChatDoormanState): Promise<void> {
   }
 }
 
-/// A new assistant message starts a fresh draft text; the steps stay.
-export function noteChatMessageStart(message: { role?: string }): void {
-  const state = draftingDoorman();
-  if (!state?.draft || message?.role !== "assistant") return;
-  state.draft.text = "";
+// This matches OMP's visible thinking blocks, not signatures or redacted data.
+function displayableThinking(message: any): string[] {
+  if (message?.role !== "assistant" || !Array.isArray(message.content)) return [];
+  return message.content.flatMap((part: any) =>
+    part?.type === "thinking" && typeof part.thinking === "string" && part.thinking.length
+      ? [part.thinking] : []);
+}
+
+// A new assistant keeps earlier thinking and tool history, but replaces its text.
+export function noteChatMessageStart(message: any): void {
+  for (const state of chatDoormen.values()) {
+    const draft = state.draft;
+    if (!draft || state.stopped) continue;
+    if (message?.role === "user" || generatedTurnKey(message) !== null) {
+      draft.owned = message?.role === "custom"
+        && message.customType === "athanor-chat-say"
+        && message.details?.sayId === state.pendingSayId;
+      continue;
+    }
+    if (!draft.owned || message?.role !== "assistant") continue;
+    draft.completedThinking.push(...draft.thinking);
+    draft.thinking = [];
+    draft.text = "";
+    noteChatMessageUpdate(message);
+  }
 }
 
 export function noteChatMessageUpdate(message: { role?: string }): void {
   const state = draftingDoorman();
   if (!state?.draft || message?.role !== "assistant") return;
   const text = conversationText(message);
-  if (text === state.draft.text) return;
-  state.draft.text = text;
+  const thinking = displayableThinking(message);
+  const draft = state.draft;
+  if (text === draft.text && thinking.length === draft.thinking.length
+    && thinking.every((block, index) => block === draft.thinking[index])) return;
+  draft.text = text;
+  draft.thinking = thinking;
   scheduleDraftFlush(state, false);
+}
+
+function isSettledAssistant(message: any): boolean {
+  return message?.role === "assistant"
+    && Boolean(message.stopReason)
+    && message.stopReason !== "toolUse"
+    && message.stopDetails?.type !== "pause_turn";
+}
+
+export function noteChatMessageEnd(message: any): void {
+  const state = draftingDoorman();
+  if (!state?.draft || message?.role !== "assistant") return;
+  noteChatMessageUpdate(message);
+  // agent_end may arrive after an unrelated async-result response has started.
+  if (isSettledAssistant(message)) state.draft.owned = false;
 }
 
 function stepSummary(intent: unknown, args: unknown): string {

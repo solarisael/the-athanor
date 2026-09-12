@@ -640,6 +640,40 @@ pub struct ChatStep {
     pub elapsed_ms: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatOutcome {
+    #[default]
+    Complete,
+    Error,
+    Aborted,
+}
+
+impl<'de> Deserialize<'de> for ChatOutcome {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct OutcomeVisitor;
+
+        impl serde::de::Visitor<'_> for OutcomeVisitor {
+            type Value = ChatOutcome;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a chat outcome string: complete, error, or aborted")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                match value {
+                    "complete" => Ok(ChatOutcome::Complete),
+                    "error" => Ok(ChatOutcome::Error),
+                    "aborted" => Ok(ChatOutcome::Aborted),
+                    _ => Err(E::unknown_variant(value, &["complete", "error", "aborted"])),
+                }
+            }
+        }
+
+        deserializer.deserialize_str(OutcomeVisitor)
+    }
+}
+
 /// One line of the room conversation as the chat projection serves it.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -656,6 +690,11 @@ pub struct ChatMessage {
     /// operator lines.
     #[serde(default)]
     pub steps: Vec<ChatStep>,
+    /// Displayable thinking only; the Host caps blocks and total characters.
+    #[serde(default)]
+    pub thinking: Vec<String>,
+    #[serde(default)]
+    pub outcome: ChatOutcome,
 }
 
 /// The spirit side of a say still being answered: the text so far and the
@@ -668,6 +707,8 @@ pub struct ChatDraft {
     pub author_name: String,
     pub text: String,
     pub steps: Vec<ChatStep>,
+    #[serde(default)]
+    pub thinking: Vec<String>,
     pub at: String,
 }
 
@@ -691,6 +732,10 @@ pub struct ChatTurnPayload {
     pub text: String,
     #[serde(default)]
     pub steps: Vec<ChatStep>,
+    #[serde(default)]
+    pub thinking: Vec<String>,
+    #[serde(default)]
+    pub outcome: ChatOutcome,
 }
 
 /// The room's adapter reporting the spirit side of a turn still running.
@@ -703,6 +748,8 @@ pub struct ChatDraftPayload {
     pub text: String,
     #[serde(default)]
     pub steps: Vec<ChatStep>,
+    #[serde(default)]
+    pub thinking: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

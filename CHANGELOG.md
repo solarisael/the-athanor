@@ -47,6 +47,12 @@ the exact implementation record.
 
 ### Changed
 
+- Insula raw observations expire after seven UTC days. Migration 0032 updates existing expiry timestamps without deleting observations.
+  Daily cleanup selects expired records without a second retention delay. The first check still waits five minutes.
+  Coverage checks, permanent summaries, tombstones, and historical fourteen-day receipts remain intact.
+- Work-mode Presence includes always-on coding guidance without requiring a trigger.
+  Native lesson guards still require explicit approval and a trigger.
+
 - `remember` skips backups unless the caller requests one; `sleep` keeps backups enabled by default.
   Skipped backups return `Skipped`, not `Ok`.
   PostgreSQL dumps exclude the `insula` schema and still refuse database migrations newer than the binary.

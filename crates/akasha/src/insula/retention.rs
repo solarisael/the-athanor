@@ -132,7 +132,7 @@ pub async fn run_retention(
     cutoff: DateTime<Utc>,
     days: i16,
 ) -> Result<RetentionReceipt, InsulaError> {
-    if !atom(house_id, 64) || days <= 0 || cutoff > Utc::now() {
+    if !atom(house_id, 64) || days != 7 || cutoff > Utc::now() {
         return Err(bad("retention", "invalid_request"));
     }
     let cutoff = cutoff
@@ -209,7 +209,7 @@ pub async fn run_retention(
     let drops: i64 = a.try_get("drops")?;
     let watermark: DateTime<Utc> = a.try_get("watermark")?;
     let coverage: String = a.try_get("coverage")?;
-    // Exact observed_at + 14-day expiry, a minute-truncated cutoff, and a
+    // Exact observed_at + 7-day expiry, a minute-truncated cutoff, and a
     // strict `< cutoff` predicate make every selected source minute complete:
     // the boundary minute is wholly retained and every prior minute is wholly
     // eligible. Comparing the selected source groups to whole Vitals rows is

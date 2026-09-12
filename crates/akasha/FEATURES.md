@@ -14,7 +14,8 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `substrate_health`, `vault_recall`, and `substrate_migrations` answer before the pool opens.
 - `protocol_error_class`, `app_error_class`, and `backup_error_class` name the failure for the observation. `app_error_outcome` marks refusals as refusals.
 - `cli_subcommand` runs five commands: `backup`, `restore`, `health`, `migrations`, and `semantic-vocabulary-refresh`.
-- `spawn_retention_service` sweeps raw observation rows once each day. The first sweep waits five minutes.
+- `spawn_retention_service` checks expired raw observations once each day. The first check waits five minutes.
+- Raw observations expire after seven UTC days. Each sweep checks expiry against the current UTC minute.
 - `WslKeepalive` holds a helper process open on Windows and terminates it on drop.
 
 ### remember/ — the durable write
@@ -119,7 +120,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `vitals` rolls each event into the per-minute vitals row.
 - `query_trace` reads one trace inside the caller's scope, up to 1000 rows.
 - `query_vitals` reads the minute rollups, up to 5000 rows.
-- `run_retention` deletes raw rows past the cutoff and writes one sweep receipt with counts and hashes.
+- `run_retention` deletes expired raw observations only after it verifies complete Vitals coverage. It preserves summaries, tombstones, and deletion receipts.
 - `query_retention` reads the sweep receipts with their tombstone summary, up to 100 rows.
 - `query_unverified_exit` reads, for one room, the sessions whose restart intent reached `exiting` and never reached `verified` inside the stage window, up to 100 rows. It observes the restart plane and commands nothing.
 - `lock` takes an advisory lock so two writers cannot race on one logical key.

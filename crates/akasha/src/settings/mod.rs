@@ -46,7 +46,7 @@ impl Default for RoomSettings {
             cluster_stale_chunk_count: 250,
             cluster_stale_fraction: 0.05,
             cluster_stale_days: 7,
-            insula_retention_days: 14,
+            insula_retention_days: 7,
             backup_keep_count: 3,
             house_language: "portuguese".into(),
             house_tz: "America/Sao_Paulo".into(),
@@ -158,12 +158,14 @@ impl RoomSettings {
         if self.cluster_stale_chunk_count <= 0
             || self.cluster_stale_days <= 0
             || self.cluster_stale_fraction > 1.0
-            || self.insula_retention_days <= 0
             || self.backup_keep_count == 0
         {
             return Err(decode_error(
                 "room setting limit must be positive and in range",
             ));
+        }
+        if self.insula_retention_days != 7 {
+            return Err(decode_error("unsupported Insula retention policy"));
         }
         if self.house_language.is_empty()
             || !self
@@ -192,35 +194,16 @@ fn decode_error(message: impl Into<String>) -> sqlx::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
-    fn settings_load_uses_complete_current_defaults() {
-        let loaded = RoomSettings::from_rows(std::iter::empty()).unwrap();
-        assert_eq!(
-            serde_json::to_value(loaded).unwrap(),
-            json!({
-                "remember_section_split_chars": 4_000,
-                "remember_chunk_chars": 2_200,
-                "remember_chunk_overlap_chars": 200,
-                "recall_temporal_half_life_days": 7.0,
-                "recall_temporal_durability_curve_power": 2,
-                "recall_semantic_similarity_weight": 0.6,
-                "recall_semantic_rank_weight": 0.4,
-                "recall_content_similarity_weight": 0.6,
-                "recall_content_rank_weight": 0.4,
-                "recall_semantic_lexical_score_weight": 0.15,
-                "recall_semantic_lexical_rank_weight": 0.05,
-                "recall_thread_base_weight": 0.35,
-                "recall_thread_rank_weight": 0.55,
-                "cluster_stale_chunk_count": 250,
-                "cluster_stale_fraction": 0.05,
-                "cluster_stale_days": 7,
-                "insula_retention_days": 14,
-                "backup_keep_count": 3,
-                "house_language": "portuguese",
-                "house_tz": "America/Sao_Paulo",
-            })
+    fn settings_load_rejects_unsupported_retention_policy() {
+        let supported =
+            RoomSettings::from_rows([Ok(("insula_retention_days".into(), Value::from(7)))])
+                .unwrap();
+        assert_eq!(supported.insula_retention_days, 7);
+        assert!(
+            RoomSettings::from_rows([Ok(("insula_retention_days".into(), Value::from(14),))])
+                .is_err()
         );
     }
 

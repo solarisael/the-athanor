@@ -170,7 +170,7 @@ pub struct ObservationEvent {
 
 fn expires(e: &ObservationEvent) -> Result<DateTime<Utc>, InsulaError> {
     e.observed_at
-        .checked_add_signed(Duration::days(14))
+        .checked_add_signed(Duration::days(7))
         .ok_or_else(|| bad("observedAt", "expiry_overflow"))
 }
 

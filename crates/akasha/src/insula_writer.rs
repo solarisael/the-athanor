@@ -680,7 +680,10 @@ mod tests {
         let started = Instant::now();
         let unflushed = drain_with_ceiling(stuck, Duration::from_millis(40), &state).await;
         assert!(started.elapsed() >= Duration::from_millis(40));
-        assert!(started.elapsed() < Duration::from_secs(2), "ceiling is bounded");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "ceiling is bounded"
+        );
         assert_eq!(unflushed, 9 - 6 + 2);
     }
 
@@ -720,7 +723,10 @@ mod tests {
         };
 
         drop(deferred("knock_poll_empty"));
-        assert!(receiver.try_recv().is_err(), "a dropped deferred span emits nothing");
+        assert!(
+            receiver.try_recv().is_err(),
+            "a dropped deferred span emits nothing"
+        );
 
         let span = deferred("knock_poll_claimed");
         let span_id = span.span_id.to_string();
@@ -813,6 +819,15 @@ mod tests {
     fn isolated_database_url() -> String {
         let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
             .expect("Insula writer proof requires a dedicated PostgreSQL URL");
+        let options: sqlx::postgres::PgConnectOptions = url.parse().expect("valid test URL");
+        let database = options
+            .get_database()
+            .expect("explicit test database")
+            .to_ascii_lowercase();
+        assert!(
+            database.contains("test") && !database.contains("solarisael"),
+            "refusing a non-test or live database, including percent-encoded names"
+        );
         let lower = url.to_ascii_lowercase();
         assert!(
             !lower.contains("solarisael_memory") && !lower.contains("solarisael-house"),
@@ -830,6 +845,11 @@ mod tests {
             .execute(&pool)
             .await?;
         sqlx::raw_sql(INSULA_MIGRATION).execute(&pool).await?;
+        sqlx::raw_sql(include_str!(
+            "../../../substrate/migrations/0032_insula_seven_day_retention.sql"
+        ))
+        .execute(&pool)
+        .await?;
         Ok(pool)
     }
 

@@ -42,3 +42,6 @@ path = "src/lib.rs"
 # and the live service all address it. Renaming the exe is a deploy-day migration.
 name = "athanor-substrate"
 path = "src/main.rs"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["process"] }

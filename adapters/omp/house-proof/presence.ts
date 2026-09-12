@@ -208,7 +208,7 @@ function presenceDirectives(
       sourceIds: ["identity:active-spirit"],
       triggerScope: ["text"],
     },
-    ...lessons.slice(0, 8).map((lesson) => ({
+    ...lessons.slice(0, 30).map((lesson) => ({
       id: `presence:${lesson.id}`,
       kind: "enact" as const,
       severity: "advisory" as const,

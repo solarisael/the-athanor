@@ -7,22 +7,21 @@ use akasha::migrations::{migration_pool, run_migrations};
 use akasha::{
     AppError, Config, DesignDocumentQueryParams, DesignDocumentWriteParams, EntityResolveParams,
     GigaWorkerHandle, LessonContextParams, LessonDeleteParams, LessonQueryParams,
-    LessonTriggerMatchParams,
-    LessonUpdateParams, OutcomeClass, QuestBoardParams, QuestChargebookParams, QuestClaimParams,
-    QuestClockParams, QuestEvidenceParams, QuestPostParams, QuestReportParams,
-    SubstrateHealthOptions, TrustedBinding, anamnesis, anamnesis_write, canon_read, canon_write,
-    cluster_maintenance, design_document_query, design_document_write, entity_resolve,
-    giga_candidate_list, giga_conversation_ingest, giga_event_claim, giga_event_finish,
-    giga_event_ingest, giga_event_replay, giga_health, giga_promote, giga_queue_maintenance,
-    giga_review, giga_tool_promote, giga_tool_review, hallway_create, hallway_inbox, hallway_join,
-    hallway_knock, hallway_knock_policy, hallway_post, hallway_read, lesson_context, lesson_delete,
-    lesson_query, lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake,
-    quest_board, quest_chargebook, quest_claim, quest_clock, quest_evidence, quest_post,
-    quest_report, recall, refresh_semantic_vocabulary, remember, restart_claim, restart_request,
-    restart_status, restart_transition, restart_verify, spawn_giga_worker, substrate_health,
-    substrate_health_with_config, validate_trusted_binding,
+    LessonTriggerMatchParams, LessonUpdateParams, OutcomeClass, QuestBoardParams,
+    QuestChargebookParams, QuestClaimParams, QuestClockParams, QuestEvidenceParams,
+    QuestPostParams, QuestReportParams, SubstrateHealthOptions, TrustedBinding, anamnesis,
+    anamnesis_write, canon_read, canon_write, cluster_maintenance, design_document_query,
+    design_document_write, entity_resolve, giga_candidate_list, giga_conversation_ingest,
+    giga_event_claim, giga_event_finish, giga_event_ingest, giga_event_replay, giga_health,
+    giga_promote, giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review,
+    hallway_create, hallway_inbox, hallway_join, hallway_knock, hallway_knock_policy, hallway_post,
+    hallway_read, lesson_context, lesson_delete, lesson_query, lesson_trigger_match, lesson_update,
+    paper_boat_sleep, paper_boat_wake, quest_board, quest_chargebook, quest_claim, quest_clock,
+    quest_evidence, quest_post, quest_report, recall, refresh_semantic_vocabulary, remember,
+    restart_claim, restart_request, restart_status, restart_transition, restart_verify,
+    spawn_giga_worker, substrate_health, substrate_health_with_config, validate_trusted_binding,
 };
-use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono::{DateTime, Timelike, Utc};
 use hearth::{
     CanonReadRequest, CanonWriteRequest,
     ClusterMaintenanceRequest as DomainClusterMaintenanceRequest, GigaEvent, GigaEventClaimRequest,
@@ -735,8 +734,8 @@ fn retention_schedule() -> (std::time::Duration, std::time::Duration) {
 }
 
 fn retention_cutoff(now: DateTime<Utc>) -> DateTime<Utc> {
-    (now - Duration::days(14))
-        .with_second(0)
+    // Raw expiry already includes retention; the sweep must not subtract it again.
+    now.with_second(0)
         .and_then(|value| value.with_nanosecond(0))
         .expect("UTC timestamps always support minute truncation")
 }
@@ -1509,7 +1508,12 @@ mod tests {
             panic!("expected root Knock");
         };
         assert_eq!(root.parent_knock_id, None);
-        assert!(serde_json::to_value(root).unwrap().get("parentKnockId").is_none());
+        assert!(
+            serde_json::to_value(root)
+                .unwrap()
+                .get("parentKnockId")
+                .is_none()
+        );
 
         let parent = "3d3051cb-aee1-4a2d-9316-15e383374f39";
         envelope["params"]["parentKnockId"] = serde_json::json!(parent);

@@ -54,6 +54,7 @@ const MIGRATIONS: &[&str] = &[
     migration!("0026_restart.sql"),
     migration!("0027_restart_successor_proof.sql"),
     migration!("0028_room_settings.sql"),
+    migration!("0032_insula_seven_day_retention.sql"),
 ];
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -64,6 +65,15 @@ const OTHER_ROOM: &str = "reference-other";
 fn isolated_database_url() -> String {
     let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
+    let options: sqlx::postgres::PgConnectOptions = url.parse().expect("valid test URL");
+    let database = options
+        .get_database()
+        .expect("explicit test database")
+        .to_ascii_lowercase();
+    assert!(
+        database.contains("test") && !database.contains("solarisael"),
+        "refusing a non-test or live database, including percent-encoded names"
+    );
     let lower = url.to_ascii_lowercase();
     assert!(
         !lower.contains("solarisael_memory"),

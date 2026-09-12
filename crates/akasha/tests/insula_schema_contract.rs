@@ -8,6 +8,15 @@ const INSULA_MIGRATION: &str = include_str!("../../../substrate/migrations/0022_
 fn isolated_database_url() -> String {
     let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("Insula proof requires a dedicated PostgreSQL URL");
+    let options: sqlx::postgres::PgConnectOptions = url.parse().expect("valid test URL");
+    let database = options
+        .get_database()
+        .expect("explicit test database")
+        .to_ascii_lowercase();
+    assert!(
+        database.contains("test") && !database.contains("solarisael"),
+        "refusing a non-test or live database, including percent-encoded names"
+    );
     let lower = url.to_ascii_lowercase();
     assert!(
         !lower.contains("solarisael_memory") && !lower.contains("solarisael-house"),
@@ -180,6 +189,147 @@ async fn insula_retention_has_deterministic_same_house_coverage_proof() -> TestR
         );
     }
 
+    sqlx::query("DROP SCHEMA insula CASCADE")
+        .execute(&pool)
+        .await?;
+    Ok(())
+}
+
+// Kills destructive upgrades, hash rewrites, historical receipt relabeling,
+// and calendar-day expiry arithmetic across a daylight-saving transition.
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets its dedicated Insula schema"]
+async fn seven_day_upgrade_preserves_evidence_and_uses_elapsed_hours_across_dst() -> TestResult {
+    let pool = fresh_insula().await?;
+    // One connection keeps the deliberately non-UTC session timezone in scope.
+    sqlx::query("SET TIME ZONE 'America/New_York'")
+        .execute(&pool)
+        .await?;
+    sqlx::raw_sql(
+        "INSERT INTO insula.log (
+            event_id, span_id, trace_id, writer_id, writer_sequence,
+            house_id, room, spirit, session_id, component, layer, operation,
+            phase, observed_at, outcome_class, idempotency_scope,
+            idempotency_key, semantic_hash, expires_at
+         )
+         SELECT gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 1,
+                'solarisael', 'upgrade', 'Proof', 'upgrade-session', 'substrate', 'domain',
+                'upgrade', 'point', observed, 'ok', 'trace_span',
+                encode(sha256(observed::text::bytea),'hex'), repeat('a',64),
+                observed + INTERVAL '14 days'
+         FROM (VALUES ('2026-03-04 12:00:00-05'::timestamptz), (NOW())) source(observed);
+         INSERT INTO insula.vitals_minute (
+            query_name, query_version, minute, house_id, room, spirit, component,
+            layer, operation, phase, outcome_class, event_count,
+            source_first_sequence, source_last_sequence, source_first_observed_at,
+            source_last_observed_at, source_coverage_hash
+         )
+         SELECT 'insula.vitals.minute', 1, date_trunc('minute', observed_at),
+                house_id, room, spirit, component, layer, operation, phase, outcome_class, 1,
+                writer_sequence, writer_sequence, observed_at, observed_at,
+                encode(sha256((event_id::text || ':' || semantic_hash)::bytea),'hex')
+         FROM insula.log;
+         INSERT INTO insula.retention_receipts (
+            receipt_id, receipt_kind, receipt_version, house_id, sweep_version, sweep_key,
+            retention_days, swept_through, window_start, window_end, event_count, writer_count,
+            duplicate_count_sum, drop_count_sum, coverage_version, coverage_hash,
+            rollup_query_name, rollup_query_version, rollup_watermark
+         ) VALUES (
+            gen_random_uuid(), 'insula.retention.raw_delete', 1, 'solarisael', 1, repeat('b',64),
+            14, NOW(), NOW()-INTERVAL '30 days', NOW()-INTERVAL '30 days', 1, 1,
+            0, 0, 1, repeat('c',64), 'insula.vitals.minute', 1, NOW()
+         );",
+    )
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO insula.log_tombstones (
+            tombstone_id, receipt_id, receipt_kind, house_id, writer_id,
+            first_writer_sequence, last_writer_sequence, first_observed_at, last_observed_at,
+            event_count, room_count, spirit_count, session_count, duplicate_count_sum,
+            drop_count_sum, coverage_version, coverage_hash
+         )
+         SELECT gen_random_uuid(), receipt_id, receipt_kind, house_id, gen_random_uuid(),
+                1, 1, window_start, window_end, 1, 1, 1, 1, 0, 0, 1, coverage_hash
+         FROM insula.retention_receipts",
+    )
+    .execute(&pool)
+    .await?;
+    let tombstones_before: serde_json::Value = sqlx::query_scalar(
+        "SELECT jsonb_agg(to_jsonb(t) ORDER BY tombstone_id) FROM insula.log_tombstones t",
+    )
+    .fetch_one(&pool)
+    .await?;
+    let raw_before: serde_json::Value = sqlx::query_scalar(
+        "SELECT jsonb_agg(to_jsonb(l)-'expires_at' ORDER BY event_id) FROM insula.log l",
+    )
+    .fetch_one(&pool)
+    .await?;
+    let summaries_before: serde_json::Value = sqlx::query_scalar(
+        "SELECT jsonb_agg(to_jsonb(v) ORDER BY minute) FROM insula.vitals_minute v",
+    )
+    .fetch_one(&pool)
+    .await?;
+    let receipts_before: serde_json::Value = sqlx::query_scalar(
+        "SELECT jsonb_agg(to_jsonb(r) ORDER BY receipt_id) FROM insula.retention_receipts r",
+    )
+    .fetch_one(&pool)
+    .await?;
+    let migration =
+        include_str!("../../../substrate/migrations/0032_insula_seven_day_retention.sql");
+    sqlx::raw_sql(migration).execute(&pool).await?;
+    sqlx::raw_sql(migration).execute(&pool).await?;
+    let raw_after: serde_json::Value = sqlx::query_scalar(
+        "SELECT jsonb_agg(to_jsonb(l)-'expires_at' ORDER BY event_id) FROM insula.log l",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        raw_after, raw_before,
+        "upgrade and replay preserve every raw field except expiry"
+    );
+    let summaries_after: serde_json::Value = sqlx::query_scalar(
+        "SELECT jsonb_agg(to_jsonb(v) ORDER BY minute) FROM insula.vitals_minute v",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(summaries_after, summaries_before);
+    let receipts_after: serde_json::Value = sqlx::query_scalar(
+        "SELECT jsonb_agg(to_jsonb(r) ORDER BY receipt_id) FROM insula.retention_receipts r",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        receipts_after, receipts_before,
+        "historical fourteen-day proof must stay truthful"
+    );
+    let tombstones_after: serde_json::Value = sqlx::query_scalar(
+        "SELECT jsonb_agg(to_jsonb(t) ORDER BY tombstone_id) FROM insula.log_tombstones t",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(tombstones_after, tombstones_before);
+    let exact_expiry: bool = sqlx::query_scalar(
+        "SELECT bool_and(expires_at-observed_at = INTERVAL '168 hours') FROM insula.log",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert!(exact_expiry);
+    let invalid_expiry = sqlx::query(
+        "UPDATE insula.log SET expires_at=observed_at+INTERVAL '7 days'
+         WHERE observed_at='2026-03-04 12:00:00-05'::timestamptz",
+    )
+    .execute(&pool)
+    .await
+    .expect_err("DST-shortened calendar week must violate exact expiry");
+    assert_eq!(
+        invalid_expiry
+            .as_database_error()
+            .and_then(|e| e.code())
+            .as_deref(),
+        Some("23514")
+    );
+    sqlx::query("SET TIME ZONE 'UTC'").execute(&pool).await?;
     sqlx::query("DROP SCHEMA insula CASCADE")
         .execute(&pool)
         .await?;

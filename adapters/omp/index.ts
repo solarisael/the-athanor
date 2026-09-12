@@ -89,7 +89,7 @@ import { messageText } from "./house-proof/text.ts";
 import { anchorTurnAdditions, currentTurnOrigin, turnKeysByMessage } from "./house-proof/turn-origin.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
-import { installLessonTtsrBridge, syncLessonTtsr } from "./house-proof/lesson-ttsr.ts";
+import { installLessonTtsrBridge, selectPresenceLessons, syncLessonTtsr } from "./house-proof/lesson-ttsr.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./house-proof/context.ts";
 import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./house-proof/constants.ts";
 import { showHouseContextFeedback } from "./house-proof/feedback.ts";
@@ -994,7 +994,6 @@ export default function solarisaelHouseProof(pi, release) {
     const warnings: string[] = [];
     let presenceBoat: PresenceMaterial | null = null;
     let presenceAnamnesis: PresenceMaterial[] = [];
-    let presenceLessons: PresenceMaterial[] = [];
     let presenceRecalled: PresenceMaterial[] = [];
     let houseState = null;
 
@@ -1040,9 +1039,7 @@ export default function solarisaelHouseProof(pi, release) {
     });
     for (const warning of lessonTtsr.warnings) warnings.push(warning);
     if (lessonTtsr.active > 0) activities.push(`${lessonTtsr.active} native lesson guard${lessonTtsr.active === 1 ? "" : "s"}`);
-    // Presence is handed the same rules the native guards were armed with, so
-    // the lived middle never quotes a lesson the session is not actually under.
-    presenceLessons = lessonMaterials(lessonTtsr.lessons);
+    let lessonMode = houseState?.recallPolicy?.resolvedMode;
     let conversation: ConversationCapture | null = null;
     try {
       conversation = await logConversationWindow(
@@ -1288,6 +1285,7 @@ export default function solarisaelHouseProof(pi, release) {
         const preliminaryRoute = contextAnalysis.route;
         const snapshot = await policyClient.inspect();
         policyState = snapshot.recallPolicy;
+        lessonMode = policyState.resolvedMode;
         const resolution = policyState?.requestedMode !== "quiet"
           && preliminaryRoute.entityResolutionSuggested
           ? await resolveEntities({
@@ -1324,6 +1322,7 @@ export default function solarisaelHouseProof(pi, release) {
         });
         decision = evaluation.decision;
         policyState = evaluation.snapshot.recallPolicy;
+        lessonMode = decision.resolvedMode;
 
 
         if (decision.shouldRecall && decision.refreshReason) {
@@ -1493,7 +1492,7 @@ export default function solarisaelHouseProof(pi, release) {
           relationship: presencePulse ? [presencePulse] : [],
           anamnesis: presenceAnamnesis,
           recalled: presenceRecalled,
-          lessons: presenceLessons,
+          lessons: lessonMaterials(selectPresenceLessons(lessonTtsr, lessonMode)),
         });
         pendingPresenceContracts.set(`${room}\0${hostSession}`, {
           contractId: compiled.contractId,

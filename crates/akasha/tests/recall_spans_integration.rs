@@ -13,8 +13,7 @@
 
 use akasha::insula::TrustedBinding;
 use akasha::{
-    Config, EmbeddingMode, end_span, flush_insula_emitter, init_insula_emitter, recall,
-    start_span,
+    Config, EmbeddingMode, end_span, flush_insula_emitter, init_insula_emitter, recall, start_span,
 };
 use hearth::{RecallRequest, RoomKey};
 use sqlx::{
@@ -64,6 +63,7 @@ const MIGRATIONS: &[&str] = &[
     migration!("0026_restart.sql"),
     migration!("0027_restart_successor_proof.sql"),
     migration!("0028_room_settings.sql"),
+    migration!("0032_insula_seven_day_retention.sql"),
 ];
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -92,6 +92,15 @@ const EXPECTED_PHASES: &[&str] = &[
 fn isolated_database_url() -> String {
     let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("dedicated test database URL must be configured when this proof is run");
+    let options: sqlx::postgres::PgConnectOptions = url.parse().expect("valid test URL");
+    let database = options
+        .get_database()
+        .expect("explicit test database")
+        .to_ascii_lowercase();
+    assert!(
+        database.contains("test") && !database.contains("solarisael"),
+        "refusing a non-test or live database, including percent-encoded names"
+    );
     let lower = url.to_ascii_lowercase();
     assert!(
         !lower.contains("solarisael_memory"),
@@ -311,7 +320,11 @@ async fn every_recall_phase_is_a_child_span_with_a_duration() -> TestResult {
             "{} must be a child of the recall span",
             row.operation
         );
-        assert_eq!(row.trace_id, parent.trace_id, "{} shares the trace", row.operation);
+        assert_eq!(
+            row.trace_id, parent.trace_id,
+            "{} shares the trace",
+            row.operation
+        );
         assert!(
             row.duration_us.is_some(),
             "{} must end with a duration",
@@ -334,10 +347,7 @@ async fn every_recall_phase_is_a_child_span_with_a_duration() -> TestResult {
     expected.sort_unstable();
     assert_eq!(observed, expected, "phase set");
 
-    let children_us: i64 = by_phase
-        .values()
-        .filter_map(|row| row.duration_us)
-        .sum();
+    let children_us: i64 = by_phase.values().filter_map(|row| row.duration_us).sum();
     let parent_us = parent.duration_us.expect("parent duration");
     assert!(
         children_us <= parent_us,
@@ -370,8 +380,7 @@ async fn every_recall_phase_is_a_child_span_with_a_duration() -> TestResult {
 /// The statement `recall.content` ran before the trigram cut, kept verbatim
 /// as the oracle for the rewrite. `$5` is the term-pattern array, which the
 /// new lane spends as one parameter per pattern instead.
-const CONTENT_LANE_BEFORE_THE_CUT: &str =
-    "SELECT m.id AS memory_id,c.chunk_index,
+const CONTENT_LANE_BEFORE_THE_CUT: &str = "SELECT m.id AS memory_id,c.chunk_index,
             word_similarity($1,c.body)::double precision AS sim
      FROM memory_chunks c
      JOIN memories m ON m.id=c.memory_id

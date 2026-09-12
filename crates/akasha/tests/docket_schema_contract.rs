@@ -21,6 +21,15 @@ const BELL_MIGRATION: &str = include_str!("../../../substrate/migrations/0020_ha
 fn isolated_database_url() -> String {
     let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
         .expect("Docket proof requires a dedicated PostgreSQL URL");
+    let options: sqlx::postgres::PgConnectOptions = url.parse().expect("valid test URL");
+    let database = options
+        .get_database()
+        .expect("explicit test database")
+        .to_ascii_lowercase();
+    assert!(
+        database.contains("test") && !database.contains("solarisael"),
+        "refusing a non-test or live database, including percent-encoded names"
+    );
     let lower = url.to_ascii_lowercase();
     assert!(
         !lower.contains("solarisael_memory") && !lower.contains("solarisael-house"),
@@ -934,7 +943,7 @@ async fn insert_insula_row(
             'point', NOW() + ($5 * INTERVAL '1 minute'), 'ok', 10, 20,
             $3, $4, 'trace_span', encode(sha256(gen_random_uuid()::text::bytea),'hex'),
             encode(sha256('test-hash'::bytea),'hex'),
-            NOW() + ($5 * INTERVAL '1 minute') + INTERVAL '14 days'
+            NOW() + ($5 * INTERVAL '1 minute') + INTERVAL '168 hours'
          )",
     )
     .bind(session)
@@ -959,6 +968,11 @@ async fn docket_chargebook_counts_only_the_attempt_lineage_window() -> TestResul
     let pool = fresh_docket().await?;
     sqlx::raw_sql(CAPABILITY_MIGRATION).execute(&pool).await?;
     sqlx::raw_sql(INSULA_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(include_str!(
+        "../../../substrate/migrations/0032_insula_seven_day_retention.sql"
+    ))
+    .execute(&pool)
+    .await?;
     sqlx::query("DELETE FROM insula.log WHERE house_id='test-house'")
         .execute(&pool)
         .await?;

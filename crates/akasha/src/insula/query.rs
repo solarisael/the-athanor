@@ -493,6 +493,15 @@ mod tests {
     fn isolated_database_url() -> String {
         let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
             .expect("Insula spans proof requires a dedicated PostgreSQL URL");
+        let options: sqlx::postgres::PgConnectOptions = url.parse().expect("valid test URL");
+        let database = options
+            .get_database()
+            .expect("explicit test database")
+            .to_ascii_lowercase();
+        assert!(
+            database.contains("test") && !database.contains("solarisael"),
+            "refusing a non-test or live database, including percent-encoded names"
+        );
         let lower = url.to_ascii_lowercase();
         assert!(
             !lower.contains("solarisael_memory") && !lower.contains("solarisael-house"),
@@ -513,6 +522,11 @@ mod tests {
             .await?;
         sqlx::raw_sql(INSULA_MIGRATION).execute(&pool).await?;
         sqlx::raw_sql(LANE_SPANS_MIGRATION).execute(&pool).await?;
+        sqlx::raw_sql(include_str!(
+            "../../../../substrate/migrations/0032_insula_seven_day_retention.sql"
+        ))
+        .execute(&pool)
+        .await?;
         Ok(pool)
     }
 
@@ -543,7 +557,7 @@ mod tests {
                  $1::uuid,$2::uuid,$3::uuid,gen_random_uuid(),$4,
                  $5,$6,'Kodo','service:kodo','omp_adapter','adapter',$7,$8,
                  $9,$10,$11,$12,
-                 'trace_span',$13,$14,$9 + INTERVAL '14 days'
+                 'trace_span',$13,$14,$9 + INTERVAL '168 hours'
              )",
         )
         .bind(event_id.to_string())

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { runLessonQuery } from "./lesson-context.ts";
+import type { ResolvedRecallMode } from "./recall-policy.ts";
 
 const BRIDGE_STATE = Symbol.for("solarisael.athanor.lesson-ttsr.v1");
 const PROVIDER = "athanor-lessons";
@@ -16,7 +17,7 @@ const LANGUAGE_EXTENSIONS: Record<string, string[]> = {
 type LessonRow = {
   id: number; type: string; title: string; lesson: string; proofPattern?: string | null; project?: string | null;
   languageKeys?: string[]; tags?: string[]; condition?: string[]; astCondition?: string[]; triggerScope?: string[];
-  interruptMode?: "block" | "remind" | null; repeatCooldownSecs?: number | null;
+  interruptMode?: "block" | "remind" | null; repeatCooldownSecs?: number | null; alwaysOn?: boolean;
 };
 
 type ManagerRecord = { manager: any; active: Set<string>; known: Set<string>; patched: boolean };
@@ -95,6 +96,7 @@ function globsFor(row: LessonRow): string[] | undefined {
 }
 
 function nativeRule(row: LessonRow, activeProject: string | null): Record<string, unknown> | null {
+  if (!row.tags?.includes("ttsr-approved")) return null;
   const condition = (row.condition ?? []).filter(Boolean);
   const astCondition = (row.astCondition ?? []).filter(Boolean);
   if (!condition.length && !astCondition.length) return null;
@@ -125,26 +127,45 @@ function nativeRule(row: LessonRow, activeProject: string | null): Record<string
 
 function rowsFrom(result: unknown): LessonRow[] {
   if (!result || typeof result !== "object" || (result as any).ok !== true || !Array.isArray((result as any).lessons)) return [];
-  return (result as any).lessons.filter((row: LessonRow) =>
-    row.tags?.includes("ttsr-approved") && ((row.condition?.length ?? 0) > 0 || (row.astCondition?.length ?? 0) > 0));
+  return (result as any).lessons;
 }
 
 export type TtsrLesson = { id: number; body: string };
+export type LessonTtsrSync = {
+  active: number; added: number; warnings: string[]; lessons: TtsrLesson[]; baseline: TtsrLesson[];
+};
+
+export function selectPresenceLessons(
+  synced: Pick<LessonTtsrSync, "lessons" | "baseline">,
+  resolvedMode: ResolvedRecallMode | null | undefined,
+): TtsrLesson[] {
+  const baseline = resolvedMode === "work" ? synced.baseline : [];
+  const selected = new Map(baseline.map((lesson) => [lesson.id, lesson]));
+  for (const lesson of synced.lessons) {
+    if (!selected.has(lesson.id)) selected.set(lesson.id, lesson);
+  }
+
+  return [...selected.values()];
+}
 
 export async function syncLessonTtsr(args: {
   ctx: any; roomDir: string; room: string; activeProject: string | null;
-}): Promise<{ active: number; added: number; warnings: string[]; lessons: TtsrLesson[] }> {
+}): Promise<LessonTtsrSync> {
   args.ctx.getContextUsage?.();
   const sessionId = String(args.ctx.sessionManager?.getSessionId?.() ?? args.ctx.sessionID ?? "").trim();
   const record = state().sessions.get(sessionId);
-  if (!record) return { active: 0, added: 0, warnings: ["native OMP TTSR manager unavailable"], lessons: [] };
 
   const queries = FAMILIES.map((family) => runLessonQuery(args.roomDir, args.room, { type: family, limit: 50 }));
   if (args.activeProject) queries.push(runLessonQuery(args.roomDir, args.room, { type: "project", project: args.activeProject, limit: 50 }));
   const results = await Promise.all(queries);
   const rows = results.flatMap(rowsFrom);
-  // Armed rows are the selection Presence is fed: one lesson set, one authority,
-  // so a guard the session cannot see is never quoted as a rule to it either.
+  const baseline = rows
+    .filter((row) => row.type === "coding" && row.alwaysOn === true)
+    .map((row) => ({ id: row.id, body: row.lesson }));
+  if (!record) {
+    return { active: 0, added: 0, warnings: ["native OMP TTSR manager unavailable"], lessons: [], baseline };
+  }
+
   const armed = rows.flatMap((row) => {
     const rule = nativeRule(row, args.activeProject);
     return rule ? [{ row, rule }] : [];
@@ -169,5 +190,6 @@ export async function syncLessonTtsr(args: {
     added,
     warnings,
     lessons: armed.map(({ row }) => ({ id: row.id, body: row.lesson })),
+    baseline,
   };
 }

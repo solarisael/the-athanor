@@ -1662,6 +1662,7 @@ async fn query_akasha_lessons(
         query: payload.query,
         always_on: false,
         limit: payload.limit,
+        ids: payload.ids,
     };
     let result = match lesson_query(pool, params).await {
         Ok(result) => serde_json::to_value(&result).expect("Akasha lesson result serializes"),

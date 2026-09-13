@@ -420,6 +420,9 @@ pub struct AkashaLessonQueryPayload {
     pub query: Option<String>,
     #[serde(default = "default_akasha_lesson_limit")]
     pub limit: u32,
+    /// Exact lesson ids inside the family; a direct lookup skips eligibility keys.
+    #[serde(default)]
+    pub ids: Vec<i64>,
 }
 
 fn default_akasha_lesson_limit() -> u32 {
@@ -430,6 +433,7 @@ const AKASHA_QUERY_MAX_CHARS: usize = 512;
 const AKASHA_FILTER_MAX_CHARS: usize = 128;
 const AKASHA_KEY_MAX_CHARS: usize = 64;
 const AKASHA_KEYS_MAX: usize = 16;
+const AKASHA_IDS_MAX: usize = 50;
 
 /// Trims one bounded free-text query, refusing blank and oversize text.
 fn bounded_akasha_query(field: &str, value: &str) -> Result<String, String> {
@@ -491,6 +495,12 @@ impl AkashaLessonQueryPayload {
             *query = bounded_akasha_query("lesson query", query)?;
         }
         self.limit = self.limit.clamp(1, 50);
+        if self.ids.len() > AKASHA_IDS_MAX {
+            return Err(format!("ids carries more than {AKASHA_IDS_MAX} ids"));
+        }
+        if self.ids.iter().any(|id| *id <= 0) {
+            return Err("ids must be positive lesson ids".into());
+        }
         Ok(())
     }
 }

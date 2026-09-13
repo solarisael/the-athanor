@@ -105,6 +105,23 @@ fn lesson_query_preserves_typed_filters_and_bounds() {
 }
 
 #[test]
+fn lesson_query_ids_reach_a_project_row_without_naming_the_project() {
+    // Kills: dropping `self.ids.is_empty()` from validate, or losing the `ids`
+    // field so serde rejects the request.
+    let direct: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "project", "ids": [491]
+    }))
+    .unwrap();
+    assert_eq!(direct.ids, vec![491]);
+    assert!(direct.validate().is_ok());
+    let bare: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "project", "ids": []
+    }))
+    .unwrap();
+    assert!(bare.validate().is_err());
+}
+
+#[test]
 fn context_eligibility_requires_declared_axis_overlap() {
     let rust = BTreeSet::from([String::from("rust")]);
     assert!(intersects(&[], &rust));

@@ -1,6 +1,6 @@
 //! PostgreSQL proof for the lesson_query alwaysOn wire filter.
 
-use akasha::{LessonQueryParams, lesson_query};
+use akasha::{LessonQueryParams, LessonQueryResult, lesson_query};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{PgPool, Row};
 use std::str::FromStr;
@@ -118,5 +118,65 @@ async fn lesson_query_always_on_filter_returns_only_flagged_rows_and_absence_is_
         .await?
         .try_get("count")?;
     assert_eq!(count, 2);
+    Ok(())
+}
+
+async fn insert_keyed_lesson(pool: &PgPool, id: i64, technology: &[&str]) -> TestResult {
+    sqlx::query(
+        "INSERT INTO lessons (lesson_key,id,title,lesson,technology_keys) VALUES ('coding',$1,$2,$3,$4)",
+    )
+    .bind(id)
+    .bind(format!("lesson {id}"))
+    .bind(format!("body {id}"))
+    .bind(technology.iter().map(|v| v.to_string()).collect::<Vec<_>>())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+fn ids_of(result: &LessonQueryResult) -> Vec<i64> {
+    let mut ids: Vec<i64> = result.lessons.iter().map(|lesson| lesson.id).collect();
+    ids.sort_unstable();
+    ids
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+async fn lesson_query_without_keys_sees_keyed_rows_and_keys_only_narrow() -> TestResult {
+    // Kills: restoring `AND cardinality(technology_keys) = 0` for an empty key
+    // list, or dropping the `cardinality = 0 OR &&` branch for a supplied list.
+    let pool = temp_lesson_pool().await?;
+    insert_lesson(&pool, 1, false).await?;
+    insert_keyed_lesson(&pool, 2, &["react"]).await?;
+    insert_keyed_lesson(&pool, 3, &["gdscript"]).await?;
+
+    let bare: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "coding"
+    }))?;
+    assert_eq!(ids_of(&lesson_query(&pool, bare).await?), vec![1, 2, 3]);
+
+    let react: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "coding", "technologyKeys": ["react"]
+    }))?;
+    assert_eq!(ids_of(&lesson_query(&pool, react).await?), vec![1, 2]);
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+async fn lesson_query_ids_return_exactly_the_named_rows() -> TestResult {
+    // Kills: dropping the `id = ANY` predicate, or letting eligibility keys
+    // still gate a direct lookup.
+    let pool = temp_lesson_pool().await?;
+    insert_lesson(&pool, 1, false).await?;
+    insert_keyed_lesson(&pool, 2, &["react"]).await?;
+    insert_keyed_lesson(&pool, 3, &["gdscript"]).await?;
+
+    let direct: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "coding", "ids": [3], "technologyKeys": ["react"]
+    }))?;
+    let result = lesson_query(&pool, direct).await?;
+    assert_eq!(ids_of(&result), vec![3]);
+    assert_eq!(result.filters.ids, vec![3]);
     Ok(())
 }

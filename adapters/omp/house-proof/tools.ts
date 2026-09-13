@@ -854,17 +854,19 @@ export function registerSolarisaelTools(pi, release) {
       project: z.string().optional().describe("Required for project lessons; optional narrowing for coding lessons."),
       register: z.string().optional().describe("Writing or design register filter."),
       stage: z.string().optional().describe("Audio pipeline stage filter."),
-      languageKeys: z.array(z.string()).optional().describe("Eligibility context. Includes unkeyed lessons and coding/project lessons matching at least one language slug."),
-      technologyKeys: z.array(z.string()).optional().describe("Eligibility context. Includes unkeyed lessons and coding/project lessons matching at least one technology slug."),
+      languageKeys: z.array(z.string()).optional().describe("Eligibility context. Omitted: every lesson is eligible. Supplied: unkeyed lessons plus lessons matching at least one language slug."),
+      technologyKeys: z.array(z.string()).optional().describe("Eligibility context. Omitted: every lesson is eligible. Supplied: unkeyed lessons plus lessons matching at least one technology slug."),
       query: z.string().optional().describe("Full-text lesson query."),
       limit: z.number().default(12).describe("Maximum rows; integer from 1 through 50."),
+      ids: z.array(z.number()).optional().describe("Exact lesson IDs inside the family, as a lesson map names them. Returns those rows only: no eligibility keys, no thread expansion. Project lessons need no project when ids are given."),
     }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
       const project = params.project?.trim();
-      if (params.type === "project" && !project) {
-        return refuseToolResult("project lessons require project");
+      const ids = (params.ids ?? []).filter((id) => Number.isInteger(id) && id > 0);
+      if (params.type === "project" && !project && ids.length === 0) {
+        return refuseToolResult("project lessons require project or ids");
       }
       if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 50) {
         return refuseToolResult("limit must be an integer from 1 through 50");
@@ -880,6 +882,7 @@ export function registerSolarisaelTools(pi, release) {
         ...(params.languageKeys?.length ? { languageKeys: params.languageKeys } : {}),
         ...(params.technologyKeys?.length ? { technologyKeys: params.technologyKeys } : {}),
         ...(params.query?.trim() ? { query: params.query.trim() } : {}),
+        ...(ids.length ? { ids } : {}),
       }, signal);
       return {
         isError: !result.ok,

@@ -35,6 +35,10 @@ pub struct LessonQueryParams {
     pub always_on: bool,
     #[serde(default = "default_twelve")]
     pub limit: u32,
+    /// Direct lookup by lesson ID inside the family. A map names lessons by
+    /// number, so the number must reach the row without eligibility keys.
+    #[serde(default)]
+    pub ids: Vec<i64>,
 }
 impl LessonQueryParams {
     pub fn validate(&self) -> Result<(), AppError> {
@@ -42,6 +46,7 @@ impl LessonQueryParams {
             return Err(AppError::Invalid("room must be a lowercase slug".into()));
         }
         if self.family == LessonFamily::Project
+            && self.ids.is_empty()
             && self.project.as_deref().is_none_or(|v| v.trim().is_empty())
         {
             return Err(AppError::Invalid("project lessons require project".into()));
@@ -150,6 +155,7 @@ pub struct LessonFilters {
     pub query: Option<String>,
     pub always_on: bool,
     pub limit: u32,
+    pub ids: Vec<i64>,
 }
 #[derive(Debug, Serialize)]
 pub struct LessonQueryResult {
@@ -161,17 +167,16 @@ pub struct LessonQueryResult {
     pub taxonomy: Vec<LessonTaxonomy>,
 }
 
+/// Keys narrow, they never exclude by absence. A query without keys sees every
+/// lesson; a query with keys sees unkeyed lessons plus lessons sharing a slug.
+/// The old form hid every keyed lesson from a bare query (memories 3512, 4284).
 fn eligibility(qb: &mut QueryBuilder<'_, Postgres>, language: &[String], technology: &[String]) {
-    if language.is_empty() {
-        qb.push(" AND cardinality(language_keys) = 0");
-    } else {
+    if !language.is_empty() {
         qb.push(" AND (cardinality(language_keys) = 0 OR language_keys && ")
             .push_bind(language.to_vec())
             .push(")");
     }
-    if technology.is_empty() {
-        qb.push(" AND cardinality(technology_keys) = 0");
-    } else {
+    if !technology.is_empty() {
         qb.push(" AND (cardinality(technology_keys) = 0 OR technology_keys && ")
             .push_bind(technology.to_vec())
             .push(")");
@@ -215,7 +220,14 @@ pub async fn lesson_query(
     if let Some(stage) = params.stage.as_ref() {
         qb.push(" AND ").push_bind(stage).push(" = ANY(stage)");
     }
-    eligibility(&mut qb, &params.language_keys, &params.technology_keys);
+    let direct = !params.ids.is_empty();
+    if direct {
+        qb.push(" AND id = ANY(")
+            .push_bind(params.ids.clone())
+            .push(")");
+    } else {
+        eligibility(&mut qb, &params.language_keys, &params.technology_keys);
+    }
     if params.always_on {
         qb.push(" AND always_on");
     }
@@ -261,7 +273,7 @@ pub async fn lesson_query(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    if !expansion_keys.is_empty() && lessons.len() < 50 {
+    if !direct && !expansion_keys.is_empty() && lessons.len() < 50 {
         let ids = lessons.iter().map(|row| row.id).collect::<Vec<_>>();
         let mut expand = QueryBuilder::<Postgres>::new(LESSON_SELECT);
         expand
@@ -309,11 +321,18 @@ pub async fn lesson_query(
     if let Some(project) = params.project.as_ref() {
         taxonomy_q.push(" AND project = ").push_bind(project);
     }
-    eligibility(
-        &mut taxonomy_q,
-        &params.language_keys,
-        &params.technology_keys,
-    );
+    if direct {
+        taxonomy_q
+            .push(" AND id = ANY(")
+            .push_bind(params.ids.clone())
+            .push(")");
+    } else {
+        eligibility(
+            &mut taxonomy_q,
+            &params.language_keys,
+            &params.technology_keys,
+        );
+    }
     if params.always_on {
         taxonomy_q.push(" AND always_on");
     }
@@ -351,6 +370,7 @@ pub async fn lesson_query(
             query: params.query,
             always_on: params.always_on,
             limit: params.limit,
+            ids: params.ids,
         },
         lessons,
         taxonomy,

@@ -74,6 +74,7 @@ export async function applyRecallViewport(
   result: Record<string, unknown>,
   mode: "automatic" | "manual",
   idempotencyKey?: string,
+  signal?: AbortSignal,
 ): Promise<RecallViewport> {
   const response = await sendHostCommand(
     hostCommand(
@@ -84,6 +85,7 @@ export async function applyRecallViewport(
       idempotencyKey,
     ),
     new Set([CONTEXT_VIEWPORTED]),
+    signal,
   );
   return response.result as RecallViewport;
 }

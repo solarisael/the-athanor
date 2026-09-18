@@ -93,6 +93,7 @@ import { registerSolarisaelTools } from "./house-proof/tools.ts";
 import { installLessonTtsrBridge, selectPresenceLessons, syncLessonTtsr } from "./house-proof/lesson-ttsr.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./house-proof/context.ts";
 import { installSemanticJudgmentShadow } from "./house-proof/semantic-judgment.ts";
+import { createRecallReranker, type RecallRerankPolicy, type RecallRerankResult } from "./house-proof/recall-judgment.ts";
 export {
   scoreToolCallShadow,
   scoreCompletedDraftShadow,
@@ -129,25 +130,124 @@ import {
   type InsulaSpan,
 } from "./house-proof/insula.ts";
 import { showInsulaCockpit } from "./house-proof/vitals.ts";
+
+const AUTOMATIC_CONTEXT_COMMIT_RESERVE_MS = 500;
+const JEV_RECALL_MAX_WAIT_MS = 1_500;
+const JEV_RECALL_RESERVE_MARGIN_MS = 100;
+
 type AutomaticContextBudgetResult<T> =
   | { status: "settled"; value: T }
   | { status: "failed"; error: unknown }
   | { status: "timeout" };
+type AutomaticContextWork<T> =
+  | Promise<T>
+  | ((signal: AbortSignal, deadline: number) => Promise<T>);
+type AutomaticContextBudget = { signal: AbortSignal; deadline: number };
 
 export async function settleAutomaticContextWithinBudget<T>(
-  work: Promise<T>,
+  work: AutomaticContextWork<T>,
   timeoutMs = AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
 ): Promise<AutomaticContextBudgetResult<T>> {
+  const controller = new AbortController();
+  const deadline = Date.now() + timeoutMs;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const observed = work.then<AutomaticContextBudgetResult<T>>(
+  let timedOut = false;
+  const timeout = new Promise<AutomaticContextBudgetResult<T>>((resolve) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      resolve({ status: "timeout" });
+    }, timeoutMs);
+  });
+  let started: Promise<T>;
+  try {
+    started = typeof work === "function"
+      ? work(controller.signal, deadline)
+      : work;
+  } catch (error) {
+    if (timer) clearTimeout(timer);
+    return { status: "failed", error };
+  }
+  const observed = Promise.resolve(started).then<AutomaticContextBudgetResult<T>>(
     (value) => ({ status: "settled", value }),
     (error) => ({ status: "failed", error }),
   );
-  const timeout = new Promise<AutomaticContextBudgetResult<T>>((resolve) => {
-    timer = setTimeout(() => resolve({ status: "timeout" }), timeoutMs);
-  });
   const result = await Promise.race([observed, timeout]);
   if (timer) clearTimeout(timer);
+  if (timedOut && result.status !== "timeout") return { status: "timeout" };
+  return result;
+}
+
+function automaticBudgetOpen(
+  budget: AutomaticContextBudget,
+  reserveMs = 0,
+): boolean {
+  return !budget.signal.aborted && Date.now() + reserveMs < budget.deadline;
+}
+export function jevRecallDeadline(
+  automaticContextDeadline: number,
+  now = Date.now(),
+): number | null {
+  const available = automaticContextDeadline
+    - now
+    - AUTOMATIC_CONTEXT_COMMIT_RESERVE_MS
+    - JEV_RECALL_RESERVE_MARGIN_MS;
+  if (available <= 0) return null;
+
+  return now + Math.min(JEV_RECALL_MAX_WAIT_MS, available);
+}
+
+
+function boundedJevReason(value: unknown): string | null {
+  const reason = String(value ?? "").replace(/\s+/g, " ").trim();
+  return reason ? reason.slice(0, 160) : null;
+}
+
+function contentFreeJevReceipt(value: unknown): Record<string, unknown> {
+  const source = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const receipt: Record<string, unknown> = {
+    schemaVersion: String(source.schemaVersion || "jev-recall-receipt.v1").slice(0, 80),
+    status: String(source.status || "baseline").slice(0, 40),
+  };
+  const reason = boundedJevReason(source.reason);
+  if (reason) receipt.reason = reason;
+  for (const key of ["provider", "model", "policyRevision"] as const) {
+    const value = String(source[key] || "").trim();
+    if (value) receipt[key] = value.slice(0, 120);
+  }
+  for (const key of ["latencyMs", "scored", "selected"] as const) {
+    const count = Number(source[key]);
+    if (Number.isSafeInteger(count) && count >= 0) receipt[key] = count;
+  }
+  if (typeof source.fallbackUsed === "boolean") {
+    receipt.fallbackUsed = source.fallbackUsed;
+  }
+  return receipt;
+}
+
+
+export function prepareRecallResultForViewport(
+  raw: unknown,
+  reranked: RecallRerankResult,
+  active: boolean,
+): Record<string, unknown> {
+  const result = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? { ...(raw as Record<string, unknown>) }
+    : {};
+  const candidates = Array.isArray(reranked.retrievalCandidates)
+    ? reranked.retrievalCandidates
+    : [];
+  result.retrievalCandidates = candidates;
+  if (active) {
+    result.semanticChunks = [];
+    result.contentChunks = [];
+    const canonMatches = Array.isArray(result.canonMatches) ? result.canonMatches : [];
+    const dateMatches = Array.isArray(result.dateMatches) ? result.dateMatches : [];
+    result.found = candidates.length + canonMatches.length + dateMatches.length > 0;
+  }
+  delete result.rerankCandidates;
   return result;
 }
 
@@ -643,11 +743,19 @@ export default function solarisaelHouseProof(pi, release) {
   pi.setLabel("The Athanor");
   const lessonTtsrInstallWarning = installLessonTtsrBridge(pi);
   const semanticJudgmentShadow = installSemanticJudgmentShadow(pi);
-  // The command exposes local coverage only. No eligibility provider means no remote judgment.
+  const recallJevContext: { modelRegistry?: unknown } = {};
+  const recallReranker = createRecallReranker({ context: recallJevContext });
+  // Semantic shadow coverage is local; automatic Recall reranking is separately policy-gated.
   pi.registerCommand?.("jev-shadow", {
     description: "Show local Jev shadow coverage for this session",
     handler: (_args, ctx) => {
       ctx.ui.notify(JSON.stringify(semanticJudgmentShadow.getCoverage(), null, 2), "info");
+    },
+  });
+  pi.registerCommand?.("jev-recall", {
+    description: "Show content-free Jev Recall reranker coverage for this session",
+    handler: (_args, ctx) => {
+      ctx.ui.notify(JSON.stringify(recallReranker.getCoverage(), null, 2), "info");
     },
   });
   pi.registerCommand?.("insula", {
@@ -985,7 +1093,9 @@ export default function solarisaelHouseProof(pi, release) {
     event: any,
     ctx: any,
     observed: { span: InsulaSpan | null },
+    budget: AutomaticContextBudget,
   ) => {
+    if (!automaticBudgetOpen(budget)) return;
     let messages = Array.isArray(event?.messages) ? event.messages : [];
     const originalMessages = messages;
     const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx.cwd);
@@ -1054,6 +1164,7 @@ export default function solarisaelHouseProof(pi, release) {
     }
 
     const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
+    recallJevContext.modelRegistry = ctx?.modelRegistry;
     const shellBinding = { room, spirit, session: hostSession };
     if (lessonTtsrInstallWarning) warnings.push(lessonTtsrInstallWarning);
     const lessonTtsr = await syncLessonTtsr({
@@ -1087,7 +1198,6 @@ export default function solarisaelHouseProof(pi, release) {
     const currentTurnKey = turnKeys.get(promptMessage);
     const turnMemo = turnAdditionMemo(memoSessionKey, effectiveRoomDir);
     pruneTurnAdditionMemo(turnMemo, new Set(turnKeys.values()));
-    persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);
     if (currentTurnKey && turnMemo.has(currentTurnKey)) {
       // Later requests of the same turn replay identical bytes so the
       // Anthropic prefix cache can hit past the system block.
@@ -1306,8 +1416,11 @@ export default function solarisaelHouseProof(pi, release) {
       let queryRoute: Record<string, any> | null = null;
       let decision: RecallPolicyDecision | null = null;
       let policyState: PersistedRecallPolicy | null = null;
+      let rerankPolicy: RecallRerankPolicy = { mode: "off", approved: false };
       try {
         const preliminaryRoute = contextAnalysis.route;
+        rerankPolicy = await recallReranker.loadPolicy(effectiveRoomDir, room, ctx);
+        if (!automaticBudgetOpen(budget)) return;
         const snapshot = await policyClient.inspect();
         policyState = snapshot.recallPolicy;
         lessonMode = policyState.resolvedMode;
@@ -1351,17 +1464,93 @@ export default function solarisaelHouseProof(pi, release) {
 
 
         if (decision.shouldRecall && decision.refreshReason) {
+          if (!automaticBudgetOpen(budget, AUTOMATIC_CONTEXT_COMMIT_RESERVE_MS)) return;
+          const rerankEnabled = rerankPolicy.approved
+            && (rerankPolicy.mode === "shadow" || rerankPolicy.mode === "active");
           const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, {
             temporalDecay: true,
-            timeoutMs: AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
+            signal: budget.signal,
+            timeoutMs: rerankEnabled
+              ? Math.max(
+                1,
+                Math.min(
+                  AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
+                  budget.deadline - Date.now() - AUTOMATIC_CONTEXT_COMMIT_RESERVE_MS,
+                ),
+              )
+              : AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
+            ...(rerankEnabled ? { rerankCandidateTopK: 64 } : {}),
           });
           if (recalled.ok) {
+            const rawRecall = recalled.result;
+            const rawRecord = rawRecall && typeof rawRecall === "object" && !Array.isArray(rawRecall)
+              ? rawRecall as Record<string, unknown>
+              : {};
+            const baseline = Array.isArray(rawRecord.retrievalCandidates)
+              ? rawRecord.retrievalCandidates
+              : [];
+            const sidecar = Array.isArray(rawRecord.rerankCandidates)
+              ? rawRecord.rerankCandidates
+              : undefined;
+            let reranked: RecallRerankResult;
+            const rerankDeadline = jevRecallDeadline(budget.deadline);
+            if (rerankEnabled && sidecar === undefined) {
+              reranked = {
+                retrievalCandidates: baseline,
+                receipt: {
+                  schemaVersion: "jev-recall-receipt.v1",
+                  status: "failed",
+                  reason: "pool-unavailable",
+                  fallbackUsed: true,
+                },
+              };
+            } else if (rerankEnabled && rerankDeadline === null) {
+              reranked = {
+                retrievalCandidates: baseline,
+                receipt: {
+                  schemaVersion: "jev-recall-receipt.v1",
+                  status: "refused",
+                  reason: "deadline",
+                  fallbackUsed: true,
+                },
+              };
+            } else {
+              try {
+                reranked = await recallReranker.rerank({
+                  query: decision.query,
+                  retrievalCandidates: baseline,
+                  ...(sidecar ? { rerankCandidates: sidecar } : {}),
+                  signal: budget.signal,
+                  deadline: rerankEnabled
+                    ? rerankDeadline!
+                    : budget.deadline - AUTOMATIC_CONTEXT_COMMIT_RESERVE_MS,
+                  sessionId: hostSession,
+                  context: ctx,
+                });
+              } catch (error) {
+                reranked = {
+                  retrievalCandidates: baseline,
+                  receipt: {
+                    schemaVersion: "jev-recall-receipt.v1",
+                    status: "failed",
+                    reason: boundedJevReason(error instanceof Error ? error.message : error) || "rerank-failed",
+                    fallbackUsed: true,
+                  },
+                };
+              }
+            }
+            if (!automaticBudgetOpen(budget)) return;
+            const jevReceipt = contentFreeJevReceipt(reranked.receipt);
+            const jevActive = rerankPolicy.mode === "active" && jevReceipt.status === "active";
+            const sanitized = prepareRecallResultForViewport(rawRecall, reranked, jevActive);
             const viewport = await applyRecallViewport(
               { room, spirit, session: hostSession },
-              recalled.result,
+              sanitized,
               "automatic",
               currentTurnKey ? `${currentTurnKey}:viewport` : undefined,
+              budget.signal,
             );
+            if (!automaticBudgetOpen(budget)) return;
             const automaticCompact = viewport.presentation;
             const recallWarnings = Array.isArray(automaticCompact.warnings) ? automaticCompact.warnings : [];
             presenceRecalled = recallMaterials(automaticCompact);
@@ -1383,6 +1572,7 @@ export default function solarisaelHouseProof(pi, release) {
                   mode: decision.resolvedMode,
                   refreshReason: decision.refreshReason,
                   viewport: viewport.diagnostics,
+                  jev: jevReceipt,
                 },
                 attribution: "agent",
                 timestamp,
@@ -1391,6 +1581,13 @@ export default function solarisaelHouseProof(pi, release) {
             const recallEntries = automaticCompact.retrievalCandidates.length
               + automaticCompact.canonMatches.length
               + automaticCompact.dateMatches.length;
+            const jevProblem = rerankPolicy.mode !== "off"
+              && jevReceipt.status !== "active"
+              && jevReceipt.status !== "shadow";
+            if (jevProblem) {
+              warnings.push(`automatic Recall Jev baseline: ${boundedJevReason(jevReceipt.reason) || "unknown"}`);
+            }
+            if (!automaticBudgetOpen(budget)) return;
             const completed = await policyClient.completeRefresh({
               queryTerms: decision.queryTerms,
               refreshReason: decision.refreshReason,
@@ -1402,9 +1599,13 @@ export default function solarisaelHouseProof(pi, release) {
               idempotencyKey: currentTurnKey ? `${currentTurnKey}:complete` : undefined,
             });
             policyState = completed.recallPolicy;
+            if (!automaticBudgetOpen(budget)) return;
             if (recallMessage) {
               additions.push(recallMessage);
               activities.push(`automatic Recall: ${recallEntries} entries (${decision.resolvedMode})`);
+            }
+            if (rerankPolicy.mode !== "off" && (jevReceipt.status === "active" || jevReceipt.status === "shadow")) {
+              activities.push(`automatic Recall Jev ${jevReceipt.status}`);
             }
             if (recallWarnings.length) {
               warnings.push(`automatic Recall warning: ${String(recallWarnings[0])}`);
@@ -1419,6 +1620,7 @@ export default function solarisaelHouseProof(pi, release) {
               viewport: automaticCompact,
               viewportDiagnostics: {
                 ...viewport.diagnostics,
+                jev: jevReceipt,
                 policy: {
                   requestedMode: policyState.requestedMode,
                   resolvedMode: policyState.resolvedMode,
@@ -1490,6 +1692,7 @@ export default function solarisaelHouseProof(pi, release) {
       }
     }
 
+    if (!automaticBudgetOpen(budget)) return;
     if (topLevelSession(room) === hostSession) {
       try {
         const binding = { room, spirit, session: hostSession };
@@ -1519,6 +1722,7 @@ export default function solarisaelHouseProof(pi, release) {
           recalled: presenceRecalled,
           lessons: lessonMaterials(selectPresenceLessons(lessonTtsr, lessonMode)),
         });
+        if (!automaticBudgetOpen(budget)) return;
         pendingPresenceContracts.set(`${room}\0${hostSession}`, {
           contractId: compiled.contractId,
           directiveIds: compiled.directiveIds,
@@ -1548,6 +1752,7 @@ export default function solarisaelHouseProof(pi, release) {
       }
     }
 
+    if (!automaticBudgetOpen(budget)) return;
     if (currentTurnKey) {
       mergeTurnAdditions(turnMemo, currentTurnKey, additions);
       persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);
@@ -1563,6 +1768,7 @@ export default function solarisaelHouseProof(pi, release) {
       warnings.length ? "degraded" : "ok",
       warnings.length ? "partial_context" : null,
     );
+    observed.span = null;
     const anchored = anchorTurnAdditions(messages, turnKeys, turnMemo);
     if (anchored) return anchored;
     return messages === originalMessages ? undefined : { messages };
@@ -1571,9 +1777,15 @@ export default function solarisaelHouseProof(pi, release) {
   pi.on("context", async (event, ctx) => {
     const observed: { span: InsulaSpan | null } = { span: null };
     const result = await settleAutomaticContextWithinBudget(
-      composeContextAdditions(event, ctx, observed),
+      (signal, deadline) => composeContextAdditions(event, ctx, observed, { signal, deadline }),
     );
-    if (result.status === "settled") return result.value;
+    if (result.status === "settled") {
+      if (observed.span) {
+        endInsulaSpan(observed.span, "degraded", "automatic_context_cancelled");
+        observed.span = null;
+      }
+      return result.value;
+    }
     const span = observed.span;
     observed.span = null;
     if (result.status === "timeout") {

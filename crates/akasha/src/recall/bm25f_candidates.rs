@@ -13,6 +13,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 const BM25F_TOP_K: usize = 8;
 const BM25F_MAX_CANDIDATES: i64 = 512;
+const BM25F_BROAD_TOP_K: usize = 4_096;
+const BM25F_BROAD_MAX_CANDIDATES: i64 = 4_096;
 
 #[derive(Clone, Copy)]
 struct Bm25fAverageLengths {
@@ -32,6 +34,57 @@ pub(super) async fn load_bm25f_candidates_for_terms(
     decay_now: DateTime<Utc>,
     settings: &RoomSettings,
     warnings: &mut Vec<String>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    load_bm25f_candidates_for_terms_bounded(
+        pool,
+        rooms,
+        terms,
+        temporal_decay,
+        decay_now,
+        settings,
+        warnings,
+        BM25F_MAX_CANDIDATES,
+        BM25F_TOP_K,
+        true,
+    )
+    .await
+}
+
+pub(super) async fn load_bm25f_candidates_for_terms_broad(
+    pool: &PgPool,
+    rooms: &[String],
+    terms: &[String],
+    temporal_decay: bool,
+    decay_now: DateTime<Utc>,
+    settings: &RoomSettings,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let mut ignored_warnings = Vec::new();
+    load_bm25f_candidates_for_terms_bounded(
+        pool,
+        rooms,
+        terms,
+        temporal_decay,
+        decay_now,
+        settings,
+        &mut ignored_warnings,
+        BM25F_BROAD_MAX_CANDIDATES,
+        BM25F_BROAD_TOP_K,
+        false,
+    )
+    .await
+}
+
+async fn load_bm25f_candidates_for_terms_bounded(
+    pool: &PgPool,
+    rooms: &[String],
+    terms: &[String],
+    temporal_decay: bool,
+    decay_now: DateTime<Utc>,
+    settings: &RoomSettings,
+    warnings: &mut Vec<String>,
+    candidate_limit: i64,
+    result_limit: usize,
+    report_truncation: bool,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     if terms.is_empty() {
         return Ok(Vec::new());
@@ -145,7 +198,7 @@ pub(super) async fn load_bm25f_candidates_for_terms(
     )
     .bind(rooms)
     .bind(&terms)
-    .bind(BM25F_MAX_CANDIDATES)
+    .bind(candidate_limit)
     .bind(origami::boats::MEMORY_KIND)
     .fetch_all(pool)
     .await?;
@@ -153,15 +206,17 @@ pub(super) async fn load_bm25f_candidates_for_terms(
     // whole matching pool. A pool wider than the prefilter ceiling means the
     // ranker never saw part of it: say so for any term count, since a
     // multi-term query is prefiltered by tsquery rank, not by BM25F.
-    if let Some(total) = rows
-        .first()
-        .and_then(|row| row.try_get::<i64, _>("total_matches").ok())
-        .filter(|total| *total > BM25F_MAX_CANDIDATES)
-    {
-        warnings.push(format!(
-            "BM25F candidate pool truncated at {BM25F_MAX_CANDIDATES} of {total} matching chunks ({} query terms); ranking never saw the rest",
-            terms.len()
-        ));
+    if report_truncation {
+        if let Some(total) = rows
+            .first()
+            .and_then(|row| row.try_get::<i64, _>("total_matches").ok())
+            .filter(|total| *total > candidate_limit)
+        {
+            warnings.push(format!(
+                "BM25F candidate pool truncated at {candidate_limit} of {total} matching chunks ({} query terms); ranking never saw the rest",
+                terms.len()
+            ));
+        }
     }
 
     let mut candidates = Vec::with_capacity(rows.len());
@@ -253,6 +308,6 @@ pub(super) async fn load_bm25f_candidates_for_terms(
             .as_i64()
             .is_some_and(|memory_id| seen_memories.insert(memory_id))
     });
-    candidates.truncate(BM25F_TOP_K);
+    candidates.truncate(result_limit);
     Ok(candidates)
 }

@@ -15,7 +15,7 @@ use crate::config::{AppError, Config, EMBED_DIMENSION, EmbeddingMode, HTTP_CLIEN
 use crate::insula::OutcomeClass;
 use crate::insula_writer::{EmitterSpan, end_span};
 use crate::settings::RoomSettings;
-use bm25f_candidates::load_bm25f_candidates_for_terms;
+use bm25f_candidates::{load_bm25f_candidates_for_terms, load_bm25f_candidates_for_terms_broad};
 use chrono::{NaiveDate, Utc};
 use content_lane::content_lane_rows;
 use embedding::{EmbedError, embed_query};
@@ -57,6 +57,8 @@ pub struct RecallResult {
     pub cluster_staleness: Option<serde_json::Value>,
     #[serde(rename = "clusterResonance", skip_serializing_if = "Option::is_none")]
     pub cluster_resonance: Option<serde_json::Value>,
+    #[serde(rename = "rerankCandidates", skip_serializing_if = "Option::is_none")]
+    pub rerank_candidates: Option<Vec<serde_json::Value>>,
 }
 
 fn query_dates(query: &str) -> Vec<NaiveDate> {
@@ -132,6 +134,82 @@ pub(crate) fn candidate_terms(
         matched.len() as f64 / terms.len() as f64
     };
     (matched, missing, coverage)
+}
+
+/// Keep the reranking sidecar deliberately narrower than the regular recall
+/// result. It receives only candidate cards with bounded excerpts; raw lane
+/// arrays, record bodies, canon, taxonomy, and neighbors never enter it.
+fn bounded_rerank_candidate(candidate: &serde_json::Value) -> Option<serde_json::Value> {
+    let memory_id = candidate["memory_id"].as_i64()?;
+    let excerpt = candidate
+        .get("excerpt")
+        .or_else(|| candidate.get("body"))
+        .and_then(serde_json::Value::as_str)?;
+    let mut projected = serde_json::Map::new();
+    for key in [
+        "memory_id",
+        "source_path",
+        "title",
+        "heading_path",
+        "sources",
+        "term_coverage",
+        "matched_terms",
+        "missing_terms",
+        "score",
+        "semantic_score",
+        "content_score",
+        "bm25f_score",
+        "bm25f_fields",
+        "semantic_lexical_score",
+        "semantic_lexical_fields",
+        "durability",
+        "temporal_weight",
+        "reasons",
+        "source",
+        "chunk_index",
+    ] {
+        if let Some(value) = candidate.get(key) {
+            projected.insert(key.to_owned(), value.clone());
+        }
+    }
+    projected.insert("memory_id".to_owned(), serde_json::Value::from(memory_id));
+    projected.insert(
+        "excerpt".to_owned(),
+        serde_json::Value::String(bounded_excerpt(excerpt)),
+    );
+    if !projected.contains_key("score") {
+        let score = candidate
+            .get("bm25f_score")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or_default();
+        projected.insert("score".to_owned(), serde_json::Value::from(score));
+    }
+    Some(serde_json::Value::Object(projected))
+}
+
+fn should_build_rerank_candidates(projection: hearth::RecallProjection, top_k: u32) -> bool {
+    projection.is_auto() && top_k > 0
+}
+
+fn build_rerank_candidates(
+    baseline: &[serde_json::Value],
+    broad: &[serde_json::Value],
+    exact_memory_ids: &BTreeSet<i64>,
+    top_k: usize,
+) -> Vec<serde_json::Value> {
+    let mut seen = BTreeSet::new();
+    baseline
+        .iter()
+        .chain(broad)
+        .filter_map(bounded_rerank_candidate)
+        .filter(|candidate| {
+            let Some(memory_id) = candidate["memory_id"].as_i64() else {
+                return false;
+            };
+            !exact_memory_ids.contains(&memory_id) && seen.insert(memory_id)
+        })
+        .take(top_k)
+        .collect()
 }
 
 /// One phase of a recall, observed as a child of the request's `recall`
@@ -224,6 +302,7 @@ pub async fn recall(
             taxonomy: serde_json::json!({"rooms":rooms,"memoryTypes":[],"threadKeys":[],"namedEntities":[]}),
             cluster_staleness: None,
             cluster_resonance: None,
+            rerank_candidates: None,
         });
     }
     let query_dates = query_dates(query);
@@ -724,6 +803,37 @@ pub async fn recall(
     });
     retrieval_candidates.truncate(semantic_top_k.max(content_top_k) as usize);
     retrieval_candidates.splice(0..0, exact_candidates);
+    let rerank_candidates =
+        if should_build_rerank_candidates(projection, request.rerank_candidate_top_k()) {
+            let phase = Phase::start(span, "recall.rerank_pool");
+            match load_bm25f_candidates_for_terms_broad(
+                pool,
+                &rooms,
+                &references.strip_terms(bm25f::query_terms(query)),
+                temporal_decay,
+                decay_now,
+                &settings,
+            )
+            .await
+            {
+                Ok(broad) => {
+                    let candidates = build_rerank_candidates(
+                        &retrieval_candidates,
+                        &broad,
+                        &exact_memory_ids,
+                        request.rerank_candidate_top_k() as usize,
+                    );
+                    phase.ok();
+                    Some(candidates)
+                }
+                Err(_) => {
+                    phase.degraded("recall.rerank_pool_unavailable");
+                    None
+                }
+            }
+        } else {
+            None
+        };
     phase.ok();
     // A manual projection reads records, not chunks: the selected memories are
     // capped by count and then carry their complete bodies. The auto
@@ -890,6 +1000,7 @@ pub async fn recall(
         taxonomy,
         cluster_staleness,
         cluster_resonance,
+        rerank_candidates,
     })
 }
 
@@ -915,4 +1026,96 @@ async fn attach_thread_neighbors(
     }
     phase.ok();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_rerank_candidates, should_build_rerank_candidates};
+    use hearth::RecallProjection;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn rerank_pool_is_sidecar_only_and_does_not_mutate_baseline() {
+        let baseline = vec![
+            serde_json::json!({
+                "memory_id": 7,
+                "source_path": "memory/7",
+                "title": "baseline",
+                "heading_path": "",
+                "excerpt": "bounded baseline",
+                "score": 0.9,
+                "thread_neighbors": [{"id": 8}],
+                "body": "manual body must not cross the sidecar boundary",
+                "semanticChunks": [{"body": "raw lane"}],
+            }),
+            serde_json::json!({
+                "memory_id": 9,
+                "source_path": "memory/9",
+                "title": "exact",
+                "excerpt": "exact reference",
+                "score": 1.0,
+            }),
+        ];
+        let before = baseline.clone();
+        let broad = vec![serde_json::json!({
+            "memory_id": 11,
+            "source_path": "memory/11",
+            "title": "broad",
+            "heading_path": "",
+            "body": "x".repeat(2_000),
+            "bm25f_score": 0.7,
+            "canonMatches": [{"termKey": "forbidden"}],
+            "contentChunks": [{"body": "raw lane"}],
+            "taxonomy": {"rooms": ["lab"]},
+        })];
+        let sidecar = build_rerank_candidates(&baseline, &broad, &BTreeSet::from([9]), 64);
+
+        assert_eq!(baseline, before);
+        assert_eq!(
+            sidecar
+                .iter()
+                .filter_map(|candidate| candidate["memory_id"].as_i64())
+                .collect::<Vec<_>>(),
+            vec![7, 11]
+        );
+        assert!(sidecar.iter().all(|candidate| {
+            candidate.get("body").is_none()
+                && candidate.get("thread_neighbors").is_none()
+                && candidate.get("canonMatches").is_none()
+                && candidate.get("semanticChunks").is_none()
+                && candidate.get("contentChunks").is_none()
+                && candidate.get("taxonomy").is_none()
+                && candidate["excerpt"]
+                    .as_str()
+                    .is_some_and(|excerpt| excerpt.chars().count() <= 1_201)
+        }));
+    }
+
+    #[test]
+    fn rerank_pool_honors_requested_bound_and_exact_precedence() {
+        let broad = (1..=10)
+            .map(|memory_id| {
+                serde_json::json!({
+                    "memory_id": memory_id,
+                    "source_path": format!("memory/{memory_id}"),
+                    "title": "",
+                    "excerpt": "candidate",
+                    "score": memory_id as f64,
+                })
+            })
+            .collect::<Vec<_>>();
+        let sidecar = build_rerank_candidates(&[], &broad, &BTreeSet::from([10]), 3);
+        assert_eq!(sidecar.len(), 3);
+        assert!(!sidecar.iter().any(|candidate| candidate["memory_id"] == 10));
+    }
+
+    #[test]
+    fn rerank_sidecar_is_automatic_only() {
+        assert!(should_build_rerank_candidates(RecallProjection::Auto, 1));
+        assert!(!should_build_rerank_candidates(RecallProjection::Auto, 0));
+        assert!(!should_build_rerank_candidates(
+            RecallProjection::Manual,
+            64
+        ));
+    }
 }

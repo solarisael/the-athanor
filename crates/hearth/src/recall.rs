@@ -3,6 +3,9 @@ use crate::room::RoomKey;
 use serde::{Deserialize, Serialize};
 
 const MAX_RECALL_TOP_K: u32 = 1_000;
+/// Maximum number of automatic candidates exposed through the optional
+/// reranking sidecar.
+pub const MAX_RERANK_CANDIDATE_TOP_K: u32 = 64;
 
 /// Most records a manual projection hands back whole. This is the same seat
 /// count the Host viewport keeps for one presentation; the cap trims by count
@@ -51,6 +54,7 @@ pub struct RecallRequest {
     content_min_similarity: f64,
     temporal_decay: bool,
     projection: RecallProjection,
+    rerank_candidate_top_k: u32,
 }
 
 impl RecallRequest {
@@ -96,6 +100,7 @@ impl RecallRequest {
             content_min_similarity,
             temporal_decay: false,
             projection: RecallProjection::Auto,
+            rerank_candidate_top_k: 0,
         })
     }
 
@@ -107,6 +112,20 @@ impl RecallRequest {
     pub fn with_projection(mut self, projection: RecallProjection) -> Self {
         self.projection = projection;
         self
+    }
+    /// Request a bounded automatic reranking sidecar. Zero disables it.
+    pub fn with_rerank_candidate_top_k(
+        mut self,
+        rerank_candidate_top_k: u32,
+    ) -> Result<Self, DomainError> {
+        if rerank_candidate_top_k > MAX_RERANK_CANDIDATE_TOP_K {
+            return Err(DomainError::InvalidTopK {
+                field: "rerank_candidate_top_k".into(),
+                value: rerank_candidate_top_k,
+            });
+        }
+        self.rerank_candidate_top_k = rerank_candidate_top_k;
+        Ok(self)
     }
 
     pub fn room(&self) -> &RoomKey {
@@ -133,11 +152,14 @@ impl RecallRequest {
     pub const fn projection(&self) -> RecallProjection {
         self.projection
     }
+    pub const fn rerank_candidate_top_k(&self) -> u32 {
+        self.rerank_candidate_top_k
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MANUAL_RECORD_CAP, RecallProjection, RecallRequest};
+    use super::{MANUAL_RECORD_CAP, MAX_RERANK_CANDIDATE_TOP_K, RecallProjection, RecallRequest};
     use crate::room::RoomKey;
 
     #[test]
@@ -159,5 +181,31 @@ mod tests {
             RecallProjection::Auto
         );
         assert!(MANUAL_RECORD_CAP >= 1);
+    }
+
+    #[test]
+    fn rerank_top_k_is_disabled_by_default_and_domain_bounded() {
+        let request =
+            RecallRequest::new(RoomKey::new("lab").unwrap(), "alpha".into(), 8, 0.4, 8, 0.3)
+                .unwrap();
+        assert_eq!(request.rerank_candidate_top_k(), 0);
+        assert_eq!(
+            request
+                .clone()
+                .with_rerank_candidate_top_k(MAX_RERANK_CANDIDATE_TOP_K)
+                .unwrap()
+                .rerank_candidate_top_k(),
+            MAX_RERANK_CANDIDATE_TOP_K
+        );
+        let error = request
+            .with_rerank_candidate_top_k(MAX_RERANK_CANDIDATE_TOP_K + 1)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            crate::error::DomainError::InvalidTopK {
+                field: "rerank_candidate_top_k".into(),
+                value: MAX_RERANK_CANDIDATE_TOP_K + 1,
+            }
+        );
     }
 }

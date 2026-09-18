@@ -87,11 +87,18 @@ export async function recallWithRouting(
   effectiveRoomDir: string,
   room: string,
   query: string,
-  { signal, temporalDecay = false, projection = "auto", timeoutMs = RECALL_TIMEOUT_MS }: {
+  {
+    signal,
+    temporalDecay = false,
+    projection = "auto",
+    timeoutMs = RECALL_TIMEOUT_MS,
+    rerankCandidateTopK,
+  }: {
     signal?: AbortSignal;
     temporalDecay?: boolean;
     projection?: RecallProjection;
     timeoutMs?: number;
+    rerankCandidateTopK?: number;
   } = {},
 ) {
   const runtime = rustRecallTransport();
@@ -109,8 +116,13 @@ export async function recallWithRouting(
   }
   const { executable, transport } = runtime;
   const vaultProfile = !text(process.env.ATHANOR_SUBSTRATE_ROOT);
+  const rerankParams = !vaultProfile
+    && Number.isSafeInteger(rerankCandidateTopK)
+    && rerankCandidateTopK > 0
+    ? { rerank_candidate_top_k: rerankCandidateTopK }
+    : {};
   const baseParams = vaultProfile
-    ? { room, room_dir: effectiveRoomDir, query }
+    ? { room, room_dir: effectiveRoomDir, query, ...rerankParams }
     : {
       room,
       query,
@@ -118,6 +130,7 @@ export async function recallWithRouting(
       semantic_min_similarity: RECALL_SEMANTIC_MIN_SIM,
       content_top_k: 8,
       content_min_similarity: RECALL_CONTENT_MIN_SIM,
+      ...rerankParams,
     };
   const decayParams = temporalDecay && !vaultProfile ? { ...baseParams, temporal_decay: true } : baseParams;
   const manual = projection === "manual" && !vaultProfile;

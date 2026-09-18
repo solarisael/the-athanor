@@ -190,6 +190,9 @@ fn default_content_top_k() -> u32 {
 fn default_content_min_similarity() -> f64 {
     0.30
 }
+fn default_rerank_candidate_top_k() -> u32 {
+    0
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -206,6 +209,13 @@ pub struct RecallParams {
     pub content_min_similarity: f64,
     #[serde(default)]
     pub temporal_decay: bool,
+    /// Automatic-only bounded sidecar candidate count. Zero preserves the
+    /// legacy response shape and disables broad-pool retrieval.
+    #[serde(
+        default = "default_rerank_candidate_top_k",
+        skip_serializing_if = "is_zero_u32"
+    )]
+    pub rerank_candidate_top_k: u32,
     /// `auto` (default) keeps the bounded passive working set; `manual` returns
     /// the selected records whole under `hearth::MANUAL_RECORD_CAP`. Skipped on
     /// the wire while `auto` so older peers read the same bytes as before.
@@ -539,6 +549,12 @@ pub struct RecallResultInput {
     pub source: String,
     #[serde(rename = "retrievalCandidates")]
     pub retrieval_candidates: Vec<RecallCandidate>,
+    #[serde(
+        default,
+        rename = "rerankCandidates",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rerank_candidates: Option<Vec<RecallCandidate>>,
     #[serde(rename = "canonMatches")]
     pub canon_matches: Vec<RecallCanonMatch>,
     #[serde(rename = "semanticChunks")]
@@ -1450,6 +1466,10 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
+}
+
 impl TryFrom<RecallParams> for RecallRequest {
     type Error = ProtocolError;
 
@@ -1464,12 +1484,17 @@ impl TryFrom<RecallParams> for RecallRequest {
             params.content_top_k,
             params.content_min_similarity,
         )
+        .map_err(|e| ProtocolError::InvalidParams(e.to_string()))
         .map(|request| {
             request
                 .with_temporal_decay(params.temporal_decay)
                 .with_projection(params.projection)
         })
-        .map_err(|e| ProtocolError::InvalidParams(e.to_string()))
+        .and_then(|request| {
+            request
+                .with_rerank_candidate_top_k(params.rerank_candidate_top_k)
+                .map_err(|e| ProtocolError::InvalidParams(e.to_string()))
+        })
     }
 }
 impl TryFrom<ClusterMaintenanceParams> for ClusterMaintenanceRequest {
@@ -4499,7 +4524,10 @@ mod tests {
             ("design-lesson", r#","voice":"craft""#),
             ("audio-lesson", ""),
         ] {
-            assert!(!absent(kind, fields), "{kind} must skip an unrequested dump");
+            assert!(
+                !absent(kind, fields),
+                "{kind} must skip an unrequested dump"
+            );
             assert!(absent(kind, &format!("{fields},\"backup\":true")));
             assert!(!absent(kind, &format!("{fields},\"backup\":false")));
         }
@@ -4507,10 +4535,13 @@ mod tests {
 
     #[test]
     fn sleep_keeps_backup_unless_refused() {
-        for (field, expected) in [("", true), (r#","backup":true"#, true), (r#","backup":false"#, false)] {
-            let params: PaperBoatSleepParams = serde_json::from_str(
-                &format!(r#"{{"room":"lab","body":"boat"{field}}}"#),
-            ).unwrap();
+        for (field, expected) in [
+            ("", true),
+            (r#","backup":true"#, true),
+            (r#","backup":false"#, false),
+        ] {
+            let params: PaperBoatSleepParams =
+                serde_json::from_str(&format!(r#"{{"room":"lab","body":"boat"{field}}}"#)).unwrap();
             assert_eq!(params.backup, expected);
         }
     }
@@ -4974,7 +5005,6 @@ mod tests {
             ));
         }
     }
-
     #[test]
     fn response_requires_exactly_one_branch() {
         let both = r#"{"protocol":1,"id":"x","result":{},"error":{}}"#;
@@ -4994,32 +5024,50 @@ mod tests {
         assert_eq!(recall.content_top_k(), 8);
         assert_eq!(recall.content_min_similarity(), 0.30);
         assert!(!recall.temporal_decay());
+        assert_eq!(recall.rerank_candidate_top_k(), 0);
 
-        let explicit = RequestEnvelope::parse_line(
-            r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","temporal_decay":true}}"#,
+        let rerank = RequestEnvelope::parse_line(
+        r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","rerank_candidate_top_k":64}}"#,
+    )
+    .unwrap()
+    .recall_request()
+    .unwrap();
+        assert_eq!(rerank.rerank_candidate_top_k(), 64);
+        assert!(
+        RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","rerank_candidate_top_k":65}}"#,
         )
         .unwrap()
         .recall_request()
-        .unwrap();
+        .is_err(),
+        "rerank sidecar count is rejected above the domain maximum"
+    );
+
+        let explicit = RequestEnvelope::parse_line(
+        r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","temporal_decay":true}}"#,
+    )
+    .unwrap()
+    .recall_request()
+    .unwrap();
         assert!(explicit.temporal_decay());
         assert_eq!(explicit.projection(), RecallProjection::Auto);
 
         let manual = RequestEnvelope::parse_line(
-            r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","projection":"manual"}}"#,
+        r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","projection":"manual"}}"#,
+    )
+    .unwrap()
+    .recall_request()
+    .unwrap();
+        assert_eq!(manual.projection(), RecallProjection::Manual);
+        assert!(
+        RequestEnvelope::parse_line(
+            r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","projection":"dossier"}}"#,
         )
         .unwrap()
         .recall_request()
-        .unwrap();
-        assert_eq!(manual.projection(), RecallProjection::Manual);
-        assert!(
-            RequestEnvelope::parse_line(
-                r#"{"protocol":1,"id":"r","method":"recall","params":{"room":"lab","query":"alpha","projection":"dossier"}}"#,
-            )
-            .unwrap()
-            .recall_request()
-            .is_err(),
-            "an unknown projection is refused, never defaulted"
-        );
+        .is_err(),
+        "an unknown projection is refused, never defaulted"
+    );
 
         let params: RecallParams =
             serde_json::from_value(serde_json::json!({"room":"lab","query":"alpha"})).unwrap();

@@ -348,7 +348,7 @@ describe("Recall Jev reranker", () => {
     expect(result.retrievalCandidates).toBe(baseline);
     expect(result.receipt).toMatchObject({
       status: "failed",
-      reason: "invalid-response",
+      reason: "model-mismatch",
     });
     expect(JSON.stringify(reranker.getCoverage())).not.toContain("echoed private text");
   });

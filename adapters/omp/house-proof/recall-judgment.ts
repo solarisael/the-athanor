@@ -39,6 +39,7 @@ const MAX_PACKET_BYTES = 32768;
 const MAX_RESPONSE_BYTES = 65536;
 const MAX_CARDS = 48;
 const MAX_CARD_CODEPOINTS = 384;
+const VALID_MODEL = /^(?=[A-Za-z0-9._:/-]{1,64}$)(?=.*jev)[A-Za-z0-9._:/-]+$/i;
 
 const toText = (value: unknown): string =>
   typeof value === "string" ? value : "";
@@ -102,10 +103,12 @@ const parseValidResponse = (raw: string, cards: readonly RecallCard[]) => {
       );
     });
 
-  if (parsed?.model !== MODEL || invalidAnswers) {
+  if (typeof parsed?.model !== "string" || !VALID_MODEL.test(parsed.model)) {
+    return { parsed: null, reason: "model-mismatch" as const };
+  }
+  if (invalidAnswers) {
     return { parsed: null, reason: "invalid-response" as const };
   }
-
   return { parsed, reason: undefined };
 };
 

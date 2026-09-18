@@ -4,7 +4,11 @@
   "description": "The Athanor OMP adapter for the native Rust runtime.",
   "author": "Sol",
   "license": "Apache-2.0",
-  "repository": { "type": "git", "url": "git+https://github.com/solarisael/the-athanor.git", "directory": "adapters/omp" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solarisael/the-athanor.git",
+    "directory": "adapters/omp"
+  },
   "type": "module",
   "main": "index.ts",
   "scripts": {
@@ -12,6 +16,8 @@
     "deploy": "pwsh -NoProfile -File deploy-local.ps1"
   },
   "devDependencies": {
+    "@oh-my-pi/pi-ai": "18.2.4",
+    "@oh-my-pi/pi-coding-agent": "18.2.4",
     "zod": "4.5.4"
   }
 }

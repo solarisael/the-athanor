@@ -92,6 +92,19 @@ import { queryAnamnesis, formatAnamnesisContext } from "./house-proof/anamnesis.
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
 import { installLessonTtsrBridge, selectPresenceLessons, syncLessonTtsr } from "./house-proof/lesson-ttsr.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./house-proof/context.ts";
+import { installSemanticJudgmentShadow } from "./house-proof/semantic-judgment.ts";
+export {
+  scoreToolCallShadow,
+  scoreCompletedDraftShadow,
+  selectSemanticRoute,
+  SEMANTIC_SCORE_SCHEMA_VERSION,
+  SEMANTIC_SHADOW_THRESHOLDS,
+  SEMANTIC_THRESHOLD_POLICY,
+  type SemanticJudge,
+  type SemanticReceipt,
+  type SemanticCoverage,
+  type SemanticDisposition,
+} from "./house-proof/semantic-judgment.ts";
 import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "./house-proof/constants.ts";
 import { showHouseContextFeedback } from "./house-proof/feedback.ts";
 import {
@@ -629,6 +642,14 @@ async function recordAutomaticContextTelemetry(
 export default function solarisaelHouseProof(pi, release) {
   pi.setLabel("The Athanor");
   const lessonTtsrInstallWarning = installLessonTtsrBridge(pi);
+  const semanticJudgmentShadow = installSemanticJudgmentShadow(pi);
+  // The command exposes local coverage only. No eligibility provider means no remote judgment.
+  pi.registerCommand?.("jev-shadow", {
+    description: "Show local Jev shadow coverage for this session",
+    handler: (_args, ctx) => {
+      ctx.ui.notify(JSON.stringify(semanticJudgmentShadow.getCoverage(), null, 2), "info");
+    },
+  });
   pi.registerCommand?.("insula", {
     description: "Show the Host's Insula Vitals for the last 15m, 1h, or 24h",
     handler: (args, ctx) => showInsulaCockpit(args, ctx),

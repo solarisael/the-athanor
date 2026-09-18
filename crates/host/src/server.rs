@@ -1659,8 +1659,10 @@ async fn query_akasha_lessons(
         stage: payload.stage,
         language_keys: payload.language_keys,
         technology_keys: payload.technology_keys,
+        tag: None,
         query: payload.query,
         always_on: false,
+        trigger_only: false,
         limit: payload.limit,
         ids: payload.ids,
     };

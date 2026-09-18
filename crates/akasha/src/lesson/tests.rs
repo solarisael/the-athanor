@@ -91,11 +91,15 @@ fn lesson_query_preserves_typed_filters_and_bounds() {
         "stage": "mix",
         "languageKeys": [],
         "technologyKeys": [],
-        "limit": 12
+        "limit": 12,
+        "triggerOnly": true,
+        "tag": "ttsr-approved",
     }))
     .unwrap();
     assert_eq!(params.family, LessonFamily::Audio);
     assert_eq!(params.stage.as_deref(), Some("mix"));
+    assert!(params.trigger_only);
+    assert_eq!(params.tag.as_deref(), Some("ttsr-approved"));
     assert!(params.validate().is_ok());
     let invalid: LessonQueryParams = serde_json::from_value(serde_json::json!({
         "room": "kintsu", "type": "project", "limit": 12

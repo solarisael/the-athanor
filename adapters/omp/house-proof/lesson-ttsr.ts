@@ -155,15 +155,47 @@ export async function syncLessonTtsr(args: {
   const sessionId = String(args.ctx.sessionManager?.getSessionId?.() ?? args.ctx.sessionID ?? "").trim();
   const record = state().sessions.get(sessionId);
 
-  const queries = FAMILIES.map((family) => runLessonQuery(args.roomDir, args.room, { type: family, limit: 50 }));
-  if (args.activeProject) queries.push(runLessonQuery(args.roomDir, args.room, { type: "project", project: args.activeProject, limit: 50 }));
-  const results = await Promise.all(queries);
-  const rows = results.flatMap(rowsFrom);
-  const baseline = rows
+  const triggerQueries: Array<{ family: string; result: Promise<Record<string, unknown>> }> =
+    FAMILIES.map((family) => ({
+      family,
+      result: runLessonQuery(args.roomDir, args.room, {
+        type: family, tag: "ttsr-approved", triggerOnly: true, limit: 50,
+      }),
+    }));
+  if (args.activeProject) {
+    triggerQueries.push({
+      family: "project",
+      result: runLessonQuery(args.roomDir, args.room, {
+        type: "project", project: args.activeProject,
+        tag: "ttsr-approved", triggerOnly: true, limit: 50,
+      }),
+    });
+  }
+  const [baselineResult, ...triggerResults] = await Promise.all([
+    runLessonQuery(args.roomDir, args.room, { type: "coding", alwaysOn: true, limit: 50 }),
+    ...triggerQueries.map((query) => query.result),
+  ]);
+  const warnings: string[] = [];
+  const triggerRows = triggerResults.flatMap((result, index) => {
+    const rows = rowsFrom(result);
+    // # enough: 50 guards per family; a visible warning requires a paged trigger API before growth crosses it.
+    if (rows.length === 50) warnings.push(`${triggerQueries[index].family} trigger query reached the 50-row ceiling`);
+    return rows;
+  });
+  const baselineRows = rowsFrom(baselineResult);
+  if (baselineRows.length === 50) warnings.push("coding baseline query reached the 50-row ceiling");
+  const rows = [...new Map(
+    [...triggerRows, ...baselineRows].map((row) => [`${row.type}:${row.id}`, row]),
+  ).values()];
+  const baseline = baselineRows
     .filter((row) => row.type === "coding" && row.alwaysOn === true)
     .map((row) => ({ id: row.id, body: row.lesson }));
   if (!record) {
-    return { active: 0, added: 0, warnings: ["native OMP TTSR manager unavailable"], lessons: [], baseline };
+    return {
+      active: 0, added: 0,
+      warnings: [...warnings, "native OMP TTSR manager unavailable"],
+      lessons: [], baseline,
+    };
   }
 
   const armed = rows.flatMap((row) => {
@@ -173,7 +205,6 @@ export async function syncLessonTtsr(args: {
   const rules = armed.map((entry) => entry.rule);
   const next = new Set(rules.map((rule) => String(rule.name)));
   let added = 0;
-  const warnings: string[] = [];
   for (const rule of rules) {
     const name = String(rule.name);
     if (record.known.has(name)) continue;

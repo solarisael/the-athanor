@@ -30,9 +30,13 @@ pub struct LessonQueryParams {
     #[serde(default)]
     pub technology_keys: Vec<String>,
     #[serde(default)]
+    pub tag: Option<String>,
+    #[serde(default)]
     pub query: Option<String>,
     #[serde(default)]
     pub always_on: bool,
+    #[serde(default)]
+    pub trigger_only: bool,
     #[serde(default = "default_twelve")]
     pub limit: u32,
     /// Direct lookup by lesson ID inside the family. A map names lessons by
@@ -152,8 +156,10 @@ pub struct LessonFilters {
     pub stage: Option<String>,
     pub language_keys: Vec<String>,
     pub technology_keys: Vec<String>,
+    pub tag: Option<String>,
     pub query: Option<String>,
     pub always_on: bool,
+    pub trigger_only: bool,
     pub limit: u32,
     pub ids: Vec<i64>,
 }
@@ -220,6 +226,11 @@ pub async fn lesson_query(
     if let Some(stage) = params.stage.as_ref() {
         qb.push(" AND ").push_bind(stage).push(" = ANY(stage)");
     }
+    if let Some(tag) = params.tag.as_ref().filter(|value| !value.trim().is_empty()) {
+        qb.push(" AND ")
+            .push_bind(tag.trim().to_owned())
+            .push(" = ANY(tags)");
+    }
     let direct = !params.ids.is_empty();
     if direct {
         qb.push(" AND id = ANY(")
@@ -230,6 +241,9 @@ pub async fn lesson_query(
     }
     if params.always_on {
         qb.push(" AND always_on");
+    }
+    if params.trigger_only {
+        qb.push(" AND (condition <> '{}' OR ast_condition <> '{}')");
     }
     if let Some(query) = params.query.as_ref().filter(|v| !v.is_empty()) {
         qb.push(" AND lesson_tsv @@ websearch_to_tsquery(CASE WHEN lesson_key = 'audio' THEN ")
@@ -293,9 +307,18 @@ pub async fn lesson_query(
         if let Some(project) = params.project.as_ref() {
             expand.push(" AND project = ").push_bind(project);
         }
+        if let Some(tag) = params.tag.as_ref().filter(|value| !value.trim().is_empty()) {
+            expand
+                .push(" AND ")
+                .push_bind(tag.trim().to_owned())
+                .push(" = ANY(tags)");
+        }
         eligibility(&mut expand, &params.language_keys, &params.technology_keys);
         if params.always_on {
             expand.push(" AND always_on");
+        }
+        if params.trigger_only {
+            expand.push(" AND (condition <> '{}' OR ast_condition <> '{}')");
         }
         expand
             .push(" ORDER BY always_on DESC, updated_at DESC, id LIMIT ")
@@ -321,6 +344,12 @@ pub async fn lesson_query(
     if let Some(project) = params.project.as_ref() {
         taxonomy_q.push(" AND project = ").push_bind(project);
     }
+    if let Some(tag) = params.tag.as_ref().filter(|value| !value.trim().is_empty()) {
+        taxonomy_q
+            .push(" AND ")
+            .push_bind(tag.trim().to_owned())
+            .push(" = ANY(tags)");
+    }
     if direct {
         taxonomy_q
             .push(" AND id = ANY(")
@@ -335,6 +364,9 @@ pub async fn lesson_query(
     }
     if params.always_on {
         taxonomy_q.push(" AND always_on");
+    }
+    if params.trigger_only {
+        taxonomy_q.push(" AND (condition <> '{}' OR ast_condition <> '{}')");
     }
     taxonomy_q.push(" GROUP BY kind_path,shape ORDER BY count DESC,kind_path");
     let taxonomy = taxonomy_q
@@ -367,8 +399,10 @@ pub async fn lesson_query(
             stage: params.stage,
             language_keys: params.language_keys,
             technology_keys: params.technology_keys,
+            tag: params.tag,
             query: params.query,
             always_on: params.always_on,
+            trigger_only: params.trigger_only,
             limit: params.limit,
             ids: params.ids,
         },

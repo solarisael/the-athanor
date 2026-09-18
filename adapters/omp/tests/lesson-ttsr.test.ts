@@ -47,6 +47,33 @@ function sync(ctx: unknown, activeProject: string | null = null) {
 function presence(result: Awaited<ReturnType<typeof sync>>, mode: Parameters<typeof selectPresenceLessons>[1]) {
   return lessonMaterials(selectPresenceLessons(result, mode));
 }
+test("sync separates the always-on baseline from deterministic trigger queries", async () => {
+  lessons([]);
+  const { ctx } = session();
+  await sync(ctx, "The Athanor");
+  const filters = query.mock.calls.map((call) => call[2]);
+  expect(filters).toContainEqual({ type: "coding", alwaysOn: true, limit: 50 });
+  for (const family of ["coding", "writing", "design", "audio"]) {
+    expect(filters).toContainEqual({
+      type: family, tag: "ttsr-approved", triggerOnly: true, limit: 50,
+    });
+  }
+  expect(filters).toContainEqual({
+    type: "project", project: "The Athanor",
+    tag: "ttsr-approved", triggerOnly: true, limit: 50,
+  });
+});
+
+test("a full trigger page reports its retrieval ceiling", async () => {
+  lessons(Array.from({ length: 50 }, (_, index) => coding(index + 1, {
+    tags: ["ttsr-approved"], condition: [`guard ${index}`],
+  })));
+  const { ctx } = session();
+  const result = await sync(ctx);
+  expect(result.active).toBe(50);
+  expect(result.warnings).toContain("coding trigger query reached the 50-row ceiling");
+});
+
 
 test("unarmed always-on coding reaches work Presence, not conversation or quiet", async () => {
   lessons([coding(200, { alwaysOn: true }), coding(224), {

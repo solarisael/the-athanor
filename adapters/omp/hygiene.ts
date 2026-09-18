@@ -1,12 +1,46 @@
-// OMP-local filesystem hygiene: one pre-exec guard.
+// OMP-local pre-exec guards.
 //
-// A scratch-shaped write into a tracked tree is blocked before the tool runs,
-// locally and synchronously, because the guard must hold even when nothing else
-// of the House is up. Nothing else lives here: advisory house counsel, project
-// state, lessons, and ranking are behavioral decisions owned by Rust.
+// Scratch writes and malformed AST Edit metavariables block synchronously.
+// Both guards must work when the rest of the House is unavailable.
+// Advisory counsel, project state, lessons, and ranking remain Rust-owned.
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+type ToolCallEvent = { toolName?: string; input?: Record<string, unknown> };
+type Refusal = { block: true; reason: string };
+
+const INVALID_AST_METAVARIABLE = /(?<!\$)\$\$(?!\$)[A-Za-z_][A-Za-z0-9_]*/;
+
+function astEditParams(event: ToolCallEvent): Record<string, unknown> | null {
+  if (event.toolName === "ast_edit") return event.input ?? {};
+  if (event.toolName !== "write" || event.input?.path !== "xd://ast_edit") return null;
+  if (typeof event.input.content !== "string") return null;
+  try {
+    const decoded = JSON.parse(event.input.content);
+    return decoded && typeof decoded === "object" && !Array.isArray(decoded) ? decoded : null;
+  } catch {
+    // The mounted AST Edit device owns malformed JSON refusal.
+    return null;
+  }
+}
+
+export function evaluateAstEdit(event: ToolCallEvent): Refusal | null {
+  const params = astEditParams(event);
+  if (!params || !Array.isArray(params.ops)) return null;
+  const invalid = params.ops.findIndex((op) => {
+    if (!op || typeof op !== "object") return false;
+    const candidate = op as Record<string, unknown>;
+    return [candidate.pat, candidate.out].some((value) =>
+      typeof value === "string" && INVALID_AST_METAVARIABLE.test(value)
+    );
+  });
+  if (invalid < 0) return null;
+  return {
+    block: true,
+    reason: `Refusing AST Edit operation ${invalid + 1}: $$NAME is invalid. Use $$$NAME for zero-or-more nodes.`,
+  };
+}
 
 export function isScratchName(targetPath: string): boolean {
   const base = (targetPath.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "").toLowerCase();
@@ -46,7 +80,7 @@ export function isInTrackedTree(
 export function evaluateWrite(
   targetPath: string,
   hasMarker?: (directory: string) => boolean,
-): { block: true; reason: string } | null {
+): Refusal | null {
   if (!targetPath) return null;
   const sanctionedScratch = /(^|[\\/])\.scratch([\\/]|$)/i.test(targetPath);
   if (sanctionedScratch || !isScratchName(targetPath) || !isInTrackedTree(targetPath, hasMarker)) {
@@ -67,6 +101,8 @@ export default function solarisaelHygiene(pi) {
   pi.setLabel?.("Solarisael Hygiene");
 
   pi.on("tool_call", async (event) => {
+    const astEditRefusal = evaluateAstEdit(event);
+    if (astEditRefusal) return astEditRefusal;
     if (event?.toolName !== "write") return;
     return evaluateWrite(String(event.input?.path ?? ""));
   });

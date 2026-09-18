@@ -1,4 +1,4 @@
-//! PostgreSQL proof for the lesson_query alwaysOn wire filter.
+//! PostgreSQL proof for the lesson_query routing filters.
 
 use akasha::{LessonQueryParams, LessonQueryResult, lesson_query};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -75,6 +75,41 @@ async fn insert_lesson(pool: &PgPool, id: i64, always_on: bool) -> TestResult {
     .await?;
     Ok(())
 }
+async fn insert_trigger_lesson(
+    pool: &PgPool,
+    id: i64,
+    condition: &[&str],
+    ast_condition: &[&str],
+    tags: &[&str],
+) -> TestResult {
+    sqlx::query(
+        "INSERT INTO lessons (lesson_key,id,title,lesson,condition,ast_condition,tags)
+         VALUES ('coding',$1,$2,$3,$4,$5,$6)",
+    )
+    .bind(id)
+    .bind(format!("lesson {id}"))
+    .bind(format!("body {id}"))
+    .bind(
+        condition
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>(),
+    )
+    .bind(
+        ast_condition
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>(),
+    )
+    .bind(
+        tags.iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>(),
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
 
 #[tokio::test]
 #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
@@ -118,6 +153,38 @@ async fn lesson_query_always_on_filter_returns_only_flagged_rows_and_absence_is_
         .await?
         .try_get("count")?;
     assert_eq!(count, 2);
+    Ok(())
+}
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+async fn lesson_query_trigger_only_returns_regex_and_ast_guards() -> TestResult {
+    // Kills: dropping either trigger column from the routing predicate.
+    let pool = temp_lesson_pool().await?;
+    insert_lesson(&pool, 1, false).await?;
+    insert_trigger_lesson(&pool, 2, &["unsafe"], &[], &["ttsr-approved"]).await?;
+    insert_trigger_lesson(
+        &pool,
+        3,
+        &[],
+        &["try { $$$BODY } catch ($ERR) { }"],
+        &["ttsr-approved"],
+    )
+    .await?;
+    insert_trigger_lesson(&pool, 4, &["unapproved"], &[], &[]).await?;
+
+    let routed: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "coding",
+        "tag": "ttsr-approved", "triggerOnly": true
+    }))?;
+    let routed = lesson_query(&pool, routed).await?;
+    assert_eq!(ids_of(&routed), vec![2, 3]);
+    assert!(routed.filters.trigger_only);
+    assert_eq!(routed.filters.tag.as_deref(), Some("ttsr-approved"));
+
+    let bare: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "coding"
+    }))?;
+    assert_eq!(ids_of(&lesson_query(&pool, bare).await?), vec![1, 2, 3, 4]);
     Ok(())
 }
 

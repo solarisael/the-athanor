@@ -272,6 +272,17 @@ test("production-shaped installation without eligibility never resolves or calls
   expect(fixture.resolutions()).toBe(0);
   expect(requests).toHaveLength(0);
 });
+test("eligible hooks require an explicitly injected runtime backend", async () => {
+  const fixture = hookFixture(eligible, null);
+  fixture.emit(turn());
+  await settled(fixture, 1);
+  expect(fixture.getReceipts()[0]).toMatchObject({
+    status: "inconclusive",
+    reason: "judgment backend unavailable",
+  });
+  expect(fixture.resolutions()).toBe(1);
+});
+
 
 test("unavailable or failing eligibility yields one honest receipt per invocation", async () => {
   for (const provider of [() => undefined, () => { throw new Error("private eligibility detail"); }] satisfies EligibilityProvider[]) {

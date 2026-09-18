@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import type { Judge, JudgmentResult, Questions } from "@oh-my-pi/pi-ai/judgment";
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 
-import { findScopedSettings } from "@oh-my-pi/pi-coding-agent/config/settings";
-import { resolveJudge } from "@oh-my-pi/pi-coding-agent/judgment";
+// Installed components receive runtime services through OMP's extension context.
+// Runtime package imports can load a second pi_natives copy from Bun's cache.
 
 export const SEMANTIC_SCORE_SCHEMA_VERSION = "jev-shadow-score.v3";
 export const SEMANTIC_THRESHOLD_POLICY = "locked-corpus-2026-09-18-v1";
@@ -46,18 +46,6 @@ export type EligibilityProvider = (
 ) => (SemanticPacket & { lessons: Lesson[] }) | undefined |
   Promise<(SemanticPacket & { lessons: Lesson[] }) | undefined>;
 
-export function resolveSemanticJudge(ctx: ExtensionContext): SemanticJudge | undefined {
-  const settings = findScopedSettings(ctx.cwd);
-  if (!settings || !ctx.modelRegistry) return undefined;
-  const judge = resolveJudge({
-    settings,
-    registry: ctx.modelRegistry,
-    backend: "online",
-    sessionModel: ctx.model,
-    sessionId: ctx.sessionManager.getSessionId(),
-  });
-  return { judge, preferredKind: judge.kind };
-}
 
 const questions = {
   applies: { type: "noul", instructions: "Does at least one eligible lesson apply to this bounded proposal?" },
@@ -325,7 +313,7 @@ export function installSemanticJudgmentShadow(
               eligible,
               observation.proposal,
               eligible.lessons,
-              () => (options.resolveBackend ?? resolveSemanticJudge)(ctx),
+              () => options.resolveBackend?.(ctx),
               observation,
             ),
             observation,

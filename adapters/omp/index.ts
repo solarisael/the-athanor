@@ -128,6 +128,7 @@ import {
   recordInsulaPoint,
   startInsulaSpan,
   type InsulaOutcome,
+  type InsulaPointRequest,
   type InsulaSpan,
 } from "./house-proof/insula.ts";
 import { showInsulaCockpit } from "./house-proof/vitals.ts";
@@ -284,7 +285,7 @@ const insulaRequestSpans = new Map<string, InsulaSpan>();
 const insulaToolSpans = new Map<string, InsulaSpan>();
 // The last settled request per room+session, kept so the next turn's verdict
 // can hang from the request it judges and join that request's usage point.
-type SettledInsulaRequest = Pick<InsulaSpan, "room" | "traceId" | "spanId" | "providerRequestId">;
+export type SettledInsulaRequest = Pick<InsulaSpan, "room" | "traceId" | "spanId" | "providerRequestId">;
 const lastSettledInsulaRequests = new Map<string, SettledInsulaRequest>();
 
 const INSULA_STOP_REASONS: Record<string, { outcomeClass: InsulaOutcome; errorClass: string | null }> = {
@@ -382,19 +383,24 @@ function settleInsulaRequest(
  * refusal), plus `turn_verdict.<x>` when scored and `recall_fit.<x>` /
  * `recall_use.<x>` when Recall had injected for that turn. A disabled policy
  * records nothing: silence is not a measurement.
+ *
+ * Every point keeps `trace_span` scope. The `provider_request` scope keys on
+ * the request id alone (no operation), and `provider_usage` already holds that
+ * key for the parent; a verdict point claiming it would collide and the Host
+ * would drop it. The request id rides along as a correlation column only.
  */
-function recordTurnVerdict(
+export function verdictInsulaPoints(
   room: string,
   parent: SettledInsulaRequest | undefined,
   result: VerdictResult,
-): void {
-  if (result.status === "disabled") return;
+): InsulaPointRequest[] {
+  if (result.status === "disabled") return [];
   const correlation = {
     room,
     traceId: parent?.traceId,
     parentSpanId: parent?.spanId,
     providerRequestId: parent?.providerRequestId,
-    scope: parent?.providerRequestId ? "provider_request" as const : "trace_span" as const,
+    scope: "trace_span" as const,
   };
   const outcome: Record<VerdictResult["status"], InsulaOutcome> = {
     scored: "ok",
@@ -403,21 +409,30 @@ function recordTurnVerdict(
     unavailable: "degraded",
     failed: "error",
   };
-  recordInsulaPoint({
+  const points: InsulaPointRequest[] = [{
     ...correlation,
     operation: `verdict_request.${result.provider ?? "none"}`,
     outcomeClass: outcome[result.status],
     errorClass: result.status === "scored" ? null : result.reason,
     durationUs: result.latencyMs * 1_000,
     bytesOut: result.status === "scored" ? result.packetBytes : 0,
-  });
-  if (result.status !== "scored") return;
+  }];
+  if (result.status !== "scored") return points;
 
-  recordInsulaPoint({ ...correlation, operation: `turn_verdict.${result.turn}`, outcomeClass: "ok" });
+  points.push({ ...correlation, operation: `turn_verdict.${result.turn}`, outcomeClass: "ok" });
   if (result.recall) {
-    recordInsulaPoint({ ...correlation, operation: `recall_fit.${result.recall.fit}`, outcomeClass: "ok" });
-    recordInsulaPoint({ ...correlation, operation: `recall_use.${result.recall.use}`, outcomeClass: "ok" });
+    points.push({ ...correlation, operation: `recall_fit.${result.recall.fit}`, outcomeClass: "ok" });
+    points.push({ ...correlation, operation: `recall_use.${result.recall.use}`, outcomeClass: "ok" });
   }
+  return points;
+}
+
+function recordTurnVerdict(
+  room: string,
+  parent: SettledInsulaRequest | undefined,
+  result: VerdictResult,
+): void {
+  for (const point of verdictInsulaPoints(room, parent, result)) recordInsulaPoint(point);
 }
 
 /**

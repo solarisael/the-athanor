@@ -8,7 +8,7 @@ import {
   createVerdictScorer,
   recallTitlesFromWorkingSet,
 } from "../house-proof/turn-verdict.ts";
-import { previousTurnForVerdict } from "../index.ts";
+import { previousTurnForVerdict, verdictInsulaPoints } from "../index.ts";
 
 const roots: string[] = [];
 
@@ -273,3 +273,38 @@ describe("previous turn selection", () => {
     expect(previousTurnForVerdict([first, second], second, new Map(), new Map())).toBeNull();
   });
 });
+
+describe("verdict insula points", () => {
+  const parent = { room: "kodo", traceId: "trace-1", spanId: "span-1", providerRequestId: "msg_01" };
+  const scored = {
+    status: "scored" as const, provider: "typesafe" as const, model: "jev-latest",
+    turn: "continued" as const, recall: { fit: "relevant" as const, use: "ignored" as const },
+    latencyMs: 579, packetBytes: 1249,
+  };
+
+  test("never claims the parent's provider_request key, which provider_usage already holds", () => {
+    const points = verdictInsulaPoints("kodo", parent, scored);
+    expect(points.map(point => point.operation)).toEqual([
+      "verdict_request.typesafe", "turn_verdict.continued", "recall_fit.relevant", "recall_use.ignored",
+    ]);
+    for (const point of points) {
+      expect(point.scope).toBe("trace_span");
+      expect(point).toMatchObject({ traceId: "trace-1", parentSpanId: "span-1", providerRequestId: "msg_01" });
+    }
+    expect(points[0]).toMatchObject({ outcomeClass: "ok", errorClass: null, durationUs: 579_000, bytesOut: 1249 });
+  });
+
+  test("a refusal is one point with its reason; a disabled policy is silence", () => {
+    const refused = verdictInsulaPoints("kodo", undefined, {
+      status: "refused", provider: "typesafe", reason: "secret_like", latencyMs: 1,
+    });
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({
+      operation: "verdict_request.typesafe", outcomeClass: "refused", errorClass: "secret_like",
+      scope: "trace_span", traceId: undefined, providerRequestId: undefined, bytesOut: 0,
+    });
+    expect(verdictInsulaPoints("kodo", parent, { status: "disabled", provider: null, reason: "not_approved", latencyMs: 0 }))
+      .toEqual([]);
+  });
+});
+

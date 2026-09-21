@@ -22,6 +22,12 @@ the exact implementation record.
 
 ### Added
 
+- The OMP adapter can judge each finished turn with Jev. It reads the operator's reply and the previous assistant turn, both clipped, and records `turn_verdict` and `recall_verdict` points in Insula.
+  The room marker `jevVerdict` turns this on with an explicit grant. It is off by default.
+  The provider is `typesafe` or a `laya` endpoint on loopback. Both use the same request shape.
+- Insula records the size of each context block the OMP adapter injects, per organ, as `injection.<organ>` points.
+  The `provider_usage` point now carries cache-read and cache-write token counts in `bytes_in` and `bytes_out`.
+
 - Hallway posts publish sanitized room triggers through JetStream after the database commit. Hosts push inbox changes to subscribed sessions.
   Failed publication preserves the post. OMP keeps its per-turn Bell check until it has a persistent Host connection.
 

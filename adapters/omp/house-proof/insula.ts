@@ -115,6 +115,8 @@ export type InsulaPointRequest = InsulaSpanRequest & {
   errorClass?: string | null;
   scope?: InsulaScope;
   durationUs?: number | null;
+  bytesIn?: number | null;
+  bytesOut?: number | null;
   tokensIn?: number | null;
   tokensOut?: number | null;
   providerRequestId?: string | null;
@@ -138,6 +140,8 @@ type ObservationDraft = {
   outcomeClass: InsulaOutcome;
   errorClass: string | null;
   durationUs: number | null;
+  bytesIn: number;
+  bytesOut: number;
   tokensIn: number;
   tokensOut: number;
   toolCallId: string | null;
@@ -298,6 +302,8 @@ export class InsulaWriter {
       outcomeClass: "unknown",
       errorClass: null,
       durationUs: null,
+      bytesIn: 0,
+      bytesOut: 0,
       tokensIn: 0,
       tokensOut: 0,
       toolCallId: span.toolCallId,
@@ -327,6 +333,8 @@ export class InsulaWriter {
       durationUs: durationUs === undefined
         ? elapsedMicroseconds(span.startedAt)
         : boundedDuration(durationUs),
+      bytesIn: 0,
+      bytesOut: 0,
       tokensIn: 0,
       tokensOut: 0,
       toolCallId: span.toolCallId,
@@ -355,6 +363,8 @@ export class InsulaWriter {
       outcomeClass: request.outcomeClass,
       errorClass: mechanicalName(request?.errorClass),
       durationUs: boundedDuration(request?.durationUs),
+      bytesIn: boundedTokens(request?.bytesIn),
+      bytesOut: boundedTokens(request?.bytesOut),
       tokensIn: boundedTokens(request?.tokensIn),
       tokensOut: boundedTokens(request?.tokensOut),
       toolCallId,
@@ -435,8 +445,8 @@ export class InsulaWriter {
       durationUs: draft.phase === "start" ? null : draft.durationUs,
       outcomeClass: draft.outcomeClass,
       errorClass: draft.outcomeClass === "ok" ? null : draft.errorClass,
-      bytesIn: 0,
-      bytesOut: 0,
+      bytesIn: draft.phase === "start" ? 0 : draft.bytesIn,
+      bytesOut: draft.phase === "start" ? 0 : draft.bytesOut,
       tokensIn: draft.phase === "start" ? 0 : draft.tokensIn,
       tokensOut: draft.phase === "start" ? 0 : draft.tokensOut,
       toolCallId: draft.toolCallId,
@@ -467,7 +477,12 @@ export class InsulaWriter {
       outcomeClass: "degraded",
       errorClass: "queue_overflow",
       durationUs: null,
+      bytesIn: 0,
+      bytesOut: 0,
+      tokensIn: 0,
+      tokensOut: 0,
       toolCallId: null,
+      providerRequestId: null,
       scope: "writer_sequence",
       dropCount: count,
     });

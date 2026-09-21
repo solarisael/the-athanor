@@ -86,7 +86,7 @@ import {
   readQuestBoard,
 } from "./house-proof/substrate.ts";
 import { receiveAutomaticWake } from "./house-proof/wake-context/index.ts";
-import { messageText } from "./house-proof/text.ts";
+import { conversationText, messageText } from "./house-proof/text.ts";
 import { anchorTurnAdditions, currentTurnOrigin, turnKeysByMessage } from "./house-proof/turn-origin.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
@@ -94,6 +94,7 @@ import { installLessonTtsrBridge, selectPresenceLessons, syncLessonTtsr } from "
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./house-proof/context.ts";
 import { installSemanticJudgmentShadow } from "./house-proof/semantic-judgment.ts";
 import { createRecallReranker, type RecallRerankPolicy, type RecallRerankResult } from "./house-proof/recall-judgment.ts";
+import { createVerdictScorer, recallTitlesFromWorkingSet, type VerdictResult } from "./house-proof/turn-verdict.ts";
 export {
   scoreToolCallShadow,
   scoreCompletedDraftShadow,
@@ -273,10 +274,18 @@ type InsulaSettlement = {
   durationUs: number | null;
   tokensIn: number;
   tokensOut: number;
+  // Cache buckets ride bytesIn/bytesOut on the usage point: tokensIn stays the
+  // full input so older vitals rows keep comparing, and price needs the split.
+  cacheRead: number;
+  cacheWrite: number;
 };
 
 const insulaRequestSpans = new Map<string, InsulaSpan>();
 const insulaToolSpans = new Map<string, InsulaSpan>();
+// The last settled request per room+session, kept so the next turn's verdict
+// can hang from the request it judges and join that request's usage point.
+type SettledInsulaRequest = Pick<InsulaSpan, "room" | "traceId" | "spanId" | "providerRequestId">;
+const lastSettledInsulaRequests = new Map<string, SettledInsulaRequest>();
 
 const INSULA_STOP_REASONS: Record<string, { outcomeClass: InsulaOutcome; errorClass: string | null }> = {
   stop: { outcomeClass: "ok", errorClass: null },
@@ -320,6 +329,8 @@ function insulaAssistantSettlement(message: any): InsulaSettlement | null {
     durationUs: durationMs === null ? null : durationMs * 1_000,
     tokensIn: bucket(usage?.input) + bucket(usage?.cacheRead) + bucket(usage?.cacheWrite),
     tokensOut: bucket(usage?.output),
+    cacheRead: bucket(usage?.cacheRead),
+    cacheWrite: bucket(usage?.cacheWrite),
   };
 }
 
@@ -338,6 +349,13 @@ function settleInsulaRequest(
   if (!span) return;
   insulaRequestSpans.delete(key);
   endInsulaSpan(span, outcomeClass, errorClass, usage?.durationUs ?? null);
+  lastSettledInsulaRequests.set(key, {
+    room: span.room,
+    traceId: span.traceId,
+    spanId: span.spanId,
+    providerRequestId: span.providerRequestId,
+  });
+  trimOldestMap(lastSettledInsulaRequests, 256);
   const measured = usage && (usage.tokensIn > 0 || usage.tokensOut > 0) ? usage : null;
   // One usage point per settled request, always. Unmetered usage is a degraded
   // point rather than a zero-token ok one, so Vitals can tell "nothing was
@@ -352,8 +370,82 @@ function settleInsulaRequest(
     errorClass: measured ? null : "usage_unavailable",
     tokensIn: measured?.tokensIn ?? 0,
     tokensOut: measured?.tokensOut ?? 0,
+    bytesIn: measured?.cacheRead ?? 0,
+    bytesOut: measured?.cacheWrite ?? 0,
     scope: span.providerRequestId ? "provider_request" : "trace_span",
   });
+}
+
+/**
+ * Verdict points hang from the request they judge. One `verdict_request.<provider>`
+ * point always (its duration is the judge's latency, its error class the
+ * refusal), plus `turn_verdict.<x>` / `recall_verdict.<x>` when scored. A
+ * disabled policy records nothing: silence is not a measurement.
+ */
+function recordTurnVerdict(
+  room: string,
+  parent: SettledInsulaRequest | undefined,
+  result: VerdictResult,
+): void {
+  if (result.status === "disabled") return;
+  const correlation = {
+    room,
+    traceId: parent?.traceId,
+    parentSpanId: parent?.spanId,
+    providerRequestId: parent?.providerRequestId,
+    scope: parent?.providerRequestId ? "provider_request" as const : "trace_span" as const,
+  };
+  const outcome: Record<VerdictResult["status"], InsulaOutcome> = {
+    scored: "ok",
+    disabled: "unknown",
+    refused: "refused",
+    unavailable: "degraded",
+    failed: "error",
+  };
+  recordInsulaPoint({
+    ...correlation,
+    operation: `verdict_request.${result.provider ?? "none"}`,
+    outcomeClass: outcome[result.status],
+    errorClass: result.status === "scored" ? null : result.reason,
+    durationUs: result.latencyMs * 1_000,
+    bytesOut: result.status === "scored" ? result.packetBytes : 0,
+  });
+  if (result.status !== "scored") return;
+
+  recordInsulaPoint({ ...correlation, operation: `turn_verdict.${result.turn}`, outcomeClass: "ok" });
+  if (result.recall) {
+    recordInsulaPoint({ ...correlation, operation: `recall_verdict.${result.recall}`, outcomeClass: "ok" });
+  }
+}
+
+/**
+ * One point per injected block, parented to the context_assembly span. bytesOut
+ * is what the Athanor added this turn; bytesIn is the conversation it was added
+ * to. Together they are the Athanor's share of the prompt, per organ.
+ */
+function recordContextInjections(
+  room: string,
+  span: InsulaSpan | null,
+  additions: Array<{ customType?: unknown; content?: unknown }>,
+  contextCharacters: number,
+): void {
+  for (const addition of additions) {
+    const organ = String(addition.customType ?? "")
+      .replace(/^athanor-/, "")
+      .replace(/-/g, "_");
+    const content = typeof addition.content === "string"
+      ? addition.content
+      : JSON.stringify(addition.content ?? "");
+    recordInsulaPoint({
+      room,
+      operation: `injection.${organ || "unknown"}`,
+      traceId: span?.traceId,
+      parentSpanId: span?.spanId,
+      outcomeClass: "ok",
+      bytesIn: contextCharacters,
+      bytesOut: content.length,
+    });
+  }
 }
 
 function pruneInsulaRoomKeys(roomPrefix: string, current: string): void {
@@ -406,6 +498,41 @@ function trimOldestMap<K, V>(map: Map<K, V>, limit: number): void {
   if (map.size <= limit) return;
   const oldest = map.keys().next();
   if (!oldest.done) map.delete(oldest.value);
+}
+
+/**
+ * The turn the operator is replying to: the last assistant text before the
+ * prompt, and the recall titles injected for that turn (additions anchor after
+ * their turn's user message, so they live in the memo under that user's key).
+ */
+export function previousTurnForVerdict(
+  messages: any[],
+  promptMessage: any,
+  turnKeys: Map<any, string>,
+  turnMemo: Map<string, Array<Record<string, any>>>,
+): { assistantTurn: string; recallTitles: string[] } | null {
+  const promptIndex = messages.indexOf(promptMessage);
+  if (promptIndex <= 0) return null;
+
+  let assistantTurn = "";
+  let previousUserKey: string | undefined;
+  for (let index = promptIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === "assistant" && !assistantTurn) {
+      assistantTurn = conversationText(message).trim();
+      continue;
+    }
+    if (message?.role === "user") {
+      if (!assistantTurn) return null;
+      previousUserKey = turnKeys.get(message);
+      break;
+    }
+  }
+  if (!assistantTurn) return null;
+
+  const additions = previousUserKey ? turnMemo.get(previousUserKey) ?? [] : [];
+  const recall = additions.find((addition) => addition?.customType === "athanor-recall-context");
+  return { assistantTurn, recallTitles: recallTitlesFromWorkingSet(recall?.content) ?? [] };
 }
 
 // before_agent_start prompt per room+session, held for one turn only.
@@ -745,6 +872,30 @@ export default function solarisaelHouseProof(pi, release) {
   const semanticJudgmentShadow = installSemanticJudgmentShadow(pi);
   const recallJevContext: { modelRegistry?: unknown } = {};
   const recallReranker = createRecallReranker({ context: recallJevContext });
+  const verdictScorer = createVerdictScorer({ context: recallJevContext });
+  const judgePreviousTurnDetached = async (input: {
+    room: string;
+    roomDir: string;
+    parent: SettledInsulaRequest | undefined;
+    sessionId: string;
+    operatorReply: string;
+    assistantTurn: string;
+    recallTitles: string[];
+  }): Promise<void> => {
+    try {
+      await verdictScorer.loadPolicy(input.roomDir, input.room);
+      const result = await verdictScorer.score({
+        operatorReply: input.operatorReply,
+        assistantTurn: input.assistantTurn,
+        recallTitles: input.recallTitles,
+        sessionId: input.sessionId,
+      });
+      recordTurnVerdict(input.room, input.parent, result);
+    } catch (error) {
+      console.warn(`[athanor] Turn verdict degraded: ${error instanceof Error ? error.message : String(error)}`);
+      // A verdict is a measurement about the turn, never part of it.
+    }
+  };
   // Semantic shadow coverage is local; automatic Recall reranking is separately policy-gated.
   pi.registerCommand?.("jev-shadow", {
     description: "Show local Jev shadow coverage for this session",
@@ -1206,6 +1357,23 @@ export default function solarisaelHouseProof(pi, release) {
       return messages === originalMessages ? undefined : { messages };
     }
 
+    // First request of a native turn: the operator's reply is in hand, so the
+    // previous turn can be judged. Detached: a verdict never delays context.
+    if (origin?.native) {
+      const previous = previousTurnForVerdict(messages, promptMessage, turnKeys, turnMemo);
+      if (previous) {
+        void judgePreviousTurnDetached({
+          room,
+          roomDir: effectiveRoomDir,
+          parent: lastSettledInsulaRequests.get(insulaRequestKey(room, hostSession)),
+          sessionId: hostSession,
+          operatorReply: prompt,
+          ...previous,
+        });
+      }
+    }
+
+    const contextCharacters = messages.reduce((total, message) => total + messageText(message).length, 0);
     let contextAnalysis: ContextAnalysis | null = null;
     try {
       contextAnalysis = await analyzeContext(
@@ -1213,7 +1381,7 @@ export default function solarisaelHouseProof(pi, release) {
         {
           prompt,
           recognizedEntities: [],
-          contextCharacters: messages.reduce((total, message) => total + messageText(message).length, 0),
+          contextCharacters,
           activeSpirit: houseState?.embodiedSpirit || spirit,
           operator: houseState?.operator || operator,
           routingModeEnabled: Boolean(houseState?.routingMode?.enabled),
@@ -1757,6 +1925,7 @@ export default function solarisaelHouseProof(pi, release) {
       mergeTurnAdditions(turnMemo, currentTurnKey, additions);
       persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);
     }
+    recordContextInjections(room, observed.span, additions, contextCharacters);
     showHouseContextFeedback(ctx, {
       room,
       spirit: houseState?.embodiedSpirit || spirit,

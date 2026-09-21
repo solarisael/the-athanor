@@ -212,6 +212,36 @@ describe("Insula observation writer", () => {
     expect(JSON.stringify(result)).not.toMatch(/content|message|payload|body/i);
   });
 
+  test("a point carries its byte sizes and never a span start", async () => {
+    installHostEndpoint(INERT_PORT);
+    const sink = recorder();
+    const writer = new InsulaWriter({ transport: sink.transport, flushDelayMs: 10_000 });
+
+    const span = writer.startSpan({ room: "kodo", operation: "context_assembly" })!;
+    writer.point({
+      room: "kodo",
+      operation: "injection.presence_context",
+      traceId: span.traceId,
+      parentSpanId: span.spanId,
+      outcomeClass: "ok",
+      bytesIn: 120_000,
+      bytesOut: 4_096.4,
+    });
+    await writer.close();
+
+    const [start, injection] = sink.events();
+    expect(start).toMatchObject({ phase: "start", bytesIn: 0, bytesOut: 0 });
+    expect(injection).toMatchObject({
+      operation: "injection.presence_context",
+      phase: "point",
+      parentSpanId: span.spanId,
+      bytesIn: 120_000,
+      bytesOut: 4_096,
+      tokensIn: 0,
+      tokensOut: 0,
+    });
+  });
+
   test("uses the provider-reported duration instead of including later tool work", async () => {
     installHostEndpoint(INERT_PORT);
     const sink = recorder();

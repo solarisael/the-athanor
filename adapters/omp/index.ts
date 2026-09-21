@@ -379,8 +379,9 @@ function settleInsulaRequest(
 /**
  * Verdict points hang from the request they judge. One `verdict_request.<provider>`
  * point always (its duration is the judge's latency, its error class the
- * refusal), plus `turn_verdict.<x>` / `recall_verdict.<x>` when scored. A
- * disabled policy records nothing: silence is not a measurement.
+ * refusal), plus `turn_verdict.<x>` when scored and `recall_fit.<x>` /
+ * `recall_use.<x>` when Recall had injected for that turn. A disabled policy
+ * records nothing: silence is not a measurement.
  */
 function recordTurnVerdict(
   room: string,
@@ -414,7 +415,8 @@ function recordTurnVerdict(
 
   recordInsulaPoint({ ...correlation, operation: `turn_verdict.${result.turn}`, outcomeClass: "ok" });
   if (result.recall) {
-    recordInsulaPoint({ ...correlation, operation: `recall_verdict.${result.recall}`, outcomeClass: "ok" });
+    recordInsulaPoint({ ...correlation, operation: `recall_fit.${result.recall.fit}`, outcomeClass: "ok" });
+    recordInsulaPoint({ ...correlation, operation: `recall_use.${result.recall.use}`, outcomeClass: "ok" });
   }
 }
 
@@ -502,19 +504,21 @@ function trimOldestMap<K, V>(map: Map<K, V>, limit: number): void {
 
 /**
  * The turn the operator is replying to: the last assistant text before the
- * prompt, and the recall titles injected for that turn (additions anchor after
- * their turn's user message, so they live in the memo under that user's key).
+ * prompt, the operator message it answered, and the recall titles injected for
+ * that turn (additions anchor after their turn's user message, so they live in
+ * the memo under that user's key).
  */
 export function previousTurnForVerdict(
   messages: any[],
   promptMessage: any,
   turnKeys: Map<any, string>,
   turnMemo: Map<string, Array<Record<string, any>>>,
-): { assistantTurn: string; recallTitles: string[] } | null {
+): { operatorMessage: string; assistantTurn: string; recallTitles: string[] } | null {
   const promptIndex = messages.indexOf(promptMessage);
   if (promptIndex <= 0) return null;
 
   let assistantTurn = "";
+  let operatorMessage = "";
   let previousUserKey: string | undefined;
   for (let index = promptIndex - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -524,6 +528,7 @@ export function previousTurnForVerdict(
     }
     if (message?.role === "user") {
       if (!assistantTurn) return null;
+      operatorMessage = conversationText(message).trim();
       previousUserKey = turnKeys.get(message);
       break;
     }
@@ -532,7 +537,7 @@ export function previousTurnForVerdict(
 
   const additions = previousUserKey ? turnMemo.get(previousUserKey) ?? [] : [];
   const recall = additions.find((addition) => addition?.customType === "athanor-recall-context");
-  return { assistantTurn, recallTitles: recallTitlesFromWorkingSet(recall?.content) ?? [] };
+  return { operatorMessage, assistantTurn, recallTitles: recallTitlesFromWorkingSet(recall?.content) ?? [] };
 }
 
 // before_agent_start prompt per room+session, held for one turn only.
@@ -878,6 +883,7 @@ export default function solarisaelHouseProof(pi, release) {
     roomDir: string;
     parent: SettledInsulaRequest | undefined;
     sessionId: string;
+    operatorMessage: string;
     operatorReply: string;
     assistantTurn: string;
     recallTitles: string[];
@@ -885,6 +891,7 @@ export default function solarisaelHouseProof(pi, release) {
     try {
       await verdictScorer.loadPolicy(input.roomDir, input.room);
       const result = await verdictScorer.score({
+        operatorMessage: input.operatorMessage,
         operatorReply: input.operatorReply,
         assistantTurn: input.assistantTurn,
         recallTitles: input.recallTitles,

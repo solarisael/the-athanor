@@ -1,14 +1,19 @@
 import { readFile } from "node:fs/promises";
 
 // Judges the previous assistant turn by the operator's reply, and the recall
-// injected for that turn by whether the reply shows it mattered. Results feed
-// Insula only; nothing here touches context. The provider is interchangeable:
-// typesafe (hosted Jev) and laya (loopback sidecar) speak the same
-// state + questions shape, so switching is a marker edit.
+// injected for that turn on two axes: fit (did Recall surface what the
+// operator's message needed) and use (did the assistant draw on it). Two axes
+// because one label lied in two of four cells: a perfect recall the assistant
+// ignored read as Recall's miss, a bad recall the assistant parroted read as a
+// hit. Results feed Insula only; nothing here touches context. The provider is
+// interchangeable: typesafe (hosted Jev) and laya (loopback sidecar) speak the
+// same state + questions shape, so switching is a marker edit.
 
 export type VerdictProvider = "typesafe" | "laya";
 export type TurnVerdict = "corrected" | "continued" | "gold";
-export type RecallVerdict = "used" | "ignored" | "misleading";
+export type RecallFit = "relevant" | "unneeded" | "wrong";
+export type RecallUse = "used" | "ignored" | "misled";
+export type RecallVerdict = { fit: RecallFit; use: RecallUse };
 
 export type VerdictPolicy =
   | { mode: "off"; approved: false }
@@ -22,9 +27,11 @@ export type VerdictPolicy =
   };
 
 export type VerdictInput = {
+  /** The operator's message the judged turn answered; the one Recall ran for. */
+  operatorMessage: string;
   operatorReply: string;
   assistantTurn: string;
-  /** Titles of what Recall injected for that turn; empty or absent skips the recall question. */
+  /** Titles of what Recall injected for that turn; empty or absent skips the recall questions. */
   recallTitles?: readonly string[];
   sessionId?: string;
   signal?: AbortSignal;
@@ -63,11 +70,23 @@ const MAX_PACKET_BYTES = 32768;
 const MAX_RESPONSE_BYTES = 65536;
 const DEFAULT_DEADLINE_MS = 5000;
 
-// enough: clips sized to the Laya English root (~320 state tokens). Raise them
-// together with the sidecar's head_max_len, never one side alone.
+// enough: clips sized to the Laya English root (~480 state tokens across the
+// four strings). Raise them together with the sidecar's head_max_len, never
+// one side alone.
+const MESSAGE_CHARS = 300;
 const REPLY_CHARS = 400;
 const ASSISTANT_TAIL_CHARS = 600;
 const RECALL_TITLES_CHARS = 600;
+
+const TURN_INSTRUCTIONS =
+  "An AI assistant answered the operator's message, then the operator replied. " +
+  "Judge the assistant's turn by how the operator reacts to it.";
+const RECALL_FIT_INSTRUCTIONS =
+  "A memory system retrieved the listed memories for the operator's message, before the assistant answered. " +
+  "Judge the retrieval, not the assistant: did it surface what that message needed?";
+const RECALL_USE_INSTRUCTIONS =
+  "The assistant answered with the listed memories in its context. " +
+  "Judge the assistant, not the retrieval: did its turn draw on them, and to what effect?";
 
 const TURN_CRITERIA: Record<TurnVerdict, string> = {
   corrected: "The operator corrects, disagrees, re-explains, or says the assistant got it wrong",
@@ -75,10 +94,16 @@ const TURN_CRITERIA: Record<TurnVerdict, string> = {
   gold: "The operator explicitly praises or thanks the assistant for that turn",
 };
 
-const RECALL_CRITERIA: Record<RecallVerdict, string> = {
+const RECALL_FIT_CRITERIA: Record<RecallFit, string> = {
+  relevant: "The memories fit the operator's message; a good reply would draw on them",
+  unneeded: "The message did not need memories; the retrieval was harmless noise",
+  wrong: "The memories miss what the message was about; they point somewhere else",
+};
+
+const RECALL_USE_CRITERIA: Record<RecallUse, string> = {
   used: "The assistant's turn visibly draws on the recalled memories",
-  ignored: "The turn does not use them; they were irrelevant or unnecessary",
-  misleading: "The recalled memories pulled the turn in a wrong direction",
+  ignored: "The turn does not draw on them",
+  misled: "The turn followed the recalled memories into a wrong direction",
 };
 
 const containsSecret = (value: string): boolean =>
@@ -93,26 +118,21 @@ const tail = (value: string, length: number): string =>
 export function buildVerdictPacket(input: VerdictInput, provider: VerdictProvider) {
   const titles = (input.recallTitles ?? []).map(title => String(title ?? "").trim()).filter(Boolean);
   const recallList = head(titles.map(title => `- ${title}`).join("\n"), RECALL_TITLES_CHARS);
+  const operatorMessage = head(input.operatorMessage.trim(), MESSAGE_CHARS);
   const state: Record<string, string> = {
-    schemaVersion: "jev-verdict.v1",
+    schemaVersion: "jev-verdict.v2",
     assistantTurn: tail(input.assistantTurn.trim(), ASSISTANT_TAIL_CHARS),
     operatorReply: head(input.operatorReply.trim(), REPLY_CHARS),
   };
+  if (operatorMessage) state.operatorMessage = operatorMessage;
   if (recallList) state.recalledMemories = recallList;
 
   const questions: Record<string, unknown> = {
-    turn: {
-      type: "choice",
-      instructions: "The operator replies to the assistant's previous turn. Judge that previous turn by how the operator reacts.",
-      criteria: TURN_CRITERIA,
-    },
+    turn: { type: "choice", instructions: TURN_INSTRUCTIONS, criteria: TURN_CRITERIA },
   };
   if (recallList) {
-    questions.recall = {
-      type: "choice",
-      instructions: "Memories were recalled into the assistant's context for that turn, listed by title. Did the assistant's turn draw on them?",
-      criteria: RECALL_CRITERIA,
-    };
+    questions.recallFit = { type: "choice", instructions: RECALL_FIT_INSTRUCTIONS, criteria: RECALL_FIT_CRITERIA };
+    questions.recallUse = { type: "choice", instructions: RECALL_USE_INSTRUCTIONS, criteria: RECALL_USE_CRITERIA };
   }
 
   return provider === "typesafe"
@@ -156,16 +176,20 @@ function parseVerdictResponse(
   if (typeof model !== "string" || !model || model.length > 64) return { reason: "model_mismatch" };
 
   const answers = parsed?.answers;
-  const turn = answers?.turn;
-  if (turn?.type !== "choice" || !Object.hasOwn(TURN_CRITERIA, String(turn.choice))) return { reason: "invalid_response" };
+  const choice = <T extends string>(answer: any, criteria: Record<T, string>): T | null =>
+    answer?.type === "choice" && Object.hasOwn(criteria, String(answer.choice)) ? answer.choice : null;
+
+  const turn = choice(answers?.turn, TURN_CRITERIA);
+  if (!turn) return { reason: "invalid_response" };
 
   if (!askedRecall) {
-    if (answers.recall !== undefined) return { reason: "invalid_response" };
-    return { model, turn: turn.choice, recall: null };
+    if (answers.recallFit !== undefined || answers.recallUse !== undefined) return { reason: "invalid_response" };
+    return { model, turn, recall: null };
   }
-  const recall = answers?.recall;
-  if (recall?.type !== "choice" || !Object.hasOwn(RECALL_CRITERIA, String(recall.choice))) return { reason: "invalid_response" };
-  return { model, turn: turn.choice, recall: recall.choice };
+  const fit = choice(answers?.recallFit, RECALL_FIT_CRITERIA);
+  const use = choice(answers?.recallUse, RECALL_USE_CRITERIA);
+  if (!fit || !use) return { reason: "invalid_response" };
+  return { model, turn, recall: { fit, use } };
 }
 
 export function createVerdictScorer(options: VerdictScorerOptions = {}) {
@@ -281,7 +305,7 @@ export function createVerdictScorer(options: VerdictScorerOptions = {}) {
       if (new TextEncoder().encode(raw).byteLength > MAX_RESPONSE_BYTES) {
         return fail("failed", "oversize", active.provider);
       }
-      const parsed = parseVerdictResponse(raw, "recall" in packet.questions);
+      const parsed = parseVerdictResponse(raw, "recallFit" in packet.questions);
       if ("reason" in parsed) return fail("failed", parsed.reason, active.provider);
 
       return {

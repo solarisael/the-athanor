@@ -54,6 +54,7 @@ function answering(answers: Record<string, unknown>, model = "jev-latest") {
 }
 
 const turnInput = {
+  operatorMessage: "which photo do i send him, green shirt or the studio one?",
   operatorReply: "no dummy you're seeing it the wrong way around òwó",
   assistantTurn: "Assuming you mean the green-shirt photo is the better one, give him the actual differences.",
 };
@@ -83,10 +84,13 @@ describe("verdict policy", () => {
 });
 
 describe("verdict packet", () => {
-  test("clips the reply head and the assistant tail, and asks recall only when memories were injected", () => {
+  test("clips the message and reply heads and the assistant tail, and asks recall only when memories were injected", () => {
+    const message = "M".repeat(1000);
     const reply = "R".repeat(1000);
     const assistant = "A".repeat(1000) + "TAIL";
-    const bare = buildVerdictPacket({ operatorReply: reply, assistantTurn: assistant }, "typesafe");
+    const bare = buildVerdictPacket({ operatorMessage: message, operatorReply: reply, assistantTurn: assistant }, "typesafe");
+    expect(bare.state.schemaVersion).toBe("jev-verdict.v2");
+    expect(bare.state.operatorMessage).toHaveLength(300);
     expect(bare.state.operatorReply).toHaveLength(400);
     expect(bare.state.assistantTurn).toHaveLength(600);
     expect(bare.state.assistantTurn.endsWith("TAIL")).toBe(true);
@@ -95,12 +99,24 @@ describe("verdict packet", () => {
     expect(bare.model).toBe("jev-latest");
 
     const withRecall = buildVerdictPacket(
-      { operatorReply: reply, assistantTurn: assistant, recallTitles: ["canon: The Athanor", "The deploy landed"] },
+      { ...turnInput, recallTitles: ["canon: The Athanor", "The deploy landed"] },
       "laya",
     );
     expect(withRecall.state.recalledMemories).toBe("- canon: The Athanor\n- The deploy landed");
-    expect(Object.keys(withRecall.questions)).toEqual(["turn", "recall"]);
+    expect(Object.keys(withRecall.questions)).toEqual(["turn", "recallFit", "recallUse"]);
     expect("model" in withRecall).toBe(false);
+  });
+
+  test("tells the judge what it is grading on every question", () => {
+    const packet = buildVerdictPacket({ ...turnInput, recallTitles: ["The deploy landed"] }, "typesafe");
+    const instructions = (key: string) => (packet.questions[key] as { instructions: string }).instructions;
+    expect(instructions("turn")).toMatch(/judge the assistant's turn by how the operator reacts/i);
+    expect(instructions("recallFit")).toMatch(/memory system retrieved .* for the operator's message/i);
+    expect(instructions("recallFit")).toMatch(/judge the retrieval, not the assistant/i);
+    expect(instructions("recallUse")).toMatch(/judge the assistant, not the retrieval/i);
+
+    const empty = buildVerdictPacket({ ...turnInput, operatorMessage: "  " }, "typesafe");
+    expect(empty.state.operatorMessage).toBeUndefined();
   });
 
   test("reads titles out of a real recall working set and nothing out of other blocks", () => {
@@ -132,21 +148,25 @@ describe("verdict scoring", () => {
     expect(calls).toBe(0);
   });
 
-  test("scores a turn and its recall through typesafe with the bearer key", async () => {
+  test("scores a turn and both recall axes through typesafe with the bearer key", async () => {
     const { fetcher, requests } = answering({
       turn: { type: "choice", choice: "corrected", probabilities: { corrected: 0.9, continued: 0.08, gold: 0.02 } },
-      recall: { type: "choice", choice: "ignored", probabilities: { used: 0.1, ignored: 0.85, misleading: 0.05 } },
+      recallFit: { type: "choice", choice: "relevant", probabilities: { relevant: 0.8, unneeded: 0.15, wrong: 0.05 } },
+      recallUse: { type: "choice", choice: "ignored", probabilities: { used: 0.1, ignored: 0.85, misled: 0.05 } },
     });
     const scorer = createVerdictScorer({ context: context(), fetch: fetcher });
     await scorer.loadPolicy(await room(typesafeMarker), "test-room");
 
     const result = await scorer.score({ ...turnInput, recallTitles: ["The deploy landed"], sessionId: "s1" });
 
-    expect(result).toMatchObject({ status: "scored", provider: "typesafe", model: "jev-latest", turn: "corrected", recall: "ignored" });
+    expect(result).toMatchObject({
+      status: "scored", provider: "typesafe", model: "jev-latest", turn: "corrected", recall: { fit: "relevant", use: "ignored" },
+    });
     expect(requests).toHaveLength(1);
     expect(requests[0]!.url).toBe("https://api.typesafe.ai/v1/systemone");
     expect((requests[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer test-key");
     const body = JSON.parse(String(requests[0]!.init.body));
+    expect(body.state.operatorMessage).toBe(turnInput.operatorMessage);
     expect(body.state.operatorReply).toBe(turnInput.operatorReply);
     expect(body.state.recalledMemories).toBe("- The deploy landed");
   });
@@ -183,11 +203,20 @@ describe("verdict scoring", () => {
   test("rejects an answer set that does not match the questions asked", async () => {
     const unasked = answering({
       turn: { type: "choice", choice: "gold" },
-      recall: { type: "choice", choice: "used" },
+      recallFit: { type: "choice", choice: "relevant" },
     });
     const scorer = createVerdictScorer({ context: context(), fetch: unasked.fetcher });
     await scorer.loadPolicy(await room(typesafeMarker), "test-room");
     expect(await scorer.score(turnInput)).toMatchObject({ status: "failed", reason: "invalid_response" });
+
+    const halfAnswered = answering({
+      turn: { type: "choice", choice: "gold" },
+      recallFit: { type: "choice", choice: "relevant" },
+    });
+    const half = createVerdictScorer({ context: context(), fetch: halfAnswered.fetcher });
+    await half.loadPolicy(await room(typesafeMarker), "test-room");
+    expect(await half.score({ ...turnInput, recallTitles: ["The deploy landed"] }))
+      .toMatchObject({ status: "failed", reason: "invalid_response" });
 
     for (const choice of ["meh", "constructor", "toString"]) {
       const wrongLabel = answering({ turn: { type: "choice", choice } });
@@ -218,7 +247,7 @@ describe("previous turn selection", () => {
   const user = (id: string, text: string) => ({ role: "user", id, content: text });
   const assistant = (text: string) => ({ role: "assistant", content: [{ type: "text", text }, { type: "toolCall", name: "read" }] });
 
-  test("takes the last assistant text before the prompt and the recall memo of that turn", () => {
+  test("takes the last assistant text before the prompt, the message it answered, and that turn's recall memo", () => {
     const first = user("u1", "kodo. it's time.");
     const second = user("u2", "no dummy you're seeing it the wrong way around");
     const messages = [first, assistant("Same face, very different presentation."), second];
@@ -229,6 +258,7 @@ describe("previous turn selection", () => {
     ]]]);
 
     expect(previousTurnForVerdict(messages, second, turnKeys, memo)).toEqual({
+      operatorMessage: "kodo. it's time.",
       assistantTurn: "Same face, very different presentation.",
       recallTitles: ["Tania's four audios"],
     });

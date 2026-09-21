@@ -63,6 +63,8 @@ pub const RECALL_POLICY_PROJECTION_ID: &str = "recall_policy";
 pub const RECALL_POLICY_SUBSCRIBE: &str = "athanor.recall_policy.subscribe";
 pub const RECALL_POLICY_RESYNC: &str = "athanor.recall_policy.resync";
 pub const RECALL_POLICY_SET_REQUESTED_MODE: &str = "athanor.recall_policy.set_requested_mode";
+pub const RECALL_POLICY_JUDGED_MODE: &str = "athanor.recall_policy.judged_mode";
+pub const RECALL_POLICY_JUDGED_MODE_SOURCE: &str = "jev";
 pub const RECALL_POLICY_ACKNOWLEDGE: &str = "athanor.recall_policy.acknowledge";
 pub const RECALL_POLICY_EVALUATE: &str = "athanor.recall_policy.evaluate";
 pub const RECALL_POLICY_COMPLETE_REFRESH: &str = "athanor.recall_policy.complete_refresh";
@@ -112,6 +114,17 @@ pub enum RecallResolvedMode {
     Work,
     Mixed,
     Quiet,
+}
+
+/// One JEV reading of the exchange: the mode a judge would retrieve under,
+/// stamped with the policy revision that produced it. `quiet` is an operator
+/// choice, never a judgment, so the parse arm refuses it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecallJudgedMode {
+    pub mode: RecallResolvedMode,
+    pub source: String,
+    pub revision: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -545,6 +558,8 @@ struct RawClientCommand {
     #[serde(default)]
     compaction_summary: Option<String>,
     #[serde(default)]
+    judged_mode: Option<RecallJudgedMode>,
+    #[serde(default)]
     context_request: Option<ContextAnalysisRequest>,
     #[serde(default)]
     context_viewport_mode: Option<crate::RecallViewportMode>,
@@ -885,6 +900,7 @@ impl RawClientCommand {
             || self.conversation_request.is_some()
             || self.trigger_request.is_some()
             || self.recall_result.is_some()
+            || self.judged_mode.is_some()
         {
             return Err(CommandParseError::from_meta(
                 meta,
@@ -910,6 +926,10 @@ pub enum ClientCommand {
         meta: CommandMeta,
         base_version: u64,
         requested_mode: RecallRequestedMode,
+    },
+    JudgedMode {
+        meta: CommandMeta,
+        judged: RecallJudgedMode,
     },
     Evaluate {
         meta: CommandMeta,
@@ -1035,6 +1055,7 @@ impl ClientCommand {
             | Self::PaperBoatReceiptSubscribe { meta }
             | Self::Resync { meta }
             | Self::SetRequestedMode { meta, .. }
+            | Self::JudgedMode { meta, .. }
             | Self::Evaluate { meta, .. }
             | Self::CompleteRefresh { meta, .. }
             | Self::FailRefresh { meta, .. }
@@ -1313,6 +1334,47 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
                 base_version,
                 requested_mode,
             })
+        }
+        RECALL_POLICY_JUDGED_MODE => {
+            if raw.base_version.is_some()
+                || raw.mutations.is_some()
+                || raw.version.is_some()
+                || raw.sequence.is_some()
+                || raw.facts.is_some()
+                || raw.refresh.is_some()
+                || raw.failure_reason.is_some()
+                || raw.compaction_summary.is_some()
+            {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "judged_mode command carries fields for another command type",
+                ));
+            }
+            let judged = raw.judged_mode.ok_or_else(|| {
+                CommandParseError::from_meta(&meta, "judged_mode command requires judged_mode")
+            })?;
+            if judged.source != RECALL_POLICY_JUDGED_MODE_SOURCE {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    format!(
+                        "judged_mode accepts only source {RECALL_POLICY_JUDGED_MODE_SOURCE}, not {}",
+                        judged.source
+                    ),
+                ));
+            }
+            if judged.revision.trim().is_empty() {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "judged_mode requires a nonblank revision",
+                ));
+            }
+            if judged.mode == RecallResolvedMode::Quiet {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "judged_mode may pick only conversation, work, or mixed",
+                ));
+            }
+            Ok(ClientCommand::JudgedMode { meta, judged })
         }
         RECALL_POLICY_EVALUATE => {
             if raw.base_version.is_some()

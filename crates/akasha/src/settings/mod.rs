@@ -18,6 +18,9 @@ pub struct RoomSettings {
     pub recall_semantic_lexical_rank_weight: f64,
     pub recall_thread_base_weight: f64,
     pub recall_thread_rank_weight: f64,
+    /// Gate for per-mode ranking profiles. Off means every profile is flat.
+    #[serde(default)]
+    pub recall_mode_profiles_enabled: bool,
     pub cluster_stale_chunk_count: i64,
     pub cluster_stale_fraction: f64,
     pub cluster_stale_days: i64,
@@ -43,6 +46,7 @@ impl Default for RoomSettings {
             recall_semantic_lexical_rank_weight: 0.05,
             recall_thread_base_weight: 0.35,
             recall_thread_rank_weight: 0.55,
+            recall_mode_profiles_enabled: false,
             cluster_stale_chunk_count: 250,
             cluster_stale_fraction: 0.05,
             cluster_stale_days: 7,
@@ -111,6 +115,9 @@ impl RoomSettings {
                 }
                 "recall_thread_base_weight" => settings.recall_thread_base_weight = decode(value)?,
                 "recall_thread_rank_weight" => settings.recall_thread_rank_weight = decode(value)?,
+                "recall_mode_profiles_enabled" => {
+                    settings.recall_mode_profiles_enabled = decode(value)?
+                }
                 "cluster_stale_chunk_count" => settings.cluster_stale_chunk_count = decode(value)?,
                 "cluster_stale_fraction" => settings.cluster_stale_fraction = decode(value)?,
                 "cluster_stale_days" => settings.cluster_stale_days = decode(value)?,
@@ -120,6 +127,11 @@ impl RoomSettings {
                 "house_tz" => settings.house_tz = decode(value)?,
                 _ => return Err(decode_error(format!("unknown room setting key {key}"))),
             }
+        }
+        // Deploy-wide door: the env flag outranks the room row, so a whole
+        // House flips without editing every room's settings.
+        if let Some(enabled) = recall_mode_profiles_env() {
+            settings.recall_mode_profiles_enabled = enabled;
         }
         settings.validate()?;
         Ok(settings)
@@ -182,6 +194,13 @@ impl RoomSettings {
 
 fn decode<T: DeserializeOwned>(value: Value) -> Result<T, sqlx::Error> {
     serde_json::from_value(value).map_err(|error| sqlx::Error::Decode(Box::new(error)))
+}
+
+/// `RECALL_MODE_PROFILES_ENABLED=1` (or `true`) turns mode ranking profiles on
+/// for every room; any other value pins them off. Unset leaves the room row.
+fn recall_mode_profiles_env() -> Option<bool> {
+    let raw = std::env::var("RECALL_MODE_PROFILES_ENABLED").ok()?;
+    Some(matches!(raw.trim(), "1" | "true"))
 }
 
 fn decode_error(message: impl Into<String>) -> sqlx::Error {

@@ -619,6 +619,39 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             base_version,
             requested_mode,
         } => set_requested_mode(state, meta, base_version, requested_mode, command_hash).await,
+        ClientCommand::JudgedMode { meta, judged } => {
+            let mut runtime = state.runtime.lock().await;
+            let mut session = runtime
+                .sessions
+                .get(&meta.sender_session)
+                .cloned()
+                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            session.judge_mode(judged.mode);
+            runtime
+                .sessions
+                .insert(meta.sender_session.clone(), session);
+            if let Err(reason) = runtime.durable.save_sessions(&runtime.sessions) {
+                let failed = outcome_with_runtime(
+                    state,
+                    &meta,
+                    RECALL_POLICY_COMMAND_FAILED,
+                    Some(reason),
+                    &runtime,
+                    None,
+                );
+                return Responses {
+                    direct: vec![serialize(&failed)],
+                    delta: None,
+                };
+            }
+            // The judgment moves no projection field, so the reply is the
+            // standing snapshot: the caller sees the state it is judging for.
+            let snapshot = snapshot(state, &meta, &runtime);
+            Responses {
+                direct: vec![serialize(&snapshot)],
+                delta: None,
+            }
+        }
         ClientCommand::Evaluate { meta, facts } => {
             let mut runtime = state.runtime.lock().await;
             if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {

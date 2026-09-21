@@ -7,6 +7,7 @@ use std::collections::HashSet;
 
 const WORKING_SET_STALE_TURNS: u64 = 8;
 const WORKING_SET_STALE_TOKEN_DELTA: u64 = 4_096;
+const CONVERSATION_HYSTERESIS_TURNS: u64 = 2;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -24,6 +25,7 @@ pub struct RecallPolicySession {
     active_project: Option<String>,
     resolution_reason: String,
     conversation_streak: u64,
+    judged_mode: Option<RecallResolvedMode>,
     turns_since_refresh: u64,
     observed_conversation_tokens: u64,
     last_refresh_conversation_tokens: u64,
@@ -42,6 +44,8 @@ struct LegacyRecallPolicySession {
     active_project: Option<String>,
     resolution_reason: String,
     conversation_streak: u64,
+    #[serde(default)]
+    judged_mode: Option<RecallResolvedMode>,
     turns_since_refresh: u64,
     observed_conversation_tokens: u64,
     last_refresh_conversation_tokens: u64,
@@ -62,6 +66,7 @@ impl<'de> Deserialize<'de> for RecallPolicySession {
             active_project: legacy.active_project,
             resolution_reason: legacy.resolution_reason,
             conversation_streak: legacy.conversation_streak,
+            judged_mode: legacy.judged_mode,
             turns_since_refresh: legacy.turns_since_refresh,
             observed_conversation_tokens: legacy.observed_conversation_tokens,
             last_refresh_conversation_tokens: legacy.last_refresh_conversation_tokens,
@@ -89,6 +94,7 @@ impl Serialize for RecallPolicySession {
             active_project: &'a Option<String>,
             resolution_reason: &'a String,
             conversation_streak: u64,
+            judged_mode: &'a Option<RecallResolvedMode>,
             turns_since_refresh: u64,
             observed_conversation_tokens: u64,
             last_refresh_conversation_tokens: u64,
@@ -105,6 +111,7 @@ impl Serialize for RecallPolicySession {
             active_project: &self.active_project,
             resolution_reason: &self.resolution_reason,
             conversation_streak: self.conversation_streak,
+            judged_mode: &self.judged_mode,
             turns_since_refresh: self.turns_since_refresh,
             observed_conversation_tokens: self.observed_conversation_tokens,
             last_refresh_conversation_tokens: self.last_refresh_conversation_tokens,
@@ -127,6 +134,7 @@ impl RecallPolicySession {
             active_project: projection.active_project.clone(),
             resolution_reason: projection.resolution_reason.clone(),
             conversation_streak: 0,
+            judged_mode: None,
             turns_since_refresh: 0,
             observed_conversation_tokens: 0,
             last_refresh_conversation_tokens: 0,
@@ -150,6 +158,7 @@ impl RecallPolicySession {
                 "explicit-override".to_owned()
             },
             conversation_streak: 0,
+            judged_mode: None,
             turns_since_refresh: 0,
             observed_conversation_tokens: 0,
             last_refresh_conversation_tokens: 0,
@@ -198,6 +207,9 @@ impl RecallPolicySession {
         self.active_project = active_project.clone();
         self.resolution_reason = resolution_reason;
         self.conversation_streak = conversation_streak;
+        // The judgment lives exactly one turn: a turn that ignored it, because
+        // the operator pinned a mode, spends it unheard.
+        self.judged_mode = None;
         self.turns_since_refresh = self.turns_since_refresh.saturating_add(1);
         self.observed_conversation_tokens = facts.conversation_tokens;
 
@@ -308,6 +320,10 @@ impl RecallPolicySession {
         self.last_refresh_reason = Some("compaction-invalidated".to_owned());
     }
 
+    pub fn judge_mode(&mut self, mode: RecallResolvedMode) {
+        self.judged_mode = Some(mode);
+    }
+
     pub fn projection(&self, updated_at: String) -> RecallPolicyState {
         RecallPolicyState {
             requested_mode: self.requested_mode,
@@ -374,6 +390,11 @@ fn resolve_auto_mode(
     if tool_evidence {
         return (RecallResolvedMode::Work, "tool-evidence".to_owned(), 0);
     }
+    // A judge only reads words, so it loses to hands on files and to the routed
+    // intents above, and wins over the conversation hysteresis below.
+    if let Some(judged) = session.judged_mode {
+        return (judged, "jev-judged".to_owned(), 0);
+    }
     if active_project.is_some()
         && matches!(
             session.resolved_mode,
@@ -381,7 +402,7 @@ fn resolve_auto_mode(
         )
     {
         let streak = session.conversation_streak.saturating_add(1);
-        return if streak >= 2 {
+        return if streak >= CONVERSATION_HYSTERESIS_TURNS {
             (
                 RecallResolvedMode::Conversation,
                 "conversation-hysteresis-complete".to_owned(),
@@ -493,7 +514,10 @@ impl ResolvedRequestedMode for RecallRequestedMode {
 #[cfg(test)]
 mod tests {
     use super::{RecallPolicySession, resolve_auto_mode};
-    use protocol::{RecallPolicyState, RecallRequestedMode, RecallResolvedMode, RecoveryState};
+    use protocol::{
+        RecallPolicyFacts, RecallPolicyState, RecallQueryRoute, RecallRequestedMode,
+        RecallResolvedMode, RecoveryState,
+    };
 
     fn projection() -> RecallPolicyState {
         RecallPolicyState {
@@ -515,6 +539,19 @@ mod tests {
         session.resolved_mode = resolved_mode;
         session.conversation_streak = conversation_streak;
         session
+    }
+
+    fn facts(intent: &str, tool_evidence: bool) -> RecallPolicyFacts {
+        RecallPolicyFacts {
+            query_route: RecallQueryRoute {
+                intent: intent.to_owned(),
+                ..RecallQueryRoute::default()
+            },
+            active_project: None,
+            conversation_tokens: 0,
+            working_set_present: false,
+            tool_evidence,
+        }
     }
 
     #[test]
@@ -635,5 +672,49 @@ mod tests {
                 2
             )
         );
+    }
+
+    #[test]
+    fn a_judged_mode_flips_the_next_auto_resolution_once() {
+        let mut session = session(RecallResolvedMode::Conversation, 0);
+        session.judge_mode(RecallResolvedMode::Mixed);
+        let judged = session.evaluate(RecallRequestedMode::Auto, facts("general", false));
+        assert_eq!(judged.resolved_mode, RecallResolvedMode::Mixed);
+        assert_eq!(session.resolution_reason, "jev-judged");
+        assert_eq!(
+            session.judged_mode, None,
+            "the judgment is spent on the turn it lands"
+        );
+        let after = session.evaluate(RecallRequestedMode::Auto, facts("general", false));
+        assert_eq!(after.resolved_mode, RecallResolvedMode::Conversation);
+        assert_eq!(session.resolution_reason, "general");
+    }
+
+    #[test]
+    fn an_explicit_work_mode_ignores_the_judged_mode() {
+        let mut session = session(RecallResolvedMode::Conversation, 0);
+        session.judge_mode(RecallResolvedMode::Conversation);
+        let decision = session.evaluate(RecallRequestedMode::Work, facts("general", false));
+        assert_eq!(decision.resolved_mode, RecallResolvedMode::Work);
+        assert_eq!(session.resolution_reason, "explicit-override");
+        assert_eq!(
+            session.judged_mode, None,
+            "an explicit turn spends the judgment unheard"
+        );
+    }
+
+    #[test]
+    fn a_judged_mode_survives_the_session_file() {
+        let mut stored = session(RecallResolvedMode::Conversation, 0);
+        stored.judge_mode(RecallResolvedMode::Work);
+        let written = serde_json::to_string(&stored).expect("session serializes");
+        let read: RecallPolicySession =
+            serde_json::from_str(&written).expect("written session parses");
+        assert_eq!(read.judged_mode, Some(RecallResolvedMode::Work));
+        let older = written.replace(r#""judged_mode":"work","#, "");
+        assert_ne!(older, written, "an older session file carries no judged_mode");
+        let read_older: RecallPolicySession =
+            serde_json::from_str(&older).expect("older session parses");
+        assert_eq!(read_older.judged_mode, None);
     }
 }

@@ -95,6 +95,7 @@ import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./hou
 import { installSemanticJudgmentShadow } from "./house-proof/semantic-judgment.ts";
 import { createRecallReranker, type RecallRerankPolicy, type RecallRerankResult } from "./house-proof/recall-judgment.ts";
 import { createVerdictScorer, recallTitlesFromWorkingSet, type VerdictResult } from "./house-proof/turn-verdict.ts";
+import { createModeScorer, type ModeResult } from "./house-proof/mode-judge.ts";
 export {
   scoreToolCallShadow,
   scoreCompletedDraftShadow,
@@ -424,6 +425,46 @@ export function verdictInsulaPoints(
     points.push({ ...correlation, operation: `recall_fit.${result.recall.fit}`, outcomeClass: "ok" });
     points.push({ ...correlation, operation: `recall_use.${result.recall.use}`, outcomeClass: "ok" });
   }
+  return points;
+}
+
+/**
+ * The mode judge's mirror of `verdictInsulaPoints`: one `mode_request.<provider>`
+ * per judgement, plus `recall_mode.<x>` when it scored. Same `trace_span` scope,
+ * for the same reason — `provider_request` keys on the request id alone and
+ * `provider_usage` already holds that key for the parent.
+ */
+export function modeInsulaPoints(
+  room: string,
+  parent: SettledInsulaRequest | undefined,
+  result: ModeResult,
+): InsulaPointRequest[] {
+  if (result.status === "disabled") return [];
+  const correlation = {
+    room,
+    traceId: parent?.traceId,
+    parentSpanId: parent?.spanId,
+    providerRequestId: parent?.providerRequestId,
+    scope: "trace_span" as const,
+  };
+  const outcome: Record<ModeResult["status"], InsulaOutcome> = {
+    scored: "ok",
+    disabled: "unknown",
+    refused: "refused",
+    unavailable: "degraded",
+    failed: "error",
+  };
+  const points: InsulaPointRequest[] = [{
+    ...correlation,
+    operation: `mode_request.${result.provider ?? "none"}`,
+    outcomeClass: outcome[result.status],
+    errorClass: result.status === "scored" ? null : result.reason,
+    durationUs: result.latencyMs * 1_000,
+    bytesOut: result.status === "scored" ? result.packetBytes : 0,
+  }];
+  if (result.status !== "scored") return points;
+
+  points.push({ ...correlation, operation: `recall_mode.${result.mode}`, outcomeClass: "ok" });
   return points;
 }
 
@@ -893,6 +934,7 @@ export default function solarisaelHouseProof(pi, release) {
   const recallJevContext: { modelRegistry?: unknown } = {};
   const recallReranker = createRecallReranker({ context: recallJevContext });
   const verdictScorer = createVerdictScorer({ context: recallJevContext });
+  const modeScorer = createModeScorer({ context: recallJevContext });
   const judgePreviousTurnDetached = async (input: {
     room: string;
     roomDir: string;
@@ -916,6 +958,39 @@ export default function solarisaelHouseProof(pi, release) {
     } catch (error) {
       console.warn(`[athanor] Turn verdict degraded: ${error instanceof Error ? error.message : String(error)}`);
       // A verdict is a measurement about the turn, never part of it.
+    }
+  };
+  const judgeModeDetached = async (input: {
+    room: string;
+    spirit: string;
+    roomDir: string;
+    parent: SettledInsulaRequest | undefined;
+    sessionId: string;
+    operatorMessage: string;
+    assistantTurn: string;
+    operatorReply: string;
+  }): Promise<void> => {
+    try {
+      const policy = await modeScorer.loadPolicy(input.roomDir, input.room);
+      const result = await modeScorer.score({
+        operatorMessage: input.operatorMessage,
+        assistantTurn: input.assistantTurn,
+        operatorReply: input.operatorReply,
+        sessionId: input.sessionId,
+      });
+      if (result.status === "scored" && policy.mode === "active") {
+        try {
+          await new RecallPolicyHostClient({ room: input.room, spirit: input.spirit, session: input.sessionId })
+            .judgedMode({ mode: result.mode, source: "jev", revision: policy.revision });
+        } catch (error) {
+          // An undelivered proposal is not an unmeasured judgement: the point below still lands.
+          console.warn(`[athanor] Judged mode not delivered: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      for (const point of modeInsulaPoints(input.room, input.parent, result)) recordInsulaPoint(point);
+    } catch (error) {
+      console.warn(`[athanor] Mode judgement degraded: ${error instanceof Error ? error.message : String(error)}`);
+      // A proposal about the next turn, never part of this one.
     }
   };
   // Semantic shadow coverage is local; automatic Recall reranking is separately policy-gated.
@@ -1384,13 +1459,26 @@ export default function solarisaelHouseProof(pi, release) {
     if (origin?.native) {
       const previous = previousTurnForVerdict(messages, promptMessage, turnKeys, turnMemo);
       if (previous) {
+        const parent = lastSettledInsulaRequests.get(insulaRequestKey(room, hostSession));
         void judgePreviousTurnDetached({
           room,
           roomDir: effectiveRoomDir,
-          parent: lastSettledInsulaRequests.get(insulaRequestKey(room, hostSession)),
+          parent,
           sessionId: hostSession,
           operatorReply: prompt,
           ...previous,
+        });
+        // Same turn, two judges: one grades what happened, one proposes what to
+        // retrieve next. Both detached.
+        void judgeModeDetached({
+          room,
+          spirit,
+          roomDir: effectiveRoomDir,
+          parent,
+          sessionId: hostSession,
+          operatorMessage: previous.operatorMessage,
+          assistantTurn: previous.assistantTurn,
+          operatorReply: prompt,
         });
       }
     }
@@ -1645,7 +1733,12 @@ export default function solarisaelHouseProof(pi, release) {
           activeProject,
           workingSetPresent: existingTypes.has("athanor-recall-context")
             || memoHasCustomType(turnMemo, "athanor-recall-context"),
-          toolEvidence: hasToolEvidence({ room, spirit, session: hostSession }),
+          // The turn ordinal is counted here, once per evaluation: work
+          // evidence decays by operator turns, and a turn may ask twice.
+          toolEvidence: hasToolEvidence(
+            { room, spirit, session: hostSession },
+            messages.reduce((turns, message) => turns + (message?.role === "user" ? 1 : 0), 0),
+          ),
           idempotencyKey: currentTurnKey ? `${currentTurnKey}:evaluate` : undefined,
         });
         decision = evaluation.decision;
@@ -1659,6 +1752,7 @@ export default function solarisaelHouseProof(pi, release) {
             && (rerankPolicy.mode === "shadow" || rerankPolicy.mode === "active");
           const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, {
             temporalDecay: true,
+            mode: decision.resolvedMode,
             signal: budget.signal,
             timeoutMs: rerankEnabled
               ? Math.max(

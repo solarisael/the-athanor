@@ -3,6 +3,7 @@ mod content_lane;
 mod embedding;
 mod memory_reference;
 mod pointer_files;
+mod profile;
 mod semantic_vocabulary;
 mod temporal;
 mod thread_neighbors;
@@ -24,6 +25,7 @@ use memory_reference::{
     apply_manual_record_cap, hydrate_record_bodies, memory_references, resolve_memory_references,
 };
 use pointer_files::protocol_pointer_files;
+use profile::{CanonOrder, apply_and_order, for_mode};
 use semantic_vocabulary::{load_semantic_vocabulary_concepts, semantic_vocabulary_terms};
 use serde::Serialize;
 use sqlx::{PgPool, Row};
@@ -39,6 +41,9 @@ pub struct RecallResult {
     pub source: &'static str,
     /// `auto` or `manual`: which projection shaped `retrievalCandidates`.
     pub projection: &'static str,
+    /// The ranking mode this recall resolved to. Echoed even while the profile
+    /// gate is off, so telemetry can split on it.
+    pub mode: &'static str,
     pub warnings: Vec<String>,
     #[serde(rename = "retrievalCandidates")]
     pub retrieval_candidates: Vec<serde_json::Value>,
@@ -257,6 +262,7 @@ pub async fn recall(
     let query = request.query();
     let temporal_decay = request.temporal_decay();
     let projection = request.projection();
+    let mode = request.mode();
     let semantic_top_k = request.semantic_top_k();
     let content_top_k = request.content_top_k();
     let semantic_min_similarity = request.semantic_min_similarity();
@@ -264,6 +270,7 @@ pub async fn recall(
     let phase = Phase::start(span, "recall.settings");
     let settings = RoomSettings::load(pool, room).await?;
     phase.ok();
+    let profile = for_mode(mode, settings.recall_mode_profiles_enabled);
     let rooms = vec![room.to_owned(), "house".to_owned()];
     let mut warnings = Vec::new();
     // An explicit memory reference is the cheapest cross-reference the House
@@ -292,6 +299,7 @@ pub async fn recall(
             found: !retrieval_candidates.is_empty(),
             source: "rust-postgres",
             projection: projection.as_str(),
+            mode: mode.as_str(),
             warnings,
             retrieval_candidates,
             canon_matches: Vec::new(),
@@ -659,6 +667,10 @@ pub async fn recall(
                 serde_json::json!(existing["score"].as_f64().unwrap_or_default() + lane_score);
             existing["bm25f_score"] = candidate["bm25f_score"].clone();
             existing["bm25f_fields"] = candidate["bm25f_fields"].clone();
+            // Only this lane selects the memory's type and age, so it hands
+            // them to an entry another lane opened.
+            existing["memory_type"] = candidate["memory_type"].clone();
+            existing["memory_age_days"] = candidate["memory_age_days"].clone();
             let source = existing["source"].as_str().unwrap_or("candidate");
             if !source.split('+').any(|part| part == "bm25f") {
                 existing["source"] = serde_json::json!(format!("{source}+bm25f"));
@@ -701,6 +713,8 @@ pub async fn recall(
                 "reasons": reasons,
                 "source": "bm25f",
                 "chunk_index": candidate["chunk_index"],
+                "memory_type": candidate["memory_type"],
+                "memory_age_days": candidate["memory_age_days"],
             }),
         );
     }
@@ -744,6 +758,8 @@ pub async fn recall(
                 "reasons": ["semantic vocabulary expansion BM25F score"],
                 "source": "semantic_lexical_bm25f",
                 "chunk_index": candidate["chunk_index"],
+                "memory_type": candidate["memory_type"],
+                "memory_age_days": candidate["memory_age_days"],
             }),
         );
     }
@@ -791,16 +807,10 @@ pub async fn recall(
                 .is_none_or(|memory_id| !exact_memory_ids.contains(&memory_id))
         })
         .collect();
-    retrieval_candidates.sort_by(|a, b| {
-        b["score"]
-            .as_f64()
-            .unwrap_or(0.0)
-            .partial_cmp(&a["score"].as_f64().unwrap_or(0.0))
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a["source_path"].as_str().cmp(&b["source_path"].as_str()))
-            .then_with(|| a["chunk_index"].as_i64().cmp(&b["chunk_index"].as_i64()))
-            .then_with(|| a["memory_id"].as_i64().cmp(&b["memory_id"].as_i64()))
-    });
+    // The mode profile rides the fused score. Only the two BM25F lanes select
+    // `m.type` and the memory's age; semantic, content and thread rows that no
+    // BM25F row touched carry neither and take the flat multiplier.
+    apply_and_order(&profile, &mut retrieval_candidates);
     retrieval_candidates.truncate(semantic_top_k.max(content_top_k) as usize);
     retrieval_candidates.splice(0..0, exact_candidates);
     let rerank_candidates =
@@ -897,17 +907,62 @@ pub async fn recall(
     .bind(&settings.house_language)
     .fetch_all(pool)
     .await?;
+    // The SQL tiers bound the rows; the profile reorders inside one tier, so a
+    // mode lifts its own kinds without ever passing an exact row the caller
+    // named.
+    struct CanonRow {
+        id: i64,
+        name: String,
+        kind: String,
+        summary: String,
+        aliases: Vec<String>,
+        weighty: bool,
+        files: serde_json::Value,
+        exactness: i32,
+    }
+    let mut canon_ordered = Vec::with_capacity(canon_rows.len());
+    for row in canon_rows {
+        canon_ordered.push(CanonRow {
+            id: row.try_get("id")?,
+            name: row.try_get("name")?,
+            kind: row.try_get("kind")?,
+            summary: row.try_get("summary")?,
+            aliases: row.try_get("aliases")?,
+            weighty: row.try_get("weighty")?,
+            files: row.try_get("pointer_files")?,
+            exactness: row.try_get("exactness")?,
+        });
+    }
+    canon_ordered.sort_by(|left, right| {
+        profile.compare_canon(
+            &CanonOrder {
+                exactness: left.exactness,
+                kind: &left.kind,
+                weighty: left.weighty,
+                name: &left.name,
+            },
+            &CanonOrder {
+                exactness: right.exactness,
+                kind: &right.kind,
+                weighty: right.weighty,
+                name: &right.name,
+            },
+        )
+    });
     let mut canon_matches = Vec::new();
     let mut named_entities = Vec::new();
-    for row in canon_rows {
-        let id: i64 = row.try_get("id")?;
-        let name: String = row.try_get("name")?;
-        let kind: String = row.try_get("kind")?;
-        let summary: String = row.try_get("summary")?;
-        let aliases: Vec<String> = row.try_get("aliases")?;
-        let weighty: bool = row.try_get("weighty")?;
-        let files: serde_json::Value = row.try_get("pointer_files")?;
-        let exact = row.try_get::<i32, _>("exactness")? <= 1;
+    for canon in canon_ordered {
+        let CanonRow {
+            id,
+            name,
+            kind,
+            summary,
+            aliases,
+            weighty,
+            files,
+            exactness,
+        } = canon;
+        let exact = exactness <= 1;
         let truncated = !exact && exceeds_excerpt(&summary);
         let projected = if truncated {
             bounded_excerpt(&summary)
@@ -987,6 +1042,7 @@ pub async fn recall(
             || !date_matches.is_empty(),
         source: "rust-postgres",
         projection: projection.as_str(),
+        mode: mode.as_str(),
         warnings,
         retrieval_candidates,
         canon_matches,

@@ -21,9 +21,10 @@ use hearth::{
     GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
     GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
     GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
-    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallProjection,
-    RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberReceipt,
-    RememberRequest, RoomKey, ThreadContinuation, lesson_triggers::LessonTriggerSpec,
+    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallMode,
+    RecallProjection, RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails,
+    RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
+    lesson_triggers::LessonTriggerSpec,
 };
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -221,6 +222,11 @@ pub struct RecallParams {
     /// the wire while `auto` so older peers read the same bytes as before.
     #[serde(default, skip_serializing_if = "RecallProjection::is_auto")]
     pub projection: RecallProjection,
+    /// Ranking mode for this recall. Missing reads as `mixed`; an unknown name
+    /// is refused at the boundary. Skipped on the wire while absent so older
+    /// peers read the same bytes as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -588,6 +594,10 @@ pub struct RecallResultInput {
     pub warnings: Vec<String>,
     #[serde(default)]
     pub projection: Option<RecallProjection>,
+    /// Echo of the resolved ranking mode. Always present on a fresh substrate
+    /// result; telemetry splits on it while the profile gate is still off.
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 pub type RecallResult = RecallResultInput;
@@ -1494,6 +1504,14 @@ impl TryFrom<RecallParams> for RecallRequest {
             request
                 .with_rerank_candidate_top_k(params.rerank_candidate_top_k)
                 .map_err(|e| ProtocolError::InvalidParams(e.to_string()))
+        })
+        .and_then(|request| {
+            let mode = match params.mode.as_deref() {
+                Some(raw) => RecallMode::try_from(raw)
+                    .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?,
+                None => RecallMode::Mixed,
+            };
+            Ok(request.with_mode(mode))
         })
     }
 }

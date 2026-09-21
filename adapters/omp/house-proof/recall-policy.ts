@@ -12,6 +12,9 @@ import {
 export const RECALL_POLICY_MODES = ["auto", "conversation", "work", "quiet"] as const;
 export type RequestedRecallMode = typeof RECALL_POLICY_MODES[number];
 export type ResolvedRecallMode = "conversation" | "work" | "mixed" | "quiet";
+// The Jev judge only ever proposes a retrieval shape; quiet is the operator's
+// to ask for, never a judge's to infer.
+export type JudgedRecallMode = Exclude<ResolvedRecallMode, "quiet">;
 export type PersistedRecallPolicy = {
   requestedMode: RequestedRecallMode;
   resolvedMode: ResolvedRecallMode;
@@ -95,15 +98,19 @@ function snapshot(event: SnapshotEvent): RecallPolicyHostSnapshot {
 // A mutate tool marks work mode and records only enough path state to name the
 // active repository. Lesson selection no longer rides this evidence.
 //
-// enough: evidence holds for the session's lifetime; add decay if work mode overstays casual use.
+// enough: evidence decays after WORK_DECAY_TURNS operator turns with no mutate
+// tool, counted from the ordinal its caller reports — a fixed count of turns,
+// never a token or time budget. Any edit or write restarts it. Raise the
+// constant if Work walks back while hands are still on files.
 
+export const WORK_DECAY_TURNS = 6;
 const TOOL_EVIDENCE_SESSION_LIMIT = 256;
 const EVIDENCE_DIR_LIMIT = 8;
 const MUTATE_TOOLS = new Set(["edit", "write"]);
 const EDIT_SECTION_HEADER = /^\[([^#\r\n]+)#[0-9A-F]{4}\]$/;
 const INTERNAL_URI = /^[a-z][a-z0-9+.-]*:\/\//i;
 
-type SessionWorkEvidence = { dirs: Set<string> };
+type SessionWorkEvidence = { dirs: Set<string>; markedTurn: number | null; turn: number };
 const toolEvidenceSessions = new Map<string, SessionWorkEvidence>();
 
 export type ToolTouch = { paths?: string[]; cwd?: string };
@@ -138,16 +145,23 @@ export function mutateToolPaths(toolName: unknown, input: unknown): string[] {
   return paths;
 }
 
-export function markToolEvidence(binding: HostBinding, touch?: ToolTouch): void {
-  const key = evidenceKey(binding);
-  if (!key) return;
-  const evidence = toolEvidenceSessions.get(key) ?? { dirs: new Set<string>() };
+function touchSession(key: string): SessionWorkEvidence {
+  const evidence = toolEvidenceSessions.get(key) ?? { dirs: new Set<string>(), markedTurn: null, turn: 0 };
   toolEvidenceSessions.delete(key);
   toolEvidenceSessions.set(key, evidence);
   if (toolEvidenceSessions.size > TOOL_EVIDENCE_SESSION_LIMIT) {
     const oldest = toolEvidenceSessions.keys().next();
     if (!oldest.done) toolEvidenceSessions.delete(oldest.value);
   }
+  return evidence;
+}
+
+export function markToolEvidence(binding: HostBinding, touch?: ToolTouch): void {
+  const key = evidenceKey(binding);
+  if (!key) return;
+  const evidence = touchSession(key);
+  // Hands on files restart the count, wherever the session's turns have reached.
+  evidence.markedTurn = evidence.turn;
   const cwd = String(touch?.cwd ?? "").trim();
   for (const raw of touch?.paths ?? []) {
     const filePath = String(raw ?? "").trim();
@@ -158,9 +172,20 @@ export function markToolEvidence(binding: HostBinding, touch?: ToolTouch): void 
   }
 }
 
-export function hasToolEvidence(binding: HostBinding): boolean {
+/**
+ * True while the session's last mutate tool is fewer than `WORK_DECAY_TURNS`
+ * operator turns back. `turn` is the caller's ordinal and is only ever read
+ * here: a turn that asks twice must not age the evidence twice. Omitting it
+ * reads the evidence without advancing the count.
+ */
+export function hasToolEvidence(binding: HostBinding, turn?: number): boolean {
   const key = evidenceKey(binding);
-  return key ? toolEvidenceSessions.has(key) : false;
+  if (!key) return false;
+  const reported = Number.isFinite(turn) ? Math.trunc(turn as number) : null;
+  const evidence = reported === null ? toolEvidenceSessions.get(key) : touchSession(key);
+  if (!evidence) return false;
+  if (reported !== null) evidence.turn = Math.max(evidence.turn, reported);
+  return evidence.markedTurn !== null && evidence.turn - evidence.markedTurn < WORK_DECAY_TURNS;
 }
 
 // Worktrees keep `.git` as a file, not a directory; existsSync covers both.
@@ -288,6 +313,22 @@ export class RecallPolicyHostClient {
       "athanor.recall_policy.invalidate_after_compaction",
       { compaction_summary: String(summary ?? "") },
       idempotencyKey,
+    )));
+  }
+
+  // The mode judge's one write. A proposal, not a setting: the Host consumes it
+  // once, and only while the requested mode is auto.
+  async judgedMode(input: {
+    mode: JudgedRecallMode;
+    source: "jev";
+    revision: string;
+    idempotencyKey?: unknown;
+  }) {
+    return snapshot(await send(commandEnvelope(
+      this.binding,
+      "athanor.recall_policy.judged_mode",
+      { judged_mode: { mode: input.mode, source: input.source, revision: input.revision } },
+      input.idempotencyKey,
     )));
   }
 }

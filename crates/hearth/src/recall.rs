@@ -1,6 +1,7 @@
 use crate::error::DomainError;
 use crate::room::RoomKey;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 const MAX_RECALL_TOP_K: u32 = 1_000;
 /// Maximum number of automatic candidates exposed through the optional
@@ -44,6 +45,60 @@ impl RecallProjection {
     }
 }
 
+/// Which shape of memory a recall is for. The wire list is closed on purpose:
+/// the House answers to these four names and refuses a fifth.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecallMode {
+    Conversation,
+    Work,
+    #[default]
+    Mixed,
+    Quiet,
+}
+
+impl RecallMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Conversation => "conversation",
+            Self::Work => "work",
+            Self::Mixed => "mixed",
+            Self::Quiet => "quiet",
+        }
+    }
+}
+
+/// A mode name the House does not answer to. Typed so a boundary refuses it by
+/// value instead of matching on a message.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnknownRecallMode(pub String);
+
+impl fmt::Display for UnknownRecallMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "unknown recall mode `{}`: expected conversation, work, mixed or quiet",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for UnknownRecallMode {}
+
+impl TryFrom<&str> for RecallMode {
+    type Error = UnknownRecallMode;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "conversation" => Ok(Self::Conversation),
+            "work" => Ok(Self::Work),
+            "mixed" => Ok(Self::Mixed),
+            "quiet" => Ok(Self::Quiet),
+            other => Err(UnknownRecallMode(other.to_owned())),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecallRequest {
     room: RoomKey,
@@ -55,6 +110,7 @@ pub struct RecallRequest {
     temporal_decay: bool,
     projection: RecallProjection,
     rerank_candidate_top_k: u32,
+    mode: RecallMode,
 }
 
 impl RecallRequest {
@@ -101,6 +157,7 @@ impl RecallRequest {
             temporal_decay: false,
             projection: RecallProjection::Auto,
             rerank_candidate_top_k: 0,
+            mode: RecallMode::Mixed,
         })
     }
 
@@ -126,6 +183,12 @@ impl RecallRequest {
         }
         self.rerank_candidate_top_k = rerank_candidate_top_k;
         Ok(self)
+    }
+
+    /// Name the ranking mode. A request that never names one stays `Mixed`.
+    pub fn with_mode(mut self, mode: RecallMode) -> Self {
+        self.mode = mode;
+        self
     }
 
     pub fn room(&self) -> &RoomKey {
@@ -154,6 +217,9 @@ impl RecallRequest {
     }
     pub const fn rerank_candidate_top_k(&self) -> u32 {
         self.rerank_candidate_top_k
+    }
+    pub const fn mode(&self) -> RecallMode {
+        self.mode
     }
 }
 

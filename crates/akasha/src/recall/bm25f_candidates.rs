@@ -12,7 +12,9 @@ use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, BTreeSet};
 
 const BM25F_TOP_K: usize = 8;
-const BM25F_MAX_CANDIDATES: i64 = 512;
+// enough: 4_096 is the ranked prefilter ceiling; past it the truncation
+// warning below still says the ranker never saw the rest.
+const BM25F_MAX_CANDIDATES: i64 = 4_096;
 const BM25F_BROAD_TOP_K: usize = 4_096;
 const BM25F_BROAD_MAX_CANDIDATES: i64 = 4_096;
 
@@ -167,7 +169,7 @@ async fn load_bm25f_candidates_for_terms_bounded(
            )
            SELECT m.id AS memory_id,m.source_path,coalesce(m.title,'') AS title,
                   coalesce(c.heading_path,'') AS heading_path,c.body,c.chunk_index,m.meta,
-                  array_to_string(m.threads,' ') AS threads,m.type AS memory_type,
+                  array_to_string(m.threads,' ') AS threads,m.type AS memory_type,m.created_at,
                   count(*) OVER()::bigint AS total_matches
            FROM memory_chunks c
            JOIN memories m ON m.id=c.memory_id
@@ -227,6 +229,8 @@ async fn load_bm25f_candidates_for_terms_bounded(
         let threads: String = row.try_get("threads")?;
         let body: String = row.try_get("body")?;
         let memory_type: String = row.try_get("memory_type")?;
+        let created_at: DateTime<Utc> = row.try_get("created_at")?;
+        let age_days = (decay_now - created_at).num_seconds() as f64 / 86_400.0;
         let score = bm25f::score(
             &terms,
             document_count as u64,
@@ -292,6 +296,8 @@ async fn load_bm25f_candidates_for_terms_bounded(
             "heading_path": heading_path,
             "body": bounded_excerpt(&body),
             "chunk_index": row.try_get::<i32,_>("chunk_index")?,
+            "memory_type": memory_type,
+            "memory_age_days": age_days,
             "bm25f_score": score.value,
             "bm25f_fields": score.matched_fields,
             "durability": durability,

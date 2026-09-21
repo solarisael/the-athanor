@@ -1,5 +1,6 @@
 import { RustJsonlTransport, RustTransportError } from "../rust-transport.ts";
 import { discoverRustExecutable } from "../discovery.ts";
+import type { ResolvedRecallMode } from "./recall-policy.ts";
 
 const RECALL_SEMANTIC_MIN_SIM = 0.40;
 const RECALL_CONTENT_MIN_SIM = 0.30;
@@ -93,12 +94,14 @@ export async function recallWithRouting(
     projection = "auto",
     timeoutMs = RECALL_TIMEOUT_MS,
     rerankCandidateTopK,
+    mode,
   }: {
     signal?: AbortSignal;
     temporalDecay?: boolean;
     projection?: RecallProjection;
     timeoutMs?: number;
     rerankCandidateTopK?: number;
+    mode?: ResolvedRecallMode;
   } = {},
 ) {
   const runtime = rustRecallTransport();
@@ -131,6 +134,9 @@ export async function recallWithRouting(
       content_top_k: 8,
       content_min_similarity: RECALL_CONTENT_MIN_SIM,
       ...rerankParams,
+      // Named by the caller's policy decision, never inferred here. The Vault
+      // lane has its own strict params and never carries it.
+      ...(mode ? { mode } : {}),
     };
   const decayParams = temporalDecay && !vaultProfile ? { ...baseParams, temporal_decay: true } : baseParams;
   const manual = projection === "manual" && !vaultProfile;

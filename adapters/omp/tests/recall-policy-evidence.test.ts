@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   WORK_DECAY_TURNS,
@@ -52,10 +55,15 @@ describe("work evidence decay", () => {
   });
 
   test("decay expires the evidence, not the paths it named", () => {
+    // A worktree keeps `.git` as a file; the project name is that folder's.
+    const repo = join(mkdtempSync(join(tmpdir(), "athanor-evidence-")), "Dragon-Repo");
+    mkdirSync(repo);
+    writeFileSync(join(repo, ".git"), "gitdir: elsewhere\n");
+
     const binding = session();
-    markToolEvidence(binding, { paths: ["adapters/omp/index.ts"], cwd: process.cwd() });
+    markToolEvidence(binding, { paths: ["adapters/omp/index.ts"], cwd: repo });
     expect(hasToolEvidence(binding, 20)).toBe(false);
-    expect(activeProjectFromEvidence(binding)).toBe("jev-striatum");
+    expect(activeProjectFromEvidence(binding)).toBe("dragon-repo");
   });
 
   test("an unnamed room or session is never evidence", () => {

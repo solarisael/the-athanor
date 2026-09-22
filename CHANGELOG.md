@@ -53,6 +53,8 @@ the exact implementation record.
 
 ### Changed
 
+- Every cargo build for this repository lands in one absolute target directory, `C:/Projects/the-athanor-target`, shared by every worktree. The release build uses the same directory.
+  The deploy ritual stages payloads under `<checkout>/target/releases` and prunes only that tree. Before this change it pruned `target/deploy`, which deleted the development build cache after every successful deploy.
 - Insula raw observations expire after seven UTC days. Migration 0032 updates existing expiry timestamps without deleting observations.
   Daily cleanup selects expired records without a second retention delay. The first check still waits five minutes.
   Coverage checks, permanent summaries, tombstones, and historical fourteen-day receipts remain intact.

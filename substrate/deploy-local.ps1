@@ -86,7 +86,9 @@ if ([string]::IsNullOrWhiteSpace($env:VCToolsInstallDir) -or ([string]$env:VSCMD
   Import-Module (Join-Path $VsRoot "Common7/Tools/Microsoft.VisualStudio.DevShell.dll")
   Enter-VsDevShell -VsInstallPath $VsRoot -SkipAutomaticLocation -DevCmdArguments "-arch=x64 -host_arch=x64" | Out-Null
 }
-$Out = Join-Path $Root "target/deploy/$Release"
+# Staged payloads get their own tree. Cargo's target directory lives outside
+# the checkout (.cargo/config.toml) and the prune below must never reach it.
+$Out = Join-Path $Root "target/releases/$Release"
 Invoke-Checked -Label "native release payload" -FilePath "pwsh" -ArgumentList @(
   "-NoProfile", "-File", (Join-Path $Root "installer/build-native-release.ps1"),
   "-Version", $Release, "-OutDir", $Out
@@ -139,7 +141,7 @@ try {
 
 # Payload trees are disposable after installation; keep this release's for
 # inspection and drop older ones.
-Get-ChildItem (Join-Path $Root "target/deploy") -Directory -ErrorAction SilentlyContinue |
+Get-ChildItem (Join-Path $Root "target/releases") -Directory -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -cne $Release } |
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 

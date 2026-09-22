@@ -1,11 +1,16 @@
-# Build policy for every cargo invocation in this checkout.
+# Build policy for every cargo invocation in this repository.
 #
-# One target directory: build, test, check, clippy and the deploy ritual share
-# target/deploy, so no invocation cold-builds its own tree (project lesson
-# #465). The ritual prunes target/debug and target/release after a deploy;
-# with this default those trees never appear.
+# One target directory for the whole workstation: build, test, check, clippy,
+# and the release build in installer/build-native-release.ps1 all land here, and
+# every worktree under C:/Projects/the-athanor-dev shares it, so a fanout of
+# three worktrees compiles the dependency set once instead of three times
+# (project lesson #465). The path is absolute on purpose; a relative one is a
+# cold 15 GB tree per worktree. Another machine changes this one line.
+#
+# Payload staging lives in <checkout>/target/releases and nothing in this tree
+# is ever pruned by the deploy ritual.
 [build]
-target-dir = "target/deploy"
+target-dir = "C:/Projects/the-athanor-target"
 
 # Incremental artifacts are per-crate, per-target and never collected; a week
 # of dev and test builds left 20 GB of them on 2026-09-02. A full recompile of

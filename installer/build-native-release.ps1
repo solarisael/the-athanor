@@ -131,11 +131,13 @@ Invoke-NativeReleaseStage -Name "dependency-preparation" -OutDir $Out -Action {
   Remove-StaleNativeBuildCaches $DependencyCacheRoot $DependencyCacheKey $RequiredDependencyFiles $DependencyCacheLock | Out-Null
 }
 
-$CargoTarget = Join-Path $Root "target"
+# The release build lands wherever .cargo/config.toml says every build lands,
+# so a deploy reuses the dependency set the tests just compiled. Ask the pinned
+# cargo for that path rather than restating it here.
+$CargoTarget = (& $Toolchain.cargoPath metadata --format-version 1 --no-deps --locked --manifest-path (Join-Path $Root "Cargo.toml") | ConvertFrom-Json).target_directory
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($CargoTarget)) { throw "cargo metadata could not name the target directory" }
 Invoke-NativeReleaseStage -Name "cargo-build" -OutDir $Out -Action {
-  $PreviousCargoTarget = $env:CARGO_TARGET_DIR
   $PreviousRustc = [Environment]::GetEnvironmentVariable("RUSTC", "Process")
-  $env:CARGO_TARGET_DIR = $CargoTarget
   # Build with the exact binaries preflight verified inside the pinned rustup
   # toolchain, and pin the compiler too: neither cargo nor rustc may be taken
   # from PATH here, so a shadow can never produce release bytes.
@@ -146,7 +148,6 @@ Invoke-NativeReleaseStage -Name "cargo-build" -OutDir $Out -Action {
     if ($LASTEXITCODE -ne 0) { throw "Rust release build failed" }
   } finally {
     Pop-Location
-    $env:CARGO_TARGET_DIR = $PreviousCargoTarget
     if ($null -eq $PreviousRustc) { Remove-Item Env:RUSTC -ErrorAction SilentlyContinue }
     else { $env:RUSTC = $PreviousRustc }
   }

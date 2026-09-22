@@ -404,6 +404,12 @@ pub struct RecallCandidate {
     pub durability: Option<String>,
     #[serde(default)]
     pub temporal_weight: Option<f64>,
+    // The BM25F lane selects these for the ranking profile. The viewport never
+    // presents them; the recall_result command still has to accept them.
+    #[serde(default)]
+    pub memory_type: Option<String>,
+    #[serde(default)]
+    pub memory_age_days: Option<f64>,
     /// Complete authoritative record body; present only under a manual projection.
     #[serde(default)]
     pub body: Option<String>,
@@ -5291,6 +5297,51 @@ mod tests {
         let mut unknown = serde_json::to_value(decoded).unwrap();
         unknown["unexpected"] = serde_json::json!(true);
         assert!(serde_json::from_value::<RecallResult>(unknown).is_err());
+    }
+
+    #[test]
+    fn recall_result_accepts_profile_ranking_keys_on_candidates() {
+        // Every key the fused BM25F lane emits today. A new substrate key that
+        // this struct does not know fails the recall_result command at runtime,
+        // so this list is the contract the substrate ranks against.
+        let result: RecallResult = serde_json::from_value(serde_json::json!({
+            "ok": true,
+            "query": "bounded query",
+            "found": true,
+            "source": "rust-postgres",
+            "mode": "work",
+            "retrievalCandidates": [{
+                "memory_id": 7,
+                "source_path": "memory/2026-09-21_recall_modes.md",
+                "title": "recall modes",
+                "heading_path": "__preamble__",
+                "excerpt": "mode on the wire",
+                "sources": ["memory/2026-09-21_recall_modes.md"],
+                "term_coverage": 0.5,
+                "matched_terms": ["recall"],
+                "missing_terms": ["modes"],
+                "score": 0.9,
+                "bm25f_score": 4.2,
+                "bm25f_fields": {"title": 1.0},
+                "durability": "standing",
+                "temporal_weight": 0.8,
+                "reasons": ["BM25F field-aware lexical score"],
+                "source": "bm25f",
+                "chunk_index": 0,
+                "memory_type": "memory",
+                "memory_age_days": 0.4
+            }],
+            "canonMatches": [],
+            "semanticChunks": [],
+            "contentChunks": [],
+            "dateMatches": [],
+            "queryDates": [],
+            "taxonomy": {}
+        }))
+        .unwrap();
+        let candidate = &result.retrieval_candidates[0];
+        assert_eq!(candidate.memory_type.as_deref(), Some("memory"));
+        assert_eq!(candidate.memory_age_days, Some(0.4));
     }
     fn giga_private_source_json() -> Value {
         serde_json::json!({

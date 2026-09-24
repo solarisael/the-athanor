@@ -9,19 +9,17 @@
  *   first, and a bad argument also comes back as an `isError` result.
  * - Search, index and status only. No memory route and no delete route.
  */
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   ADAPTER_NAME,
   closeService,
-  errorPayload,
-  index,
-  indexShape,
   logToStderr,
-  search,
   searchShape,
-  status,
+  indexShape,
   statusShape,
   type IndexInput,
   type SearchInput,
@@ -67,7 +65,7 @@ export function createMcpServer(version: string): McpServer {
       inputSchema: searchShape,
       annotations: { readOnlyHint: false, openWorldHint: false },
     },
-    (input) => runTool(() => search(input as SearchInput)),
+    (input, extra) => runIsolatedTool("search", input as SearchInput, extra.signal),
   );
 
   server.registerTool(
@@ -88,7 +86,7 @@ export function createMcpServer(version: string): McpServer {
         openWorldHint: false,
       },
     },
-    (input, extra) => runTool(() => index(input as IndexInput, { signal: extra.signal })),
+    (input, extra) => runIsolatedTool("index", input as IndexInput, extra.signal),
   );
 
   server.registerTool(
@@ -103,20 +101,63 @@ export function createMcpServer(version: string): McpServer {
       inputSchema: statusShape,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    (input) => runTool(() => status(input as StatusInput)),
+    (input, extra) => runIsolatedTool("status", input as StatusInput, extra.signal),
   );
 
   return server;
 }
 
-async function runTool(
-  operation: () => Promise<Record<string, unknown>>,
+type Operation = "search" | "index" | "status";
+
+// A failed native collection constructor can retain a Windows file handle.
+// Keep that failure inside the request process, not the MCP server.
+async function runIsolatedTool(
+  operation: Operation,
+  input: SearchInput | IndexInput | StatusInput,
+  signal: AbortSignal,
 ): Promise<ToolResult> {
   try {
-    const data = await operation();
-    return { content: [textBlock(data)], structuredContent: data };
+    const child = spawn(process.execPath, [fileURLToPath(new URL("./worker.js", import.meta.url))], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    let inputError: Error | undefined;
+    child.stdin.on("error", (error: Error) => { inputError = error; });
+    const abort = () => child.kill();
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      if (signal.aborted) abort();
+      child.stdin.end(JSON.stringify({ operation, input }));
+
+      const exitCode = await new Promise<number | null>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", resolve);
+      });
+      const output = Buffer.concat(stdout).toString("utf8");
+      if (!output || exitCode !== 0 || inputError) {
+        throw new Error(
+          `Search worker exited ${exitCode}: ${inputError?.message ?? Buffer.concat(stderr).toString("utf8")}`,
+        );
+      }
+      const result = JSON.parse(output) as {
+        ok: boolean;
+        data?: Record<string, unknown>;
+        error?: Record<string, unknown>;
+      };
+      const payload = result.ok ? result.data : { ok: false, error: result.error };
+      return {
+        content: [textBlock(payload)],
+        ...(result.ok ? { structuredContent: result.data } : { isError: true }),
+      };
+    } finally {
+      signal.removeEventListener("abort", abort);
+    }
   } catch (error) {
-    return { content: [textBlock({ ok: false, error: errorPayload(error) })], isError: true };
+    const payload = { ok: false, error: { code: "WORKER_ERROR", message: String(error) } };
+    return { content: [textBlock(payload)], isError: true };
   }
 }
 

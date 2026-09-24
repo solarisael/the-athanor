@@ -9,5 +9,5 @@
     "rewriteRelativeImportExtensions": true,
     "noEmitOnError": true
   },
-  "include": ["src/cli.ts", "src/mcp.ts", "src/service.ts", "src/nemotron.ts"]
+  "include": ["src/cli.ts", "src/mcp.ts", "src/service.ts", "src/nemotron.ts", "src/worker.ts"]
 }

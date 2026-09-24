@@ -3,9 +3,8 @@
  * `@zvec/zvec-grep` entry point only.
  *
  * Invariants:
- * - One handle for each request, closed in `finally`. Requests run one at a
- *   time, so one native index handle is open at most. The library keeps its
- *   own cross-process locks; their errors surface as they are.
+ * - A constructed library handle closes in `finally`. MCP requests run in
+ *   separate processes because a failed native constructor can retain handles.
  * - The model is made once here and lent to the library as `borrowed`, so
  *   only `closeService` disposes it.
  * - Never pass `endpoint`, `apiKey`, `device` or `embedding` to

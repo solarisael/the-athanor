@@ -27,6 +27,13 @@ pub const METHOD_RESTART_STATUS: &str = "restart_status";
 /// refusal vocabulary.
 pub const STORM_REFUSAL_CODE: &str = "restart_storm";
 
+/// The code the substrate answers with for every database failure: Postgres
+/// could not be reached, or could not finish the query (akasha
+/// `AppError::code`). It is not a decision about the restart, because the House
+/// was not there to make one, so the keeper waits for the House instead of
+/// reading it as a refusal.
+pub const HOUSE_UNREACHABLE_CODE: &str = "database";
+
 /// The exit code an armed adapter leaves behind. A hint only: the keeper asks
 /// `restart_status` for every exit code, armed or not.
 pub const ARMED_EXIT_CODE: i32 = 87;
@@ -67,6 +74,10 @@ pub struct ProtocolErrorBody {
 impl ProtocolErrorBody {
     pub fn is_storm_refusal(&self) -> bool {
         self.code == STORM_REFUSAL_CODE
+    }
+
+    pub fn is_house_unreachable(&self) -> bool {
+        self.code == HOUSE_UNREACHABLE_CODE
     }
 }
 

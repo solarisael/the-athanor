@@ -11,8 +11,7 @@ use crate::protocol::{
     RestartStatusIntent, RestartStatusParams, RestartStatusReceipt, RestartTransitionParams,
     RestartTransitionReceipt, RestartTransitionTarget,
 };
-use crate::resolve::resolve_substrate_exe;
-use crate::session::{Answer, SubstrateSession};
+use crate::session::{Answer, HouseLine};
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use interactive_process::{InteractiveChild, InteractiveCommand};
@@ -26,6 +25,10 @@ const CHILD_POLL: Duration = Duration::from_millis(200);
 /// The relaunching stage is seconds-scale by contract, so the keeper looks for
 /// the successor's verify often, on the substrate session it already holds open.
 const VERIFY_POLL: Duration = Duration::from_secs(1);
+/// How long the keeper rests between asks while the House cannot answer.
+const HOUSE_RETRY: Duration = Duration::from_secs(2);
+/// How often a long silence is told again on the console.
+const SILENCE_RETELL: Duration = Duration::from_secs(60);
 const UNKNOWN_EXIT_CODE: i32 = -1;
 const RESTART_INTENT_ENV: &str = "ATHANOR_RESTART_INTENT_ID";
 const RESTART_SUCCESSOR_PROOF_ENV: &str = "ATHANOR_RESTART_SUCCESSOR_PROOF";
@@ -193,22 +196,44 @@ pub fn run_controlled(
             return Ok(ControlledOutcome::Stopped);
         }
 
-        // # enough: one substrate child for each ask; it keeps the release pointer fresh (census 1.9)
-        let executable = resolve_substrate_exe(&config.program_root)
-            .context("the current substrate could not be resolved")?;
-        let mut session = SubstrateSession::start(&executable, &config.state_root)?;
+        // # enough: one substrate child for each restart; one whose line breaks is replaced (census 1.9)
+        let mut house = HouseLine::new(&config.program_root, &config.state_root);
 
-        let pending = match ask_status(&mut session, config, None)? {
-            Ok(pending) => pending,
-            Err(refusal) => {
-                session.close()?;
+        let heard = if armed_exit_hint(Some(exit_code)) {
+            // An armed exit is a restart the House already agreed to. A House
+            // that cannot be asked right now has not changed its mind, and the
+            // House alone decides when the intent is dead: it refuses a lapsed
+            // one when asked. So the keeper waits here instead of walking away.
+            until_answered(&mut house, &runtime, |house| ask_status(house, config, None))?
+        } else {
+            match ask_status(&mut house, config, None)? {
+                Answer::Ok(pending) => Heard::Answered(pending),
+                Answer::Refused(refusal) => Heard::Refused(refusal),
+                Answer::Unreachable(reason) => {
+                    house.close()?;
+                    return Ok(ControlledOutcome::Completed(Outcome::Failed {
+                        message: format!(
+                            "omp-keeper: omp exited {exit_code} without arming a restart, and the House could not be asked whether one was pending ({reason}); nothing was relaunched"
+                        ),
+                    }));
+                }
+            }
+        };
+        let pending = match heard {
+            Heard::Answered(pending) => pending,
+            Heard::Refused(refusal) => {
+                house.close()?;
                 return Ok(ControlledOutcome::Completed(refusal_outcome(&refusal)));
+            }
+            Heard::Stopped => {
+                house.close()?;
+                return Ok(ControlledOutcome::Stopped);
             }
         };
         let pending = match pending {
             Some(pending) if status_step(Some(pending.state)) == StatusStep::Claim => pending,
             Some(pending) => {
-                session.close()?;
+                house.close()?;
                 println!(
                     "omp-keeper: intent {} is {} for {}; nothing to relaunch",
                     pending.intent_id,
@@ -218,7 +243,7 @@ pub fn run_controlled(
                 return Ok(ControlledOutcome::Completed(Outcome::Stopped { exit_code }));
             }
             None => {
-                session.close()?;
+                house.close()?;
                 println!(
                     "omp-keeper: no restart intent for {}; the keeper exits",
                     config.workspace
@@ -227,26 +252,32 @@ pub fn run_controlled(
             }
         };
         if control.is_stop_requested() {
-            session.close()?;
+            house.close()?;
             return Ok(ControlledOutcome::Stopped);
         }
 
         let capability = config
             .read_capability()
             .context("the keeper restart_claim capability could not be read")?;
-        let claim: RestartClaimReceipt = match session.call(
-            METHOD_RESTART_CLAIM,
-            &RestartClaimParams {
-                intent_id: pending.intent_id.clone(),
-                claimant: config.claimant.clone(),
-                capability: capability.expose().to_string(),
-                idempotency_key: claim_key(&pending.intent_id, &config.claimant),
-            },
-        )? {
-            Answer::Ok(result) => result,
-            Answer::Refused(refusal) => {
-                session.close()?;
+        let claim_params = RestartClaimParams {
+            intent_id: pending.intent_id.clone(),
+            claimant: config.claimant.clone(),
+            capability: capability.expose().to_string(),
+            idempotency_key: claim_key(&pending.intent_id, &config.claimant),
+        };
+        // The claim carries its idempotency key, so asking again after silence
+        // cannot mint a second claim.
+        let claim: RestartClaimReceipt = match until_answered(&mut house, &runtime, |house| {
+            house.call(METHOD_RESTART_CLAIM, &claim_params)
+        })? {
+            Heard::Answered(claim) => claim,
+            Heard::Refused(refusal) => {
+                house.close()?;
                 return Ok(ControlledOutcome::Completed(refusal_outcome(&refusal)));
+            }
+            Heard::Stopped => {
+                house.close()?;
+                return Ok(ControlledOutcome::Stopped);
             }
         };
         println!(
@@ -254,16 +285,16 @@ pub fn run_controlled(
             pending.intent_id, claim.claim_epoch
         );
 
-        match relaunch(config, &mut session, &pending, &claim, &runtime)? {
+        match relaunch(config, &mut house, &pending, &claim, &runtime)? {
             Relaunched::Verified(successor) => {
-                adopt_verified_successor(&mut child, successor, session.close());
+                adopt_verified_successor(&mut child, successor, house.close());
             }
             Relaunched::Completed(outcome) => {
-                session.close()?;
+                house.close()?;
                 return Ok(ControlledOutcome::Completed(outcome));
             }
             Relaunched::Stopped => {
-                session.close()?;
+                house.close()?;
                 return Ok(ControlledOutcome::Stopped);
             }
         }
@@ -276,7 +307,7 @@ pub fn run_controlled(
 /// same budget the claim handed over.
 fn relaunch(
     config: &KeeperConfig,
-    session: &mut SubstrateSession,
+    house: &mut HouseLine<'_>,
     pending: &RestartStatusIntent,
     claim: &RestartClaimReceipt,
     runtime: &Runtime<'_>,
@@ -296,14 +327,16 @@ fn relaunch(
         // so a retry runs inside the House's own new window instead of a second
         // clock invented here.
         let detail = (attempts > 1).then(|| format!("relaunch attempt {attempts}"));
-        let successor_proof = match transition(
-            session,
-            pending,
-            &claim.claim_token,
-            RestartTransitionTarget::Relaunching,
-            detail,
-        )? {
-            Answer::Ok(receipt) => match receipt.state {
+        let successor_proof = match until_answered(house, runtime, |house| {
+            transition(
+                house,
+                pending,
+                &claim.claim_token,
+                RestartTransitionTarget::Relaunching,
+                detail.clone(),
+            )
+        })? {
+            Heard::Answered(receipt) => match receipt.state {
                 RestartState::Relaunching => {
                     println!(
                         "omp-keeper: intent {} is relaunching (attempt {attempts})",
@@ -325,9 +358,10 @@ fn relaunch(
                     other.as_str()
                 ),
             },
-            Answer::Refused(refusal) => {
+            Heard::Refused(refusal) => {
                 return Ok(Relaunched::Completed(refusal_outcome(&refusal)));
             }
+            Heard::Stopped => return Ok(Relaunched::Stopped),
         };
 
         if runtime.control.is_stop_requested() {
@@ -335,8 +369,7 @@ fn relaunch(
         }
         let failure = match successor_proof {
             Some(ref proof) => {
-                match attempt_relaunch(config, session, pending, proof, &mut last_window, runtime)?
-                {
+                match attempt_relaunch(config, house, pending, proof, &mut last_window, runtime)? {
                     Attempt::Verified(child) => {
                         println!(
                             "omp-keeper: the House saw the successor verify intent {}",
@@ -356,15 +389,20 @@ fn relaunch(
             == RelaunchAction::Fail
         {
             let detail = format!("{attempts} relaunch attempts failed; the last: {failure}");
-            let answer = transition(
-                session,
-                pending,
-                &claim.claim_token,
-                RestartTransitionTarget::Failed,
-                Some(detail.clone()),
-            )?;
-            if let Answer::Refused(refusal) = answer {
-                return Ok(Relaunched::Completed(refusal_outcome(&refusal)));
+            match until_answered(house, runtime, |house| {
+                transition(
+                    house,
+                    pending,
+                    &claim.claim_token,
+                    RestartTransitionTarget::Failed,
+                    Some(detail.clone()),
+                )
+            })? {
+                Heard::Answered(_) => {}
+                Heard::Refused(refusal) => {
+                    return Ok(Relaunched::Completed(refusal_outcome(&refusal)));
+                }
+                Heard::Stopped => return Ok(Relaunched::Stopped),
             }
             return Ok(Relaunched::Completed(Outcome::Failed {
                 message: format!(
@@ -390,7 +428,7 @@ enum Watched {
 /// the session Sol asked for, so it does not outlive its deadline.
 fn attempt_relaunch(
     config: &KeeperConfig,
-    session: &mut SubstrateSession,
+    house: &mut HouseLine<'_>,
     pending: &RestartStatusIntent,
     successor_proof: &str,
     last_window: &mut Option<Deadline>,
@@ -412,7 +450,7 @@ fn attempt_relaunch(
     // that leaves Sol's omp running with nothing watching it and the intent
     // stuck in relaunching, which is the one shape the House cannot clean up.
     // Every sad path below reaches the same kill and reports a failed attempt.
-    match watch_relaunched(session, config, pending, &mut child, last_window, runtime) {
+    match watch_relaunched(house, config, pending, &mut child, last_window, runtime) {
         Ok(Watched::Verified) => Ok(Attempt::Verified(child)),
         Ok(Watched::Unproven(reason)) => {
             leave_no_child(&mut child, runtime);
@@ -425,34 +463,44 @@ fn attempt_relaunch(
         Err(error) => {
             leave_no_child(&mut child, runtime);
             Ok(Attempt::Failed(format!(
-                "the keeper lost the House mid-relaunch: {error:#}"
+                "the keeper could not follow the relaunch: {error:#}"
             )))
         }
     }
 }
 
+/// Hold a relaunched omp against the House's relaunching window. A House that
+/// cannot be asked decides nothing, so the child keeps running through it; only
+/// a finish without a verify, or the window the House published, ends the
+/// attempt (laws/LAWS.bend `watch`).
 fn watch_relaunched(
-    session: &mut SubstrateSession,
+    house: &mut HouseLine<'_>,
     config: &KeeperConfig,
     pending: &RestartStatusIntent,
     child: &mut OmpChild,
     last_window: &mut Option<Deadline>,
     runtime: &Runtime<'_>,
 ) -> Result<Watched> {
-    if runtime.control.is_stop_requested() {
-        return Ok(Watched::Stopped);
-    }
-    let Some(window) = relaunching_window(session, config, pending, last_window)? else {
-        return Ok(Watched::Unproven(format!(
-            "the House has named no relaunching deadline for intent {}, so there is no window to wait inside",
-            pending.intent_id
-        )));
-    };
+    let mut silence = Silence::default();
+    let mut window = Window::Unheard;
     loop {
         if runtime.control.is_stop_requested() {
             return Ok(Watched::Stopped);
         }
-        match observe(session, config, pending)? {
+        if let Window::Unheard = window {
+            window = relaunching_window(house, config, pending, last_window, &mut silence)?;
+        }
+        let deadline = match window {
+            Window::Stands(deadline) => Some(deadline),
+            Window::Unheard => None,
+            Window::Unnamed => {
+                return Ok(Watched::Unproven(format!(
+                    "the House has named no relaunching deadline for intent {}, so there is no window to wait inside",
+                    pending.intent_id
+                )));
+            }
+        };
+        match observe(house, config, pending, &mut silence)? {
             VerifyWatch::Verified => return Ok(Watched::Verified),
             // Finished, but the House never said verified. Which end it reached
             // is not ours to guess, so it counts as no verify at all.
@@ -464,11 +512,13 @@ fn watch_relaunched(
             }
             VerifyWatch::Waiting => {}
         }
-        if window.has_passed(Utc::now()) {
+        if let Some(deadline) = deadline
+            && deadline.has_passed(Utc::now())
+        {
             return Ok(Watched::Unproven(format!(
                 "the successor did not verify by {} ({})",
-                window.at().to_rfc3339(),
-                window.source()
+                deadline.at().to_rfc3339(),
+                deadline.source()
             )));
         }
         if child
@@ -476,14 +526,35 @@ fn watch_relaunched(
             .context("the relaunched omp child could not be inspected")?
             .is_some()
         {
-            // verified and exited in one breath is still verified, so ask once more
-            return Ok(match observe(session, config, pending)? {
-                VerifyWatch::Verified => Watched::Verified,
+            // Verified and exited in one breath is still verified, so ask once
+            // more, and hear the House out: only it knows which one happened.
+            let last = until_answered(house, runtime, |house| {
+                ask_status(house, config, Some(&pending.intent_id))
+            })?;
+            return Ok(match last {
+                Heard::Answered(observed)
+                    if verify_watch(&pending.intent_id, observed.as_ref())
+                        == VerifyWatch::Verified =>
+                {
+                    Watched::Verified
+                }
+                Heard::Stopped => Watched::Stopped,
                 _ => Watched::Unproven("the successor exited before it verified".to_string()),
             });
         }
         std::thread::sleep(VERIFY_POLL);
     }
+}
+
+/// The window one attempt waits inside, as far as the keeper has heard.
+#[derive(Clone, Copy)]
+enum Window {
+    /// The instant the House published, for this attempt or the one before.
+    Stands(Deadline),
+    /// The House answered and has named none: there is no window to wait inside.
+    Unnamed,
+    /// The House could not be asked, and has named none yet.
+    Unheard,
 }
 
 /// The window this attempt may wait inside. Only the House sets one. When the
@@ -492,22 +563,35 @@ fn watch_relaunched(
 /// the House ever allowed, and that is the one direction this stage must not
 /// fail. `claim.stageDeadlines.relaunchingSecs` is deliberately not a fallback.
 fn relaunching_window(
-    session: &mut SubstrateSession,
+    house: &mut HouseLine<'_>,
     config: &KeeperConfig,
     pending: &RestartStatusIntent,
     last_window: &mut Option<Deadline>,
-) -> Result<Option<Deadline>> {
-    let published = match ask_status(session, config, Some(&pending.intent_id)) {
-        Ok(Ok(Some(intent))) if intent.intent_id == pending.intent_id => {
+    silence: &mut Silence,
+) -> Result<Window> {
+    let published = match ask_status(house, config, Some(&pending.intent_id)) {
+        Ok(Answer::Ok(Some(intent))) if intent.intent_id == pending.intent_id => {
+            silence.heard();
             intent.deadlines.relaunching_deadline_at
         }
-        Ok(Ok(_)) => None,
-        Ok(Err(refusal)) => {
+        Ok(Answer::Ok(_)) => {
+            silence.heard();
+            None
+        }
+        Ok(Answer::Refused(refusal)) => {
+            silence.heard();
             eprintln!(
                 "omp-keeper: the House refused the relaunching window read ({}: {}); the deadline it last published stands",
                 refusal.code, refusal.message
             );
             None
+        }
+        // Silence is not a read that failed: the House minted this attempt's
+        // window at the transition, and the one before it says nothing about
+        // it. Ask again until the House can say.
+        Ok(Answer::Unreachable(reason)) => {
+            silence.heard_nothing(&reason);
+            return Ok(Window::Unheard);
         }
         Err(error) => {
             eprintln!(
@@ -520,28 +604,133 @@ fn relaunching_window(
         Some(published) => {
             let window = house_deadline(&published)?;
             *last_window = Some(window);
-            Ok(Some(window))
+            Ok(Window::Stands(window))
         }
-        None => Ok(*last_window),
+        None => Ok(last_window.map_or(Window::Unnamed, Window::Stands)),
     }
 }
 
-/// One look at our own intent, by id. A refused read decides nothing: it is
-/// neither a verify nor a terminal sighting, so the window is left to end the
-/// wait rather than this answer.
+/// One look at our own intent, by id. A read the House refused or could not
+/// answer decides nothing: it is neither a verify nor a terminal sighting, so
+/// the window is left to end the wait rather than this answer.
 fn observe(
-    session: &mut SubstrateSession,
+    house: &mut HouseLine<'_>,
     config: &KeeperConfig,
     pending: &RestartStatusIntent,
+    silence: &mut Silence,
 ) -> Result<VerifyWatch> {
-    match ask_status(session, config, Some(&pending.intent_id))? {
-        Ok(observed) => Ok(verify_watch(&pending.intent_id, observed.as_ref())),
-        Err(refusal) => {
+    match ask_status(house, config, Some(&pending.intent_id))? {
+        Answer::Ok(observed) => {
+            silence.heard();
+            Ok(verify_watch(&pending.intent_id, observed.as_ref()))
+        }
+        Answer::Refused(refusal) => {
+            silence.heard();
             eprintln!(
                 "omp-keeper: the House refused a verification read ({}: {})",
                 refusal.code, refusal.message
             );
             Ok(VerifyWatch::Waiting)
+        }
+        Answer::Unreachable(reason) => {
+            silence.heard_nothing(&reason);
+            Ok(VerifyWatch::Waiting)
+        }
+    }
+}
+
+/// What a move heard once the House was there to hear it.
+enum Heard<T> {
+    Answered(T),
+    Refused(ProtocolErrorBody),
+    Stopped,
+}
+
+/// Ask until the House answers. Silence is not a decision: the House was not
+/// there to make one, so it never ends the loop, and the House alone decides
+/// when a restart is dead, by refusing it when asked (laws/LAWS.bend `move`).
+/// Only a stop from the operator ends the wait early.
+fn until_answered<'h, T>(
+    house: &mut HouseLine<'h>,
+    runtime: &Runtime<'_>,
+    mut ask: impl FnMut(&mut HouseLine<'h>) -> Result<Answer<T>>,
+) -> Result<Heard<T>> {
+    let mut silence = Silence::default();
+    loop {
+        if runtime.control.is_stop_requested() {
+            return Ok(Heard::Stopped);
+        }
+        match ask(house)? {
+            Answer::Ok(value) => {
+                silence.heard();
+                return Ok(Heard::Answered(value));
+            }
+            Answer::Refused(refusal) => {
+                silence.heard();
+                return Ok(Heard::Refused(refusal));
+            }
+            Answer::Unreachable(reason) => {
+                silence.heard_nothing(&reason);
+                if !rest(runtime, HOUSE_RETRY) {
+                    return Ok(Heard::Stopped);
+                }
+            }
+        }
+    }
+}
+
+/// Sleep in child-poll steps so a stop is never waited out. False when a stop
+/// arrived first.
+fn rest(runtime: &Runtime<'_>, span: Duration) -> bool {
+    let until = Instant::now() + span;
+    loop {
+        if runtime.control.is_stop_requested() {
+            return false;
+        }
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return true;
+        }
+        std::thread::sleep(left.min(CHILD_POLL));
+    }
+}
+
+/// One stretch of House silence on the console: told when it begins, again
+/// once a minute while it lasts, and once more when the House answers.
+#[derive(Default)]
+struct Silence {
+    began: Option<Instant>,
+    told: Option<Instant>,
+}
+
+impl Silence {
+    fn heard_nothing(&mut self, reason: &str) {
+        let now = Instant::now();
+        let Some(began) = self.began else {
+            self.began = Some(now);
+            self.told = Some(now);
+            eprintln!("omp-keeper: the House cannot answer ({reason}); waiting for it");
+            return;
+        };
+        if self
+            .told
+            .is_none_or(|told| now.duration_since(told) >= SILENCE_RETELL)
+        {
+            self.told = Some(now);
+            eprintln!(
+                "omp-keeper: still waiting for the House after {}s ({reason})",
+                now.duration_since(began).as_secs()
+            );
+        }
+    }
+
+    fn heard(&mut self) {
+        if let Some(began) = self.began.take() {
+            self.told = None;
+            eprintln!(
+                "omp-keeper: the House answers again after {}s",
+                began.elapsed().as_secs()
+            );
         }
     }
 }
@@ -576,13 +765,13 @@ fn claim_key(intent_id: &str, claimant: &str) -> String {
 }
 
 fn transition(
-    session: &mut SubstrateSession,
+    house: &mut HouseLine<'_>,
     pending: &RestartStatusIntent,
     claim_token: &str,
     to: RestartTransitionTarget,
     detail: Option<String>,
 ) -> Result<Answer<RestartTransitionReceipt>> {
-    session.call(
+    house.call(
         METHOD_RESTART_TRANSITION,
         &RestartTransitionParams {
             intent_id: pending.intent_id.clone(),
@@ -602,18 +791,17 @@ fn transition(
 /// intent in whatever state it reached, which is the only read that can show a
 /// `verified` successor.
 fn ask_status(
-    session: &mut SubstrateSession,
+    house: &mut HouseLine<'_>,
     config: &KeeperConfig,
     intent_id: Option<&str>,
-) -> Result<std::result::Result<Option<RestartStatusIntent>, ProtocolErrorBody>> {
+) -> Result<Answer<Option<RestartStatusIntent>>> {
     let params = RestartStatusParams {
         workspace: config.workspace.clone(),
         intent_id: intent_id.map(str::to_string),
     };
-    match session.call::<_, RestartStatusReceipt>(METHOD_RESTART_STATUS, &params)? {
-        Answer::Ok(receipt) => Ok(Ok(receipt.intent)),
-        Answer::Refused(refusal) => Ok(Err(refusal)),
-    }
+    Ok(house
+        .call::<_, RestartStatusReceipt>(METHOD_RESTART_STATUS, &params)?
+        .map(|receipt| receipt.intent))
 }
 
 fn spawn_omp(
@@ -771,12 +959,12 @@ fn adopt_verified_successor<T>(current: &mut T, successor: T, close_result: Resu
 }
 
 fn watch_status(config: &KeeperConfig) -> Result<Option<RestartStatusIntent>> {
-    let executable = resolve_substrate_exe(&config.program_root)?;
-    let mut session = SubstrateSession::start(&executable, &config.state_root)?;
-    let answer = ask_status(&mut session, config, None);
-    session.close()?;
+    let mut house = HouseLine::new(&config.program_root, &config.state_root);
+    let answer = ask_status(&mut house, config, None);
+    house.close()?;
     match answer? {
-        Ok(pending) => Ok(pending),
-        Err(refusal) => bail!("{}: {}", refusal.code, refusal.message),
+        Answer::Ok(pending) => Ok(pending),
+        Answer::Refused(refusal) => bail!("{}: {}", refusal.code, refusal.message),
+        Answer::Unreachable(reason) => bail!("the House cannot answer ({reason})"),
     }
 }

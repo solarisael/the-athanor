@@ -119,7 +119,7 @@ fn write_config(tree: &Tree, launch: &[String], watch_interval_secs: u64) {
     .expect("config file");
 }
 
-fn run_keeper_with(tree: &Tree, mode: &str, extra: &[(&str, &str)]) -> Output {
+fn keeper_command(tree: &Tree, mode: &str, extra: &[(&str, &str)]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_athanor"));
     command
         .arg("keeper")
@@ -133,7 +133,13 @@ fn run_keeper_with(tree: &Tree, mode: &str, extra: &[(&str, &str)]) -> Output {
     for (name, value) in extra {
         command.env(name, value);
     }
-    command.output().expect("keeper runs")
+    command
+}
+
+fn run_keeper_with(tree: &Tree, mode: &str, extra: &[(&str, &str)]) -> Output {
+    keeper_command(tree, mode, extra)
+        .output()
+        .expect("keeper runs")
 }
 
 fn lines(path: &Path) -> Vec<String> {
@@ -600,21 +606,22 @@ fn a_cmd_shim_launch_starts_omp_with_its_console_and_arguments_intact() {
     );
 }
 
-/// P1(2)a: the House vanishing after the spawn must not leave omp behind.
+/// P1(2)a: a wire that breaks after the spawn must not leave omp behind.
 ///
 /// Pre-repair the error escaped `attempt_relaunch` through `?`, which drops the
 /// Child without killing it -- on Windows that is a live omp with no keeper and
-/// an intent stuck in relaunching. The keeper cannot reach `failed` here, because
-/// the transition needs the same dead session; what it must still do is put the
-/// child down and say so.
+/// an intent stuck in relaunching. A House that merely went silent is waited
+/// for now (see the away tests below); a House that answers nonsense is not
+/// silence, so the keeper cannot follow the relaunch and must put the child
+/// down and say so, on every attempt.
 #[test]
-fn a_house_that_vanishes_after_the_spawn_leaves_no_orphaned_omp() {
+fn a_wire_that_breaks_after_the_spawn_leaves_no_orphaned_omp() {
     let tree = tree();
     let ready = tree.root.join("omp-ready");
     let ready_path = ready.display().to_string();
     let ran = run_keeper_timed(
         &tree,
-        "substrate-dies-mid-watch",
+        "garbage-mid-watch",
         &[
             ("FAKE_OMP_SLEEP_SECS", "6"),
             ("FAKE_OMP_SLEEP_FROM_RUN", "2"),
@@ -624,29 +631,24 @@ fn a_house_that_vanishes_after_the_spawn_leaves_no_orphaned_omp() {
     let (stdout, stderr) = (&ran.stdout, &ran.stderr);
     assert!(
         !stderr.contains("timed out waiting for relaunch readiness"),
-        "the fixture must reach child readiness before losing the House:\n{stdout}\n{stderr}"
-    );
-    assert_eq!(
-        fs::read_to_string(&ready).expect("the relaunched child announced readiness"),
-        "ready run 2\n",
-        "the House disappears only after the second child enters its stay-alive branch"
+        "the fixture must reach child readiness before breaking the wire:\n{stdout}\n{stderr}"
     );
     assert_ne!(
         ran.output.status.code(),
         Some(0),
-        "losing the House mid-relaunch is not a success:\n{stdout}\n{stderr}"
+        "a broken wire mid-relaunch is not a success:\n{stdout}\n{stderr}"
     );
     assert!(
         !stdout.contains("saw the successor verify"),
-        "a lost House is never a verify: {stdout}"
+        "nonsense is never a verify: {stdout}"
     );
     assert_eq!(
         lines(&tree.runs).len(),
-        2,
-        "the armed exit and one relaunch attempt: {stdout}"
+        3,
+        "the armed exit and two relaunch attempts: {stdout}"
     );
-    // The guarantee, checked before any wording: outlive the child's own sleep,
-    // because an orphan records itself only once it gets past that.
+    // The guarantee, checked before any wording: outlive the children's own
+    // sleep, because an orphan records itself only once it gets past that.
     std::thread::sleep(Duration::from_secs(9));
     assert!(
         lines(&tree.survived).is_empty(),
@@ -654,7 +656,7 @@ fn a_house_that_vanishes_after_the_spawn_leaves_no_orphaned_omp() {
         lines(&tree.survived)
     );
     assert!(
-        stderr.contains("lost the House mid-relaunch"),
+        stderr.contains("could not follow the relaunch"),
         "the keeper names what happened to it: {stderr}"
     );
 }
@@ -780,4 +782,263 @@ fn a_stranger_intent_is_never_our_verify_even_if_the_live_intent_fence_relaxes()
         "the unproven successors were put down: {:?}",
         lines(&tree.survived)
     );
+}
+
+/// Quest 50c26913, law 2: the House blinks at every move of an armed restart —
+/// the ask after the exit, the claim, the relaunching transition — once as a
+/// substrate that dies without answering and once as a Postgres it cannot
+/// reach. Pre-repair the first silent ask ended the keeper and nobody
+/// relaunched omp. Now each move waits for the House and the restart lands.
+#[test]
+fn an_armed_restart_waits_out_a_house_that_blinks_at_every_move() {
+    let tree = tree();
+    let ran = run_keeper_timed(
+        &tree,
+        "full-loop",
+        &[
+            // asks 0-1: the status after the exit; 3-4: the claim; 6: the transition
+            ("FAKE_SUBSTRATE_AWAY", "0-1:gone,3-4:database,6-6:gone"),
+            ("FAKE_OMP_QUIT_FROM_RUN", "2"),
+        ],
+    );
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert_eq!(
+        ran.output.status.code(),
+        Some(0),
+        "a restart the House blinked through still lands:\n{stdout}\n{stderr}"
+    );
+    assert_eq!(
+        lines(&tree.runs).len(),
+        2,
+        "omp came back once: {stdout}"
+    );
+    assert!(
+        stdout.contains("saw the successor verify"),
+        "the restart is the House's verified one: {stdout}"
+    );
+    let claims = requests_for(&tree.transcript, "restart_claim");
+    assert_eq!(claims.len(), 3, "two silent claims, then the answered one");
+    assert!(
+        claims
+            .iter()
+            .all(|claim| claim["params"]["idempotencyKey"] == claims[0]["params"]["idempotencyKey"]),
+        "every claim after silence carries the one idempotency key: {claims:?}"
+    );
+    let transitions = requests_for(&tree.transcript, "restart_transition");
+    assert_eq!(transitions.len(), 2, "one silent transition, then the answered one");
+    assert!(
+        transitions
+            .iter()
+            .all(|transition| transition["params"]["to"] == "relaunching"
+                && transition["params"]["detail"].is_null()),
+        "a transition repeated after silence is the same first attempt: {transitions:?}"
+    );
+    assert!(
+        stderr.contains("the House cannot answer") && stderr.contains("answers again"),
+        "the operator sees the House go and come back: {stderr}"
+    );
+}
+
+/// Law 2, the watch: a relaunched omp keeps running while the House cannot be
+/// asked whether it verified. Pre-repair the first silent verify read killed
+/// the successor and failed the attempt.
+#[test]
+fn the_successor_keeps_running_while_the_house_is_away_mid_watch() {
+    let tree = tree();
+    let ran = run_keeper_timed(
+        &tree,
+        "full-loop",
+        &[
+            // asks 0-3: status, claim, transition, window; 4-7: verify reads
+            ("FAKE_SUBSTRATE_AWAY", "4-7:gone"),
+            ("FAKE_OMP_SLEEP_SECS", "10"),
+            ("FAKE_OMP_SLEEP_FROM_RUN", "2"),
+        ],
+    );
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert_eq!(
+        ran.output.status.code(),
+        Some(0),
+        "the successor verified once the House came back:\n{stdout}\n{stderr}"
+    );
+    assert!(
+        stdout.contains("saw the successor verify"),
+        "the House saw it verify: {stdout}"
+    );
+    assert!(
+        !stderr.contains("relaunch attempt 1 failed"),
+        "silence never failed the attempt: {stderr}"
+    );
+    assert_eq!(lines(&tree.runs).len(), 2, "no second relaunch: {stdout}");
+    assert_eq!(
+        lines(&tree.survived),
+        ["survived run 2"],
+        "the successor lived out its own life, unkilled through the silence"
+    );
+}
+
+/// Law 2, the edges: a refusal after any silence still ends the loop at once.
+#[test]
+fn a_refusal_after_silence_still_ends_the_loop() {
+    let tree = tree();
+    let ran = run_keeper_timed(
+        &tree,
+        "storm-on-claim",
+        &[("FAKE_SUBSTRATE_AWAY", "0-2:database")],
+    );
+    let stdout = &ran.stdout;
+    assert_eq!(ran.output.status.code(), Some(1), "a refusal is not success");
+    assert_eq!(
+        methods(&tree.transcript),
+        [
+            "restart_status",
+            "restart_status",
+            "restart_status",
+            "restart_status",
+            "restart_claim"
+        ],
+        "three silent asks, the answered one, then the refused claim and nothing after"
+    );
+    assert_eq!(lines(&tree.runs).len(), 1, "never relaunched: {stdout}");
+    assert!(
+        stdout.contains("refused another restart"),
+        "the refusal is told plainly: {stdout}"
+    );
+}
+
+/// Law 2, the edges: the House's relaunching window still ends an attempt when
+/// it passes during the silence, and the keeper still waits for the House to
+/// hear the retry and the failure.
+#[test]
+fn the_window_still_ends_an_attempt_while_the_house_is_away() {
+    let tree = tree();
+    let ran = run_keeper_timed(
+        &tree,
+        "unverified",
+        &[
+            // from ask 4 the verify reads of the 2 s window, then the retry's transition
+            ("FAKE_SUBSTRATE_AWAY", "4-8:gone"),
+            ("FAKE_OMP_SLEEP_SECS", "30"),
+            ("FAKE_OMP_SLEEP_FROM_RUN", "2"),
+        ],
+    );
+    let (stdout, stderr) = (&ran.stdout, &ran.stderr);
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "an unverified restart is a failure:\n{stdout}\n{stderr}"
+    );
+    assert!(
+        stderr.contains("relaunch attempt 1 failed: the successor did not verify by"),
+        "the window, not the silence, ended attempt 1: {stderr}"
+    );
+    let transitions = requests_for(&tree.transcript, "restart_transition");
+    let targets: Vec<_> = transitions
+        .iter()
+        .map(|transition| transition["params"]["to"].as_str().expect("target"))
+        .collect();
+    assert_eq!(
+        targets.last(),
+        Some(&"failed"),
+        "the House heard the failure: {targets:?}"
+    );
+    assert_eq!(lines(&tree.runs).len(), 3, "the exit and two attempts: {stdout}");
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        lines(&tree.survived).is_empty(),
+        "both unverified successors were put down: {:?}",
+        lines(&tree.survived)
+    );
+}
+
+/// Law 2, the edges: only an armed exit waits for the House. An ordinary quit
+/// while the House is away ends at once, so an absent House never holds the
+/// operator's console hostage.
+#[test]
+fn an_unarmed_exit_does_not_wait_for_an_absent_house() {
+    let tree = tree();
+    let ran = run_keeper_timed(
+        &tree,
+        "full-loop",
+        &[
+            ("FAKE_SUBSTRATE_AWAY", "0-99:database"),
+            ("FAKE_OMP_QUIT_FROM_RUN", "1"),
+        ],
+    );
+    let stdout = &ran.stdout;
+    assert_eq!(ran.output.status.code(), Some(1), "an unasked House is not success");
+    assert_eq!(methods(&tree.transcript), ["restart_status"], "asked once");
+    assert!(
+        stdout.contains("without arming a restart"),
+        "the keeper says why it did not wait: {stdout}"
+    );
+}
+
+/// Quest 50c26913, law 4: one room's restart touches only that room. Two
+/// keepers run side by side, each over its own omp with the same program name.
+/// Room A arms, restarts, and verifies while room B's omp keeps running.
+#[test]
+fn one_rooms_restart_leaves_another_rooms_omp_running() {
+    let room_a = tree();
+    let room_b = tree();
+    write_config(&room_b, &[room_b.program.display().to_string()], 1);
+    let ready_b = room_b.root.join("omp-ready");
+    let ready_b_path = ready_b.display().to_string();
+    let mut keeper_b = keeper_command(
+        &room_b,
+        "no-intent",
+        &[
+            ("FAKE_OMP_SLEEP_SECS", "8"),
+            ("FAKE_OMP_READY", &ready_b_path),
+        ],
+    )
+    .stdout(std::process::Stdio::null())
+    .spawn()
+    .expect("room B's keeper starts");
+    let started = Instant::now();
+    while !ready_b.exists() {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "room B's omp never came up"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let ran_a = run_keeper_timed(&room_a, "full-loop", &[("FAKE_OMP_QUIT_FROM_RUN", "2")]);
+    assert_eq!(
+        ran_a.output.status.code(),
+        Some(0),
+        "room A restarted:\n{}\n{}",
+        ran_a.stdout,
+        ran_a.stderr
+    );
+    assert_eq!(lines(&room_a.runs).len(), 2, "room A's omp came back once");
+    assert!(
+        keeper_b.try_wait().expect("room B's keeper").is_none(),
+        "room B's keeper is still holding its running omp after room A's restart"
+    );
+
+    let exit_b = keeper_b.wait().expect("room B's keeper ends");
+    assert_eq!(exit_b.code(), Some(0), "room B's omp quit on its own terms");
+    assert_eq!(
+        lines(&room_b.survived),
+        ["survived run 1"],
+        "room B's omp lived out its own life; nothing killed it"
+    );
+    assert_eq!(lines(&room_b.runs).len(), 1, "room B was never relaunched");
+    assert!(
+        methods(&room_b.transcript)
+            .iter()
+            .all(|method| method == "restart_status"),
+        "room B only asked about itself; it never claimed or moved an intent"
+    );
+    for (room, tree) in [("A", &room_a), ("B", &room_b)] {
+        let workspace = tree.root.join("workspace").display().to_string();
+        for status in requests_for(&tree.transcript, "restart_status") {
+            assert_eq!(
+                status["params"]["workspace"], workspace,
+                "room {room} asks the House about its own workspace only"
+            );
+        }
+    }
 }

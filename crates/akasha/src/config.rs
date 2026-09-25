@@ -38,6 +38,13 @@ const DEFAULT_EMBEDDING_MODEL_TIMEOUT_SECS: u64 = 20;
 /// became a 21 s recall (three per day, measured 2026-09-05). Past 3 s the
 /// lexical answer now is worth more than the semantic answer later.
 pub(crate) const RECALL_EMBED_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long one pool acquire may take, reconnects included. A pooled socket
+/// Postgres already dropped is pinged out in milliseconds; this bounds the
+/// silent socket and the House that is not there yet. Under the old 120 s an
+/// acquire across a Postgres bounce sat on dead sockets for 28–117 s
+/// (2026-09-23), so every caller waited out the bounce blind. Callers that
+/// must survive an absent House wait for it themselves (quest 50c26913).
+const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const EMBED_DIMENSION: usize = 2048;
 pub(crate) static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 pub(crate) static ROOM_KEY_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -949,7 +956,9 @@ impl Config {
             .map_err(|_| AppError::Config("invalid database configuration".into()))?;
         let pool = PgPoolOptions::new()
             .max_connections(4)
-            .acquire_timeout(Duration::from_secs(120))
+            // already sqlx's default; stated because the bounce law depends on it
+            .test_before_acquire(true)
+            .acquire_timeout(POOL_ACQUIRE_TIMEOUT)
             .connect_with(options)
             .await
             .map_err(AppError::DatabaseConnect)?;

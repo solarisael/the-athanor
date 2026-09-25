@@ -58,6 +58,14 @@ the exact implementation record.
 
 ### Changed
 
+- The keeper waits for the House when the House cannot answer. Before this change, one silent ask after an armed exit stopped the keeper, and nobody started omp again.
+  A silent ask is a substrate that stops before it answers, or a `database` answer when Postgres is not reachable. The keeper asks again every 2 seconds.
+  After an armed exit, the status ask, the claim, and each transition wait for an answer. A relaunched omp continues to run while the House is away.
+  A refusal still stops the keeper. The relaunching deadline from the House still ends an attempt. After an exit that did not arm, the keeper asks one time and exits 1 if the House cannot answer.
+  The console shows when the House goes away, one time each minute while it is away, and when it answers again.
+- The substrate pool tests each pooled connection before it gives the connection to a caller, and one acquire waits a maximum of 5 seconds. Before this change, one acquire waited up to 120 seconds.
+  After a Postgres restart, a dead pooled connection now costs milliseconds. When Postgres is down, the caller gets a `database` answer in 5 seconds.
+
 - Every cargo build for this repository lands in one absolute target directory, `C:/Projects/the-athanor-target`, shared by every worktree. The release build uses the same directory.
   The deploy ritual stages payloads under `<checkout>/target/releases` and prunes only that tree. Before this change it pruned `target/deploy`, which deleted the development build cache after every successful deploy.
 - Insula raw observations expire after seven UTC days. Migration 0032 updates existing expiry timestamps without deleting observations.

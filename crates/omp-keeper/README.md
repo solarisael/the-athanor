@@ -36,7 +36,8 @@ operator started, and only the keeper can.
    is only a hint. The keeper asks `restart_status` after every exit code.
 3. Resolve the current substrate program. Read `<programRoot>/current.json`, then
    use `versions/<version>/bin/athanor-substrate.exe`. The keeper resolves this
-   path again for every ask, so a release change during a session takes effect.
+   path again for every substrate child it starts, so a release change during a
+   session takes effect.
 4. Start the substrate as a child and speak newline-delimited JSON to it.
 5. Read the answer:
    - No pending intent: print one line and exit. The exit code says whether the
@@ -53,6 +54,33 @@ operator started, and only the keeper can.
    deadline is killed, and the attempt counts as failed.
 7. Stop when the House refuses. A storm-guard refusal ends the loop with a plain
    message that says omp is not running.
+8. Wait when the House cannot answer. See "An absent House" below.
+
+## An absent House
+
+Silence from the House is not a decision. The substrate child can die before
+it answers, or answer `database` because its Postgres cannot be reached. The
+keeper reads both as "the House is away", never as a refusal:
+
+- After an armed exit (87), the keeper asks again every 2 seconds until the
+  House answers. The same holds for the claim and for every transition. The
+  House alone decides when a restart is dead: it refuses a lapsed intent when
+  asked, and that refusal ends the loop like any other.
+- During the verify watch, the relaunched omp keeps running while the House is
+  away. Only a finish without a verify, or the relaunching deadline the House
+  published, ends the attempt. A silent window read never borrows the deadline
+  of an earlier attempt; the keeper asks again until the House names this one.
+- After an exit that did not arm (any code but 87), the keeper asks once. If the
+  House cannot answer, the keeper says so and exits 1, so an absent House never
+  holds the console after an ordinary quit.
+- A substrate child whose line breaks is killed, and the next ask starts a fresh
+  one from the current release pointer. A child that answers `database` is
+  alive, so the keeper keeps it and asks it again.
+
+The console says when the House goes away, once a minute while it stays away,
+and when it answers again. Ctrl+C ends the wait. `laws/LAWS.bend` states the
+decision order, and `bend laws/PROOF.bend` checks it; the proof covers the
+order, not the Rust.
 
 ## The exit code
 
@@ -62,7 +90,7 @@ The keeper reports one code to the shell.
 | --- | --- |
 | 0 | The keeper stopped after a child exit that asked for no restart. A relaunch that verified, and then an ordinary quit, reports 0. |
 | 88 | The child armed an exit and the keeper did not relaunch it. The House held no claimable intent, or the intent was not this keeper's to claim. |
-| 1 | The keeper refused or failed. It prints one sentence before it stops. A child code that is not one byte also reports 1. |
+| 1 | The keeper refused or failed. It prints one sentence before it stops. A child code that is not one byte also reports 1, and so does an exit that did not arm while the House could not be asked. |
 | other | The exact code of a child that asked for no restart. |
 
 The keeper never reports 87. The 87 code is the child's request. The 88 code is
@@ -174,9 +202,10 @@ Deadlines and refusals:
   published instant has passed. The contract's stage length is 60 seconds; the
   keeper's own 60 is only a net for an answer that carries no instant at all.
 - A relaunch attempt fails three ways: omp will not start, omp starts and the
-  House never confirms it before `relaunchingDeadlineAt`, or the keeper loses the
-  House after the spawn. Every one of them kills the child, retries one time, and
-  transitions the intent to `failed` on the second failure.
+  House never confirms it before `relaunchingDeadlineAt`, or the answers from
+  the House stop making sense after the spawn. Every one of them kills the
+  child, retries one time, and transitions the intent to `failed` on the second
+  failure. A House that is only away fails nothing; see "An absent House".
 - Each attempt enters `relaunching` again, because the intent row counts
   `relaunch_attempts` and mints a fresh `relaunchingDeadlineAt` on every
   `relaunching` transition. The retry runs inside the House's new window; the
@@ -197,9 +226,9 @@ Deadlines and refusals:
   child. Two keepers on one workspace fight for one intent.
 - `# enough:` one request in flight. The keeper matches every answer to its own
   request id and never sends a second request first.
-- `# enough:` one substrate child for each ask. The keeper starts the substrate,
-  asks, and closes it. This keeps the resolution fresh and costs one process
-  start for each ask.
+- `# enough:` one substrate child for each restart. The keeper starts it on the
+  first ask, keeps it while its line holds, and replaces it when the line
+  breaks. The release pointer is resolved again for every new child.
 - The storm guard belongs to the House. The keeper holds no local restart count.
   It answers a `restart_storm` refusal, wherever in the loop it arrives, with one
   operator sentence and no retry.
@@ -221,3 +250,7 @@ and `examples/fake_substrate.rs` answers the wire. That fixture builds every
 answer from a real `house_protocol::restart` struct and validates every request
 with the real door's own `validate()`, so a request the House would refuse is
 refused in the smoke too.
+`FAKE_SUBSTRATE_AWAY` sends that House away for chosen asks, either as a
+substrate that dies unanswered or as the `database` answer the real substrate
+gives when its Postgres is gone. The smoke tests live in
+`crates/athanor-install/tests/keeper_smoke.rs`.

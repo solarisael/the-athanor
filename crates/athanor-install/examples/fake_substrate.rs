@@ -17,6 +17,12 @@
 //!
 //! State lives in a sidecar file beside the transcript because the keeper opens
 //! more than one substrate session per run and each session is a fresh process.
+//!
+//! `FAKE_SUBSTRATE_AWAY` sends the House away for chosen asks, counted from 0
+//! across every session: `0-1:gone,4-4:database`. `gone` is a substrate child
+//! that exits without answering, which is a crashed substrate or a WSL that
+//! went down; `database` answers what the real substrate answers when its
+//! Postgres cannot be reached. An away ask never reaches the House's script.
 
 use ::protocol::PROTOCOL_VERSION;
 use ::protocol::restart::{
@@ -26,7 +32,8 @@ use ::protocol::restart::{
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use omp_keeper::protocol::{
-    METHOD_RESTART_CLAIM, METHOD_RESTART_STATUS, METHOD_RESTART_TRANSITION, STORM_REFUSAL_CODE,
+    HOUSE_UNREACHABLE_CODE, METHOD_RESTART_CLAIM, METHOD_RESTART_STATUS,
+    METHOD_RESTART_TRANSITION, STORM_REFUSAL_CODE,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -62,12 +69,35 @@ const OVERRUN_SECS: i64 = 5;
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Script {
+    /// Every request line any session received, away ones included.
+    asks: u32,
     statuses: u32,
     relaunch_transitions: u32,
     /// When the last relaunching transition landed. The substrate mints
     /// `relaunching_deadline_at = NOW() + relaunching_secs` on every relaunching
     /// transition, so each retry gets its own window; this anchors the same way.
     relaunching_at: Option<String>,
+}
+
+enum Away {
+    Gone,
+    Database,
+}
+
+/// Whether the House is away for this ask, and how.
+fn away(ask: u32) -> Option<Away> {
+    let spec = std::env::var("FAKE_SUBSTRATE_AWAY").ok()?;
+    spec.split(',').find_map(|stretch| {
+        let (range, how) = stretch.split_once(':').expect("away stretch is first-last:how");
+        let (first, last) = range.split_once('-').expect("away range is first-last");
+        let first: u32 = first.parse().expect("away first ask");
+        let last: u32 = last.parse().expect("away last ask");
+        (first..=last).contains(&ask).then(|| match how {
+            "gone" => Away::Gone,
+            "database" => Away::Database,
+            other => panic!("unknown away kind {other}"),
+        })
+    })
 }
 
 fn main() {
@@ -96,9 +126,17 @@ fn main() {
         let method = request["method"].as_str().unwrap_or("").to_string();
         let params = request["params"].clone();
         let mut script = read_script(&script_path);
-        let response = match refuse_bad_shape(&method, &params) {
-            Some(reason) => refusal(&id, "invalid_params", &reason),
-            None => answer(&id, &method, &mode, &params, &mut script),
+        let ask = script.asks;
+        script.asks += 1;
+        write_script(&script_path, &script);
+        let response = match away(ask) {
+            Some(Away::Gone) => std::process::exit(0),
+            // the real substrate's own words for a Postgres it cannot reach
+            Some(Away::Database) => refusal(&id, HOUSE_UNREACHABLE_CODE, "database connection failed"),
+            None => match refuse_bad_shape(&method, &params) {
+                Some(reason) => refusal(&id, "invalid_params", &reason),
+                None => answer(&id, &method, &mode, &params, &mut script),
+            },
         };
         write_script(&script_path, &script);
         writeln!(stdout, "{response}").expect("response line");
@@ -141,12 +179,15 @@ fn answer(id: &str, method: &str, mode: &str, params: &Value, script: &mut Scrip
             if mode == "storm" {
                 return storm_refusal(id);
             }
-            // The substrate walking off mid-watch, which is what a crashed or
-            // restarted House looks like to the keeper: the verify poll after the
-            // window read gets no answer at all, ever.
-            if mode == "substrate-dies-mid-watch" && script.statuses >= 2 {
-                wait_for_relaunched_omp();
-                std::process::exit(0);
+            // A House that answers nonsense mid-watch. That is no silence but a
+            // broken wire, so the keeper cannot follow the relaunch, and it must
+            // put the successor down rather than leave it running unwatched.
+            if mode == "garbage-mid-watch" && script.statuses >= 2 {
+                if script.statuses == 2 {
+                    wait_for_relaunched_omp();
+                }
+                script.statuses += 1;
+                return "the substrate lost its mind".to_string();
             }
             // The retry's window read is refused, so the keeper must keep the
             // deadline the House published for the first attempt.
@@ -222,8 +263,8 @@ fn answer(id: &str, method: &str, mode: &str, params: &Value, script: &mut Scrip
     }
 }
 
-/// The House disappears only once the successor can testify if it is orphaned.
-/// A missing readiness signal is a fixture failure, not a simulated House loss.
+/// The wire breaks only once the successor can testify if it is orphaned.
+/// A missing readiness signal is a fixture failure, not a simulated break.
 fn wait_for_relaunched_omp() {
     let path = std::env::var("FAKE_OMP_READY").expect("fake omp readiness path");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);

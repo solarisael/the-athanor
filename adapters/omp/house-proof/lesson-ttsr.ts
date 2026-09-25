@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { runLessonQuery } from "./lesson-context.ts";
 import type { ResolvedRecallMode } from "./recall-policy.ts";
+import type { RecallRerankInput, RecallRerankPolicy, RecallRerankResult, RerankGrant } from "./recall-judgment.ts";
 
 const BRIDGE_STATE = Symbol.for("solarisael.athanor.lesson-ttsr.v1");
 const PROVIDER = "athanor-lessons";
@@ -146,6 +147,67 @@ export function selectPresenceLessons(
   }
 
   return [...selected.values()];
+}
+
+export const LESSON_SIEVE_GRANT: RerankGrant = {
+  markerKey: "jevLessons",
+  purpose: "lesson-sieve",
+  allowFlag: "allowPrivateLessonPackets",
+};
+
+type LessonReranker = {
+  loadPolicy(dir: string, room: string, supplied?: any): Promise<RecallRerankPolicy>;
+  rerank(input: RecallRerankInput): Promise<RecallRerankResult>;
+};
+
+export type LessonSieveInput = {
+  turn: string; roomDir: string; room: string; query: string; baseline: TtsrLesson[];
+  deadline: number | null; signal?: AbortSignal; sessionId?: string; context?: any; supplied?: any;
+};
+export type LessonSieveResult = { baseline: TtsrLesson[]; receipt: Readonly<Record<string, unknown>> };
+type LessonSieveDecision = { keep: Set<number> | null; receipt: Readonly<Record<string, unknown>> };
+
+function fallback(reason: string, status = "refused"): LessonSieveDecision {
+  return { keep: null, receipt: { schemaVersion: "jev-recall-receipt.v1", status, reason, fallbackUsed: true } };
+}
+
+async function decideLessons(reranker: LessonReranker, input: LessonSieveInput): Promise<LessonSieveDecision> {
+  try {
+    const policy = await reranker.loadPolicy(input.roomDir, input.room, input.supplied);
+    if (policy.approved && input.deadline === null) return fallback("deadline");
+    const result = await reranker.rerank({
+      query: input.query,
+      retrievalCandidates: input.baseline,
+      signal: input.signal,
+      ...(input.deadline === null ? {} : { deadline: input.deadline }),
+      sessionId: input.sessionId,
+      context: input.context,
+    });
+    if (result.receipt.status !== "active") return { keep: null, receipt: result.receipt };
+    return { keep: new Set(result.retrievalCandidates.map((lesson) => Number(lesson?.id))), receipt: result.receipt };
+  } catch {
+    return fallback("sieve-failed", "failed");
+  }
+}
+
+// One decision per turn, whatever its outcome: retries replay it so Presence bytes hold for the prompt cache.
+export function createLessonSieve(reranker: LessonReranker, capacity = 64) {
+  const decisions = new Map<string, Promise<LessonSieveDecision>>();
+  return async function sieve(input: LessonSieveInput): Promise<LessonSieveResult> {
+    const key = [
+      input.turn,
+      createHash("sha256").update(input.query).digest("hex"),
+      input.baseline.map((lesson) => lesson.id).join(","),
+    ].join("\0");
+    let decision = decisions.get(key);
+    if (!decision) {
+      decision = decideLessons(reranker, input);
+      decisions.set(key, decision);
+      while (decisions.size > capacity) decisions.delete(decisions.keys().next().value!);
+    }
+    const { keep, receipt } = await decision;
+    return { baseline: keep ? input.baseline.filter((lesson) => keep.has(lesson.id)) : input.baseline, receipt };
+  };
 }
 
 export async function syncLessonTtsr(args: {

@@ -90,7 +90,13 @@ import { conversationText, messageText } from "./house-proof/text.ts";
 import { anchorTurnAdditions, currentTurnOrigin, turnKeysByMessage } from "./house-proof/turn-origin.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
-import { installLessonTtsrBridge, selectPresenceLessons, syncLessonTtsr } from "./house-proof/lesson-ttsr.ts";
+import {
+  createLessonSieve,
+  installLessonTtsrBridge,
+  LESSON_SIEVE_GRANT,
+  selectPresenceLessons,
+  syncLessonTtsr,
+} from "./house-proof/lesson-ttsr.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./house-proof/context.ts";
 import { installSemanticJudgmentShadow } from "./house-proof/semantic-judgment.ts";
 import { createRecallReranker, type RecallRerankPolicy, type RecallRerankResult } from "./house-proof/recall-judgment.ts";
@@ -933,6 +939,8 @@ export default function solarisaelHouseProof(pi, release) {
   const semanticJudgmentShadow = installSemanticJudgmentShadow(pi);
   const recallJevContext: { modelRegistry?: unknown } = {};
   const recallReranker = createRecallReranker({ context: recallJevContext });
+  const lessonReranker = createRecallReranker({ context: recallJevContext, grant: LESSON_SIEVE_GRANT });
+  const lessonSieve = createLessonSieve(lessonReranker);
   const verdictScorer = createVerdictScorer({ context: recallJevContext });
   const modeScorer = createModeScorer({ context: recallJevContext });
   const judgePreviousTurnDetached = async (input: {
@@ -1004,6 +1012,12 @@ export default function solarisaelHouseProof(pi, release) {
     description: "Show content-free Jev Recall reranker coverage for this session",
     handler: (_args, ctx) => {
       ctx.ui.notify(JSON.stringify(recallReranker.getCoverage(), null, 2), "info");
+    },
+  });
+  pi.registerCommand?.("jev-lessons", {
+    description: "Show content-free Jev lesson sieve coverage for this session",
+    handler: (_args, ctx) => {
+      ctx.ui.notify(JSON.stringify(lessonReranker.getCoverage(), null, 2), "info");
     },
   });
   pi.registerCommand?.("insula", {
@@ -1992,6 +2006,28 @@ export default function solarisaelHouseProof(pi, release) {
         const turnId = currentTurnKey
           || `turn:${userTurnOrdinal}:${responseDigest(prompt).slice(0, 24)}`;
         const presencePulse = presencePulseMaterial(effectiveRoomDir);
+        let presenceLessons = lessonTtsr;
+        let lessonSieveReceipt: Record<string, unknown> | undefined;
+        if (lessonMode === "work" && lessonTtsr.baseline.length > 0) {
+          const sieved = await lessonSieve({
+            turn: `${room}\0${hostSession}\0${turnId}`,
+            roomDir: effectiveRoomDir,
+            room,
+            query: prompt,
+            baseline: lessonTtsr.baseline,
+            deadline: jevRecallDeadline(budget.deadline),
+            signal: budget.signal,
+            sessionId: hostSession,
+            context: ctx,
+            supplied: ctx,
+          });
+          if (!automaticBudgetOpen(budget)) return;
+          presenceLessons = { ...lessonTtsr, baseline: sieved.baseline };
+          lessonSieveReceipt = contentFreeJevReceipt(sieved.receipt);
+          if (lessonSieveReceipt.status !== "disabled") {
+            activities.push(`Lesson sieve ${lessonSieveReceipt.status}: ${sieved.baseline.length}/${lessonTtsr.baseline.length}`);
+          }
+        }
         const compiled = await compilePresenceContext({
           binding,
           operator: houseState?.operator || operator,
@@ -2004,7 +2040,7 @@ export default function solarisaelHouseProof(pi, release) {
           relationship: presencePulse ? [presencePulse] : [],
           anamnesis: presenceAnamnesis,
           recalled: presenceRecalled,
-          lessons: lessonMaterials(selectPresenceLessons(lessonTtsr, lessonMode)),
+          lessons: lessonMaterials(selectPresenceLessons(presenceLessons, lessonMode)),
         });
         if (!automaticBudgetOpen(budget)) return;
         pendingPresenceContracts.set(`${room}\0${hostSession}`, {
@@ -2023,6 +2059,7 @@ export default function solarisaelHouseProof(pi, release) {
             frameRendered: compiled.frameRendered,
             contractId: compiled.contractId,
             turnId: compiled.turnId,
+            ...(lessonSieveReceipt ? { lessonSieve: lessonSieveReceipt } : {}),
           },
           attribution: "agent",
           timestamp,

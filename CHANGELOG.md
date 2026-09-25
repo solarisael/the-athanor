@@ -27,6 +27,11 @@ the exact implementation record.
   The provider is `typesafe` or a `laya` endpoint on loopback. Both use the same request shape.
 - Insula records the size of each context block the OMP adapter injects, per organ, as `injection.<organ>` points.
   The `provider_usage` point now carries cache-read and cache-write token counts in `bytes_in` and `bytes_out`.
+- The OMP adapter can sieve the always-on coding lessons with Jev before Presence sends them.
+  On a work turn, Jev scores each lesson against the operator prompt. Active mode keeps only the relevant lessons, with a maximum of eight.
+  The room marker `jevLessons` turns this on with its own `lesson-sieve` grant. It is off by default.
+  Shadow mode, a refusal, a failure, or a deadline keeps the full lesson set and records a receipt.
+  Trigger lessons always go through without a sieve. The `/jev-lessons` command shows the sieve coverage.
 
 - Hallway posts publish sanitized room triggers through JetStream after the database commit. Hosts push inbox changes to subscribed sessions.
   Failed publication preserves the post. OMP keeps its per-turn Bell check until it has a persistent Host connection.

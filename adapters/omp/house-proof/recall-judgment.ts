@@ -25,11 +25,21 @@ export type RecallRerankResult = {
   receipt: Readonly<Record<string, unknown>>;
 };
 
+// Each Jev door reads its own signed marker block; a grant for one purpose never opens another.
+export type RerankGrant = Readonly<{ markerKey: string; purpose: string; allowFlag: string }>;
+
+export const RECALL_RERANK_GRANT: RerankGrant = {
+  markerKey: "jevRecall",
+  purpose: "recall-rerank",
+  allowFlag: "allowPrivateRecallPackets",
+};
+
 export type RecallRerankerOptions = {
   fetch?: typeof globalThis.fetch;
   context?: any;
   now?: () => number;
   readFile?: typeof readFile;
+  grant?: RerankGrant;
 };
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
@@ -116,6 +126,7 @@ export function createRecallReranker(options: RecallRerankerOptions = {}) {
   const fetcher = options.fetch ?? globalThis.fetch;
   const now = options.now ?? Date.now;
   const read = options.readFile ?? readFile;
+  const grant = options.grant ?? RECALL_RERANK_GRANT;
   let policy: RecallRerankPolicy = { mode: "off", approved: false };
   const coverage: Record<string, number> = {
     turns: 0,
@@ -142,19 +153,19 @@ export function createRecallReranker(options: RecallRerankerOptions = {}) {
       marker = supplied;
     }
 
-    const revision = marker?.jevRecall?.grant?.policyRevision;
+    const door = marker?.[grant.markerKey];
+    const revision = door?.grant?.policyRevision;
     const valid =
       marker?.room === room &&
-      (marker.jevRecall?.mode === "shadow" ||
-        marker.jevRecall?.mode === "active") &&
-      marker.jevRecall?.provider === "typesafe" &&
-      marker.jevRecall?.grant?.purpose === "recall-rerank" &&
-      marker.jevRecall?.grant?.allowPrivateRecallPackets === true &&
+      (door?.mode === "shadow" || door?.mode === "active") &&
+      door?.provider === "typesafe" &&
+      door?.grant?.purpose === grant.purpose &&
+      door?.grant?.[grant.allowFlag] === true &&
       typeof revision === "string" &&
       revision.length > 0;
 
     policy = valid
-      ? { mode: marker.jevRecall.mode, approved: true, revision, room }
+      ? { mode: door.mode, approved: true, revision, room }
       : { mode: "off", approved: false };
     return policy;
   }

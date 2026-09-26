@@ -872,7 +872,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
-        .with_env_filter("warn")
+        // stderr lands in the operator's OMP terminal; a shared-cluster stall is not his to read there
+        .with_env_filter("warn,sqlx::query=error")
         .init();
     spawn_retention_service();
     let mut runtime: Option<Runtime> = None;

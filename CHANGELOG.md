@@ -58,6 +58,12 @@ the exact implementation record.
 
 ### Changed
 
+- On a turn where automatic Recall fires, the OMP adapter now starts the lesson sieve beside Recall instead of after it, so a slow Recall no longer leaves the sieve without time and Presence without its sieved lessons.
+  Recall's share of the context budget always ends 500 ms before the deadline, so Presence still composes after a Recall that spends all of it.
+  The Windows context budget rises from 5 s to 8 s: the substrate's own recall spends up to 3 s on an embed stall by design and up to 4 s on its lexical lane, and the 4.5 s share cut 16% of live recalls.
+  A Recall that runs out of its share is now recorded as `budget_exhausted` in `recall-turns.jsonl` and as an `automatic_recall` timeout point in Insula. A transport failure keeps its own code instead of the generic `rust_transport_failure`.
+- Insula no longer records a degraded, cancelled `context_assembly` span for every tool step that replays the turn's context. Only a real assembly opens a span; a compose that stops at the deadline is named a timeout.
+
 - The keeper waits for the House when the House cannot answer. Before this change, one silent ask after an armed exit stopped the keeper, and nobody started omp again.
   A silent ask is a substrate that stops before it answers, or a `database` answer when Postgres is not reachable. The keeper asks again every 2 seconds.
   After an armed exit, the status ask, the claim, and each transition wait for an answer. A relaunched omp continues to run while the House is away.

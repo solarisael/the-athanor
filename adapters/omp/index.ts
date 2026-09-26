@@ -96,6 +96,7 @@ import {
   LESSON_SIEVE_GRANT,
   selectPresenceLessons,
   syncLessonTtsr,
+  type LessonSieveResult,
 } from "./house-proof/lesson-ttsr.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./house-proof/context.ts";
 import { installSemanticJudgmentShadow } from "./house-proof/semantic-judgment.ts";
@@ -143,6 +144,7 @@ import { showInsulaCockpit } from "./house-proof/vitals.ts";
 const AUTOMATIC_CONTEXT_COMMIT_RESERVE_MS = 500;
 const JEV_RECALL_MAX_WAIT_MS = 1_500;
 const JEV_RECALL_RESERVE_MARGIN_MS = 100;
+const RECALL_BUDGET_CODES = new Set(["RUST_TRANSPORT_REQUEST_TIMEOUT", "RUST_TRANSPORT_REQUEST_CANCELLED"]);
 
 type AutomaticContextBudgetResult<T> =
   | { status: "settled"; value: T }
@@ -1354,7 +1356,7 @@ export default function solarisaelHouseProof(pi, release) {
   const composeContextAdditions = async (
     event: any,
     ctx: any,
-    observed: { span: InsulaSpan | null },
+    observed: { span: InsulaSpan | null; room?: string },
     budget: AutomaticContextBudget,
   ) => {
     if (!automaticBudgetOpen(budget)) return;
@@ -1381,10 +1383,23 @@ export default function solarisaelHouseProof(pi, release) {
         .map((message) => message.customType),
     );
 
+    const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
+    const memoSessionKey = `${room}:${hostSession}`;
+    const turnKeys = turnKeysByMessage(messages);
+    const currentTurnKey = turnKeys.get(promptMessage);
+    const turnMemo = turnAdditionMemo(memoSessionKey, effectiveRoomDir);
+    pruneTurnAdditionMemo(turnMemo, new Set(turnKeys.values()));
+    // Later requests of the same turn replay the first request's bytes so the
+    // Anthropic prefix cache can hit past the system block. A replay assembles
+    // nothing, so it opens no span: before this, every tool step reported a
+    // degraded, cancelled assembly.
+    const replaying = Boolean(currentTurnKey && turnMemo.has(currentTurnKey));
+
     // Context assembly is this adapter's own work before a request exists, not
     // the provider request itself: the real request span opens at the provider
     // tap, and a tool call parents to that one.
-    observed.span = startInsulaSpan({ room, operation: "context_assembly" });
+    observed.room = room;
+    if (!replaying) observed.span = startInsulaSpan({ room, operation: "context_assembly" });
     const timestamp = Date.now();
     const additions = [];
     const activities: string[] = [];
@@ -1425,7 +1440,6 @@ export default function solarisaelHouseProof(pi, release) {
       }
     }
 
-    const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
     recallJevContext.modelRegistry = ctx?.modelRegistry;
     const shellBinding = { room, spirit, session: hostSession };
     if (lessonTtsrInstallWarning) warnings.push(lessonTtsrInstallWarning);
@@ -1455,18 +1469,44 @@ export default function solarisaelHouseProof(pi, release) {
       console.warn(`[athanor] Conversation capture degraded: ${error instanceof Error ? error.message : String(error)}`);
       warnings.push("conversation capture degraded");
     }
-    const memoSessionKey = `${room}:${hostSession}`;
-    const turnKeys = turnKeysByMessage(messages);
-    const currentTurnKey = turnKeys.get(promptMessage);
-    const turnMemo = turnAdditionMemo(memoSessionKey, effectiveRoomDir);
-    pruneTurnAdditionMemo(turnMemo, new Set(turnKeys.values()));
-    if (currentTurnKey && turnMemo.has(currentTurnKey)) {
-      // Later requests of the same turn replay identical bytes so the
-      // Anthropic prefix cache can hit past the system block.
+    if (replaying) {
       const anchored = anchorTurnAdditions(messages, turnKeys, turnMemo);
       if (anchored) return anchored;
       return messages === originalMessages ? undefined : { messages };
     }
+
+    // The fallback key must not collide when the operator repeats the
+    // same prompt text later in the session, so it carries the user-turn
+    // ordinal alongside the digest; retries within one turn recompute
+    // both identically.
+    const userTurnOrdinal = messages.filter((message: any) => message?.role === "user").length;
+    const turnId = currentTurnKey
+      || `turn:${userTurnOrdinal}:${responseDigest(prompt).slice(0, 24)}`;
+
+    // One sieve decision per turn, started beside Recall when Recall fires:
+    // queued after Recall, its Jev call found no budget left on a slow Recall.
+    let lessonSieving: Promise<LessonSieveResult> | null = null;
+    const sieveLessons = () => {
+      if (
+        lessonSieving
+        || lessonMode !== "work"
+        || lessonTtsr.baseline.length === 0
+        || topLevelSession(room) !== hostSession
+      ) return lessonSieving;
+      lessonSieving = lessonSieve({
+        turn: `${room}\0${hostSession}\0${turnId}`,
+        roomDir: effectiveRoomDir,
+        room,
+        query: prompt,
+        baseline: lessonTtsr.baseline,
+        deadline: jevRecallDeadline(budget.deadline),
+        signal: budget.signal,
+        sessionId: hostSession,
+        context: ctx,
+        supplied: ctx,
+      });
+      return lessonSieving;
+    };
 
     // First request of a native turn: the operator's reply is in hand, so the
     // previous turn can be judged. Detached: a verdict never delays context.
@@ -1762,21 +1802,17 @@ export default function solarisaelHouseProof(pi, release) {
 
         if (decision.shouldRecall && decision.refreshReason) {
           if (!automaticBudgetOpen(budget, AUTOMATIC_CONTEXT_COMMIT_RESERVE_MS)) return;
+          sieveLessons();
           const rerankEnabled = rerankPolicy.approved
             && (rerankPolicy.mode === "shadow" || rerankPolicy.mode === "active");
+          // Recall's share ends at the commit reserve, so Presence still lands
+          // after a Recall that spends all of it.
+          const recallShareMs = Math.max(1, budget.deadline - Date.now() - AUTOMATIC_CONTEXT_COMMIT_RESERVE_MS);
           const recalled = await recallWithRouting(effectiveRoomDir, room, decision.query, {
             temporalDecay: true,
             mode: decision.resolvedMode,
             signal: budget.signal,
-            timeoutMs: rerankEnabled
-              ? Math.max(
-                1,
-                Math.min(
-                  AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
-                  budget.deadline - Date.now() - AUTOMATIC_CONTEXT_COMMIT_RESERVE_MS,
-                ),
-              )
-              : AUTOMATIC_CONTEXT_IO_TIMEOUT_MS,
+            timeoutMs: recallShareMs,
             ...(rerankEnabled ? { rerankCandidateTopK: 64 } : {}),
           });
           if (recalled.ok) {
@@ -1927,28 +1963,53 @@ export default function solarisaelHouseProof(pi, release) {
               },
             });
           } else {
+            // The transport times out on the share given above and cancels on the
+            // context deadline: both mean the budget ran out, not the substrate.
+            const budgetSpent = RECALL_BUDGET_CODES.has(String(recalled.result?.code ?? ""));
+            const failure = budgetSpent
+              ? `automatic Recall ran out of its ${recallShareMs} ms budget share`
+              : recalled.result?.error || "recall failed";
+            recordInsulaPoint({
+              room,
+              operation: "automatic_recall",
+              traceId: observed.span?.traceId,
+              parentSpanId: observed.span?.spanId,
+              outcomeClass: budgetSpent ? "timeout" : "error",
+              errorClass: budgetSpent
+                ? "recall_budget_exhausted"
+                : String(recalled.result?.code || "recall_failed").toLowerCase(),
+            });
             policyState = (await policyClient.failRefresh(
-              recalled.result?.error || "recall failed",
+              failure,
               currentTurnKey ? `${currentTurnKey}:failed` : undefined,
             )).recallPolicy;
+            const diagnostic = automaticContextDiagnostic({
+              operation: "automatic_recall",
+              stage: "request_parse",
+              error: recalled.result?.error || "recall failed",
+              failure: recalled.result,
+              route: queryRoute,
+              requestDispatched: true,
+            });
             await recordAutomaticContextTelemetry({
               effectiveRoomDir,
               sessionId: hostSession,
               room,
               prompt,
               route: queryRoute,
-              status: "error",
-              error: redactDiagnosticText(recalled.result?.error || "recall failed", [decision.query, prompt]),
-              diagnostic: automaticContextDiagnostic({
-                operation: "automatic_recall",
-                stage: "request_parse",
-                error: recalled.result?.error || "recall failed",
-                failure: recalled.result,
-                route: queryRoute,
-                requestDispatched: true,
-              }),
+              status: budgetSpent ? "budget_exhausted" : "error",
+              error: redactDiagnosticText(failure, [decision.query, prompt]),
+              diagnostic: budgetSpent
+                ? {
+                  ...diagnostic,
+                  code: "AUTOMATIC_RECALL_BUDGET_EXHAUSTED",
+                  category: "budget",
+                  stage: "budget",
+                  budget: { share_ms: recallShareMs, context_budget_ms: AUTOMATIC_CONTEXT_IO_TIMEOUT_MS },
+                }
+                : diagnostic,
             }).catch(() => undefined);
-            warnings.push("automatic Recall failed");
+            warnings.push(budgetSpent ? "automatic Recall ran out of budget" : "automatic Recall failed");
           }
         } else {
           await recordRecallTelemetry({
@@ -1998,29 +2059,12 @@ export default function solarisaelHouseProof(pi, release) {
           message?.customType === "athanor-presence-context"
           && typeof message?.details?.frameId === "string"
         );
-        // The fallback key must not collide when the operator repeats the
-        // same prompt text later in the session, so it carries the user-turn
-        // ordinal alongside the digest; retries within one turn recompute
-        // both identically.
-        const userTurnOrdinal = messages.filter((message: any) => message?.role === "user").length;
-        const turnId = currentTurnKey
-          || `turn:${userTurnOrdinal}:${responseDigest(prompt).slice(0, 24)}`;
         const presencePulse = presencePulseMaterial(effectiveRoomDir);
         let presenceLessons = lessonTtsr;
         let lessonSieveReceipt: Record<string, unknown> | undefined;
-        if (lessonMode === "work" && lessonTtsr.baseline.length > 0) {
-          const sieved = await lessonSieve({
-            turn: `${room}\0${hostSession}\0${turnId}`,
-            roomDir: effectiveRoomDir,
-            room,
-            query: prompt,
-            baseline: lessonTtsr.baseline,
-            deadline: jevRecallDeadline(budget.deadline),
-            signal: budget.signal,
-            sessionId: hostSession,
-            context: ctx,
-            supplied: ctx,
-          });
+        const sieving = sieveLessons();
+        if (sieving) {
+          const sieved = await sieving;
           if (!automaticBudgetOpen(budget)) return;
           presenceLessons = { ...lessonTtsr, baseline: sieved.baseline };
           lessonSieveReceipt = contentFreeJevReceipt(sieved.receipt);
@@ -2097,25 +2141,33 @@ export default function solarisaelHouseProof(pi, release) {
   };
 
   pi.on("context", async (event, ctx) => {
-    const observed: { span: InsulaSpan | null } = { span: null };
+    const observed: { span: InsulaSpan | null; room?: string } = { span: null };
+    const startedAt = performance.now();
     const result = await settleAutomaticContextWithinBudget(
       (signal, deadline) => composeContextAdditions(event, ctx, observed, { signal, deadline }),
     );
     if (result.status === "settled") {
+      // A span still open on a settled compose means the compose saw the
+      // deadline pass and stopped before the timer fired: a timeout by another
+      // door. Replays and promptless turns open no span.
       if (observed.span) {
-        endInsulaSpan(observed.span, "degraded", "automatic_context_cancelled");
+        endInsulaSpan(observed.span, "degraded", "automatic_context_timeout");
         observed.span = null;
       }
       return result.value;
     }
-    const span = observed.span;
+    // A replaying request opened no span; a timeout or failure there is still
+    // one, so it gets a span measured from the hook's own start.
+    const opened = observed.span;
+    const span = opened ?? (observed.room ? startInsulaSpan({ room: observed.room, operation: "context_assembly" }) : null);
+    const durationUs = opened ? undefined : Math.round((performance.now() - startedAt) * 1_000);
     observed.span = null;
     if (result.status === "timeout") {
-      endInsulaSpan(span, "degraded", "automatic_context_timeout");
+      endInsulaSpan(span, "degraded", "automatic_context_timeout", durationUs);
       console.warn(`[athanor] Automatic context stopped after ${AUTOMATIC_CONTEXT_IO_TIMEOUT_MS}ms`);
       return;
     }
-    endInsulaSpan(span, "error", insulaErrorClass(result.error));
+    endInsulaSpan(span, "error", insulaErrorClass(result.error), durationUs);
     console.warn(`[athanor] Automatic context degraded: ${result.error instanceof Error ? result.error.message : String(result.error)}`);
   });
 

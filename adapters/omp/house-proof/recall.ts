@@ -1,4 +1,4 @@
-import { RustJsonlTransport, RustTransportError } from "../rust-transport.ts";
+import { RustJsonlTransport, RustTransportError, TransportUnavailableError } from "../rust-transport.ts";
 import { discoverRustExecutable } from "../discovery.ts";
 import type { ResolvedRecallMode } from "./recall-policy.ts";
 
@@ -20,7 +20,9 @@ function boundedStderr(stderr: unknown): string {
 
 function rustRecallFailure(error: unknown, transport: RustJsonlTransport) {
   const stderr = boundedStderr(error instanceof RustTransportError ? error.stderr : transport.stderrDiagnostics);
-  if (error instanceof RustTransportError) {
+  // A transport timeout or cancellation keeps its own code: the automatic caller
+  // names a spent budget share by it, and every other failure by its own.
+  if (error instanceof RustTransportError || error instanceof TransportUnavailableError) {
     return {
       ok: false,
       error: error.message,

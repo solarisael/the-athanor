@@ -65,7 +65,7 @@ export async function recordRecallTelemetry({
   room: string;
   prompt: string;
   route: Record<string, unknown> | null;
-  status: "injected" | "empty" | "skipped" | "error";
+  status: "injected" | "empty" | "skipped" | "error" | "budget_exhausted";
   viewport?: Record<string, unknown> | null;
   viewportDiagnostics?: Record<string, unknown> | null;
   error?: unknown;

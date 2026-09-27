@@ -335,7 +335,20 @@ function guardSnapshots(tool: any, input: unknown): GuardSnapshot[] {
   }
   const digest = tool?.matcherDigest?.(input);
   if (typeof digest !== "string") return [];
-  return [{ digest, paths: tool?.matcherPaths?.(input) ?? [] }];
+  const paths = tool?.matcherPaths?.(input);
+  return [{ digest, paths: Array.isArray(paths) && paths.length > 0 ? [...paths] : pathsFromArgs(input) }];
+}
+
+// OMP's write tool has no matcherPaths; the inspector then reads `path`-named
+// arguments, and the AST language comes from their extension.
+function pathsFromArgs(input: unknown): string[] {
+  if (!input || typeof input !== "object") return [];
+  return Object.entries(input as Record<string, unknown>).flatMap(([key, value]) => {
+    const name = key.toLowerCase();
+    if (typeof value === "string" && name.endsWith("path")) return [value];
+    if (Array.isArray(value) && name.endsWith("paths")) return value.filter((item) => typeof item === "string");
+    return [];
+  });
 }
 
 // Mirrors OMP's TtsrToolInspector candidates closely enough for extension and

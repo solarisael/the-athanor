@@ -177,7 +177,8 @@ test("a block lesson refuses every matching write, not only the one the native i
     astCondition: ["try { $$$BODY } catch ($ERR) { }"],
   })]);
   const id = randomUUID();
-  const write = { name: "write", matcherDigest: (args: any) => args.content, matcherPaths: (args: any) => [args.path] };
+  // OMP's write tool exposes only matcherDigest; its path comes from the `path` argument.
+  const write = { name: "write", matcherDigest: (args: any) => args.content };
   class AgentSession {
     sessionManager = { getSessionId: () => id };
     ttsrManager = new TtsrManager({ enabled: true, repeatMode: "once" });

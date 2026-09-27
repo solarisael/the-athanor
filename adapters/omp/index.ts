@@ -91,6 +91,7 @@ import { anchorTurnAdditions, currentTurnOrigin, turnKeysByMessage } from "./hou
 import { queryAnamnesis, formatAnamnesisContext } from "./house-proof/anamnesis.ts";
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
 import {
+  blockLessonRefusal,
   createLessonSieve,
   installLessonTtsrBridge,
   LESSON_SIEVE_GRANT,
@@ -1337,6 +1338,18 @@ export default function solarisaelHouseProof(pi, release) {
       });
     } catch {
       // An unreadable room costs the work hint, never the tool call.
+    }
+  });
+  pi.on("tool_call", async (event, ctx) => {
+    try {
+      return await blockLessonRefusal(event, ctx);
+    } catch (error) {
+      // tool_call errors fail closed, so a broken guard would refuse every write in the
+      // session. The native TTSR interrupt still fires once; the operator sees this degrade.
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[athanor] Block lesson guard degraded on ${event?.toolName}: ${reason}`);
+      ctx?.ui?.notify?.(`Athanor block lessons unguarded for this call: ${reason}`, "warning");
+      return undefined;
     }
   });
   pi.on("message_start", async (event, ctx) => {

@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { isAbsolute, resolve } from "node:path";
 import { runLessonQuery } from "./lesson-context.ts";
 import type { ResolvedRecallMode } from "./recall-policy.ts";
 import type { RecallRerankInput, RecallRerankPolicy, RecallRerankResult, RerankGrant } from "./recall-judgment.ts";
@@ -21,7 +22,10 @@ type LessonRow = {
   interruptMode?: "block" | "remind" | null; repeatCooldownSecs?: number | null; alwaysOn?: boolean;
 };
 
-type ManagerRecord = { manager: any; active: Set<string>; known: Set<string>; patched: boolean };
+type BlockGuard = { manager: any; rules: Map<string, Record<string, unknown>>; signature: string };
+type ManagerRecord = {
+  manager: any; session: any; active: Set<string>; known: Set<string>; patched: boolean; guard: BlockGuard | null;
+};
 type BridgeState = { sessions: Map<string, ManagerRecord>; patchedPrototype?: object };
 
 function state(): BridgeState {
@@ -59,9 +63,10 @@ function captureSession(session: any): void {
   const bridge = state();
   let record = bridge.sessions.get(sessionId);
   if (!record || record.manager !== manager) {
-    record = { manager, active: new Set(), known: new Set(), patched: false };
+    record = { manager, session, active: new Set(), known: new Set(), patched: false, guard: null };
     bridge.sessions.set(sessionId, record);
   }
+  record.session = session;
   patchManager(record);
 }
 
@@ -278,6 +283,8 @@ export async function syncLessonTtsr(args: {
     }
   }
   record.active = next;
+  const guardWarning = armBlockGuard(record, armed.filter(({ row }) => row.interruptMode === "block").map(({ rule }) => rule));
+  if (guardWarning) warnings.push(guardWarning);
   return {
     active: next.size,
     added,
@@ -285,4 +292,90 @@ export async function syncLessonTtsr(args: {
     lessons: armed.map(({ row }) => ({ id: row.id, body: row.lesson })),
     baseline,
   };
+}
+
+// The native manager interrupts a stream once per session (repeatMode "once"),
+// so the model's identical retry used to land on disk. A block lesson refuses at
+// tool execution instead, through a second OMP manager that holds only block
+// rules. Only OMP's coordinator marks rules injected, so this one never goes
+// quiet. OMP's matcher stays the only matcher.
+const GUARD_SETTINGS = { enabled: true };
+
+function armBlockGuard(record: ManagerRecord, rules: Array<Record<string, unknown>>): string | null {
+  const signature = rules.map((rule) => String(rule.name)).sort().join("\n");
+  if (record.guard?.signature === signature) return null;
+  record.guard = null;
+  if (rules.length === 0) return null;
+
+  const Manager = record.manager?.constructor;
+  const manager = typeof Manager === "function" ? new Manager(GUARD_SETTINGS) : null;
+  if (typeof manager?.replaceRules !== "function" || typeof manager?.checkAstSnapshot !== "function") {
+    return "block lessons unguarded at execution: OMP TTSR manager has no replaceRules/checkAstSnapshot";
+  }
+  const accepted: Set<string> = manager.replaceRules(rules);
+  const kept = rules.filter((rule) => accepted.has(String(rule.name)));
+  record.guard = { manager, rules: new Map(kept.map((rule) => [String(rule.name), rule])), signature };
+  const rejected = rules.length - kept.length;
+  return rejected > 0 ? `block guard rejected ${rejected} rule${rejected === 1 ? "" : "s"}` : null;
+}
+
+type GuardSnapshot = { digest: string; paths: string[] };
+
+// # enough: edit digests carry the patch's inserted lines, as native TTSR sees them, so an
+// edit that only empties an existing catch body escapes; the way up is an OMP post-edit snapshot.
+function guardSnapshots(tool: any, input: unknown): GuardSnapshot[] {
+  const entries = tool?.matcherEntries?.(input);
+  if (Array.isArray(entries) && entries.length > 0) {
+    return entries.map((entry: { path: string; digest: string }) => ({ digest: entry.digest, paths: [entry.path] }));
+  }
+  const digest = tool?.matcherDigest?.(input);
+  if (typeof digest !== "string") return [];
+  return [{ digest, paths: tool?.matcherPaths?.(input) ?? [] }];
+}
+
+// Mirrors OMP's TtsrToolInspector candidates closely enough for extension and
+// basename globs; the inspector itself is private to the session coordinator.
+function pathCandidates(rawPath: string, cwd: string): string[] {
+  const raw = rawPath.trim().replaceAll("\\", "/");
+  if (!raw) return [];
+  const absolute = (isAbsolute(rawPath) ? rawPath : resolve(cwd, rawPath)).replaceAll("\\", "/");
+  return [...new Set([raw, absolute])];
+}
+
+/** A `tool_call` refusal when an edit or write would put a block lesson's match on disk. */
+export async function blockLessonRefusal(event: any, ctx: any): Promise<{ block: true; reason: string } | undefined> {
+  const sessionId = String(ctx?.sessionManager?.getSessionId?.() ?? "").trim();
+  const record = state().sessions.get(sessionId);
+  const guard = record?.guard;
+  if (!guard) return undefined;
+
+  const tools: any[] = record.session?.agent?.state?.tools ?? [];
+  const tool = tools.find((candidate) => candidate?.name === event?.toolName);
+  const snapshots = guardSnapshots(tool, event?.input ?? {});
+  if (snapshots.length === 0) return undefined;
+
+  const cwd = String(ctx?.cwd ?? process.cwd());
+  const hits = new Map<string, Record<string, unknown>>();
+  try {
+    for (const [index, snapshot] of snapshots.entries()) {
+      const context = {
+        source: "tool",
+        toolName: event.toolName,
+        // A fresh key per call: the AST throttle skips a snapshot it has already seen under the same key.
+        streamKey: `athanor-block:${event?.toolCallId ?? randomUUID()}#${index}`,
+        filePaths: snapshot.paths.flatMap((path) => pathCandidates(path, cwd)),
+      };
+      const matched = [
+        ...guard.manager.checkSnapshot(snapshot.digest, context),
+        ...(await guard.manager.checkAstSnapshot(snapshot.digest, context)),
+      ];
+      for (const rule of matched) hits.set(String(rule.name), guard.rules.get(String(rule.name)) ?? rule);
+    }
+  } finally {
+    guard.manager.resetBuffer?.();
+  }
+  if (hits.size === 0) return undefined;
+
+  const reasons = [...hits.values()].map((rule) => `${rule.path}\n${rule.content}`);
+  return { block: true, reason: `Refused by The Athanor block lesson:\n\n${reasons.join("\n\n")}` };
 }

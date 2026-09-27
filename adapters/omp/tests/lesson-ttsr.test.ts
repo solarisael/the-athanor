@@ -2,7 +2,8 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 
 import * as lessonContext from "../house-proof/lesson-context.ts";
-import { installLessonTtsrBridge, selectPresenceLessons, syncLessonTtsr } from "../house-proof/lesson-ttsr.ts";
+import { TtsrManager } from "@oh-my-pi/pi-coding-agent/export/ttsr";
+import { blockLessonRefusal, installLessonTtsrBridge, selectPresenceLessons, syncLessonTtsr } from "../house-proof/lesson-ttsr.ts";
 import { lessonMaterials } from "../house-proof/presence-materials.ts";
 import * as host from "../house-proof/host.ts";
 import { compilePresenceContext, type PresenceCompileInput } from "../house-proof/presence.ts";
@@ -168,4 +169,32 @@ test("work craft beyond the eighth lesson receives an enact directive within the
     transport.mockRestore();
     retireTopLevelSession(room, binding.session);
   }
+});
+
+test("a block lesson refuses every matching write, not only the one the native interrupt caught", async () => {
+  lessons([coding(389, {
+    tags: ["ttsr-approved"], interruptMode: "block", triggerScope: ["tool:edit", "tool:write"],
+    astCondition: ["try { $$$BODY } catch ($ERR) { }"],
+  })]);
+  const id = randomUUID();
+  const write = { name: "write", matcherDigest: (args: any) => args.content, matcherPaths: (args: any) => [args.path] };
+  class AgentSession {
+    sessionManager = { getSessionId: () => id };
+    ttsrManager = new TtsrManager({ enabled: true, repeatMode: "once" });
+    agent = { state: { tools: [write] } };
+    getContextUsage() { return {}; }
+  }
+  installLessonTtsrBridge({ pi: { AgentSession } });
+  const ctx: any = new AgentSession();
+  expect((await sync(ctx)).warnings).toEqual([]);
+
+  const attempt = (toolCallId: string, path: string, content: string) =>
+    blockLessonRefusal({ toolName: "write", toolCallId, input: { path, content } }, ctx);
+  const swallowed = "try {\n  run();\n} catch (error) { }\n";
+  expect((await attempt("first", "a.ts", swallowed))?.reason).toContain("athanor://lessons/coding/389");
+  // The native interrupt has now spent its once-per-session shot, as the coordinator records it.
+  ctx.ttsrManager.markInjectedByNames(ctx.ttsrManager.getRules().map((rule: { name: string }) => rule.name));
+  expect((await attempt("identical-retry", "a.ts", swallowed))?.reason).toContain("athanor://lessons/coding/389");
+  expect(await attempt("named", "a.ts", "try {\n  run();\n} catch (error) {\n  // probe failure is the answer\n}\n"))
+    .toBeUndefined();
 });

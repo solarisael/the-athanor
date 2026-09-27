@@ -654,7 +654,7 @@ export function registerSolarisaelTools(pi, release) {
       condition: z.array(z.string()).optional().describe("lesson kinds: native OMP TTSR regex patterns."),
       astCondition: z.array(z.string()).optional().describe("lesson kinds: native OMP TTSR ast-grep patterns."),
       triggerScope: z.array(z.string()).optional().describe("lesson kinds: native OMP scopes (text | tool | tool:<name>)."),
-      interruptMode: z.enum(["block", "remind"]).optional().describe("lesson kinds: block interrupts; remind injects without interruption."),
+      interruptMode: z.enum(["block", "remind"]).optional().describe("lesson kinds: block interrupts the stream once and refuses every matching edit/write at execution; remind injects without interruption."),
       repeatCooldownSecs: z.number().optional().describe("lesson kinds: stored cooldown metadata; native bridge currently fires each version once per session."),
     }),
     approval: "write",

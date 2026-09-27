@@ -80,6 +80,9 @@ the exact implementation record.
   Coverage checks, permanent summaries, tombstones, and historical fourteen-day receipts remain intact.
 - Work-mode Presence includes always-on coding guidance without requiring a trigger.
   Native lesson guards still require explicit approval and a trigger.
+- A `block` lesson now refuses every matching `edit` or `write` at tool execution, with the lesson text as the reason.
+  Before this change, OMP interrupted the stream one time for each session. The retry of the same write went to disk.
+  The guard uses OMP's own matcher. For `edit`, it sees only the inserted lines, as the native interrupt does.
 - Chat retains a settled response when the Host is unavailable and retries delivery after recovery.
   Retries preserve the answer and idempotency identity while refreshing the transport envelope.
 - The public site includes every reviewed GUI module and excludes private telemetry and operator configuration.

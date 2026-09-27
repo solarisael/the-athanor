@@ -11,6 +11,7 @@
 # is ever pruned by the deploy ritual.
 [build]
 target-dir = "C:/Projects/the-athanor-target"
+# ATHANOR_BUILD_TARGET_DIR in [env] below repeats this path; change both.
 
 # Incremental artifacts are per-crate, per-target and never collected; a week
 # of dev and test builds left 20 GB of them on 2026-09-02. A full recompile of
@@ -23,3 +24,6 @@ incremental = false
 # Nothing here needs test parallelism yet (Sol, 2026-09-02).
 [env]
 RUST_TEST_THREADS = "1"
+# akasha's state.rs trusts its development state root only for binaries under
+# this directory. Cargo does not expose build.target-dir to the compiler.
+ATHANOR_BUILD_TARGET_DIR = "C:/Projects/the-athanor-target"

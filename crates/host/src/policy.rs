@@ -712,7 +712,10 @@ mod tests {
             serde_json::from_str(&written).expect("written session parses");
         assert_eq!(read.judged_mode, Some(RecallResolvedMode::Work));
         let older = written.replace(r#""judged_mode":"work","#, "");
-        assert_ne!(older, written, "an older session file carries no judged_mode");
+        assert_ne!(
+            older, written,
+            "an older session file carries no judged_mode"
+        );
         let read_older: RecallPolicySession =
             serde_json::from_str(&older).expect("older session parses");
         assert_eq!(read_older.judged_mode, None);

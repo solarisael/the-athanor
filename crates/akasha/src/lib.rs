@@ -30,7 +30,7 @@ pub use cluster::{
     ClusterGroup, ClusterMembers, ClusterStaleness, cluster_is_stale, cluster_maintenance,
     cluster_staleness, spherical_kmeans,
 };
-pub use config::{AppError, Config, EmbeddingMode};
+pub use config::{AppError, Config, EmbeddingMode, POOL_ACQUIRE_TIMEOUT};
 pub use docket::{
     AcceptanceSummary, QuestBoardItem, QuestBoardParams, QuestBoardResult, QuestChargebookParams,
     QuestChargebookResult, QuestChargebookRow, QuestChargebookTotals, QuestClaimParams,
@@ -88,9 +88,8 @@ pub use recall::{RecallResult, recall, refresh_semantic_vocabulary};
 pub use remember::remember;
 pub use restart::{
     EXIT_UNCLAIMED_REASON, EXITING_DEADLINE_SECS, RELAUNCH_ATTEMPT_LIMIT,
-    RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS, STORM_MAX_EXITING_PER_WINDOW,
-    STORM_WINDOW_SECS, restart_claim, restart_request, restart_status, restart_transition,
-    restart_verify,
+    RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS, STORM_MAX_EXITING_PER_WINDOW, STORM_WINDOW_SECS,
+    restart_claim, restart_request, restart_status, restart_transition, restart_verify,
 };
 pub use settings::RoomSettings;
 pub use timeline::{

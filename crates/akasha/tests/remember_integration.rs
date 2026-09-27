@@ -551,7 +551,7 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     &cfg,
                     RecallRequest::new(RoomKey::new(room)?, body.into(), 1, 0.0, 2, 0.0)?
                         .with_temporal_decay(true),
-                        None,
+                    None,
                 )
                 .await?;
                 let cutoff_paths = cutoff
@@ -868,7 +868,11 @@ async fn remember_with_backup_returns_a_verifiable_dump_receipt() {
         if backup.status == "ok" { "ok" } else { "error" }
     );
     assert_eq!(point.get::<Option<String>, _>("error_class"), backup.code);
-    assert!(point.get::<Option<i64>, _>("duration_us").is_some_and(|us| us > 0));
+    assert!(
+        point
+            .get::<Option<i64>, _>("duration_us")
+            .is_some_and(|us| us > 0)
+    );
 
     assert_eq!(
         backup.status, "ok",
@@ -876,15 +880,26 @@ async fn remember_with_backup_returns_a_verifiable_dump_receipt() {
         backup.code, backup.detail
     );
     assert!(
-        !receipt.warnings.iter().any(|warning| warning.contains("backup")),
+        !receipt
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("backup")),
         "an ok backup adds no warning: {:?}",
         receipt.warnings
     );
     let dump_path = std::path::PathBuf::from(backup.dump_path.as_deref().expect("dump path"));
-    assert!(dump_path.is_file(), "dump must exist at {}", dump_path.display());
+    assert!(
+        dump_path.is_file(),
+        "dump must exist at {}",
+        dump_path.display()
+    );
     assert_eq!(dump_path.parent(), Some(backup_dir.as_path()));
     let bytes = std::fs::read(&dump_path).expect("dump must be readable");
-    assert_eq!(&bytes[..5], b"PGDMP", "dump must be a custom-format archive");
+    assert_eq!(
+        &bytes[..5],
+        b"PGDMP",
+        "dump must be a custom-format archive"
+    );
     assert_eq!(backup.bytes, Some(bytes.len() as u64));
     assert_eq!(
         backup.sha256.as_deref(),
@@ -893,7 +908,13 @@ async fn remember_with_backup_returns_a_verifiable_dump_receipt() {
     );
     let tool = backup.tool.as_deref().expect("tool");
     assert!(
-        ["pg_bin_dir:pg_dump", "wsl:pg_dump", "wsl-system32:pg_dump", "path:pg_dump"].contains(&tool),
+        [
+            "pg_bin_dir:pg_dump",
+            "wsl:pg_dump",
+            "wsl-system32:pg_dump",
+            "path:pg_dump"
+        ]
+        .contains(&tool),
         "tool must name the probed route: {tool}"
     );
     assert!(backup.elapsed_ms.is_some());

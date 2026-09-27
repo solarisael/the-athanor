@@ -295,8 +295,7 @@ async fn post_write_backup(
     warnings: &mut Vec<String>,
 ) -> BackupOutcome {
     let outcome =
-        backup::post_write_outcome(pool, &cfg.database_url, settings.backup_keep_count, true)
-            .await;
+        backup::post_write_outcome(pool, &cfg.database_url, settings.backup_keep_count, true).await;
     warnings.extend(outcome.warning());
     outcome
 }

@@ -14,9 +14,9 @@
 //!
 //! * `ATHANOR_STATE_DIR` names the state root explicitly and is mandatory for
 //!   every installed run. It must be absolute.
-//! * The compile-time checkout is used only when this process is demonstrably
-//!   running *out of* that checkout's `target/` directory, i.e. under
-//!   `cargo run` / `cargo test`. That is the development case and nothing else.
+//! * The process uses the compile-time checkout only when it runs from the
+//!   cargo target directory of the build. Only `cargo run` and `cargo test`
+//!   do that. That is the development case and nothing else.
 //! * Any other situation is an error, never a guess.
 
 use std::{
@@ -83,17 +83,23 @@ fn compiled_athanor_root() -> &'static Path {
         .expect("crate manifest must live at <athanor-root>/crates/akasha")
 }
 
+/// The shared cargo target directory, from `ATHANOR_BUILD_TARGET_DIR` in
+/// `.cargo/config.toml`. Since 2ebb5eb it lives outside every checkout.
+fn compiled_target_dir() -> &'static Path {
+    Path::new(env!("ATHANOR_BUILD_TARGET_DIR"))
+}
+
 /// `<athanor-root>/state`, but only when `executable` actually lives inside
-/// `<athanor-root>/target`. Cargo puts `cargo run` and `cargo test` binaries
-/// there and an installed product never appears there, so this distinguishes a
-/// development run from an installed one even when both happen on the machine
-/// that produced the build.
+/// the build's cargo target directory. Cargo puts `cargo run` and `cargo test`
+/// binaries there and an installed product never appears there, so this
+/// distinguishes a development run from an installed one even when both happen
+/// on the machine that produced the build.
 fn development_state_root_for(executable: Option<&Path>) -> Option<PathBuf> {
     let root = compiled_athanor_root();
     // Canonicalize both sides so a symlinked or `..`-laden invocation still
     // compares correctly. If the target directory cannot be canonicalized the
-    // build checkout is not present on this machine, which is itself the answer.
-    let target = root.join("target").canonicalize().ok()?;
+    // build machine's target is not present here, which is itself the answer.
+    let target = compiled_target_dir().canonicalize().ok()?;
     let executable = executable?.canonicalize().ok()?;
     executable.starts_with(&target).then(|| root.join("state"))
 }
@@ -163,14 +169,14 @@ mod tests {
         );
     }
 
-    /// A cargo test binary runs from `<athanor-root>/target`, so the
+    /// A cargo test binary runs from the shared target directory, so the
     /// development fallback resolves — and resolves to the checkout's own
     /// `state` directory, not to anything cwd-relative.
     #[test]
     fn development_root_is_the_compiled_checkout_state_dir() {
         let executable = env::current_exe().expect("a test binary has a path");
         let (root, source) = resolve_state_root_from(None, Some(&executable))
-            .expect("a cargo test binary runs from <athanor-root>/target");
+            .expect("a cargo test binary runs from the shared target directory");
         assert_eq!(root, compiled_athanor_root().join("state"));
         assert_eq!(source, StateRootSource::DevelopmentCheckout);
         assert!(root.is_absolute());
@@ -182,8 +188,8 @@ mod tests {
     /// on the very machine that built it.
     #[test]
     fn installed_executable_outside_the_build_target_requires_the_variable() {
-        // A real, canonicalizable path that is certainly not under
-        // <athanor-root>/target: the system temp directory.
+        // A real, canonicalizable path that is certainly not under the shared
+        // target directory: the system temp directory.
         let outside = env::temp_dir();
         assert_eq!(
             resolve_state_root_from(None, Some(&outside)).unwrap_err(),

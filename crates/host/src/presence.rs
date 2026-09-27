@@ -223,12 +223,14 @@ impl PresenceRuntime {
     /// Install a session the store holds live and this process does not: a
     /// Host that restarted continues the session from its row.
     pub fn adopt(&mut self, session: &str, frame: PresenceFrame, ledger: PresenceLedger) {
-        self.sessions.entry(session.to_owned()).or_insert(PresenceSession {
-            frame,
-            ledger,
-            active_contract: None,
-            receipts: VecDeque::new(),
-        });
+        self.sessions
+            .entry(session.to_owned())
+            .or_insert(PresenceSession {
+                frame,
+                ledger,
+                active_contract: None,
+                receipts: VecDeque::new(),
+            });
     }
 
     pub fn has_session(&self, session: &str) -> bool {
@@ -569,7 +571,11 @@ mod tests {
     fn a_session_reopens_after_close_under_its_original_key() {
         let mut runtime = PresenceRuntime::default();
         let first = runtime
-            .open(&authentication(), OPEN_KEY, open_request(Some(boat(4471, "yesterday"))))
+            .open(
+                &authentication(),
+                OPEN_KEY,
+                open_request(Some(boat(4471, "yesterday"))),
+            )
             .unwrap();
         runtime
             .close(
@@ -584,15 +590,27 @@ mod tests {
             .unwrap();
 
         let reopened = runtime
-            .open(&authentication(), OPEN_KEY, open_request(Some(boat(4473, "tonight"))))
+            .open(
+                &authentication(),
+                OPEN_KEY,
+                open_request(Some(boat(4473, "tonight"))),
+            )
             .unwrap();
         runtime
-            .compile(SESSION, "presence-compile:turn-1", compile_request(&reopened, "turn-1"))
+            .compile(
+                SESSION,
+                "presence-compile:turn-1",
+                compile_request(&reopened, "turn-1"),
+            )
             .expect("the reopened frame compiles");
 
         // The key now answers the reopen, not the open it superseded.
         let retried = runtime
-            .open(&authentication(), OPEN_KEY, open_request(Some(boat(4473, "tonight"))))
+            .open(
+                &authentication(),
+                OPEN_KEY,
+                open_request(Some(boat(4473, "tonight"))),
+            )
             .unwrap();
         assert_eq!(retried, reopened);
     }
@@ -611,10 +629,16 @@ mod tests {
             .open_carrying(&authentication(), OPEN_KEY, open_request(None), Some(slept))
             .unwrap();
         let (_, ledger) = runtime.session_state(SESSION).expect("live");
-        assert_eq!(ledger.repair_rule_ids, vec!["presence:lesson:408".to_owned()]);
+        assert_eq!(
+            ledger.repair_rule_ids,
+            vec!["presence:lesson:408".to_owned()]
+        );
         assert_eq!(ledger.recent_registers, vec!["soft".to_owned()]);
         assert_eq!(ledger.contract_version, 12);
-        assert_eq!(ledger.frame_version, frame.version, "the ledger follows the new frame");
+        assert_eq!(
+            ledger.frame_version, frame.version,
+            "the ledger follows the new frame"
+        );
     }
 
     #[test]
@@ -632,7 +656,11 @@ mod tests {
         restarted.adopt(SESSION, frame.clone(), ledger);
         assert!(restarted.has_session(SESSION));
         let answered = restarted
-            .open(&authentication(), "presence-open:after-restart", open_request(None))
+            .open(
+                &authentication(),
+                "presence-open:after-restart",
+                open_request(None),
+            )
             .unwrap();
         assert_eq!(answered, frame);
         restarted
@@ -660,7 +688,11 @@ mod tests {
             .open(&authentication(), OPEN_KEY, open_request(None))
             .unwrap();
         let same_key_new_body = runtime
-            .open(&authentication(), OPEN_KEY, open_request(Some(boat(1, "new material"))))
+            .open(
+                &authentication(),
+                OPEN_KEY,
+                open_request(Some(boat(1, "new material"))),
+            )
             .unwrap();
         let new_key = runtime
             .open(&authentication(), "presence-open:again", open_request(None))

@@ -1,14 +1,13 @@
 use akasha::{
-    presence_session_close, presence_session_load, presence_session_open,
-    presence_session_write_ledger, AppError,
+    AppError, presence_session_close, presence_session_load, presence_session_open,
+    presence_session_write_ledger,
 };
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
 use summoning::presence::{
-    PresenceAuthentication, PresenceAuthority, PresenceBinding, PresenceCapability,
-    PresenceFrame, PresenceLedger, PresenceMaterial, PresenceMaterialRole, PresenceOpenRequest,
-    open_presence,
+    PresenceAuthentication, PresenceAuthority, PresenceBinding, PresenceCapability, PresenceFrame,
+    PresenceLedger, PresenceMaterial, PresenceMaterialRole, PresenceOpenRequest, open_presence,
 };
 use uuid::Uuid;
 
@@ -156,7 +155,8 @@ async fn apply_migrations_and_run(pool: &PgPool) -> TestResult {
 
     // Wake: the session opens.
     let first_frame = frame("yesterday's boat");
-    let opened = presence_session_open(pool, &binding(), &first_frame, &ledger(&first_frame, &[])).await?;
+    let opened =
+        presence_session_open(pool, &binding(), &first_frame, &ledger(&first_frame, &[])).await?;
     assert!(opened.is_live());
     assert_eq!(opened.frame, first_frame);
     assert_eq!(opened.room, "kodo");
@@ -167,7 +167,9 @@ async fn apply_migrations_and_run(pool: &PgPool) -> TestResult {
     presence_session_write_ledger(pool, SESSION, &learned).await?;
 
     // A restarted Host reads the row and finds the session live with what it learned.
-    let restarted = presence_session_load(pool, SESSION).await?.expect("row exists");
+    let restarted = presence_session_load(pool, SESSION)
+        .await?
+        .expect("row exists");
     assert!(restarted.is_live());
     assert_eq!(restarted.frame, first_frame);
     assert_eq!(restarted.ledger, learned);
@@ -175,7 +177,9 @@ async fn apply_migrations_and_run(pool: &PgPool) -> TestResult {
 
     // Sleep closes the presence. The ledger stays with the closed row.
     presence_session_close(pool, SESSION, &learned).await?;
-    let slept = presence_session_load(pool, SESSION).await?.expect("row exists");
+    let slept = presence_session_load(pool, SESSION)
+        .await?
+        .expect("row exists");
     assert!(!slept.is_live());
     assert!(slept.closed_at.expect("closed") >= slept.opened_at);
     assert_eq!(slept.ledger, learned);
@@ -183,11 +187,20 @@ async fn apply_migrations_and_run(pool: &PgPool) -> TestResult {
     // A closed presence learns nothing.
     assert!(matches!(
         presence_session_write_ledger(pool, SESSION, &learned).await,
-        Err(AppError::Refusal { code: "presence_not_live", .. })
+        Err(AppError::Refusal {
+            code: "presence_not_live",
+            ..
+        })
     ));
     // Closing again is not an error and changes nothing.
     presence_session_close(pool, SESSION, &ledger(&first_frame, &[])).await?;
-    assert_eq!(presence_session_load(pool, SESSION).await?.expect("row").ledger, learned);
+    assert_eq!(
+        presence_session_load(pool, SESSION)
+            .await?
+            .expect("row")
+            .ledger,
+        learned
+    );
 
     // Resume: the same session reopens with a new frame and the carried ledger.
     let second_frame = frame("tonight's boat");
@@ -199,8 +212,14 @@ async fn apply_migrations_and_run(pool: &PgPool) -> TestResult {
     let reopened = presence_session_open(pool, &binding(), &second_frame, &carried).await?;
     assert!(reopened.is_live());
     assert_eq!(reopened.frame, second_frame);
-    assert_eq!(reopened.ledger.repair_rule_ids, vec!["presence:lesson:408".to_owned()]);
-    assert!(reopened.opened_at > slept.opened_at, "a reopen is a new opening");
+    assert_eq!(
+        reopened.ledger.repair_rule_ids,
+        vec!["presence:lesson:408".to_owned()]
+    );
+    assert!(
+        reopened.opened_at > slept.opened_at,
+        "a reopen is a new opening"
+    );
     assert!(reopened.closed_at.is_none());
 
     // A rewrite of a live row keeps its opening time.

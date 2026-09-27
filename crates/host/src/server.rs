@@ -49,11 +49,11 @@ use protocol::{
     AkashaLessonFamily, AkashaLessonQueryPayload, AkashaLessonResultEvent,
     AkashaRecallQueryPayload, AkashaRecallResultEvent, CHAT_COMMAND_ACCEPTED, CHAT_COMMAND_REFUSED,
     CHAT_DELTA, CHAT_PROJECTION_ID, CHAT_SNAPSHOT, CHAT_SUBSCRIBE, CONTEXT_ANALYZED,
-    CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ChatDraft, ChatEvent, ChatMessage, ClientCommand, CommandMeta,
-    CommandOutcomeEvent, ContextAnalysisEvent, ContextViewportEvent, ConversationLogRequest,
-    DEFAULT_HOST_WS_PATH, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED, HALLWAY_KNOCK_CLAIMED,
-    HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED, HALLWAY_KNOCK_SETTLED,
-    HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
+    CONTEXT_PROJECTION_ID, CONTEXT_VIEWPORTED, ChatDraft, ChatEvent, ChatMessage, ClientCommand,
+    CommandMeta, CommandOutcomeEvent, ContextAnalysisEvent, ContextViewportEvent,
+    ConversationLogRequest, DEFAULT_HOST_WS_PATH, DeltaEvent, EventMeta, HALLWAY_INBOX_PROJECTED,
+    HALLWAY_KNOCK_CLAIMED, HALLWAY_KNOCK_COMMAND_FAILED, HALLWAY_KNOCK_COMMAND_REFUSED,
+    HALLWAY_KNOCK_SETTLED, HALLWAY_PROJECTION_ID, HOST_SCHEMA_VERSION, HallwayInboxProjectionEvent,
     HallwayKnockClaimedEvent, HallwayKnockSettledEvent, LINEAGE_NORMALIZED, LINEAGE_PROJECTION_ID,
     LineageResultEvent, PAPER_BOAT_RECEIPT_PROJECTION_ID, PAPER_BOAT_RECEIPT_SNAPSHOT,
     PAPER_BOAT_RECEIPT_SUBSCRIBE, PRESENCE_CLOSED, PRESENCE_COMMAND_REFUSED, PRESENCE_COMPILED,
@@ -241,7 +241,9 @@ impl Host {
                 .tasks
                 .spawn(run_receipt_bridge(self.state.clone(), url));
         }
-        self.state.tasks.spawn(run_hallway_bridge(self.state.clone()));
+        self.state
+            .tasks
+            .spawn(run_hallway_bridge(self.state.clone()));
     }
 
     // [host/routing] [security/auth]
@@ -326,13 +328,21 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     set_hallway_subscription(&state, &mut session, None).await;
 }
 
-async fn set_hallway_subscription(state: &AppState, current: &mut Option<String>, next: Option<String>) {
-    if *current == next { return; }
+async fn set_hallway_subscription(
+    state: &AppState,
+    current: &mut Option<String>,
+    next: Option<String>,
+) {
+    if *current == next {
+        return;
+    }
     let mut runtime = state.runtime.lock().await;
     if let Some(previous) = current.take() {
         if let Some((_, count)) = runtime.hallway_subscriptions.get_mut(&previous) {
             *count -= 1;
-            if *count == 0 { runtime.hallway_subscriptions.remove(&previous); }
+            if *count == 0 {
+                runtime.hallway_subscriptions.remove(&previous);
+            }
         }
     }
     if let Some(session) = next {
@@ -343,7 +353,11 @@ async fn set_hallway_subscription(state: &AppState, current: &mut Option<String>
     }
 }
 
-async fn handle_socket_inner(socket: WebSocket, state: AppState, hallway_session: &mut Option<String>) {
+async fn handle_socket_inner(
+    socket: WebSocket,
+    state: AppState,
+    hallway_session: &mut Option<String>,
+) {
     let (mut sink, mut source) = socket.split();
     let mut deltas = state.deltas.subscribe();
     let mut receipts = state.receipts.subscribe();
@@ -965,7 +979,14 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             // A late draft for a settled turn changes nothing and is still
             // accepted: the adapter's report was honest when it left.
             if let Some(draft) = draft {
-                let delta = chat_event(state, Some(&meta), CHAT_DELTA, vec![], vec![draft], sequence);
+                let delta = chat_event(
+                    state,
+                    Some(&meta),
+                    CHAT_DELTA,
+                    vec![],
+                    vec![draft],
+                    sequence,
+                );
                 let _ = state.chat_deltas.send(serialize(&delta));
             }
             chat_appended(state, &meta, None, sequence).await
@@ -1174,7 +1195,12 @@ async fn open_presence_frame(
     let authentication = match authenticate_presence(state, &meta) {
         Ok(authentication) => authentication,
         Err(reason) => {
-            presence_point(state, "presence_open", OutcomeClass::Refused, Some("not_authenticated"));
+            presence_point(
+                state,
+                "presence_open",
+                OutcomeClass::Refused,
+                Some("not_authenticated"),
+            );
             return presence_refusal(state, &meta, &reason).await;
         }
     };
@@ -1182,7 +1208,12 @@ async fn open_presence_frame(
     let carried = match adopt_presence_from_store(state, &mut runtime, &meta.sender_session).await {
         Ok(carried) => carried,
         Err(error) => {
-            presence_point(state, "presence_open", OutcomeClass::Error, Some("store_read"));
+            presence_point(
+                state,
+                "presence_open",
+                OutcomeClass::Error,
+                Some("store_read"),
+            );
             return presence_refusal_sync(
                 state,
                 &meta,
@@ -1192,17 +1223,20 @@ async fn open_presence_frame(
         }
     };
     let binding = authentication.binding.clone();
-    let result = runtime.presence.open_carrying(
-        &authentication,
-        &meta.idempotency_key,
-        request,
-        carried,
-    );
+    let result =
+        runtime
+            .presence
+            .open_carrying(&authentication, &meta.idempotency_key, request, carried);
     let outcome = match &result {
         Ok(_) => persist_presence(state, &runtime, &meta.sender_session, &binding, "open").await,
         Err(_) => OutcomeClass::Refused,
     };
-    presence_point(state, "presence_open", outcome, result.as_ref().err().map(|_| "refused"));
+    presence_point(
+        state,
+        "presence_open",
+        outcome,
+        result.as_ref().err().map(|_| "refused"),
+    );
     presence_response(
         state,
         &meta,
@@ -1258,7 +1292,12 @@ async fn compile_presence_turn(
 ) -> Responses {
     let mut runtime = state.runtime.lock().await;
     if let Err(error) = adopt_presence_from_store(state, &mut runtime, &meta.sender_session).await {
-        presence_point(state, "presence_compile", OutcomeClass::Error, Some("store_read"));
+        presence_point(
+            state,
+            "presence_compile",
+            OutcomeClass::Error,
+            Some("store_read"),
+        );
         return presence_refusal_sync(
             state,
             &meta,
@@ -1276,7 +1315,12 @@ async fn compile_presence_turn(
         }
         Err(_) => OutcomeClass::Refused,
     };
-    presence_point(state, "presence_compile", outcome, result.as_ref().err().map(|_| "refused"));
+    presence_point(
+        state,
+        "presence_compile",
+        outcome,
+        result.as_ref().err().map(|_| "refused"),
+    );
     presence_response(
         state,
         &meta,
@@ -1302,7 +1346,12 @@ async fn settle_presence_turn(
         }
         Err(_) => OutcomeClass::Refused,
     };
-    presence_point(state, "presence_settle", outcome, result.as_ref().err().map(|_| "refused"));
+    presence_point(
+        state,
+        "presence_settle",
+        outcome,
+        result.as_ref().err().map(|_| "refused"),
+    );
     presence_response(
         state,
         &meta,
@@ -1319,7 +1368,12 @@ async fn close_presence_frame(
 ) -> Responses {
     let mut runtime = state.runtime.lock().await;
     if let Err(error) = adopt_presence_from_store(state, &mut runtime, &meta.sender_session).await {
-        presence_point(state, "presence_close", OutcomeClass::Error, Some("store_read"));
+        presence_point(
+            state,
+            "presence_close",
+            OutcomeClass::Error,
+            Some("store_read"),
+        );
         return presence_refusal_sync(
             state,
             &meta,
@@ -1348,7 +1402,12 @@ async fn close_presence_frame(
         (Ok(_), _, _) => OutcomeClass::Ok,
         (Err(_), _, _) => OutcomeClass::Refused,
     };
-    presence_point(state, "presence_close", outcome, result.as_ref().err().map(|_| "refused"));
+    presence_point(
+        state,
+        "presence_close",
+        outcome,
+        result.as_ref().err().map(|_| "refused"),
+    );
     presence_response(
         state,
         &meta,
@@ -1363,8 +1422,14 @@ async fn close_presence_frame(
 fn presence_binding(state: &AppState, meta: &CommandMeta) -> PresenceBinding {
     let identity = state.room_store.identity().ok();
     PresenceBinding {
-        room: identity.as_ref().map(|i| i.room.clone()).unwrap_or_else(|| meta.sender_room.clone()),
-        spirit: identity.as_ref().map(|i| i.spirit.clone()).unwrap_or_else(|| meta.sender_spirit.clone()),
+        room: identity
+            .as_ref()
+            .map(|i| i.room.clone())
+            .unwrap_or_else(|| meta.sender_room.clone()),
+        spirit: identity
+            .as_ref()
+            .map(|i| i.spirit.clone())
+            .unwrap_or_else(|| meta.sender_spirit.clone()),
         operator: identity.map(|i| i.operator).unwrap_or_default(),
         session: meta.sender_session.clone(),
     }
@@ -1449,9 +1514,15 @@ fn observe_hallway_projection(
     ringing: bool,
     advance: bool,
 ) -> bool {
-    let changed = hallway_projection_changed(fingerprints.get(session).map(String::as_str), fingerprint, ringing);
+    let changed = hallway_projection_changed(
+        fingerprints.get(session).map(String::as_str),
+        fingerprint,
+        ringing,
+    );
     // A queued push is not delivery; offline clients must still see reconciliation.
-    if advance { fingerprints.insert(session.to_owned(), fingerprint.to_owned()); }
+    if advance {
+        fingerprints.insert(session.to_owned(), fingerprint.to_owned());
+    }
     changed
 }
 
@@ -1459,7 +1530,11 @@ async fn project_hallway_inbox(state: &AppState, meta: CommandMeta) -> Responses
     project_hallway_inbox_inner(state, meta, true).await
 }
 
-async fn project_hallway_inbox_inner(state: &AppState, meta: CommandMeta, advance: bool) -> Responses {
+async fn project_hallway_inbox_inner(
+    state: &AppState,
+    meta: CommandMeta,
+    advance: bool,
+) -> Responses {
     let _permit = state.hallway_operations.acquire().await;
     let Some(pool) = state.hallway_pool.as_ref() else {
         record_point(
@@ -1525,10 +1600,17 @@ async fn project_hallway_inbox_inner(state: &AppState, meta: CommandMeta, advanc
         .any(|entry| entry.unread > 0 || entry.mentions > 0);
     let mut runtime = state.runtime.lock().await;
     if advance {
-        runtime.hallway_subscriptions.entry(meta.sender_session.clone()).or_insert((meta.clone(), 0));
+        runtime
+            .hallway_subscriptions
+            .entry(meta.sender_session.clone())
+            .or_insert((meta.clone(), 0));
     }
     let changed = observe_hallway_projection(
-        &mut runtime.hallway_inbox_fingerprints, &meta.sender_session, &fingerprint, ringing, advance,
+        &mut runtime.hallway_inbox_fingerprints,
+        &meta.sender_session,
+        &fingerprint,
+        ringing,
+        advance,
     );
     let event = HallwayInboxProjectionEvent {
         meta: event_meta_for_projection(
@@ -2733,8 +2815,13 @@ const RECEIPT_BATCH_GRACE: std::time::Duration = std::time::Duration::from_secs(
 
 fn hallway_sea_failure(state: &AppState, operation: &'static str, reason: &str) {
     record_point(
-        state.insula_binding.as_ref(), "host", "origami", operation,
-        OutcomeClass::Error, Some(reason), None,
+        state.insula_binding.as_ref(),
+        "host",
+        "origami",
+        operation,
+        OutcomeClass::Error,
+        Some(reason),
+        None,
     );
 }
 
@@ -2768,14 +2855,22 @@ async fn run_hallway_bridge(state: AppState) {
 async fn consume_hallway(state: &AppState, url: &str) -> Result<(), &'static str> {
     use origami::cranes::broker::Broker;
     let client = async_nats::ConnectOptions::new()
-        .connection_timeout(Duration::from_secs(1)).connect(url).await
+        .connection_timeout(Duration::from_secs(1))
+        .connect(url)
+        .await
         .map_err(|_| "connect_failed")?;
     let context = async_nats::jetstream::new(client);
-    let consumer = Broker::hallway_consumer(&context, &state.config.room).await
+    let consumer = Broker::hallway_consumer(&context, &state.config.room)
+        .await
         .map_err(|_| "consumer_configuration_failed")?;
     loop {
-        let mut messages = consumer.fetch().max_messages(1).expires(MAX_EXPIRES)
-            .messages().await.map_err(|_| "pull_failed")?;
+        let mut messages = consumer
+            .fetch()
+            .max_messages(1)
+            .expires(MAX_EXPIRES)
+            .messages()
+            .await
+            .map_err(|_| "pull_failed")?;
         while let Some(message) = messages.next().await {
             let message = message.map_err(|_| "receive_failed")?;
             consume_hallway_message(state, message).await?;
@@ -2790,7 +2885,9 @@ async fn consume_hallway_message(
     use origami::hallways::sea::{HallwayPostProjection, hallway_room_subject};
     let projection = serde_json::from_slice::<HallwayPostProjection>(&message.payload);
     let valid = projection.as_ref().is_ok_and(|projection| {
-        projection.schema_version == 1 && projection.message_id > 0 && projection.sequence > 0
+        projection.schema_version == 1
+            && projection.message_id > 0
+            && projection.sequence > 0
             && message.subject.as_str() == hallway_room_subject(&state.config.room)
             && projection.from_room != state.config.room
             && (projection.to_rooms.is_empty() || projection.to_rooms.contains(&state.config.room))
@@ -2798,32 +2895,43 @@ async fn consume_hallway_message(
     if !valid {
         // Insula retains the poison reason, never the untrusted payload.
         hallway_sea_failure(state, "hallway.dead_letter", "invalid_projection");
-        message.ack_with(async_nats::jetstream::message::AckKind::Term).await
+        message
+            .ack_with(async_nats::jetstream::message::AckKind::Term)
+            .await
             .map_err(|_| "term_failed")?;
         return Ok(());
     }
     let sessions: Vec<_> = {
         let runtime = state.runtime.lock().await;
-        runtime.hallway_inbox_fingerprints.keys()
+        runtime
+            .hallway_inbox_fingerprints
+            .keys()
             .filter_map(|session| runtime.hallway_subscriptions.get(session))
             .filter(|(_, count)| *count > 0)
             .map(|(meta, _)| meta.clone())
             .collect()
     };
     let push = async {
-        let mut projections = futures_util::stream::iter(sessions).map(|meta| async move {
-            let session = meta.sender_session.clone();
-            let responses = match tokio::time::timeout(ACK_WAIT, project_hallway_inbox_inner(state, meta, false)).await {
-                Ok(responses) => responses,
-                Err(_) => {
-                    hallway_sea_failure(state, "hallway.push", "projection_timeout");
-                    return;
+        let mut projections = futures_util::stream::iter(sessions)
+            .map(|meta| async move {
+                let session = meta.sender_session.clone();
+                let responses = match tokio::time::timeout(
+                    ACK_WAIT,
+                    project_hallway_inbox_inner(state, meta, false),
+                )
+                .await
+                {
+                    Ok(responses) => responses,
+                    Err(_) => {
+                        hallway_sea_failure(state, "hallway.push", "projection_timeout");
+                        return;
+                    }
+                };
+                for response in responses.direct {
+                    let _ = state.hallway_deltas.send((session.clone(), response));
                 }
-            };
-            for response in responses.direct {
-                let _ = state.hallway_deltas.send((session.clone(), response));
-            }
-        }).buffer_unordered(4);
+            })
+            .buffer_unordered(4);
         while projections.next().await.is_some() {}
     };
     tokio::pin!(push);
@@ -3317,10 +3425,33 @@ mod tests {
     #[test]
     fn undelivered_push_does_not_silence_next_turn_reconciliation() {
         let mut fingerprints = std::collections::HashMap::new();
-        assert!(super::observe_hallway_projection(&mut fingerprints, "session", "first", true, true));
-        assert!(super::observe_hallway_projection(&mut fingerprints, "session", "second", true, false));
-        assert!(super::observe_hallway_projection(&mut fingerprints, "session", "second", true, true));
-        assert!(!super::observe_hallway_projection(&mut fingerprints, "session", "second", true, true));
+        assert!(super::observe_hallway_projection(
+            &mut fingerprints,
+            "session",
+            "first",
+            true,
+            true
+        ));
+        assert!(super::observe_hallway_projection(
+            &mut fingerprints,
+            "session",
+            "second",
+            true,
+            false
+        ));
+        assert!(super::observe_hallway_projection(
+            &mut fingerprints,
+            "session",
+            "second",
+            true,
+            true
+        ));
+        assert!(!super::observe_hallway_projection(
+            &mut fingerprints,
+            "session",
+            "second",
+            true,
+            true
+        ));
     }
-
 }

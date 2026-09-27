@@ -363,7 +363,10 @@ async fn run_contract(pool: &sqlx::PgPool) -> TestResult {
         .iter()
         .find(|entry| entry.hallway == hallway)
         .expect("author inbox lists the hallway");
-    assert_eq!(author_entry.members, Some(vec!["kintsu".into(), "kodo".into()]));
+    assert_eq!(
+        author_entry.members,
+        Some(vec!["kintsu".into(), "kodo".into()])
+    );
     assert_eq!(author_entry.latest_sequence, 5);
     assert_eq!(author_entry.unread, 0);
     let author_read_sequence: i64 = sqlx::query_scalar(

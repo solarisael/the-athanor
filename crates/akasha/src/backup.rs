@@ -1017,7 +1017,9 @@ async fn post_write_manifest(
         .ok()
         .and_then(|x| x.parse().ok())
         .unwrap_or(room_keep);
-    let source = source_migrations(pool).await.map_err(|error| (error, None))?;
+    let source = source_migrations(pool)
+        .await
+        .map_err(|error| (error, None))?;
     let dir = default_backup_dir().map_err(|error| (error, None))?;
     let tool = resolve_pg_tool("pg_dump")
         .ok()
@@ -1035,14 +1037,22 @@ mod tests {
     fn dump_arguments_exclude_insula() {
         let mut command = Command::new("pg_dump");
         command.args(PG_DUMP_ARGS);
-        assert!(command.get_args().any(|arg| arg == "--exclude-schema=insula"));
+        assert!(
+            command
+                .get_args()
+                .any(|arg| arg == "--exclude-schema=insula")
+        );
     }
 
     #[tokio::test]
     async fn unrequested_backup_skips_runner() {
-        let outcome = post_write_outcome_with(false, || -> std::future::Ready<Result<BackupReceipt, BackupFailure>> {
-            panic!("an unrequested backup must not invoke the runner");
-        }).await;
+        let outcome = post_write_outcome_with(
+            false,
+            || -> std::future::Ready<Result<BackupReceipt, BackupFailure>> {
+                panic!("an unrequested backup must not invoke the runner");
+            },
+        )
+        .await;
         assert!(matches!(outcome, hearth::BackupOutcome::Skipped));
     }
 
@@ -1051,12 +1061,20 @@ mod tests {
         let mut calls = 0;
         let outcome = post_write_outcome_with(true, || {
             calls += 1;
-            std::future::ready(BackupReceipt::new(
-                "memory.dump".into(), "a".repeat(64), 42, 1, "path:pg_dump".into(),
-            ).map_err(|error| BackupFailure::new(
-                BackupFailureCode::Manifest, error.to_string(), 1, None,
-            )))
-        }).await;
+            std::future::ready(
+                BackupReceipt::new(
+                    "memory.dump".into(),
+                    "a".repeat(64),
+                    42,
+                    1,
+                    "path:pg_dump".into(),
+                )
+                .map_err(|error| {
+                    BackupFailure::new(BackupFailureCode::Manifest, error.to_string(), 1, None)
+                }),
+            )
+        })
+        .await;
         assert_eq!(calls, 1);
         assert!(matches!(outcome, hearth::BackupOutcome::Ok(_)));
     }
@@ -1185,7 +1203,8 @@ mod tests {
                 wsl: PathBuf::from("C:\\Windows\\System32\\wsl.exe")
             }
         );
-        let unix = resolution(Some("/usr/lib/postgresql/16/bin"), false, false).candidates("pg_dump");
+        let unix =
+            resolution(Some("/usr/lib/postgresql/16/bin"), false, false).candidates("pg_dump");
         assert_eq!(
             unix[0].invocation,
             PgInvocation::Native(PathBuf::from("/usr/lib/postgresql/16/bin/pg_dump"))
@@ -1247,12 +1266,9 @@ mod tests {
         let text = error.to_string();
         assert!(text.starts_with("pg_dump not found; probed pg_bin_dir:pg_dump="));
         assert!(text.contains("path:pg_dump=pg_dump.exe (program not found)"));
-        let restore = resolve_pg_tool_with("pg_restore", vec![], |_| Err(String::new()))
-            .unwrap_err();
-        assert_eq!(
-            restore.failure_code(),
-            BackupFailureCode::PgRestoreNotFound
-        );
+        let restore =
+            resolve_pg_tool_with("pg_restore", vec![], |_| Err(String::new())).unwrap_err();
+        assert_eq!(restore.failure_code(), BackupFailureCode::PgRestoreNotFound);
     }
 
     #[test]

@@ -41,41 +41,78 @@ fn error(status: StatusCode, reason: impl ToString) -> Response {
 }
 
 fn payload<T>(value: Result<Json<T>, JsonRejection>) -> Result<T, Response> {
-    value.map(|Json(value)| value)
+    value
+        .map(|Json(value)| value)
         .map_err(|reason| error(StatusCode::BAD_REQUEST, reason.body_text()))
 }
 
-async fn snapshot(State(state): State<AppState>, body: Result<Json<EmptyRequest>, JsonRejection>) -> Response {
-    if let Err(response) = payload(body) { return response; }
+async fn snapshot(
+    State(state): State<AppState>,
+    body: Result<Json<EmptyRequest>, JsonRejection>,
+) -> Response {
+    if let Err(response) = payload(body) {
+        return response;
+    }
     let runtime = state.runtime.lock().await;
     Json(json!({ "room": state.config.room, "messages": runtime.chat.snapshot(), "drafts": runtime.chat.drafts() })).into_response()
 }
 
-async fn say(State(state): State<AppState>, body: Result<Json<SayRequest>, JsonRejection>) -> Response {
-    let request = match payload(body) { Ok(request) => request, Err(response) => return response };
+async fn say(
+    State(state): State<AppState>,
+    body: Result<Json<SayRequest>, JsonRejection>,
+) -> Response {
+    let request = match payload(body) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
     if request.text.trim().is_empty() || request.text.chars().count() > CHAT_MAX_TEXT_CHARS {
-        return error(StatusCode::BAD_REQUEST, "text must contain 1 to 32768 characters");
+        return error(
+            StatusCode::BAD_REQUEST,
+            "text must contain 1 to 32768 characters",
+        );
     }
     if request.say_id.trim().is_empty() || request.say_id.chars().count() > MAX_SAY_ID_CHARS {
-        return error(StatusCode::BAD_REQUEST, "sayId must contain 1 to 256 characters");
+        return error(
+            StatusCode::BAD_REQUEST,
+            "sayId must contain 1 to 256 characters",
+        );
     }
     let identity = match state.room_store.identity() {
         Ok(identity) => identity,
         Err(reason) => return error(StatusCode::SERVICE_UNAVAILABLE, reason),
     };
     let mut runtime = state.runtime.lock().await;
-    let message = runtime.chat.say(&identity.operator, &request.text, &request.say_id, now_rfc3339());
+    let message = runtime.chat.say(
+        &identity.operator,
+        &request.text,
+        &request.say_id,
+        now_rfc3339(),
+    );
     if let Some(message) = &message {
         publish_chat(&state, None, message.clone(), runtime.cursor.sequence);
     }
     Json(json!({ "room": state.config.room, "accepted": true, "repeated": message.is_none(), "message": message })).into_response()
 }
 
-async fn room_state(State(state): State<AppState>, body: Result<Json<EmptyRequest>, JsonRejection>) -> Response {
-    if let Err(response) = payload(body) { return response; }
+async fn room_state(
+    State(state): State<AppState>,
+    body: Result<Json<EmptyRequest>, JsonRejection>,
+) -> Response {
+    if let Err(response) = payload(body) {
+        return response;
+    }
     let root = match state.room_store.read_root() {
-        Ok(root) if root.get("room").and_then(Value::as_str) == Some(state.config.room.as_str()) => root,
-        Ok(_) => return error(StatusCode::SERVICE_UNAVAILABLE, "room state names a foreign room"),
+        Ok(root)
+            if root.get("room").and_then(Value::as_str) == Some(state.config.room.as_str()) =>
+        {
+            root
+        }
+        Ok(_) => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "room state names a foreign room",
+            );
+        }
         Err(reason) => return error(StatusCode::SERVICE_UNAVAILABLE, reason),
     };
     let runtime = state.runtime.lock().await;
@@ -96,13 +133,19 @@ fn project_room(room: &str, root: &Value) -> Value {
         "operator": root.get("operator").and_then(Value::as_str),
         "spirit": root.get("embodiedSpirit").and_then(Value::as_str).or_else(|| root.get("agentName").and_then(Value::as_str)),
     });
-    if let Some(enabled) = root.pointer("/routingMode/enabled").and_then(Value::as_bool) {
+    if let Some(enabled) = root
+        .pointer("/routingMode/enabled")
+        .and_then(Value::as_bool)
+    {
         result["routingMode"] = json!(if enabled { "on" } else { "off" });
     }
     if let Some(policy) = root.get("recallPolicy").filter(|value| value.is_object()) {
         result["recallPolicy"] = policy.clone();
     }
-    if let Some(model) = root.pointer("/modelDefault/model").filter(|value| value.is_string() || value.is_null()) {
+    if let Some(model) = root
+        .pointer("/modelDefault/model")
+        .filter(|value| value.is_string() || value.is_null())
+    {
         result["modelDefault"] = model.clone();
     }
     result
@@ -110,9 +153,9 @@ fn project_room(room: &str, root: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use super::super::Host;
     use super::*;
     use crate::config::{HostConfig, KnockAutonomy};
-    use super::super::Host;
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
     use std::path::PathBuf;
@@ -126,7 +169,8 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
-            let directory = std::env::temp_dir().join(format!("athanor-surface-{}", uuid::Uuid::new_v4()));
+            let directory =
+                std::env::temp_dir().join(format!("athanor-surface-{}", uuid::Uuid::new_v4()));
             let config = HostConfig {
                 bind: "127.0.0.1:0".parse().unwrap(),
                 bearer_token: "surface-test".into(),
@@ -152,14 +196,25 @@ mod tests {
                 }
             });
             std::fs::write(config.room_state_path(), root.to_string()).unwrap();
-            let host = Host::new(config, None, CancellationToken::new(), TaskTracker::new()).unwrap();
+            let host =
+                Host::new(config, None, CancellationToken::new(), TaskTracker::new()).unwrap();
             Self { host, directory }
         }
 
         async fn post(&self, path: &str, body: Value, authenticated: bool) -> (StatusCode, Value) {
-            let mut request = Request::builder().method("POST").uri(path).header("content-type", "application/json");
-            if authenticated { request = request.header("authorization", "Bearer surface-test"); }
-            let response = self.host.router().oneshot(request.body(Body::from(body.to_string())).unwrap()).await.unwrap();
+            let mut request = Request::builder()
+                .method("POST")
+                .uri(path)
+                .header("content-type", "application/json");
+            if authenticated {
+                request = request.header("authorization", "Bearer surface-test");
+            }
+            let response = self
+                .host
+                .router()
+                .oneshot(request.body(Body::from(body.to_string())).unwrap())
+                .await
+                .unwrap();
             let status = response.status();
             let bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
             (status, serde_json::from_slice(&bytes).unwrap())
@@ -191,12 +246,24 @@ mod tests {
         assert_eq!(snapshot["messages"], json!([accepted["message"]]));
         let (status, repeated) = fixture.post(CHAT_SAY_PATH, body, true).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(repeated, json!({ "room": "kodo", "accepted": true, "repeated": true, "message": null }));
-        assert!(matches!(deltas.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
-        assert_eq!(fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1, snapshot);
+        assert_eq!(
+            repeated,
+            json!({ "room": "kodo", "accepted": true, "repeated": true, "message": null })
+        );
+        assert!(matches!(
+            deltas.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1,
+            snapshot
+        );
         let (status, room) = fixture.post(ROOM_STATE_PATH, json!({}), true).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(room["chat"], json!({ "entries": 1, "lastAt": accepted["message"]["at"] }));
+        assert_eq!(
+            room["chat"],
+            json!({ "entries": 1, "lastAt": accepted["message"]["at"] })
+        );
         assert!(room.get("routingMode").is_none());
         assert!(room.get("modelDefault").is_none());
         println!("SAY {accepted}\nSNAPSHOT {snapshot}\nROOM {room}");
@@ -216,9 +283,15 @@ mod tests {
             assert!(refusal["error"].is_string());
         }
         for path in [CHAT_SAY_PATH, CHAT_SNAPSHOT_PATH, ROOM_STATE_PATH] {
-            assert_eq!(fixture.post(path, json!({}), false).await.0, StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                fixture.post(path, json!({}), false).await.0,
+                StatusCode::UNAUTHORIZED
+            );
         }
-        assert_eq!(fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1["messages"], json!([]));
+        assert_eq!(
+            fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1["messages"],
+            json!([])
+        );
     }
 
     #[tokio::test]
@@ -228,10 +301,13 @@ mod tests {
         std::fs::write(&path, json!({ "room": "kodo" }).to_string()).unwrap();
         let (status, absent) = fixture.post(ROOM_STATE_PATH, json!({}), true).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(absent, json!({
-            "room": "kodo", "operator": null, "spirit": null,
-            "presences": [], "chat": { "entries": 0, "lastAt": null }
-        }));
+        assert_eq!(
+            absent,
+            json!({
+                "room": "kodo", "operator": null, "spirit": null,
+                "presences": [], "chat": { "entries": 0, "lastAt": null }
+            })
+        );
         let root = json!({
             "room": "kodo", "operator": "Sol", "embodiedSpirit": "Kodo",
             "routingMode": { "enabled": false }, "recallPolicy": { "requestedMode": "quiet" },
@@ -240,10 +316,13 @@ mod tests {
         std::fs::write(&path, root.to_string()).unwrap();
         let (status, reported) = fixture.post(ROOM_STATE_PATH, json!({}), true).await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(reported, json!({
-            "room": "kodo", "operator": "Sol", "spirit": "Kodo", "routingMode": "off",
-            "recallPolicy": { "requestedMode": "quiet" }, "modelDefault": null,
-            "presences": [], "chat": { "entries": 0, "lastAt": null }
-        }));
+        assert_eq!(
+            reported,
+            json!({
+                "room": "kodo", "operator": "Sol", "spirit": "Kodo", "routingMode": "off",
+                "recallPolicy": { "requestedMode": "quiet" }, "modelDefault": null,
+                "presences": [], "chat": { "entries": 0, "lastAt": null }
+            })
+        );
     }
 }

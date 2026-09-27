@@ -43,8 +43,9 @@ pub(crate) const RECALL_EMBED_TIMEOUT: Duration = Duration::from_secs(3);
 /// silent socket and the House that is not there yet. Under the old 120 s an
 /// acquire across a Postgres bounce sat on dead sockets for 28–117 s
 /// (2026-09-23), so every caller waited out the bounce blind. Callers that
-/// must survive an absent House wait for it themselves (quest 50c26913).
-const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
+/// must survive an absent House wait for it themselves (quest 50c26913). The
+/// Host pool shares this bound, since the same bounce reaches both pools.
+pub const POOL_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) const EMBED_DIMENSION: usize = 2048;
 pub(crate) static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 pub(crate) static ROOM_KEY_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -926,7 +927,9 @@ impl Config {
             };
         Ok(Self {
             database_url,
-            nats_url: env::var("ATHANOR_NATS_URL").ok().filter(|url| !url.trim().is_empty()),
+            nats_url: env::var("ATHANOR_NATS_URL")
+                .ok()
+                .filter(|url| !url.trim().is_empty()),
             embed_model: configured_value("ATHANOR_EMBED_MODEL", &dotenv)
                 .unwrap_or_else(|| DEFAULT_EMBED_MODEL.into()),
             embed_dimension,

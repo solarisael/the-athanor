@@ -154,7 +154,11 @@ pub(crate) fn compare_candidates(left: &Value, right: &Value) -> Ordering {
                 .as_str()
                 .cmp(&right["source_path"].as_str())
         })
-        .then_with(|| left["chunk_index"].as_i64().cmp(&right["chunk_index"].as_i64()))
+        .then_with(|| {
+            left["chunk_index"]
+                .as_i64()
+                .cmp(&right["chunk_index"].as_i64())
+        })
         .then_with(|| left["memory_id"].as_i64().cmp(&right["memory_id"].as_i64()))
 }
 

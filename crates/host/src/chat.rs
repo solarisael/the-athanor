@@ -40,8 +40,14 @@ impl ChatLog {
         at: String,
     ) -> Option<ChatMessage> {
         self.append(
-            ChatAuthor::Operator, author_name, text, say_id, vec![], vec![],
-            ChatOutcome::Complete, at,
+            ChatAuthor::Operator,
+            author_name,
+            text,
+            say_id,
+            vec![],
+            vec![],
+            ChatOutcome::Complete,
+            at,
         )
     }
 
@@ -60,8 +66,14 @@ impl ChatLog {
     ) -> Option<ChatMessage> {
         self.retire_draft(turn_id);
         self.append(
-            ChatAuthor::Spirit, author_name, text, turn_id, bounded_steps(steps),
-            thinking, outcome, at,
+            ChatAuthor::Spirit,
+            author_name,
+            text,
+            turn_id,
+            bounded_steps(steps),
+            thinking,
+            outcome,
+            at,
         )
     }
 
@@ -112,7 +124,10 @@ impl ChatLog {
     }
 
     pub(crate) fn summary(&self) -> (usize, Option<&str>) {
-        (self.entries.len(), self.entries.back().map(|message| message.at.as_str()))
+        (
+            self.entries.len(),
+            self.entries.back().map(|message| message.at.as_str()),
+        )
     }
 
     fn append(
@@ -214,7 +229,17 @@ mod tests {
     fn a_spirit_line_takes_the_sequence_after_the_operator_line_before_it() {
         let mut log = ChatLog::default();
         let say = log.say("Sol", "hello dragon", "say-1", now()).unwrap();
-        let turn = log.turn("Kodo", "thump thump", "turn-1", vec![], vec![], ChatOutcome::Complete, now()).unwrap();
+        let turn = log
+            .turn(
+                "Kodo",
+                "thump thump",
+                "turn-1",
+                vec![],
+                vec![],
+                ChatOutcome::Complete,
+                now(),
+            )
+            .unwrap();
         assert_eq!(turn.sequence, say.sequence + 1);
     }
 
@@ -222,13 +247,29 @@ mod tests {
     fn a_draft_is_replaced_whole_and_retired_by_its_turn() {
         let mut log = ChatLog::default();
         log.say("Sol", "hello", "say-1", now()).unwrap();
-        log.draft("Kodo", "thu", "say-1", vec![], vec![], now()).unwrap();
-        let draft = log.draft("Kodo", "thump", "say-1", vec![step("t-1")], vec![], now()).unwrap();
+        log.draft("Kodo", "thu", "say-1", vec![], vec![], now())
+            .unwrap();
+        let draft = log
+            .draft("Kodo", "thump", "say-1", vec![step("t-1")], vec![], now())
+            .unwrap();
         assert_eq!(log.drafts(), vec![draft]);
-        let turn = log.turn("Kodo", "thump thump", "say-1", vec![step("t-1")], vec![], ChatOutcome::Complete, now()).unwrap();
+        let turn = log
+            .turn(
+                "Kodo",
+                "thump thump",
+                "say-1",
+                vec![step("t-1")],
+                vec![],
+                ChatOutcome::Complete,
+                now(),
+            )
+            .unwrap();
         assert_eq!(turn.steps, vec![step("t-1")]);
         assert!(log.drafts().is_empty());
-        assert!(log.draft("Kodo", "late", "say-1", vec![], vec![], now()).is_none());
+        assert!(
+            log.draft("Kodo", "late", "say-1", vec![], vec![], now())
+                .is_none()
+        );
     }
 
     #[test]
@@ -245,8 +286,16 @@ mod tests {
         let mut log = ChatLog::default();
         log.say("Sol", "hello", "shared-id", now())
             .expect("the operator side enters the ring");
-        log.turn("Kodo", "answer", "shared-id", vec![], vec![], ChatOutcome::Complete, now())
-            .expect("the spirit side is not the operator side");
+        log.turn(
+            "Kodo",
+            "answer",
+            "shared-id",
+            vec![],
+            vec![],
+            ChatOutcome::Complete,
+            now(),
+        )
+        .expect("the spirit side is not the operator side");
         assert_eq!(log.snapshot().len(), 2);
     }
 

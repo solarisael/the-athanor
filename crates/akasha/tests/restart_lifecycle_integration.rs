@@ -1064,7 +1064,9 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
         "the House expired it: no spirit was in the room to do it ({actor})"
     );
     assert!(
-        ledger(&pool, &stranded).await?.contains(&"failed".to_string()),
+        ledger(&pool, &stranded)
+            .await?
+            .contains(&"failed".to_string()),
         "the terminal move is in the append-only ledger"
     );
 

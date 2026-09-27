@@ -1,5 +1,6 @@
 use crate::config::HostConfig;
 use crate::server::Host;
+use akasha::POOL_ACQUIRE_TIMEOUT;
 use akasha::insula_writer::{flush_insula_emitter, init_insula_emitter};
 use axum::Router;
 use origami::cranes::{delivery::DeliveryService, outbox::Store};
@@ -237,6 +238,9 @@ fn house_settings(
         .map(|url| {
             PgPoolOptions::new()
                 .max_connections(HOUSE_POOL_CONNECTIONS)
+                // already sqlx's default; stated because the bounce law depends on it
+                .test_before_acquire(true)
+                .acquire_timeout(POOL_ACQUIRE_TIMEOUT)
                 .connect_lazy(url)
         })
         .transpose()

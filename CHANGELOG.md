@@ -71,6 +71,7 @@ the exact implementation record.
   The console shows when the House goes away, one time each minute while it is away, and when it answers again.
 - The substrate pool tests each pooled connection before it gives the connection to a caller, and one acquire waits a maximum of 5 seconds. Before this change, one acquire waited up to 120 seconds.
   After a Postgres restart, a dead pooled connection now costs milliseconds. When Postgres is down, the caller gets a `database` answer in 5 seconds.
+  The Host pool in `athanor.exe` uses the same two rules. Before this change, one Host acquire waited up to 30 seconds.
 
 - Every cargo build for this repository lands in one absolute target directory, `C:/Projects/the-athanor-target`, shared by every worktree. The release build uses the same directory.
   The deploy ritual stages payloads under `<checkout>/target/releases` and prunes only that tree. Before this change it pruned `target/deploy`, which deleted the development build cache after every successful deploy.

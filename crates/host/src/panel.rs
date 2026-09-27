@@ -125,16 +125,17 @@ impl PanelHost {
     }
 
     pub(crate) fn router(&self) -> Router {
-        self.protect(Router::new()
-
-            .route(BOARD_PATH, post(read_board))
-            .route(INBOX_PATH, post(read_inbox))
-            .route(MESSAGES_PATH, post(read_messages))
-            .route(EVIDENCE_PATH, post(read_evidence))
-            .route(MEMORY_TIMELINE_PATH, post(read_memory_timeline))
-            .route(MEMORY_READ_PATH, post(read_memory))
-            .route(LESSON_TIMELINE_PATH, post(read_lesson_timeline))
-            .with_state(self.clone()))
+        self.protect(
+            Router::new()
+                .route(BOARD_PATH, post(read_board))
+                .route(INBOX_PATH, post(read_inbox))
+                .route(MESSAGES_PATH, post(read_messages))
+                .route(EVIDENCE_PATH, post(read_evidence))
+                .route(MEMORY_TIMELINE_PATH, post(read_memory_timeline))
+                .route(MEMORY_READ_PATH, post(read_memory))
+                .route(LESSON_TIMELINE_PATH, post(read_lesson_timeline))
+                .with_state(self.clone()),
+        )
     }
 
     pub(crate) fn protect(&self, router: Router) -> Router {

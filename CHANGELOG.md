@@ -23,6 +23,10 @@ the exact implementation record.
 ### Added
 
 - The OMP adapter can judge each finished turn with Jev. It reads the operator's reply and the previous assistant turn, both clipped, and records `turn_verdict` and `recall_verdict` points in Insula.
+- In a top-level House session, an OMP handoff writes a paper boat in the embodied spirit's voice instead of the OMP handoff document.
+  The adapter replaces only the final handoff prompt message, so the provider prompt cache still applies.
+  After the handoff compaction, the adapter writes the exact summary as a paper boat without a backup. `sleep` keeps its backup.
+  If OMP changes its handoff prompt, the adapter writes no boat and shows a warning.
   The room marker `jevVerdict` turns this on with an explicit grant. It is off by default.
   The provider is `typesafe` or a `laya` endpoint on loopback. Both use the same request shape.
 - Insula records the size of each context block the OMP adapter injects, per organ, as `injection.<organ>` points.

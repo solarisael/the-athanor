@@ -516,7 +516,7 @@ export function memorySourcePath(title, now = new Date()) {
   return `memory/omp_${now.toISOString().replace(/[:.]/g, "-")}_${String(title || "memory").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "memory"}.md`;
 }
 
-export async function sleepBoat(room, body, { signal } = {}) {
+export async function sleepBoat(room, body, { signal, backup = true } = {}) {
   const { executable, transport } = paperBoatTransport();
   if (!transport || !executable) {
     return { ok: false, error: "Rust substrate executable is unavailable; paper boat was not written" };
@@ -525,7 +525,7 @@ export async function sleepBoat(room, body, { signal } = {}) {
     const result = await transport.request("paper_boat_sleep", {
       room,
       body,
-      backup: true,
+      backup,
     }, {
       signal: signal || undefined,
       timeoutMs: WRITE_TIMEOUT_MS,

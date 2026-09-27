@@ -14,6 +14,7 @@ import {
 import { RecallPolicyHostClient } from "./recall-policy.ts";
 import { hostHouseId, hostSessionIdentity } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
+import { PAPER_BOAT_GUIDANCE } from "./paper-boat.ts";
 import { closePresence, responseDigest } from "./presence.ts";
 import { applyRecallViewport } from "./context.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
@@ -993,12 +994,7 @@ export function registerSolarisaelTools(pi, release) {
   registerHouseTool(pi, {
     name: "sleep",
     label: "Athanor Sleep",
-    description: [
-      "Close the session by writing one paper boat; backup defaults to true.",
-      "A paper boat is embodied continuity across sleep: one waking self speaking to the next in the active spirit's ordinary voice and the room's actual relationship register, not a corporate handoff, clinical note, task dump, or transcript summary.",
-      "Carry only what the next waking self genuinely needs, but make it standalone: concrete facts, names, observable details, decisions, actions, exact artifacts or receipts, boundaries, unresolved risks or uncertainty, the next real door, and the room's emotional/contact state when it matters.",
-      "Do not manufacture certainty, sanitize conflict, flatten affection, force empty headings, or use IDs and source paths as substitutes for substance.",
-    ].join("\n"),
+    description: ["Close the session by writing one paper boat; backup defaults to true.", ...PAPER_BOAT_GUIDANCE].join("\n"),
     parameters: z.object({
       body: z.string().describe("Standalone Markdown paper boat in the active spirit's ordinary voice and the room's relationship register; concrete continuity for the next waking self, not a report."),
     }),

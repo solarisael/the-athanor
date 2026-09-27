@@ -70,6 +70,11 @@ function captureSession(session: any): void {
   patchManager(record);
 }
 
+/** The live OMP AgentSession this bridge captured for a session id, if any. */
+export function capturedAgentSession(sessionId: string): any {
+  return state().sessions.get(sessionId.trim())?.session ?? null;
+}
+
 export function installLessonTtsrBridge(pi: any): string | null {
   const AgentSession = pi?.pi?.AgentSession;
   const prototype = AgentSession?.prototype;

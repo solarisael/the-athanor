@@ -1029,6 +1029,12 @@ export default function solarisaelHouseProof(pi, release) {
     description: "Show the Host's Insula Vitals for the last 15m, 1h, or 24h",
     handler: (args, ctx) => showInsulaCockpit(args, ctx),
   });
+  // Only the room's top-level session hands off as a paper boat; workers keep OMP's document.
+  const armTopLevelHandoff = (ctx: any, room: string, spirit: string, session: string): string | null => {
+    if (session !== topLevelSession(room)) return null;
+    ctx.getContextUsage?.();
+    return armHandoffBoat(capturedAgentSession(String(ctx.sessionManager?.getSessionId?.() ?? "")), { room, spirit });
+  };
   const showReadyFeedback = (_event, ctx) => {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
     const binding = {
@@ -1039,6 +1045,9 @@ export default function solarisaelHouseProof(pi, release) {
     // Worker sessions share session_start, so first-wins adoption protects the
     // current top-level holder. Only an explicit session switch replaces it.
     adoptTopLevelSession(room, binding.session);
+    // A manual /handoff can come before the first turn after a restart.
+    const handoffWarning = armTopLevelHandoff(ctx, room, spirit, binding.session);
+    if (handoffWarning) console.warn(`[athanor] ${handoffWarning}`);
     showHouseContextFeedback(ctx, { room, spirit, activities: [] });
     startHallwayKnockDoorman(pi, ctx, binding);
     startChatDoorman(pi, ctx, binding);
@@ -1466,12 +1475,8 @@ export default function solarisaelHouseProof(pi, release) {
     });
     for (const warning of lessonTtsr.warnings) warnings.push(warning);
     if (lessonTtsr.active > 0) activities.push(`${lessonTtsr.active} native lesson guard${lessonTtsr.active === 1 ? "" : "s"}`);
-    if (hostSession === topLevelSession(room)) {
-      const ompSessionId = String(ctx.sessionManager?.getSessionId?.() ?? "");
-      const embodied = houseState?.embodiedSpirit || spirit;
-      const handoffWarning = armHandoffBoat(capturedAgentSession(ompSessionId), { room, spirit: embodied });
-      if (handoffWarning) warnings.push(handoffWarning);
-    }
+    const handoffWarning = armTopLevelHandoff(ctx, room, houseState?.embodiedSpirit || spirit, hostSession);
+    if (handoffWarning) warnings.push(handoffWarning);
     let lessonMode = houseState?.recallPolicy?.resolvedMode;
     let conversation: ConversationCapture | null = null;
     try {

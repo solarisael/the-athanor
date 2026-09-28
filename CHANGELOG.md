@@ -76,6 +76,10 @@ the exact implementation record.
 
 ### Changed
 
+- Lesson language and technology keys now match by family. A trailing number is a version: `bend-2` has the family `bend`.
+  A key without a version reaches every version, so `bend` finds lessons keyed `bend-2`. A key with a version reaches the same version and the key without a version, so `bend-2` finds `bend` but not `bend-1`.
+  Stored keys do not change. `lessons` queries, lesson context, and the OMP trigger globs use the same rule. The OMP trigger globs now also know `.bend` and `.wgsl` files.
+
 - On a turn where automatic Recall fires, the OMP adapter now starts the lesson sieve beside Recall instead of after it, so a slow Recall no longer leaves the sieve without time and Presence without its sieved lessons.
   Recall's share of the context budget always ends 500 ms before the deadline, so Presence still composes after a Recall that spends all of it.
   The Windows context budget rises from 5 s to 8 s: the substrate's own recall spends up to 3 s on an embed stall by design and up to 4 s on its lexical lane, and the 4.5 s share cut 16% of live recalls.

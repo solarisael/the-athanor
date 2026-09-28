@@ -106,6 +106,15 @@ test("unapproved triggers never arm while approved guards retain scope and proje
   expect(presence(result, "conversation").map((material) => material.body)).toEqual(["Craft body 2", "Project rule"]);
 });
 
+test("a versioned language key globs through its family", async () => {
+  // Kills: looking up LANGUAGE_EXTENSIONS by the raw key, which drops the glob
+  // for `bend-2` and arms the guard on every file instead of Bend sources.
+  lessons([coding(5, { tags: ["ttsr-approved"], condition: ["musttail"], languageKeys: ["bend-2"], triggerScope: ["tool:edit"] })]);
+  const { ctx, rules } = session();
+  await sync(ctx);
+  expect(rules[0].globs).toEqual(["**/*.bend"]);
+});
+
 test("coding baseline survives an unavailable native manager without arming conditional lessons", async () => {
   lessons([coding(200, { alwaysOn: true }), coding(224, { tags: ["ttsr-approved"], condition: ["rename"] })]);
   const result = await sync({ sessionID: randomUUID() });

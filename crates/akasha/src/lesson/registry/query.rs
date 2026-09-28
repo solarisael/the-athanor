@@ -1,4 +1,5 @@
 use super::family::LessonFamily;
+use super::keys::{KEY_FAMILY_SQL, KeyScope};
 use crate::config::{AppError, ROOM_KEY_RE};
 use crate::lesson::defaults::default_twelve;
 use crate::settings::RoomSettings;
@@ -174,18 +175,23 @@ pub struct LessonQueryResult {
 }
 
 /// Keys narrow, they never exclude by absence. A query without keys sees every
-/// lesson; a query with keys sees unkeyed lessons plus lessons sharing a slug.
+/// lesson; a query with keys sees unkeyed lessons plus lessons whose key
+/// family meets the request, so `bend` reaches a row keyed `bend-2` while
+/// `bend-1` does not (see `keys.rs`; `KeyScope::admits` is the Rust twin).
 /// The old form hid every keyed lesson from a bare query (memories 3512, 4284).
 fn eligibility(qb: &mut QueryBuilder<'_, Postgres>, language: &[String], technology: &[String]) {
-    if !language.is_empty() {
-        qb.push(" AND (cardinality(language_keys) = 0 OR language_keys && ")
-            .push_bind(language.to_vec())
-            .push(")");
-    }
-    if !technology.is_empty() {
-        qb.push(" AND (cardinality(technology_keys) = 0 OR technology_keys && ")
-            .push_bind(technology.to_vec())
-            .push(")");
+    for (column, keys) in [("language_keys", language), ("technology_keys", technology)] {
+        let scope = KeyScope::new(keys);
+        if scope.is_empty() {
+            continue;
+        }
+        qb.push(format!(
+            " AND (cardinality({column}) = 0 OR EXISTS (SELECT 1 FROM unnest({column}) AS k WHERE lower(k) = ANY("
+        ))
+        .push_bind(scope.accepted.into_iter().collect::<Vec<_>>())
+        .push(format!(") OR {KEY_FAMILY_SQL} = ANY("))
+        .push_bind(scope.requested.into_iter().collect::<Vec<_>>())
+        .push(")))");
     }
 }
 

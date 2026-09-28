@@ -1,5 +1,6 @@
 use super::*;
 use crate::lesson::registry::context::intersects;
+use crate::lesson::registry::keys::{KeyScope, key_family};
 use crate::lesson::registry::mutation::update::patch_trigger_spec;
 use std::collections::BTreeSet;
 
@@ -132,6 +133,39 @@ fn context_eligibility_requires_declared_axis_overlap() {
     assert!(intersects(&[String::from("rust")], &rust));
     assert!(!intersects(&[String::from("python")], &rust));
     assert!(!intersects(&[String::from("rust")], &BTreeSet::new()));
+}
+
+#[test]
+fn key_family_drops_only_trailing_version_segments() {
+    for (key, family) in [
+        ("bend-2", "bend"),
+        ("godot-4", "godot"),
+        ("vgpu-0-4", "vgpu"),
+        ("Bend-2", "bend"),
+        ("github-actions", "github-actions"),
+        ("x86", "x86"),
+        ("qwen3-embedding", "qwen3-embedding"),
+        ("2", "2"),
+    ] {
+        assert_eq!(key_family(key), family, "{key}");
+    }
+}
+
+#[test]
+fn key_scope_reaches_versions_downward_and_never_sideways() {
+    // Kills: symmetric family matching (bend-1 reaching bend-2), prefix fuzz
+    // (github reaching github-actions), or losing the unkeyed-row pass.
+    let keys = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();
+    let bend = KeyScope::new(&keys(&["bend"]));
+    assert!(bend.admits(&keys(&["bend-2"])));
+    assert!(bend.admits(&keys(&["bend"])));
+    assert!(bend.admits(&[]));
+    let bend_two = KeyScope::new(&keys(&["bend-2"]));
+    assert!(bend_two.admits(&keys(&["bend-2"])));
+    assert!(bend_two.admits(&keys(&["bend"])));
+    assert!(!bend_two.admits(&keys(&["bend-1"])));
+    assert!(!KeyScope::new(&keys(&["github"])).admits(&keys(&["github-actions"])));
+    assert!(!KeyScope::new(&[]).admits(&keys(&["rust"])));
 }
 
 #[test]

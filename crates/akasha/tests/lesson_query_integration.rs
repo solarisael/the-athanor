@@ -231,6 +231,37 @@ async fn lesson_query_without_keys_sees_keyed_rows_and_keys_only_narrow() -> Tes
 
 #[tokio::test]
 #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+async fn lesson_query_key_families_match_key_scope() -> TestResult {
+    // The SQL half of keys.rs: the same cases `key_scope_reaches_versions_
+    // downward_and_never_sideways` pins for `KeyScope::admits`.
+    let pool = temp_lesson_pool().await?;
+    insert_lesson(&pool, 1, false).await?;
+    insert_keyed_lesson(&pool, 2, &["bend-2"]).await?;
+    insert_keyed_lesson(&pool, 3, &["bend"]).await?;
+    insert_keyed_lesson(&pool, 4, &["bend-1"]).await?;
+    insert_keyed_lesson(&pool, 5, &["github-actions"]).await?;
+
+    let cases: [(&str, Vec<i64>); 4] = [
+        ("bend", vec![1, 2, 3, 4]),
+        ("bend-2", vec![1, 2, 3]),
+        ("github", vec![1]),
+        ("github-actions", vec![1, 5]),
+    ];
+    for (key, expected) in cases {
+        let params: LessonQueryParams = serde_json::from_value(serde_json::json!({
+            "room": "kodo", "type": "coding", "technologyKeys": [key]
+        }))?;
+        assert_eq!(
+            ids_of(&lesson_query(&pool, params).await?),
+            expected,
+            "{key}"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
 async fn lesson_query_ids_return_exactly_the_named_rows() -> TestResult {
     // Kills: dropping the `id = ANY` predicate, or letting eligibility keys
     // still gate a direct lookup.

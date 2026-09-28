@@ -1,3 +1,4 @@
+use super::keys::KeyScope;
 use crate::config::{AppError, ROOM_KEY_RE};
 use crate::lesson::defaults::default_eight;
 use serde::{Deserialize, Serialize};
@@ -170,6 +171,8 @@ pub async fn lesson_context(
     let registers = normalized(&params.registers);
     let languages = normalized(&params.languages);
     let technologies = normalized(&params.technologies);
+    let language_scope = KeyScope::new(&params.languages);
+    let technology_scope = KeyScope::new(&params.technologies);
     let filters = LessonContextFilters {
         scopes: scopes.clone(),
         projects: projects.iter().cloned().collect(),
@@ -201,8 +204,8 @@ pub async fn lesson_context(
             .is_some_and(|v| !v.trim().is_empty() && !projects.contains(&v.trim().to_lowercase()))
             || !intersects(&stage, &stages)
             || !intersects(&register, &registers)
-            || !intersects(&language, &languages)
-            || !intersects(&technology, &technologies)
+            || !language_scope.admits(&language)
+            || !technology_scope.admits(&technology)
         {
             continue;
         }
@@ -220,8 +223,8 @@ pub async fn lesson_context(
         let technology: Vec<String> = row.try_get("technology_keys")?;
         if !intersects(&stage, &stages)
             || !intersects(&register, &registers)
-            || !intersects(&language, &languages)
-            || !intersects(&technology, &technologies)
+            || !language_scope.admits(&language)
+            || !technology_scope.admits(&technology)
         {
             continue;
         }

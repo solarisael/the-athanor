@@ -32,6 +32,8 @@ Retrieval discipline: the lexical query is weak. Widen before concluding
 `nats`/`jetstream`/`nats-jetstream` (lessons 365-369), Go lessons are keyed
 `go-toolchain`/`go-modules` or carry no keys at all (370-374). When a filter
 returns nothing, direct SQL against the `lessons` table is ground truth.
+Versions do not need exact spelling: a trailing number is a version, so
+`bend` finds lessons keyed `bend-2`. Different names still need their own key.
 
 Load-bearing rows for this repo's delivery spine: 365-369 (JetStream failure
 contracts, retention authority, ack-deadline-as-lease, dedup-window-ends-

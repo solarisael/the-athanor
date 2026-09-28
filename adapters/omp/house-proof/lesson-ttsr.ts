@@ -14,7 +14,11 @@ const LANGUAGE_EXTENSIONS: Record<string, string[]> = {
   css: ["css", "scss", "sass", "less"], html: ["html", "htm"], markdown: ["md", "mdx"],
   go: ["go"], ruby: ["rb"], java: ["java"], c: ["c", "h"], cpp: ["cc", "cpp", "hpp"],
   csharp: ["cs"], lua: ["lua"], zig: ["zig"], gdscript: ["gd"], glsl: ["glsl", "vert", "frag"],
+  wgsl: ["wgsl"], bend: ["bend"],
 };
+
+// Same fold as crates/akasha/src/lesson/registry/keys.rs: `bend-2` globs as `bend`.
+const keyFamily = (key: string) => key.trim().toLowerCase().replace(/(-[0-9]+)+$/, "");
 
 type LessonRow = {
   id: number; type: string; title: string; lesson: string; proofPattern?: string | null; project?: string | null;
@@ -98,7 +102,7 @@ function normalizeProject(value: unknown): string {
 }
 
 function globsFor(row: LessonRow): string[] | undefined {
-  const extensions = [...new Set((row.languageKeys ?? []).flatMap((key) => LANGUAGE_EXTENSIONS[String(key).toLowerCase()] ?? []))];
+  const extensions = [...new Set((row.languageKeys ?? []).flatMap((key) => LANGUAGE_EXTENSIONS[keyFamily(String(key))] ?? []))];
   const project = normalizeProject(row.project);
   if (project && extensions.length) return extensions.map((ext) => `**/${project}/**/*.${ext}`);
   if (project) return [`**/${project}/**`];

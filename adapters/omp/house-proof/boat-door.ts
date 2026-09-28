@@ -5,7 +5,9 @@
  *
  * It opens on `/handoff [focus]`, or when Sol sends a message after the context
  * has crossed the boat line just below OMP's own compaction threshold. That
- * message waits and is delivered after the handoff.
+ * message waits and is delivered after the handoff. When one long turn jumps
+ * past the threshold anyway, the door cancels OMP's automatic compaction and
+ * asks for the boat once the turn is over.
  *
  * What the door says comes from the room's `handoff-door.md`, so each room can
  * ask in its own voice. A missing file or section falls back to the House lines.
@@ -26,7 +28,7 @@ const SET_ASIDE_TEXT = "[Old tool output set aside so the paper boat fits.]";
 
 export const DOOR_LINES_FILE = "handoff-door.md";
 
-export type DoorLines = { handoff: string; nearLimit: string; after: string };
+export type DoorLines = { handoff: string; nearLimit: string; compaction: string; after: string };
 
 export const HOUSE_DOOR_LINES: DoorLines = {
   handoff: [
@@ -41,6 +43,12 @@ export const HOUSE_DOOR_LINES: DoorLines = {
     "Call `sleep` and write no reply text: the turn ends when the boat is cast, and the handoff starts.",
     "You speak again after the handoff.",
   ].join("\n"),
+  compaction: [
+    "The context reached OMP's compaction threshold during the last turn, and the handoff waits for your boat.",
+    "Cast your paper boat now with the `sleep` tool, in your own voice, for the self who wakes after the handoff.",
+    "Call `sleep` and write no reply text: the turn ends when the boat is cast, and the handoff starts.",
+    "You speak again after the handoff.",
+  ].join("\n"),
   after: [
     "The handoff is done. Your paper boat is in the House, and the handoff document now holds your context.",
     "Continue with Sol from here. Nobody typed this turn.",
@@ -50,6 +58,7 @@ export const HOUSE_DOOR_LINES: DoorLines = {
 const DOOR_SECTIONS: Record<string, keyof DoorLines> = {
   "handoff": "handoff",
   "near limit": "nearLimit",
+  "compaction": "compaction",
   "after": "after",
 };
 
@@ -68,7 +77,8 @@ type Door = {
   sessionId: string;
   focus: string | undefined;
   held: Held[];
-  stage: "boat" | "handoff";
+  /** "waiting": a cancelled compaction opened the door, and the boat request waits for the turn to end. */
+  stage: "waiting" | "boat" | "handoff";
   boatCast: boolean;
   compacted: boolean;
   spirit: string;
@@ -81,10 +91,13 @@ type Door = {
 // reaches it through boatCast without knowing about the door's wiring.
 let door: Door | null = null;
 let installed: BoatDoorDeps | null = null;
+// Set by auto_compaction_start; session_before_compact itself does not say why it runs.
+let autoCompactionReason: string | undefined;
 
 export function resetBoatDoor(): void {
   door = null;
   installed = null;
+  autoCompactionReason = undefined;
 }
 
 function sessionIdOf(ctx: any): string {
@@ -125,10 +138,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
     if (!session || session.isStreaming || session.isCompacting) return undefined;
 
     // Read on every door, so an edit to the room file needs no restart.
-    const room = deps.room(ctx);
-    const { lines, problem } = readDoorLines(room.dir);
-    if (problem) ctx?.ui?.notify?.(`${DOOR_LINES_FILE}: ${problem} The House lines fill the gap.`, "warning");
-
+    const lines = doorLines(deps, ctx);
     door = {
       sessionId: sessionIdOf(ctx),
       focus: command?.[1]?.trim() || undefined,
@@ -136,14 +146,45 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
       stage: "boat",
       boatCast: false,
       compacted: false,
-      spirit: room.spirit,
+      spirit: deps.room(ctx).spirit,
       after: lines.after,
     };
-    pi.sendMessage(attention(BOAT_REQUEST, nearLine ? lines.nearLimit : lines.handoff), {
-      deliverAs: "nextTurn",
-      triggerTurn: true,
-    });
+    askForBoat(pi, nearLine ? lines.nearLimit : lines.handoff);
     return { handled: true };
+  });
+
+  pi.on("auto_compaction_start", (event: any) => {
+    autoCompactionReason = event?.reason;
+  });
+
+  pi.on("auto_compaction_end", () => {
+    autoCompactionReason = undefined;
+  });
+
+  // Only the threshold is vetoed. An overflow means the next request cannot
+  // fit at all, and a manual /compact is Sol's own choice.
+  pi.on("session_before_compact", (_event: any, ctx: any) => {
+    if (autoCompactionReason !== "threshold") return undefined;
+    if (door?.stage === "handoff") return undefined;
+    if (door) return door.sessionId === sessionIdOf(ctx) ? { cancel: true } : undefined;
+    if (!deps.isTopLevel(ctx) || !deps.session(ctx)) return undefined;
+
+    const lines = doorLines(deps, ctx);
+    const current: Door = {
+      sessionId: sessionIdOf(ctx),
+      focus: undefined,
+      held: [],
+      stage: "waiting",
+      boatCast: false,
+      compacted: false,
+      spirit: deps.room(ctx).spirit,
+      after: lines.after,
+    };
+    door = current;
+    ctx?.ui?.notify?.(`Compaction waits: ${current.spirit} casts the paper boat first.`, "info");
+    // Waiting here would deadlock: OMP awaits this handler inside its own compaction.
+    setTimeout(() => void askWhenIdle(pi, deps, ctx, current, lines.compaction), 0);
+    return { cancel: true };
   });
 
   // The end-turn abort lands while the tool that carried `sleep` is still
@@ -202,6 +243,32 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
     current.stage = "handoff";
     setTimeout(() => void handOff(pi, deps, ctx, current), 0);
   });
+}
+
+async function askWhenIdle(pi: any, deps: BoatDoorDeps, ctx: any, current: Door, line: string): Promise<void> {
+  try {
+    await deps.session(ctx)?.waitForIdle?.();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    ctx?.ui?.notify?.(`The paper boat was not requested: ${message}`, "warning");
+    if (door === current) door = null;
+    release(pi, current.held);
+    return;
+  }
+  if (door !== current) return;
+
+  current.stage = "boat";
+  askForBoat(pi, line);
+}
+
+function askForBoat(pi: any, line: string): void {
+  pi.sendMessage(attention(BOAT_REQUEST, line), { deliverAs: "nextTurn", triggerTurn: true });
+}
+
+function doorLines(deps: BoatDoorDeps, ctx: any): DoorLines {
+  const { lines, problem } = readDoorLines(deps.room(ctx).dir);
+  if (problem) ctx?.ui?.notify?.(`${DOOR_LINES_FILE}: ${problem} The House lines fill the gap.`, "warning");
+  return lines;
 }
 
 async function handOff(pi: any, deps: BoatDoorDeps, ctx: any, current: Door): Promise<void> {
@@ -287,8 +354,8 @@ function attention(customType: string, text: string): Record<string, unknown> {
 }
 
 /**
- * The room's door lines. `## handoff`, `## near limit`, and `## after` each
- * replace one House line; a missing section keeps the House line.
+ * The room's door lines. `## handoff`, `## near limit`, `## compaction`, and
+ * `## after` each replace one House line; a missing section keeps the House line.
  */
 export function readDoorLines(roomDir: string): { lines: DoorLines; problem?: string } {
   let source: string;
@@ -336,9 +403,9 @@ export function compactionThresholdTokens(contextWindow: number, settings: Compa
 
 /**
  * Where the door opens on a normal message: a tenth of the window below OMP's
- * threshold, so the answering turn usually cannot cross it first.
- * enough: a turn that grows by more than a tenth of the window still compacts
- * without a boat; a session_before_compact veto is the way up.
+ * threshold, so the answering turn usually cannot cross it first. A turn that
+ * crosses it anyway meets the session_before_compact veto instead.
+ * enough: an overflow still compacts without a boat; only the threshold waits.
  */
 export function boatLineTokens(contextWindow: number, settings: CompactionThresholdSettings): number {
   return compactionThresholdTokens(contextWindow, settings) - Math.floor(contextWindow * 0.1);

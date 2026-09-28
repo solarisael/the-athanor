@@ -186,6 +186,59 @@ test("a compaction OMP ran on its own during the door is not repeated", async ()
   expect(sent.at(-1)?.message.customType).toBe("athanor-after-handoff");
 });
 
+const compactionAt = async (emit: (name: string, event: any) => Promise<unknown>, reason: string) => {
+  await emit("auto_compaction_start", { type: "auto_compaction_start", reason, action: "handoff" });
+  const result = await emit("session_before_compact", { type: "session_before_compact" });
+  await emit("auto_compaction_end", { type: "auto_compaction_end" });
+  return result;
+};
+
+test("a turn that jumps past the threshold keeps its context: the compaction waits for the boat", async () => {
+  let idle!: () => void;
+  const longTurn = new Promise<void>((resolve) => { idle = resolve; });
+  const { session, calls } = fakeSession({ waitForIdle: () => longTurn });
+  const { ctx, emit, sent, userMessages } = fakePi(session);
+
+  expect(await compactionAt(emit, "threshold")).toEqual({ cancel: true });
+  await settle();
+  // The long turn is still running: no boat request yet, and its own end must not close the door.
+  expect(sent).toEqual([]);
+  await emit("agent_end", { type: "agent_end" });
+  expect(await emit("input", input("still there?"))).toEqual({ handled: true });
+  // A second threshold check in the same turn waits too.
+  expect(await compactionAt(emit, "threshold")).toEqual({ cancel: true });
+
+  idle();
+  await settle();
+  expect(sent.map((entry) => entry.message.customType)).toEqual(["athanor-boat-before-handoff"]);
+  expect(sent[0].message.content).toContain(HOUSE_DOOR_LINES.compaction);
+
+  boatCast(ctx);
+  await emit("agent_end", { type: "agent_end" });
+  await settle();
+  expect(calls.handoff).toEqual([undefined]);
+  expect(userMessages).toEqual(["still there?"]);
+});
+
+test("overflow, manual /compact, workers, and the handoff itself compact without a veto", async () => {
+  const main = fakePi(fakeSession().session);
+  expect(await compactionAt(main.emit, "overflow")).toBeUndefined();
+  expect(await main.emit("session_before_compact", { type: "session_before_compact" })).toBeUndefined();
+
+  const worker = fakePi(fakeSession().session, { topLevel: false });
+  expect(await compactionAt(worker.emit, "threshold")).toBeUndefined();
+
+  resetBoatDoor();
+  const { session } = fakeSession();
+  const { ctx, emit, sent } = fakePi(session);
+  await emit("input", input("/handoff"));
+  boatCast(ctx);
+  await emit("agent_end", { type: "agent_end" });
+  expect(await compactionAt(emit, "threshold")).toBeUndefined();
+  await settle();
+  expect(sent).toHaveLength(2);
+});
+
 test("the room's handoff-door.md speaks for the door; missing sections keep the House lines", async () => {
   const roomDir = roomWithDoorFile([
     "# Kodo's door",

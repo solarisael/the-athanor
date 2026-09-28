@@ -1039,11 +1039,11 @@ export default function solarisaelHouseProof(pi, release) {
       const { room, effectiveRoomDir } = roomContext(ctx.cwd);
       return hostSessionIdentity(ctx, effectiveRoomDir) === topLevelSession(room);
     },
-    nearCompaction: (ctx) => {
+    tokensOverBoatLine: (ctx) => {
       const usage = ctx.getContextUsage?.();
       const settings = pi.pi?.settings;
-      if (!usage?.tokens || !usage.contextWindow || !settings?.get?.("compaction.enabled")) return false;
-      return usage.tokens >= boatLineTokens(usage.contextWindow, {
+      if (!usage?.tokens || !usage.contextWindow || !settings?.get?.("compaction.enabled")) return undefined;
+      return usage.tokens - boatLineTokens(usage.contextWindow, {
         thresholdTokens: settings.get("compaction.thresholdTokens"),
         thresholdPercent: settings.get("compaction.thresholdPercent"),
         reserveTokens: settings.get("compaction.reserveTokens"),

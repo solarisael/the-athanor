@@ -20,6 +20,10 @@ const END_TURN_AFTER_TOOL = Symbol.for("pi-agent-core.terminal-tool-result");
 
 const HANDOFF_COMMAND = /^\/handoff(?:\s+([\s\S]*))?$/;
 
+const BOAT_REQUEST = "athanor-boat-before-handoff";
+
+const SET_ASIDE_TEXT = "[Old tool output set aside so the paper boat fits.]";
+
 export const DOOR_LINES_FILE = "handoff-door.md";
 
 export type DoorLines = { handoff: string; nearLimit: string; after: string };
@@ -53,7 +57,8 @@ export type BoatDoorDeps = {
   /** The live OMP AgentSession behind this ctx: agent, waitForIdle, handoff, isStreaming, isCompacting. */
   session(ctx: any): any;
   isTopLevel(ctx: any): boolean;
-  nearCompaction(ctx: any): boolean;
+  /** Context tokens above the boat line: negative below it, undefined when unknown or compaction is off. */
+  tokensOverBoatLine(ctx: any): number | undefined;
   room(ctx: any): { dir: string; spirit: string };
 };
 
@@ -68,6 +73,8 @@ type Door = {
   compacted: boolean;
   spirit: string;
   after: string;
+  /** How many of the oldest tool results the boat turn's requests leave out; decided on its first request. */
+  setAside?: number;
 };
 
 // One OMP process has one top-level session, so one door. The `sleep` tool
@@ -107,7 +114,9 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
     }
 
     const command = HANDOFF_COMMAND.exec(text);
-    const nearLine = !command && text !== "" && !text.startsWith("/") && deps.nearCompaction(ctx);
+    const normalMessage = !command && text !== "" && !text.startsWith("/");
+    const over = normalMessage ? deps.tokensOverBoatLine(ctx) : undefined;
+    const nearLine = over !== undefined && over >= 0;
     if (!command && !nearLine) return undefined;
     if (!deps.isTopLevel(ctx)) return undefined;
 
@@ -130,7 +139,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
       spirit: room.spirit,
       after: lines.after,
     };
-    pi.sendMessage(attention("athanor-boat-before-handoff", nearLine ? lines.nearLimit : lines.handoff), {
+    pi.sendMessage(attention(BOAT_REQUEST, nearLine ? lines.nearLimit : lines.handoff), {
       deliverAs: "nextTurn",
       triggerTurn: true,
     });
@@ -150,6 +159,27 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
       content: [{ type: "text", text: "The paper boat is cast. The handoff starts now." }],
       isError: false,
     };
+  });
+
+  // Near the limit the boat turn can overflow, or trip OMP's mid-turn
+  // compaction before `sleep` runs. Only the boat turn's requests lose the old
+  // tool output; the session keeps every result for the handoff.
+  pi.on("context", (event: any, ctx: any) => {
+    if (door?.stage !== "boat" || door.sessionId !== sessionIdOf(ctx)) return undefined;
+    const messages: any[] = event?.messages ?? [];
+
+    // Decided once: later requests in this turn report the smaller usage, and
+    // would otherwise put the old output back.
+    if (door.setAside === undefined) {
+      const over = deps.tokensOverBoatLine(ctx) ?? 0;
+      door.setAside = over > 0 ? oldToolResultsToFree(messages, over) : 0;
+      if (door.setAside > 0) {
+        ctx?.ui?.notify?.(`The context is tight: ${door.setAside} old tool results are set aside so the paper boat fits.`, "info");
+      }
+    }
+    if (door.setAside === 0) return undefined;
+
+    return { messages: setAsideOldToolResults(messages, door.setAside) };
   });
 
   pi.on("session_compact", (_event: any, ctx: any) => {
@@ -207,6 +237,44 @@ function release(pi: any, held: Held[]): void {
   const text = held.map((entry) => entry.text).filter(Boolean).join("\n\n");
   const images = held.flatMap((entry) => entry.images ?? []);
   pi.sendUserMessage(images.length > 0 ? [{ type: "text", text }, ...images] : text);
+}
+
+/** Tool results from before the door asked for the boat, oldest first. */
+function oldToolResultIndexes(messages: any[]): number[] {
+  const boatRequest = messages.findLastIndex((message) => message?.role === "custom" && message.customType === BOAT_REQUEST);
+  const indexes: number[] = [];
+  for (let index = 0; index < boatRequest; index++) {
+    if (messages[index]?.role === "toolResult") indexes.push(index);
+  }
+  return indexes;
+}
+
+/** How many of the oldest tool results free at least `tokens`; all of them when even that is not enough. */
+function oldToolResultsToFree(messages: any[], tokens: number): number {
+  const indexes = oldToolResultIndexes(messages);
+  let freed = 0;
+  for (let count = 0; count < indexes.length; count++) {
+    freed += estimatedTokens(messages[indexes[count]]) - estimatedTokens({ content: SET_ASIDE_TEXT });
+    if (freed >= tokens) return count + 1;
+  }
+  return indexes.length;
+}
+
+// New message objects: OMP falls back to a shallow copy when the history does
+// not clone, and editing in place would then change the session itself.
+function setAsideOldToolResults(messages: any[], count: number): any[] {
+  const setAside = new Set(oldToolResultIndexes(messages).slice(0, count));
+  return messages.map((message, index) =>
+    setAside.has(index) ? { ...message, content: [{ type: "text", text: SET_ASIDE_TEXT }] } : message,
+  );
+}
+
+// enough: four characters per token, text only. A true count needs the
+// model's tokenizer, which OMP does not give extensions.
+function estimatedTokens(message: any): number {
+  const content = message?.content;
+  const text = typeof content === "string" ? content : (content ?? []).map((part: any) => part?.text ?? "").join("");
+  return Math.ceil(text.length / 4);
 }
 
 function attention(customType: string, text: string): Record<string, unknown> {

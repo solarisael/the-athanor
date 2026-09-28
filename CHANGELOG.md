@@ -34,6 +34,8 @@ the exact implementation record.
   The tool call that carries `sleep` shows as a cast boat. It does not show "Aborted: Cancelled".
   A room can set the door messages in its own `handoff-door.md`. The `## handoff`, `## near limit`, and `## after` sections each replace one House message.
   A missing file or section keeps the House message. An unknown section shows a warning, and the door still opens.
+  When the context is above the boat line, the boat turn sends the oldest tool results as a short placeholder. It removes only enough to go below the line.
+  The session keeps every tool result, so the handoff reads the full session. Tool results from the boat turn always stay.
 - Insula records the size of each context block the OMP adapter injects, per organ, as `injection.<organ>` points.
   The `provider_usage` point now carries cache-read and cache-write token counts in `bytes_in` and `bytes_out`.
 - The OMP adapter can sieve the always-on coding lessons with Jev before Presence sends them.

@@ -38,7 +38,9 @@ function fakeSession(overrides: Record<string, unknown> = {}) {
   return { session, calls };
 }
 
-function fakePi(session: unknown, options: { topLevel?: boolean; near?: boolean; roomDir?: string } = {}) {
+type PiOptions = { topLevel?: boolean; near?: boolean; over?: number; roomDir?: string };
+
+function fakePi(session: unknown, options: PiOptions = {}) {
   const handlers = new Map<string, Handler[]>();
   const sent: Array<{ message: any; options: any }> = [];
   const userMessages: unknown[] = [];
@@ -51,7 +53,7 @@ function fakePi(session: unknown, options: { topLevel?: boolean; near?: boolean;
   installBoatDoor(pi, {
     session: () => session,
     isTopLevel: () => options.topLevel ?? true,
-    nearCompaction: () => options.near ?? false,
+    tokensOverBoatLine: () => options.over ?? (options.near ? 0 : -1),
     room: () => ({ dir: options.roomDir ?? emptyRoom(), spirit: "Kodo" }),
   });
   const ctx = {
@@ -326,4 +328,66 @@ test("nested through write's untilAborted, the cast boat fails the carrier and t
     content: [{ type: "text", text: error!.message }],
   });
   expect(repaired?.isError).toBe(false);
+});
+
+const toolResult = (id: string, chars: number) => ({
+  role: "toolResult",
+  toolCallId: id,
+  toolName: "read",
+  content: [{ type: "text", text: "x".repeat(chars) }],
+  isError: false,
+});
+
+function boatTurnHistory() {
+  return [
+    { role: "user", content: "read the whole repo" },
+    toolResult("old-1", 12_000),
+    toolResult("old-2", 12_000),
+    toolResult("old-3", 400),
+    { role: "custom", customType: "athanor-boat-before-handoff", content: "cast your boat" },
+    toolResult("boat-turn", 12_000),
+  ];
+}
+
+const textOf = (message: any) => message.content.map((part: any) => part.text).join("");
+
+const toolResultTexts = (messages: any[]) => messages.filter((message) => message.role === "toolResult").map(textOf);
+
+const SET_ASIDE = "[Old tool output set aside so the paper boat fits.]";
+
+test("over the boat line, the boat turn leaves out just enough old tool output, and the session keeps it", async () => {
+  const options: PiOptions = { over: 2_500 };
+  const { emit, notices } = fakePi(fakeSession().session, options);
+  await emit("input", input("hello"));
+
+  const history = boatTurnHistory();
+  const request = (await emit("context", { type: "context", messages: history })) as { messages: any[] };
+
+  expect(toolResultTexts(request.messages)).toEqual([SET_ASIDE, "x".repeat(12_000), "x".repeat(400), "x".repeat(12_000)]);
+  expect(request.messages[1].toolCallId).toBe("old-1");
+  expect(request.messages[0]).toBe(history[0]);
+  expect(textOf(history[1])).toBe("x".repeat(12_000));
+  expect(notices.join("\n")).toContain("1 old tool results are set aside");
+
+  // The next request reports the smaller usage; the old output stays out.
+  options.over = -40_000;
+  const next = (await emit("context", { type: "context", messages: history })) as { messages: any[] };
+  expect(toolResultTexts(next.messages)[0]).toBe(SET_ASIDE);
+});
+
+test("the boat turn's own tool results are never set aside, even when the old ones are not enough", async () => {
+  const { emit } = fakePi(fakeSession().session, { over: 1_000_000 });
+  await emit("input", input("/handoff"));
+
+  const request = (await emit("context", { type: "context", messages: boatTurnHistory() })) as { messages: any[] };
+
+  expect(toolResultTexts(request.messages)).toEqual([SET_ASIDE, SET_ASIDE, SET_ASIDE, "x".repeat(12_000)]);
+});
+
+test("below the boat line, or with no door open, every request goes out whole", async () => {
+  const below = fakePi(fakeSession().session, { over: -1 });
+  expect(await below.emit("context", { type: "context", messages: boatTurnHistory() })).toBeUndefined();
+
+  await below.emit("input", input("/handoff"));
+  expect(await below.emit("context", { type: "context", messages: boatTurnHistory() })).toBeUndefined();
 });

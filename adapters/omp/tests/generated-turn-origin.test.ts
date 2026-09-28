@@ -186,7 +186,7 @@ beforeEach(() => {
   registerTopLevelSession(ROOM_KEY, session);
   host = fakeHost();
   handlers = registerAdapter();
-  expect(handlers.get("context")).toHaveLength(1);
+  expect(handlers.get("context")).toHaveLength(2);
 });
 
 afterEach(() => {
@@ -226,10 +226,14 @@ async function agentEnd(messages: unknown[]): Promise<void> {
   }
 }
 
+// Every context handler, in registration order, the way OMP's emitContext chains them.
 async function runContext(messages: unknown[]): Promise<any[] | undefined> {
-  const [handler] = handlers.get("context") ?? [];
-  const result = await handler!({ type: "context", messages }, ctx()) as { messages?: any[] } | undefined;
-  return result?.messages;
+  let current: any[] | undefined;
+  for (const handler of handlers.get("context") ?? []) {
+    const result = await handler({ type: "context", messages: current ?? messages }, ctx()) as { messages?: any[] } | undefined;
+    current = result?.messages ?? current;
+  }
+  return current;
 }
 
 // A user prompt as OMP builds it: content [{ type: "text", text: expandedText }].

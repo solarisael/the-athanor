@@ -11,7 +11,19 @@
 // show the answer forming instead of a silent gap. Text reports are
 // throttled; tool steps report at once. The draft is a courtesy, never
 // evidence: a lost draft report costs nothing, the settled turn is the truth.
+//
+// Says reach OMP as custom messages, never as `input`, so the boat door cannot
+// see them on its own. The doorman hands it `/handoff` and every say that
+// arrives over the boat line, and waits while the door is open.
 
+import {
+  AFTER_HANDOFF,
+  BOAT_REQUEST,
+  boatDoorOpen,
+  handoffCommand,
+  openSurfaceDoor,
+  overBoatLine,
+} from "./boat-door.ts";
 import { hostCommand, sendHostCommand, HostUnavailable, type HostBinding } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { conversationText } from "./text.ts";
@@ -22,6 +34,11 @@ const CHAT_SUBSCRIBE = "athanor.chat.subscribe";
 const CHAT_TURN = "athanor.chat.turn";
 const CHAT_DRAFT = "athanor.chat.draft";
 const SNAPSHOT = new Set(["athanor.chat.snapshot"]);
+const SAY = "athanor-chat-say";
+// A say's turn can start from the say itself or from a boat door it opened.
+const SAY_ORIGINS = new Set([SAY, BOAT_REQUEST, AFTER_HANDOFF]);
+// The turns that can answer a say: the say, or the turn after a `/handoff` say.
+const SAY_ANSWERS = new Set([SAY, AFTER_HANDOFF]);
 const ACCEPTED = new Set(["athanor.chat.command_accepted"]);
 const CHAT_POLL_MS = 2_000;
 const CHAT_DRAFT_THROTTLE_MS = 250;
@@ -92,7 +109,7 @@ function warn(state: ChatDoormanState, message: string): void {
 
 function sayMessage(line: ChatLine): Record<string, unknown> {
   return {
-    customType: "athanor-chat-say",
+    customType: SAY,
     content: [
       "<athanor-attention>",
       `Chat surface message from ${line.authorName} (say ${line.turnId}).`,
@@ -126,7 +143,7 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     await deliverChatReport(state);
     return;
   }
-  if (state.pendingSayId) return;
+  if (state.pendingSayId || boatDoorOpen()) return;
   if (typeof state.ctx?.isIdle === "function" && !state.ctx.isIdle()) return;
   state.ticking = true;
   try {
@@ -138,6 +155,7 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     // or been retired while the Host was answering.
     if (state.stopped || topLevelSession(state.binding.room) !== state.binding.session) return;
     if (typeof state.ctx?.isIdle === "function" && !state.ctx.isIdle()) return;
+    if (boatDoorOpen()) return;
     const lines = parseLines(snapshot);
     const answered = new Set(
       lines.filter((line) => line.author === "spirit").map((line) => line.turnId),
@@ -149,6 +167,23 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
     if (!next) return;
     state.pendingSayId = next.turnId;
     state.draft = { text: "", thinking: [], completedThinking: [], owned: false, steps: [], reports: 0, dirty: false, flushing: false, timer: null };
+
+    const command = handoffCommand(next.text);
+    if (command || overBoatLine(state.ctx)) {
+      const nearLimit = !command;
+      const opened = openSurfaceDoor(state.ctx, {
+        sayId: next.turnId,
+        focus: command?.focus,
+        nearLimit,
+        done: (handedOff) => surfaceDoorClosed(state, next, nearLimit, handedOff),
+      });
+      if (opened) return;
+      // A `/handoff` the door refuses is not a question for the spirit.
+      if (command) {
+        await settleSay(state, next.turnId, { text: "", thinking: [], outcome: "aborted" });
+        return;
+      }
+    }
     state.pi.sendMessage(sayMessage(next), { deliverAs: "nextTurn", triggerTurn: true });
   } catch (error) {
     if (!(error instanceof HostUnavailable)) {
@@ -201,7 +236,7 @@ export async function noteChatTurnEnd(
   const sayId = state.pendingSayId;
   const originIndex = messages.findLastIndex((message) =>
     message?.role === "custom"
-    && message.customType === "athanor-chat-say"
+    && SAY_ANSWERS.has(message.customType)
     && message.details?.sayId === sayId
   );
   if (originIndex < 0) return;
@@ -219,7 +254,14 @@ export async function noteChatTurnEnd(
   const thinking = ownedMessages.slice(0, assistantIndex + 1).flatMap(displayableThinking);
   const outcome = assistant.stopReason === "error" || assistant.stopReason === "aborted"
     ? assistant.stopReason : "complete";
-  const responseText = conversationText(assistant);
+  await settleSay(state, sayId, { text: conversationText(assistant), thinking, outcome });
+}
+
+async function settleSay(
+  state: ChatDoormanState,
+  sayId: string,
+  answer: { text: string; thinking: string[]; outcome: "complete" | "error" | "aborted" },
+): Promise<void> {
   // Capture once. Later lifecycle snapshots cannot rewrite a reply awaiting
   // acknowledgment, and draft events cannot extend its finished tool history.
   state.settledReport = {
@@ -230,15 +272,25 @@ export async function noteChatTurnEnd(
         room: state.binding.room,
         turnId: sayId,
         authorName: state.binding.spirit,
-        text: responseText,
-        thinking,
-        outcome,
+        ...answer,
         steps: state.draft?.steps.map((step) => ({ ...step })) ?? [],
       },
     },
   };
   clearDraftTimer(state);
   await deliverChatReport(state);
+}
+
+// A near-limit say waited for the handoff and now becomes its own turn, with the
+// boat's steps still in its draft. A `/handoff` that did not hand off ends here;
+// one that did is answered by the turn after the handoff.
+function surfaceDoorClosed(state: ChatDoormanState, line: ChatLine, nearLimit: boolean, handedOff: boolean): void {
+  if (state.stopped || state.pendingSayId !== line.turnId) return;
+  if (nearLimit) {
+    state.pi.sendMessage(sayMessage(line), { deliverAs: "nextTurn", triggerTurn: true });
+    return;
+  }
+  if (!handedOff) void settleSay(state, line.turnId, { text: "", thinking: [], outcome: "aborted" });
 }
 
 async function deliverChatReport(state: ChatDoormanState): Promise<void> {
@@ -340,10 +392,9 @@ export function noteChatMessageStart(message: any): void {
   for (const state of chatDoormen.values()) {
     const draft = state.draft;
     if (!draft || state.stopped || state.settledReport) continue;
-    if (message?.role === "user" || generatedTurnKey(message) !== null) {
-      draft.owned = message?.role === "custom"
-        && message.customType === "athanor-chat-say"
-        && message.details?.sayId === state.pendingSayId;
+    const sayOrigin = message?.role === "custom" && SAY_ORIGINS.has(message.customType);
+    if (message?.role === "user" || generatedTurnKey(message) !== null || sayOrigin) {
+      draft.owned = sayOrigin && message.details?.sayId === state.pendingSayId;
       continue;
     }
     if (!draft.owned || message?.role !== "assistant") continue;

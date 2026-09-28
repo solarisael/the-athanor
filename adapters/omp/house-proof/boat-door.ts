@@ -22,7 +22,18 @@ const END_TURN_AFTER_TOOL = Symbol.for("pi-agent-core.terminal-tool-result");
 
 const HANDOFF_COMMAND = /^\/handoff(?:\s+([\s\S]*))?$/;
 
-const BOAT_REQUEST = "athanor-boat-before-handoff";
+/** `/handoff [focus]` as the door reads it; null for any other text. */
+export function handoffCommand(text: string): { focus?: string } | null {
+  const match = HANDOFF_COMMAND.exec(text.trim());
+  if (!match) return null;
+  return { focus: match[1]?.trim() || undefined };
+}
+
+export const BOAT_REQUEST = "athanor-boat-before-handoff";
+
+export const AFTER_HANDOFF = "athanor-after-handoff";
+
+const NEXT_TURN = { deliverAs: "nextTurn", triggerTurn: true } as const;
 
 const SET_ASIDE_TEXT = "[Old tool output set aside so the paper boat fits.]";
 
@@ -73,6 +84,13 @@ export type BoatDoorDeps = {
 
 type Held = { text: string; images?: unknown[] };
 
+/**
+ * A chat surface say that opened the door. `nearLimit`: the say waits for the
+ * handoff and is then answered. Otherwise the say was `/handoff`, and the turn
+ * after the handoff answers it. `done` tells the surface how the door closed.
+ */
+export type SurfaceSay = { sayId: string; focus?: string; nearLimit: boolean; done(handedOff: boolean): void };
+
 type Door = {
   sessionId: string;
   focus: string | undefined;
@@ -85,18 +103,21 @@ type Door = {
   after: string;
   /** How many of the oldest tool results the boat turn's requests leave out; decided on its first request. */
   setAside?: number;
+  surface?: SurfaceSay;
 };
 
 // One OMP process has one top-level session, so one door. The `sleep` tool
 // reaches it through boatCast without knowing about the door's wiring.
 let door: Door | null = null;
 let installed: BoatDoorDeps | null = null;
+let installedPi: any = null;
 // Set by auto_compaction_start; session_before_compact itself does not say why it runs.
 let autoCompactionReason: string | undefined;
 
 export function resetBoatDoor(): void {
   door = null;
   installed = null;
+  installedPi = null;
   autoCompactionReason = undefined;
 }
 
@@ -111,8 +132,32 @@ export function boatCast(ctx: any): void {
   installed?.session(ctx)?.agent?.abort?.(END_TURN_AFTER_TOOL);
 }
 
+export function boatDoorOpen(): boolean {
+  return door !== null;
+}
+
+export function overBoatLine(ctx: any): boolean {
+  const over = installed?.tokensOverBoatLine(ctx);
+  return over !== undefined && over >= 0;
+}
+
+/** The chat surface's way in: its says reach OMP as custom messages, and never as `input`. */
+export function openSurfaceDoor(ctx: any, say: SurfaceSay): boolean {
+  const deps = installed;
+  if (!deps || !installedPi || door) return false;
+  if (!deps.isTopLevel(ctx)) return false;
+  const session = deps.session(ctx);
+  if (!session || session.isStreaming || session.isCompacting) return false;
+
+  const lines = doorLines(deps, ctx);
+  door = makeDoor(deps, ctx, lines, { focus: say.focus, held: [], stage: "boat", surface: say });
+  askForBoat(installedPi, say.nearLimit ? lines.nearLimit : lines.handoff, say.sayId);
+  return true;
+}
+
 export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
   installed = deps;
+  installedPi = pi;
 
   pi.on("input", (event: any, ctx: any) => {
     if (event?.source !== "interactive") return undefined;
@@ -126,7 +171,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
       return { handled: true };
     }
 
-    const command = HANDOFF_COMMAND.exec(text);
+    const command = handoffCommand(text);
     const normalMessage = !command && text !== "" && !text.startsWith("/");
     const over = normalMessage ? deps.tokensOverBoatLine(ctx) : undefined;
     const nearLine = over !== undefined && over >= 0;
@@ -139,16 +184,11 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
 
     // Read on every door, so an edit to the room file needs no restart.
     const lines = doorLines(deps, ctx);
-    door = {
-      sessionId: sessionIdOf(ctx),
-      focus: command?.[1]?.trim() || undefined,
+    door = makeDoor(deps, ctx, lines, {
+      focus: command?.focus,
       held: nearLine ? [{ text, images: event.images }] : [],
       stage: "boat",
-      boatCast: false,
-      compacted: false,
-      spirit: deps.room(ctx).spirit,
-      after: lines.after,
-    };
+    });
     askForBoat(pi, nearLine ? lines.nearLimit : lines.handoff);
     return { handled: true };
   });
@@ -170,16 +210,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
     if (!deps.isTopLevel(ctx) || !deps.session(ctx)) return undefined;
 
     const lines = doorLines(deps, ctx);
-    const current: Door = {
-      sessionId: sessionIdOf(ctx),
-      focus: undefined,
-      held: [],
-      stage: "waiting",
-      boatCast: false,
-      compacted: false,
-      spirit: deps.room(ctx).spirit,
-      after: lines.after,
-    };
+    const current = makeDoor(deps, ctx, lines, { focus: undefined, held: [], stage: "waiting" });
     door = current;
     ctx?.ui?.notify?.(`Compaction waits: ${current.spirit} casts the paper boat first.`, "info");
     // Waiting here would deadlock: OMP awaits this handler inside its own compaction.
@@ -234,7 +265,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
     if (!current.boatCast) {
       door = null;
       ctx?.ui?.notify?.("No paper boat was cast, so the handoff did not run.", "warning");
-      release(pi, current.held);
+      finish(pi, current, false);
       return;
     }
 
@@ -252,7 +283,7 @@ async function askWhenIdle(pi: any, deps: BoatDoorDeps, ctx: any, current: Door,
     const message = error instanceof Error ? error.message : String(error);
     ctx?.ui?.notify?.(`The paper boat was not requested: ${message}`, "warning");
     if (door === current) door = null;
-    release(pi, current.held);
+    finish(pi, current, false);
     return;
   }
   if (door !== current) return;
@@ -261,8 +292,24 @@ async function askWhenIdle(pi: any, deps: BoatDoorDeps, ctx: any, current: Door,
   askForBoat(pi, line);
 }
 
-function askForBoat(pi: any, line: string): void {
-  pi.sendMessage(attention(BOAT_REQUEST, line), { deliverAs: "nextTurn", triggerTurn: true });
+function askForBoat(pi: any, line: string, sayId?: string): void {
+  pi.sendMessage(attention(BOAT_REQUEST, line, sayId), NEXT_TURN);
+}
+
+function makeDoor(
+  deps: BoatDoorDeps,
+  ctx: any,
+  lines: DoorLines,
+  opening: Pick<Door, "focus" | "held" | "stage" | "surface">,
+): Door {
+  return {
+    ...opening,
+    sessionId: sessionIdOf(ctx),
+    boatCast: false,
+    compacted: false,
+    spirit: deps.room(ctx).spirit,
+    after: lines.after,
+  };
 }
 
 function doorLines(deps: BoatDoorDeps, ctx: any): DoorLines {
@@ -292,11 +339,24 @@ async function handOff(pi: any, deps: BoatDoorDeps, ctx: any, current: Door): Pr
     door = null;
   }
 
+  finish(pi, current, handedOff);
+}
+
+// A `/handoff` say from the surface is answered by the turn after the handoff,
+// so that turn's message names the say. A near-limit say is answered itself.
+function finish(pi: any, current: Door, handedOff: boolean): void {
+  const surface = current.surface;
+  if (handedOff && surface && !surface.nearLimit) {
+    pi.sendMessage(attention(AFTER_HANDOFF, current.after, surface.sayId), NEXT_TURN);
+  }
+
   if (current.held.length > 0) {
     release(pi, current.held);
-  } else if (handedOff) {
-    pi.sendMessage(attention("athanor-after-handoff", current.after), { deliverAs: "nextTurn", triggerTurn: true });
+  } else if (handedOff && !surface) {
+    pi.sendMessage(attention(AFTER_HANDOFF, current.after), NEXT_TURN);
   }
+
+  surface?.done(handedOff);
 }
 
 function release(pi: any, held: Held[]): void {
@@ -344,12 +404,14 @@ function estimatedTokens(message: any): number {
   return Math.ceil(text.length / 4);
 }
 
-function attention(customType: string, text: string): Record<string, unknown> {
+// `sayId` lets the chat doorman own the door's turns for the say that opened it.
+function attention(customType: string, text: string, sayId?: string): Record<string, unknown> {
   return {
     customType,
     content: ["<athanor-attention>", text, "</athanor-attention>"].join("\n"),
     display: true,
     attribution: "agent",
+    ...(sayId ? { details: { sayId } } : {}),
   };
 }
 

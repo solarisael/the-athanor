@@ -39,6 +39,10 @@ the exact implementation record.
   A missing file or section keeps the House message. An unknown section shows a warning, and the door still opens.
   When the context is above the boat line, the boat turn sends the oldest tool results as a short placeholder. It removes only enough to go below the line.
   The session keeps every tool result, so the handoff reads the full session. Tool results from the boat turn always stay.
+  The door also opens from the chat surface (Pulse). A `/handoff [focus]` say asks for the boat, and the turn after the handoff answers that say.
+  A say sent above the boat line waits for the boat and the handoff, and then the spirit answers it.
+  The tools of the boat turn show as steps on the answer. If no boat is written or the handoff fails, the say shows as Cancelled.
+  The chat doorman sends no new say to OMP while the door is open.
 - Insula records the size of each context block the OMP adapter injects, per organ, as `injection.<organ>` points.
   The `provider_usage` point now carries cache-read and cache-write token counts in `bytes_in` and `bytes_out`.
 - The OMP adapter can sieve the always-on coding lessons with Jev before Presence sends them.

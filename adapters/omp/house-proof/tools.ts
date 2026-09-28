@@ -15,6 +15,7 @@ import { RecallPolicyHostClient } from "./recall-policy.ts";
 import { hostHouseId, hostSessionIdentity } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { PAPER_BOAT_GUIDANCE } from "./paper-boat.ts";
+import { boatCast } from "./boat-door.ts";
 import { closePresence, responseDigest } from "./presence.ts";
 import { applyRecallViewport } from "./context.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
@@ -1010,6 +1011,7 @@ export function registerSolarisaelTools(pi, release) {
         params.body,
         signal,
       );
+      if (result.ok) boatCast(ctx);
       return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });

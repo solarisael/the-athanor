@@ -100,7 +100,7 @@ import {
   syncLessonTtsr,
   type LessonSieveResult,
 } from "./house-proof/lesson-ttsr.ts";
-import { armHandoffBoat, persistHandoffBoat } from "./house-proof/paper-boat.ts";
+import { boatLineTokens, installBoatDoor } from "./house-proof/boat-door.ts";
 import { analyzeContext, applyRecallViewport, type ContextAnalysis } from "./house-proof/context.ts";
 import { installSemanticJudgmentShadow } from "./house-proof/semantic-judgment.ts";
 import { createRecallReranker, type RecallRerankPolicy, type RecallRerankResult } from "./house-proof/recall-judgment.ts";
@@ -1029,12 +1029,27 @@ export default function solarisaelHouseProof(pi, release) {
     description: "Show the Host's Insula Vitals for the last 15m, 1h, or 24h",
     handler: (args, ctx) => showInsulaCockpit(args, ctx),
   });
-  // Only the room's top-level session hands off as a paper boat; workers keep OMP's document.
-  const armTopLevelHandoff = (ctx: any, room: string, spirit: string, session: string): string | null => {
-    if (session !== topLevelSession(room)) return null;
-    ctx.getContextUsage?.();
-    return armHandoffBoat(capturedAgentSession(String(ctx.sessionManager?.getSessionId?.() ?? "")), { room, spirit });
-  };
+  // Only the room's top-level session casts a boat before its handoff; workers keep OMP's document.
+  installBoatDoor(pi, {
+    session: (ctx) => {
+      ctx.getContextUsage?.();
+      return capturedAgentSession(String(ctx.sessionManager?.getSessionId?.() ?? ""));
+    },
+    isTopLevel: (ctx) => {
+      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      return hostSessionIdentity(ctx, effectiveRoomDir) === topLevelSession(room);
+    },
+    nearCompaction: (ctx) => {
+      const usage = ctx.getContextUsage?.();
+      const settings = pi.pi?.settings;
+      if (!usage?.tokens || !usage.contextWindow || !settings?.get?.("compaction.enabled")) return false;
+      return usage.tokens >= boatLineTokens(usage.contextWindow, {
+        thresholdTokens: settings.get("compaction.thresholdTokens"),
+        thresholdPercent: settings.get("compaction.thresholdPercent"),
+        reserveTokens: settings.get("compaction.reserveTokens"),
+      });
+    },
+  });
   const showReadyFeedback = (_event, ctx) => {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
     const binding = {
@@ -1045,9 +1060,6 @@ export default function solarisaelHouseProof(pi, release) {
     // Worker sessions share session_start, so first-wins adoption protects the
     // current top-level holder. Only an explicit session switch replaces it.
     adoptTopLevelSession(room, binding.session);
-    // A manual /handoff can come before the first turn after a restart.
-    const handoffWarning = armTopLevelHandoff(ctx, room, spirit, binding.session);
-    if (handoffWarning) console.warn(`[athanor] ${handoffWarning}`);
     showHouseContextFeedback(ctx, { room, spirit, activities: [] });
     startHallwayKnockDoorman(pi, ctx, binding);
     startChatDoorman(pi, ctx, binding);
@@ -1475,8 +1487,6 @@ export default function solarisaelHouseProof(pi, release) {
     });
     for (const warning of lessonTtsr.warnings) warnings.push(warning);
     if (lessonTtsr.active > 0) activities.push(`${lessonTtsr.active} native lesson guard${lessonTtsr.active === 1 ? "" : "s"}`);
-    const handoffWarning = armTopLevelHandoff(ctx, room, houseState?.embodiedSpirit || spirit, hostSession);
-    if (handoffWarning) warnings.push(handoffWarning);
     let lessonMode = houseState?.recallPolicy?.resolvedMode;
     let conversation: ConversationCapture | null = null;
     try {
@@ -2206,20 +2216,6 @@ export default function solarisaelHouseProof(pi, release) {
     removeMemoCustomType(turnMemo, "athanor-recall-context");
     persistTurnAdditionMemo(effectiveRoomDir, memoSessionKey, turnMemo);
     const summary = event?.compactionEntry?.summary ?? event?.summary;
-    try {
-      const agentSession = capturedAgentSession(String(ctx.sessionManager?.getSessionId?.() ?? ""));
-      const boat = await persistHandoffBoat(agentSession, event?.compactionEntry, room);
-      if (boat.reason === "prompt_not_served") {
-        console.warn(`[athanor] Handoff boat not filed: ${boat.error}`);
-        ctx.ui?.notify?.("Handoff wrote the OMP document; no paper boat was filed.", "warning");
-      } else if (boat.reason === "sleep" && !boat.written) {
-        console.warn(`[athanor] Handoff boat write failed: ${JSON.stringify(boat.result)}`);
-        ctx.ui?.notify?.("Handoff boat did not reach the House.", "warning");
-      }
-    } catch (error) {
-      console.warn(`[athanor] Handoff boat degraded: ${error instanceof Error ? error.message : String(error)}`);
-      ctx.ui?.notify?.("Handoff boat did not reach the House.", "warning");
-    }
     try {
       await new RecallPolicyHostClient({
         room,

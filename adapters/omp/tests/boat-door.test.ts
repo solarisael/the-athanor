@@ -1,9 +1,20 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { DEFAULT_COMPACTION_SETTINGS, resolveThresholdTokens } from "@oh-my-pi/pi-agent-core/compaction/compaction";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
+import { untilAborted } from "@oh-my-pi/pi-utils";
 
-import { boatCast, boatLineTokens, compactionThresholdTokens, installBoatDoor, resetBoatDoor } from "../house-proof/boat-door.ts";
+import {
+  boatCast,
+  boatLineTokens,
+  compactionThresholdTokens,
+  HOUSE_DOOR_LINES,
+  installBoatDoor,
+  resetBoatDoor,
+} from "../house-proof/boat-door.ts";
 
 // 2026-09-28, live: Sol typed /handoff, OMP wrote its own document, and no boat
 // reached Postgres. The prompt swap never ran on the interactive path. Sol's
@@ -27,7 +38,7 @@ function fakeSession(overrides: Record<string, unknown> = {}) {
   return { session, calls };
 }
 
-function fakePi(session: unknown, options: { topLevel?: boolean; near?: boolean } = {}) {
+function fakePi(session: unknown, options: { topLevel?: boolean; near?: boolean; roomDir?: string } = {}) {
   const handlers = new Map<string, Handler[]>();
   const sent: Array<{ message: any; options: any }> = [];
   const userMessages: unknown[] = [];
@@ -41,6 +52,7 @@ function fakePi(session: unknown, options: { topLevel?: boolean; near?: boolean 
     session: () => session,
     isTopLevel: () => options.topLevel ?? true,
     nearCompaction: () => options.near ?? false,
+    room: () => ({ dir: options.roomDir ?? emptyRoom(), spirit: "Kodo" }),
   });
   const ctx = {
     sessionManager: { getSessionId: () => SESSION },
@@ -56,6 +68,25 @@ function fakePi(session: unknown, options: { topLevel?: boolean; near?: boolean 
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 const input = (text: string) => ({ type: "input", text, source: "interactive" });
+
+function emptyRoom(): string {
+  return mkdtempSync(path.join(tmpdir(), "boat-door-room-"));
+}
+
+function roomWithDoorFile(body: string): string {
+  const dir = emptyRoom();
+  writeFileSync(path.join(dir, "handoff-door.md"), body);
+  return dir;
+}
+
+const abortedResult = (toolName: string) => ({
+  type: "tool_result",
+  toolName,
+  toolCallId: "call-1",
+  input: {},
+  content: [{ type: "text", text: "Aborted: Cancelled" }],
+  isError: true,
+});
 
 afterEach(() => resetBoatDoor());
 
@@ -153,6 +184,62 @@ test("a compaction OMP ran on its own during the door is not repeated", async ()
   expect(sent.at(-1)?.message.customType).toBe("athanor-after-handoff");
 });
 
+test("the room's handoff-door.md speaks for the door; missing sections keep the House lines", async () => {
+  const roomDir = roomWithDoorFile([
+    "# Kodo's door",
+    "",
+    "## handoff",
+    "kodooo, handoff time uwu. paper boat with `sleep` first, just the boat, ok?",
+    "",
+    "## after",
+    "handoff's done, dummy uwu",
+    "",
+  ].join("\n"));
+
+  const asked = fakePi(fakeSession().session, { roomDir });
+  await asked.emit("input", input("/handoff"));
+  expect(asked.sent[0].message.content).toBe(
+    "<athanor-attention>\nkodooo, handoff time uwu. paper boat with `sleep` first, just the boat, ok?\n</athanor-attention>",
+  );
+  boatCast(asked.ctx);
+  await asked.emit("agent_end", { type: "agent_end" });
+  await settle();
+  expect(asked.sent[1].message.content).toBe("<athanor-attention>\nhandoff's done, dummy uwu\n</athanor-attention>");
+  expect(asked.notices).toEqual([]);
+
+  resetBoatDoor();
+  const near = fakePi(fakeSession().session, { roomDir, near: true });
+  await near.emit("input", input("hello"));
+  expect(near.sent[0].message.content).toContain(HOUSE_DOOR_LINES.nearLimit);
+});
+
+test("an unknown section in handoff-door.md is named, and the door still opens", async () => {
+  const roomDir = roomWithDoorFile("## handof\ntypo'd line\n");
+  const { emit, sent, notices } = fakePi(fakeSession().session, { roomDir });
+
+  expect(await emit("input", input("/handoff"))).toEqual({ handled: true });
+  expect(sent[0].message.content).toContain(HOUSE_DOOR_LINES.handoff);
+  expect(notices.join("\n")).toContain('unknown sections "handof"');
+});
+
+test("the abort that ends the boat turn is reported as a cast boat, never as a lost one", async () => {
+  const { session } = fakeSession();
+  const { ctx, emit } = fakePi(session);
+
+  expect(await emit("tool_result", abortedResult("write"))).toBeUndefined();
+
+  await emit("input", input("/handoff"));
+  expect(await emit("tool_result", abortedResult("write"))).toBeUndefined();
+  expect(await emit("tool_result", { ...abortedResult("write"), content: [{ type: "text", text: "disk full" }] }))
+    .toBeUndefined();
+
+  boatCast(ctx);
+  expect(await emit("tool_result", abortedResult("write"))).toEqual({
+    content: [{ type: "text", text: "The paper boat is cast. The handoff starts now." }],
+    isError: false,
+  });
+});
+
 test("the boat line sits below OMP's own compaction threshold", () => {
   const cases = [
     { window: 1_000_000, settings: {} },
@@ -214,4 +301,29 @@ test("in OMP's real agent loop, a cast boat ends the turn before the model speak
     .flatMap((message: any) => message.content.filter((part: any) => part.type === "text"));
   expect(said).toEqual([]);
   expect(agent.state.messages.at(-1).role).toBe("toolResult");
+});
+
+// Live, 2026-09-28: `sleep` ran nested as `write xd://sleep`. The boat reached
+// the House, and the outer write, wrapped in untilAborted, still failed.
+test("nested through write's untilAborted, the cast boat fails the carrier and the door repairs the result", async () => {
+  const controller = new AbortController();
+  const { ctx, emit } = fakePi({
+    ...fakeSession().session,
+    agent: { abort: (reason: unknown) => controller.abort(reason) },
+  });
+  await emit("input", input("/handoff"));
+
+  const carrier = untilAborted(controller.signal, async () => {
+    boatCast(ctx);
+    await Promise.resolve();
+    return { ok: true };
+  });
+  const error = await carrier.then(() => null, (thrown: Error) => thrown);
+  expect(error?.message).toBe("Aborted: Cancelled");
+
+  const repaired: any = await emit("tool_result", {
+    ...abortedResult("write"),
+    content: [{ type: "text", text: error!.message }],
+  });
+  expect(repaired?.isError).toBe(false);
 });

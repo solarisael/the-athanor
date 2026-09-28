@@ -31,6 +31,9 @@ the exact implementation record.
   When the context is near the OMP compaction threshold, a new operator message waits. The boat and the handoff run first, and then the spirit answers the message.
   The boat line is 10% of the context window below the threshold. A turn that grows more than that still compacts without a boat.
   If no boat is written, the handoff does not run, and a warning shows.
+  The tool call that carries `sleep` shows as a cast boat. It does not show "Aborted: Cancelled".
+  A room can set the door messages in its own `handoff-door.md`. The `## handoff`, `## near limit`, and `## after` sections each replace one House message.
+  A missing file or section keeps the House message. An unknown section shows a warning, and the door still opens.
 - Insula records the size of each context block the OMP adapter injects, per organ, as `injection.<organ>` points.
   The `provider_usage` point now carries cache-read and cache-write token counts in `bytes_in` and `bytes_out`.
 - The OMP adapter can sieve the always-on coding lessons with Jev before Presence sends them.

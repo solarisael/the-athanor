@@ -1049,6 +1049,10 @@ export default function solarisaelHouseProof(pi, release) {
         reserveTokens: settings.get("compaction.reserveTokens"),
       });
     },
+    room: (ctx) => {
+      const { spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      return { dir: effectiveRoomDir, spirit };
+    },
   });
   const showReadyFeedback = (_event, ctx) => {
     const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);

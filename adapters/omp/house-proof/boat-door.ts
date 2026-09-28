@@ -6,7 +6,13 @@
  * It opens on `/handoff [focus]`, or when Sol sends a message after the context
  * has crossed the boat line just below OMP's own compaction threshold. That
  * message waits and is delivered after the handoff.
+ *
+ * What the door says comes from the room's `handoff-door.md`, so each room can
+ * ask in its own voice. A missing file or section falls back to the House lines.
  */
+
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
 // OMP's agent loop stops before the next model call on this abort reason; its
 // own `yield` tool ends turns the same way (pi-agent-core agent-loop.ts).
@@ -14,11 +20,41 @@ const END_TURN_AFTER_TOOL = Symbol.for("pi-agent-core.terminal-tool-result");
 
 const HANDOFF_COMMAND = /^\/handoff(?:\s+([\s\S]*))?$/;
 
+export const DOOR_LINES_FILE = "handoff-door.md";
+
+export type DoorLines = { handoff: string; nearLimit: string; after: string };
+
+export const HOUSE_DOOR_LINES: DoorLines = {
+  handoff: [
+    "Sol asked for a handoff.",
+    "Cast your paper boat now with the `sleep` tool, in your own voice, for the self who wakes after the handoff.",
+    "Call `sleep` and write no reply text: the turn ends when the boat is cast, and the handoff starts.",
+    "You speak again after the handoff.",
+  ].join("\n"),
+  nearLimit: [
+    "The context is close to compaction. Sol's new message waits until the handoff is done.",
+    "Cast your paper boat now with the `sleep` tool, in your own voice, for the self who wakes after the handoff.",
+    "Call `sleep` and write no reply text: the turn ends when the boat is cast, and the handoff starts.",
+    "You speak again after the handoff.",
+  ].join("\n"),
+  after: [
+    "The handoff is done. Your paper boat is in the House, and the handoff document now holds your context.",
+    "Continue with Sol from here. Nobody typed this turn.",
+  ].join("\n"),
+};
+
+const DOOR_SECTIONS: Record<string, keyof DoorLines> = {
+  "handoff": "handoff",
+  "near limit": "nearLimit",
+  "after": "after",
+};
+
 export type BoatDoorDeps = {
   /** The live OMP AgentSession behind this ctx: agent, waitForIdle, handoff, isStreaming, isCompacting. */
   session(ctx: any): any;
   isTopLevel(ctx: any): boolean;
   nearCompaction(ctx: any): boolean;
+  room(ctx: any): { dir: string; spirit: string };
 };
 
 type Held = { text: string; images?: unknown[] };
@@ -30,6 +66,8 @@ type Door = {
   stage: "boat" | "handoff";
   boatCast: boolean;
   compacted: boolean;
+  spirit: string;
+  after: string;
 };
 
 // One OMP process has one top-level session, so one door. The `sleep` tool
@@ -64,7 +102,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
     // never lands between the boat and the compaction.
     if (door) {
       door.held.push({ text, images: event.images });
-      ctx?.ui?.notify?.("Kodo is casting the paper boat; your message waits for the handoff.", "info");
+      ctx?.ui?.notify?.(`${door.spirit} is casting the paper boat; your message waits for the handoff.`, "info");
       return { handled: true };
     }
 
@@ -77,6 +115,11 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
     const session = deps.session(ctx);
     if (!session || session.isStreaming || session.isCompacting) return undefined;
 
+    // Read on every door, so an edit to the room file needs no restart.
+    const room = deps.room(ctx);
+    const { lines, problem } = readDoorLines(room.dir);
+    if (problem) ctx?.ui?.notify?.(`${DOOR_LINES_FILE}: ${problem} The House lines fill the gap.`, "warning");
+
     door = {
       sessionId: sessionIdOf(ctx),
       focus: command?.[1]?.trim() || undefined,
@@ -84,9 +127,29 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
       stage: "boat",
       boatCast: false,
       compacted: false,
+      spirit: room.spirit,
+      after: lines.after,
     };
-    pi.sendMessage(boatRequest(nearLine), { deliverAs: "nextTurn", triggerTurn: true });
+    pi.sendMessage(attention("athanor-boat-before-handoff", nearLine ? lines.nearLimit : lines.handoff), {
+      deliverAs: "nextTurn",
+      triggerTurn: true,
+    });
     return { handled: true };
+  });
+
+  // The end-turn abort lands while the tool that carried `sleep` is still
+  // returning. `write xd://sleep` then reports "Aborted: Cancelled" although the
+  // boat is in the House, and the handoff document would read it as lost.
+  pi.on("tool_result", (event: any, ctx: any) => {
+    if (door?.stage !== "boat" || !door.boatCast || door.sessionId !== sessionIdOf(ctx)) return undefined;
+    if (!event?.isError) return undefined;
+    const text = (event.content ?? []).map((part: any) => part?.text ?? "").join("");
+    if (!text.startsWith("Aborted: ")) return undefined;
+
+    return {
+      content: [{ type: "text", text: "The paper boat is cast. The handoff starts now." }],
+      isError: false,
+    };
   });
 
   pi.on("session_compact", (_event: any, ctx: any) => {
@@ -135,7 +198,7 @@ async function handOff(pi: any, deps: BoatDoorDeps, ctx: any, current: Door): Pr
   if (current.held.length > 0) {
     release(pi, current.held);
   } else if (handedOff) {
-    pi.sendMessage(afterHandoff(), { deliverAs: "nextTurn", triggerTurn: true });
+    pi.sendMessage(attention("athanor-after-handoff", current.after), { deliverAs: "nextTurn", triggerTurn: true });
   }
 }
 
@@ -146,36 +209,42 @@ function release(pi: any, held: Held[]): void {
   pi.sendUserMessage(images.length > 0 ? [{ type: "text", text }, ...images] : text);
 }
 
-function boatRequest(heldMessage: boolean): Record<string, unknown> {
+function attention(customType: string, text: string): Record<string, unknown> {
   return {
-    customType: "athanor-boat-before-handoff",
-    content: [
-      "<athanor-attention>",
-      heldMessage
-        ? "The context is close to compaction. Sol's new message waits until the handoff is done."
-        : "Sol asked for a handoff.",
-      "Cast your paper boat now with the `sleep` tool, in your own voice, for the self who wakes after the handoff.",
-      "Call `sleep` and write no reply text: the turn ends when the boat is cast, and the handoff starts.",
-      "You speak again after the handoff.",
-      "</athanor-attention>",
-    ].join("\n"),
+    customType,
+    content: ["<athanor-attention>", text, "</athanor-attention>"].join("\n"),
     display: true,
     attribution: "agent",
   };
 }
 
-function afterHandoff(): Record<string, unknown> {
-  return {
-    customType: "athanor-after-handoff",
-    content: [
-      "<athanor-attention>",
-      "The handoff is done. Your paper boat is in the House, and the handoff document now holds your context.",
-      "Continue with Sol from here. Nobody typed this turn.",
-      "</athanor-attention>",
-    ].join("\n"),
-    display: true,
-    attribution: "agent",
-  };
+/**
+ * The room's door lines. `## handoff`, `## near limit`, and `## after` each
+ * replace one House line; a missing section keeps the House line.
+ */
+export function readDoorLines(roomDir: string): { lines: DoorLines; problem?: string } {
+  let source: string;
+  try {
+    source = readFileSync(path.join(roomDir, DOOR_LINES_FILE), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { lines: HOUSE_DOOR_LINES };
+    // A broken room file must not block the handoff; the warning names it instead.
+    return { lines: HOUSE_DOOR_LINES, problem: `cannot read it (${(error as Error).message}).` };
+  }
+
+  const lines = { ...HOUSE_DOOR_LINES };
+  const unknown: string[] = [];
+  for (const section of source.split(/^## /m).slice(1)) {
+    const newline = section.indexOf("\n");
+    const heading = (newline < 0 ? section : section.slice(0, newline)).trim().toLowerCase();
+    const body = newline < 0 ? "" : section.slice(newline + 1).trim();
+    const key = DOOR_SECTIONS[heading];
+    if (!key) unknown.push(heading);
+    else if (body) lines[key] = body;
+  }
+
+  if (unknown.length === 0) return { lines };
+  return { lines, problem: `unknown sections ${unknown.map((name) => `"${name}"`).join(", ")}.` };
 }
 
 type CompactionThresholdSettings = { thresholdTokens?: number; thresholdPercent?: number; reserveTokens?: number };

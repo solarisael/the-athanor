@@ -129,12 +129,12 @@ Refreshed: 2026-09-13.
 - Coding #134 — Frontend UX proof belongs to the rendered surface. Use for: visual proof.
 - Coding #258 — A URL is not navigation. Use for: GUI entry paths.
 - Project #462 — (title in registry). Use for: the parked Godot client boundary.
-- Coding #165 — (title in registry). Use for: Godot work only if Sol reopens the client.
-- Coding #166 — (title in registry). Use for: Godot work only if Sol reopens the client.
-- Coding #167 — (title in registry). Use for: Godot work only if Sol reopens the client.
-- Coding #331 — (title in registry). Use for: Godot work only if Sol reopens the client.
-- Coding #341 — (title in registry). Use for: Godot work only if Sol reopens the client.
-- Coding #375 — (title in registry). Use for: Godot work only if Sol reopens the client.
+- Coding #165 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
+- Coding #166 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
+- Coding #167 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
+- Coding #331 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
+- Coding #341 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
+- Coding #375 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
 
 ## Installation, migration, and release hardening
 
@@ -243,10 +243,10 @@ Refreshed: 2026-09-13.
 - Coding #370 — (title in registry). Use for: PHP, Apache, or Go work.
 - Coding #374 — (title in registry). Use for: PHP, Apache, or Go work.
 - Coding #369 — (title in registry). Use for: JetStream diagnosis or repair.
-- Coding #165 — (title in registry). Use for: Godot work only if Sol reopens the client.
-- Coding #166 — (title in registry). Use for: Godot work only if Sol reopens the client.
-- Coding #167 — (title in registry). Use for: Godot work only if Sol reopens the client.
-- Coding #331 — (title in registry). Use for: Godot work only if Sol reopens the client.
+- Coding #165 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
+- Coding #166 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
+- Coding #167 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
+- Coding #331 — (title in registry). Use for: work inside the private `athanor-godot` repository only.
 - Project #462 — (title in registry). Use for: the parked Godot client boundary.
 - Coding #214 — Respect pgvector HNSW dimensional limits. Use for: pgvector dimensions, types, operator classes, or HNSW.
 - Coding #216 — (title in registry). Use for: disposable transition-test data only.
@@ -272,7 +272,7 @@ Refreshed: 2026-09-13.
 - Memory #3383, “Accepted 1.0 boundary,” is the newest program intent and corrects Memory #3378, “Earlier Rust-convergence roadmap pass.”
 - Memory #3376, “One Rust furnace,” carries the shared Vault/AKASHA skeleton.
 - Read `docs/roadmap.md`, `docs/ARCHITECTURE.md`, `docs/RUNTIME_ARCHITECTURE.md`, and `docs/EVIDENCE.md` before implementation; reconcile older delivery order with Memory #3383 before briefing workers.
-- Prolog/Datalog, Lean/Z3/SyGuS, marketplace work, new cognitive organs, expanded distributed-worker lanes, and ornamental Godot systems remain outside the 1.0 program.
+- Prolog/Datalog, Lean/Z3/SyGuS, marketplace work, new cognitive organs, expanded distributed-worker lanes, and the parked Godot client in the private `athanor-godot` repository remain outside the 1.0 program.
 - The 2026-09-02 refactor audit found every listed refactor lesson in the registry but none loaded.
 - House writes use one column-keyed `serde_json::json!` row through `jsonb_populate_record(NULL::table, $1)`; reads use a `#[derive(sqlx::FromRow)]` struct.
 - The reference files are `crates/akasha/src/insula/ingest.rs` and `crates/akasha/src/anamnesis.rs`.
@@ -283,7 +283,7 @@ Refreshed: 2026-09-13.
 - Vault never requires NATS.
 - The main agent owns the gate that NATS removes more queue, polling, supervision, and failure machinery than it adds; a Delivery kitten owns one lane.
 - Load all twelve listed design lessons before GUI extraction or implementation.
-- `gui-prototype/` is the operator surface; `gui/` remains parked unless Sol reopens its screens, themes, and scenes.
+- `gui-prototype/` is the operator surface; the parked Godot client lives in the private repository `solarisael/athanor-godot`.
 - Use `docs/RUNTIME_ARCHITECTURE.md` sections 4.1 and 4.5 for command, event, snapshot, delta, replay, and resynchronization contracts.
 - The GUI consumes Host commands and projections; it never owns authority, accesses PostgreSQL or NATS directly, or infers domain state from appearance.
 - Release evidence covers clean installation, Vault-to-AKASHA migration, restart, live and failed replacement, backup, restore, rollback, and exact supported platforms.

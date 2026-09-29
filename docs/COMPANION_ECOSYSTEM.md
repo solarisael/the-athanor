@@ -96,7 +96,7 @@ storage health. Companion-created structures use fixed typed records and logical
 scope keys. A new schema or physical partition remains a reviewed platform
 migration because it affects every House's recoverability and compatibility.
 
-Godot visual changes follow authoritative Host projection deltas. Moving a
+Client visual changes follow authoritative Host projection deltas. Moving a
 constellation is not itself a durable room mutation.
 
 ### 3.3 Resource conflict
@@ -209,7 +209,7 @@ The marketplace distributes separate artifact classes:
 
 1. **Archetype/personality seeds** — authored starting contracts, voice material,
    preferences, and examples.
-2. **Presentation packages** — Godot themes, environments, companion bodies,
+2. **Presentation packages** — client themes, environments, companion bodies,
    audio, animation, and room assets.
 3. **Model/LoRA packages** — weights or adapters plus lineage, model card,
    evaluation, runtime, and license contracts.
@@ -356,7 +356,6 @@ This architecture does not:
 
 - [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — House, room, spirit, and custody contracts
 - [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — proof, synthesis, and governed promotion
-- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) — spatial rooms and presentation packages
 - [`SECURITY.md`](./SECURITY.md) — trust and privacy boundaries
 - [Hugging Face model cards](https://huggingface.co/docs/hub/model-cards)
 - [SLSA principles](https://slsa.dev/spec/v1.2/principles)

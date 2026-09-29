@@ -64,7 +64,7 @@ Every component reads the manifest and nothing else for module presence:
 ### 3.3 One door
 
 - `athanor.exe` owns one in-process multi-room Host.
-- The process is an independent peer: it launches neither parked Godot nor OMP and
+- The process is an independent peer: it does not launch OMP and
   owns neither OMP session lifetime nor terminal parenthood.
 - The Host binds one declared loopback port.
 - Every WebSocket and HTTP route starts with `/room/<room-key>`.
@@ -90,7 +90,6 @@ Every component reads the manifest and nothing else for module presence:
 | `host` | the room server, the spirit's door | always |
 | `athanor-install` | the installer itself | always |
 | `gui-prototype/` | Read-only web operator surface; `bun gui-prototype/serve.ts` proxies Host reads over loopback | source checkout |
-| `gui` | Parked Godot client; historical protocol-only dependency contract | packaged, parked |
 | `vault` | retrieval without a database — guarded by test (`vault_recall_dispatch_has_no_database_parameters`) | vault |
 | `origami`, `delivery` | NATS pointers, PostgreSQL bodies | akasha |
 | `akasha` | PostgreSQL bodies and the managed-embedder client | akasha |

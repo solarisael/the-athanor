@@ -11,7 +11,6 @@ pub const SUPPORTED_PLATFORM: &str = "windows-x64";
 pub const POSTGRESQL_VERSION: &str = "18.4-2";
 pub const PGVECTOR_VERSION: &str = "0.8.6";
 pub const NATS_VERSION: &str = "2.14.4";
-pub const GODOT_VERSION: &str = "4.7.1-stable";
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -33,8 +32,6 @@ pub struct Compatibility {
     pub host_api: u32,
     pub substrate_api: u32,
     pub delivery_api: u32,
-    pub godot_api: String,
-    pub godot: String,
     pub postgresql: String,
     pub pgvector: String,
     pub nats_server: String,
@@ -113,19 +110,15 @@ impl ReleaseManifest {
         let compatibility_ok = self.compatibility.host_api == 1
             && self.compatibility.substrate_api == 1
             && self.compatibility.delivery_api == 1
-            && self.compatibility.godot_api == "4.7"
-            && self.compatibility.godot == GODOT_VERSION
             && self.compatibility.postgresql == POSTGRESQL_VERSION
             && self.compatibility.pgvector == PGVECTOR_VERSION
             && self.compatibility.nats_server == NATS_VERSION;
         if !compatibility_ok {
             return Err(ManifestError::Compatibility(format!(
-                "hostApi={}, substrateApi={}, deliveryApi={}, godotApi={}, Godot={}, PostgreSQL={}, pgvector={}, NATS={}",
+                "hostApi={}, substrateApi={}, deliveryApi={}, PostgreSQL={}, pgvector={}, NATS={}",
                 self.compatibility.host_api,
                 self.compatibility.substrate_api,
                 self.compatibility.delivery_api,
-                self.compatibility.godot_api,
-                self.compatibility.godot,
                 self.compatibility.postgresql,
                 self.compatibility.pgvector,
                 self.compatibility.nats_server,
@@ -179,7 +172,7 @@ impl ReleaseManifest {
 
 #[cfg(test)]
 mod tests {
-    use super::REQUIRED_SCHEMA;
+    use super::{REQUIRED_SCHEMA, ReleaseManifest};
 
     #[test]
     fn packaged_schema_metadata_matches_runtime_acceptance() {
@@ -190,5 +183,37 @@ mod tests {
             Some(u64::from(REQUIRED_SCHEMA)),
             "the native runtime must accept the schema declared by its own package"
         );
+    }
+
+    #[test]
+    fn a_retained_release_that_still_pins_godot_stays_valid_for_rollback() {
+        let retained = serde_json::json!({
+            "format": 1,
+            "product": "the-athanor",
+            "version": "0.9.6.1",
+            "platform": "windows-x64",
+            "schemaVersion": REQUIRED_SCHEMA,
+            "compatibility": {
+                "hostApi": 1,
+                "substrateApi": 1,
+                "deliveryApi": 1,
+                "godotApi": "4.7",
+                "godot": "4.7.1-stable",
+                "postgresql": "18.4-2",
+                "pgvector": "0.8.6",
+                "natsServer": "2.14.4"
+            },
+            "artifacts": [{
+                "component": "app",
+                "path": "bin/athanor.exe",
+                "sha256": "0".repeat(64),
+                "size": 1,
+                "executable": true
+            }],
+            "rollback": { "databaseRestoreRequired": true, "minimumRetainedVersions": 2 }
+        });
+        let manifest: ReleaseManifest = serde_json::from_value(retained)
+            .expect("releases built before the Godot client left must still parse");
+        assert_eq!(manifest.validate(), Ok(()));
     }
 }

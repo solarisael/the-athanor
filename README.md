@@ -12,7 +12,7 @@ making the project start from zero again.
 The earlier source snapshot used `0.9.6`.
 Read [`package.json`](./package.json) for the current product version.
 One Rust workspace owns the behavioral core, Vault retrieval, AKASHA PostgreSQL
-authority, Athanor Host, NATS delivery, native lifecycle, and parked Godot client.
+authority, Athanor Host, NATS delivery, and native lifecycle.
 Vault remains database-free; AKASHA adds durable typed memory, lessons, canon,
 continuity, and governed background work.
 
@@ -231,7 +231,6 @@ The `0.9.6` label belongs to an earlier source snapshot.
 - an authenticated localhost Athanor Host with persisted snapshots, typed
   deltas, resynchronization, idempotency, and restart recovery;
 - a read-only web operator surface at `gui-prototype/`;
-- a parked Godot 4.7.1 client with Recall Policy and sanitized Paper Boat receipt screens;
 - one native Windows service supervisor, installer, updater/rollback path,
   doctor, uninstall, and explicit purge boundary;
 - named OMP organs whose adapter delegates behavioral authority to Rust.
@@ -266,7 +265,7 @@ Later implementation receipts remain separately dated.
 The web prototype at `gui-prototype/` is the read-only operator surface.
 Run `bun gui-prototype/serve.ts` from the repository root.
 It reads the Host through a loopback proxy.
-The Godot client is parked.
+The parked Godot client lives in the private repository `solarisael/athanor-godot`.
 Conversation, authority changes, review actions, and complete operational visibility remain incomplete.
 
 The 1.0 gate also requires healthy live continuity organs, clean generic
@@ -287,7 +286,7 @@ tenancy, or clean-machine installation evidence.
 ## Install
 
 One repository and one release own the substrate, Host, delivery, OMP adapter,
-parked Godot client, installer, updater, and install contract.
+installer, updater, and install contract.
 
 The supported ordinary package is one checksum-published native Windows x64
 installer:
@@ -297,9 +296,9 @@ The-Athanor-<version>-windows-x64.exe
 The-Athanor-<version>-windows-x64.exe.sha256
 ```
 
-It carries the Rust runtime binaries, parked Godot 4.7.1, EnterpriseDB PostgreSQL
+It carries the Rust runtime binaries, EnterpriseDB PostgreSQL
 18.4-2 with pgvector 0.8.6, and NATS Server 2.14.4. The installed service needs
-no WSL, Python, Bun, Cargo, or separate database/broker. The bundled Godot client is parked.
+no WSL, Python, Bun, Cargo, or separate database/broker.
 PostgreSQL remains the durable AKASHA authority; Vault retrieval remains
 available as a runtime capability rather than a separate package.
 
@@ -330,7 +329,6 @@ purge contracts.
 | `crates/host` | One authenticated multi-room client boundary; runs the crane loop |
 | `crates/athanor-install`, `installer/` | Native lifecycle, immutable release staging, and Windows installer |
 | `gui-prototype/` | Read-only web operator surface; `serve.ts` proxies Host reads over loopback |
-| `gui/` | Parked Godot client; no direct database or broker authority |
 | `adapters/omp/` | OMP lifecycle hooks and named tool surface delegated to Rust |
 
 All three live in [`solarisael/the-athanor`](https://github.com/solarisael/the-athanor)
@@ -372,7 +370,6 @@ harness already has a supported adapter.
 - [Changelog](./CHANGELOG.md) — active `0.9.6` work and retained RC build history
 - [Planned Features](./docs/PLANNED_FEATURES.md) — canonical status map
 - [Runtime Architecture](./docs/RUNTIME_ARCHITECTURE.md)
-- [Parked Godot Client](./docs/GODOT_CLIENT.md)
 - [Synthesis Architecture](./docs/SYNTHESIS_ARCHITECTURE.md)
 - [Companion Ecosystem](./docs/COMPANION_ECOSYSTEM.md)
 

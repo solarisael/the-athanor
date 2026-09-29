@@ -90,7 +90,7 @@ Headless room work disables interactive transports and sidecars unless policy
 explicitly enables them. `room_reflection` must not silently consume a live
 dialogue tail; `room_dialogue` must visibly address an intentional live session.
 
-The Host sends Godot versioned typed deltas with bounded mutation counts and
+The Host sends clients versioned typed deltas with bounded mutation counts and
 payload sizes. Clients reject gaps, out-of-order versions, unknown operations,
 and unauthorized projection fields, then request replay or a fresh snapshot.
 Do not expose arbitrary database or object-property paths through a generic
@@ -163,12 +163,11 @@ Marketplace metadata uses expiry, threshold signing where appropriate, key
 rotation, rollback/freeze protection, and revocation. An update cannot widen
 permissions silently.
 
-The Godot marketplace/client is a presentation and consent surface. A cinematic
+The marketplace client is a presentation and consent surface. A cinematic
 particle, companion body, or alchemical state cannot represent authority unless
 it follows an authenticated Host event.
 
-Read [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) and
-[`GODOT_CLIENT.md`](./GODOT_CLIENT.md).
+Read [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md).
 
 ## Organizational authorization
 

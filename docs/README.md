@@ -50,7 +50,7 @@ Hallways where attention and read state remain separate facts.
 The web prototype at `gui-prototype/` is the read-only operator surface.
 Run `bun gui-prototype/serve.ts` from the repository root.
 It reads the Host through a loopback proxy.
-The Godot client is parked.
+The parked Godot client lives in the private repository `solarisael/athanor-godot`.
 Cingulate, OMEGA, and ANON remain roadmap claims.
 
 If a page says something works, a receipt should exist.
@@ -76,7 +76,6 @@ If a page says something works, a receipt should exist.
 - [The concept map](./EXPLAINING_THE_ATHANOR.md) keeps the system's definitions stable.
 - [Runtime Architecture](./RUNTIME_ARCHITECTURE.md) owns Host, delivery, invocation, and proof.
 - [Code Flow Map](./CODE_FLOW_MAP.md) traces current module ownership and event paths.
-- [Parked Godot Client](./GODOT_CLIENT.md) preserves the historical native specification.
 - [Synthesis Architecture](./SYNTHESIS_ARCHITECTURE.md) covers bounded symbolic synthesis.
 - [Companion Ecosystem](./COMPANION_ECOSYSTEM.md) covers room sovereignty and signed exchange.
 - [Product Architecture](./PRODUCT_ARCHITECTURE.md) maps domains, capabilities, and governance.

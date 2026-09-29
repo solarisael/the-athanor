@@ -93,8 +93,7 @@ Retrieve these bodies before design or implementation work in this directory. Ex
 - Scope: local repo contracts and historical receipts, not lesson bodies or new verification claims.
 - Historical boundary: dated receipts describe their own wave, not a fresh deployment claim.
 - Governed path: `gui-prototype/`, the deliberately cheap HTML/CSS/JavaScript interaction laboratory for The Athanor GUI.
-- Excluded scope: repository root, Host, substrate, and production Godot client.
-- Production translation map: `../gui/LESSONS_MAP.md`.
+- Excluded scope: repository root, Host, substrate, and the parked Godot client in the private repository `solarisael/athanor-godot`.
 - Authority: PostgreSQL remains authoritative for lesson and memory bodies.
 - Local routing content: product rulings, design taste, code grammar, promotion gates, and proof.
 - Before consequential work, retrieve named lesson bodies; bare IDs are routing labels, not delivery.
@@ -488,12 +487,12 @@ Retrieve these bodies before design or implementation work in this directory. Ex
 
 ### Promotion gate
 
-- A prototype discovery enters `gui/` only when all six conditions below are true.
+- A prototype discovery enters the private `athanor-godot` repository only when all six conditions below are true.
 - Condition 1: Sol has judged the interaction on the rendered surface.
 - Condition 2: the product object and owner are named without archive taxonomy.
 - Condition 3: anatomy, states, refusals, focus, keyboard behavior, responsive behavior, and disclosure are explicit.
-- Condition 4: the production map and `../gui/DESIGN_CONTRACTS.md` have a semantic home for it.
-- Condition 5: Godot receives the behavior as a native scene/component contract.
+- Condition 4: the production map and the design contracts in the private `athanor-godot` repository have a semantic home for it.
+- Condition 5: the parked Godot client in the private `athanor-godot` repository receives the behavior as a native scene/component contract.
 - Condition 5 boundary: HTML, CSS, and JavaScript syntax are not copied across platforms.
 - Condition 6: Host-owned data and effects remain Host-owned.
 - If a decision is still being felt out, leave it here.

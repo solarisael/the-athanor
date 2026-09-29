@@ -11,7 +11,6 @@ function Get-NativeReleaseStageNames {
     "dependency-preparation",
     "cargo-build",
     "payload-materialization",
-    "godot-import",
     "manifest-hashing",
     "output-copy",
     "inno-packaging"

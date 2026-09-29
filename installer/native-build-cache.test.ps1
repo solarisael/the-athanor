@@ -7,8 +7,8 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 
 $Root = Join-Path ([IO.Path]::GetTempPath()) "athanor-native-cache-test-$PID-$([Guid]::NewGuid().ToString('N'))"
-$Required = @("postgresql/bin/postgres.exe", "postgresql/lib/vector.dll", "godot/athanor-gui.exe")
-$Key = Get-NativeBuildCacheKey @("cache-v1", "postgres-sha", "pgvector-sha", "godot-sha")
+$Required = @("postgresql/bin/postgres.exe", "postgresql/lib/vector.dll", "nats/nats-server.exe")
+$Key = Get-NativeBuildCacheKey @("cache-v1", "postgres-sha", "pgvector-sha", "nats-sha")
 try {
   New-Item $Root -ItemType Directory -Force | Out-Null
   Assert-True (-not (Test-NativeBuildCache $Root $Key $Required)) "an unmarked cache must be rejected"

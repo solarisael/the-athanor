@@ -56,7 +56,7 @@ The release manifest and this table are the sanitized artifacts.
 
 ### Boundary
 
-The Godot client is parked. `athanor.exe` starts the Host without launching a presentation child.
+The parked Godot client lives in the private repository `solarisael/athanor-godot`. `athanor.exe` starts the Host without a presentation child.
 The web prototype at `gui-prototype/` is the read-only operator surface.
 `bun gui-prototype/serve.ts` serves it and proxies Host reads over loopback.
 OMP owns its substrate transport children. The legacy `omp-keeper.exe` process remains.

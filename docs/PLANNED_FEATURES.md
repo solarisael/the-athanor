@@ -64,9 +64,9 @@ proposed repair order and unchanged release gates; it activates no deferred work
 | GIGA Hippocampus Stage 1 | Notice possible memories and lessons while life happens, then keep them non-authoritative until review | Current infrastructure and explicit review; useful classification, consolidation, and later benefit unproved |
 | Curios | Keep selected hunches until later context makes them meaningful | Current retention; automatic resonance and bounded resurfacing not delivered |
 | GIGA Striatum | Keep the right reviewed lessons warm on every turn while a work state persists | Current narrow deterministic process triggers; complete learned work-state behavior remains planned, post-Docket and shadow-first |
-| Web operator surface at `gui-prototype/` | Read House state through the loopback proxy in `serve.ts` | Current — read-only; Godot is parked |
+| Web operator surface at `gui-prototype/` | Read House state through the loopback proxy in `serve.ts` | Current — read-only |
 | Athanor Host | Give clients one authenticated snapshot/delta/resync surface with restart-safe cursors and idempotency | Current Host boundary; 0.9.5 is a historical evidence label |
-| Session Recall Policy | Make proactive retrieval visible and mode-aware without requiring ordinary users to understand retrieval engineering | Current — Rust Host + OMP; Godot is parked |
+| Session Recall Policy | Make proactive retrieval visible and mode-aware without requiring ordinary users to understand retrieval engineering | Current — Rust Host + OMP |
 | GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Specified |
 | PostgreSQL outbox and NATS delivery | Deliver bounded opaque pointers with explicit duplicate windows and durable PostgreSQL idempotency | Current — `boat.ready` lane |
 | Paper Boat sleep, wake, and delivery receipt | Commit the Boat and outbox together, wake from PostgreSQL authority, and show only sanitized receipt metadata | Current sleep/wake paths; backup latency remains; transport receipt does not prove recipient application |
@@ -82,7 +82,7 @@ proposed repair order and unchanged release gates; it activates no deferred work
 | Proof-guided repair trajectories | Feed structured counterexamples into bounded repair and retain reviewed trajectories for possible offline training | Specified |
 | Optional Wasmtime sandbox | Run compatible untrusted plugins/helpers with empty-by-default capabilities and hard resource limits | Specified |
 | pgvector HNSW boundary | Keep semantic ANN in pgvector and revisit native indexing only after a measured supported-backend ceiling | Specified |
-| In-world Godot client | Preserve the spatial presentation specification | Parked — historical specification |
+| In-world Godot client | Preserve the spatial presentation specification | Parked — lives in the private repository `solarisael/athanor-godot` |
 | Companion room sovereignty | Let governing companions create child rooms/workspaces inside constitutional resource, custody, and audit grants | Specified |
 | Companion-authored models | Let companions initiate governed local model/LoRA training with lineage, evaluation, canary, rollback, and model cards | Specified |
 | BM25F lexical retrieval | Rank structured memory fields with a principled field-aware sparse baseline | Current |
@@ -104,7 +104,7 @@ Run `bun gui-prototype/serve.ts` from the repository root.
 It reads the Host through a loopback proxy.
 The proxy allowlists read routes for health, Insula, Docket, Hallway, memory,
 and lessons. Fixtures and parked native controls do not establish a web write path.
-The Godot client is parked.
+The parked Godot client lives in the private repository `solarisael/athanor-godot`.
 The following native controls and spatial design remain historical specifications for the parked client.
 
 The client does not connect directly to PostgreSQL, NATS, Ollama, hosted model
@@ -114,7 +114,7 @@ not yet understand.
 
 After one initial snapshot, ordinary updates are typed deltas with base and next
 versions. Missing or out-of-order mutations trigger replay or resynchronization.
-The parked Godot client updates only the affected view-model or scene subtree and queues redraw
+The parked client updates only the affected view-model or scene subtree and queues redraw
 only where state changed; it does not rebuild the complete renderer-facing
 projection for a tiny mutation.
 
@@ -125,7 +125,7 @@ for nodes, edges, and motion. Fine-grained Host deltas update only affected
 records.
 
 The Solarisael website remains visual canon. One generated token manifest feeds
-web tokens and parked Godot Theme/Environment/material resources. Custom Controls exist
+web tokens and the theme, environment, and material resources of the parked client. Custom Controls exist
 for real behavior/layout roles; shape, state, tone, and phase remain typed
 resources and variations rather than one class per poetic element.
 
@@ -140,7 +140,7 @@ The Rust Host persists the requested mode in room state, resolves `Auto` per
 session with work-immediate/conversation-hysteresis behavior, replaces one
 bounded Recall working set instead of accumulating per-turn payloads, invalidates
 it after compaction, and exposes status and overrides through OMP.
-The web operator surface is read-only. The Godot controls are parked.
+The web operator surface is read-only.
 Hands on files are evidence: a session that has edited or written resolves `Auto`
 to work whatever the prompt sounds like, while a named technical project or an
 explicit lookup still outranks that evidence.
@@ -183,7 +183,7 @@ about the current Rust Recall response. Hydrated records form a deduplicated
 working set that survives ordinary turns and is rebuilt after compaction or a
 scope change.
 
-The parked Godot client retains the historical Recall Policy display.
+The parked Godot client, in the private repository `solarisael/athanor-godot`, retains the historical Recall Policy display.
 It renders requested and resolved modes, scope, refresh reason, evidence count, recovery state, and degradation from Host projections.
 The web operator surface reads Host state through the loopback proxy without exposing writes.
 Cluster resonance and other retrieval telemetry remain inspectable diagnostics
@@ -211,7 +211,7 @@ PostgreSQL is the durable authority for messages, events, sources, review, and
 outcomes. A transactional outbox publishes bounded `boat.ready` pointers to NATS
 JetStream. Private prose stays in PostgreSQL; consumers acknowledge only after
 committing one idempotent receipt. The Host replays retained sanitized receipt
-projections after restart. The parked Godot client retains a historical renderer for these receipts.
+projections after restart. The parked client retains a historical renderer for these receipts.
 That renderer does not invent or load a Boat body.
 
 The broader Origami contract specifies versioned crease patterns for
@@ -457,7 +457,7 @@ preserve existing Houses during installation, upgrade, backup, and recovery.
 
 See [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the runtime
 sequence, [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) for formal
-backends, [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) for the parked spatial client,
+backends,
 [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) for sovereignty and the
 marketplace, and [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) for
 identity, custody, and authority contracts.

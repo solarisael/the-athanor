@@ -41,7 +41,7 @@ function Write-SandboxFile([string]$Path, [string]$Content) {
 
 function New-SandboxRepository([string]$Root, [string]$Version) {
   $Adapter = Join-Path $Root "adapters/omp"
-  Write-SandboxFile (Join-Path $Root "installer/dependencies.json") "{`"format`":1,`"schemaVersion`":19,`"components`":{`"hostApi`":2,`"substrateApi`":3,`"deliveryApi`":5,`"godotApi`":`"4.7`"}}"
+  Write-SandboxFile (Join-Path $Root "installer/dependencies.json") "{`"format`":1,`"schemaVersion`":19,`"components`":{`"hostApi`":2,`"substrateApi`":3,`"deliveryApi`":5}}"
   Write-SandboxFile (Join-Path $Adapter "package.json") "{`"name`":`"the-athanor-omp`",`"version`":`"$Version`"}"
   foreach ($Name in @("index.ts", "hygiene.ts", "athanor-root.ts", "discovery.ts", "giga.ts", "kitten-lineage.ts", "rust-transport.ts")) {
     Write-SandboxFile (Join-Path $Adapter $Name) "export const source = `"$Name`";`n"

@@ -18,17 +18,11 @@
       "version": "2.14.4",
       "url": "https://github.com/nats-io/nats-server/releases/download/v2.14.4/nats-server-v2.14.4-windows-amd64.zip",
       "sha256": "b6755c58ffec1518d0efaa6985284f6e796d22caab7cae4ec90a49a1bf79fa5d"
-    },
-    "godot": {
-      "version": "4.7.1-stable",
-      "url": "https://github.com/godotengine/godot/releases/download/4.7.1-stable/Godot_v4.7.1-stable_win64.exe.zip",
-      "sha256": "c7a289051eaefb460b0106b60e9cd5bee0ef55fd102dcb2bed1eb356cf3d90a1"
     }
   },
   "components": {
     "hostApi": 1,
     "substrateApi": 1,
-    "deliveryApi": 1,
-    "godotApi": "4.7"
+    "deliveryApi": 1
   }
 }

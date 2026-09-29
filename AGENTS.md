@@ -43,10 +43,8 @@ execution identity), 49/51 (inserts declare their key; migrations idempotent).
 ## Main surface (standing, 2026-08-28 — project lesson 462)
 
 The web client at `gui-prototype/` is the House's main operator surface.
-The Godot client under `gui/` is PARKED, not deleted: `athanor.exe` stays the
-canonical desktop owner of harness processes, but the face it fronts is the
-web prototype. Do not extend Godot screens, themes, or scenes without Sol
-explicitly reopening the Godot client.
+The parked Godot client moved to the private `solarisael/athanor-godot` repository.
+The release does not ship it. Its rules, including typography, live in that repository's `AGENTS.md`.
 
 ## Lessons scopes: runtime vs GUI
 
@@ -55,26 +53,9 @@ Two project scopes, deliberately separate:
 - **`the-athanor`** — runtime, substrate, delivery, Host, installer, adapter
   rules. Version discipline (lesson 358) lives here. The main-surface
   direction (lesson 462) also lives here.
-- **`the-athanor-gui`** — parked Godot client taste: theme, typography,
-  layout, screen contracts. Dormant while the client is parked; applies only
-  when Godot work is explicitly resumed. Client taste must not blur into
-  runtime rules and vice versa.
+- **`the-athanor-gui`** — Godot client taste: theme, typography, layout, screen
+  contracts. These lessons apply only inside the private `solarisael/athanor-godot`
+  repository, and only when Sol reopens the Godot client.
 
 Record new lessons into the matching scope with the `remember` organ
 (`kind: project-lesson`, `project` as above).
-
-## Typography (parked Godot client only — project lesson 375)
-
-One face: **Atkinson Hyperlegible Next as an MSDF FontFile**
-(`multichannel_signed_distance_field=true`, `hinting=0`) wrapped in a
-`FontVariation` with `variation_embolden = 0.35` — the embolden compensates
-Godot's un-gamma'd dark-theme blending and was the decisive lever. The theme's
-`default_font` is the single source; no per-style `fonts/font` overrides; no
-additional faces without Sol's explicit say-so.
-Two floors are law: no `font_size` below **14px**; no light-on-dark
-`font_color` below **0.7** brightness (muted tier is 0.78; dark-on-light chip
-text exempt). Hierarchy comes from size and color, never face-switching.
-Rendering law: any surface showing the UI (including viewport-textured 3D
-quads) must map **1:1 texels to pixels at rest** — orthographic camera sized
-to the quad, nearest filtering. Depth and focus belong to motion, never to a
-resting frame.

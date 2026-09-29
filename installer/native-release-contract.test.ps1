@@ -160,7 +160,7 @@ try {
   $Stages = Get-NativeReleaseStageNames
   foreach ($Required in @(
       "toolchain-preflight", "download-verification", "dependency-preparation", "cargo-build",
-      "payload-materialization", "godot-import", "manifest-hashing", "output-copy", "inno-packaging")) {
+      "payload-materialization", "manifest-hashing", "output-copy", "inno-packaging")) {
     Assert-True ($Stages -ccontains $Required) "the shared contract must own the stage name $Required"
   }
 

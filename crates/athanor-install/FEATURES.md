@@ -100,9 +100,9 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 
 `src/manifest.rs`. The release manifest for the native product.
 
-- **Pinned versions.** The module pins the schema, the platform, PostgreSQL, pgvector, NATS, and Godot.
+- **Pinned versions.** The module pins the schema, the platform, PostgreSQL, pgvector, and NATS.
 - **Validation.** It requires format 1, the `the-athanor` product, a safe version, the `windows-x64` platform, and the exact required schema.
-- **Compatibility.** All eight compatibility fields must match the pinned values exactly. A mismatch reports every observed value.
+- **Compatibility.** All six compatibility fields must match the pinned values exactly. A mismatch reports every observed value.
 - **Rollback contract.** The manifest must require a database restore and must retain at least 2 versions.
 - **Artifacts.** Paths must be relative, must hold only normal parts, and must not use a backslash. Digests must be 64 hexadecimal characters. Duplicate paths are refused.
 - **`verify_bytes`.** It compares the size first, then the SHA-256 digest without regard to case.

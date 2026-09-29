@@ -47,9 +47,7 @@ installed immutable component. Operator data and secrets are separate:
     release-manifest.json
     bin\
       athanor-substrate.exe
-      athanor-gui.exe              pinned Godot 4.7.1 runtime (parked client)
     runtime\
-      godot\                        imported client project + GDExtension (parked)
       postgresql\                   EnterpriseDB PostgreSQL 18.4-2 + pgvector 0.8.6
       nats\nats-server.exe          NATS Server 2.14.4
   components\omp-adapter\
@@ -102,7 +100,7 @@ the verified handle for each child. It never selects unrelated processes by
 name.
 
 `athanor.exe` is an independent local manager and in-process multi-room Host. It
-does not launch the parked Godot client and does not own OMP session lifetime. Every room route
+does not own OMP session lifetime. Every room route
 starts with `/room/<room-key>`.
 
 Run the native doctor from an elevated terminal:
@@ -140,7 +138,7 @@ The manager refuses an adapter release that is incompatible with the active
 native manifest. These commands never change a native product version.
 
 The Start menu contains **The Athanor** and **Athanor Doctor**.
-**The Athanor** runs `athanor.exe`, which starts the Host without launching the parked Godot client.
+**The Athanor** runs `athanor.exe`, which starts the Host.
 **Athanor Doctor** provides lifecycle diagnostics.
 Run `bun gui-prototype/serve.ts` from the repository root.
 Open `http://127.0.0.1:4175` unless `PULSE_PORT` specifies another port.

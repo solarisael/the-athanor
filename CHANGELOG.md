@@ -76,6 +76,9 @@ the exact implementation record.
 
 ### Changed
 
+- The release no longer ships the parked Godot client. The installer does not download Godot, does not install `athanor-gui.exe` or `runtime/godot/`, and has no `godot-import` stage.
+  The release manifest no longer pins `godotApi` or `godot`. Its format stays 1. The installer still accepts a retained release manifest that pins them, so a rollback to an older release works.
+  The Godot client and its history moved to the private repository `solarisael/athanor-godot`. The live GUI is `gui-prototype/`.
 - Lesson language and technology keys now match by family. A trailing number is a version: `bend-2` has the family `bend`.
   A key without a version reaches every version, so `bend` finds lessons keyed `bend-2`. A key with a version reaches the same version and the key without a version, so `bend-2` finds `bend` but not `bend-1`.
   Stored keys do not change. `lessons` queries, lesson context, and the OMP trigger globs use the same rule. The OMP trigger globs now also know `.bend` and `.wgsl` files.

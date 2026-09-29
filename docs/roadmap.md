@@ -20,7 +20,7 @@ The `0.9.6` native Windows x64 late-beta source label is historical evidence.
 Read the current product version from [`../package.json`](../package.json)
 and installed artifact identity from its immutable release manifest.
 OMP is the supported harness. One Rust workspace owns the behavioral core,
-Vault, AKASHA, Host, delivery, native lifecycle, and parked Godot client. Read
+Vault, AKASHA, Host, delivery, and native lifecycle. Read
 [the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
 
 The historical candidate included:
@@ -201,8 +201,7 @@ bodies, the GPU-particle constellation, or broader in-world surfaces.
 
 Before implementation, keep [`../LESSON_MAP.md`](../LESSON_MAP.md), this
 roadmap, [`ARCHITECTURE.md`](./ARCHITECTURE.md),
-[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md),
-[`GODOT_CLIENT.md`](./GODOT_CLIENT.md) (parked historical specification), and
+[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md), and
 [`EVIDENCE.md`](./EVIDENCE.md) aligned with the same owners and gates.
 
 ### 2. Retain the historical 0.11 parity baseline and close known fixes
@@ -306,7 +305,7 @@ credentials and subject ACLs are mandatory before that expansion.
 The web prototype at `gui-prototype/` is the read-only operator surface.
 Run `bun gui-prototype/serve.ts` from the repository root.
 It reads the Host through a loopback proxy.
-The Godot client is parked.
+The parked Godot client lives in the private repository `solarisael/athanor-godot`.
 The parked native specification describes authenticated Host commands, snapshots, deltas, replay, and resynchronization.
 It prohibits direct connections to PostgreSQL, NATS, model providers, or harness internals.
 Its Recall Policy, sanitized Paper Boat receipt, and worker-lane screens remain historical evidence.

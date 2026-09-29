@@ -164,7 +164,7 @@ includes:
 The web prototype at `gui-prototype/` is the read-only operator surface.
 Run `bun gui-prototype/serve.ts` from the repository root.
 It reads the Host through a loopback proxy.
-The Godot client is parked.
+The parked Godot client lives in the private repository `solarisael/athanor-godot`.
 Cingulate, Datalog/Lean proof paths, OMEGA, ANON, and the signed marketplace remain specified, planned, or research work.
 
 ## Why the provocative voice exists

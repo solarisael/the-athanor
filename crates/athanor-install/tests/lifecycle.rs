@@ -130,8 +130,6 @@ fn release(version: &str, bytes: &[u8]) -> ReleaseManifest {
             host_api: 1,
             substrate_api: 1,
             delivery_api: 1,
-            godot_api: "4.7".into(),
-            godot: "4.7.1-stable".into(),
             postgresql: "18.4-2".into(),
             pgvector: "0.8.6".into(),
             nats_server: "2.14.4".into(),

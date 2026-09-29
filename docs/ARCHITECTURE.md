@@ -44,7 +44,7 @@ The Athanor Host is the authenticated, versioned boundary between interactive cl
 The web prototype at `gui-prototype/` is the read-only operator surface.
 Run `bun gui-prototype/serve.ts` from the repository root.
 It reads the Host through a loopback proxy.
-The Godot client is parked.
+The parked Godot client lives in the private repository `solarisael/athanor-godot`.
 
 ```text
 Web prototype ── loopback proxy ── Athanor Host ── Rust contracts ── Vault / AKASHA
@@ -94,7 +94,7 @@ documents link to it instead of repeating it.
 | `crates/akasha`, `substrate/` | PostgreSQL-authoritative AKASHA operations, migrations, retrieval, typed stores, Docket, GIGA, Insula, health, backup, and restore |
 | `crates/host` | One authenticated multi-room listener, snapshots, deltas, Recall Policy, receipt projection, and the Crane delivery task |
 | `crates/athanor-install`, `crates/omp-keeper`, `crates/interactive-process`, `installer/` | `athanor.exe`: native service lifecycle, immutable staging, rollback, doctor, OMP session keeper, and the Windows installer |
-| `gui/`, `gui-prototype/` | Godot operator client (parked) and the web operator surface |
+| `gui-prototype/` | The web operator surface |
 | `adapters/omp/` | OMP entrypoint, room integration, named tools, and Rust transport |
 | `.github/workflows/` | Continuous integration and native release assembly |
 | `docs/`, root Markdown | Canonical documentation |
@@ -104,8 +104,7 @@ not import the OMP adapter. The core does not require PostgreSQL. The Vault
 profile runs without any substrate component. Each boundary stays enforced by
 contract, not by repository distance.
 
-The public API boundaries are `hostApi=1`, `substrateApi=1`, `deliveryApi=1`,
-and `godotApi=4.7` for the parked client.
+The public API boundaries are `hostApi=1`, `substrateApi=1`, and `deliveryApi=1`.
 
 ### Installed layout
 
@@ -114,7 +113,7 @@ Immutable product versions and mutable operator data are separate:
 | Installed path | Content |
 |---|---|
 | `%ProgramFiles%\Solarisael\Athanor\bin` | Stable independent manager and Host owner, lifecycle manager, and OMP loader |
-| `%ProgramFiles%\Solarisael\Athanor\versions\<version>` | Verified immutable runtime, OMP adapter, parked Godot client, PostgreSQL, and NATS |
+| `%ProgramFiles%\Solarisael\Athanor\versions\<version>` | Verified immutable runtime, OMP adapter, PostgreSQL, and NATS |
 | `%ProgramData%\Solarisael\Athanor\config` | Non-secret database mode, one Host port, and House room identities |
 | `%ProgramData%\Solarisael\Athanor\secrets` | ACL-restricted service secrets |
 | `%ProgramData%\Solarisael\Athanor\data` | Managed PostgreSQL and NATS durable data |
@@ -128,7 +127,7 @@ broker, and one delivery worker. It reports `RUNNING` after these children pass
 readiness. It drains the same children in reverse order.
 
 `athanor.exe` is an independent local manager and the one in-process multi-room
-Host owner. It binds one loopback listener without launching the parked Godot client or becoming
+Host owner. It binds one loopback listener without becoming
 the parent of OMP sessions. Every WebSocket and HTTP route starts with
 `/room/<room-key>`. One shared PostgreSQL pool serves all room projections.
 
@@ -155,9 +154,8 @@ The-Athanor-<version>-windows-x64.exe
 The-Athanor-<version>-windows-x64.exe.sha256
 ```
 
-The payload pins PostgreSQL 18.4-2, pgvector 0.8.6, NATS 2.14.4, and parked Godot
-4.7.1. The service needs no WSL, Python, Bun, Cargo, or separate database/broker.
-The parked Godot client needs no editor.
+The payload pins PostgreSQL 18.4-2, pgvector 0.8.6, and NATS 2.14.4.
+The service needs no WSL, Python, Bun, Cargo, or separate database/broker.
 An explicit advanced mode may use an operator-provided compatible PostgreSQL database.
 
 The OpenCode adapter line and the two portable Vault/AKASHA archives are
@@ -490,6 +488,5 @@ lands on the same core contracts, and none becomes a parallel authority path.
 
 Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for runtime order,
 [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) for proof/synthesis,
-[`GODOT_CLIENT.md`](./GODOT_CLIENT.md) for the parked presentation specification,
 [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) for sovereignty and
 marketplace, and [`roadmap.md`](./roadmap.md) for release gates.

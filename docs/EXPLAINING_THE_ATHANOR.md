@@ -212,7 +212,7 @@ behavior it has not verified.
 > judgment on ambiguity and novel work. Today the only supported release target
 > is Windows x64 with OMP. The Host supports the read-only web operator surface at `gui-prototype/`.
 > `bun gui-prototype/serve.ts` serves it and proxies Host reads over loopback.
-> The Godot client is parked. Cingulate, OMEGA, and ANON remain roadmap claims.
+> The parked Godot client lives in the private repository `solarisael/athanor-godot`. Cingulate, OMEGA, and ANON remain roadmap claims.
 
 ## What The Athanor is not
 
@@ -225,7 +225,7 @@ The Athanor is not:
 - an enterprise knowledge platform already supporting teams and tenancy;
 - a privacy layer that prevents model providers from seeing prompts;
 - a cross-platform, one-click, harness-agnostic release today;
-- a finished native application; the Godot client is parked;
+- a finished native application;
 - a system where GIGA candidates, retrieved memories, or Anamnesis counsel are
   automatically authoritative.
 
@@ -239,7 +239,7 @@ The distinctions below carry the architecture:
 | candidate / memory | Generation is not promotion |
 | counsel / canon | Useful repetition is not current authoritative fact |
 | Paper Boat / complete memory | A handoff points into continuity; it does not replace the archive |
-| current web operator surface / parked Godot client | `gui-prototype/` provides read-only Host access; the native specification remains historical |
+| current web operator surface / parked Godot client | `gui-prototype/` provides read-only Host access; the parked client lives in the private repository `solarisael/athanor-godot` |
 | provider-neutral core / supported harnesses | Architectural portability is not a shipped adapter matrix |
 
 ## Status language

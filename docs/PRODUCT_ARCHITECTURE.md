@@ -748,7 +748,6 @@ Resolve these remaining public cutover items:
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) defines current component ownership, the installed layout, and authority boundaries.
 - [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) defines the accepted Host, UI, delivery, embodiment, derivation, and proof runtime.
 - [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) defines bounded e-graph, Z3, SyGuS, Wasmtime, proof-feedback, and promotion contracts.
-- [`GODOT_CLIENT.md`](./GODOT_CLIENT.md) defines the spatial client and presentation-body boundary.
 - [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) defines companion sovereignty, model bodies, and marketplace artifacts.
 - [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) defines GIGA and Hippocampus.
 - [`RETRIEVAL.md`](./RETRIEVAL.md) defines retrieval and evidence authority.

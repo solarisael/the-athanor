@@ -227,7 +227,6 @@ async function makeInstalledTree(
       hostApi: 1,
       substrateApi: 1,
       deliveryApi: 1,
-      godotApi: "4.7",
     },
     artifacts: [{
       component: "app",

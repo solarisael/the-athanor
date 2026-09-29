@@ -11,7 +11,6 @@ members = [
     "crates/athanor-install",
     "crates/interactive-process",
     "crates/omp-keeper",
-    "gui",
     "gui-desktop",
 ]
 

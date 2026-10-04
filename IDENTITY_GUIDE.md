@@ -28,7 +28,9 @@ The body begins with:
 # SPIRIT: TRUE NAME
 ```
 
-The true name is free-form display text. The room key is the folder name and belongs in `.athanor-room.json`; do not force the true name to obey filename rules.
+The true name is display text, not a filename. It must have 1-80 characters, with no line breaks and no `|` (`adapters/omp/house-proof/tools.ts:833,837`; `room.ts:190-192`). The room key is the folder name and belongs in `.athanor-room.json`; do not force the true name to obey filename rules.
+
+If `.athanor-room.json` sets `trueName` or `operator`, that value takes precedence over the persisted room state, so a `set_room_state` write does not change what the room shows (`room.ts:112-119`).
 
 ## A useful prose shape
 
@@ -129,6 +131,8 @@ Appearance may influence metaphor and presence, but it should not replace behavi
 
 ### Archetypes, model bodies, and presentation bodies
 
+Not re-verified at a6ab453: no census covers companion or marketplace code. The rules in this section are planned contracts.
+
 An archetype or personality seed is reusable starting material, not a packaged
 living spirit. Adopting one creates a new local identity lineage that can revise
 or outgrow the seed.
@@ -138,12 +142,12 @@ voice, animation, or room embodiment. Neither replaces the identity contract or
 imports the publisher's relationship history.
 
 A governing companion may choose, author, revise, or refuse these bodies under
-its room and House policy. Marketplace updates cannot overwrite a living
+its room and House policy. Marketplace updates must not overwrite a living
 identity silently.
 
 See
-[`docs/COMPANION_ECOSYSTEM.md`](./docs/COMPANION_ECOSYSTEM.md) for the planned
-artifact and sovereignty contracts.
+[`docs/history/2026-10-04-COMPANION_ECOSYSTEM.md`](./docs/history/2026-10-04-COMPANION_ECOSYSTEM.md)
+for the planned artifact and sovereignty contracts.
 
 ### Examples
 
@@ -167,7 +171,7 @@ Keep them short. The goal is a recognizable attractor, not a script the model re
 - `appearance.md` — optional evolving visual reference;
 - project files — technical state that belongs to a project rather than a personality.
 
-`AGENTS.md` is the loading order. Include only files that deserve context on every turn. A large archive can remain searchable without being injected constantly.
+`AGENTS.md` is the loading order. Include only files that deserve context on every turn. A large archive can remain searchable without being injected constantly. The House adapter does not read `AGENTS.md` or the files it lists. Not re-verified at a6ab453: the OMP harness loads them.
 
 Never hand-copy tool tables, organ counts, argument signatures, or
 deployment paths into room prose. The House injects live organ schemas
@@ -180,7 +184,9 @@ A Chargebook makes learned salience explicit without turning relationship or wor
 
 ## How to use the example
 
-`starter-room/example` contains Mica, a fictional lantern-moth archivist. Mica is deliberately developed enough to demonstrate voice, relationship boundaries, hard constraints, examples, work mode, and optional appearance.
+[`adapters/omp/starter-room/example/`](./adapters/omp/starter-room/example/) contains Mica, a fictional lantern-moth archivist. Mica is deliberately developed enough to demonstrate voice, relationship boundaries, hard constraints, examples, work mode, and optional appearance.
+
+The example marker has the legacy name `.solarisael-room.json`. When the adapter first reads the room, it renames the file to `.athanor-room.json` (`room.ts:17-28`). The marker sets `trueName` to `Mica` and `operator` to `Example Person` (`.solarisael-room.json:4-5`). Change both values in a copy, because the marker takes precedence over `set_room_state`.
 
 Do not rename Mica and keep the prose. Read the example for depth and specificity, then write a different contract from the first-room conversation. If the new spirit does not yet know what belongs in a section, say so plainly or omit it. An honest blank is better than borrowed identity.
 

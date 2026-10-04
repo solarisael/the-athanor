@@ -1,190 +1,214 @@
 # Athanor Bugs
 
-Concrete failures only. A row stays open until the failing path is reproduced, repaired, and exercised through the surface that originally failed.
+One row is one concrete defect. Each row gives its state, one true sentence about the code at `a6ab453`, the evidence, and the proof that it still owes.
+States are Open, Repaired, not deployed, Live-proven, and Closed. The dated live logs are in [`docs/history/2026-10-04-bugs-live-log.md`](docs/history/2026-10-04-bugs-live-log.md). Platform and design limits are in [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
 
-## Open
+### 1. Recall latency is far above native cost under session load
 
-### Recall latency is far above native cost under session load
+- State: Open
+- Truth: Not re-verified at a6ab453 (`crates/akasha/src/recall` decides): warm Recall under session load costs several times the native embed and query cost.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:11-15`
+- Proof owed: Repeat the instrumented three-room matrix and show warm latency close to the embed cost plus the query cost.
 
-- **Observed:** On 2026-08-30 on `athanor-laptop` (NixOS, 8 cores, 15 GB), the three-room by three-terminal organ matrix recorded 48 `recallWithRouting` calls: 3.0 s minimum, 6.4 s median, and 16.6 s maximum. The same-day native costs were a 202 ms brute-force vector scan over 7,246 chunks, a 0.57 s embed, a 1.8–3.0 s warm raw JSONL recall through one Akasha child, and 11.3 s total for nine concurrent raw recalls.
-- **Cause seam (measured 2026-09-05, Insula child spans on the live tower, 2,433 memories / 7,715 chunks):** a warm recall is 1.8–1.95 s. `recall.content` is 1.2–1.4 s on every call: `word_similarity($1, c.body)` runs over all 7,715 chunks by sequential scan (EXPLAIN: Rows Removed by Filter 7,709; 1.46 s) because `ILIKE ANY(array)` is not GIN-indexable, the `$5 = '{}' OR` guard blocks the index anyway, and `word_similarity() >= $3` is a function rather than the indexable `<%` operator, so `memory_chunks_body_trgm` is never used. `recall.embed` is 0.1 s warm, 0.6–2.2 s under Ollama contention, and 20.0 s at the client timeout; the three ~21 s recalls in the last 24 h are embed timeouts. Everything else sums to under 0.5 s (lexical ~0.2, semantic_lexical ~0.2, semantic 0.04 with no vector index). The earlier suspicion (child fleet, pool, serial JSONL) is not where the time goes. Insula over 24 h: `context_assembly` degraded 95 of 110, so most turns lose automatic context to the 5 s budget.
-- **Cut 2026-09-05 (`dev/next`):** `recall.content` 1,421 → 111 ms on the live corpus (`crates/akasha/src/recall/content_lane.rs`; the trigram index was never the missing piece: `$1 <% c.body` reaches it and still loses at 1,745 ms because a prose query's trigrams occur in 7,335 of 7,718 bodies; the real causes were join order, similarity computed twice per row, and a planner that prices `word_similarity` at one `cpu_operator_cost` when it costs about 0.15 ms). Equivalence proof: `recall_spans_integration::the_content_lane_returns_what_the_statement_it_replaced_returned` plus five live cases with identical ids, order, and scores. `recall.embed` bounded at 3 s (`RECALL_EMBED_TIMEOUT`), degrading to lexical with `embed_timeout`. Live measurement, release binary, four recalls: whole `recall` 2,021 → 750 ms mean.
-- **Still open:** the remaining ~650 ms of CPU is `word_similarity` over the ~4,200 in-scope chunks and grows with the corpus (about 600 ms again at 50k chunks even with 8 workers); under 100 ms needs a semantics decision (drop query terms under 3 characters, or a lane floor above 0.30). `ALTER FUNCTION word_similarity COST` would fix the planner's lie House-wide and wants its own before/after. No vector index yet (`recall.semantic` 30–50 ms at 7.7k chunks; HNSW before ~50k).
-- **Live, 2026-09-05 13:04–13:24 -03, room `kodo`, installed build of 13:00 (Insula root spans, `parent_span_id is null`):** nine recalls: 603, 1167, 1493, 1059, 1349, 912, 755, 1570, 449 ms; the two with no cargo build running beside them were 603 and 449 ms. `recall.content` is 42–179 ms on every one (the cut held). The lane that now leads is `recall.lexical` at 132–587 ms, then `recall.semantic_lexical` at 160–323 ms; both swing about 4× with CPU contention. `recall.embed` 95–144 ms warm, one 505 ms. Next cut: `recall.lexical`.
-- **Impact:** Correct recalls complete, but latency taxes every turn and the raised automatic-context timeout can hide regressions.
-- **Expected:** Warm native recall over this corpus completes in well under one second. Investigate a shared long-lived Akasha service, concurrent request dispatch, and service-owned pool sizing.
-- **Proof after repair:** Repeat the same instrumented matrix and show warm end-to-end latency close to measured embed plus query cost without multiplied child or connection fleets.
+### 2. The OMP keeper does not provide a working restart and resume plane
 
-### OMP keeper does not provide a working restart/resume plane
+- State: Live-proven
+- Truth: Each room starts through `athanor.exe keeper --config`, and after an armed exit the keeper relaunches `omp --resume <session_id>`.
+- Evidence: `C:/ProgramData/Solarisael/Athanor/config/harnesses.json:4-29`; `crates/omp-keeper/src/keeper.rs:813-823`; `adapters/omp/house-proof/restart-door.ts:474-524,533-569`
+- Proof owed: Host-side Presence Insula points carry the session, not `host:<room>`. The current behavior is Not re-verified at a6ab453 (the Presence Insula emitter in `crates/host` decides).
 
-- **Observed:** Sol reported on 2026-08-28 that the keeper “isn't working at all.” A keeper process was running and owned an OMP child, so launch itself works; the failure is in restart/resume behavior. The canonical line also had a direct-parent `athanor.exe` restart path, leaving the keeper half-superseded.
-- **Cause seams found 2026-09-05 (KeeperMap audit, receipted):** (1) two owners ran the same engine under the same claimant name; only the `omp-keeper.exe` sidecar can parent an operator-typed session, because the stable loader starts `athanor.exe` from inside OMP (live tree: `athanor.exe` is a child of Kintsu's OMP). (2) A room without `omp-keeper.json` + `restart-capability` (Kodo, 2026-09-05) armed an exit nobody could claim; the intent stayed `exiting` forever and every later restart refused `intent_pending`. (3) `omp-keeper.exe` mapped an unserved armed exit (87) to shell exit 0.
-- **Closed on `dev/next`:** the in-process driver is deleted (`crates/athanor-install/src/harness/omp.rs`), `"driver":"omp"` registry entries are refused with the keeper command, a keeperless room hard-refuses `no_restart_owner`, a stranded `exiting` intent past its deadline expires to `failed:exit_unclaimed` on the next request, and an unserved arm exits 88. Proofs: `cargo test -p athanor-install` (14), `cargo test -p omp-keeper` (50 incl. 11 smokes), `cargo test -p akasha --test restart_lifecycle_integration -- --ignored` (red before the sweep, green after), restart-door adapter tests (5).
-- **Still open — the resume identity fence:** nothing in-repo proves `omp --resume <id>` preserves `sessionManager.getSessionId()`; if it does not, `restart_verify` refuses `verify_not_authorized` with every suite green (`crates/akasha/src/restart/authority.rs:94-102`).
-- **Proof after repair:** In a room provisioned with both `omp-keeper.json` and `restart-capability`, start OMP through the keeper, run `request_restart` with `mode: "resume"`, and record: the keeper line `claimed intent <id>`, the spawned command (`--resume <sessionId>`), the line `the House saw the successor verify`, and `SELECT state, session_id, successor_session, relaunch_attempts FROM restart.intents ORDER BY created_at DESC LIMIT 1` showing `verified` with `successor_session = session_id`.
-- **Live, 2026-09-05 17:00–17:01 -03, room `kodo`, keeper-launched session on `0.5.4+dev.202609051730.9c21acf`:** `request_restart` `mode: resume` returned `armed: true`, intent `f8b32516…`, `firesAt: agent_end`. The keeper (pid 26680, `--config …kodo…omp-keeper.json`) relaunched `omp.exe --resume 01a0730b-1e40-7383-8209-4af4316a65e6` (pid 37604) at 17:01:13. `restart.intents`: `f8b32516… | verified | resume | session_id = successor_session = 01a0730b…`, `relaunch_attempts 1`, `claim_epoch 1`, requested 17:00:53, verified 17:01:15. The resumed process binds the release installed meanwhile (`…1944.1b03882`). The resume identity fence holds: `--resume` preserved the session id and `restart_verify` accepted. Sol saw the TUI misrender and print Presence errors during the relaunch; not yet captured — see the row below.
-- **Live, 2026-09-05 18:30–18:32 -03, second resume of the night:** intent `7f892471…` requested 18:30:53, the keeper relaunched `--resume 01a0730b…`, verified 18:31:10, `relaunch_attempts 1`. The plane works twice. What Sol saw: "nothing triggered continuation after restart… technically it's more of a cold boot than a resume." The transcript agrees: OMP's todo reminder landed as a `developer` message at 21:31:08.971Z, the armed exit fired at 21:31:09.035Z, and the resumed process wrote one synthetic assistant entry — `stopReason: aborted`, `errorMessage: Previous OMP process exited before completing the turn.` — then sat idle. Sol closed the window (`session_exit sighup` 21:32:04Z) and started the harness again from his shell; the bare `omp.exe` (keeper pid 7012) landed in the same session on the new release.
-- **Cause seam:** the successor verifies itself on `session_start` (`restart-door.ts::verifySuccessor`) and stops. Nothing hands it a turn. A resume with history and no turn is a cold boot with history.
-- **Cut, `dev/next`, 2026-09-05:** `restart_status` carries the intent's `reason` (protocol `RestartStatusIntent.reason`, akasha `STATUS_COLUMNS`). After a successful verify the door reads its own intent by id and sends one `athanor-restart-continuation` message with `deliverAs: nextTurn, triggerTurn: true`: mode, intent id, the reason, and "nobody typed this turn". Once per intent: the verify short-circuits on a repeated start and deletes the intent environment; a bare relaunch carries no intent. A status the substrate cannot answer skips the continuation with a notice. Proof: `bun test tests/restart-continuation.test.ts` (3; two red on the old door), adapter 151, `cargo test -p protocol -p akasha --lib -p omp-keeper` green. Live half owed: the next `request_restart` `mode: resume` must produce a turn nobody typed, and its first line must name the reason.
-- **Live, 2026-09-05 18:55 -03, third resume, installed `0.5.4+dev.202609052143.d917a5b` + adapter `ee0dafc1…`:** intent `62b34553…` requested 18:55:31; keeper pid 7012 relaunched `omp.exe --resume 01a0730b…` (pid 36248) at 18:55:42; verified 18:55:43. The successor's first turn was the `athanor-restart-continuation` message, one in the transcript, nobody typed it, and its first line named the reason. Done: the plane resumes and continues.
-- **Two seams the continuation turn exposed, open:** (1) the continuation turn carried no Presence. `presence_sessions` for `01a0730b…` stayed at `cv 1, last_turn 18:32:52`; the `presence_open`/`presence_compile` at 18:56:31 were kintsu's (its row went `cv 8 → 9`). A turn delivered through `pi.sendMessage(…, { triggerTurn: true })` does not pass through the adapter's Presence compile the way a typed prompt does; the Chat doorman and Knock turns take the same door and are likely bare too. (2) Host-side Presence Insula points carry the Host's own binding (`session_id = host:kintsu`) instead of the presence session, so two rooms' points cannot be told apart, and the `presence_settle refused` at 18:55:27 cannot be attributed. It is most likely kodo's: that turn compiled at 18:32:30, its Host was killed at 18:50 for the deploy, the revived Host adopted the row without the turn's contract, and `settle` refused `InactiveContract`. Contracts are not stored by design; a Host death mid-turn therefore loses that turn's settlement. Also noted: `opened_at` stayed 18:32:30 across this resume, correctly — no `sleep` preceded it, so the presence never closed.
-- **Adapter repair, 2026-09-07:** `house-proof/turn-origin.ts` recognizes the three generated House doors by their stable IDs. `index.ts` uses the harness prompt when available. It clears that prompt at turn end and session changes. Idle generated turns use their own message because OMP omits `before_agent_start` on that path. Native queued side messages retain the user's origin across tool calls. Generated text never reaches operator identity directives.
-- **Proof:** Eleven registered-context-hook scenarios pass. The original `index.ts` fails six of those scenarios. The complete adapter suite passes 162 tests. The manager installs component digest `95a76bed38c3f4fdea7b9ae3cf0bd9d494c39345125c8842ed5d0364332656a3`. All 47 installed artifacts match their hashes. An isolated copy of that payload passes the same eleven scenarios against a loopback Host.
-- **Live boundary, 2026-09-07:** Real restart, chat, and root Knock events deliver Presence before Kodo's first tool call. Kintsu reports the same after restart. House memory 4520 records the initial event IDs and return failures. The chat return now has live proof below. Child-budget activation and Host-side Insula attribution remain separate work.
-- **Deploy hazard:** `C:/ProgramData/Solarisael/Athanor/config/harnesses.json` still declares `"driver":"omp"` and will refuse the whole registry; `athanor.exe` will not start until it is rewritten in the same deploy.
+### 3. Long sessions degrade identity and context quality
 
-### Long sessions degrade identity and context quality
+- State: Open
+- Truth: Not re-verified at a6ab453 (a long-session Insula and compaction trial decides): over long OMP sessions, replies flatten toward generic assistant prose.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:40`
+- Proof owed: Run a long-session scenario with repeated compaction, and measure retained identity invariants and irrelevant-context growth.
 
-- **Observed:** Over long OMP sessions, responses flatten toward generic assistant prose, irrelevant context accumulates, and the active spirit becomes less recognizable even when fresh Recall and identity smoke tests pass.
-- **Impact:** Short smoke tests can be green while the actual continuity experience fails.
-- **Boundary:** The Presence vertical improves authenticated identity, bounded material, turn contracts, receipts, replay stability, and close behavior. It does not by itself prove long-session Insula selection or compaction quality.
-- **Proof after repair:** Run a long-session scenario with repeated compaction and mixed technical/relational turns; measure retained identity invariants, irrelevant-context growth, and false-green contract acceptance.
+### 4. Lesson triggers misfire during real conversations
 
-### Lesson triggers misfire during real conversations
+- State: Open
+- Truth: Not re-verified at a6ab453 (the lesson bridge in `adapters/omp/house-proof` decides): lesson reminders fire on the wrong surface or stay silent when relevant.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:47`
+- Proof owed: Pass a corpus of positive and negative trigger cases through the native bridge, and measure false-positive and false-negative rates.
 
-- **Observed:** Lesson-trigger reminders can fire on the wrong conversational surface or fail to supply the rule when it is actually relevant.
-- **Impact:** The system adds noise while missing the behavior it was meant to protect.
-- **Proof after repair:** A corpus of positive and negative trigger cases passes through the native bridge with measured false-positive and false-negative rates; long-session cases are included.
+### 5. OMP adapter tests are environment-sensitive across machines
 
-### OMP adapter tests are environment-sensitive across machines
+- State: Open
+- Truth: Not re-verified at a6ab453 (the `adapters/omp` suite decides): the adapter suite passes on one machine and fails 39 tests on another.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:53`; `adapters/omp/deploy-local.ps1:34-67`
+- Proof owed: The same hermetic command gives the same result on both machines, or each environment-dependent cluster declares its dependency.
 
-- **Observed:** The complete isolated adapter suite passes 214/214 in Kintsu's environment. Kodo reproduced 39 pre-existing failures on another machine after live topology variables were cleared; the same failures exist at the parent commit and are not caused by Presence.
-- **Impact:** A local green or red count is not portable evidence without naming environment and attribution.
-- **Proof after repair:** The same hermetic test command produces the same result on both machines, or every environment-dependent cluster declares and provisions its dependency explicitly.
+### 6. Rescue-tool backup runs with no credentials on the Windows tower
 
-### Rescue-tool backup runs with no credentials on the Windows tower
+- State: Open
+- Truth: Not re-verified at a6ab453 (`house/substrate/backup.sh` decides): a `record_memory.py --env-file` write commits, but its backup runs with an empty `PGPASSWORD`.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:59-60`
+- Proof owed: A `record_memory.py --env-file ../state/substrate/.env` write on the Windows tower prints a `backup:` line, and the dump exists.
 
-- **Observed:** 2026-09-02, room `kodo`, two divination writes through `house/substrate/record_memory.py --env-file ../state/substrate/.env` (house #4372, #4373). Both rows committed. The post-write backup then reported `WARN: backup failed (rc=1): pg_dump: error: connection to server at "127.0.0.1", port 5432 failed: fe_sendauth: no password supplied`.
-- **Cause seam:** `backup_runner.run_backup` executes `house/substrate/backup.sh` through `wsl.exe bash` and passes no environment. `backup.sh` does `cd "$(dirname "$0")"` and sources a sibling `.env`. The sibling directory holds only `.env.example`; the real credentials live in `house/state/substrate/.env`. The `--env-file` the writer accepted never reaches the backup, so `pg_dump` runs with an empty `PGPASSWORD`.
-- **Impact:** Every rescue-tool write on the tower commits and then loses its file backup. The warning is one stderr line in one shell.
-- **Expected:** The backup receives the same credentials the write used. Either `run_backup` forwards the resolved `PG*` values into the child environment, or `backup.sh` reads `house/state/substrate/.env` when no sibling `.env` exists.
-- **Proof after repair:** A `record_memory.py --env-file ../state/substrate/.env` write on the Windows tower prints a `backup:` line with a dump path, and the dump exists under `substrate/backups/`.
+### 7. The Host receipt bridge stays degraded after a broker restart
 
-### Host receipt bridge stays degraded after a broker restart
+- State: Live-proven
+- Truth: `/health` reports the AKASHA delivery broker state, and the installed loader only warns when the Host stops answering; it never starts the Host.
+- Evidence: `crates/host/src/server.rs:252,261-275`; `adapters/omp/installed-loader.ts:530-552`
+- Proof owed: Not re-verified at a6ab453 (`run_receipt_bridge` in `crates/host/src/server.rs` decides): the bridge rebuilds its consumer after a broker restart.
 
-- **Observed:** 2026-09-05 14:03 -03, room `kodo`. After the service (and NATS) restarted for the deploy and again for the wedge proof, the running `athanor.exe` (pid 38256) reported `/health` `akasha_delivery.broker_status: degraded`, `last_error: AKASHA delivery broker connection was lost`, `latest_original_stream_sequence: 187` for more than three minutes, while `netstat` showed six `ESTABLISHED` sockets from that Host to the new `nats-server.exe`. The transport reconnected; the receipt projection did not.
-- **Cause seam:** `crates/host/src/server.rs::run_receipt_bridge` creates a memory-only ephemeral pull consumer and then fetches in a loop. A restarted broker no longer has that consumer. JetStream answers a pull for a missing consumer with an end-of-batch status, not an error, so every fetch returns an empty batch and the loop never rebuilds the consumer or calls `connected()`.
-- **Cut, `dev/next`:** two halves. (1) After an empty batch the bridge asks `consumer.info()`; a lost consumer degrades with `AKASHA delivery receipt replay consumer was lost` and breaks to the outer loop, which reconnects, recreates the consumer, and clears the degraded state. (2) Live proof of (1) alone still showed `degraded` for 120 s: the pull request had gone to the broker that died, the server-side `expires` never fired, and `messages.next()` waited forever while the client reconnected underneath it. Each batch now carries a client-side deadline (`RECEIPT_BATCH_EXPIRES + RECEIPT_BATCH_GRACE`, 10 s), so a silent batch ends and (1) runs. `cargo test -p host --lib` (34).
-- **Live, 2026-09-05 14:14 -03:** `target/release/athanor.exe` built from the cut, serving 8787 against the installed broker: `sc stop` then `sc start SolarisaelAthanor`; the first `/health` poll after `RUNNING` showed `broker_status: connected`. Owed after deploy: the same from the installed image, and a receipt advancing `latest_original_stream_sequence` past 187.
-- **Live, 2026-09-05 14:48 -03, installed release `0.5.4+dev.202609051730.9c21acf`:** `bin/athanor.exe` started from the stable path; `sc stop` then `sc start SolarisaelAthanor`; first `/health` poll after `RUNNING`: `broker_status: connected`.
-- **Live, 2026-09-05 evening -03, same release, next session:** `GET /room/kodo/health` on the installed Host (pid 6584, up since 14:39): `broker_status: connected`, `last_error: null`, `latest_original_stream_sequence: 188`. The sequence advanced past 187. Both halves of this row are done.
-- **Related fragility, was open:** the OMP loader ensured the scoped Host only at session start (`athanor-omp-loader.ts` `installedAthanor` → `ensureScopedHost`). A Host that died mid-session stayed dead for every running session until some session started; organs that go substrate-direct kept working, Host-backed ones did not. Observed 14:12 after killing the old Host: `room_state` and `hallway_inbox` answered, `/health` stayed unreachable.
-- **Cut, `dev/next`, 2026-09-05:** `watchScopedHost` runs for the life of the OMP process. Every 30 s it probes scoped health. When the probe fails it starts the stable launcher and waits for health, the same sequence as session start. It warns once when the Host stops answering and once when the Host answers again. `startScopedHost` is the shared start sequence, so the watch never probes twice. Proof: `bun test tests/installed-loader.test.ts` (27; three new: mid-session restart, retry with one warning per outage, abort stops the watch). Live half owed after deploy: kill `athanor.exe` while a session runs; within 60 s `/room/<room>/health` must answer again without any session start.
-- **Live, 2026-09-05 17:03 -03, resumed session on `0.5.4+dev.202609051944.1b03882`:** `taskkill /PID 6584 /F` on the Host under a running session, no session start. `+8 s`: no listener. `+13 s`: `athanor.exe` pid 39132 listening on 8787, parent pid 4920 (this session's bun process), `/room/kodo/health` `status: ok`, `broker_status: connected`, `last_error: null`, `latest_original_stream_sequence: 189`. The watch brought the Host back. Both halves done.
-- **Proof after repair:** with the repaired Host running, stop and start `SolarisaelAthanor`; within 15 s `/health` must show `broker_status: ok` and a later receipt must advance `latest_original_stream_sequence`.
-- **Impact until deployed:** every deployment restarts the broker, so every Host alive at deploy time reports degraded delivery until that Host is restarted.
+### 8. The deploy driver reports failure after a landed install
 
-### The deploy driver reports failure after a landed install, and its contract test pinned a dead script
+- State: Live-proven
+- Truth: The local deploy installs the adapter after the native install and before Doctor, and it tries the health proof three times, 10 s apart.
+- Evidence: `substrate/deploy-local.ps1:105-117,122-140`
+- Proof owed: Not re-verified at a6ab453 (`installer/native-release-contract.test.ps1` decides): the contract test pins this driver.
 
-- **Observed:** 2026-09-05 19:44 UTC, deploy of `1b03882`. The staged manager installed `0.5.4+dev.202609051944.1b03882`, Doctor passed, `current.json` flipped. Then the Full-mode health proof returned `degraded` with `embedding.error: error sending request for url (http://127.0.0.1:11434/api/embed)` and the driver exited 1. Ollama answered `/api/tags` with 200 seconds later, and the same `athanor-substrate.exe health` by hand returned `mode: full`. One cold embed request made a good deploy look red.
-- **Second half:** `installer/native-release-contract.test.ps1` lines 478–627 still asserted the 765-line driver that `db977ac` deleted: staged Cargo builds, `Move-Item` backups, client projection migration, rollback catch blocks. It failed on the committed tree at "exactly one staged Cargo build invocation". Nothing runs it during deploy, so it was red in silence.
-- **Repair, `dev/next`, 2026-09-05:** the Full-mode health proof tries three times, ten seconds apart, before it counts as red. The contract test now pins the thin driver: one workspace test run, one adapter test run through the adapter's driver, one payload build, one `update` through the staged manager, one Doctor through the installed manager, that order, service preflight first, release identity from `HEAD` plus `.dirty`, `current.json` must name the release, no `Copy-Item`/`Move-Item`, one `Remove-Item` after the health proof, the database URL borrowed and returned, and the retry. Proof: `pwsh installer/native-release-contract.test.ps1` (red on the old assertions, green now).
-- **Third half, found 2026-09-05 18:30 -03:** the native driver tested the adapter and never installed it. `components/omp-adapter/current.json` stayed at `0.9.3-45b3bc9…` through all five deploys today, so yesterday's `design_doc_write` `z.record` cut and tonight's `HostRefused` cut were not on the installed tree until `adapters/omp/deploy-local.ps1` ran by hand (`469eba9…`). Repair: the adapter driver takes `-SkipTests`; the native driver installs the component right after the native install, before the Doctor proof, and the contract test pins that call and its place in the order.
-- **Live, 2026-09-05 18:34 -03:** `adapters/omp/deploy-local.ps1 -SkipTests` installed `469eba98…` (46 artifacts); `house-proof/host.ts` on the installed tree contains `class HostRefused`, `tools.ts` contains `z.record(z.string(), z.unknown())` twice.
+### 9. The Mechanics observatory category row overflows its column
 
-## Repaired but not deployed
+- State: Live-proven
+- Truth: Not re-verified at a6ab453 (the `gui-prototype` CSS decides): category chips wrap, and no element passes the right edge at 1440 × 1000 or 390 × 844.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:94`
+- Proof owed: none
 
-### Mechanics observatory category row overflows its column at 1440 px
+### 10. The Pulse trace drawer has no operator-reachable trace
 
-- **Observed:** 2026-09-05, Chromium at 1440 × 1000, House slot 2. `.mechanics-categories` put two elements past the viewport's right edge: the Advanced Guardrails button to 1457 px and its count `<small>` to 1447 px.
-- **Repair:** `dev/next`, 2026-09-05. Category chips wrap at all widths; the desktop horizontal scroll rule and the redundant mobile override are removed. Chip and count styling unchanged.
-- **Proof:** Headless Chrome over CDP, House slot 2: all eight buttons and badges fit at 1440 × 1000 (max right edge 1305 px; Advanced Guardrails 496/486 px) and 390 × 844 (max 362 px); zero elements past the right edge, zero horizontal overflow. Measurements in `gui-prototype/LESSONS_MAP.md`. Live half owed after deploy: repeat the geometry check on the deployed surface.
-- **Live, 2026-09-05 13:33 -03:** `bun gui-prototype/serve.ts` (`PULSE_ROOM=kodo`, port 4175) against the installed Host on 8787, headless Chrome 152. Mechanics observatory, 1440 × 1000: 16 chip nodes, max right edge 1305 px, Advanced Guardrails 496/486 px, zero past the edge, no horizontal overflow. 390 × 844: max right 362 px, zero past the edge.
+- State: Live-proven
+- Truth: The Host serves room-scoped Insula spans at `/athanor/v1/insula/spans`, and the Pulse proxy exposes them at `/live/insula/spans`.
+- Evidence: `crates/host/src/insula.rs:41-55,321-372,392-656`; `gui-prototype/live-routes.json:2-16`
+- Proof owed: none
 
-### Pulse trace drawer has no operator-reachable trace id
+### 11. A durable write's backup leaves no receipt
 
-- **Observed:** 2026-09-05. The lane trace drawer rendered real Host spans when given a trace id, but a lane derived from `insula.vitals_minute` rollups carried no trace id, and no Host route listed spans.
-- **Repair:** `dev/next`, 2026-09-05. New bounded Host read `/athanor/v1/insula/spans` (`crates/host/src/insula.rs`; `akasha::insula::query_spans`): room-scoped by the trusted binding, `{ operation, phase?, outcome_class?, window: 15m|1h|24h, limit ≤ 100 }`, newest first, `query_name`/`query_version` stamped. Migration `0029_insula_log_lane_spans.sql` adds `idx_insula_log_lane_spans (house_id, room, operation, observed_at DESC, span_id DESC)`; EXPLAIN shows Limit → Index Scan with no Sort. The proxy exposes `/live/insula/spans`; Pulse lanes open a two-stage drawer: spans list → trace. Proof found and fixed two defects: `ORDER BY span_id` bound to the text alias (index never served the order) and keyboard focus stranding above the span rows.
-- **Proof:** `cargo test -p akasha --lib insula::query -- --ignored` (3: window/limit/newest-first/cross-room refusal, malformed refusals, plan); `cargo test -p host --lib` (34; absent or wrong bearer → 401 before the handler); browser receipt at 1440 × 1000 and 390 × 844 in `gui-prototype/LESSONS_MAP.md` (8-row spans list, drill-down to a real trace, `No spans in window`, genuine Host 422 refusal rendered by name). Live half owed after deploy: from House slot 2, click a lane, pick a span, and see the same spans `insula/trace` returns.
-- **Live, 2026-09-05 13:34 -03, same surface:** clicking lane `knock_claim` listed `8 spans · insula.spans.recent v1 · last 24h · truncated at 8` from the installed Host; clicking the newest opened `Trace · 2 spans · insula.trace v1 · trace 73f313c0-8cd4-46ad-bf45-bc7c60ede2a8` with span `7225008b` start and end (1.2 ms, ok). A direct POST to `/live/insula/trace` for the same id returned the same two rows. Focus stayed on the pressed span row.
+- State: Live-proven
+- Truth: Each write receipt carries a `backup` result; `sleep` backs up by default, and `remember` backs up only when the caller asks.
+- Evidence: `crates/protocol/src/lib.rs:168-176,1397,1751,1785,2159,2174`
+- Proof owed: none
 
-### A durable write's backup leaves no receipt on success and only a string on failure
+### 12. The durable-write file backup reports "program not found" on the Windows tower
 
-- **Observed:** `backup::run_post_write` (`crates/akasha/src/backup.rs`) returned `Result<(), _>` and discarded the `Manifest` that `backup_with_migrations` produced. Every caller (`remember`, `remember_lesson`, `anamnesis_write`, `paper_boat_sleep`) turned an error into one warning string and recorded nothing on success. Kintsu's cartography audit of 2026-08-30 (J07) found this.
-- **Repair:** `dev/next`, 2026-09-05. `run_post_write` returns `hearth::BackupReceipt { dump_path, sha256, bytes, elapsed_ms, tool }` or `hearth::BackupFailure { code, detail, elapsed_ms, tool }`. Every write receipt carries `backup: { status: ok|failed|skipped, … }` on the wire; the OMP remember and sleep frames render it. Every outcome lands one Insula point `backup.post_write` with the elapsed time and the failure code as error class. A failed backup still never fails the PostgreSQL commit. OMP memory writes no longer force `backup: false`; they follow the substrate default (backup on).
-- **Proof:** `cargo test -p akasha --lib` (75), `cargo test -p protocol --lib` (59), `bun test tests/backup-receipt-feedback.test.ts` (5), `cargo test -p akasha --test remember_integration remember_with_backup_returns_a_verifiable_dump_receipt -- --ignored` (1 passed on this tower: dump 960,390 B, receipt sha256 equals the file, `insula.log` point ok 273,712 µs). Live half owed after deploy: one `remember` and one `sleep` through the installed OMP tool show the `backup` receipt and the same `backup.post_write` row.
-- **Live half, 2026-09-05 15:40, room `kodo`, installed build of 13:00:** `remember` (#4469) returned `backup: { status: "skipped" }`. The receipt rides the wire as repaired. The write did not ask for a backup: `crates/protocol/src/lib.rs` resolved an absent `backup` to `false` for memories and to `true` only for project and audio lessons, while `adapters/omp/house-proof/tools.ts:276` omitted the field and trusted "the substrate default". Three defaults for one field; nobody backed up.
-- **Cut, `dev/next`:** every `remember` kind resolves an absent `backup` through `default_backup()` (true). An explicit `false` still refuses. Proof: `cargo test -p protocol --lib remember_backs_up_unless_the_caller_refuses` (red on the old defaults, green now; 60 total). Live half still owed after the next deploy: `remember` and `sleep` show `backup.status: ok` with a `tool`.
-- **Live half, 2026-09-05 evening, room `kodo`, first session on `0.5.4+dev.202609051730.9c21acf`:** `remember` (#4472) with no `backup` field returned `backup: { status: "ok", tool: "pg_bin_dir:pg_dump", bytes: 586910234, elapsed_ms: 47202 }` and a `dump_path` under `house/state/substrate/backups/`. `sleep` (paper boat #4473) returned `backup: { status: "ok", tool: "pg_bin_dir:pg_dump", bytes: 587352415, elapsed_ms: 49043 }`. Both halves done.
-- **Live, 2026-09-05 18:40 -03, boat #4480, session still bound to `…1944.1b03882` after the `…2109.bfeb0c5` deploy migrated the database to 30:** `backup: { status: "failed", code: "backup_error.manifest", tool: "pg_bin_dir:pg_dump" }`, detail `database schema migrations are unsupported: 1, 2, …, 30`. The receipt is right to exist and the refusal is right: a binary that predates the schema does not vouch for a dump. The detail was wrong: it named every version instead of the one the binary did not know. Cut on `dev/next`: `unknown_migrations` reports the versions past the known lineage (or from the first divergence), and the message names where the known lineage ends. Proof: `cargo test -p akasha --lib backup` (20; one new). The next boat, from a session on the new release, closes it.
+- State: Live-proven
+- Truth: Not re-verified at a6ab453 (`crates/akasha/src/backup.rs` decides): `resolve_pg_tool` probes each candidate in order and names the chosen route in the receipt.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:117-119`
+- Proof owed: none
 
-### Durable-write file backup reports "program not found" on the Windows tower
+### 13. Numeric memory IDs do not resolve through Recall
 
-- **Observed:** 2026-08-29, twice: `remember` (project-lesson #465) and `sleep` (paper boat #4219) committed to PostgreSQL and then reported `backup failed after PostgreSQL commit; ... backup io: program not found`.
-- **Cause seam:** `pg_dump` resolution was implicit; when neither `PG_BIN_DIR` nor a WSL route answered, the io error carried no name.
-- **Repair:** `dev/next`, 2026-09-05. `backup::resolve_pg_tool` probes `--version` on each candidate in order — `PG_BIN_DIR`, WSL `pg_dump` via `wsl.exe` on `PATH` then `%SystemRoot%\System32\wsl.exe` (Windows with `ATHANOR_PG_WSL=1`), then `PATH` — and the chosen route is the receipt's `tool` and the manifest's `pg_dump_tool`. When nothing answers the code is `pg_dump_not_found` and the detail names every candidate with its reason. The same resolver serves `pg_restore`.
-- **Proof:** `cargo test -p akasha --lib backup` (19). The ignored DB proof passed on this tower over both real routes: `tool: pg_bin_dir:pg_dump` (273 ms) and, with `PG_BIN_DIR` unset and `ATHANOR_PG_WSL=1`, `tool: wsl:pg_dump` (857 ms); with neither set it returned `pg_dump_not_found` with the probed list and an Insula error point — the tower's old `program not found`, now named. Live half owed after deploy: a `remember` and a `sleep` from the installed service report `backup.status: ok` with a `tool`, and the dump's sha256 matches.
-- **Live half, 2026-09-05 evening, same writes as above:** `remember` #4472 and `sleep` #4473 both name `tool: pg_bin_dir:pg_dump`; for #4472, `sha256sum` of the dump file equals the receipt's `sha256` (`710fa236…0c43`) and the size equals `bytes`. Done.
+- State: Repaired, not deployed
+- Truth: Not re-verified at a6ab453 (`crates/akasha/src/recall/memory_reference.rs` decides): Recall resolves `memory N` by primary key inside the room and House scope.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:125`
+- Proof owed: A `recall` of `memory 4197` from room `kodo` returns #4197 first.
 
-### Numeric memory IDs are not resolvable through Recall
+### 14. Manual Recall clips selected records
 
-- **Observed:** On 2026-08-28 in room `kodo`, `memory 4197 — analysis Sol made with Kintsu` did not return memory 4197 even though the House-scoped row exists. The ID was treated as an ordinary retrieval term and appeared under `missing_terms`.
-- **Cause seam:** `crates/akasha/src/recall/mod.rs` tokenized the ID into `query_terms` and BM25F terms like any word; no lane ever read `memories.id`.
-- **Repair:** `dev/next`, 2026-09-05. `crates/akasha/src/recall/memory_reference.rs` resolves `memory N`, `#N`, `[N]`, a lone `N`, and a comma list that continues an explicit reference, by primary key inside `[room, house]` before any ranked lane. The row leads `retrievalCandidates` as `exact_id`, the ID tokens leave the ranked vocabulary, an out-of-scope row is refused as `memory N refused: outside room scope` with no content, and the Host viewport counts the exact row as evidence. A year in prose (`memories from 2026`) is never a reference.
-- **Proof:** `cargo test -p akasha --test recall_reference_integration exact_memory_reference_leads_evidence_inside_room_scope -- --ignored` (1 passed, isolated schema); `cargo test -p akasha --lib recall::memory_reference` (3 passed); `cargo test -p host --lib viewport` (3 passed). Live half owed after deploy: `recall` of `memory 4197` from room `kodo` returns #4197 first.
+- State: Open
+- Truth: Not re-verified at a6ab453 (`crates/akasha/src/recall` and `crates/host/src/viewport.rs` decide): manual Recall returns only an excerpt of each selected record.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:130-133`
+- Proof owed: Confirm or refute the repair that the `CHANGELOG.md` `Unreleased` entry claims, then show memory 4520 returned in full.
 
-### Manual Recall clips selected records
+### 15. Weighty House canon is clipped during reorientation
 
-- **Observed, 2026-09-07:** Manual Recall finds memory 4520 and returns only its opening excerpt.
-- **Impact:** The returned text omits later failure observations and unresolved causes.
-- **Cause:** Akasha applies an excerpt limit. The Host applies another character limit before returning manual results.
-- **Required:** Limit manual results by record count. Return each selected record in full. Keep automatic context budgets.
-- **Boundary:** A focused paraphrase ranks memory 4520 first. A loose paraphrase misses it. These two probes do not establish a ranking cause.
+- State: Repaired, not deployed
+- Truth: Not re-verified at a6ab453 (`crates/host/src/viewport.rs` decides): an exact canon match carries the full assertion up to 6000 characters, and each cut is marked `truncated`.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:140`
+- Proof owed: Automatic Recall in `kintsu` that mentions `The Athanor` shows the full assertion once.
 
-### Weighty House canon is clipped during reorientation
+### 16. A Hallway root Knock cannot be created through the OMP tool
 
-- **Observed:** On 2026-08-29 in room `kintsu`, automatic Recall exact-matched the weighty House entity `The Athanor` but projected only a clipped summary ending at `silent ty`. The semantic lane also returned no result because its top score was 0.35 against a 0.40 floor. A House-scoped canonical read returned the complete entity.
-- **Cause seam:** `crates/host/src/viewport.rs::compact_canon` cut every canon summary at 480 characters with no marker, after `crates/akasha/src/recall/mod.rs` had already excerpted it at 1200; a multi-word name mentioned inside a sentence only reached the similarity tier.
-- **Repair:** `dev/next`, 2026-09-05. An in-query mention of a full name or alias is an exact tier; exact rows carry the complete active assertion from Akasha and through the viewport (ceiling 6000). Any cut is marked `truncated: true` with `full_read: canon_read <id>`. Automatic mode suppresses a canon row only when `canon:<id>` (the version) is already exposed in the session; compaction clears exposures.
-- **Proof:** `cargo test -p akasha --test recall_reference_integration named_weighty_canon_returns_its_complete_assertion -- --ignored` (1 passed); `cargo test -p host --lib viewport` (3 passed: whole assertion, same-version suppression and reset, explicit cut marker). Live half owed after deploy: automatic recall in `kintsu` mentioning `The Athanor` shows the full assertion once.
+- State: Repaired, not deployed
+- Truth: Not re-verified at a6ab453 (`crates/hearth/src/hallway.rs` and `adapters/omp/house-proof/tools.ts` decide): a root Knock omits `parentKnockId`, and a continuation supplies the prior receipt's UUID.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:146-147`
+- Proof owed: Send one root Knock from this room through the OMP tool.
 
-### Hallway root Knock cannot be created through the OMP tool
+### 17. A child Knock replaces an omitted inherited budget
 
-- **Observed:** `hallway_knock` requires `parent_knock_id` even for a root exchange. An empty value refuses with `malformed_uuid`; a nil UUID refuses with `knock_parent_mismatch`.
-- **Cause seam:** The installed 0.5.4 binary predates the knock door split (`5d8adb7`). On `dev/next` the wire type (`crates/hearth/src/hallway.rs:444`), the tool schema (`adapters/omp/house-proof/tools.ts:1706`), and the origami root branch (`crates/origami/src/hallways/knocks.rs:352-359`) already accept an absent parent. The tool description still told the model a parent was needed.
-- **Repair:** `dev/next`, 2026-09-05. The tool description and schema text say: omit the parent for a root exchange; supply the prior receipt's UUID only for a continuation; never an empty string or nil UUID. Root requests omit `parentKnockId` on the wire.
-- **Proof:** `cargo test -p akasha --bin athanor-substrate hallway_knock_protocol_accepts_an_absent_root_parent_and_preserves_a_continuation` (1 passed); `cargo test -p akasha --test hallway_integration -- --ignored` (root without parent receives a receipt, nil parent refuses `knock_parent_mismatch`, continuation with the returned ID succeeds; 1 passed). Live half owed after deploy: one root Knock from this room through the OMP tool.
+- State: Repaired, not deployed
+- Truth: Not re-verified at a6ab453 (the adapter and Rust Knock decoders decide): a child Knock that omits `max_turns` inherits the budget of its parent.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:154-155`
+- Proof owed: Run a fresh root-and-child exchange after the shared Host restarts onto the installed repair.
 
-### Child Knock replaces an omitted inherited budget
+### 18. Chat returns an empty response before completion
 
-- **Observed, 2026-09-07:** A two-turn root starts Kintsu. Her child omits `max_turns` and fails with `knock_parent_mismatch`.
-- **Cause:** The adapter and Rust request decoder each replace omission with four before the stored parent supplies its budget.
-- **Source repair:** Preserve omission through dispatch and decoding. Resolve the effective budget from the stored parent before policy and retry checks.
-- **Boundary:** Native and adapter repairs are installed. The real PostgreSQL check passes. A fresh live exchange awaits the shared Host's authorized restart. Hallway message 281 retains the original refusal.
+- State: Live-proven
+- Truth: The adapter settles a chat turn at `agent_end` with the first settled answer that belongs to the chat origin.
+- Evidence: `adapters/omp/house-proof/chat.ts:226-258,421-426`
+- Proof owed: none
 
-### Chat returns an empty response before completion
+### 19. The Windows service can wedge permanently in a pending state
 
-- **Observed, 2026-09-07:** A real chat input starts Kodo with Presence. The terminal client receives an empty Kodo line.
-- **Cause:** The adapter reports at provider-step `turn_end`. A tool-only step consumes the pending chat input before the final response.
-- **Repair:** Report at `agent_end` and select the first settled answer belonging to the chat origin. Skip tool steps and provider progress pauses. An unrelated pending observer cannot veto completion.
-- **Live, 2026-09-07:** The terminal client receives B, C, and D in order on adapter `bfbeed7938fceead82db09b5f4fc7ebb269c2ceeb729bcfd5638da6ebbcc2a2b`. C performs a real read before its answer. C and D each appear once. No new blank or incorrect reply appears while the asynchronous observer remains active.
+- State: Live-proven
+- Truth: The supervisor starts one child at a time, and a child that exits before it is ready fails the start and stops the started children.
+- Evidence: `crates/athanor-install/src/supervisor.rs:30-33,170-185,334-382`; `crates/athanor-install/src/service.rs:264-308`
+- Proof owed: none
 
-### Windows service can wedge permanently in a pending state
+### 20. Design catalogue same-identity supersession always failed
 
-- **Observed:** `SolarisaelAthanor` remained in `START_PENDING` at checkpoint 3 with no NATS, delivery, or Host children. `sc stop` refused with error 1052. Terminating the verified service PID and restarting restored `RUNNING` and a healthy broker-connected endpoint.
-- **Cause seam:** `crates/athanor-install/src/service.rs` published every status with `ERROR_SUCCESS`, so a failed start looked like a clean stop; the supervisor discarded child stderr, so the startup reason vanished; the checkpoint only moved when a child spawned, so a slow readiness wait looked hung.
-- **Repair:** `dev/next`, 2026-09-05. Child stderr lands in `<data>/logs/<name>.stderr.log`; a child that exits before readiness fails the start with its name, exit status, and stderr tail; the supervisor reports `Waiting` every 5 seconds and the service advances the checkpoint on each report; a failed `run` publishes `STOPPED` with `ERROR_SERVICE_SPECIFIC_ERROR` and service code 1 and traces the reason.
-- **Proof:** `cargo test -p athanor-install --test supervisor_evidence` (real `cmd.exe` children; 2 passed). The SCM half is owed after deploy: force one managed child to fail, then `sc query SolarisaelAthanor` must show `STOPPED` with `SERVICE_EXIT_CODE : 1066 (1)`, the `.stderr.log` must name the error, and no managed child may remain alive.
-- **Live, 2026-09-05 14:02 -03, installed release `0.5.4+dev.202609051650.4d98e0d`:** with a dummy listener holding 127.0.0.1:4222, `sc start SolarisaelAthanor` returned, then `sc query` showed `STATE: 1 STOPPED`, `WIN32_EXIT_CODE: 1066`, `SERVICE_EXIT_CODE: 1`. `logs/nats.stderr.log` ended with `[FTL] Error listening on port: 127.0.0.1:4222 … bind: Only one usage of each socket address`. `tasklist` showed zero `nats-server.exe`. After the listener closed, `sc start` reached `RUNNING` with one `nats-server.exe`.
+- State: Live-proven
+- Truth: Not re-verified at a6ab453 (`crates/akasha/src/lesson/design/write.rs` decides): a same-identity `design_doc_write` retires the old row and inserts the successor in one transaction.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:176-178`
+- Proof owed: TODO(census): is the `write.rs` repair committed at `a6ab453`? The old row called it uncommitted.
 
-### Design catalogue same-identity supersession always failed
+### 21. Presence refuses to reopen after sleep
 
-- **Observed:** 2026-09-03, room `kodo`. `design_doc_write` with `supersedes: 2` for `solarisael/token/reliquary-palette` (same system, type, and name) returned `database operation failed` three times with the PostgreSQL detail hidden. A plain write with a new name landed (#22). Reads worked throughout.
-- **Cause:** `crates/akasha/src/lesson/design/write.rs` inserted the successor row before it marked the old row superseded. `design_documents_current_identity_uidx` (`substrate/migrations/0012_design_documents.sql:24`) is `UNIQUE (system, doc_type, name) WHERE superseded_by IS NULL`, so the insert collided with the still-current old row. Every same-name correction in the catalogue's history was refused at the index.
-- **Repair:** `dev/next`, uncommitted. The write now retires the old row with a transient self-reference (`superseded_by = id`), inserts the successor, then repoints the old row at the real successor id, all in one transaction.
-- **Proof:** `crates/akasha/tests/design_document_integration.rs` (`same_identity_supersession_keeps_one_current_row_and_full_history`). Fails on the old order, passes on the new. Run with `ATHANOR_SUBSTRATE_TEST_DATABASE_URL` and an isolated schema, `cargo test -p akasha --test design_document_integration -- --ignored`.
-- **Live, 2026-09-05 16:24, room `kodo`, installed build of 13:00:** `design_doc_write` with `supersedes: "2"` for `solarisael/token/reliquary-palette` returned `{ ok: true, superseded: [2], id: 24 }`. `design_doc` with `includeSuperseded` shows one current row and `#2.superseded_by = 24`. Same-identity supersession works on the installed binary.
-- **Second defect the live half exposed:** #24 landed with `values: {}` and `provenance: {}`. `adapters/omp/house-proof/tools.ts` declared both as `z.object({})`, and Zod strips unknown keys, so every catalogue row written through the OMP tool since 2026-08-08 (#13–#24) carries empty values and provenance. Cut on `dev/next`: both fields are `z.record(z.string(), z.unknown())`; proof `bun test tests/design-doc-write-schema.test.ts` (2; red on the old schema) through the real registration path. Data repair: #25 supersedes #24 through the substrate directly with the ten palette tokens and six provenance keys (`select id, superseded_by, jsonb_typeof(values) from design_documents where name = 'reliquary-palette'` → `2|24`, `24|25`, `25|`). Rows #13–#23 still carry `{}`; each needs its own supersession with the values its author meant.
+- State: Live-proven
+- Truth: Presence open is get-or-create by session, and each presence session is a PostgreSQL row that the Host caches.
+- Evidence: `crates/host/src/presence.rs:12-14,62-69,174-188,223-234`; `crates/host/src/server.rs:1129-1136`
+- Proof owed: none
 
-### Presence refuses to reopen after sleep, and the adapter retries the refusal
+### 22. Presence lifecycle and authority seams
 
-- **Observed:** 2026-09-05 17:01 -03, room `kodo`, the first keeper resume. `sleep` had closed the Presence frame (by design). The keeper relaunched `omp.exe --resume <same session>`. The Presence context messages are not persisted in the session file (zero `athanor-presence-context` rows in the `.jsonl`), so the wake turn reopened under the same key `presence-open:<session>` with the new boat in its body. The Host answered `Presence idempotency key … already answered a different open body`: the replay ledger held the old open, and with the frame closed there was no live frame to answer instead. The adapter mapped the refusal to `HostUnavailable` and retried it four times with a warning each, then printed `Presence degraded`, on every turn. Sol saw the TUI misrender under the warnings. Two turns ran without Presence. Then the Host was killed for the loader-watch proof; the fresh Host had an empty ledger, and the next open succeeded.
-- **Cause seams:** (1) `crates/host/src/presence.rs::PresenceRuntime::open` returned the held body conflict when no live frame existed, so a session could not reopen after a close under its own key. `ReplayLedger::record` appended and `recall` found the first match, so a re-recorded open would have lost to the stale one. (2) `adapters/omp/house-proof/host.ts::sendHostCommand` wrapped `command_refused` in `HostUnavailable`, so the open retry loop in `presence.ts` could not tell a refusal from an outage.
-- **Cut, `dev/next`, 2026-09-05:** a presence is its session. `open` is get-or-create by session: an exact retry replays; any other open answers with the live frame when one exists and opens fresh when none does; only an impostor binding or a key belonging to another operation is refused. `record` keeps one entry per session and key. `HostRefused extends HostUnavailable` names a Host that answered no; every existing catch keeps its behavior, and the Presence open retry loop throws a refusal once. Proof: `cargo test -p host --lib presence` (4 new; the reopen test is red on the old `open` with tonight's exact error), `bun test tests/presence-open-refusal.test.ts` (2; red on the old loop with five opens instead of one).
-- **Live, 2026-09-05 18:32:30 -03, first turn on `…2109.bfeb0c5` + adapter `469eba9…` after `sleep` (boat #4480) and a keeper resume:** the turn carried Presence, zero `Presence open retrying` lines, no `Presence degraded`. `presence_sessions` gained `01a0730b… | kodo | live | turned | rules 0 | cv 1 | opened 18:32:30` — this session's first row, since its earlier frames lived on Hosts that predated the table. `insula.log`: `presence_open ok` and `presence_compile ok` at 18:32:30, and `presence_close refused` at 18:29:10 for the `sleep` (the old Host held no frame for it after the loader-watch kill; expected). Done.
-- **Second cut, `dev/next`, 2026-09-05 (Sol: "don't we have a table for each presence session? wouldn't that help a lot?"):** a presence session is a row. `substrate/migrations/0030_presence_sessions.sql` creates `presence_sessions (session_id primary key, room, spirit, operator, frame jsonb, ledger jsonb, opened_at, closed_at, last_turn_at, updated_at)`, re-applicable with a column contract check. `crates/akasha/src/presence.rs` is the store: `presence_session_open` upserts (a closed row reopens in place with a new `opened_at` and the ledger the caller passes), `presence_session_write_ledger` writes a live row's ledger and marks the turn, `presence_session_close` sets `closed_at`, `presence_session_load` reads live or closed. The Host is the cache: every door adopts a live row this process does not hold (a restarted Host continues the session), `open` carries a closed row's ledger into the new frame (repair rules and registers survive sleep), and `compile`, `settle`, and `close` write the ledger back. A failed write degrades the door's Insula point and never fails the door; each write is the whole state, so the next write repairs a missed one. Every door lands `host/presence/presence_{open,compile,settle,close}` with `ok`, `degraded`, `refused`, or `error`. Without `DATABASE_URL` the Host is memory-only as before. Proof: `cargo test -p akasha --test presence_session_integration -- --ignored` (1, on `athanor_substrate_test` in a dropped schema: open, learn, restart-read, close, refused write on a closed row, reopen carrying the ledger, one row throughout), `cargo test -p host --lib presence` (6), Host 40, akasha 75.
-- **Live, 2026-09-05 18:24 -03, installed release `0.5.4+dev.202609052109.bfeb0c5` (schema 30):** a throwaway session through the installed Host: open+compile → row `live, turned, rules 0, cv 1`; settle with one violation → `rules 1`; `taskkill` the Host (pid 29992), the loader watch revived pid 39216; compile on the revived Host with the prior frame id → same frame id, `rules 1, cv 2`. `insula.log`: `presence_open ok`, `presence_compile ok`, `presence_settle ok`, then `presence_compile ok` from the new Host. Smoke row deleted after. Still owed from this session: `sleep`, resume, and the row live again with a new `opened_at` and the same repair rules.
+- State: Open
+- Truth: The repairs for nine Presence seams exist only in the uncommitted `kintsu/summoning` worktree, outside `a6ab453`.
+- Evidence: `docs/history/2026-10-04-bugs-live-log.md:192`
+- Proof owed: Land the repairs in `dev/next`, and exercise them through the installed runtime.
 
-### Presence lifecycle and authority seams
+### 23. The Pulse proxies check no Origin or Host header
 
-The current uncommitted `kintsu/summoning` worktree repairs second-open replacement, four-door replay identity, Host-owned bounded ledger state, explicit empty-response refusal, complete hard-directive evaluation, conflicting source identity, Host-derived operator/capabilities, worker-door proof, and test-order isolation. It is not deployed evidence until integrated into canonical source and exercised through the installed runtime.
+- State: Open
+- Truth: The desktop proxy and `serve.ts` forward a request without a check of its `Origin`, `Host`, or CORS headers.
+- Evidence: `gui-desktop/src/proxy.rs:131-157`; `gui-prototype/serve.ts:64`
+- Proof owed: A simple POST from a foreign page to `/live/chat/say` is refused. The attack itself is untested.
+
+### 24. The chat ring is lost on a Host restart
+
+- State: Open
+- Truth: The chat ring lives only in Host memory, so a Host restart loses every line and draft.
+- Evidence: `crates/host/src/chat.rs:6-7,25-30`; `crates/host/src/server.rs:138,218`
+- Proof owed: After a Host restart, a chat snapshot returns the lines from before the restart.
+
+### 25. LogConversation writes under a caller-chosen room_dir
+
+- State: Open
+- Truth: `LogConversation` creates directories and appends files under a caller-chosen `room_dir` with no check, although the comment at `server.rs:2064-2066` says otherwise.
+- Evidence: `crates/host/src/server.rs:2117-2127,2131-2235`
+- Proof owed: A `LogConversation` with a `room_dir` outside its room is refused.
+
+### 26. serve.ts says it writes nothing, but chat/say writes
+
+- State: Open
+- Truth: `serve.ts:3-6` says the prototype writes nothing, but its allow-list forwards `/live/chat/say`, which writes a chat turn on the Host.
+- Evidence: `gui-prototype/serve.ts:3-6`; `gui-prototype/live-routes.json:15`; `gui-prototype/chat.js:146`
+- Proof owed: The comment matches the allow-list, or the write route leaves the allow-list.
+
+### 27. Pulse sediment sends a client-chosen room
+
+- State: Open
+- Truth: A Pulse room shelf sends `room = item.room ?? item.id` for whichever shelf is open, not the connected room.
+- Evidence: `gui-prototype/sediment/index.js:112`; `gui-prototype/app.js:1188-1190`
+- Proof owed: TODO(census): does the Host refuse a foreign room on the sediment memory and timeline routes?
+
+### 28. A restart resume is silent unless the session is a TUI
+
+- State: Open
+- Truth: Successor verification and continuation return early with no notice unless `ctx.mode === 'tui'`, so a headless relaunch never verifies.
+- Evidence: `adapters/omp/house-proof/restart-door.ts:481`
+- Proof owed: A headless keeper relaunch verifies and continues, or it reports why it cannot.
+
+### 29. The installed loader requires windows-x64 and USERPROFILE
+
+- State: Open
+- Truth: The installed OMP loader refuses a native manifest that is not `windows-x64`, and it throws when `USERPROFILE` is not set.
+- Evidence: `adapters/omp/installed-loader.ts:376,565`
+- Proof owed: The installed loader starts an OMP session on Linux.
+
+### 30. Fixed C:/ProgramData paths
+
+- State: Open
+- Truth: The Pulse prototype, the desktop proxy, and the adapter NATS fallback read fixed `C:/ProgramData/Solarisael/Athanor` paths.
+- Evidence: `gui-prototype/serve.ts:17-18`; `gui-desktop/src/main.rs:54-56`; `adapters/omp/rust-transport.ts:60`
+- Proof owed: On Linux, Pulse starts and the adapter fills a NATS URL with no hand-set variables.

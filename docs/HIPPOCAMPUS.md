@@ -1,8 +1,10 @@
 # GIGA and Hippocampus Specification
 
-Status: Stage 1 operational in the reference House; evaluation and remaining policy work continue
-Target: Operational in the current `0.9.6` late beta; broader evaluation continues
-Contract version: 0.1
+Status: contract with as-built notes. §7 (last part), §8, and the header were re-verified against the adapter at commit `a6ab453` on 2026-10-04. The 2026-10-04 census did not walk `crates/akasha/src/giga`, `crates/akasha/src/giga_worker`, or the migrations. The other sections keep their earlier date.
+Release: `0.5.4` (`package.json:3`).
+Not re-verified at a6ab453: "Stage 1 operational in the reference House" and contract version 0.1. The installed environment and `crates/akasha/src/giga` would decide them.
+Known conflicts, open (line numbers at `a6ab453`): §16.3 (lines 644-650) gives Recall a candidate lane, but §28.8 (line 1090) says unpromoted candidates are invisible to recall. §14.3 and §19 (lines 597 and 789) keep a retention policy and expiry, but §28.3 (line 1085) says nothing sets `expires_at`.
+Moved: §3 Problem, §4 Goals, and §24-27 (evaluation, security review, delivery stages, release acceptance) are in [`history/2026-10-04-hippocampus-discussion.md`](./history/2026-10-04-hippocampus-discussion.md).
 
 ## 1. Purpose
 
@@ -27,31 +29,6 @@ The Athanor keeps these architecture axes:
 The first GIGA implementation requires AKASHA. Vault-only support is outside this release contract.
 
 Hippocampus must remain optional. A failed or disabled worker must not block conversation, recall, memory writes, lesson writes, or sleep.
-
-## 3. Problem
-
-House logs exact turns and supports deliberate memory. Long sessions can still hide important events from the final consolidation step.
-
-The active model can miss a decision, correction, or lesson when it prepares a paper boat. A later recall query can also miss an event that never became a durable record.
-
-Hippocampus creates low-authority pointers near the time of the event. Later consumers use those pointers to fetch exact source spans.
-
-## 4. Goals
-
-Hippocampus must:
-
-1. Mark possible durable events after exact turns are logged.
-2. Use a local model by default.
-3. Run outside the conversation hot path.
-4. Point to exact source turns.
-5. Keep generated annotations non-authoritative.
-6. Support memory, lesson, correction, entity, and thread candidates.
-7. Use harness task metadata when an adapter provides it.
-8. Help `remember`, `recall`, task completion, and `sleep` find evidence.
-9. Support review, promotion, Curios, dismissal, expiry, and reprocessing.
-10. Preserve room, project, and source authority boundaries.
-11. Expose enough provenance to reproduce each annotation.
-12. Measure benefit, cost, misses, and false-positive burden.
 
 ## 5. Non-goals
 
@@ -127,30 +104,27 @@ A harness adapter owns:
 - delivery of advisory candidate context;
 - harness-specific error presentation.
 
-The OMP adapter currently exposes `context` and `agent_end` conversation hooks. Its hygiene extension also exposes `tool_call` and `tool_result` hooks.
+As built at `a6ab453`, the OMP adapter registers 24 `pi.on` handlers and 2 `pi.events` handlers (`adapters/omp/index.ts:1057-2311`). These parts feed GIGA:
 
-OMP does not yet expose every todo, task, or subagent event through House. The first implementation must treat those events as optional structured inputs.
+- The second `agent_end` handler logs the conversation window, then calls `ingestGigaLoggedTurnsDetached` (`index.ts:2279-2311`). The call does not wait for GIGA (`adapters/omp/giga.ts:194-195`).
+- Ingest stops when `ATHANOR_GIGA_ENABLED` is not `1`, and for a subagent session (`giga.ts:163,185-195`).
+- The `sleep` tool flushes the buffered turns with `flushGigaTurnsDetached` before it closes Presence (`adapters/omp/house-proof/tools.ts:1006-1013`).
+- The `shutdown` handler closes the GIGA transport with the other transports (`index.ts:2264-2277`).
+
+The `tool_call` and `tool_result` handlers feed Insula, kitten lineage, tool evidence, and the lesson gate. They do not feed GIGA (`index.ts:1117-1170,1347-1381`). The `task:subagent:progress` and `task:subagent:lifecycle` events feed kitten lineage (`index.ts:1293-1345`). §28.7 defers typed task and subagent events. The first implementation must treat those events as optional structured inputs.
 
 ## 8. Existing source contracts
 
-The core already logs turns through `logUserTurn` and `logAssistantTurn` in `src/ledger.ts`.
+As built at `a6ab453`:
 
-A logged turn contains these fields:
-
-- timestamp;
-- session ID;
-- message ID;
-- role;
-- spirit;
-- operator;
-- agent name;
-- exact visible text.
-
-The core stores the append-only ledger under the active spirit. It also maintains a short spirit window and room-local session context.
-
-The OMP adapter also maintains a deduplicated room transcript. Hippocampus must use stable turn identifiers instead of copying transcript text into candidate identity.
-
-The public core and adapter boundaries use explicit API versions. Hippocampus additions must follow the same compatibility policy.
+- The adapter sends each conversation window to the Host over the Host WebSocket as `athanor.shell.conversation_log` (`adapters/omp/house-proof/conversation-log.ts:7`). The repository has no `src/ledger.ts`.
+- The Host writes the ledger and the transcript under `request.room_dir` (`crates/host/src/server.rs:2148-2149,2221`). It labels each turn with the role, operator, and spirit from the request, and keys it by the request session ID (`server.rs:2153,2155`). It does not check `room_dir`. See [LIMITATIONS §8](./LIMITATIONS.md#8-known-defects-in-the-current-code).
+- Not re-verified at a6ab453: the timestamp, message ID, and agent-name fields of a logged turn, the ledger layout under the active spirit, and transcript deduplication. `server.rs` after line 2155 would decide them.
+- GIGA ingest sends the room, the project keys, and each turn's role and source ID (`giga.ts:168-173`). The project keys are `ATHANOR_GIGA_PROJECT_KEY` when it is set, else none (`giga.ts:170`). Hippocampus must use stable turn identifiers instead of copying transcript text into candidate identity.
+- GIGA runs in its own substrate child, one per room. The adapter starts it with the room directory as its working directory and sets `ATHANOR_GIGA_SOURCE_ROOM` and `ATHANOR_GIGA_CLAIM_OWNER=1` (`giga.ts:85-100`). The child starts only when `ATHANOR_GIGA_ENABLED=1` (`giga.ts:86`).
+- Seven tools reach GIGA through that child: `giga_candidate_list`, `giga_health`, `giga_queue_maintenance`, `giga_review`, `giga_promote_memory`, `giga_promote_coding_lesson`, and `giga_promote_project_lesson` (`tools.ts:1377,1409,1425,1450,1538,1554,1575`). Each refuses with `giga_disabled` unless `ATHANOR_GIGA_ENABLED=1` (`giga.ts:107-108`). None needs the Host.
+- `giga_review` and the promotion tools send the spirit name from the room files as `reviewer_id`, and the operator name from the room files as `operator_identity` (`tools.ts:1460-1465,1487,1523`). Both names are self-asserted, not authenticated (`tools.ts:818-847`; `adapters/omp/house-proof/room.ts:112-119`).
+- The core and adapter boundaries use explicit API versions. `hostApi`, `substrateApi`, and `deliveryApi` are all 1 (`crates/athanor-install/src/manifest.rs:11-13`). Hippocampus additions must follow the same compatibility policy.
 
 ## 9. Processing flow
 
@@ -739,8 +713,8 @@ job can run as a cold worker, familiar, room reflection, or intentional room
 dialogue only through the explicit policy for that target. Choosing a model or
 inheriting a room directory cannot grant room authority.
 
-Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the accepted
-routing and headless-room contract.
+Read [`ROADMAP.md`](./ROADMAP.md) for the planned routing and headless-room
+contract. The earlier text is in [`history/2026-10-04-RUNTIME_ARCHITECTURE.md`](./history/2026-10-04-RUNTIME_ARCHITECTURE.md).
 
 ## 19. Queue and scheduling contract
 
@@ -862,220 +836,6 @@ Giga health must show:
 
 Room diagnostics must not expose another room's counts when those counts reveal private activity.
 
-## 24. Evaluation
-
-### 24.1 Candidate quality fixture
-
-Create a sanitized set of sessions with human labels for:
-
-- durable events;
-- non-durable chatter;
-- coding lessons;
-- project lessons;
-- corrections;
-- supersessions;
-- entity updates;
-- thread updates.
-
-Lock the human labels before any treatment run starts. Label authors must not inspect treatment output.
-
-Outcome adjudicators must not know which output used Hippocampus. Reveal the treatment only after scoring finishes.
-
-Measure:
-
-- candidate precision;
-- candidate recall;
-- missed high-priority events;
-- false-positive review burden;
-- kind classification accuracy;
-- source-span accuracy;
-- duplicate cluster quality.
-
-### 24.2 Consolidation outcome
-
-Compare paper boats and durable writes with and without Hippocampus.
-
-Measure:
-
-- recovered human-labeled events;
-- unsupported promoted claims;
-- duplicate durable records;
-- reviewer time;
-- source fetch count;
-- consolidation latency.
-
-### 24.3 Retrieval outcome
-
-Run later recall queries against events that did not receive manual memory writes.
-
-Measure whether candidate pointers improve exact-source recovery. Do not count a generated gist as successful evidence recovery.
-
-### 24.4 Agent benchmark
-
-Run the paired House-on and House-off benchmark before GIGA where practical.
-
-Repeat the treatment with GIGA and Hippocampus enabled. Keep model, harness, tasks, tools, and budgets constant.
-
-Report these scores separately:
-
-```text
-No House
-AKASHA House
-AKASHA + GIGA House
-```
-
-### 24.5 Performance
-
-Measure:
-
-- enqueue overhead;
-- annotation latency;
-- local model tokens;
-- local compute time;
-- memory and storage growth;
-- queue recovery after downtime;
-- effect on active-turn latency.
-
-Response generation must not await classifier completion.
-
-On named reference hardware, total incremental active-turn overhead must stay below 25 ms at p95 and 100 ms at p99.
-
-The enqueue portion must stay below 15 ms at p95 and 50 ms at p99.
-
-Measure both budgets over at least 10,000 events with the declared release configuration.
-
-## 25. Security review
-
-The implementation requires a security review before release.
-
-The review must cover:
-
-- prompt injection inside visible turns;
-- malicious task metadata;
-- candidate poisoning;
-- room boundary bypass;
-- project scope confusion;
-- classifier endpoint compromise;
-- API key permissions;
-- queue payload tampering;
-- source hash validation;
-- promotion without review;
-- telemetry data leakage.
-
-Classifier output must remain data. It must never become an executable instruction without a separate trusted policy step.
-
-## 26. Delivery stages
-
-### Stage 1: Event and candidate contracts
-
-Implement versioned event validation, candidate validation, source references, and review states.
-
-Acceptance:
-
-- schema tests cover every required field;
-- invalid candidates fail closed;
-- exact turn references resolve;
-- room isolation tests pass;
-- no classifier is required yet.
-
-### Stage 2: Promotion handlers
-
-Implement every promotion handler from Section 14.2.
-
-Acceptance:
-
-- fixtures cover all seven candidate kinds;
-- only an authorized deliberate-write path changes durable state;
-- invalid input leaves durable state unchanged;
-- every handler checks source hashes and scope;
-- every handler records provenance and authorization;
-- correction and supersession updates are atomic.
-
-### Stage 3: Local classifier worker
-
-Add the replaceable provider boundary and one tested local provider.
-
-Acceptance:
-
-- classification runs after exact logging;
-- the active turn does not wait;
-- zero-candidate output succeeds;
-- invalid output creates no candidate;
-- provider failures remain replayable.
-
-### Stage 4: Sleep and remember consumers
-
-Add candidate slates to `sleep` and explicit `remember` flows.
-
-Acceptance:
-
-- consumers fetch exact sources;
-- generated gists remain non-authoritative;
-- review actions preserve provenance;
-- one durable record can merge several candidates.
-
-### Stage 5: Recall candidate lane
-
-Add low-authority candidate pointers to recall source selection.
-
-Acceptance:
-
-- recall fetches exact evidence;
-- candidates never override canon or project authority;
-- archived and superseded behavior remains unchanged;
-- cross-room candidates remain inaccessible.
-
-### Stage 6: Harness task metadata
-
-Add optional OMP task, todo, subagent, tool, and verification events as the harness exposes them.
-
-Acceptance:
-
-- adapters can omit unsupported events;
-- fixture events produce one compact intent for the correct worker, role, and phase;
-- the selected packet contains no more than four promoted lessons;
-- the same intent digest reuses the same packet;
-- a changed worker, role, phase, project, task kind, risk, target, change, or proof contract refreshes the packet;
-- ordinary tool calls do not refresh the packet;
-- unreviewed lessons never become task policy.
-
-### Stage 7: Evaluation and release
-
-Run the candidate, consolidation, retrieval, performance, and agent evaluations.
-
-Acceptance:
-
-- sanitized fixtures and methods are public;
-- limitations are explicit;
-- AKASHA behavior remains available when GIGA is disabled;
-- upgrade and rollback preserve exact logs and candidate provenance.
-- each public result names its method, fixture or corpus, hardware, date, limitations, and sanitized artifact;
-- public demonstrations use a sterile synthetic House;
-- one evidence package supplies a short presentation, reproducible live demonstration, and public posts;
-- GUI, avatar, marketplace, organizational import, and perfect installer work do not block this gate.
-
-## 27. Release acceptance
-
-GIGA can ship before 1.0 when all these statements are true:
-
-1. GIGA remains optional and requires AKASHA.
-2. Hippocampus runs asynchronously and fails open.
-3. Every candidate points to exact durable sources.
-4. Every candidate remains non-authoritative before promotion.
-5. Room and project isolation tests pass.
-6. The local classifier works without a remote provider.
-7. Sleep and remember fetch exact evidence before promotion.
-8. Recall labels candidate pointers as low authority.
-9. Review actions preserve provenance and history.
-10. Diagnostics omit raw private text by default.
-11. Candidate quality has a sanitized measured baseline.
-12. AKASHA works unchanged when GIGA is disabled.
-13. The supported profile meets its declared quality and resource thresholds.
-14. GIGA meets the active-turn overhead budget on named hardware.
-15. Only an authorized deliberate-write path can promote a candidate.
-16. Room-local review requires the authenticated governing spirit or a scoped principal.
-17. Curios remain pointer-only and cannot promote themselves through resonance.
-
 ## 28. Stage 1 decisions
 
 These questions were open at draft time. Stage 1 implementation resolved them as follows.
@@ -1095,9 +855,9 @@ These questions were open at draft time. Stage 1 implementation resolved them as
 ## 29. Related documents
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) defines the core and adapter boundary.
-- [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) defines GIGA integrity, dynamic execution, delivery, Cingulate, and formal-proof evolution.
-- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) defines optional normalization, synthesis, proof-feedback, sandbox, and governed-promotion backends for reviewed refinements.
+- [`ROADMAP.md`](./ROADMAP.md) holds the planned GIGA integrity, dynamic execution, delivery, Cingulate, and formal-proof work.
+- [`history/2026-10-04-SYNTHESIS_ARCHITECTURE.md`](./history/2026-10-04-SYNTHESIS_ARCHITECTURE.md) is the dated synthesis design.
 - [`RETRIEVAL.md`](./RETRIEVAL.md) defines retrieval and authority behavior.
 - [`LESSONS.md`](./LESSONS.md) defines typed lesson contracts.
 - [`SECURITY.md`](./SECURITY.md) defines privacy and destructive-operation rules.
-- [`roadmap.md`](./roadmap.md) defines the dependency and release sequence.
+- [`ROADMAP.md`](./ROADMAP.md) defines the dependency and release sequence.

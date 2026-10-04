@@ -13,12 +13,12 @@ execution.
 
 The implementation order is normative because later layers depend on evidence
 and contracts created by earlier layers. The public release order lives in
-[`roadmap.md`](./roadmap.md).
+[`roadmap.md`](./2026-10-04-roadmap.md).
 
 ## 1. Current boundary
 
 The source label `0.9.6` is historical; see the
-[release note](./ARCHITECTURE.md#release-and-support-target).
+[release note](./2026-10-04-ARCHITECTURE.md#release-and-support-target).
 The examined source has:
 
 - one Rust domain/protocol workspace;
@@ -66,10 +66,10 @@ authority.
 Sol accepted a critical organ review on 2026-09-06. The dated census of every
 organ family, with current behavior, remaining gap, and recommended outcome,
 lives in
-[`ARCHITECTURE.md`](./ARCHITECTURE.md#critical-organ-review-2026-09-06).
+[`ARCHITECTURE.md`](./2026-10-04-ARCHITECTURE.md#critical-organ-review-2026-09-06).
 Its planning order is coherent orientation, trustworthy visible outcomes,
 carrying work between participants, then useful learning. Release order stays in
-[`roadmap.md`](./roadmap.md); this document adds no second roadmap.
+[`roadmap.md`](./2026-10-04-roadmap.md); this document adds no second roadmap.
 
 The review preserves the authority boundaries below.
 PostgreSQL is authoritative. NATS carries delivery.
@@ -77,7 +77,7 @@ Host-only Hallway Knock claim and settlement remain intentional boundaries.
 Docket settlement retains its separate room-level independence fence.
 Cingulate remains planned over reliable evidence.
 
-The [2026-09-07 adapter repair](./EVIDENCE.md#generated-turn-presence-repair-2026-09-07) adds generated-turn origins to context preparation.
+The [2026-09-07 adapter repair](./2026-10-04-evidence-records.md#generated-turn-presence-repair-2026-09-07) adds generated-turn origins to context preparation.
 It preserves native prompt authority and stable memo keys.
 The component is installed and passes isolated replay.
 Real restart, chat, and root Knock turns now have live incoming Presence observations.
@@ -1105,7 +1105,7 @@ its shape: a deterministic predicate/boundary test, a bounded e-graph
 normalization, a bounded SyGuS repair, an optional Z3 SMT check, or a selected
 Lean obligation. The backends are branches, not a mandatory sequence. Their
 uniform receipts and governed promotion loop live in
-[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md).
+[`SYNTHESIS_ARCHITECTURE.md`](./2026-10-04-SYNTHESIS_ARCHITECTURE.md).
 
 ## 11. Lean-backed lesson obligations
 
@@ -1253,7 +1253,7 @@ TypeScript, SQL, NATS policy, and adapter behavior.
 | 6 | Native installation and service lifecycle | Clean Vault and AKASHA install, managed or external PostgreSQL, migration, restart, generation replacement, failed replacement, backup, restore, update, and rollback pass |
 | 7 | Comparative evidence and 1.0 release | Both profiles, the pre-cutover runtime, the NATS lane, and the rendered GUI satisfy the bounded claims in `EVIDENCE.md`; every public surface agrees |
 
-The release dependency order is canonical in [`roadmap.md`](./roadmap.md).
+The release dependency order is canonical in [`roadmap.md`](./2026-10-04-roadmap.md).
 Prolog/Datalog, complete Cingulate, optional synthesis and proof backends,
 selected Lean obligations, broader dynamic embodiment, companion sovereignty,
 marketplace packages, and spatial presentation remain accepted post-1.0 work.
@@ -1263,7 +1263,7 @@ this document.
 ## 13. Component ownership
 
 One repository owns every current component. The canonical layout table lives in
-[`ARCHITECTURE.md`](./ARCHITECTURE.md#repository-layout-and-component-ownership).
+[`ARCHITECTURE.md`](./2026-10-04-ARCHITECTURE.md#repository-layout-and-component-ownership).
 This table adds only the runtime surfaces above it.
 
 | Surface | Canonical owner |
@@ -1308,12 +1308,12 @@ This architecture does not:
 
 ## 15. Related documents
 
-- [`roadmap.md`](./roadmap.md) — release and dependency order
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — current system, component ownership, and installed layout
-- [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — House, room, spirit, custody, and product axes
-- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — e-graphs, Z3, SyGuS, Wasmtime, proof feedback, and governed promotion
-- [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) — room sovereignty, companion-authored models, and marketplace
-- [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) — current GIGA event/candidate/review contract
-- [`LESSONS.md`](./LESSONS.md) — current typed lesson stores
-- [`SECURITY.md`](./SECURITY.md) — privacy, room isolation, providers, and destructive actions
-- [`LIMITATIONS.md`](./LIMITATIONS.md) — current supported boundary versus planned work
+- [`roadmap.md`](./2026-10-04-roadmap.md) — release and dependency order
+- [`ARCHITECTURE.md`](./2026-10-04-ARCHITECTURE.md) — current system, component ownership, and installed layout
+- [`PRODUCT_ARCHITECTURE.md`](./2026-10-04-PRODUCT_ARCHITECTURE.md) — House, room, spirit, custody, and product axes
+- [`SYNTHESIS_ARCHITECTURE.md`](./2026-10-04-SYNTHESIS_ARCHITECTURE.md) — e-graphs, Z3, SyGuS, Wasmtime, proof feedback, and governed promotion
+- [`COMPANION_ECOSYSTEM.md`](./2026-10-04-COMPANION_ECOSYSTEM.md) — room sovereignty, companion-authored models, and marketplace
+- [`HIPPOCAMPUS.md`](../HIPPOCAMPUS.md) — current GIGA event/candidate/review contract
+- [`LESSONS.md`](../LESSONS.md) — current typed lesson stores
+- [`SECURITY.md`](./2026-10-04-SECURITY.md) — privacy, room isolation, providers, and destructive actions
+- [`LIMITATIONS.md`](./2026-10-04-LIMITATIONS.md) — current supported boundary versus planned work

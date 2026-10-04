@@ -8,373 +8,164 @@ its source attached. Corrected knowledge can replace stale guidance without
 erasing history. The model or provider carrying the work can change without
 making the project start from zero again.
 
-**Status:** native Windows x64 late beta. OMP is the supported harness.
-The earlier source snapshot used `0.9.6`.
-Read [`package.json`](./package.json) for the current product version.
-One Rust workspace owns the behavioral core, Vault retrieval, AKASHA PostgreSQL
-authority, Athanor Host, NATS delivery, and native lifecycle.
-Vault remains database-free; AKASHA adds durable typed memory, lessons, canon,
-continuity, and governed background work.
+## Status
 
-The historical installation proof used the build labeled `1.0.0-rc.3`.
-It used external database authority, separate Kintsu and Kodo Hosts, and one stable OMP loader.
-That label identifies the retained artifact and its evidence.
-It does not identify the current installation or establish product maturity.
-Read the installed manifest for active bytes and [dated evidence](./docs/EVIDENCE.md) for exercised behavior.
+- The only supported target is native Windows x64 (`.github/workflows/release.yml:17-18`; `installer/athanor.iss:22`).
+- OMP is the only supported harness. The runtime refuses the retired `driver` field (`crates/athanor-install/src/harness/config.rs:44-45,132-141`).
+- The product version is `0.5.4` ([`package.json`](./package.json):3).
+- The reference House runs `0.5.4+dev.202609282201.0e4ea3c` (`%ProgramFiles%/Solarisael/Athanor/current.json:2`).
+- One Rust workspace holds the Host, the substrate, Vault, AKASHA, delivery, and the installer ([`Cargo.toml`](./Cargo.toml):3-15).
 
-**See it:** [open the public interface specimen](https://solarisael.github.io/the-athanor/).
-It uses sanitized browser-only fixtures and makes no Host, database, delivery,
-or persistence claim.
+The docs marked "as built" were checked against the code at commit `a6ab453` on 2026-10-04.
+A section that carries the label **Not re-verified at a6ab453** keeps an older claim that the census did not check.
 
 ## Choose your entrance
 
-The project has one architecture and three useful ways into it:
-
-```mermaid
-flowchart LR
-    A[The Athanor] --> W[Make my AI tools better at work]
-    A --> X[Explore the cognitive architecture]
-    A --> E[Explain it to agents or people]
-    W --> V[Vault first]
-    X --> H[Houses, authority, retrieval, GIGA]
-    E --> G[Canonical concept graph and explanation paths]
-```
-
 | You want to… | Start here |
 |---|---|
-| Give an AI reliable project context and stop repeating the same background | Keep reading, then use [The Athanor for work](./docs/FOR_WORK.md) |
-| Inspect the deeper model-space, continuity, and cognitive-infrastructure design | [For latent-space explorers](./docs/FOR_EXPLORERS.md) |
-| Explain The Athanor accurately to another agent, teammate, user, or audience | [Explaining The Athanor](./docs/EXPLAINING_THE_ATHANOR.md) |
+| Understand what The Athanor is, in plain words | [Explaining The Athanor](./docs/EXPLAINING_THE_ATHANOR.md) |
+| Install the supported release | [Install](./INSTALL.md) |
+| Use rooms, organs, and Pulse every day | [Usage](./USAGE.md) |
+| See how the processes fit together | [Architecture, as built](./docs/ARCHITECTURE.md) |
+| Know what it cannot do today | [Limitations](./docs/LIMITATIONS.md) |
+| Know what comes next | [Roadmap](./docs/ROADMAP.md) |
+| Check the trust boundary | [Security](./docs/SECURITY.md) |
+| Look up a House word | [Vocabulary](./docs/VOCABULARY.md) |
+| Read the measurements | [Evidence](./docs/EVIDENCE.md) |
+| Find a known defect | [Bugs](./BUGS.md) |
 
-The older adversarial introduction was not discarded. It moved behind the
-second door, where a reader asking for the architectural argument can meet it on
-purpose instead of being mugged by the reception desk.
+## What runs today
 
-## Better context for ordinary work
+One Host process serves every room of the House.
+It runs one listener and nests each room under `/room/<room>` (`crates/host/src/house.rs:86-105,166-202`).
+The Host refuses a bind that is not loopback (`crates/host/src/config.rs:92-120`).
+One bearer token guards the Host. It proves reach, not identity (`crates/host/src/server.rs:282,301-323`).
 
-A normal user does not need to care about memory theory. They need the AI to
-answer questions like:
+The OMP adapter registers 43 tools (`adapters/omp/house-proof/tools.ts:491-2011`; `restart-door.ts:574`).
+Each tool delegates its behavior to the Rust substrate child or to the Host.
+[Architecture § Tools and wires](./docs/ARCHITECTURE.md#43-tools-and-wires) names the wire for each tool.
 
-> Which service owns invoice validation, what decision changed it, and where is
-> that documented?
+The Host starts one keeper for each harness with `autoStart` set.
+The keeper starts OMP, watches it, and relaunches it after an armed restart (`crates/omp-keeper/src/keeper.rs:194-547`).
+The service supervisor starts the packaged PostgreSQL and NATS with JetStream (`crates/athanor-install/src/supervisor.rs:417-459`).
 
-Without a retrieval layer, an agent must guess, reread an arbitrary pile of
-files, or ask the operator to reconstruct the project again. The Athanor gives
-it a bounded evidence path instead:
+### Pulse
 
-```mermaid
-flowchart LR
-    Q[Current task] --> R[Retrieve relevant evidence]
-    F[Project files] --> R
-    M[Prior decisions and lessons] --> R
-    R --> C[Attributed context]
-    C --> A[Tool-capable AI]
-    A --> O[Work and observable receipts]
-```
+Pulse is the web operator surface in `gui-prototype/`.
+Pulse is not read-only. It reads room state and it sends chat says.
+The proxy allows only `POST` to `/live/*` routes (`gui-prototype/serve.ts:41,44,49-52,58`).
+The allowlist includes `/live/chat/say` (`gui-prototype/live-routes.json:15`).
+`chat.js` posts a say to that route (`gui-prototype/chat.js:146`).
+The Host writes the say and publishes a delta (`crates/host/src/surface.rs:60-95`).
 
-The Athanor does not make a model infallible. It makes the context path visible:
-which source was selected, which terms or fields matched, what authority the
-record has, and where a correction belongs.
-
-## Start with Vault
-
-Vault is the lightweight profile. In the room's `.athanor-room.json`, point
-it at one or several project roots:
-
-```json
-{
-  "vaultRoots": ["../project-a", "../project-b"],
-  "vaultIgnore": ["private/**", "generated/**"],
-  "vaultMaxFileBytes": 524288,
-  "vaultMaxFiles": 5000
-}
-```
-
-Vault searches Markdown, JSON, JSONL, and plain text using exact-content and
-field-aware BM25F lanes. Results contain bounded excerpts with source path,
-heading or record identity, matching fields, selection reasons, and term
-coverage. Its index is derived from the configured files and rebuilt as needed.
-
-Vault requires no PostgreSQL, embeddings, or GPU. It excludes common generated
-paths and secret-bearing filenames, respects configured ignores and each root's
-top-level `.gitignore`, and does not follow symlinks.
-
-Read [Retrieval](./docs/RETRIEVAL.md) for the exact query, attribution, and limit
-contracts.
-
-## Local workspace search for OMP
-
-The optional Node adapter in `adapters/workspace-search` uses zvec-grep with local Ollama Nemotron embeddings.
-It searches repository files. It does not change Vault, AKASHA, or the Host.
-Node 24 or later and the following installed Ollama model are required:
-
-```text
-hf.co/zenmagnets/Nemotron-3-Embed-1B-Q4_K_M-GGUF:latest
-```
-
-Install the adapter from the repository root:
+Start Pulse from the repository root:
 
 ```powershell
-pwsh -NoProfile -File adapters/workspace-search/install.ps1
+bun gui-prototype/serve.ts
 ```
 
-The installer retains a hashed package archive under `~/.omp/tools/athanor-workspace-search`.
-It installs pinned dependencies and replaces the `zvec_grep` entry in the OMP MCP configuration.
-Restart OMP to load the installed server.
+The proxy binds `127.0.0.1:4175` and serves one room, `kodo` by default.
+It reads `runtime.json` and the Host token from fixed `C:/ProgramData` paths (`serve.ts:16-18,32-33`).
+`gui-desktop` ships the same surface as `pulse.exe` (`gui-desktop/src/main.rs:30,65-67`).
+Read [Architecture § Pulse](./docs/ARCHITECTURE.md#6-pulse) for the full contract.
 
-Index one repository explicitly:
+**Warning:** the chat ring lives in Host memory only.
+A Host restart empties the ring and the drafts. The sequence starts again at 0 (`crates/host/src/chat.rs:6-7,25-30`; `server.rs:218`).
+Only idempotency receipts, sessions, and the recall-policy cursor persist (`crates/host/src/store.rs:285-441`).
 
-```powershell
-$entry = "$HOME/.omp/tools/athanor-workspace-search/node_modules/@solarisael/athanor-workspace-search/dist/cli.js"
-node $entry index --root C:/Projects/my-repository
-node $entry search --root C:/Projects/my-repository --query "Which module owns request cancellation?"
-node $entry status --root C:/Projects/my-repository
-```
+## Vault and AKASHA
 
-Repeat the index command to update changed files.
-Use another absolute root to index another repository.
-Search never creates an index. A missing index returns `INDEX_MISSING`.
-An ordinary search does not refresh the index or check every file.
-Returned snippets carry their own freshness state.
-Search returns five hits per query group by default, with at most 2000 characters of content per hit.
-The `contentTruncated` flag marks clipped excerpts. Metadata is additional.
-Use zvec for discovery, then native grep and read once the relevant path or symbol is known.
-Set `--limit` explicitly when you need more results.
-Use `--autoUpdate` for an inline refresh before a search.
-Use `status` to inspect changes and failed files.
+**Not re-verified at a6ab453.** The census did not cover `crates/vault` or `crates/akasha`.
 
-**Warning:** `index --rebuild` discards the existing derived index.
-Use this option only when you explicitly need a rebuild.
-The adapter never changes repository source files.
-The model uses 2048 dimensions, a 4096-token context, and distinct query and passage prefixes.
-The index uses a smaller 1024-token chunk budget because zvec estimates size from characters.
-Oversized embedding inputs fail instead of being silently truncated.
+Vault is the lightweight profile. It searches Markdown, JSON, JSONL, and plain text in configured project roots.
+It needs no PostgreSQL, embeddings, or GPU.
+AKASHA adds a PostgreSQL authority layer for canon, memories, typed lessons, and GIGA candidates.
+The release ships pgvector 0.8.6 for AKASHA (`installer/dependencies.json:1-28`).
+Read [Retrieval](./docs/RETRIEVAL.md), [Lessons](./docs/LESSONS.md), and [Hippocampus](./docs/HIPPOCAMPUS.md) for the contracts.
 
-The MCP server exposes `zvec_grep_search`, `zvec_grep_index`, and `zvec_grep_status`.
-Use the CLI for long initial builds.
-There is no background watcher.
-Keep Lumen enabled until the new adapter passes an index and search check.
-Then disable its OMP plugin:
+The adapter treats a folder as a room when it holds `.athanor-room.json`, `active_spirit.md`, or `.omp/runtime/athanor-house-state.json` (`adapters/omp/house-proof/room.ts:86-127`).
 
-```powershell
-omp plugin disable lumen@claude-plugins-official
-```
-
-## Grow into AKASHA when the work needs it
-
-AKASHA adds a durable PostgreSQL authority layer, `pgvector`, `pg_trgm`, local
-embeddings, typed memory and lesson stores, supersession, chronology, taxonomy,
-and governed lifecycle operations.
-
-| Need | Vault | AKASHA |
-|---|---:|---:|
-| Attributed retrieval over configured project files | Yes | Yes |
-| Exact-content and field-aware BM25F lanes | Yes | Yes |
-| Database, embedding service, or GPU required | No | PostgreSQL and a compatible embedding service |
-| Typed authoritative memories and lessons | No | Yes |
-| Hybrid lexical, structured, and semantic retrieval | File retrieval | Yes |
-| Supersession without deleting historical records | File-level correction | Yes |
-| GIGA candidate and lesson-pressure substrate | No | Yes |
-
-This is a deployment choice, not a maturity contest. Vault can be the complete
-answer for a project corpus. AKASHA is for work that needs durable typed
-knowledge, deeper continuity, and governed cognitive machinery.
-
-## The current architecture
-
-```mermaid
-flowchart TB
-    U[Operator] --> GUI[Web prototype: read-only]
-    U --> OMP[OMP harness]
-    GUI --> PROXY[gui-prototype/serve.ts: loopback proxy]
-    PROXY -->|allowlisted POST-only /live/* read routes| HOST[Athanor Host]
-    OMP --> AD[Thin OMP adapter]
-    AD --> RUST[Shared Rust core and protocol]
-    HOST --> RUST
-    RUST --> VAULT[Vault: file-authoritative retrieval]
-    RUST --> AKASHA[AKASHA: PostgreSQL authority]
-    AKASHA --> OUTBOX[Transactional outbox]
-    OUTBOX --> NATS[NATS JetStream]
-    NATS --> HOST
-    AKASHA --> GIGA[GIGA candidates and typed lessons]
-```
-
-Authority stays explicit:
-
-```mermaid
-flowchart LR
-    P[PostgreSQL authority] --> C[Canon]
-    C --> M[Memory and typed lessons]
-    M --> R[Retrieved evidence]
-    R --> CTX[Bounded model context]
-    G[GIGA candidates] -. proposal only .-> M
-    H[Historical Markdown] -. provenance .-> M
-```
-
-In AKASHA, PostgreSQL is authoritative, canon outranks loose memory, and
-retrieval rank does not create truth. A GIGA candidate remains a proposal until
-an authorized promotion. Anamnesis is counsel, never canon.
-
-Read [Architecture](./docs/ARCHITECTURE.md) for component and data-flow
-contracts and [Hippocampus](./docs/HIPPOCAMPUS.md) for candidate authority.
-
-## What exists now
-
-These capabilities have source implementations and dated installation evidence.
-The `0.9.6` label belongs to an earlier source snapshot.
-
-- one shared Rust contract layer and Rust-owned Vault/AKASHA behavior;
-- strict database-free Vault retrieval with attributed bounded evidence;
-- PostgreSQL-authoritative canon, memory, typed lessons, continuity, and GIGA;
-- typed Paper Boat sleep/wake with transaction-coupled `boat.ready` outbox rows;
-- NATS JetStream delivery carrying only bounded sanitized pointers and receipts;
-- an authenticated localhost Athanor Host with persisted snapshots, typed
-  deltas, resynchronization, idempotency, and restart recovery;
-- a read-only web operator surface at `gui-prototype/`;
-- one native Windows service supervisor, installer, updater/rollback path,
-  doctor, uninstall, and explicit purge boundary;
-- named OMP organs whose adapter delegates behavioral authority to Rust.
-
-### Critical organ review — 2026-09-06
-
-The House must turn preserved records into useful continuity, judgment, and completed work.
-A stored record, a delivered message, and a useful outcome require separate evidence.
-The review proposes this dependency sequence:
-
-1. Make orientation coherent across models, turn sources, and interrupted sessions.
-2. Make outcomes attributable and visible through Pulse.
-3. Complete permitted exchanges through Hallway, Docket, and worker dispatch.
-4. Connect reviewed learning to later useful behavior.
-
-Current gaps include combined context size, temporal orientation, and full backups after individual writes.
-GIGA's queue status does not establish useful consolidation.
-Curio storage does not establish automatic resurfacing.
-The web operator surface remains read-only.
-
-The [generated-turn Presence repair](./docs/EVIDENCE.md#generated-turn-presence-repair-2026-09-07) is installed and passes isolated component checks.
-A new OMP session must load it.
-Real restart, chat, and root Knock turns now have live incoming Presence observations.
-Host-side session attribution remains separate work.
-
-Read the [organ review](./docs/ARCHITECTURE.md#critical-organ-review-2026-09-06) for each organ's evidence, gap, and proposed outcome.
-The 2026-09-06 review changed records and planning.
-Later implementation receipts remain separately dated.
-
-## What remains before 1.0
-
-The web prototype at `gui-prototype/` is the read-only operator surface.
-Run `bun gui-prototype/serve.ts` from the repository root.
-It reads the Host through a loopback proxy.
-The parked Godot client lives in the private repository `solarisael/athanor-godot`.
-Conversation, authority changes, review actions, and complete operational visibility remain incomplete.
-
-The 1.0 gate also requires healthy live continuity organs, clean generic
-installation, a real legacy upgrade and rollback, signing, and bounded public
-release evidence. The in-world 3D room, Datalog/Lean proof paths, Cingulate,
-OMEGA, ANON, Relay, group rooms, and the signed marketplace remain later work
-and do not block 1.0.
-
-The current late beta does not claim proven token savings, improved answer
-quality, support beyond Windows x64 + OMP, provider-side privacy, enterprise
-tenancy, or clean-machine installation evidence.
-
-
-[Planned Features](./docs/PLANNED_FEATURES.md) is the canonical status map.
-[Evidence](./docs/EVIDENCE.md) separates measurements from hypotheses.
-[Limitations](./docs/LIMITATIONS.md) names the release boundary.
+The optional local workspace search adapter has its own manual in [`adapters/workspace-search/README.md`](./adapters/workspace-search/README.md).
 
 ## Install
 
-One repository and one release own the substrate, Host, delivery, OMP adapter,
-installer, updater, and install contract.
-
-The supported ordinary package is one checksum-published native Windows x64
-installer:
+One release owns the substrate, the Host, delivery, the OMP adapter, and the installer (`installer/build-native-release.ps1:146-167`).
+The package is one checksum-published Windows x64 installer (`.github/workflows/release.yml:38-50,66-74`):
 
 ```text
 The-Athanor-<version>-windows-x64.exe
 The-Athanor-<version>-windows-x64.exe.sha256
 ```
 
-It carries the Rust runtime binaries, EnterpriseDB PostgreSQL
-18.4-2 with pgvector 0.8.6, and NATS Server 2.14.4. The installed service needs
-no WSL, Python, Bun, Cargo, or separate database/broker.
-PostgreSQL remains the durable AKASHA authority; Vault retrieval remains
-available as a runtime capability rather than a separate package.
+The installer carries EnterpriseDB PostgreSQL 18.4-2, pgvector 0.8.6, and NATS Server 2.14.4 (`crates/athanor-install/src/manifest.rs:11-13,31-38`).
+The service needs no WSL, Python, Bun, Cargo, or separate database or broker (`supervisor.rs:417-459`).
 
-Immutable product versions live under
-`%ProgramFiles%\Solarisael\Athanor\versions`. Mutable databases, rooms, backups,
-configuration, logs, and ACL-restricted secrets live under
-`%ProgramData%\Solarisael\Athanor` and survive ordinary uninstall. An explicit
-advanced mode uses an operator-provided external PostgreSQL 18 + pgvector 0.8.6
-database while retaining the other packaged components.
+- Immutable versions live under `%ProgramFiles%\Solarisael\Athanor\versions` (`crates/athanor-install/src/layout.rs:4,22-27`).
+- The database, backups, configuration, logs, and ACL-restricted secrets live under `%ProgramData%\Solarisael\Athanor`. They survive an ordinary uninstall.
+- Rooms live under `roomsRoot` from `runtime.json`. The reference install uses `C:/Solarisael/Obsidian/obsidian`. `%ProgramData%\Solarisael\Athanor\rooms` is only the default when no configuration exists (`crates/athanor-install/src/installer.rs:1167-1183`).
+- An advanced mode uses an external PostgreSQL on loopback (`supervisor.rs:282-299,322-327`).
 
-Installation verifies every staged artifact before activation, backs up before
-upgrade, runs ordered migrations, and requires Windows service readiness.
-Rollback uses the retained version pointer and pre-change database backup. A
-bounded legacy pre-install door only imports and backs up named 0.10.x trees; no
-legacy runtime is retained.
+The installer verifies every staged artifact before activation (`installer.rs:289-305,914-918,1035-1056`).
+It backs up the database before an upgrade, runs migrations, and waits for service readiness (`installer.rs:279-281,333-340`).
+Rollback uses the retained version pointer and the pre-change database backup (`installer.rs:43-48,324-329`).
 
-Read [Install The Athanor](./INSTALL.md) for checksum verification, exact
-topology, external-database configuration, rollback, uninstall, and explicit
-purge contracts.
+Read [Install](./INSTALL.md) for checksum verification, rollback, uninstall, and purge.
+Read [Architecture § Installed layout](./docs/ARCHITECTURE.md#7-installed-layout) for every installed file.
 
-## Repository boundaries
+## Components
 
-| Component | Owns |
-|---|---|
-| `crates/hearth`, `crates/protocol` | Provider-neutral domain and wire contracts |
-| `crates/vault`, `crates/akasha` | File-authoritative Vault and PostgreSQL-authoritative AKASHA behavior |
-| `crates/origami` | The communication layer: paper boats, cranes over the PostgreSQL outbox and JetStream, hallways |
-| `crates/host` | One authenticated multi-room client boundary; runs the crane loop |
-| `crates/athanor-install`, `installer/` | Native lifecycle, immutable release staging, and Windows installer |
-| `gui-prototype/` | Read-only web operator surface; `serve.ts` proxies Host reads over loopback |
-| `adapters/omp/` | OMP lifecycle hooks and named tool surface delegated to Rust |
+Every workspace member and every shipped surface lives in [`solarisael/the-athanor`](https://github.com/solarisael/the-athanor) and ships in one release.
 
-All three live in [`solarisael/the-athanor`](https://github.com/solarisael/the-athanor)
-and ship in one release. Read
-[Repository layout and component ownership](./docs/ARCHITECTURE.md#repository-layout-and-component-ownership)
-for the full contract.
+| Component | Owns | Evidence |
+|---|---|---|
+| `crates/hearth` | provider-neutral domain types and the substrate schema version | Not re-verified at a6ab453 |
+| `crates/protocol` | the wire contracts: client commands, events, chat and Presence types | `crates/protocol/src/host.rs` |
+| `crates/summoning` | Presence request and result types, Anamnesis, paper boat bodies | `protocol/src/host.rs:9-12` imports `summoning::presence`. The rest is not re-verified |
+| `crates/host` | the one authenticated multi-room Host, the chat ring, snapshots and deltas | `crates/host/src/house.rs:86,184-189,205-234` |
+| `crates/akasha` | PostgreSQL authority: canon, memory, lessons, GIGA, Docket, Insula | Not re-verified at a6ab453 |
+| `crates/origami` | paper boats, cranes, Hallways, NATS delivery | Not re-verified at a6ab453 |
+| `crates/vault` | database-free file retrieval | Not re-verified at a6ab453 |
+| `crates/athanor-install` | `athanor.exe`: service, supervisor, installer, updater, rollback, doctor, uninstall, purge | `crates/athanor-install/src/service.rs:113-308`; `cli/manage.rs:32-134` |
+| `crates/omp-keeper` | the keeper that starts, watches, and relaunches OMP for one room | `crates/omp-keeper/src/keeper.rs:188,812-823` |
+| `crates/interactive-process` | the keeper's new-window process launch | `crates/omp-keeper/src/keeper.rs:843-856` |
+| `gui-desktop` | `pulse.exe`, a desktop window that embeds `gui-prototype` | `gui-desktop/src/main.rs:30,65-67` |
+| `gui-prototype` | Pulse, the web operator surface, and its loopback proxy `serve.ts` | `gui-prototype/serve.ts:41-58` |
+| `adapters/omp` | OMP hooks and 43 tools that delegate to the substrate or the Host | `adapters/omp/house-proof/tools.ts:491-2011` |
+| `adapters/workspace-search` | optional zvec-grep search over repository files | Not re-verified at a6ab453 |
+| `installer/` | the Inno Setup script for the Windows installer | `installer/athanor.iss:22,32-33` |
 
-The core is designed around provider-neutral contracts. That does not mean every
-harness already has a supported adapter.
+**Not re-verified at a6ab453:** the public interface specimen at <https://solarisael.github.io/the-athanor/>.
+It is built from `site/` by `scripts/build-pages.mjs` with browser-only fixtures. It connects to no House.
 
 ## Documentation
 
-### Use it
+Every current document is in this list.
+Dated records live in [`docs/history/`](./docs/history/). They are provenance, not current contracts.
 
-1. [Install](./INSTALL.md)
-2. [Daily usage](./USAGE.md)
-3. [The Athanor for work](./docs/FOR_WORK.md)
-4. [Identity guide](./IDENTITY_GUIDE.md)
-
-### Understand the current system
-
-1. [Architecture](./docs/ARCHITECTURE.md)
-2. [Retrieval](./docs/RETRIEVAL.md)
-3. [Lessons](./docs/LESSONS.md)
-4. [Hippocampus](./docs/HIPPOCAMPUS.md)
-5. [Evidence](./docs/EVIDENCE.md)
-6. [Security](./docs/SECURITY.md)
-7. [Limitations](./docs/LIMITATIONS.md)
-
-### Explore or explain it
-
-- [For latent-space explorers](./docs/FOR_EXPLORERS.md)
-- [Explaining The Athanor](./docs/EXPLAINING_THE_ATHANOR.md)
-- [The House model and project history](./HOUSE.md)
-- [Grouped documentation index](./docs/README.md)
-
-### Follow accepted direction
-
-- [Changelog](./CHANGELOG.md) — active `0.9.6` work and retained RC build history
-- [Planned Features](./docs/PLANNED_FEATURES.md) — canonical status map
-- [Runtime Architecture](./docs/RUNTIME_ARCHITECTURE.md)
-- [Synthesis Architecture](./docs/SYNTHESIS_ARCHITECTURE.md)
-- [Companion Ecosystem](./docs/COMPANION_ECOSYSTEM.md)
-
-Dated snapshots under [`docs/history/`](./docs/history/) are provenance, not
-current release contracts.
+- [Install](./INSTALL.md): the supported release, checksums, rollback, and purge.
+- [Usage](./USAGE.md): rooms, organs, and Pulse in daily work.
+- [Identity guide](./IDENTITY_GUIDE.md): how to write a room identity.
+- [House](./HOUSE.md): the personal reason behind The Athanor.
+- [Agents](./AGENTS.md): rules for agents that change this repository.
+- [Bugs](./BUGS.md): known defects.
+- [Changelog](./CHANGELOG.md): release history, including retained RC builds.
+- [Lesson map](./LESSON_MAP.md): repository lessons by number. The PostgreSQL registry stays authoritative.
+- [Explaining The Athanor](./docs/EXPLAINING_THE_ATHANOR.md): the concept map.
+- [For latent-space explorers](./docs/FOR_EXPLORERS.md): the architectural argument.
+- [Vocabulary](./docs/VOCABULARY.md): House words and product names.
+- [Architecture, as built](./docs/ARCHITECTURE.md): processes, doors, and installed layout.
+- [Limitations](./docs/LIMITATIONS.md): what the code cannot do today.
+- [Roadmap](./docs/ROADMAP.md): planned work.
+- [Security](./docs/SECURITY.md): the trust boundary.
+- [Evidence](./docs/EVIDENCE.md): measurements and dated proof.
+- [Retrieval](./docs/RETRIEVAL.md): Recall and Vault contracts.
+- [Lessons](./docs/LESSONS.md): typed lessons.
+- [Hippocampus](./docs/HIPPOCAMPUS.md): GIGA candidates and their authority.
+- [OMP adapter](./adapters/omp/README.md)
+- [Workspace search adapter](./adapters/workspace-search/README.md)
+- [OMP keeper](./crates/omp-keeper/README.md)
+- Crate features: [hearth](./crates/hearth/FEATURES.md), [protocol](./crates/protocol/FEATURES.md), [summoning](./crates/summoning/FEATURES.md), [host](./crates/host/FEATURES.md), [akasha](./crates/akasha/FEATURES.md), [vault](./crates/vault/FEATURES.md), [athanor-install](./crates/athanor-install/FEATURES.md)
+- Pulse maps: [navigation](./gui-prototype/NAVIGATION_MAP.md), [lessons](./gui-prototype/LESSONS_MAP.md)
 
 ## License
 

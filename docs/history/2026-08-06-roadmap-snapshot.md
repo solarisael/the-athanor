@@ -93,10 +93,10 @@ Use these accepted product names:
 - **ANON** names attested nonpersistent one-shot execution.
 
 The detailed naming and cutover contract lives in
-[`PRODUCT_ARCHITECTURE.md`](../PRODUCT_ARCHITECTURE.md).
+[`PRODUCT_ARCHITECTURE.md`](./2026-10-04-PRODUCT_ARCHITECTURE.md).
 
 The plain-language product guide lives in
-[`PLANNED_FEATURES.md`](../PLANNED_FEATURES.md).
+[`PLANNED_FEATURES.md`](./2026-10-04-PLANNED_FEATURES.md).
 
 The canonical repository and package now use The Athanor vocabulary. Remaining
 public domains, release artifacts, installers, and namespaces must cut over
@@ -211,8 +211,8 @@ and group-room chat transports remain accepted post-1.0 product work. They must
 not delay the supported personal-House release.
 
 The technical contracts live in
-[`PRODUCT_ARCHITECTURE.md`](../PRODUCT_ARCHITECTURE.md). The public value lives
-in [`PLANNED_FEATURES.md`](../PLANNED_FEATURES.md).
+[`PRODUCT_ARCHITECTURE.md`](./2026-10-04-PRODUCT_ARCHITECTURE.md). The public value lives
+in [`PLANNED_FEATURES.md`](./2026-10-04-PLANNED_FEATURES.md).
 
 ### 0.10.x — integrated runtime before 1.0
 
@@ -235,7 +235,7 @@ contracts
 ```
 
 The complete logical contracts and acceptance gates live in
-[`RUNTIME_ARCHITECTURE.md`](../RUNTIME_ARCHITECTURE.md). The phases below remain
+[`RUNTIME_ARCHITECTURE.md`](./2026-10-04-RUNTIME_ARCHITECTURE.md). The phases below remain
 in the roadmap so the dependency order cannot disappear behind a design link.
 
 #### Phase 0 — lock the Host and runtime contracts
@@ -654,7 +654,7 @@ living relationship. Formal proof covers the approved theorem and production
 binding, not stochastic personality behavior or user intent.
 
 Detailed contract:
-[`COMPANION_ECOSYSTEM.md`](../COMPANION_ECOSYSTEM.md).
+[`COMPANION_ECOSYSTEM.md`](./2026-10-04-COMPANION_ECOSYSTEM.md).
 
 #### OMEGA organizational governance
 

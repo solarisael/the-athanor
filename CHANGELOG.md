@@ -76,6 +76,15 @@ the exact implementation record.
 
 ### Changed
 
+- The documentation is rewritten from the code census of 2026-10-04 at commit `a6ab453`. Each claim about the code names its file and line.
+  A claim that the census did not confirm carries the label `Not re-verified at a6ab453` and names the code that decides it.
+  New documents: `docs/ROADMAP.md`, `docs/VOCABULARY.md`, and `adapters/workspace-search/README.md`.
+  `docs/ROADMAP.md` absorbs `docs/PLANNED_FEATURES.md` and `docs/roadmap.md`. `docs/VOCABULARY.md` absorbs the naming sections of `docs/PRODUCT_ARCHITECTURE.md`.
+  `adapters/workspace-search/README.md` absorbs the workspace-search manual from `README.md`.
+  These documents move to `docs/history/2026-10-04-<original-name>.md`: `docs/README.md`, `docs/CODE_FLOW_MAP.md`, `docs/RUNTIME_ARCHITECTURE.md`, `docs/SYNTHESIS_ARCHITECTURE.md`, `docs/PRODUCT_ARCHITECTURE.md`, `docs/PLANNED_FEATURES.md`, `docs/roadmap.md`, `docs/COMPANION_ECOSYSTEM.md`, `docs/INSTALL_CONTRACT.md`, `docs/ONTOLOGY_CONTRACT.md`, `docs/ORIGAMI_CENSUS.md`, `docs/FOR_WORK.md`, `docs/FOR_COMPANIONS.md`, and `crates/origami/FEATURES.md`.
+  A link to a moved document points to the document that absorbs it. A link to a dated record points to its history path.
+  `BUGS.md` has one row per defect. Each row gives a state, one true sentence, the evidence, and the proof that it still owes.
+  `BUGS.md` adds eight open defects from the census. The old dated live logs move to `docs/history/2026-10-04-bugs-live-log.md`.
 - The release no longer ships the parked Godot client. The installer does not download Godot, does not install `athanor-gui.exe` or `runtime/godot/`, and has no `godot-import` stage.
   The release manifest no longer pins `godotApi` or `godot`. Its format stays 1. The installer still accepts a retained release manifest that pins them, so a rollback to an older release works.
   The Godot client and its history moved to the private repository `solarisael/athanor-godot`. The live GUI is `gui-prototype/`.

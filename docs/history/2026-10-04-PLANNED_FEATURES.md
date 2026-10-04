@@ -41,20 +41,20 @@ has been delivered or its later benefit measured.
 
 The `0.9.6` native Windows x64 late-beta source label is historical evidence,
 not a current-version declaration. Read the product version from
-[`../package.json`](../package.json) and installed identity from the immutable
+[`../package.json`](../../package.json) and installed identity from the immutable
 release manifest. OMP is the supported harness; Solarisael House remains the
 working reference House.
 
-The current capability map lives in [`ARCHITECTURE.md`](./ARCHITECTURE.md).
-Its [critical organ review dated 2026-09-06](./ARCHITECTURE.md#critical-organ-review-2026-09-06)
+The current capability map lives in [`ARCHITECTURE.md`](./2026-10-04-ARCHITECTURE.md).
+Its [critical organ review dated 2026-09-06](./2026-10-04-ARCHITECTURE.md#critical-organ-review-2026-09-06)
 separates current source, installed-path receipts, open defects, and recommendations.
 This page qualifies promises rather than duplicating that census.
 Measured results remain separate from planned claims in
-[`EVIDENCE.md`](./EVIDENCE.md).
+[`EVIDENCE.md`](../EVIDENCE.md).
 
 The accepted review asks whether records become recognition, growth, agency,
 cooperation, and operator custody. Autonomy alone is not the success criterion.
-The [dated roadmap update](./roadmap.md#planning-update-2026-09-06) owns the
+The [dated roadmap update](./2026-10-04-roadmap.md#planning-update-2026-09-06) owns the
 proposed repair order and unchanged release gates; it activates no deferred work.
 
 ## Planned feature map
@@ -192,9 +192,9 @@ rather than default model context.
 ## Presence and restart: live repairs, incomplete turn coverage
 
 Presence reopen, persistence across Host restart, and keeper restart continuation
-have live receipts in [`../BUGS.md`](../BUGS.md).
+have live receipts in [`../BUGS.md`](../../BUGS.md).
 A later separate repair note does not erase those successes.
-The [generated-turn adapter repair](./EVIDENCE.md#generated-turn-presence-repair-2026-09-07) is installed.
+The [generated-turn adapter repair](./2026-10-04-evidence-records.md#generated-turn-presence-repair-2026-09-07) is installed.
 Its registered-hook scenarios pass against an isolated copy of the installed payload.
 Real restart, chat, and root Knock turns now have live incoming Presence observations.
 The separate Host-side session-attribution defect remains unchanged.
@@ -294,7 +294,7 @@ does not update model weights. Every refinement still passes sandbox, canary,
 observed outcome, and governing promotion; it cannot approve or install itself.
 
 Detailed contract:
-[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md).
+[`SYNTHESIS_ARCHITECTURE.md`](./2026-10-04-SYNTHESIS_ARCHITECTURE.md).
 
 ## Companion sovereignty and marketplace
 
@@ -317,7 +317,7 @@ revocation, expiry, and rollback. Proof covers only its approved theorem and
 production binding; it cannot guarantee stochastic personality behavior.
 
 Detailed contract:
-[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md).
+[`COMPANION_ECOSYSTEM.md`](./2026-10-04-COMPANION_ECOSYSTEM.md).
 
 ## Curios: a cabinet for ideas before their season
 
@@ -447,7 +447,7 @@ Relay or ANON can provide remote compute. Durable continuity can remain under op
 ## The path to 1.0
 
 The release path and its dependency order are owned by
-[`roadmap.md`](./roadmap.md). This page states what each feature promises and
+[`roadmap.md`](./2026-10-04-roadmap.md). This page states what each feature promises and
 whether it is current, specified, planned, or research; it does not maintain a
 second release sequence.
 
@@ -455,9 +455,9 @@ One boundary belongs here rather than in the roadmap: the `1.0` release adds
 supported ordinary-user installation around a stable Host and UI, and it must
 preserve existing Houses during installation, upgrade, backup, and recovery.
 
-See [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for the runtime
-sequence, [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) for formal
+See [`RUNTIME_ARCHITECTURE.md`](./2026-10-04-RUNTIME_ARCHITECTURE.md) for the runtime
+sequence, [`SYNTHESIS_ARCHITECTURE.md`](./2026-10-04-SYNTHESIS_ARCHITECTURE.md) for formal
 backends,
-[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) for sovereignty and the
-marketplace, and [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) for
+[`COMPANION_ECOSYSTEM.md`](./2026-10-04-COMPANION_ECOSYSTEM.md) for sovereignty and the
+marketplace, and [`PRODUCT_ARCHITECTURE.md`](./2026-10-04-PRODUCT_ARCHITECTURE.md) for
 identity, custody, and authority contracts.

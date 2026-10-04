@@ -12,7 +12,7 @@ into one mandatory or self-authorizing pipeline.
 The reference House does not currently integrate egg, egglog, Z3, SyGuS,
 Wasmtime, or an online reinforcement-learning trainer. Incremental fact
 maintenance, Cingulate, and Lean-backed lessons remain specified or planned as
-described in [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md).
+described in [`RUNTIME_ARCHITECTURE.md`](./2026-10-04-RUNTIME_ARCHITECTURE.md).
 
 The decisions here accept:
 
@@ -353,10 +353,10 @@ This architecture does not:
 
 ## 12. Related documents and sources
 
-- [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) — runtime phases and resource contracts
-- [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) — GIGA candidates and review lifecycle
-- [`LESSONS.md`](./LESSONS.md) — typed lesson and proof-pattern contracts
-- [`SECURITY.md`](./SECURITY.md) — trust and execution boundaries
+- [`RUNTIME_ARCHITECTURE.md`](./2026-10-04-RUNTIME_ARCHITECTURE.md) — runtime phases and resource contracts
+- [`HIPPOCAMPUS.md`](../HIPPOCAMPUS.md) — GIGA candidates and review lifecycle
+- [`LESSONS.md`](../LESSONS.md) — typed lesson and proof-pattern contracts
+- [`SECURITY.md`](./2026-10-04-SECURITY.md) — trust and execution boundaries
 - [egg](https://github.com/egraphs-good/egg)
 - [egglog](https://github.com/egraphs-good/egglog)
 - [Z3 Guide](https://microsoft.github.io/z3guide/docs/logic/intro/)

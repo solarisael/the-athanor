@@ -1,5 +1,8 @@
 # origami::cranes
 
+Not re-verified at a6ab453.
+The 2026-10-04 census did not walk `crates/origami/src/cranes`; claims below keep their earlier date.
+
 Movement with a destination. A crane carries a pointer, never a body.
 
 ### outbox
@@ -52,3 +55,9 @@ Movement with a destination. A crane carries a pointer, never a body.
 - A recipient kind is worker, familiar, room, or reviewer. The name crosses the wire as snake case.
 - A recipient key holds 1 to 64 characters: lowercase letters, digits, underscore, and hyphen.
 - A recipient key starts with a lowercase letter or a digit.
+
+### delivery
+
+Not re-verified at a6ab453; `crates/origami` (`src/cranes/delivery.rs`) would decide:
+
+- `cranes::delivery` walks the crane shapes above. The outbox never calls back into it.

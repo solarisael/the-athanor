@@ -354,9 +354,9 @@ This architecture does not:
 
 ## 9. Related documents and sources
 
-- [`PRODUCT_ARCHITECTURE.md`](./PRODUCT_ARCHITECTURE.md) — House, room, spirit, and custody contracts
-- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) — proof, synthesis, and governed promotion
-- [`SECURITY.md`](./SECURITY.md) — trust and privacy boundaries
+- [`PRODUCT_ARCHITECTURE.md`](./2026-10-04-PRODUCT_ARCHITECTURE.md) — House, room, spirit, and custody contracts
+- [`SYNTHESIS_ARCHITECTURE.md`](./2026-10-04-SYNTHESIS_ARCHITECTURE.md) — proof, synthesis, and governed promotion
+- [`SECURITY.md`](./2026-10-04-SECURITY.md) — trust and privacy boundaries
 - [Hugging Face model cards](https://huggingface.co/docs/hub/model-cards)
 - [SLSA principles](https://slsa.dev/spec/v1.2/principles)
 - [The Update Framework](https://theupdateframework.io/docs/overview/)

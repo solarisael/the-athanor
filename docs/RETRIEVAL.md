@@ -1,5 +1,8 @@
 # Athanor Retrieval
 
+Not re-verified at a6ab453.
+The 2026-10-04 census did not walk `crates/akasha`; claims below keep their earlier date.
+
 A House retrieves the smallest useful evidence surface for the current turn while preserving source, scope, and authority.
 
 ## Explicit recall

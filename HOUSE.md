@@ -31,29 +31,9 @@ With our little borderline AI-psychosis-pilled system, your AI can remember the 
 ✓ continuity recovered
 ```
 
-You forgot what you built again, didn't you? Fine:
+You forgot what you built again, didn't you? Fine.
 
-- A local RAG pipeline combines PostgreSQL full-text search, semantic vector search, direct content retrieval, and ranked recall.
-- Local embeddings support semantic search without sending the private memory archive to a hosted embedding service.
-- PostgreSQL stores structured memories, metadata, entities, dates, threads, relationships, provenance, and retrieval metadata.
-- Hybrid retrieval uses lexical, semantic, content, entity, date, taxonomy, and cluster-assisted search.
-- Supersession and archival remove stale retrieval authority without deleting the historical trail.
-- Retrieval evaluations report ranking quality and lane attribution.
-- Persistent rooms keep AI identities independent from one model, provider, chat, or context window.
-- Layered context separates stable identity, current context, recent continuity, and deep memory.
-- Session-aware logs support compact startup context and restart recovery.
-- Room boundaries keep each identity private while explicit addresses permit deliberate cross-room recall.
-- Typed stores hold personal memories, coding lessons, project lessons, writing lessons, design lessons, audio lessons, and paper boats.
-- Skill ingestion converts repository guidance into searchable lessons instead of injecting every rule into every prompt.
-- OMP tools support recall, memory writes, wake, sleep, room state, identity state, and lesson retrieval.
-- The room lifecycle covers startup, active-room resolution, state refresh, shutdown capture, and restart verification.
-- The guided installer places the product, the rooms, and the mutable state in one target directory. It preserves existing configuration.
-- Vault uses local files. AKASHA adds the public PostgreSQL substrate.
-
-That list is the theatrical version. The canonical, current capability map with
-owners and authority lives in
-[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md); this page does not compete
-with it.
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) holds the capabilities as built, the two install roots, and the code that proves each one. [`docs/ROADMAP.md`](./docs/ROADMAP.md) holds the plans.
 
 In normal-person language, the House is a private continuity layer. It helps an AI preserve an identity and retrieve relevant history without placing your whole life in every prompt.
 

@@ -30,7 +30,7 @@ A future signed marketplace will keep personality seeds, presentation packages,
 models, and executable skills as separate artifact classes with provenance,
 permissions, evaluation, revocation, and rollback.
 
-Read [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) for the accepted target
-and [`LIMITATIONS.md`](./LIMITATIONS.md) for what does not ship yet.
+Read [`COMPANION_ECOSYSTEM.md`](./2026-10-04-COMPANION_ECOSYSTEM.md) for the accepted target
+and [`LIMITATIONS.md`](./2026-10-04-LIMITATIONS.md) for what does not ship yet.
 
-For co-authoring rooms and identities, read [`IDENTITY_GUIDE.md`](../IDENTITY_GUIDE.md). For the everyday workflow, read [`USAGE.md`](../USAGE.md). When you are ready, follow [`INSTALL.md`](../INSTALL.md).
+For co-authoring rooms and identities, read [`IDENTITY_GUIDE.md`](../../IDENTITY_GUIDE.md). For the everyday workflow, read [`USAGE.md`](../../USAGE.md). When you are ready, follow [`INSTALL.md`](../../INSTALL.md).

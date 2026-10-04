@@ -1,4 +1,4 @@
-# core
+# hearth
 
 Domain rules and invariants for the House. This crate holds no input and no output: it never reads a file, a socket, a database, or a clock.
 

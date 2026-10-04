@@ -7,7 +7,7 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 `src/installer.rs`. Install, upgrade, rollback, and removal. Every public entry takes the operation lock first.
 
 - **Install and upgrade.** `install` validates the manifest, resolves and validates the House configuration, runs the preflight, then refuses a version that is already active.
-- **Install order.** It creates the directories, restricts the access list, writes a missing room state file under its own rooms root, backs up the database, imports a legacy tree once, stages the release, verifies it, renames it into place, verifies it again, copies the manager binary, writes the configuration and the secrets, writes the pointers, migrates the database, installs and starts the service, waits for readiness, then writes the operator integration.
+- **Install order.** It creates the directories, restricts the access list, writes a missing room state file under its own rooms root, backs up the database, and imports a legacy tree once. It then stops the service, stages the release, verifies it, renames it into place, and verifies it again. Next it copies the manager binary, writes the configuration, the secrets, and the pointers, and migrates the database. Last, it installs and starts the service, waits for readiness, then writes the operator integration (`installer.rs:235-340`).
 - **Staged activation.** Artifacts land in a hidden staging directory, then move with one rename. Verification runs before the rename and again after it.
 - **Failed install.** A failure restores the prior installation and reports both the original error and every restoration failure. Nothing is silently half applied.
 - **Restore order.** The restore replaces the pointers, then the database, then the configuration and the secrets, then the remaining files. It removes the failed release, then restores or removes the service.
@@ -22,7 +22,7 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 - **Native verification.** `verify_native_release` compares the retained manifest with the declared one, then checks the size and the SHA-256 digest of every artifact.
 - **Preflight.** It verifies every staged artifact, requires a valid adapter fallback, requires a room state file outside its own rooms root, and requires absolute operator paths with a present loader.
 - **Configuration.** `write_configuration` writes the runtime file and, on first install, generates a 32-byte host token and a 32-byte database password. It restricts the access list on the secret file and its directory.
-- **Operator integration.** `write_operator_integration` writes the client projection with one endpoint for each room, restricts it to the operator, then registers the loader.
+- **Operator integration.** `write_operator_integration` writes the client projection, restricts it to the operator, then registers the loader. The projection holds one `hostUrl` for the House and a `rooms` map, not one endpoint per room (`installer.rs:1316-1340`; `omp.rs:14-22`).
 - **Legacy import.** `import_legacy_once` runs one time. A marker file stops every later attempt.
 - **Uninstall and purge.** `uninstall` stops and removes the service, unregisters the loader, removes the client directory, then removes the program tree. `purge` adds the data tree and demands explicit confirmation.
 - **Pointer lineage.** Reads and writes refuse an unsafe version and refuse a previous version equal to the active one.
@@ -53,9 +53,9 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 - **Verified kill.** The supervisor refuses to kill a name it does not own. It never touches an unverified process identifier.
 - **Graceful stop.** On Windows it sends a break event to the process group of the child.
 - **Readiness.** A child is ready when a loopback port accepts a connection, or when a readiness file exists. A stale readiness file is removed before the spawn.
-- **`runtime_plan`.** It builds the child list: PostgreSQL in managed mode only, NATS with JetStream, the delivery worker with a readiness file, then one Host for each room.
+- **`runtime_plan`.** It builds the child list: PostgreSQL first, in managed mode only, then NATS with JetStream. The list holds nothing else (`supervisor.rs:417-459`).
 - **Plan validation.** It requires loopback addresses, an absolute rooms root, at least one room, safe and unique room keys, and unique ports that avoid the database and broker ports.
-- **Host environment.** Each Host child receives the token, the room directory, the state directory, the house identifier, the room, the spirit, the session, and the bind address.
+- **No Host children.** The supervisor starts no Host. `app.rs` builds one `HostConfig` for each room and serves every room in one Host process (`app.rs:30-58,85-134`). See [app](#app).
 - **`prepare_service_console`.** It ignores console control events, so a break sent to a child never stops the service.
 
 ### harness
@@ -68,7 +68,8 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 - **Bounds.** An identifier holds ASCII letters, digits, `-`, `_` or `.`. An identifier and a label hold 1 to 128 characters. A duplicate identifier is refused. An absent registry file is an app with no harnesses, and a malformed file is a refusal.
 - **Ownership.** `owner.rs` keeps every child handle. Before it spawns a keeper it tries the room's `omp-keeper.lock`; a lock another process holds is reported as running with the detail `held by another owner`, and nothing is spawned. It starts, stops, and restarts one harness by identifier, and it reports one status for each declared harness: running with its process identifier, stopped, or failed with its detail. A stop waits 15 seconds, then reports the child is still alive.
 - **Shutdown.** `shutdown` stops every child this app owns and reports each child that does not stop cleanly.
-- **Control.** `control.rs` binds a loopback socket, answers one request for each connection, and compares the capability token in constant time. The GUI holds no process authority; it asks over this door.
+- **Control.** `control.rs` binds a loopback socket on an ephemeral port. It reads one JSON line for each connection, validates it, checks the token, then dispatches List, Start, Stop, or Restart (`control.rs:31-42,66-118`).
+- **Control reach.** The control token is random for each run, and the app never prints or exports it (`app.rs:92`; `config.rs:254-260`). `CONTROL_TOKEN_ENV` and `CONTROL_ADDR_ENV` exist, but no code in the repository reads them (`control.rs:17-18`). Under `athanor start` the readiness JSON goes to a null stdout (`cli/start.rs:121`).
 
 ### native_runtime
 
@@ -124,8 +125,9 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 
 `src/omp.rs`. The projection and the loader registration for the operator client.
 
-- **`ClientProjection`.** It holds the format, the house identifier, the host token, the state root, the default room, and one endpoint for each room.
-- **Validation.** It requires a complete identity, an absolute state root, an endpoint for the default room, and a loopback `ws://` address for every endpoint.
+- **`ClientProjection`.** Format 2. It holds the house identifier, the host token, the state root, one `hostUrl`, the default room, and a `rooms` map from each room to its spirit (`omp.rs:14-22`). There are no per-room endpoints.
+- **Validation.** It requires format 2 and a non-blank house identifier, host token, `hostUrl`, and default room. The state root must be absolute, and `rooms` must hold the default room. Every room needs a safe room key and a non-blank spirit (`omp.rs:25-55`).
+- **Room address.** `room_ws_url` builds `{hostUrl}/room/{room}/athanor/v1/ws`. It refuses a room that `rooms` does not hold (`omp.rs:71-81`).
 - **`register_extension`.** It finds the `extensions:` block, removes every entry owned by the Athanor, appends the stable loader, then keeps the original line ending. A missing block is appended.
 - **`unregister_extension`.** It removes only the exact loader line and leaves every other entry untouched.
 - **Ownership test.** An entry counts as owned when it names an adapter entry file under a known Athanor path, or when it names the stable loader.
@@ -134,7 +136,7 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 
 `src/layout.rs`. Every install path in one place.
 
-- **Roots.** The program root and the data root both sit under `Solarisael/Athanor`.
+- **Roots.** The program root and the data root both sit under `Solarisael/Athanor`. `ATHANOR_PROGRAM_ROOT` and `ATHANOR_DATA_ROOT` override both, only when both are set (`layout.rs:29-37`). The service ignores these overrides (`service.rs:234-240`).
 - **Program paths.** Versions, one version, the manager binary, the loader, the current pointer, the adapter root, the adapter versions, one adapter version, and the adapter pointer.
 - **Data paths.** The runtime configuration, the secrets, the backups, the PostgreSQL data, the NATS data, the logs, the rooms, the Host state, and the legacy backup.
 - **Names.** The service name, the display name, the pointer file name, and the three legacy directory names.
@@ -144,8 +146,8 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 
 `src/lib.rs`. The module list and the `doctor` report.
 
-- **`doctor`.** It takes the operation lock, then runs seven checks and returns one report with an overall verdict.
-- **Checks.** The current pointer, the release manifest, the artifact digests, the adapter pointer, the adapter integrity, the adapter compatibility, the previous adapter release, the Windows service, and the persistent data.
+- **`doctor`.** It takes the operation lock, then runs up to nine checks and returns one report with an overall verdict (`lib.rs:40-247`).
+- **Checks.** The current pointer, the adapter pointer, the Windows service, and the persistent data are always checked. The release manifest is checked when the current pointer parses, and the artifact digests when the manifest is valid. Adapter integrity is checked when the adapter pointer is valid. Adapter compatibility is checked when integrity passes. The previous adapter release is checked when the pointer names one.
 - **Honesty.** A missing or unparsable file becomes a failed check with the reason. `doctor` never guesses a version.
 - The report carries the installed version, the service state, the data state, and every check with its own detail.
 
@@ -161,3 +163,31 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 - **`chat`.** The terminal mouth for the chat projection.
 - **Installation modes.** They build the layout from `ProgramFiles` and `ProgramData`, then hand the four native seams to the installer. `--staging` and `--manifest` are required for install and update. `--external-database-file`, `--house-config-file`, and the three operator flags are optional; `--omp-config`, `--client-config`, and `--operator-principal` must arrive together.
 - **Help.** `help` prints the mode list with every flag.
+
+### app
+
+`src/app.rs`. The Host start order. `athanor.exe` with no arguments runs `app::run` (`cli/mod.rs:38-57`).
+
+- **Start order.** `run` takes these steps in order (`app.rs:85-134`):
+  1. It builds the install layout from the environment.
+  2. It reads and validates `runtime.json` and the secrets.
+  3. It calls `service::ensure_running`, which waits until the service runs and the PostgreSQL and NATS ports accept.
+  4. It loads `harnesses.json` one time.
+  5. It draws a random control token.
+  6. On Windows, it installs a console control handler.
+  7. It binds the control server on `127.0.0.1:0`.
+  8. It calls `host::start` with one `HostConfig` for each room.
+  9. It starts each `autoStart` harness in file order. It collects each failure and continues.
+  10. It prints the readiness JSON to stdout, then waits on the Host.
+- **`ensure_running`.** It starts the service one time when the service is stopped. It fails when the service is still stopped after the request. Readiness means the service runs and both ports connect within 90 seconds (`service.rs:40-111`).
+- **Database probe.** `ensure_running` always probes the configured database port, also when the database mode is external (`service.rs:40-111`).
+- **Rooms.** One Host process serves every room on `127.0.0.1:hostPort` with one bearer token. [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md#31-one-process-many-rooms) lists the source of every `HostConfig` field (`app.rs:30-58`).
+- **Waits.** The Host waits for the service. Harnesses start only after `host::start` returns. A harness start does not wait for that harness to be ready (`app.rs:88,104-113`).
+- **Shutdown.** When `RunOwner` drops, it shuts the harnesses down. On Windows, a Ctrl, close, logoff, or shutdown event shuts the owner down, and the process exits with 0 (`app.rs:60-75,95-102`).
+- **Other platforms.** Outside Windows `ensure_running` always fails, so the Host cannot start (`service.rs:319-322`). See [`LIMITATIONS.md`](../../docs/LIMITATIONS.md#3-linux-today).
+
+### endpoints
+
+`src/endpoints.rs`. The managed defaults.
+
+- The database user and the database name are `athanor`. The database port is 5432. The NATS port is 4222 (`endpoints.rs:3-12`).

@@ -1,261 +1,129 @@
-# The Athanor Boundaries
+# Limitations
 
-This document records current support boundaries and non-goals. The product README states what The Athanor does. This document tells operators where adaptation or additional engineering is still required.
+Status: current. Verified against the code at commit `a6ab453` on 2026-10-04. Each limit names the code that imposes it. The architecture that these limits belong to is in [`ARCHITECTURE.md`](./ARCHITECTURE.md). The work that removes them is in [`ROADMAP.md`](./ROADMAP.md).
 
-## Supported installation path
+## 1. Supported install
 
-Windows 11 x64 with OMP is the only supported late-beta target.
-`0.9.6` is the source version label carried by this documentation. It is a
-labeled historical snapshot. The root `package.json` declares the current
-product version. The installed immutable manifest declares the installed build;
-dated evidence in [`EVIDENCE.md`](./EVIDENCE.md) and [`../BUGS.md`](../BUGS.md)
-names `0.5.4+dev.…` builds installed on 2026-09-05. The earlier `0.9.6.1`
-activation and RC artifact labels remain immutable build identities and
-evidence, not current installed state.
+- The only supported target is Windows 11 x64 with OMP as the harness. The release manifest requires platform `windows-x64` (`crates/athanor-install/src/manifest.rs:104-106`). The release workflow has one job, `windows-x64` (`.github/workflows/release.yml:17-18`).
+- Installation requires Administrator (`installer/athanor.iss:17`).
+- The installer bundles PostgreSQL 18.4-2, pgvector 0.8.6, and NATS 2.14.4 (`installer/dependencies.json`). It needs no WSL, Python, Bun, Cargo, or Rust at run time.
+- The installer does not carry the Pulse window. `scripts/install-pulse.ps1` builds and places `pulse.exe` separately (`scripts/install-pulse.ps1:18-61`).
+- The product version is `0.5.4` (`package.json:3`). Older labels such as `0.9.6` and `1.0.0-rc.3` are history.
 
-The ordinary managed install requires:
+## 2. Other platforms
 
-- Administrator elevation;
-- the checksum-published native installer;
-- a supported OMP installation and its model/provider authentication;
-- sufficient storage for the bundled PostgreSQL, NATS, immutable
-  release versions, database, and backups.
-
-The installer carries PostgreSQL 18.4-2, pgvector 0.8.6, NATS
-2.14.4, and every Athanor Rust binary. It does not require WSL, Python, Bun,
-Cargo, a Rust toolchain, or a separately installed database or
-broker.
-
-The web prototype at `gui-prototype/` is the read-only operator surface.
-It requires Bun today.
-Run `bun gui-prototype/serve.ts` from the repository root.
-It reads the Host through a loopback proxy.
-
-Vault remains a database-free runtime profile. AKASHA uses managed PostgreSQL by
-default. Existing Houses must use explicit external-database mode when their
-authoritative PostgreSQL endpoint already owns the configured port. That mode
-takes a first-install backup, starts no PostgreSQL child, and still requires the
-release's current migration schema plus `vector`, `pg_trgm`, and `pgcrypto`.
-The 2026-09-05 installed build ran schema 30 (`BUGS.md:106`); the earlier
-schema 17 requirement is historical.
-
-Local semantic embeddings still require a compatible configured embedding
-endpoint. No GPU or embedding model is bundled in the current late beta.
-
-One repository and one release own every installed component. Read
-[the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
-
-## Other hosts
-
-| Host | Current state |
+| Platform | State |
 |---|---|
-| Windows 11 x64 + OMP | Supported late-beta target |
-| Windows 10 x64 | Installer target but not locally re-proved for the current source |
-| Native Linux | Rust components are portable in principle; installer, service, and OMP integration require host-specific engineering and verification |
-| OpenCode | Historical adapter line; unsupported |
-| macOS | Unsupported |
-| Other harnesses | Require an adapter over the Rust contracts |
+| Windows 11 x64 | installer target and reference workstation |
+| Windows 10 x64 | installer target, not re-proved for the current source |
+| Linux | the substrate, Host, adapter, and keeper are portable in source; the Host cannot start, see 3 |
+| macOS | unsupported |
+| Harnesses other than OMP | unsupported; the adapter registry refuses any `driver` field (`crates/athanor-install/src/harness/config.rs:44-45`) |
 
-An adapted path becomes trustworthy when it proves the same observable contracts: adapter loading, room discovery, `room_state`, fresh-session continuity, and—when AKASHA is selected—a real substrate write/read lifecycle.
+## 3. Linux today
 
-## Installation boundary
+- The Host cannot start. `athanor` with no arguments calls `service::ensure_running` before it binds, and the non-Windows path fails (`crates/athanor-install/src/app.rs:88`; `service.rs:319-322`). `athanor start` reports the Host refused after 20 seconds (`cli/start.rs:119-137`).
+- The installed OMP loader requires platform `windows-x64` and `USERPROFILE` (`adapters/omp/installed-loader.ts:376,565`). A Linux session must load `adapters/omp/index.ts` directly.
+- Fixed Windows paths. `serve.ts:17-18`, `gui-desktop/src/main.rs:54-56`, and `adapters/omp/rust-transport.ts:60` read `C:/ProgramData/Solarisael/Athanor/...`. On Linux the proxies refuse to start and the adapter fills no NATS URL.
+- The service, the installer, ACL hardening, and the release are Windows only. Off Windows, ACL hardening reports success and does nothing (`crates/athanor-install/src/boundaries.rs:377-380,431-435`).
+- The keeper lock does not exclude a second keeper off Windows, and a kill reaches only the direct child (`crates/omp-keeper/src/keeper.rs:82-87,128-136`).
+- The automatic Recall timeout is 2,000 ms off Windows and 8,000 ms on Windows (`adapters/omp/house-proof/constants.ts:16`).
+- A headless relaunch never verifies or continues a restart. The successor returns silently unless `ctx.mode === 'tui'` (`adapters/omp/house-proof/restart-door.ts:481`).
 
-The native installer manages one immutable-version topology. A bounded first
-install backs up only the named legacy 0.10.x product trees; it never executes
-legacy Python, WSL, Bun, or shell behavior as a fallback. The operator still
-needs a working OMP installation and its provider authentication before the AI
-can use the adapter. Read [`../INSTALL.md`](../INSTALL.md) for managed/external
-database modes, readiness, rollback, uninstall, and explicit purge.
+The substrate has run on Linux before: the organ matrix of 2026-08-30 ran on a NixOS laptop. That run used hand-written units, not this code path.
 
-The installer is locally built and payload-verified. A clean generic
-managed-database installation remains a public evidence gap, not a completed
-claim.
+## 4. Identity
 
-## Known late-beta blockers
+- No person identity exists anywhere. One bearer token serves every room of a House and proves reach, not identity (`crates/host/src/house.rs:205-234`; `server.rs:282,301-323`).
+- A chat say is `{room, text, say_id}`. The Host stamps `author_name` from the room file's single `operator` (`crates/protocol/src/host.rs:743-748`; `crates/host/src/surface.rs:85`). Two people in one room get the same name.
+- `CommandMeta` has `sender_room`, `sender_spirit`, and `sender_session`, and no `sender_operator`. `sender_session` is caller-chosen (`protocol/src/host.rs:789-809`; `server.rs:2567-2581`).
+- Each room has exactly one operator. The adapter derives room, spirit, and operator from the working directory and room files, and `set_room_state` rewrites them (`adapters/omp/house-proof/room.ts:99-127`; `tools.ts:818-847`). This is self-asserted identity.
+- Presence tells the spirit to "meet `<operator>`" and the boat door names `Sol` unless a room overrides it (`presence.ts:130,199`; `boat-door.ts:44-67`).
+- Pulse has no login. The proxy injects the shared bearer for any local caller (`serve.ts:60-63`; `gui-desktop/src/proxy.rs:99`).
 
-The earlier blocker record names a `remember` failure on a valid `continues` edge.
-It reports a bogus `params.room` validation error.
-This review examines no edge-specific installed proof.
-Generic `remember` successes do not resolve that recorded defect.
-Keep its repair status open until the affected edge is exercised.
+## 5. Rooms and sessions
 
-The live `sleep` path has a dated success receipt.
-On 2026-09-05, the installed OMP tool wrote paper boat #4473 with `backup.status: ok`.
-Its backup took 49.0 seconds.
-The backup for `remember` #4472 took 47.2 seconds.
-See `BUGS.md:105` and [`EVIDENCE.md`](./EVIDENCE.md).
-The PostgreSQL commit precedes the full post-write dump.
-The remaining sleep and wake gaps are:
+- One Host process serves every room. One Pulse process serves one room (`serve.ts:34,41`; `proxy.rs:32`). `app.js` holds one connected room (`app.js:1514-1528`).
+- Adding a room means building and installing a new release: full payload copy, database backup, service stop and start, migration. The installer refuses an already-installed version and never writes `harnesses.json` (`crates/athanor-install/src/installer.rs:217-223,240-274`; `cli/manage.rs:32-134`). Hand edits plus a Host restart work.
+- The chat ring and drafts are lost on Host restart, and the sequence restarts at 0 (`crates/host/src/chat.rs:6-7,25-30`; `server.rs:218`).
+- No list-sessions or resume-session command exists on the wire (`crates/protocol/src/restart/mod.rs:36-38`). Pulse shows `New session unavailable` (`app.js:741`). The keeper's first spawn is always fresh (`keeper.rs:188,812-823`).
+- Pulse mirrors only chat-born turns. Turns typed in the OMP terminal never enter the ring.
+- With no logged-in Windows user, only PostgreSQL and NATS run. The Host, the keepers, OMP, and Pulse are user processes (`cli/start.rs:119-125`; `harness/config.rs:25-29`).
 
-- the wake presentation keeps rendered `wake_context`, title, source, and id,
-  and drops the separate boat age and warning fields;
-- the [generated-turn adapter repair](./EVIDENCE.md#generated-turn-presence-repair-2026-09-07) is installed, with isolated component proof;
-  real restart, chat, and root Knock turns now have live incoming Presence observations;
-- Host-side Presence points still require correct session attribution (`BUGS.md:25-30`);
-- requested backups wait for a dump that excludes `insula`; `remember` defaults to no backup, while `sleep` keeps backups enabled.
+## 6. Network
 
-The operator GUI remains read-only and incomplete. The web prototype allowlists
-POST-only `/live/*` read routes for health, Insula, Docket, Hallway, memory,
-and lesson reads (`gui-prototype/serve.ts`). It does not yet provide the
-agent, message, authority, work, and failure views required for ordinary
-operation without terminal archaeology.
+- Everything binds loopback. The Host refuses a non-loopback bind (`crates/host/src/config.rs:92-120`). The adapter refuses a non-loopback Host URL (`host.ts:88-90`). Both proxies bind `127.0.0.1`.
+- No TLS anywhere. A public door needs a TLS reverse proxy in front of the Pulse proxy.
+- The Pulse proxies check no `Origin` or `Host` header and set no CSP (`proxy.rs:131-157`; `gui-desktop/tauri.conf.json:8`). A remote page open in a local browser can send simple POSTs to `/live/chat/say` or `/local/repair/start`, which raises a UAC prompt. Fix this before any network exposure.
+- `/health` is unauthenticated and exposes `state_hash`, version, sequence, and Insula health (`server.rs:252,261-275`).
+- The bearer is checked once at the WebSocket upgrade. Frames are not re-authenticated (`server.rs:282,432-483`).
+- The harness control door cannot be reached from outside the Host process. Its token is random per run and never exported (`app.rs:92`; `harness/control.rs:17-18`).
 
-## Review-derived boundaries — 2026-09-06
+## 7. Doors that need the Host
 
-Sol accepted a critical organ review on 2026-09-06. The dated census lives in
-[`ARCHITECTURE.md`](./ARCHITECTURE.md#critical-organ-review-2026-09-06). The
-bounded facts below are current boundaries, not defects to be inferred beyond
-their evidence.
+Six tools fail without a live Host: `recall`, `house_lane_status`, `familiar_status`, `familiar_dispatch`, `house_dispatch`, `recall_policy` (`adapters/omp/house-proof/tools.ts:526-532`). `sleep` degrades. Knock claim and delivery and the inbox Bell projection need the Host (`knock.ts:77-114`; `hallway.ts:26-30`). All seven `hallway_*` tools and all five `quest_*` tools go to the substrate child and work without the Host.
 
-- The context-growth nudge derives capacity from the room key
-  (`crates/hearth/src/context.rs:737-764`): 1,000,000 tokens for `kodo`,
-  400,000 otherwise. It is an assumption about the model, not a measured limit.
-- A matched process trigger emits up to twelve coding lessons with complete
-  bodies, proof, and trigger fields (`crates/hearth/src/triggers.rs`). No size
-  cap applies.
-- Wake metadata carries `created_at` and warnings in the substrate
-  (`crates/origami/src/boats/wake.rs:21-32`). The OMP presentation drops those
-  separate fields. Age-aware orientation is a recommendation.
-- The Anamnesis wake selector loads pillars and active cycles by kind and update
-  time without a cycle recency gate (`crates/akasha/src/anamnesis.rs:362-377`).
-  An active cycle that loads is not thereby relevant to the live turn.
-- Requested post-write backups use a full dump.
-  The recorded backups took about 47–49 seconds.
-  Commit and backup remain distinct outcomes.
-- The reviewed GIGA aggregate reported enabled capture and classification, a healthy store, and an empty queue.
-  It listed only dismissed candidate states.
-  These fields do not prove classifier reachability, useful review, or later benefit.
-- Docket settlement is fenced by room (`crates/akasha/src/docket/report/mod.rs:130-147`).
-  A single-room House needs an explicit independent reviewer or operator
-  arrangement. This is an authority boundary, not an exploit.
-- Workspace search `0.1.1` indexes only explicitly requested roots and has no
-  watcher. It is perception over a consented workspace, not AKASHA memory.
-- This review performs no fresh restore or complete custody certification.
-  Complete export, restore, and operator retention/deletion journeys require their own evidence.
+Retrieval is fail-open for PostgreSQL and embeddings. It is not fail-open for a missing Host: `recall` discards the substrate result and returns an error (`tools.ts:516,526-532`).
 
-## Retrieval boundary
+## 8. Known defects in the current code
 
-House retrieves bounded evidence; it does not load an entire archive into every prompt.
+- `LogConversation` creates directories and appends files under a caller-chosen `room_dir` with no check (`server.rs:2117-2127,2131-2235`). The comment at `server.rs:2064-2066` claims otherwise.
+- `room/state` returns every presence `session` and `operator` to any bearer holder (`surface.rs:118-121,133`).
+- Pulse sediment sends `room = item.room` for foreign shelves (`gui-prototype/sediment/index.js:112`). Host enforcement of that room is unknown.
+- `serve.ts:3-6` says the prototype writes nothing. `/live/chat/say` writes a chat turn.
+- `pulse.js` and `mechanics.js` show fixtures dated 2026-08-20 and 2026-08-18 until a live round answers.
 
-Automatic retrieval is intentionally narrower than explicit `recall`. Low-information turns may retrieve nothing. Explicit recall remains available for deliberate archive investigation.
+[`BUGS.md`](../BUGS.md) tracks each of these.
 
-Semantic proximity is a candidate signal, not factual authority. Important answers should follow the cited source and its authority state. Imported corporate or project documents require an explicit source-precedence policy.
+## 9. Retrieval boundary
 
-Retrieval is fail-open for conversation continuity. If PostgreSQL or embeddings are unavailable, the adapter keeps lighter room continuity usable and reports the degraded source rather than blocking the turn.
+The House retrieves bounded evidence. It does not load an entire archive into every prompt.
 
-## Context-budget boundary
+Automatic retrieval is narrower than explicit `recall`. Low-information turns may retrieve nothing. Explicit recall remains available for deliberate archive investigation.
 
-The current OMP adapter bounds each context organ independently. Room context,
-tool schemas, a fresh paper boat, Anamnesis wake counsel, active lessons,
-automatic recall, canon, thread neighbors, directives, and context-growth
-nudges each have their own eligibility and output rules.
+Semantic proximity is a candidate signal, not factual authority. Important answers follow the cited source and its authority state. Imported corporate or project documents require an explicit source-precedence policy.
 
-There is not yet one provider-tokenizer-aware coordinator that assigns a single
-turn budget across all of them. Several individually valid organs can therefore
-stack into a context surface that is larger than a short task warrants. Prefix
-caching can reduce billed cache-write cost for stable prefixes, but cached
-tokens still occupy model context and still depend on provider behavior.
+## 10. Context-budget boundary
 
-The Athanor has not yet publicly established that retrieval and continuity
-reduce total input tokens or total task cost against a no-Athanor baseline.
-Long-running work can plausibly avoid repeated explanation, searching, mistakes,
-and rediscovery; short isolated tasks may consume more input context. Treat net
-efficiency as an evaluation question, not a product claim.
+The adapter bounds each context organ independently. Room context, tool schemas, a fresh paper boat, Anamnesis counsel, active lessons, automatic recall, canon, thread neighbors, directives, and growth nudges each have their own rules. No single coordinator assigns one turn budget across all of them. Several valid organs can stack into a context surface larger than a short task warrants.
 
-## Memory boundary
+The Athanor has not established that retrieval and continuity reduce total input tokens or total task cost against a no-Athanor baseline. Treat net efficiency as an evaluation question, not a product claim.
 
-The Athanor is not indiscriminate transcript storage. Durable memory remains deliberate by default.
+## 11. Memory boundary
+
+The Athanor is not indiscriminate transcript storage. Durable memory is deliberate by default.
 
 - Events and realizations belong in memories.
 - Transferable engineering rules belong in coding lessons.
 - Project-bound rules belong in project lessons.
 - Current state can supersede older current state.
 - Narrative history remains recoverable.
-- Secrets belong in a secret manager, never memory.
+- Secrets belong in a secret manager, never in memory.
 
-The Athanor can preserve a wrong interpretation if an operator or agent deliberately records it. Correction and supersession make the trail repairable; they do not eliminate the need for judgment.
+The Athanor can preserve a wrong interpretation if an operator or agent records it. Correction and supersession make the trail repairable. They do not remove the need for judgment.
 
-## Identity boundary
+## 12. Identity boundary
 
-House preserves and loads an identity contract. It does not prove metaphysical identity, consciousness, or equivalence between different model providers.
+The House preserves and loads an identity contract. It does not prove metaphysical identity, consciousness, or equivalence between model providers.
 
-A room can keep names, voice, commitments, corrections, and shared history available across model changes. Different models may still express the same contract with different capability, style, or reliability.
+A room keeps names, voice, commitments, corrections, and shared history across model changes. Different models express the same contract with different capability, style, or reliability.
 
-Identity prose is co-authored. The installer does not manufacture intimacy, relationship claims, or a personality on the operator's behalf.
+Identity prose is co-authored. The installer does not manufacture intimacy or a personality on the operator's behalf. A personality package is starting material. A model or LoRA is a replaceable body, not proof of identity.
 
-A personality/archetype package is reusable starting material, not a packaged
-living companion. A model or LoRA is a replaceable body, not proof of identity.
-Installing either cannot import a relationship or overwrite an existing spirit
-lineage.
+## 13. Provider boundary
 
-## Provider boundary
+A local House does not make the model provider local. Context sent to a hosted model is processed under that provider's terms.
 
-A local House does not make the model provider local. Any context sent to a hosted model can be processed under that provider's terms.
+Local embeddings keep archive vectorization off a hosted service. They do not prevent selected memory context from reaching the active model provider.
 
-Local embeddings keep archive vectorization off a hosted embedding service. They do not prevent selected memory context from reaching the active model provider.
+The Athanor cannot remove provider rate limits, model policies, outages, or capability differences. Several OMP sessions on one subscription share that subscription's limits.
 
-The Athanor keeps continuity provider-portable, but it cannot remove provider-side rate limits, model policies, outages, or capability differences.
+## 14. Organizational boundary
 
-## Runtime-evolution boundary
+The room model is not an enterprise authorization system. The `house` scope is one shared commons with no per-source permissions. Authorization does not run before retrieval and ranking.
 
-The current release line does not ship background code-change indexing,
-incremental Prolog/Datalog facts and precomputed relations, invocation-time model
-routing, headless room targets, complete Cingulate, e-graph/egglog
-normalization, Z3, SyGuS, Wasmtime sandbox profiles, proof-guided repair, the
-resource-bounded Lean checker, in-world SubViewport presentation, the
-GPU-particle constellation, companion room sovereignty, companion-authored model
-training, or the signed marketplace.
+A central multi-user deployment requires tenant, team, project, and private scopes; authorization filtering before ranking; source provenance and versioning; retention and deletion policy; auditability; administrative controls; tested connectors. Do not place a company's private corpus behind shared retrieval until those controls exist and are verified. See the OMEGA section of [`ROADMAP.md`](./ROADMAP.md).
 
-The authenticated Host, typed snapshot/delta/resync path, Recall Policy, narrow
-PostgreSQL-outbox/NATS Paper Boat lane, restart replay, and native lifecycle are current.
-The parked Godot client lives in the private repository `solarisael/athanor-godot`.
-NATS remains delivery-only and never becomes memory authority.
+## 15. Non-goals
 
-The broader capabilities have accepted dependency and technical contracts in
-[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md),
-[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md), and
-[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md). Documentation labels them
-as specified, planned, or research until observable implementation gates pass.
-
-Worker lanes still obtain their runtime models from harness agent definitions;
-per-dispatch model override remains unsupported. A model process kept warm is
-not a persistent room.
-
-The current personal House has no online training service, companion model
-registry, package signature/revocation service, marketplace, autonomous child
-room creation, or constitutional resource scheduler.
-
-## Organizational boundary
-
-The current room model is not yet a complete enterprise authorization system.
-
-A central multi-user deployment requires:
-
-- tenant, team, project, and private-user scopes;
-- authorization filtering before relevance ranking;
-- source provenance and versioning;
-- retention and deletion policy;
-- auditability;
-- administrative controls;
-- tested connectors for corporate sources.
-
-Do not place an entire company's private corpus behind shared retrieval until those controls exist and have been verified.
-
-## Non-goals
-
-The Athanor does not replace:
-
-- Git for source-code history, branches, review, and merges;
-- a secret manager for credentials;
-- object storage for large binary artifacts;
-- human judgment over consequential memories and lessons;
-- the AI harness that executes models and tools;
-- specialized knowledge interfaces such as Obsidian.
-
-House coordinates continuity and retrieval across those systems.
-
-## Planned boundary changes
-
-The release path is maintained in [`roadmap.md`](./roadmap.md). Planned work is
-kept explicitly separate from current release claims in the root README and
-every architecture document.
+The Athanor does not replace Git for source history, a secret manager for credentials, object storage for large binaries, human judgment over consequential memories and lessons, the AI harness that executes models and tools, or knowledge interfaces such as Obsidian. The House coordinates continuity and retrieval across those systems.

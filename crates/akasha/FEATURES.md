@@ -1,5 +1,8 @@
 # akasha
 
+Not re-verified at a6ab453.
+The 2026-10-04 census did not walk `crates/akasha`; claims below keep their earlier date.
+
 The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` declares the 21 modules and re-exports their doors. Each section below names one module and what it does today.
 
 ### main.rs — the stdio tool-dispatch table

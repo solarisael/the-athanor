@@ -65,15 +65,22 @@ The metaphor is explanatory, not a release claim about metaphysical identity.
 The implemented claim is narrower: explicit room contracts, attributed
 retrieval, durable typed records in AKASHA, lifecycle operations, and portable
 context assembly can survive closed sessions and changed model processes.
+**Not re-verified at a6ab453:** this survival claim. `crates/akasha` would
+decide it. Paper boats are written by the substrate; the live chat ring is in
+memory only and empties on a Host restart (`crates/host/src/chat.rs:25-30`).
 
 ## One project can stay light
 
-A House is not mandatory overhead for every corpus question.
+A House is light, but it is not optional on the supported path. The OMP
+`recall` tool fails without a live Host (`adapters/omp/house-proof/tools.ts:526-532`),
+and the Host starts only after PostgreSQL and NATS accept connections
+(`crates/athanor-install/src/service.rs:40-111`).
 
-Vault performs native attributed retrieval over configured Markdown, JSON,
-JSONL, and plain-text roots. It uses an exact-content lane and field-aware BM25F,
-returns source and record identity, and requires no database, embedding service,
-or GPU.
+Vault performs attributed retrieval over configured roots and returns source
+and record identity. **Not re-verified at a6ab453:** the Markdown, JSON, JSONL,
+and plain-text root types; the exact-content and field-aware BM25F lanes; and
+Vault use without a database, embedding service, or GPU. `crates/vault` would
+decide them.
 
 That makes the smallest useful path ordinary:
 
@@ -85,9 +92,11 @@ flowchart LR
     EVIDENCE --> AGENT[Existing AI work tool]
 ```
 
-AKASHA is the larger authority profile. It adds PostgreSQL, `pgvector`,
-`pg_trgm`, compatible local embeddings, typed memories and lessons, explicit
-supersession, chronology, taxonomy, and the substrate used by GIGA.
+AKASHA is the larger authority profile. It adds PostgreSQL and `pgvector`
+(`crates/athanor-install/src/manifest.rs:11-13`). **Not re-verified at
+a6ab453:** `pg_trgm`, compatible local embeddings, typed memories and lessons,
+explicit supersession, chronology, taxonomy, and the GIGA substrate.
+`crates/akasha` would decide them.
 
 Vault and AKASHA are not “small database” and “large database.” Vault treats the
 configured files as the corpus authority. AKASHA provides a governed typed
@@ -110,7 +119,10 @@ flowchart TB
     CAND -. review and authorized promotion .-> STORE
 ```
 
-The ordering in AKASHA is deliberate:
+The ordering in AKASHA is deliberate. **Not re-verified at a6ab453:** its
+enforcement. The adapter states it only in tool descriptions
+(`adapters/omp/house-proof/tools.ts:573-574,639`); `crates/akasha` would
+decide it.
 
 1. PostgreSQL is authoritative.
 2. Canon outranks loose memory.
@@ -146,7 +158,8 @@ known. The project has not yet published a controlled token-savings claim; see
 
 ## The current organism
 
-The supported OMP adapter mounts 26 named organs. The current public system
+For the organ count, the surfaces, and the Pulse web prototype, read
+[Explaining The Athanor](./EXPLAINING_THE_ATHANOR.md#organs). The public system
 includes:
 
 - room discovery, identity, continuity, wake, sleep, and paper boats;
@@ -155,17 +168,16 @@ includes:
 - design-system catalogue read/write operations;
 - House commons separated from private room continuity;
 - deterministic worker lanes and room-owned familiar spellbooks;
-- Anamnesis reviewed counsel;
-- Hippocampus Stage 1 event ingestion, candidate creation, review, and promotion;
-- Striatum's deterministic process-trigger slice braiding process-shape coding
-  lessons; state-conditioned eligibility, ranking, and warm activation remain
-  planned.
+- Anamnesis counsel (**Not re-verified at a6ab453:** that the counsel is
+  reviewed; `crates/akasha` would decide it);
+- Hippocampus Stage 1 candidate listing, review, and promotion, off unless
+  `ATHANOR_GIGA_ENABLED=1` (`adapters/omp/giga.ts:107-108`) (**Not re-verified
+  at a6ab453:** event ingestion; `crates/akasha` would decide it).
 
-The web prototype at `gui-prototype/` is the read-only operator surface.
-Run `bun gui-prototype/serve.ts` from the repository root.
-It reads the Host through a loopback proxy.
-The parked Godot client lives in the private repository `solarisael/athanor-godot`.
-Cingulate, Datalog/Lean proof paths, OMEGA, ANON, and the signed marketplace remain specified, planned, or research work.
+**Not re-verified at a6ab453:** Striatum's deterministic process-trigger slice,
+which braids process-shape coding lessons. `crates/akasha` or
+`adapters/omp/giga.ts` would decide it. Planned work is in the
+[Roadmap](./ROADMAP.md).
 
 ## Why the provocative voice exists
 
@@ -191,10 +203,8 @@ survive a thesis defense before learning that Vault can search three projects.
 4. [Hippocampus](./HIPPOCAMPUS.md) — grounded candidates and promotion.
 5. [Evidence](./EVIDENCE.md) — measured claims and missing experiments.
 6. [Limitations](./LIMITATIONS.md) — supported boundary and explicit non-goals.
-7. [Runtime Architecture](./RUNTIME_ARCHITECTURE.md) — accepted next control
-   plane, clearly separated from shipped behavior.
-8. [Planned Features](./PLANNED_FEATURES.md) — canonical current/specified/
-   planned/research status.
+7. [Roadmap](./ROADMAP.md) — accepted next work, clearly separated from
+   shipped behavior, with current/specified/planned/research status.
 
 If you need to teach the system rather than interrogate it, use
 [Explaining The Athanor](./EXPLAINING_THE_ATHANOR.md).

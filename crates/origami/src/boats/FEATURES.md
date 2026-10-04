@@ -1,5 +1,8 @@
 # origami::boats
 
+Not re-verified at a6ab453.
+The 2026-10-04 census did not walk `crates/origami/src/boats`; claims below keep their earlier date.
+
 Stasis with a return point. A boat waits in the Sea until the room wakes.
 
 ### wake

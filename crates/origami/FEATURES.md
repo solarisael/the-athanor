@@ -2,31 +2,15 @@
 
 The message shapes of the House. PostgreSQL holds every body. NATS carries only pointers.
 
-### cranes
+Not re-verified at a6ab453. The 2026-10-04 census did not walk `crates/origami`; the claims below keep their earlier date, except the hallway note.
 
-- A crane moves a pointer to a destination. The payload never carries a body.
-- The outbox keeps each pointer in PostgreSQL. A lease claims it. A publish acknowledgement marks it published.
-- The receipt ledger commits before the caller acknowledges. A redelivery replays the recorded outcome.
-- Two lanes exist: the boat.ready lane, and the addressed crane lane.
-- The broker declares the streams, the subjects, and the durable consumers. It refuses a live configuration that differs.
-- Failure has bounds. Ten publish attempts, then a dead letter row with a reason.
-- `cranes::delivery` walks these shapes. The outbox never calls back into it.
+Each module keeps its own feature list:
 
-### hallways
+- [`src/cranes/FEATURES.md`](./src/cranes/FEATURES.md)
+- [`src/hallways/FEATURES.md`](./src/hallways/FEATURES.md)
+- [`src/boats/FEATURES.md`](./src/boats/FEATURES.md)
 
-- A hallway carries letters between rooms. PostgreSQL holds them. The Host projects them.
-- No NATS lane runs behind a hallway. That transport does not exist yet.
-- A hallway has a key, allowed rooms, presences, messages, threads, and notifications.
-- A knock asks one room for one bounded turn. The recipient room decides by its own policy.
-- Every command takes an idempotency key. A reused key with different content gets a refusal.
-
-### boats
-
-- A boat holds the state of a room at sleep. The next wake reads it back.
-- The wake returns the newest boat, then lists the memories written after it.
-- The name of a boat is a digest of the kind, the room, and the body.
-- Bounds protect the reader. The body, the title, and the list clip, and each clip adds a warning.
-- The insert stays in the substrate remember path. This module only plans it.
+The Host consumes a Hallway JetStream subject (`crates/host/src/server.rs:2855-2894`), so a NATS lane does run behind a hallway today. The hallways list carries the detail.
 
 ### sea
 

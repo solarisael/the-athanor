@@ -1,5 +1,8 @@
 # vault
 
+Not re-verified at a6ab453.
+The 2026-10-04 census did not walk `crates/vault`; claims below keep their earlier date.
+
 Vault retrieval without a database. The configured files stay the authority. One request builds its whole index in memory.
 
 ### BM25F scoring

@@ -1,33 +1,116 @@
 # protocol
 
-The newline-delimited JSON wire protocol, version 1. This crate carries the shapes that cross a process boundary, and converts them into `core` requests.
+The wire shapes that cross a process boundary. The Host WebSocket carries one JSON command in each text frame (`crates/host/src/server.rs:435-468`). This crate converts the shapes into `hearth` requests.
 
 Each section names one concern. A section that points at `src/lib.rs` names a concern that still waits for its own module.
 
 ### mod host (src/host.rs)
 
-- The Host surface has four concerns in one file: subject names, the recall policy, the client command parser, and the projection events. Each one can carve out.
-- Constants name every websocket path, stream, subject, and projection identifier the Host publishes.
-- Seven projections exist: context, hallway, routing, lineage, shell, recall policy, and boat receipts.
+The Host command socket. One file holds the projection constants, the recall policy wire, the chat shapes, the Presence wire, the client command parser, and the projection events.
+
+**Commands and projections.** Every command carries `CommandMeta`. `RawClientCommand::meta` maps each command type to the projection it expects, and refuses any other (`host.rs:837-860`). `ClientCommand` has 33 variants (`host.rs:915-1049`). Ten projections exist:
+
+| Projection | Commands in | Events out | Lines |
+|---|---|---|---|
+| `recall_policy` | Subscribe, Resync, SetRequestedMode, JudgedMode, Evaluate, CompleteRefresh, FailRefresh, InvalidateAfterCompaction, Acknowledge | SnapshotEvent, DeltaEvent, CommandOutcomeEvent | 62-79, 916-954, 1775-1879 |
+| `context` | AnalyzeContext, ApplyRecallViewport | ContextAnalysisEvent, ContextViewportEvent | 18-22, 1652-1663 |
+| `hallway` | ProjectHallwayInbox, ClaimHallwayKnock, SettleHallwayKnock | HallwayInboxProjectionEvent, HallwayKnockClaimedEvent, HallwayKnockSettledEvent | 23-31, 385-390, 1666-1685 |
+| `akasha` | AkashaRecallQuery, AkashaLessonQuery | AkashaRecallResultEvent, AkashaLessonResultEvent | 32-37, 392-398, 1690-1702 |
+| `presence` | PresenceOpen, PresenceCompile, PresenceSettle, PresenceClose | PresenceResultEvent | 38-47, 979-994, 1705 |
+| `routing` | RoutingStatus, RoutingDispatch, FamiliarStatus | RoutingResultEvent | 48-52, 995-1008, 1712-1716 |
+| `lineage` | NormalizeLineage, SettleLineage | LineageResultEvent | 53-56, 1009-1016, 1719-1727 |
+| `shell` | LogConversation, PlanTriggerLessons, BraidTriggerLessons | ShellResultEvent | 57-61, 607-633, 1732-1736 |
+| `chat` | ChatSubscribe, ChatSay, ChatTurn, ChatDraft | ChatEvent (snapshot or delta), command accepted or refused | 80-88, 1034-1048, 1742 |
+| `paper_boat_receipt` | PaperBoatReceiptSubscribe | PaperBoatReceiptEvent | 15-17, 1883-1904 |
+
+- `AkashaLessonQuery` takes the room from the binding, not from the payload (`host.rs:392-398`).
+- `SettleHallwayKnock` carries the knock identifier, the outcome, and an optional reason (`host.rs:385-390`).
+- `RoutingDispatch` and `FamiliarStatus` carry an optional room directory (`host.rs:995-1008`).
+
+**Metadata.**
+
+- `CommandMeta` carries the sender room, the sender spirit, the sender session, the correlation chain, the scope, the visibility, and the authority class (`host.rs:789-809`).
+- `CommandMeta` and `EventMeta` carry no sender operator (`host.rs:793-795,1755-1757`).
+- A parse failure keeps the message identifier and the idempotency key, so the Host can still answer (`CommandParseError`, `host.rs:1092-1096`).
+- `ChatEvent` flattens `EventMeta` (`host.rs:1742-1749`).
+- A source record reference names a record type and a record identifier (`host.rs:378-381`).
+
+**Chat.**
+
+- `ChatAuthor` is `Operator` or `Spirit`. It names a side, not an identity (`host.rs:635-642`).
+- `ChatMessage` carries the sequence, the author, `author_name`, the text, the time, the turn identifier, the steps, the thinking, and the outcome (`host.rs:705-723`). On an operator line, the turn identifier is the say identifier.
+- `ChatStep` carries the tool call identifier, the tool, a summary, a status, the start time, and an optional elapsed time. The status is `Running`, `Ok`, or `Error` (`host.rs:647-666`).
+- `ChatOutcome` is `Complete`, `Error`, or `Aborted`. `Complete` is the default (`host.rs:670-700`).
+- `ChatDraft` is the live spirit line: the turn identifier, `author_name`, the text, the steps, the thinking, and the time (`host.rs:730-738`).
+- A say is `{room, text, say_id}` and nothing else (`ChatSayPayload`, `host.rs:743-748`).
+- A turn and a draft carry the spirit side: the room, the turn identifier, `author_name`, the text, the steps, and the thinking. A turn adds the outcome (`host.rs:753-778`).
+- A say needs a non-blank room, text, and say identifier. A turn and a draft need a non-blank room and turn identifier. A subscribe refuses any chat payload (`host.rs:1515-1562`).
+- `ChatMessage.author_name` is the only person-shaped field on an operator line. The Host fills it; see [`LIMITATIONS.md`](../../docs/LIMITATIONS.md#4-identity).
+
+**Presence.**
+
+- The Presence request and result types come from `summoning::presence` (`host.rs:9-12`).
+- A raw command has four optional slots: open, compile, settle, and close (`host.rs:587-593`).
+- The parser refuses more than one Presence payload, and a payload sent under the wrong command type (`host.rs:1153-1187,1228-1254`).
+- `PresenceResultEvent` carries the metadata and one `PresenceResult` (`host.rs:1705-1709`).
+
+**Recall policy.**
+
+- The policy resolves into four modes: conversation, work, mixed, and quiet (consumer: `crates/host/src/policy.rs:220-221,364-429`).
+- A policy decision returns one action: none, clear, refresh, or clear then refresh (`crates/host/src/policy.rs:274-284`).
+
+Not re-verified at a6ab453; `crates/protocol` (`host.rs:92-375`) would decide:
+
 - The recall policy holds four requested modes: auto, conversation, work, and quiet.
-- The policy resolves into four modes: conversation, work, mixed, and quiet.
-- A policy decision returns one action: none, clear, refresh, or clear and then refresh.
 - The action says whether it clears the working set and whether it refreshes.
-- Policy facts carry the query route, the active project, the token count, and two flags for the working set and the tool evidence.
-- The policy state reads a legacy shape and writes the current shape, so an older client keeps working.
-- Recovery state is typed. A pending recovery carries its terms.
-- A delta lists only the fields that changed between two states.
-- Eleven policy fields can change. Each change becomes one field update mutation.
-- `parse_client_command` turns one JSON value into one of 26 typed commands.
-- A parse failure keeps the message identifier and the idempotency key, so the Host can still answer.
-- Command metadata carries the sender room, the sender spirit, the sender session, the correlation chain, the scope, the visibility, and the authority class.
-- Event metadata adds the sequence and the state hash.
-- Snapshot, delta, and outcome events all flatten the same metadata.
-- A boat receipt projection carries the record identifier, the stream sequence, and an integrity hash.
-- A boat receipt has four states: pending, delivered, degraded, and refused.
-- A source record reference names a record type and a record identifier.
-- The conversation request carries the visible window, the attributions, and a persist flag. A replayed session observes turns without making them durable.
-- The trigger request carries the matched trigger and the lesson rows the adapter fetched.
+- The policy state reads a legacy shape and writes the current shape.
+- A delta lists only the changed fields. Eleven policy fields can change, and each change becomes one field update mutation.
+
+**Shell and receipts.**
+
+- The conversation request carries the session identifier, the operator, the spirit, and a persist flag. A replayed session observes turns without making them durable (`host.rs:607-622`).
+- The trigger request carries an optional trigger and the lesson rows the adapter fetched (`ProcessTriggerRequest`, `host.rs:57-61,607-633`).
+- `PaperBoatReceiptEvent` carries a snapshot identifier and a state. The state carries a status, an optional receipt, and an optional diagnostic (`host.rs:1883-1904`).
+- A boat receipt has four states: pending, delivered, degraded, and refused (`host.rs:1883-1904`).
+
+### mod restart (src/restart/mod.rs)
+
+The self-restart wire, protocol version 1 (`restart/mod.rs:1-6`). Consumers reach it as `protocol::restart::...`, not through a flat re-export (`lib.rs:5-7`).
+
+- The only harness is `Omp` (`restart/mod.rs:30-32`).
+- A restart mode is `Resume` or `Fresh` (`restart/mod.rs:36-39`). `Resume` is a spirit that restarts its own session, not a client that picks a session.
+- Consent comes from the operator's standing policy or from an operator approval (`restart/mod.rs:43-46`).
+- An intent moves through `Requested`, `Claimed`, `Exiting`, `Relaunching`, `Verified`, `Failed`, and `Expired` (`restart/mod.rs:52-60`).
+- A transition targets `Exiting`, `Relaunching`, or `Failed` (`restart/mod.rs:67-71`).
+- A request carries the harness, the workspace, the mode, an optional session identifier, a reason, the consent source, the requester room, spirit, and session, a capability, and an idempotency key (`restart/mod.rs:204-224`).
+- A claim carries the intent, the claimant, a capability, and an idempotency key (`restart/mod.rs:241-248`).
+- The claim capability is a declared deviation from contract v1 (`restart/mod.rs:244-247`).
+- A transition carries the intent, an optional claim token, an optional requester session, an optional capability, the target state, and an optional detail (`restart/mod.rs:262-280`).
+- A verify carries the intent, the successor session, the successor proof, the room, the spirit, and a capability (`restart/mod.rs:323-334`).
+- A status read carries the workspace and an optional intent (`restart/mod.rs:350-357`).
+- A request receipt returns the intent, the state, and the expiry. A claim receipt returns the claim token, the claim epoch, and the stage deadlines (`restart/mod.rs:372-396`).
+- A transition receipt returns the state and an optional successor proof. A status receipt returns the workspace and an optional intent with its deadlines (`restart/mod.rs:400-446`).
+- This crate holds no wire method names for these calls. The module doc points to the substrate and the adapter (`restart/mod.rs:3-6`).
+
+### mod harness (src/harness.rs)
+
+The loopback control wire for the harnesses the app owns.
+
+- A request carries the format, a request identifier, a token, and one command (`harness.rs:14-19`). The token is a loopback process-control secret (`harness.rs:1-4`).
+- A command is `List`, `Start`, `Stop`, or `Restart`. Every command except `List` names one harness (`harness.rs:34-39`).
+- A harness lifecycle is `Stopped`, `Running`, or `Failed` (`harness.rs:54-58`).
+- A status carries the harness identifier, the label, the lifecycle, an optional process identifier, and an optional detail (`harness.rs:62-70`).
+- A response carries the format, the request identifier, an ok flag, every harness status, and an optional error (`harness.rs:74-82`).
+- An identifier holds at most 128 characters. A detail holds at most 512 (`harness.rs:9-10,124-129`).
+- The wire declares no room, no argument, and no session identifier. The module doc says the OMP-specific restart fields stay elsewhere (`harness.rs:4`).
+
+### mod contract (src/contract.rs)
+
+Shared Host address constants. This module declares no types.
+
+- `LOOPBACK_HOST` is `127.0.0.1`. `DEFAULT_HOST_WS_PORT` is 8787. `DEFAULT_HOST_WS_PATH` is `/athanor/v1/ws`. `DEFAULT_HOST_URL` is declared beside them (`contract.rs:18-31`).
+- `HOST_ROOM_PATH_PREFIX` is `/room/` (`contract.rs:25`). The installer joins the prefix and the path into `/room/<room>/athanor/v1/ws` (`crates/athanor-install/src/omp.rs:71-81`).
+- `is_safe_room_key` accepts lowercase letters, digits, and single inner hyphens. It refuses `house` (`contract.rs:34-43`).
 
 ### envelope (src/lib.rs, lines 34-43, 760-814, 1449-1484, 2436-2438, 2467-2473, 2538-2546)
 

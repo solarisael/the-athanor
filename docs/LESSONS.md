@@ -1,5 +1,8 @@
 # House Lessons
 
+Not re-verified at a6ab453.
+The 2026-10-04 census did not walk `crates/akasha`; claims below keep their earlier date.
+
 Lessons preserve reusable guidance in typed stores. They are not a second name for memories.
 
 ## Choose the store

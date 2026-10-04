@@ -18,15 +18,24 @@ operator places one per room. Its body is `@"%~dp0athanor.exe" keeper kodo %*`.
 ## Who owns the keeper
 
 The keeper owns omp. The operator starts the keeper. While it runs, the keeper
-holds `<room>/.omp/runtime/omp-keeper.lock` open with no sharing, so a second
-keeper for the same room refuses to start and names the lock. On an installed
-House, the Host can also start a keeper as an ordinary process harness: the
-registry entry names `athanor.exe` as the program and `keeper --config <room
-runtime>/omp-keeper.json` as the arguments. Before it spawns, the Host tries
-the same lock; a room whose keeper is alive elsewhere is reported as running
-and spawned again never. The Host holds no OMP driver. The stable loader starts
-the Host from inside omp, so the Host can never be the parent of a session the
-operator started, and only the keeper can.
+holds `omp-keeper.lock` open with no sharing. The lock file sits next to the
+config file (`src/keeper.rs:108-126`). A second keeper for the same room then
+refuses to start and names the lock.
+
+The single-keeper lock works on Windows only. Off Windows the keeper creates the
+lock file but excludes nothing (`src/keeper.rs:128-136`).
+
+On an installed House, the Host can also start a keeper as an ordinary process
+harness: the registry entry names `athanor.exe` as the program and
+`keeper --config <room runtime>/omp-keeper.json` as the arguments. Before it
+spawns, the Host tries the same lock; a room whose keeper is alive elsewhere is
+reported as running and spawned again never. The Host holds no OMP driver.
+
+The installed OMP loader does not start the Host. It probes Host health, warns
+when the Host is absent, and loads anyway
+(`adapters/omp/installed-loader.ts:514-528,647-650`). `athanor start` starts
+the Host (`crates/athanor-install/src/cli/start.rs:116-143`). Only the keeper
+is the parent of an omp session.
 
 ## What the keeper does
 
@@ -119,11 +128,11 @@ Example:
 
 ```json
 {
-  "ompLaunch": ["C:/Users/Administrador/.bun/bin/omp.exe"],
-  "workspace": "C:/Solarisael/Obsidian/obsidian/kodo",
+  "ompLaunch": ["<omp-install-dir>/omp.exe"],
+  "workspace": "<rooms-root>/<room>",
   "programRoot": "C:/Program Files/Solarisael/Athanor",
-  "stateRoot": "C:/Solarisael/Obsidian/obsidian/house/state",
-  "capabilityPath": "C:/Solarisael/Obsidian/obsidian/kodo/.omp/runtime/restart-capability",
+  "stateRoot": "<house-state-root>",
+  "capabilityPath": "<rooms-root>/<room>/.omp/runtime/restart-capability",
   "watchIntervalSecs": 30
 }
 ```
@@ -132,8 +141,8 @@ For a local House, deploy the release first. Then provision one room:
 
 ```powershell
 pwsh crates/omp-keeper/scripts/provision-local.ps1 `
-  -RoomDir C:/Solarisael/Obsidian/obsidian/kodo `
-  -OmpProgram C:/Users/Administrador/AppData/Roaming/npm/omp.cmd
+  -RoomDir <rooms-root>/<room> `
+  -OmpProgram <npm-global-dir>/omp.cmd
 ```
 
 The script provisions four operation secrets. It writes `omp-keeper.json` in
@@ -152,8 +161,8 @@ An installed release carries the same door in its keeper component:
 $root = "$env:ProgramFiles/Solarisael/Athanor"
 $version = (Get-Content "$root/current.json" -Raw | ConvertFrom-Json).version
 pwsh "$root/versions/$version/components/omp-keeper/provision-omp-keeper.ps1" `
-  -RoomDir C:/Solarisael/Obsidian/obsidian/kodo `
-  -OmpProgram C:/Users/Administrador/.bun/bin/omp.exe
+  -RoomDir <rooms-root>/<room> `
+  -OmpProgram <omp-install-dir>/omp.exe
 ```
 
 Give exactly one capability field. The operator provisions the secret into the
@@ -166,8 +175,8 @@ the keeper starts a program, and no PATHEXT search happens for it. A `.cmd` or
 `.bat` shim — which is what an npm-installed `omp` is — is a valid entry and
 needs no shell of your own. Rust's process spawn hands a shim to the command
 processor for you and escapes the arguments for it, so a path with spaces and
-trailing flags both survive. `crates/omp-keeper/tests/smoke.rs` proves that with
-a real `.cmd` in a directory whose name has a space.
+trailing flags both survive. `crates/athanor-install/tests/keeper_smoke.rs:550-565`
+tests that with a real `.cmd` in a directory whose name has a space.
 
 The `claimant` name must be a lowercase slug. This shape is the shape the
 substrate accepts for a principal name.
@@ -199,13 +208,18 @@ Deadlines and refusals:
   the keeper obeys those. A keeper that starts after the adapter already armed is
   therefore late on its first look, and acts on it.
 - The keeper kills the omp child only when the intent says `exiting` and the
-  published instant has passed. The contract's stage length is 60 seconds; the
-  keeper's own 60 is only a net for an answer that carries no instant at all.
+  deadline has passed. The deadline is the published `exitingDeadlineAt`. When
+  the House published no instant, the keeper uses a 60-second net. It counts
+  that net from the moment of its own poll (`src/decide.rs:53-66`,
+  `src/clock.rs:58-67`).
 - A relaunch attempt fails three ways: omp will not start, omp starts and the
   House never confirms it before `relaunchingDeadlineAt`, or the answers from
   the House stop making sense after the spawn. Every one of them kills the
-  child, retries one time, and transitions the intent to `failed` on the second
-  failure. A House that is only away fails nothing; see "An absent House".
+  child. The keeper retries while the attempt count is below the House's
+  `relaunch_attempt_limit`. Then it transitions the intent to `failed`
+  (`src/keeper.rs:386-413`, `src/decide.rs:70-76`). The House owns that limit,
+  not the keeper. A House that is only away fails nothing; see "An absent
+  House".
 - Each attempt enters `relaunching` again, because the intent row counts
   `relaunch_attempts` and mints a fresh `relaunchingDeadlineAt` on every
   `relaunching` transition. The retry runs inside the House's new window; the
@@ -232,9 +246,11 @@ Deadlines and refusals:
 - The storm guard belongs to the House. The keeper holds no local restart count.
   It answers a `restart_storm` refusal, wherever in the loop it arrives, with one
   operator sentence and no retry.
-- The keeper holds no stage clock. Every deadline it obeys is an instant read off
-  the intent; `src/clock.rs` is the only place that parses one and asks whether it
-  has passed.
+- The keeper holds one local clock: the 60-second `exiting` net above. It uses
+  that net only when the House published no `exitingDeadlineAt`
+  (`src/keeper.rs:24-32`). The relaunch window and the attempt limit come from
+  the House. `src/clock.rs` is the only place that parses an instant and asks
+  whether it has passed.
 
 ## Tests
 
@@ -243,14 +259,16 @@ cargo test -p omp-keeper
 ```
 
 The unit tests cover the config file, the substrate resolution in temporary
-directories, the House clock, and the decision functions. The smoke tests start
-the real keeper program against two fixtures and need no database:
-`examples/fake_omp.rs` is the child (it arms an exit, or overstays on demand),
-and `examples/fake_substrate.rs` answers the wire. That fixture builds every
-answer from a real `house_protocol::restart` struct and validates every request
-with the real door's own `validate()`, so a request the House would refuse is
-refused in the smoke too.
+directories, the House clock, and the decision functions. The smoke tests
+start the real keeper program against two fixtures and need no database:
+`crates/athanor-install/examples/fake_omp.rs` is the child (it arms an exit, or
+overstays on demand), and `crates/athanor-install/examples/fake_substrate.rs`
+answers the wire. That fixture builds every answer from a real
+`house_protocol::restart` struct and validates every request with the real
+door's own `validate()`, so a request the House would refuse is refused in the
+smoke too.
 `FAKE_SUBSTRATE_AWAY` sends that House away for chosen asks, either as a
 substrate that dies unanswered or as the `database` answer the real substrate
 gives when its Postgres is gone. The smoke tests live in
-`crates/athanor-install/tests/keeper_smoke.rs`.
+`crates/athanor-install/tests/keeper_smoke.rs`. The lock test runs on Windows
+only (`src/keeper.rs:154-174`).

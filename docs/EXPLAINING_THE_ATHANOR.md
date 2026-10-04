@@ -43,15 +43,21 @@ produces candidates; generation alone never creates truth.
 ### The Athanor
 
 The platform and core architecture. It defines continuity, retrieval, authority,
-routing, and extension contracts. Its current supported public harness is OMP.
-Provider-neutral core contracts do not imply that other harness adapters are
-already supported.
+routing, and extension contracts. Its only supported public harness is OMP. The
+release manifest requires the platform `windows-x64`
+(`crates/athanor-install/src/manifest.rs:104-106`). Provider-neutral core
+contracts do not mean that other harness adapters are supported.
 
 ### House
 
 One sovereign continuity domain. A House can contain multiple rooms and shared
-work knowledge without erasing room boundaries. A House is not required merely
-to search a project corpus through Vault.
+work knowledge without erasing room boundaries. One Host process serves every
+room of a House (`crates/host/src/house.rs:86-105,166-202`).
+
+On the supported OMP path, a corpus search needs the House Host. The `recall`
+tool fails when the Host is absent (`adapters/omp/house-proof/tools.ts:526-532`).
+**Not re-verified at a6ab453:** standalone Vault search without a House.
+`crates/vault` would decide it.
 
 ### Room
 
@@ -61,43 +67,70 @@ assistant history.
 
 ### Vault
 
-The lightweight file-backed retrieval profile. It searches configured Markdown,
-JSON, JSONL, and plain-text roots with exact-content and field-aware BM25F lanes.
-It returns bounded attributed excerpts and requires no database, embeddings, or
-GPU.
+The file-backed retrieval profile. It returns bounded attributed excerpts from
+configured roots.
+
+On the supported release, Vault results reach the model through the Host. The
+Host starts only after PostgreSQL and NATS accept connections
+(`crates/athanor-install/src/service.rs:40-111`). Vault therefore does not
+remove the database from the supported install.
+
+**Not re-verified at a6ab453:** the Markdown, JSON, JSONL, and plain-text root
+types; the exact-content and field-aware BM25F lanes; and the absence of
+embeddings or a GPU in Vault itself. `crates/vault` would decide them.
 
 ### AKASHA
 
-The PostgreSQL-backed authority and retrieval profile. It adds `pgvector`,
-`pg_trgm`, compatible local embeddings, typed stores, chronology, supersession,
-taxonomy, semantic and structured retrieval, and the substrate used by GIGA.
+The PostgreSQL-backed authority and retrieval profile. The release bundles
+PostgreSQL 18.4-2 and `pgvector` 0.8.6
+(`crates/athanor-install/src/manifest.rs:11-13`; `installer/dependencies.json:1-28`).
+AKASHA is also the substrate that GIGA uses.
+
+**Not re-verified at a6ab453:** `pg_trgm`, local embeddings, typed stores,
+chronology, supersession, taxonomy, and semantic and structured retrieval.
+`crates/akasha` would decide them.
 
 ### Canon
 
 Current authoritative truth in AKASHA. Canon outranks loose memory. A retrieval
-score cannot promote a record into canon.
+score cannot promote a record into canon. **Not re-verified at a6ab453:** the
+enforcement of this order. The adapter states it only in tool descriptions
+(`adapters/omp/house-proof/tools.ts:573`). `crates/akasha` would decide it.
 
 ### Memory and lessons
 
 Memory carries durable continuity with provenance and lifecycle. Lessons are
-typed reusable knowledge: coding, project, writing, design, and audio. They have
-their own eligibility and guarded-write contracts.
+typed reusable knowledge: coding, project, writing, design, and audio
+(`adapters/omp/house-proof/tools.ts:633,854`). They have their own eligibility
+and guarded-write contracts.
 
 ### GIGA
 
 Grounded Indexing and Generative Annotation: the cognitive layer above AKASHA,
-not another storage profile. Hippocampus Stage 1 produces grounded,
-non-authoritative candidates for review. Striatum's current slice braids
-process-shape coding lessons from deterministic process triggers; the
-state-conditioned selector remains planned. Candidates do not become truth by
-existing.
+not another storage profile. Candidates do not become truth by existing.
+
+GIGA is off by default. The GIGA child refuses calls with `giga_disabled` unless
+`ATHANOR_GIGA_ENABLED=1` is set (`adapters/omp/giga.ts:107-108`). When it is on,
+Hippocampus Stage 1 lists grounded, non-authoritative candidates for review and
+promotion (`giga_candidate_list`, `adapters/omp/house-proof/tools.ts:1377`).
+
+**Not re-verified at a6ab453:** Striatum's current slice, which braids
+process-shape coding lessons from deterministic process triggers, and the
+planned state-conditioned selector. `crates/akasha` or `adapters/omp/giga.ts`
+would decide them.
 
 ### Organs
 
-Named deterministic tools of a House. The supported OMP adapter currently
-mounts 26 across memory, retrieval, lessons, continuity, counsel, routing,
-design-system catalogues, GIGA review, and House configuration. An organ is not
-an autonomous agent.
+Named deterministic tools of a House. The supported OMP adapter registers 43:
+42 in `adapters/omp/house-proof/tools.ts:491-2011` and `request_restart` in
+`restart-door.ts:574`. They cover memory, retrieval, lessons, continuity,
+counsel, routing, design-system catalogues, GIGA review, House configuration,
+the Hallway (7 `hallway_*` tools), the Docket (5 `quest_*` tools), and restart.
+[Architecture](./ARCHITECTURE.md#43-tools-and-wires) lists each tool and its
+wire. An organ is not an autonomous agent.
+
+Six organs fail without a live Host; `sleep` degrades
+([Limitations](./LIMITATIONS.md#7-doors-that-need-the-host)).
 
 ### Paper Boat
 
@@ -131,7 +164,66 @@ sources, the tool does the work, and every claim remains inspectable.
 AKASHA enters only when the work needs durable typed decisions, semantic
 recall, lessons, chronology, or a larger governed archive. None of those
 concepts are required to understand the immediate value of attributed project
-context.
+context. The supported install still runs the Host, PostgreSQL, and NATS for
+this path ([Vault](#vault)).
+
+## For work
+
+You should not have to explain your project again every morning. A House keeps
+project decisions, conventions, lessons, corrections, and handoffs across
+sessions and model processes.
+
+A normal session has four steps:
+
+```text
+enter the room → work → remember what matters → leave a paper boat
+```
+
+- `recall` retrieves older evidence. It fails without the Host.
+- `remember` records durable events, decisions, or lessons.
+- `sleep` leaves a compact handoff for the next session. Without the Host, it
+  degrades.
+- `wake` catches the latest handoff.
+
+(`adapters/omp/house-proof/tools.ts:526-532`;
+[Limitations](./LIMITATIONS.md#7-doors-that-need-the-host).) Read
+[Usage](../USAGE.md) for the everyday workflow and [Evidence](./EVIDENCE.md)
+for the measured retrieval results.
+
+## For companions
+
+A companion that forgets you at every restart is not a companion. The room
+keeps the continuity; the model is a replaceable body.
+
+What works today:
+
+- The four lifecycle tools above carry memory and handoffs between sessions.
+- Memories and lessons are separate stores. Lesson types are coding, project,
+  writing, design, and audio.
+- Presence sessions reload from PostgreSQL when the Host starts
+  (`crates/host/src/server.rs:1129-1136`).
+- The live chat ring is in memory only. A Host restart empties it
+  (`crates/host/src/chat.rs:25-30`; `server.rs:218`). Durable continuity comes
+  from memories and paper boats, not from the chat ring.
+- To add a room, edit `runtime.json` and restart the Host
+  ([Limitations](./LIMITATIONS.md#5-rooms-and-sessions)).
+
+**Not re-verified at a6ab453:** that room history survives model and provider
+changes, and that corrections move through supersession. `crates/akasha` would
+decide them.
+
+What is planned, not shipped:
+
+- companions that create and organize their own child rooms;
+- presentation bodies for a companion;
+- model training that a companion starts, inside declared resource, consent,
+  backup, and audit policy;
+- a signed marketplace that keeps personality seeds, presentation packages,
+  models, and executable skills as separate artifact classes.
+
+Planned items live in the [Roadmap feature map](./ROADMAP.md#feature-map). The dated design record is
+[the companion ecosystem target](./history/2026-10-04-COMPANION_ECOSYSTEM.md).
+To co-author rooms and identities, read the [Identity Guide](../IDENTITY_GUIDE.md).
 
 ## The architectural path
 
@@ -143,7 +235,7 @@ The architectural distinction is:
 
 That path has five parts:
 
-1. Vault supplies attributed project retrieval without infrastructure weight.
+1. Vault supplies attributed retrieval from configured files.
 2. AKASHA supplies typed PostgreSQL authority and hybrid retrieval.
 3. Canon, memory, lessons, candidates, and counsel have different authority.
 4. GIGA may propose; authorized lifecycle operations decide what becomes
@@ -186,11 +278,11 @@ behavior it has not verified.
 ## Thirty seconds
 
 > The Athanor makes AI tools more reliable on real projects by controlling how
-> they receive context. Vault can search local project files and return bounded
-> excerpts with exact attribution without needing a database or GPU. AKASHA adds
-> PostgreSQL-backed memory, typed lessons, semantic retrieval, corrections, and
-> governed cognitive workers. The model can change; the sources, authority, and
-> continuity contracts remain inspectable.
+> they receive context. Vault searches local project files and returns bounded
+> excerpts with exact attribution. AKASHA adds PostgreSQL-backed memory, typed
+> lessons, semantic retrieval, corrections, and governed cognitive workers. The
+> model can change; the sources, authority, and continuity contracts remain
+> inspectable.
 
 ## Two minutes
 
@@ -200,19 +292,28 @@ behavior it has not verified.
 > memory or a machine-generated suggestion.
 >
 > The Athanor supplies that missing structure. Its Vault profile is the small
-> path: point it at one or several Markdown, JSON, JSONL, or text corpora and it
-> returns relevant bounded excerpts with source and match attribution. Its
-> AKASHA profile adds a PostgreSQL authority layer, typed memories and lessons,
-> semantic retrieval, chronology, supersession, and GIGA workers whose output is
-> explicitly non-authoritative until reviewed.
+> path: point it at one or several project corpora and it returns relevant
+> bounded excerpts with source and match attribution. Its AKASHA profile adds a
+> PostgreSQL authority layer, typed memories and lessons, semantic retrieval,
+> chronology, supersession, and GIGA workers whose output is explicitly
+> non-authoritative until reviewed.
 >
 > A House is the sovereign continuity boundary; rooms keep identities and
 > relationships separate inside it. Deterministic organs handle known mechanics
 > such as retrieval, validation, lifecycle, and routing so models can spend
 > judgment on ambiguity and novel work. Today the only supported release target
-> is Windows x64 with OMP. The Host supports the read-only web operator surface at `gui-prototype/`.
-> `bun gui-prototype/serve.ts` serves it and proxies Host reads over loopback.
-> The parked Godot client lives in the private repository `solarisael/athanor-godot`. Cingulate, OMEGA, and ANON remain roadmap claims.
+> is Windows x64 with OMP. The Pulse web surface at `gui-prototype/` reads Host
+> state and posts chat turns to the Host.
+
+`bun gui-prototype/serve.ts` serves Pulse. It needs the installed
+`C:/ProgramData/Solarisael/Athanor/config/runtime.json` and the runtime secrets
+file (`gui-prototype/serve.ts:16-18,32-41`). It binds `127.0.0.1`, serves one
+room from `PULSE_ROOM` (default `kodo`) on port 4175, and adds the Host bearer
+server-side (`serve.ts:34-36,44,58-65`). The `/live/chat/say` route writes a
+chat turn on the Host (`gui-prototype/chat.js:146`;
+`gui-prototype/live-routes.json:15`). The comment at `serve.ts:3-6` still says
+"read-only"; that comment is wrong. Planned surfaces are in the
+[Roadmap](./ROADMAP.md).
 
 ## What The Athanor is not
 
@@ -239,7 +340,7 @@ The distinctions below carry the architecture:
 | candidate / memory | Generation is not promotion |
 | counsel / canon | Useful repetition is not current authoritative fact |
 | Paper Boat / complete memory | A handoff points into continuity; it does not replace the archive |
-| current web operator surface / parked Godot client | `gui-prototype/` provides read-only Host access; the parked client lives in the private repository `solarisael/athanor-godot` |
+| Pulse surface / Host authority | Pulse reads Host state and posts chat turns through a loopback proxy; the Host keeps the state |
 | provider-neutral core / supported harnesses | Architectural portability is not a shipped adapter matrix |
 
 ## Status language
@@ -251,8 +352,9 @@ Use status words exactly:
 - **Planned:** accepted roadmap direction.
 - **Research:** an investigated possibility without a release promise.
 
-For current labels, consult [Planned Features](./PLANNED_FEATURES.md). For measured
-claims, consult [Evidence](./EVIDENCE.md). For the supported boundary, consult
+For the built system, consult [Architecture](./ARCHITECTURE.md). For planned
+work, consult the [Roadmap](./ROADMAP.md). For measured claims, consult
+[Evidence](./EVIDENCE.md). For the supported boundary, consult
 [Limitations](./LIMITATIONS.md).
 
 ## Recommended reading by question
@@ -267,5 +369,5 @@ claims, consult [Evidence](./EVIDENCE.md). For the supported boundary, consult
 | What may GIGA write? | [Hippocampus](./HIPPOCAMPUS.md) |
 | What is actually measured? | [Evidence](./EVIDENCE.md) |
 | What is unsupported? | [Limitations](./LIMITATIONS.md) |
-| What exists versus what is planned? | [Planned Features](./PLANNED_FEATURES.md) |
+| What is planned? | [Roadmap](./ROADMAP.md) |
 | Why is the architecture this strange? | [For latent-space explorers](./FOR_EXPLORERS.md) |

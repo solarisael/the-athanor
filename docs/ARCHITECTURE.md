@@ -1,492 +1,283 @@
-# The Athanor Architecture
+# Architecture, as built
 
-The Athanor separates durable continuity from the model session that consumes it. Models and harnesses remain replaceable; rooms, identity, memory, and authority remain under the operator's control.
+Status: current. Verified against the code at commit `a6ab453` (`dev/next`) on 2026-10-04.
 
-## System boundaries
+This document describes what the code does today. Every claim names a file and a line range. Sixteen read-only censuses produced the evidence; they live in the census folder named at the end. Layers the census did not walk are marked **not re-verified**. Planned work lives in [`ROADMAP.md`](./ROADMAP.md). Limits live in [`LIMITATIONS.md`](./LIMITATIONS.md). Words live in [`VOCABULARY.md`](./VOCABULARY.md).
 
-```text
-operator
-   │
-   ▼
-room directory
-   │
-   ├── identity contract
-   ├── room state
-   ├── compact continuity
-   └── room marker
-   │
-   ▼
-harness adapter
-   │
-   ├── room discovery
-   ├── lifecycle hooks
-   ├── conversation logging
-   ├── tool registration
-   └── context injection
-   │
-   ▼
-House core
-   │
-   ├── room and identity contracts
-   ├── retrieval orchestration
-   ├── ranking and authority
-   ├── memory context shaping
-   └── worker-routing contracts
-   │
-   ├──────── Vault ───────── room-local files
-   │
-   └──────── AKASHA ──────── PostgreSQL + pgvector + embeddings
-```
-
-### Host and delivery plane
-
-The Athanor Host is the authenticated, versioned boundary between interactive clients and the Rust runtime.
-The web prototype at `gui-prototype/` is the read-only operator surface.
-Run `bun gui-prototype/serve.ts` from the repository root.
-It reads the Host through a loopback proxy.
-The parked Godot client lives in the private repository `solarisael/athanor-godot`.
+## 1. The shape
 
 ```text
-Web prototype ── loopback proxy ── Athanor Host ── Rust contracts ── Vault / AKASHA
-OMP adapter ──────────────────────┘                                  │
-                                                                    └── PostgreSQL outbox
-                                                                                │
-                                                                                └── NATS JetStream
+ Browser ──HTTP──▶ Pulse proxy (127.0.0.1:4175) ──HTTP + Bearer──▶ Host (127.0.0.1:8787)
+                   serve.ts or pulse.exe             /room/<room>/athanor/v1/...
+                                                            │
+                                                            ├── PostgreSQL (127.0.0.1:5432)
+                                                            └── NATS JetStream (127.0.0.1:4222)
+ OMP ──loads──▶ Athanor adapter ──WebSocket + Bearer──▶ Host (same process, same port)
+                      │
+                      └──JSONL over stdio──▶ athanor-substrate child ──▶ PostgreSQL
+ athanor.exe (no arguments) starts the Host for every room, then one keeper per room.
+ Each keeper starts and watches one OMP session.
+ The Windows service `SolarisaelAthanor` owns only PostgreSQL and NATS.
 ```
 
-PostgreSQL remains authoritative. The outbox records durable publication intent
-in the same transaction as the domain event. NATS JetStream may deliver opaque
-record IDs and wake consumers, but it never becomes memory, review state, or a
-second conversation ledger.
+Three rules hold the shape together:
 
-Paper Boat sleep commits its continuity row and `boat.ready` Crane outbox event in
-one PostgreSQL transaction. NATS carries only bounded pointer and sanitized receipt
-projections; wake reloads the complete Boat from PostgreSQL authority. That lane is
-the first lane of one general Crane delivery system: a shared outbox, receipt, and
-dead-letter trio, subjects routed per lane, and optional crease, recipient, expiry,
-and lineage fields on the envelope. Origami folds, Pawprints, and room wake
-behavior on the addressed lanes remain specified extensions of the same envelope
-rather than current release claims.
+1. Every listener binds loopback. The Host refuses a non-loopback bind (`crates/host/src/config.rs:92-120`). The adapter refuses a Host URL that is not `ws:` on `127.0.0.1`, `localhost`, or `::1` (`adapters/omp/house-proof/host.ts:88-90`). Both Pulse proxies bind `127.0.0.1` (`gui-prototype/serve.ts:44`; `gui-desktop/src/main.rs:63`).
+2. One bearer token serves the whole House. The Host checks it once, at the WebSocket upgrade or on each HTTP door (`crates/host/src/server.rs:282,301-323`). The token proves reach, never identity.
+3. PostgreSQL is authoritative for durable records. The Host keeps a few files and in-memory rings. The adapter keeps no durable state of its own.
 
-`boat.ready` is the only current production outbox producer. Addressed Crane
-subjects, envelopes, and generic receipt validation exist structurally and in
-tests, but no named worker, familiar, room, or reviewer currently consumes and
-applies them. A current Paper Boat receipt proves transport validation; it does
-not prove room wake, model consumption, or human reading.
+## 2. Processes on one machine
 
-The complete accepted target, including dynamic model and room execution,
-Prolog/Datalog derivations, Cingulate enforcement, and optional Lean-backed
-lessons, lives in
-[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md).
+| Process | Binary and arguments | Started by | Binds | Needs |
+|---|---|---|---|---|
+| Service | `athanor.exe service` | Windows SCM | nothing | `current.json`, `runtime.json` |
+| PostgreSQL | `versions/<v>/runtime/postgresql/bin/postgres.exe` | the service, only when `databaseMode` is `managed` | `127.0.0.1:databasePort` | `data/postgresql` |
+| NATS | `versions/<v>/runtime/nats/nats-server.exe -js` | the service, always | `127.0.0.1:natsPort` | `data/nats` |
+| Host | `athanor.exe` with no arguments | the operator or `athanor start` | `127.0.0.1:hostPort` and a control door on `127.0.0.1:0` | the service running, `runtime.json`, `runtime-secrets.json`, `harnesses.json` |
+| Keeper | `athanor.exe keeper --config <room>/.omp/runtime/omp-keeper.json` | the Host, for each `autoStart` harness | nothing | the keeper config, the installed substrate |
+| OMP | `ompLaunch` from the keeper config | the keeper | nothing | OMP provider auth |
+| Substrate child | `athanor-substrate.exe` | the adapter, on first request | nothing | `DATABASE_URL`, optional embeddings |
+| Pulse proxy | `pulse.exe` or `bun gui-prototype/serve.ts` | the operator | `127.0.0.1:4175` | `runtime.json`, `runtime-secrets.json` |
 
-## Repository layout and component ownership
+Start order. The service starts PostgreSQL first when it is managed, then NATS. It waits up to 90 seconds for each port and reports progress every 5 seconds (`crates/athanor-install/src/supervisor.rs:30-33,334-382,417-459`). The Host calls `service::ensure_running` before it binds (`crates/athanor-install/src/app.rs:88`). On a non-Windows system that call fails (`crates/athanor-install/src/service.rs:319-322`). After the Host binds, it starts each `autoStart` harness in file order and collects failures without stopping (`app.rs:104-113`). When the Host exits, it stops only the harnesses it started (`app.rs:131-133`).
 
-One repository owns The Athanor. The public repository is
-[`solarisael/the-athanor`](https://github.com/solarisael/the-athanor). One
-release publishes every component below. This table is canonical. Other
-documents link to it instead of repeating it.
+The service runs with no logged-in user. The Host, the keepers, OMP, and Pulse are user processes.
 
-| Component path | Responsibility |
+## 3. The Host
+
+### 3.1 One process, many rooms
+
+`house::start(Vec<HostConfig>)` runs one thread, one Tokio runtime, and one listener. Each room becomes its own `server::Host`, nested under `/room/<room>` in one axum router (`crates/host/src/house.rs:86-105,166-202`). Every room must share the bind address, the bearer token, the House id, `DATABASE_URL`, and the NATS URL (`house.rs:205-234`). The spirit and the session may differ per room.
+
+The production builder makes one `HostConfig` per `runtime.json` `rooms[]` entry (`app.rs:30-58`):
+
+| Field | Source |
 |---|---|
-| `crates/hearth`, `crates/protocol` | Provider-neutral domain, authority, and wire contracts |
-| `crates/origami`, `crates/summoning` | The communication layer (paper boats, Cranes, Hallways) and the waking cycle's typed requests (Anamnesis, Presence) |
-| `crates/vault` | Strict database-free, file-authoritative Vault retrieval |
-| `crates/akasha`, `substrate/` | PostgreSQL-authoritative AKASHA operations, migrations, retrieval, typed stores, Docket, GIGA, Insula, health, backup, and restore |
-| `crates/host` | One authenticated multi-room listener, snapshots, deltas, Recall Policy, receipt projection, and the Crane delivery task |
-| `crates/athanor-install`, `crates/omp-keeper`, `crates/interactive-process`, `installer/` | `athanor.exe`: native service lifecycle, immutable staging, rollback, doctor, OMP session keeper, and the Windows installer |
-| `gui-prototype/` | The web operator surface |
-| `adapters/omp/` | OMP entrypoint, room integration, named tools, and Rust transport |
-| `.github/workflows/` | Continuous integration and native release assembly |
-| `docs/`, root Markdown | Canonical documentation |
+| `bind` | `127.0.0.1` plus `runtime.json` `hostPort` |
+| `bearer_token` | `runtime-secrets.json` `hostToken` |
+| `room`, `spirit` | `rooms[].room`, `rooms[].spirit` |
+| `room_dir` | `roomsRoot/<room>` |
+| `state_dir` | `data/state/host/<room>` |
+| `house_id` | `runtime.json` `houseId` |
+| `session` | `app:<room>` |
+| `database_url` | the secrets file, always set |
+| `nats_url` | `nats://natsHost:natsPort`, always set |
+| `knock_autonomy` | environment variable `ATHANOR_HOST_KNOCK_AUTONOMY`: `claim` (default) or `off` (`config.rs:4,21-41`) |
 
-One repository does not merge the internal authority boundaries. The core does
-not import the OMP adapter. The core does not require PostgreSQL. The Vault
-profile runs without any substrate component. Each boundary stays enforced by
-contract, not by repository distance.
+The Host owns runtime resources per House: a lazy PostgreSQL pool of 8 connections, the Insula emitter, a NATS `DeliveryService` task, and a cancellation token (`house.rs:19,171-181,235-248`).
 
-The public API boundaries are `hostApi=1`, `substrateApi=1`, and `deliveryApi=1`.
+### 3.2 Doors
 
-### Installed layout
+HTTP doors, all `POST` unless noted, all under `/room/<room>`:
 
-Immutable product versions and mutable operator data are separate:
+| Door | Owner | Auth | Notes |
+|---|---|---|---|
+| `GET /health` | `server.rs:252,261-275` | **none** | status, schema version, WebSocket path, cursor, delivery health, Insula health |
+| `/athanor/v1/ws` (upgrade) | `server.rs:253,277-299` | bearer at upgrade | the command socket, see 3.3 |
+| `/athanor/v1/chat/snapshot`, `chat/say`, `room/state` | `crates/host/src/surface.rs:13-15,29-37` | bearer | the Pulse surface |
+| `/athanor/v1/docket/board`, `docket/evidence`, `hallway/inbox`, `hallway/messages`, `memory/timeline`, `memory/read`, `lesson/timeline` | `crates/host/src/panel.rs:37-43,109-150` | bearer | read only; identity comes from `HostConfig`, never from the request (`panel.rs:247-325`) |
+| `/athanor/v1/insula/events`, `vitals`, `trace`, `retention`, `spans`, `unverified-exit` | `crates/host/src/insula.rs:27-38,272-284` | bearer | the only database write is `ingest_batch` into `insula.log` and `insula.vitals_minute` |
 
-| Installed path | Content |
+Panel and surface doors refuse a query string, hold 4 concurrent operations, and cap the body at 64 KiB (`panel.rs:45-46,132-141,199-212`). Insula doors cap the body at 512 KiB and the batch at 128 events (`insula.rs:41-55`).
+
+### 3.3 The command socket
+
+Text frames carry JSON commands. Binary frames are refused. Each command passes JSON parse, a semantic hash, `parse_client_command`, then `validate_command` (`server.rs:525-574`). `validate_command` requires the claimed `house_id`, `sender_room`, `sender_spirit`, scope, and recipient to equal the Host configuration, `visibility` to be `operator`, and `authority_class` to be `room_state` (`server.rs:2537-2583`). `sender_session` is caller-chosen and unauthenticated. `Subscribe` and `PaperBoatReceiptSubscribe` pass with a blank binding.
+
+32 command arms exist (`server.rs:576-963`). Grouped by projection:
+
+| Projection | Commands |
 |---|---|
-| `%ProgramFiles%\Solarisael\Athanor\bin` | Stable independent manager and Host owner, lifecycle manager, and OMP loader |
-| `%ProgramFiles%\Solarisael\Athanor\versions\<version>` | Verified immutable runtime, OMP adapter, PostgreSQL, and NATS |
-| `%ProgramData%\Solarisael\Athanor\config` | Non-secret database mode, one Host port, and House room identities |
-| `%ProgramData%\Solarisael\Athanor\secrets` | ACL-restricted service secrets |
-| `%ProgramData%\Solarisael\Athanor\data` | Managed PostgreSQL and NATS durable data |
-| `%ProgramData%\Solarisael\Athanor\state\host\<room>` | Isolated Host projection state per room |
-| `%ProgramData%\Solarisael\Athanor\backups` | Upgrade, rollback, external-authority, and legacy pre-install backups |
-| `%USERPROFILE%\.omp\agent\athanor\client.json` | ACL-restricted Host base URL, token, and room identities |
+| `recall_policy` | Subscribe, Resync, Acknowledge, SetRequestedMode, JudgedMode, Evaluate, CompleteRefresh, FailRefresh, InvalidateAfterCompaction |
+| `context` | AnalyzeContext, ApplyRecallViewport |
+| `hallway` | ProjectHallwayInbox, ClaimHallwayKnock, SettleHallwayKnock |
+| `akasha` | AkashaRecallQuery, AkashaLessonQuery |
+| `presence` | PresenceOpen, PresenceCompile, PresenceSettle, PresenceClose |
+| `routing` | RoutingStatus, RoutingDispatch, FamiliarStatus |
+| `lineage` | NormalizeLineage, SettleLineage |
+| `shell` | LogConversation, PlanTriggerLessons, BraidTriggerLessons |
+| `chat` | ChatSubscribe, ChatSay, ChatTurn, ChatDraft |
+| `paper_boat_receipt` | PaperBoatReceiptSubscribe |
 
-`current.json` atomically selects the active immutable version. The
-`SolarisaelAthanor` Windows service starts optional managed PostgreSQL, one NATS
-broker, and one delivery worker. It reports `RUNNING` after these children pass
-readiness. It drains the same children in reverse order.
+Knock claim and settle pass an extra gate: `knock_authority` compares the sender with `config.spirit` (`server.rs:1649-1665`). `RoutingDispatch` and `FamiliarStatus` resolve the room directory on the server (`server.rs:2067-2093`). `LogConversation` writes transcript files under the `room_dir` the caller sends, with no check (`server.rs:2131-2235`). This is a known defect; see [`LIMITATIONS.md`](./LIMITATIONS.md).
 
-`athanor.exe` is an independent local manager and the one in-process multi-room
-Host owner. It binds one loopback listener without becoming
-the parent of OMP sessions. Every WebSocket and HTTP route starts with
-`/room/<room-key>`. One shared PostgreSQL pool serves all room projections.
+### 3.4 The chat ring
 
-OMP registers one stable loader under Program Files. The loader follows the
-native and adapter activation pointers, reads the restricted client projection,
-and checks the default room's scoped Host health. When Athanor is absent it
-starts the verified stable `athanor.exe` as an independent hidden peer, waits
-boundedly for real scoped health, then loads the adapter. Unknown room paths
-fail closed. Install removes duplicate development registration owners.
+The ring is `ChatLog { entries: VecDeque<ChatMessage>, drafts, next_sequence }` in memory, one per room (`crates/host/src/chat.rs:25-30`; `server.rs:138,218`). It keeps at most 256 entries, 8 drafts, 64 steps per line, and 32,768 characters of text or thinking per line (`chat.rs:16-23`). A Host restart empties the ring and restarts the sequence at 0.
 
-### Release and support target
+A message has `sequence`, `author` (`Operator` or `Spirit`), `author_name`, `text`, `at`, `turn_id`, `steps`, `thinking`, and `outcome` (`crates/protocol/src/host.rs:705-723`). The Host stamps `author_name` from the room-state file: operator lines get `identity.operator`, spirit lines get `identity.spirit` (`server.rs:999-1012`; `surface.rs:80-86`; `crates/host/src/store.rs:51-75`). The caller never supplies a name. A say is `{room, text, say_id}` (`protocol/src/host.rs:743-748`).
 
-`0.9.6` is the source version label carried by this documentation. It is a
-labeled historical snapshot, not the current product version. The root
-[`package.json`](../package.json) declares the current product version. The
-installed immutable version manifest declares the installed build; dated
-evidence in [`EVIDENCE.md`](./EVIDENCE.md) and [`BUGS.md`](../BUGS.md) names
-later `0.5.4+dev.…` installed builds. This document does not change version
-strings. OMP is the supported harness. The release artifact shape is one
-checksum-published installer:
+Three callers append. The operator line comes from `chat/say` over HTTP or `ChatSay` over the socket. The spirit line comes from `ChatTurn`. `ChatDraft` replaces the live draft. `turn` retires the draft and appends one spirit line; a later draft for a settled turn changes nothing (`chat.rs:54-124`). Dedupe is by `(author, turn_id)`.
 
-```text
-The-Athanor-<version>-windows-x64.exe
-The-Athanor-<version>-windows-x64.exe.sha256
-```
+### 3.5 Presence and durable Host state
 
-The payload pins PostgreSQL 18.4-2, pgvector 0.8.6, and NATS 2.14.4.
-The service needs no WSL, Python, Bun, Cargo, or separate database/broker.
-An explicit advanced mode may use an operator-provided compatible PostgreSQL database.
+Presence sessions are keyed by the authenticated binding session (`crates/host/src/presence.rs:155,174-188`). Each keeps a frame, an authoritative ledger, an active contract, and at most 16 receipts. A replay ledger of 64 entries refuses an idempotency key reused with a different body. Presence rows reload from PostgreSQL on Host start (`server.rs:1129-1136`).
 
-The OpenCode adapter line and the two portable Vault/AKASHA archives are
-historical. Vault and AKASHA are runtime authority profiles inside one release,
-not separate packages.
+The Host writes two kinds of files. In `room_dir/.omp/runtime/athanor-house-state.json` it writes only `recallPolicy` and `lastUpdatedAt`, by atomic replace (`store.rs:77-135`). In `state_dir` it keeps `recall-policy-cursor.json`, `recall-policy-receipts.json` (at most 512), and `recall-policy-sessions.json` (`store.rs:285-441`).
 
-## Room model
+Presence advertises capabilities from configuration: `RoomState` always, `Akasha` when a database or NATS URL exists, `Receipts` when enabled (`presence.rs:421-436`).
 
-A room is a writable directory with one stable lowercase key. Display names may change without changing the room key.
+### 3.6 Projections
 
-The Vault room contract includes:
+The Recall viewport compacts candidates to fixed ceilings: excerpt 900 characters, 5 kept candidates in automatic mode, 6 canon rows, warnings 8×300 in automatic mode (`crates/host/src/viewport.rs:89-128,278-446`). Automatic mode suppresses `zero-terms`, `glue-only`, `insufficient-evidence`, and `saturated` candidates (`viewport.rs:484-508`).
 
-- `.athanor-room.json` for machine-readable room identity;
-- `AGENTS.md` as the host context entrypoint;
-- `active_spirit.md` as the active identity and voice contract;
-- `room_summary.md` as compact continuity;
-- room-local state and conversation artifacts owned by the adapter.
+Recall policy is Host-owned. A refresh needs a non-Quiet mode and one of: explicit lookup, technical project, or pending recovery (`crates/host/src/policy.rs:220-221`). Refresh reasons rank from `post-compaction-recovery` down to `stale-working-set` at 8 turns or 4,096 tokens (`policy.rs:245-273`).
 
-Rooms are isolated by default. The core resolves an explicit room directory and validates the room key before loading identity or memory. Invalid or missing room paths do not borrow another room or the process working directory.
+Dispatch is validation and packaging. The Host never spawns a worker: every receipt carries `executed: false` and an accepted packet is `spawnPacket { tool: "task", args }` (`crates/host/src/routing/dispatch.rs:176-177,440-456`). Four lanes exist: `smol-scout`, `smol-executor`, `tester`, `verifier` (`crates/host/src/routing.rs:100-157`). The spellbook lives at `<room_dir>/familiars/spellbook.json` or `litters.json` (`routing.rs:300-301`).
 
-## Context layers
+## 4. The OMP adapter
 
-House keeps four concerns separate:
+### 4.1 Load path
 
-| Layer | Purpose | Typical lifetime |
+OMP loads `adapters/omp/index.ts`. Its default export `solarisaelHouseProof(pi, release)` sets the label `The Athanor`, registers four slash commands (`jev-shadow`, `jev-recall`, `jev-lessons`, `insula`), installs the lesson TTSR bridge, the semantic judgment shadow, and the boat door, then calls `registerSolarisaelTools` (`index.ts:941-944,1010-1056,2313`).
+
+An installed House loads `bin/athanor-omp-loader.ts` instead. It reads `%USERPROFILE%/.omp/agent/athanor/client.json` (format 2: `houseId`, `hostToken`, `stateRoot`, `hostUrl`, `defaultRoom`, `rooms`), `current.json`, and the hash-verified component manifests. It writes `ATHANOR_STATE_DIR`, `ATHANOR_SUBSTRATE_ROOT`, `ATHANOR_SUBSTRATE_EXE`, `PG_BIN_DIR`, `ATHANOR_HOST_HOUSE_ID`, `ATHANOR_HOST_TOKEN`, and `ATHANOR_HOST_URL` into the environment, probes `/health` for the default room, warns when the Host is absent, then imports `index.ts` and `hygiene.ts` (`adapters/omp/installed-loader.ts:511,530-552,554-556,619-663`). It requires platform `windows-x64` (`installed-loader.ts:376`) and `USERPROFILE` (`installed-loader.ts:565`).
+
+### 4.2 Hooks
+
+The adapter registers 24 `pi.on` handlers and 2 `pi.events` handlers (`index.ts:1057-2311`):
+
+| Hook | What it does |
+|---|---|
+| `session_start`, `session_switch`, `session_shutdown` | adopts the top-level session, shows House feedback, starts and stops the Knock and chat doormen |
+| `before_agent_start` | holds the turn prompt, capped at 128 entries |
+| `tool_call` ×4, `tool_result` ×2 | Insula spans, kitten task rooms, tool evidence marks, block-lesson refusal |
+| `message_start` ×2, `message_update`, `message_end` | chat message tracking, Knock turn tracking |
+| `tool_execution_start`, `tool_execution_end` | chat step drafts |
+| `turn_start`, `auto_retry_start` | Insula request points |
+| `context` | `composeContextAdditions`, the Presence and Recall injection inside a time budget (`index.ts:1396-2181`) |
+| `session_compact` | drops the Recall working set and invalidates the Host policy |
+| `agent_end` ×2 | chat settlement, conversation log, GIGA ingest, Knock turn end |
+| `shutdown` | closes the transports and stops the listeners |
+| `task.subagent.lifecycle`, `task` events | kitten lineage |
+
+### 4.3 Tools and wires
+
+43 tools are registered: 42 in `adapters/omp/house-proof/tools.ts:491-2011` plus `request_restart` in `restart-door.ts:574`.
+
+| Wire | Count | Tools |
 |---|---|---|
-| Identity | Who is present and how the identity or working role is expressed | Stable, deliberately revised |
-| Current state | Active operator, spirit, room, and safe mutable metadata | Current room state |
-| Recent continuity | Compact handoff and live session context | Sessions to days |
-| Deep memory | Events, decisions, lessons, entities, threads, dates, and source evidence | Durable archive |
-
-This separation lets a new session load a small identity and continuity surface while retrieving deeper evidence only when the current turn needs it.
-
-## Current operational capability topology
-
-The reference implementation is more than the four storage/context layers
-above. The table below is the current machine-readable map for cold evaluators:
-
-| Surface | Current role | Owner | Authority |
-|---|---|---|---|
-| Room identity and state | Stable room key, operator, active spirit, identity contract, compact live context | Rust authority + thin adapter + operator-owned files | Room files and explicit state writes |
-| Vault retrieval | Attributed Markdown, JSON, JSONL, and text search through exact-content and field-aware BM25F lanes | Rust core, exposed by the adapter | The selected files remain authoritative |
-| AKASHA memory | Durable memories, chunks, entities, dates, threads, continuation edges, relationships, taxonomy, and lifecycle | Substrate + PostgreSQL | PostgreSQL; current/superseded/archived state is explicit |
-| Paper boats | Room-scoped continuity across closed sessions, including stale-boat detection when later memories exist | Rust substrate + adapter presentation | Orientation for the next session, not canon |
-| Typed lessons | Coding, project, writing, design, and audio guidance with store-specific scope and proof fields | Rust contracts + substrate stores | Active typed record within its declared scope |
-| Context analysis | Query classification, keyword/process triggers, and context-pressure nudges returned through a typed Host command | Rust core + Host | Policy result; no durable authority |
-| Recall viewport | Evidence qualification and per-session saturation over attributed Recall candidates | Rust Host | Selects a bounded view; source authority is unchanged |
-| Canon and controlled vocabulary | Load-bearing assertions plus bounded lexical expansion from authoritative entities, active threads, and lesson metadata | Rust core + substrate | Canon governs generation; expansion only locates evidence |
-| Anamnesis Cabinet | Reviewed pillars and lived cycles supplied as bounded counsel | Substrate + adapter presentation | Advisory only; never canon or memory authority |
-| GIGA Hippocampus Stage 1 | Exact turn events, asynchronous classification, non-authoritative candidates, review, Curios, promotion, and queue maintenance | Adapter event translation + substrate worker/store | Candidate until reviewed and explicitly promoted |
-| Design-system catalogue | Typed immutable/superseding design tokens, components, contracts, and guidelines, read through `design_doc` and written through `design_doc_write` | Substrate + adapter registration | Current catalogue record within the named design system |
-| Worker routing and familiars | Deterministic lanes, room-owned spellbooks, and validated harness-ready task packets | Typed Rust core + Host; adapter reads the room-local spellbook and presents the packet | Routing policy only; no memory or room authority |
-| Subagent lineage | OMP lifecycle/result shapes normalized into standalone quest-memory requests | Typed Rust core + Host; adapter translates OMP events | PostgreSQL becomes authoritative only after the ordinary memory write receipt |
-| Rust transport and health | Long-lived JSONL requests, cancellation/timeouts, crash replacement, compatibility checks, redacted diagnostics, and uncertain-write reconciliation | OMP transport skin + Rust substrate | Transport carries receipts; it does not become authority |
-
-These surfaces are deliberately separate. A lesson is not a memory, Cabinet
-counsel is not canon, a GIGA candidate is not evidence, a familiar is not a
-second routing system, and transport success is not proof that a stored claim is
-true.
-
-Detailed contracts live in [`RETRIEVAL.md`](./RETRIEVAL.md),
-[`LESSONS.md`](./LESSONS.md), [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md), and
-[`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md).
-
-<a id="critical-organ-review-2026-09-06"></a>
-
-## Critical organ review — 2026-09-06
-
-Sol accepted this review on 2026-09-06. This pass updates records and planning.
-It changes no runtime, migration, deployment, version, or frozen acceptance terms.
-The Athanor preserves records and governs changes.
-Reliable continuity, judgment, and completed work need more complete paths.
-Success means recognition, growth, agency, cooperation, and operator custody.
-Autonomy contributes to these outcomes.
-
-The accepted outcome sequence is: coherent orientation, then trustworthy
-visible outcomes, then carrying work between participants, then useful
-learning. Release order and gates stay in [`roadmap.md`](./roadmap.md).
-Each family below states the examined behavior, remaining gap, and proposed outcome.
-Remaining proposals stay unfinished; completed slices cite separate evidence.
-Installed observations name their dates; source findings do not certify current deployment.
-
-| Family | Current behavior (source) | Remaining gap | Recommended outcome |
-|---|---|---|---|
-| AKASHA and Vault | AKASHA stores typed PostgreSQL authority. Vault retrieves file-authoritative evidence. See [Profiles](#vault). | Storage alone does not prove portable custody. | Preserve authority during export, migration, and restore. Keep external sources distinct from House-authored memory. |
-| Memory and canon | Typed records retain source identity and supersession. See [Authority and correction](#authority-and-correction). | Old operational claims can outlive their observation. | Show observation date, artifact, and successor evidence. Distinguish commitments, history, interpretations, and current state. |
-| Context capacity nudge | [`context.rs:737-764`](../crates/hearth/src/context.rs) derives nudge capacity from the room key. It assumes 1,000,000 tokens for `kodo` and 400,000 elsewhere. | The nudge does not read the actual model limit. | Obtain capacity from the active runtime. Preserve room identity when the model changes. |
-| Aggregate context selection | Each organ selects context separately. No [aggregate coordinator](#context-assembly-and-token-budgets) exists. | Several valid organs can exceed a useful combined budget. | Apply one relevance and size budget across the assembled turn. Preserve exact recovery for omitted evidence. |
-| Lessons and Striatum | [`triggers.rs:22-107`](../crates/hearth/src/triggers.rs) requests at most twelve process coding lessons and emits complete bodies, proof, and trigger fields. | The formatter has no content-size cap. Full learned work-state behavior remains planned. | Bound content and count. Select a stable applicable set. Record relevant use and misleading triggers before claiming improvement. |
-| Recall lanes | The semantic lane timed out at 3000 ms during the review. Lexical evidence still returned. | This observation does not measure overall retrieval quality. | Preserve degradation attribution. Examine the cause and affected query classes before changing limits. |
-| Presence, room state, and Summoning | [`BUGS.md`](../BUGS.md) records live reopen, persistence, and restart continuation. The [generated-turn evidence](./EVIDENCE.md#generated-turn-presence-repair-2026-09-07) covers live restart, chat, and root Knock delivery. | Host-side session attribution is unchanged. Chat response and child Knock failures have separate repair work. | Repair the separate paths without reopening proven persistence or incoming delivery. |
-| Paper boats, wake, sleep, and Keeper | [`wake.rs:21-32`](../crates/origami/src/boats/wake.rs) selects the newest room boat. The [adapter](../adapters/omp/house-proof/wake-context/index.ts) retains its rendered letter and identity fields. | Separate age and warning metadata are dropped. The rendered letter can still contain a stale-boat warning. | Carry temporal metadata. Keep the authored letter distinct from an interruption checkpoint. Preserve the existing handoff contract. |
-| Anamnesis | [`anamnesis.rs:362-377`](../crates/akasha/src/anamnesis.rs) selects wake-enabled pillars or active cycles by kind and update time. | The selector has no cycle-recency condition. | Select cycles by temporal and current relevance. Preserve authored pillars and counsel authority. |
-| Durable writes and backup | [`BUGS.md:105`](../BUGS.md) records successful backups for `remember` #4472 and `sleep` #4473. They took 47.2 and 49.0 seconds. | [`backup.rs:929-1012`](../crates/akasha/src/backup.rs) awaits a full post-write dump after commit. Generic write success does not prove a valid `continues` edge. | Preserve commit and backup outcomes separately. Choose a recovery policy before replacing full dumps. |
-| Design catalogue | [`BUGS.md:151`](../BUGS.md) records live same-identity supersession. Line 152 records separate adapter field loss and the palette repair through #25. | That record leaves historical rows #13-#23 unresolved. This review performs no new database census. | Audit exact structured content through the tool boundary. Recover historical values only from exact sources. |
-| GIGA Hippocampus | The aggregate result reported capture and classification enabled, store healthy, queue 0, failures 0, and processed 430. | These fields do not prove classifier reachability, useful classification, reviewed consolidation, or later benefit. Draft `704ce3e2` records dismissed-candidate purge history. | Prove fresh classification and an attributable review outcome. Follow useful promotions into later retrieval. |
-| Curios | Retained candidate state and explicit review are current. | Bounded automatic resurfacing is not established. | Return a retained Curio to review with cited new evidence. Prevent automatic promotion. |
-| Cingulate | Cingulate remains planned. | Reliable lifecycle and outcome evidence must precede its judgments. | Start with specific evidence obligations. Keep formal solver expansion deferred. |
-| Hallway | The domain, Bell projection, and recipient-authorized bounded Knocks exist. | Complete idle/headless delivery and recipient application remain unfinished. NATS absence alone is not a defect. | Complete request-to-disposition, including unavailable recipients, interruption, refusal, and duplicate handling. |
-| Docket review independence | [`report/mod.rs:130-147`](../crates/akasha/src/docket/report/mod.rs) fences settlement by room. The claimant room cannot settle its own items. | A single-room House needs an explicitly supported independent reviewer or operator arrangement. | Bind reviewer authority to authenticated capabilities. Preserve independent review and frozen acceptance terms. |
-| Dispatch and familiars | Dispatch prepares validated packets. The main model spawns explicitly. Familiars retain their lane bindings. | Complete attempt-to-execution evidence through interruptions is not established by packet validation. | Connect actual execution and evidence to existing Docket attempts. Avoid a parallel work store. |
-| Insula | Source measurements and Pulse traces exist. [`BUGS.md:30`](../BUGS.md) records incorrect session attribution for Host-side Presence points. | Those points cannot reliably identify the participant's turn. | Correct attribution and preserve durable evidence separately from short-lived telemetry. Insula observes; it does not authorize work. |
-| Pulse web surface | [`serve.ts:26-39`](../gui-prototype/serve.ts) allowlists reads for health, Insula, Docket, Hallway, memory, and lessons. | The surface is read-only. Fixtures do not establish operational writes. | Show each completed path and its evidence. Keep authenticated writes behind their existing gates. |
-| Origami and NATS | The current `boat.ready` lane has transport receipts. See [Host and delivery plane](#host-and-delivery-plane). | A transport receipt does not establish recipient application, model consumption, or human reading. | Complete recipient-specific application receipts when that expansion is authorized. Keep PostgreSQL authoritative. |
-| Version labels | Documentation retains `0.9.6`. The root `package.json` declares `0.5.4`. Dated evidence identifies installed artifacts separately. | These labels describe different records and dates. | Use `package.json` for product version and the installed manifest for active bytes. Keep historical evidence labeled. |
-| Workspace search | Workspace search `0.1.1` was accepted in the preceding session (House memory #4499). It uses explicit per-root indexing and has no watcher. | The older Whiskers draft is historical planning. | Keep repository perception separate from AKASHA. Preserve the accepted search scope. |
-| Sovereignty and installation | The [component table](#repository-layout-and-component-ownership) names backup, restore, upgrade, and rollback surfaces. | This review performs no fresh restore or complete custody certification. | Prove complete export, restore, and migration. Define operator retention and deletion choices. Keep OMEGA, Relay, ANON, marketplace, and spatial work deferred. |
-
-House memory **#4509** holds the complete accepted analysis in PostgreSQL.
-The [roadmap update](./roadmap.md#planning-update-2026-09-06) links its Docket goal and four draft supplements.
-Those supplements cite existing work and preserve claims, deadlines, frozen acceptance, and the writing priority.
-This review does not supersede historical memories or invalidate accepted search work.
-
-## Vault
-
-Vault uses operator-controlled files and the harness adapter. It provides:
-
-- stable room discovery;
-- identity and compact context loading;
-- conversation continuity artifacts and restart recovery;
-- room-state tools and multiple isolated rooms;
-- native local recall over Markdown, JSON, JSONL, and eligible text files;
-- field-aware BM25F over paths, titles, headings, structured keys, tags,
-  metadata, and bodies;
-- an exact-content lane for identifiers, filenames, symbols, UUIDs, quoted
-  strings, and errors;
-- bounded attributed excerpts with exact source paths and heading or record
-  identity.
-
-Vault requires no database, vector index, embedding service, or GPU. Vault also
-requires no substrate binary, no PostgreSQL, no WSL, and no Rust runtime. Its
-in-memory index is derived and rebuildable from authoritative files. Recall
-defaults to the room directory; `.athanor-room.json` may name one or more
-operator-controlled `vaultRoots`, additional `vaultIgnore` patterns, and bounded
-`vaultMaxFileBytes` or `vaultMaxFiles` limits. The scanner does not follow
-symlinks, skips common generated and secret-bearing paths, and honors each
-configured root's top-level `.gitignore`.
-
-## AKASHA
-
-AKASHA adds the substrate as the durable memory authority. PostgreSQL stores memories, entities, threads, chunks, clusters, GIGA candidates, typed lesson stores, and the controlled semantic vocabulary. Native BM25F scores memory title, heading, source path, threads, body, and type with corpus IDF, term-frequency saturation, and per-field length normalization. PostgreSQL full-text search, `pg_trgm`, direct content search, structured rails, BM25F, and pgvector semantic search contribute retrieval candidates.
-
-The tested local embedding path uses Nemotron-3-Embed-1B with 2,048-dimensional vectors through a compatible local endpoint. Recall reuses its query vector to select at most three sufficiently similar, room-scoped concepts derived only from authoritative named entities, active threads, and lesson metadata. Their normalized terms enter a separate capped BM25F lane with concept, similarity, source-kind, and field attribution. Missing or stale vocabulary fails open without weakening exact BM25F. The substrate can use another compatible Ollama or OpenAI-style embedding endpoint when indexing and recall share the same vector space.
-
-The AKASHA profile adds:
-
-- `remember`, `recall`, `sleep`, and `wake`;
-- memories and paper boats scoped to rooms;
-- coding, project, writing, design, and audio lesson stores;
-- entity, date, thread, taxonomy, relationship, and cluster retrieval;
-- provenance and authority state;
-- correction through supersession;
-- archival without silent historical deletion;
-- vector rebuilds and substrate health checks.
-
-AKASHA also supports optional GIGA cognitive workers. Hippocampus Stage 1 logs
-exact events before asynchronous local classification and stores generated
-candidates as non-authoritative pointers to source evidence. Review, Curios,
-promotion, health, and safe queue maintenance are explicit operations.
-
-Striatum currently uses twelve hard-coded process patterns in `hearth/src/context.rs`.
-They select at most one trigger per prompt.
-A match adds up to twelve process-shape coding lessons through `hearth/src/triggers.rs`.
-The formatter includes complete bodies, proof patterns, and trigger fields without a size cap.
-See the [2026-09-06 review](#critical-organ-review-2026-09-06).
-
-The current slice has no semantic model, hysteresis, or lesson-set carryover.
-The earlier six-lesson Nemotron/hysteresis slice was removed.
-The target Striatum selects lessons from Docket facts after Docket implementation.
-It starts in shadow mode.
-Eligibility precedes ranking.
-Degraded selection returns an attributed empty set instead of broadening the match.
-
-Every planned packet and receipt carries a version.
-The selector has no authority over priority, capabilities, or acceptance policy.
-Cingulate remains planned, starting with non-blocking reminders and warnings.
-Hard gates require calibrated criteria that explicitly name authoritative obligations and required proof.
-
-The next GIGA integrity pass keeps three contexts distinct: durable evidence,
-one-invocation model tokens, and loaded model residency. Every cold job starts
-with fresh inference state over an explicit source snapshot. Completed
-interaction anchors, deterministic overlapping evidence, reviewed precedents,
-separate expected and observed outcomes, and proof receipts must stabilize
-before GIGA work is distributed across models or rooms.
-
-## Retrieval flow
-
-Automatic per-turn retrieval merges bounded candidate streams:
-
-```text
-latest user turn
-      │
-      ├── pinned room context
-      ├── important named entities
-      ├── BM25F field-aware lexical candidates
-      ├── controlled semantic-vocabulary BM25F candidates
-      ├── lexical thread matches
-      ├── deferred prior-turn candidates
-      └── semantic memory chunks
-      │
-      ▼
-rank → fuse → deduplicate → diversity cap → budget trim
-      │
-      ▼
-source-cited context injected into the current turn
-```
-
-Explicit `recall` exposes broader retrieval and its evidence viewport. Retrieval returns source paths, reasons, authority state, and suppression diagnostics where available. Automatic retrieval is bounded to protect the active context window.
-
-The injection path is fail-open: retrieval errors are logged and do not block the conversation. Room resolution itself fails closed so one room never silently borrows another room's context.
-
-Read [`RETRIEVAL.md`](./RETRIEVAL.md) for operational retrieval behavior.
-
-### Context assembly and token budgets
-
-The OMP adapter assembles context through distinct bounded organs:
-
-```text
-stable harness + room contract
-        │
-        ├── fresh-session paper boat
-        ├── fresh-session Anamnesis wake counsel
-        ├── routing-mode and exact keyword directives
-        ├── automatic Vault / AKASHA recall evidence
-        └── context-growth nudge
-        │
-        ▼
-hidden attributed context for the active model turn
-```
-
-Approved trigger-bearing lessons enter OMP’s native TTSR manager. Other typed lessons enter only through explicit `lessons` queries.
-
-Each organ has its own eligibility check, output cap, source attribution, and
-fail-open behavior. Fresh-session surfaces are injected once. Automatic recall
-can decline low-information turns; explicit `recall` exposes a broader evidence
-viewport. Repeated evidence is suppressed or saturated within the session, and
-stable additions are kept byte-stable where the harness can preserve provider
-prefix caching.
-
-The current adapter does **not** yet enforce one provider-tokenizer-aware
-aggregate budget across identity, tool schemas, paper boats, Anamnesis, lessons,
-recall, canon, thread neighbors, and directives. Independent bounds prevent one
-organ from becoming unbounded, but several valid organs can still stack into a
-large turn. This is a documented current limitation and a future Host-level
-coordination responsibility, not a proven net-token-saving claim.
-
-The context-growth nudge estimates fill from characters and a per-room literal
-capacity (`hearth/src/context.rs`). It does not read the active model's real
-limit. The [2026-09-06 review](#critical-organ-review-2026-09-06) recommends
-model-aware capacity as the first orientation outcome.
-
-## Authority and correction
-
-House distinguishes a stored event from what currently holds authority.
-
-A new state claim may supersede an older state claim while preserving the old row as history. Ordinary retrieval strongly demotes superseded rows and excludes archived rows. Deliberate historical queries can still include them.
-
-Canon assertions are injected separately from ordinary memory context. Where canon and a retrieved interpretation conflict, canon wins for generation.
-
-Corporate or project source authority remains a separate domain. An imported source document can remain the factual authority while House memories and embeddings locate it. Import profiles must preserve source class, path, version, scope, and precedence rather than flattening every document into generic memory.
-
-Authority is domain-specific rather than one universal row ladder:
-
-| Evidence class | What it may govern | What it may not do |
-|---|---|---|
-| Live enforced repository evidence and declared external project sources | Their named implementation or business domain | Become room identity or personal canon merely because they were indexed |
-| Canon assertions | Load-bearing identity, relationship, naming, and project assertions in their declared scope | Rewrite external source facts outside that scope |
-| Current typed project/design records and lessons | The project, design system, register, or craft scope they explicitly name | Gain broader scope through semantic similarity |
-| Active memories | Events and current continuity claims until corrected, superseded, or archived | Outrank conflicting canon or a declared external factual authority |
-| Anamnesis counsel | Suggest a previously lived path worth considering | Assert that the same pattern is happening now |
-| GIGA candidates, embeddings, clusters, and lexical expansion | Navigate toward possible evidence or review work | Promote themselves, become facts, or authorize an action |
-
-This is why Prism-like ledgers, curated Libraries, live repositories, or
-corporate systems do not need to be copied into generic memories. Vault can
-search them directly. When an AKASHA import profile indexes them, it must retain
-stable source identity, state, version, evidence anchors, and precedence.
-Athanor retrieval then leads the model to the governing claim or document
-without taking its authority away.
-
-## Typed knowledge
-
-The Athanor uses separate stores because different knowledge requires different retrieval and authority rules:
-
-- memories record things that happened;
-- coding lessons record transferable engineering rules;
-- project lessons record project-bound rules and constraints;
-- writing lessons record prose and voice craft;
-- design lessons record reusable design-system taste bound to a named design
-  system and its catalogue entries;
-- audio lessons record reusable audio-pipeline rules;
-- Cabinet entries preserve bounded counsel and lived cycles.
-
-Read [`LESSONS.md`](./LESSONS.md) for the lesson contracts.
-
-## Worker routing
-
-The core defines deterministic worker lanes and produces validated task packets. It does not import OMP, call tools, spawn agents, or resolve providers.
-
-Current lanes are:
-
-- `smol-scout` for bounded read-only terrain mapping;
-- `smol-executor` for narrow exact edits;
-- `tester` for explicit behavioral contracts;
-- `verifier` for independent checks.
-
-Dispatch takes exactly one selector — a lane or a familiar — through one unified contract; the familiar-only entry point is an alias over the same path. Accepted receipts expose `spawnPacket.args` shaped directly for the harness task call, and harness adapters spawn explicitly with that packet. Runtime models come from the agent definitions themselves; per-dispatch model override is unsupported. This keeps routing policy testable and the core independent from one harness runtime.
-
-That paragraph describes the current dispatch contract. The planned invocation
-router adds a separate `ModelSelector`, execution target, and session lifecycle
-above adapter-specific spawning. Model choice will remain independent from
-identity: changing provider or model cannot rename a spirit, grant room
-authority, or silently reuse conversational state.
-
-### Familiar spellbooks
-
-Familiars are room-owned identities bound to existing worker lanes; they do not add a second routing system. A room stores the canonical registry at `familiars/spellbook.json`. Adapters also accept `familiars/litters.json` as a filename alias.
-
-The spellbook keeps generic code vocabulary (`collective: "familiars"`) while exposing room language through `collectiveAliases`, such as `kittens`. Each familiar has a stable id, display name, aliases, description, and one lane. Optional `ompAgent` and `modelRole` bindings route that familiar to an exact discovered harness agent and its configured model alias instead of merely relabelling the lane's generic worker. Both bindings must be present together. Legacy entries without them remain readable and fall back to the lane route with an explicit receipt warning; this is transition behavior, not a named-familiar success condition. The core resolves the identity and delegates packet shaping to the same unified dispatch contract. Harness adapters still spawn explicitly.
-
-## Extension direction
-
-New harnesses implement adapters over the same core contracts. Organizational
-deployments add access control, source connectors, and import profiles above the
-substrate.
-
-Extension order and release gates are owned by
-[`roadmap.md`](./roadmap.md); this document does not restate them. What matters
-architecturally is the invariant: every extension, before and after `1.0.0`,
-lands on the same core contracts, and none becomes a parallel authority path.
-
-Read [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) for runtime order,
-[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) for proof/synthesis,
-[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) for sovereignty and
-marketplace, and [`roadmap.md`](./roadmap.md) for release gates.
+| Substrate child only | 31 | `canon_read`, `canon_write`, `remember`, `delete_lesson`, `update_lesson`, `wake`, `lessons`, `design_doc`, `design_doc_write`, `anamnesis`, `anamnesis_write`, 7 `giga_*`, 7 `hallway_*`, 5 `quest_*`, `request_restart` |
+| Host socket only | 5 | `familiar_status`, `familiar_dispatch`, `house_dispatch`, `recall_policy`, `house_lane_status` |
+| Both | 2 | `recall` (substrate result, then Host viewport; fails without the Host, `tools.ts:526-532`), `sleep` (Host presence close, then substrate boat; degrades) |
+| Room files | 4 | `room_state`, `set_room_state`, `house_routing_mode`, `house_model_default` |
+| In process | 1 | `kitten_lineage_status` |
+
+The substrate wire. The adapter spawns `athanor-substrate` with `stdio: pipe`, `shell: false` (`adapters/omp/rust-transport.ts:569-575`). It finds the binary through `ATHANOR_SUBSTRATE_EXE`, or with `ATHANOR_AUTO=1` through the bundled `bin/<platform>/` folder then `PATH`; platforms are `windows-x64`, `linux-x64`, `linux-arm64` (`adapters/omp/discovery.ts:17-26,58-78`). One JSON line per request: `{protocol: 1, id, method, params}`; replies are JSON lines up to 1 MiB (`rust-transport.ts:416,460,641-666`). The default request timeout is 120 s. The transport never restarts a dead child; the caller rebuilds it on the next request (`rust-transport.ts:585-599`; `substrate.ts:22-31`). Health is a one-shot run of `athanor-substrate health --substrate-dir <ATHANOR_SUBSTRATE_ROOT> --skip-embedding` (`substrate.ts:313-321,428-513`).
+
+The Host wire. One WebSocket per command: open, send, wait for the reply whose `correlation_id` equals the `message_id`, close (`host.ts:157-206`). Default timeout 3 s, bounded to 250–30,000 ms. Every command carries `scope: room:<room>:recall_policy` and `authority_class: room_state` (`host.ts:121-143`). The token is `ATHANOR_HOST_TOKEN`; the House id is `ATHANOR_HOST_HOUSE_ID`. Insula events and vitals use Host HTTP (`insula.ts:26,417`; `vitals.ts:8,182`).
+
+### 4.4 The chat doorman
+
+The doorman polls. Every 2,000 ms it sends `athanor.chat.subscribe` and reads the whole ring (`adapters/omp/house-proof/chat.ts:43,126-153,197-221`). It skips a tick when the session is not the room's top-level session, when a say is pending, when the boat door is open, or when OMP is not idle. A typed terminal turn therefore delays says.
+
+The next say is the lowest-sequence operator line with no spirit line of the same `turnId` (`chat.ts:160-168`). The doorman injects it with `pi.sendMessage(message, { deliverAs: 'nextTurn', triggerTurn: true })` as custom type `athanor-chat-say` (`chat.ts:110-124,187`). A chat-born turn is `native: false` and carries no operator authority (`turn-origin.ts:7-29,73-93`).
+
+At `agent_end` the doorman finds the settled assistant message and sends `athanor.chat.turn` with idempotency key `chat-turn:<sayId>` (`chat.ts:226-316`). Live drafts go out as `athanor.chat.draft`, throttled to 250 ms for text and immediate for tool steps (`chat.ts:333-380`). The doorman needs `ctx.setInterval`, `ctx.isIdle`, and `pi.sendMessage`. It needs no terminal.
+
+### 4.5 Presence, boats, and restart
+
+Presence opens one frame per session with `athanor.presence.open`, binding `{room, spirit, operator, session}` (`presence.ts:72-81,117-170`). Each turn it sends `athanor.presence.compile` with the prompt, the recalled set, the lessons, and the directives. Materials come from `<roomDir>/presence-pulse.md`, the paper boat, the Anamnesis excerpt, lessons, and Recall, capped at 16 items (`presence-materials.ts:15-119`). Every Presence call refuses a session that is not the room's top-level session (`presence.ts:310-314`).
+
+The boat door intercepts typed input only when `event.source === 'interactive'`; says enter through `openSurfaceDoor` (`boat-door.ts:145-194`). A threshold compaction is cancelled and the boat is requested when the session is idle; a manual `/compact` is not vetoed (`boat-door.ts:196-219`). The House lines name the operator `Sol` by default; a room's `handoff-door.md` overrides them by section (`boat-door.ts:44-67,422-445`).
+
+The restart door arms an exit with code 87 at `agent_end` after a verified intent (`restart-door.ts:852-904`). The successor verifies and continues only when `ctx.mode === 'tui'`; otherwise it returns silently (`restart-door.ts:474-571`).
+
+### 4.6 Room and identity
+
+A directory is a room when it holds `.athanor-room.json`, `active_spirit.md`, or `.omp/runtime/athanor-house-state.json` (`room.ts:86-127`). The room key is the marker's `room`, else the folder name lowercased. An unrecognized working directory falls back to `<ATHANOR_VAULT_ROOT or ~/Solarisael>/default-room` (`room.ts:105-110`).
+
+The spirit comes from `marker.trueName`, then `active_spirit.md`, then the persisted `embodiedSpirit`. The operator comes from `marker.operator`, then the persisted `operator`, else `Operator`. Each room has exactly one operator (`room.ts:77-84,112-119`). `set_room_state` writes both fields; this is self-asserted identity, not authentication (`tools.ts:818-847`; `room.ts:221-265`).
+
+## 5. The keeper
+
+The keeper runs `ompLaunch[0]` with `ompLaunch[1..]` from `omp-keeper.json`; the binary is not hard-coded (`crates/omp-keeper/src/config.rs:22,128-134`). It refuses `--continue`, `-c`, `--resume`, `-r` in that list; the keeper alone decides resume or fresh (`config.rs:70-75`). The first spawn is always fresh. A relaunch with a `Resume` intent appends `--resume <session_id>` (`crates/omp-keeper/src/keeper.rs:188,812-823`). The working directory is `config.workspace`. The child inherits the environment, minus two restart variables that the keeper sets on relaunch (`keeper.rs:33-34,828-853`).
+
+While OMP runs, the keeper polls `try_wait` every 200 ms and asks the House for `restart_status` every `watchIntervalSecs` (default 30). It kills OMP only when an intent is `exiting` past its deadline (`keeper.rs:863-918`). After OMP exits, exit code 87 counts as an armed restart; the keeper claims the intent, relaunches, and watches for `verified` every second (`keeper.rs:194-547`). When the House is unreachable the keeper waits forever, retrying every 2 s and logging every 60 s (`keeper.rs:202-207,653-736`).
+
+The config fields are `ompLaunch`, `workspace`, `programRoot`, `stateRoot`, `watchIntervalSecs`, `claimant`, and exactly one of `capability` or `capabilityPath` (`config.rs:19-34,53-59`). The substrate path resolves through `programRoot/current.json` to `versions/<v>/bin/athanor-substrate` and refuses symlinks and path escapes (`crates/omp-keeper/src/resolve.rs:11-145`).
+
+## 6. Pulse
+
+Pulse is one static module. `gui-prototype/index.html:248` loads `app.js`, which imports every other module. `app.js` holds one connected room at a time (`app.js:1514-1528`); `say(text)` takes no room argument (`chat.js:129-148`). It has no identity field (`app.js:140-173`). `New session` is unavailable (`app.js:733-743`).
+
+Two proxies share one contract. `gui-prototype/serve.ts` runs under Bun for development. `gui-desktop/src/proxy.rs` ships as `pulse.exe`, a Tauri window; `pulse --serve-only` serves the embedded assets with no window (`gui-desktop/src/main.rs:30,65-67`). Both:
+
+- bind `127.0.0.1` on port 4175 by default;
+- serve one room per process, from `PULSE_ROOM` or `--room`, default `kodo`;
+- read `C:/ProgramData/Solarisael/Athanor/config/runtime.json` for `hostPort` and `rooms[]`, and `secrets/runtime-secrets.json` for `hostToken`, at fixed paths (`serve.ts:17-18,32-41`; `main.rs:54-56`);
+- forward the 15 routes in `gui-prototype/live-routes.json` to `http://127.0.0.1:<hostPort>/room/<room>/...` and add the bearer server-side (`serve.ts:58-65`; `proxy.rs:97-102`);
+- check no `Origin` or `Host` header (`proxy.rs:131-157`).
+
+`pulse.exe` also answers `POST /local/repair/status` and `/local/repair/start`, which run `athanor.exe status` or `athanor.exe start`; `service: true` raises a UAC prompt (`proxy.rs:43-68,163-232`).
+
+The chat flow. `say` posts `{text, sayId}` to `/live/chat/say` and shows an optimistic line (`chat.js:129-148`). Then it polls `/live/chat/snapshot` every 2,000 ms, or 400 ms while a draft exists, until each operator row has a spirit row with the same `turnId` (`chat.js:69-81`). A 400 from the Host removes the line with no retry; a transport error marks it undelivered and hands the clock to `health.js`, which retries at 2, 4, 8, then 15 seconds (`chat.js:150-159`; `health.js:23,78-82`). Retry of a say is manual and reuses the same `sayId`.
+
+The other modules read only: the Docket board and evidence, the Hallway inbox and messages, Insula vitals, retention, spans, and trace, and the memory and lesson timelines (`board/index.js`, `pulse.js`, `sediment/index.js`). `pulse.js` and `mechanics.js` still show dated fixtures until a live round answers (`pulse.js:14-54,671-673`; `mechanics.js:23-25`).
+
+## 7. Installed layout
+
+`P` is `%ProgramFiles%/Solarisael/Athanor`. `D` is `%ProgramData%/Solarisael/Athanor`. `ATHANOR_PROGRAM_ROOT` and `ATHANOR_DATA_ROOT` override both when set together (`crates/athanor-install/src/layout.rs:4,22-47`). The service ignores those overrides (`service.rs:234-240`).
+
+| Path | Content |
+|---|---|
+| `P/bin/athanor.exe`, `P/bin/athanor-omp-loader.ts` | the one executable and the stable loader |
+| `P/current.json` | `version`, `previousVersion`, `rollbackBackup` |
+| `P/versions/<version>/` | `bin/`, `runtime/postgresql/`, `runtime/nats/`, `components/omp-keeper/`, `components/omp-adapter/`, `compatibility.json`, `release-manifest.json` |
+| `P/components/omp-adapter/current.json`, `versions/<releaseId>/` | the adapter component pointer and payloads |
+| `D/config/runtime.json` | `databaseMode`, `databaseHost`, `databasePort`, `natsHost`, `natsPort`, `hostPort`, `schemaVersion`, `houseId`, `roomsRoot`, `operatorStateRoot`, `defaultRoom`, `rooms[{room, spirit}]`, `ompConfigPath`, `clientConfigPath` |
+| `D/config/harnesses.json` | `format: 1`, `harnesses[{harnessId, autoStart, label, program, arguments, workspace, console}]` (`crates/athanor-install/src/harness/config.rs:15-59`) |
+| `D/secrets/runtime-secrets.json` | `hostToken`, `postgresPassword`, `externalDatabaseUrl`; restricted ACL |
+| `D/data/postgresql`, `D/data/nats`, `D/state/host/<room>`, `D/backups`, `D/logs` | runtime data and Host state |
+| `<roomsRoot>/<room>/.omp/runtime/athanor-house-state.json` | operator, `embodiedSpirit`, `recallPolicy`; written once if missing |
+| `<roomsRoot>/<room>/.omp/runtime/omp-keeper.json` | the keeper config |
+| `%USERPROFILE%/.omp/agent/athanor/client.json` | format 2 client projection with a copy of `hostToken` |
+| `%USERPROFILE%/.omp/agent/config.yml` | the OMP extension registration, edited in place |
+
+The installer never writes `harnesses.json`. Adding a room means building and installing a new release; see [`LIMITATIONS.md`](./LIMITATIONS.md).
+
+## 8. Contracts the code keeps
+
+These rules come from the earlier runtime architecture. The code keeps them unless a note says otherwise.
+
+### 8.1 Invariants
+
+1. PostgreSQL is authoritative for AKASHA records, authority state, source references, review state, outcomes, and durable delivery records.
+2. A transport owns delivery progress, never truth.
+3. A model body is replaceable compute, never an identity.
+4. A room or spirit grants authority through an explicit authenticated binding, never through a working directory, process name, model name, or prompt claim. **Not yet met:** the adapter derives room, spirit, and operator from the working directory and room files (`room.ts:99-127`), and the Host accepts any claim that matches its configuration behind the shared bearer (`server.rs:2567-2581`).
+5. Generated candidates remain proposals until a review or promotion contract grants authority.
+6. Model inference starts from explicit evidence. Hidden token history never becomes an undeclared source.
+7. User interfaces consume Host commands and events. They do not touch PostgreSQL, NATS, model endpoints, or harness state directly.
+8. Cross-room access is explicit, scoped, attributable, and denied by default. **Caveat:** `LogConversation` accepts a caller-chosen `room_dir` (`server.rs:2131-2235`).
+9. Every hard gate names its obligation and the proof it requires.
+10. Failure in optional cognition or transport must not rewrite truth or block a healthy local conversation.
+
+### 8.2 Command envelope
+
+`CommandMeta` carries `schema_version`, `message_id`, `house_id`, `sender_room`, `sender_spirit`, `sender_session`, `recipient`, `correlation_id`, `causation_id`, `reply_target`, `idempotency_key`, `scope`, `visibility`, `authority_class`, `created_at`, `expires_at`, and `max_hops` (`crates/protocol/src/host.rs:789-809`). It has no `sender_operator`. The semantic hash ignores the identifiers and timestamps (`server.rs:504-512`). Mutation commands require an idempotency key; a replay returns the existing result or a stable conflict.
+
+Events carry `EventMeta` with `projection_id`, `sequence`, and `state_hash` (`protocol/src/host.rs:1751-1772`). A command asks one handler to attempt a transition. An event states that a transition occurred.
+
+### 8.3 Snapshots and deltas
+
+The Recall Policy projection sends one snapshot on `Subscribe` or `Resync` and typed deltas after it (`server.rs:584-605`; `protocol/src/host.rs:1775-1866`). Snapshot fields: `projection_id`, `schema_version`, `snapshot_id`, `version`, `sequence`, `state_hash`, `state`. Delta fields: `delta_id`, `projection_id`, `base_version`, `next_version`, `sequence`, `source_event_ids`, `mutations`, `coalesce_key`, `created_at`.
+
+**Not built:** a bounded replay window. A client that misses a sequence asks for a fresh snapshot. Pulse chat and the chat doorman poll whole snapshots.
+
+### 8.4 Hallway Knock timing
+
+A Knock claim and settle use a 10 s Host timeout. The Knock doorman polls every 2 s and backs off from 5 s to 60 s while the Host is unreachable, with one degradation warning (`knock.ts:73-116,143-146,297-378`). Pending Knocks stay claimable on the board.
+
+## 9. Not re-verified at a6ab453
+
+The census did not walk these layers. Their documents keep their older dates:
+
+- `crates/akasha`: Recall lanes, memory and lesson storage, GIGA, the Hallway domain, the outbox. See [`RETRIEVAL.md`](./RETRIEVAL.md), [`LESSONS.md`](./LESSONS.md), [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md).
+- `crates/origami`: boats, cranes, hallways. See the crate `FEATURES.md` files.
+- `crates/hearth`, `crates/vault`, `crates/summoning`, `crates/interactive-process`.
+- `adapters/workspace-search` and `scripts/build-pages.mjs`.
+
+## 10. Evidence
+
+The sixteen census reports and the sixteen documentation verdict tables live in `C:/Projects/the-athanor-dev/census-2026-10-04/` on the reference workstation. House memory 5432 holds the map. [`BUGS.md`](../BUGS.md) carries the defects the census found.

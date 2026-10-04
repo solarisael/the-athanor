@@ -146,7 +146,7 @@ under its room and House policy without losing identity continuity.
 
 Companion room sovereignty, model training, and marketplace artifacts are
 defined in
-[`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md).
+[`COMPANION_ECOSYSTEM.md`](./2026-10-04-COMPANION_ECOSYSTEM.md).
 
 ## 7. Vault storage profile
 
@@ -230,7 +230,7 @@ Hippocampus is the first GIGA worker. It marks possible memories, lessons, corre
 
 The room's governing spirit can authorize a durable room-local change. The operator controls room bindings and the House's shared policy.
 
-The detailed GIGA contract lives in [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md).
+The detailed GIGA contract lives in [`HIPPOCAMPUS.md`](../HIPPOCAMPUS.md).
 
 ### 9.1 GIGA execution and refinement boundary
 
@@ -252,7 +252,7 @@ becoming a second authority system.
 Optional e-graph, Z3, SyGuS, Wasmtime, proof-feedback, and governed-promotion
 backends do not become new product profiles. They are bounded implementations
 behind Cingulate and execution contracts. See
-[`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md).
+[`SYNTHESIS_ARCHITECTURE.md`](./2026-10-04-SYNTHESIS_ARCHITECTURE.md).
 
 ## 10. OMEGA organization layer
 
@@ -595,7 +595,7 @@ The public repository is now [`solarisael/the-athanor`](https://github.com/solar
 One repository holds core, substrate, the OMP adapter, the installer, the
 updater, workflows, and canonical docs. The public archive, profile, installer
 mode, executable, and topology names carry no legacy tokens. Read
-[the canonical component table](./ARCHITECTURE.md#repository-layout-and-component-ownership).
+[the canonical component table](./2026-10-04-ARCHITECTURE.md#repository-layout-and-component-ownership).
 
 These legacy tokens remain deliberately. They are installed identifiers, not
 public product names:
@@ -745,13 +745,13 @@ Resolve these remaining public cutover items:
 
 ## 27. Related documents
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) defines current component ownership, the installed layout, and authority boundaries.
-- [`RUNTIME_ARCHITECTURE.md`](./RUNTIME_ARCHITECTURE.md) defines the accepted Host, UI, delivery, embodiment, derivation, and proof runtime.
-- [`SYNTHESIS_ARCHITECTURE.md`](./SYNTHESIS_ARCHITECTURE.md) defines bounded e-graph, Z3, SyGuS, Wasmtime, proof-feedback, and promotion contracts.
-- [`COMPANION_ECOSYSTEM.md`](./COMPANION_ECOSYSTEM.md) defines companion sovereignty, model bodies, and marketplace artifacts.
-- [`HIPPOCAMPUS.md`](./HIPPOCAMPUS.md) defines GIGA and Hippocampus.
-- [`RETRIEVAL.md`](./RETRIEVAL.md) defines retrieval and evidence authority.
-- [`LESSONS.md`](./LESSONS.md) defines typed lesson stores.
-- [`SECURITY.md`](./SECURITY.md) defines privacy and trust boundaries.
-- [`roadmap.md`](./roadmap.md) defines the dependency and release sequence.
-- [`PLANNED_FEATURES.md`](./PLANNED_FEATURES.md) explains the planned product surface in plain language.
+- [`ARCHITECTURE.md`](./2026-10-04-ARCHITECTURE.md) defines current component ownership, the installed layout, and authority boundaries.
+- [`RUNTIME_ARCHITECTURE.md`](./2026-10-04-RUNTIME_ARCHITECTURE.md) defines the accepted Host, UI, delivery, embodiment, derivation, and proof runtime.
+- [`SYNTHESIS_ARCHITECTURE.md`](./2026-10-04-SYNTHESIS_ARCHITECTURE.md) defines bounded e-graph, Z3, SyGuS, Wasmtime, proof-feedback, and promotion contracts.
+- [`COMPANION_ECOSYSTEM.md`](./2026-10-04-COMPANION_ECOSYSTEM.md) defines companion sovereignty, model bodies, and marketplace artifacts.
+- [`HIPPOCAMPUS.md`](../HIPPOCAMPUS.md) defines GIGA and Hippocampus.
+- [`RETRIEVAL.md`](../RETRIEVAL.md) defines retrieval and evidence authority.
+- [`LESSONS.md`](../LESSONS.md) defines typed lesson stores.
+- [`SECURITY.md`](./2026-10-04-SECURITY.md) defines privacy and trust boundaries.
+- [`roadmap.md`](./2026-10-04-roadmap.md) defines the dependency and release sequence.
+- [`PLANNED_FEATURES.md`](./2026-10-04-PLANNED_FEATURES.md) explains the planned product surface in plain language.

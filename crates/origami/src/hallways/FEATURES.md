@@ -1,6 +1,6 @@
 # origami::hallways
 
-Room letters. PostgreSQL holds every hallway, and the Host projects it. No NATS lane runs behind these calls.
+Room letters. PostgreSQL holds every hallway, and the Host projects it.
 
 ### messages
 
@@ -67,6 +67,16 @@ Room letters. PostgreSQL holds every hallway, and the Host projects it. No NATS 
 - A refusal carries a static code and a static message. Callers route on the code.
 - A sqlx error converts into `Database`, and the source stays readable.
 - The four shapes match the substrate `AppError`, so the substrate adapter only renames them.
+
+### sea
+
+`src/hallways/sea.rs`. The JetStream shape of a hallway post.
+
+- `HallwayPostProjection` is the post the Host consumes from JetStream. The Host reads `schema_version`, `message_id`, `sequence`, `from_room`, and `to_rooms` (`crates/host/src/server.rs:2885-2894`).
+- `hallway_room_subject(room)` names the subject of one room. The Host compares the message subject with the subject of its own room (`server.rs:2891`).
+- The Host accepts a post only when the schema version is 1, the message id and the sequence are positive, the sender room is another room, and `to_rooms` is empty or names this room (`server.rs:2887-2894`).
+- The Host terminates a post that fails these checks and records `invalid_projection` in Insula. It never records the payload (`server.rs:2895-2902`).
+- TODO(census): which code publishes `HallwayPostProjection` on `hallway_room_subject`?
 
 ### gaps carried
 

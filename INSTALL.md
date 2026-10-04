@@ -364,34 +364,26 @@ The installer has no room mode. It offers `install`, `update`,
 `uninstall`, and `purge` (`manage.rs:32-134`). It refuses an installed version
 (`installer.rs:217-223`). It never writes `harnesses.json`.
 
-The code allows these hand steps:
+Manual configuration does not require a new release.
+The following inventory is not a verified installation procedure.
+Keeper capability provisioning and the exact Host stop/start procedure remain undocumented here.
+Do not treat this inventory as an end-to-end room setup guide.
 
-1. Create `<roomsRoot>\<room>\`. Write
-   `.omp\runtime\athanor-house-state.json` with `version`, `operator`,
-   `agentName`, `embodiedSpirit`, `room`, and `recallPolicy`
-   (`installer.rs:256-270`). The adapter accepts this file as a room marker
-   (`adapters/omp/house-proof/room.ts:86-127`). The next upgrade requires it
-   (`installer.rs:244-249`).
-2. Write `<roomsRoot>\<room>\.omp\runtime\omp-keeper.json`. Give `ompLaunch`,
-   `workspace`, `programRoot`, `stateRoot`, and exactly one of `capability` or
-   `capabilityPath`. `watchIntervalSecs` and `claimant` are optional
-   (`crates/omp-keeper/src/config.rs:19-34,53-59`).
-3. Add `{ "room": <key>, "spirit": <name> }` to `rooms` in
-   `D\config\runtime.json` (`supervisor.rs:243-246,262`). The key must pass
-   `is_safe_room_key` (`supervisor.rs:308`).
-4. Add an entry to `D\config\harnesses.json`: `harnessId`, `label`,
-   `autoStart`, `program`, `arguments`, `workspace`, and `console`
-   (`harness/config.rs:25-59`). Copy an installed entry. Set `arguments` to
-   `keeper`, `--config`, and the path from step 2.
-5. Restart the Host. The Host reads both files once at start and never reloads
-   them (`app.rs:87,91`; `crates/athanor-install/src/harness/owner.rs:35-48`).
+| Surface | Required configuration |
+|---|---|
+| `<roomsRoot>\<room>\.omp\runtime\athanor-house-state.json` | `version`, `operator`, `agentName`, `embodiedSpirit`, `room`, and `recallPolicy` (`installer.rs:256-270`). |
+| `<roomsRoot>\<room>\.omp\runtime\omp-keeper.json` | `ompLaunch`, `workspace`, `programRoot`, `stateRoot`, and exactly one of `capability` or `capabilityPath` (`crates/omp-keeper/src/config.rs:19-34,61-105`). |
+| `D\config\runtime.json` | A `rooms` entry with a safe `room` key and `spirit` (`supervisor.rs:243-246,308`). |
+| `D\config\harnesses.json` | The harness entry and its keeper configuration path (`harness/config.rs:25-59`). |
+| The operator's `.omp\agent\athanor\client.json` | A `rooms` entry for `athanor chat`. The client refuses an absent room (`crates/athanor-install/src/omp.rs:71-75`). |
 
-An upgrade without `/HOUSECONFIGFILE` keeps the House from `runtime.json`
-(`installer.rs:1171-1172`). `athanor chat` reads `rooms` from `client.json`
-(`crates/athanor-install/src/omp.rs:21,71-75`).
+The Host reads its room and harness configuration at start.
+It does not reload these files (`app.rs:87,91`; `harness/owner.rs:35-48`).
+The loader checks health through `client.defaultRoom` (`adapters/omp/installed-loader.ts:641`).
+The adapter derives its active room from workspace markers (`adapters/omp/house-proof/room.ts:86-127`).
+An upgrade without `/HOUSECONFIGFILE` keeps the House from `runtime.json` (`installer.rs:1171-1172`).
 
-TODO(census): does the loader or the adapter need the new room in
-`client.json` `rooms`?
+Remaining proof: provision a new room, start its keeper, connect OMP and chat, then verify restart without disturbing existing rooms.
 
 [Limitations § Rooms and sessions](./docs/LIMITATIONS.md#5-rooms-and-sessions)
 lists the other room limits.

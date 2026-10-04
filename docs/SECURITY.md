@@ -69,7 +69,7 @@ Warning: Off Windows, both ACL functions do nothing and report success (`boundar
 - `GET /health` needs no bearer. It returns status, schema version, WebSocket path, version, sequence, `state_hash`, delivery health, and Insula health (`server.rs:252,261-275`).
 - The harness control door uses a random token per run that is never exported (`app.rs:92`; `crates/athanor-install/src/harness/control.rs:17-18`).
 
-A public door needs a TLS reverse proxy and an `Origin` check first. See section 7.
+A public door still needs TLS, operator authentication, and an approved origin policy. See section 7.
 
 ## 5. Host authentication
 
@@ -95,12 +95,17 @@ A public door needs a TLS reverse proxy and an `Origin` check first. See section
 
 ## 7. Pulse proxies
 
-Warning: A remote page open in a local browser can send simple POSTs to `/live/chat/say` or `/local/repair/start`. The repair route with `service:true` raises a UAC prompt (`gui-desktop/src/proxy.rs:43-68,187-227`).
+The 2026-10-04 source repair guards both proxies before route handling. It is not deployed.
 
-- Neither proxy checks `Origin`, `Host`, or CORS, and neither authenticates its client (`proxy.rs:39-41,131-157`; `serve.ts:37-40,51-52,78,80`).
-- Both proxies add the bearer server-side for any local caller. The page never holds it (`serve.ts:60-63`; `proxy.rs:99`).
+- `Host` must equal `127.0.0.1:<listening-port>`.
+- Any supplied `Origin` must equal `http://127.0.0.1:<listening-port>`.
+- Requests other than GET or HEAD require that Origin.
+- Cross-site Fetch Metadata is refused. Refused requests receive HTTP 403 before forwarding or local repair.
+- Navigation without an Origin header remains available at the canonical loopback URL.
+- These checks prevent browser cross-origin requests. They do not authenticate native clients, which can forge headers.
+- Permitted live calls receive the Host bearer server-side. The page never holds it.
 - The allow-list has 15 routes, including `chat/say` and `room/state` (`gui-prototype/live-routes.json:2-16`; `proxy.rs:30`).
-- The comment at `serve.ts:3-6` says the prototype writes nothing. `/live/chat/say` writes a chat turn (`live-routes.json:15`; `gui-prototype/chat.js:146`).
+- The proxy documentation includes chat writes. The route allow-list remains unchanged.
 - The desktop webview has no CSP (`gui-desktop/tauri.conf.json:8`). Its one capability grants no IPC commands (`gui-desktop/capabilities/default.json:1-6`).
 - Nothing in those files restricts where the window can navigate (`tauri.conf.json:5-10`; `gui-desktop/src/main.rs:70-73`).
 

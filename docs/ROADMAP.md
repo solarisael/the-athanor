@@ -30,7 +30,7 @@ A Built or Partly built state is a census result for one slice. It does not mean
 | Curios | Keep selected hunches until later context makes them meaningful | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: `crates/akasha`. Automatic resurfacing is Planned. |
 | GIGA Striatum | Keep the right reviewed lessons warm while a work state persists | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: `crates/akasha`. The nearest census row is the adapter lesson bridge (`adapters/omp/index.ts:1033-1056`). Learned work-state behavior is Planned after Docket, shadow first. |
 | Web operator surface | Show House state and send chat through a loopback proxy (`serve.ts` or `pulse.exe`) | Built | Not read-only: the allow-list includes `/live/chat/say` (`gui-prototype/live-routes.json:15`; `chat.js:146`). See [Pulse](./ARCHITECTURE.md#6-pulse). Login and authenticated writes are Planned. |
-| Athanor Host | Give clients one authenticated snapshot, delta, and resync surface with restart-safe cursors and idempotency | Built | Resync (`crates/host/src/server.rs:2551-2566`). Replay ledger of 64 entries (`presence.rs:12-14`). Recall cursor and receipts persist (`store.rs:15,285-441`). Chat persistence is Planned, see [the chat ring](./ARCHITECTURE.md#34-the-chat-ring). |
+| Athanor Host | Give clients authenticated snapshots, deltas, and resync | Built | Recall Policy cursors and bounded receipts persist (`crates/host/src/store.rs:333-369,406-428`). Presence reloads from PostgreSQL (`server.rs:1129-1136`). These guarantees differ by projection. Chat persistence is Planned, see [the chat ring](./ARCHITECTURE.md#34-the-chat-ring). |
 | Session Recall Policy | Make proactive retrieval visible and mode-aware | Built | `crates/host/src/policy.rs:130-347`; `recall_policy` tool (`tools.ts:1176`). |
 | GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: `crates/akasha`. |
 | PostgreSQL outbox and NATS delivery | Deliver bounded opaque pointers with explicit duplicate windows and durable PostgreSQL idempotency | Partly built | Host `DeliveryService` (`crates/host/src/house.rs:235-248`). The Host also consumes Hallway post projections from JetStream (`server.rs:2855-2894`). The substrate outbox is not re-verified at `a6ab453`; deciding crate: `crates/akasha`. |
@@ -48,7 +48,7 @@ A Built or Partly built state is a census result for one slice. It does not mean
 | Optional Wasmtime sandbox | Run compatible untrusted helpers with empty default capabilities and hard limits | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: none found. |
 | pgvector HNSW boundary | Keep semantic search in pgvector until a measured ceiling | Partly built | pgvector 0.8.6 is pinned (`crates/athanor-install/src/manifest.rs:11-13`; `installer/dependencies.json:1-28`). The HNSW index is not re-verified at `a6ab453`; deciding crate: `crates/akasha`. |
 | In-world Godot client | Preserve the spatial presentation specification | Parked | The payload carries no Godot (`build-native-release.ps1:146-167`). The client lives in the private repository `solarisael/athanor-godot`, not re-verified. |
-| Companion room sovereignty | Let governing companions create child rooms inside constitutional grants | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: not named by the census. Related limit: adding a room needs a new release (`crates/athanor-install/src/installer.rs:217-223,240-274`). |
+| Companion room sovereignty | Let governing companions create child rooms inside constitutional grants | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: not named by the census. The installer has no room-add command. Manual configuration exists; see [Add a room](../INSTALL.md#add-a-room). |
 | Companion-authored models | Let companions start governed local model or LoRA training with lineage, evaluation, and rollback | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: not named by the census. |
 | BM25F lexical retrieval | Rank structured memory fields with a field-aware sparse baseline | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: `crates/akasha`. |
 | Nemotron-controlled lexical bridge | Expand through at most three stored concepts into a lower-priority BM25F lane | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: `crates/akasha`. |
@@ -122,7 +122,10 @@ Warning: the broker has no credentials. NATS starts with `-js -a 127.0.0.1` and 
 The older gate said: no second lane before credentials and subject ACLs. The Hallway lane already exists, so the gate is broken. Fix the gate before any further lane:
 
 - Add service credentials and subject ACLs.
-- Decide whether the Hallway projection lane stays before 1.0. TODO(census): who produces `HallwayPostProjection`?
+- Decide whether the Hallway projection lane stays before 1.0.
+  `crates/akasha/src/hallway.rs:38-104` owns its producer.
+  Publication follows the PostgreSQL write and is best-effort.
+  A publication failure records an Insula point and preserves the successful post receipt.
 - Prove commit and publish order, durable idempotency, the duplicate window, rejection of bad pointers, restart, redelivery, and dead-letter recovery.
 - Show delivery receipts in the GUI. No receipt route exists among the 15 Pulse routes (`gui-prototype/live-routes.json:2-16`).
 
@@ -139,7 +142,7 @@ Routes exist for chat, room state, Docket, Hallway, memory, lessons, Insula, and
 - more than one room per Pulse process (`serve.ts:34,41`; `proxy.rs:32`);
 - GIGA review and dispatch lineage views;
 - live data in place of dated fixtures (`gui-prototype/app.js:66-93`);
-- login, `Origin` checks, and authenticated writes, see [Network](./LIMITATIONS.md#6-network);
+- login and authenticated writes; the 2026-10-04 source repair adds local Origin/Host checks and awaits deployment;
 - delivery, backup, migration, and version state that an operator can act on.
 
 Every view must read Host projections. The GUI must not keep a second truth.

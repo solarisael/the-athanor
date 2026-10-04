@@ -1,9 +1,7 @@
 // Local serving harness for the GUI prototype — the one live wire.
 //
-// Serves the static prototype files AND proxies read-only House queries to one
-// room Host, holding the bearer token server-side so the page never sees a
-// credential. Operator ruling 2026-08-20 (Sol): the prototype may read the
-// actual Athanor; it still writes nothing.
+// The proxy holds the Host bearer outside the page. Browser requests must
+// belong to this loopback origin before they can reach any proxy route.
 //
 // Run: bun gui-prototype/serve.ts   (PULSE_ROOM=kodo PULSE_PORT=4175)
 //
@@ -43,7 +41,16 @@ const roomPath = `/room/${room}`;
 Bun.serve({
   hostname: "127.0.0.1",
   port,
-  async fetch(request) {
+  async fetch(request, server) {
+    const authority = `127.0.0.1:${server.port}`;
+    const origin = request.headers.get("origin");
+    const unsafe = request.method !== "GET" && request.method !== "HEAD";
+    if (
+      request.headers.get("host") !== authority ||
+      (origin !== null && origin !== `http://${authority}`) ||
+      (unsafe && origin === null) ||
+      request.headers.get("sec-fetch-site") === "cross-site"
+    ) return new Response("forbidden origin", { status: 403 });
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/live/")) {
@@ -82,4 +89,4 @@ Bun.serve({
   },
 });
 
-console.log(`prototype on http://127.0.0.1:${port} · live House reads via ${roomPath} on Host :${hostPort}`);
+console.log(`prototype on http://127.0.0.1:${port} · live House via ${roomPath} on Host :${hostPort}`);

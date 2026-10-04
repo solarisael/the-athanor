@@ -614,7 +614,7 @@ balanced, compatibility/web, accessibility, and focused-2D profiles preserve
 meaning on other hardware. Abstract procedural companion bodies remain
 self-chosen presentation packages.
 
-Detailed contract: [`GODOT_CLIENT.md`](../GODOT_CLIENT.md).
+The Godot client contract now lives in the private [athanor-godot repository](https://github.com/solarisael/athanor-godot/blob/main/docs/GODOT_CLIENT.md).
 
 #### Embodiment and creator ecosystem
 

@@ -89,17 +89,18 @@ States are Open, Repaired, not deployed, Live-proven, and Closed. The dated live
 
 ### 13. Numeric memory IDs do not resolve through Recall
 
-- State: Repaired, not deployed
-- Truth: Not re-verified at a6ab453 (`crates/akasha/src/recall/memory_reference.rs` decides): Recall resolves `memory N` by primary key inside the room and House scope.
-- Evidence: `docs/history/2026-10-04-bugs-live-log.md:125`
-- Proof owed: A `recall` of `memory 4197` from room `kodo` returns #4197 first.
+- State: Deployed; live proof recorded; independent review pending
+- Truth: Recall resolves numeric memory IDs within the room and House scope.
+- Evidence: Docket quest `8bac5c8b-2740-4c0f-b3d8-42e028471a28`, receipt `f42b1240-d48b-4675-81f4-0fed1ef66f59`, records deployment and live checks on 2026-09-05.
+- Evidence: On 2026-10-04, Kintsu's live `recall("memory 4520")` returns record 4520 with reason `exact memory id`.
+- Proof owed: Independent review of the quest's success, scope-refusal, and absent-ID receipts. The acceptance verdicts remain pending.
 
 ### 14. Manual Recall clips selected records
 
-- State: Open
-- Truth: Not re-verified at a6ab453 (`crates/akasha/src/recall` and `crates/host/src/viewport.rs` decide): manual Recall returns only an excerpt of each selected record.
-- Evidence: `docs/history/2026-10-04-bugs-live-log.md:130-133`
-- Proof owed: Confirm or refute the repair that the `CHANGELOG.md` `Unreleased` entry claims, then show memory 4520 returned in full.
+- State: Live-proven for the recorded example
+- Truth: Manual Recall returns the selected record body separately from its excerpt.
+- Evidence: On 2026-10-04, Kintsu's live `recall("memory 4520")` returns a 3,427-character body and a separate 900-character excerpt.
+- Proof owed: None for this example. This observation does not certify every query or ranking result.
 
 ### 15. Weighty House canon is clipped during reorientation
 
@@ -159,10 +160,10 @@ States are Open, Repaired, not deployed, Live-proven, and Closed. The dated live
 
 ### 23. The Pulse proxies check no Origin or Host header
 
-- State: Open
-- Truth: The desktop proxy and `serve.ts` forward a request without a check of its `Origin`, `Host`, or CORS headers.
-- Evidence: `gui-desktop/src/proxy.rs:131-157`; `gui-prototype/serve.ts:64`
-- Proof owed: A simple POST from a foreign page to `/live/chat/say` is refused. The attack itself is untested.
+- State: Repaired in source, not deployed
+- Truth: Both proxies reject foreign Host and Origin headers before forwarding or local repair. Non-GET/HEAD requests require the canonical Origin.
+- Evidence: `gui-prototype/serve.ts` and `gui-desktop/src/proxy.rs`. The real Bun proxy smoke rejects foreign, null, missing, and wrong-port origins.
+- Proof owed: Deployment and an installed browser check. Native clients can forge headers; operator authentication remains separate work.
 
 ### 24. The chat ring is lost on a Host restart
 
@@ -180,10 +181,10 @@ States are Open, Repaired, not deployed, Live-proven, and Closed. The dated live
 
 ### 26. serve.ts says it writes nothing, but chat/say writes
 
-- State: Open
-- Truth: `serve.ts:3-6` says the prototype writes nothing, but its allow-list forwards `/live/chat/say`, which writes a chat turn on the Host.
-- Evidence: `gui-prototype/serve.ts:3-6`; `gui-prototype/live-routes.json:15`; `gui-prototype/chat.js:146`
-- Proof owed: The comment matches the allow-list, or the write route leaves the allow-list.
+- State: Corrected in source
+- Truth: The serving harness documentation now includes the Host write boundary.
+- Evidence: `gui-prototype/serve.ts` and its unchanged chat route allow-list.
+- Proof owed: None for this comment correction.
 
 ### 27. Pulse sediment sends a client-chosen room
 

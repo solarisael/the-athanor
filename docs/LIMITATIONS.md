@@ -44,7 +44,7 @@ The substrate has run on Linux before: the organ matrix of 2026-08-30 ran on a N
 ## 5. Rooms and sessions
 
 - One Host process serves every room. One Pulse process serves one room (`serve.ts:34,41`; `proxy.rs:32`). `app.js` holds one connected room (`app.js:1514-1528`).
-- Adding a room means building and installing a new release: full payload copy, database backup, service stop and start, migration. The installer refuses an already-installed version and never writes `harnesses.json` (`crates/athanor-install/src/installer.rs:217-223,240-274`; `cli/manage.rs:32-134`). Hand edits plus a Host restart work.
+- The installer has no room-add command and refuses an already-installed version (`crates/athanor-install/src/installer.rs:217-223`; `cli/manage.rs:32-134`). Manual configuration does not require a new release. [Add a room](../INSTALL.md#add-a-room) lists the configuration surfaces and the remaining procedure gaps.
 - The chat ring and drafts are lost on Host restart, and the sequence restarts at 0 (`crates/host/src/chat.rs:6-7,25-30`; `server.rs:218`).
 - No list-sessions or resume-session command exists on the wire (`crates/protocol/src/restart/mod.rs:36-38`). Pulse shows `New session unavailable` (`app.js:741`). The keeper's first spawn is always fresh (`keeper.rs:188,812-823`).
 - Pulse mirrors only chat-born turns. Turns typed in the OMP terminal never enter the ring.
@@ -54,7 +54,7 @@ The substrate has run on Linux before: the organ matrix of 2026-08-30 ran on a N
 
 - Everything binds loopback. The Host refuses a non-loopback bind (`crates/host/src/config.rs:92-120`). The adapter refuses a non-loopback Host URL (`host.ts:88-90`). Both proxies bind `127.0.0.1`.
 - No TLS anywhere. A public door needs a TLS reverse proxy in front of the Pulse proxy.
-- The Pulse proxies check no `Origin` or `Host` header and set no CSP (`proxy.rs:131-157`; `gui-desktop/tauri.conf.json:8`). A remote page open in a local browser can send simple POSTs to `/live/chat/say` or `/local/repair/start`, which raises a UAC prompt. Fix this before any network exposure.
+- The 2026-10-04 source repair checks the canonical loopback Host and Origin in both Pulse proxies. It is not deployed. These checks do not provide operator authentication or a public-network deployment policy. The desktop webview still has no CSP.
 - `/health` is unauthenticated and exposes `state_hash`, version, sequence, and Insula health (`server.rs:252,261-275`).
 - The bearer is checked once at the WebSocket upgrade. Frames are not re-authenticated (`server.rs:282,432-483`).
 - The harness control door cannot be reached from outside the Host process. Its token is random per run and never exported (`app.rs:92`; `harness/control.rs:17-18`).

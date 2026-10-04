@@ -207,7 +207,10 @@ Two proxies share one contract. `gui-prototype/serve.ts` runs under Bun for deve
 - serve one room per process, from `PULSE_ROOM` or `--room`, default `kodo`;
 - read `C:/ProgramData/Solarisael/Athanor/config/runtime.json` for `hostPort` and `rooms[]`, and `secrets/runtime-secrets.json` for `hostToken`, at fixed paths (`serve.ts:17-18,32-41`; `main.rs:54-56`);
 - forward the 15 routes in `gui-prototype/live-routes.json` to `http://127.0.0.1:<hostPort>/room/<room>/...` and add the bearer server-side (`serve.ts:58-65`; `proxy.rs:97-102`);
-- check no `Origin` or `Host` header (`proxy.rs:131-157`).
+- in the 2026-10-04 source repair, require the canonical loopback Host and reject foreign Origin headers before route handling.
+
+The source repair also requires Origin for requests other than GET or HEAD.
+It refuses cross-site Fetch Metadata. It is not deployed.
 
 `pulse.exe` also answers `POST /local/repair/status` and `/local/repair/start`, which run `athanor.exe status` or `athanor.exe start`; `service: true` raises a UAC prompt (`proxy.rs:43-68,163-232`).
 

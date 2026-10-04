@@ -42,7 +42,9 @@ The Host refuses a bind that is not loopback (`crates/host/src/config.rs:92-120`
 One bearer token guards the Host. It proves reach, not identity (`crates/host/src/server.rs:282,301-323`).
 
 The OMP adapter registers 43 tools (`adapters/omp/house-proof/tools.ts:491-2011`; `restart-door.ts:574`).
-Each tool delegates its behavior to the Rust substrate child or to the Host.
+Most tools call the Rust substrate child or the Host.
+Some tools read or write local state through TypeScript.
+For example, `set_room_state` writes the room state and `active_spirit.md` (`adapters/omp/house-proof/tools.ts:826-845`; `room.ts:215-264`).
 [Architecture § Tools and wires](./docs/ARCHITECTURE.md#43-tools-and-wires) names the wire for each tool.
 
 The Host starts one keeper for each harness with `autoStart` set.

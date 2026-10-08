@@ -24,7 +24,7 @@ the exact implementation record.
 
 - Host API 2 provides typed room, organ, context, judgment, and lifecycle commands.
   OMP adapter `0.10.0` requires this API.
-  The wire schema remains `1`, and the database schema remains `32`.
+  The wire schema remains `1`. The database schema is `33`.
 
 - OMP children use the Ask Parent protocol for missing historical context and intent.
   Automatic Recall stays off for children. Ordinary children also receive a refusal when they call Recall directly.
@@ -33,6 +33,11 @@ the exact implementation record.
 - The Host can judge each finished turn with Jev.
   OMP supplies the operator reply and the previous assistant turn.
   Native code clips the input and records verdict points in Insula.
+- Native OMP lesson fires write the `lesson_trigger_events` ledger again. The ledger stopped on 26 August 2026, when OMP's own matcher replaced the substrate matcher.
+  The substrate gains the `lesson_trigger_record` organ operation. It writes one ledger row and matches nothing. OMP's matcher stays the only matcher.
+  The adapter calls it through the Host organ door when OMP announces `ttsr_triggered` for an Athanor rule, and when the block guard refuses an edit or write. The Host adds the session.
+  Each row names the room, the session, the lesson, the surface, the tool, the path, the matcher kind, and the urgency.
+  Migration 0033 makes `matched_pattern` nullable. OMP names the rule that fired, not the pattern. The row carries the pattern only when the rule has one pattern of that kind.
   The room marker `jevVerdict` turns this on with an explicit grant. It is off by default.
   The provider is `typesafe` or a `laya` endpoint on loopback. Both receive the same state and questions.
 - In a top-level House session, a handoff starts with a paper boat. The spirit writes the boat with the real `sleep` tool.

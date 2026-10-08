@@ -1,13 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import type { NativeLessonPlan } from "./context.ts";
+import type { HostBinding } from "./host.ts";
+import { requestOrgan } from "./organ.ts";
 
 const BRIDGE_STATE = Symbol.for("solarisael.athanor.lesson-ttsr.v1");
 const PROVIDER = "athanor-lessons";
 
 type BlockGuard = { manager: any; rules: Map<string, Record<string, unknown>>; signature: string };
+// Where OMP's matcher last saw a rule: `ttsr_triggered` names the rule, never the surface.
+type LastMatch = { patternKind: "regex" | "ast"; surface: "tool" | "prose"; tool?: string; path?: string };
 type ManagerRecord = {
   manager: any; session: any; active: Set<string>; known: Set<string>; patched: boolean; guard: BlockGuard | null;
+  lastMatch: Map<string, LastMatch>;
 };
 type BridgeState = { sessions: Map<string, ManagerRecord>; patchedPrototype?: object };
 
@@ -21,6 +26,26 @@ function filterAthanor(record: ManagerRecord, rules: unknown): unknown {
   return rules.filter((rule) => rule?._source?.provider !== PROVIDER || record.active.has(String(rule?.name ?? "")));
 }
 
+function matchContext(method: string, context: any): LastMatch {
+  const tool = context?.source === "tool";
+  const path = Array.isArray(context?.filePaths) ? context.filePaths.find((item: unknown) => typeof item === "string") : undefined;
+  return {
+    patternKind: method === "checkAstSnapshot" ? "ast" : "regex",
+    surface: tool ? "tool" : "prose",
+    tool: tool && typeof context?.toolName === "string" ? context.toolName : undefined,
+    path: tool ? path : undefined,
+  };
+}
+
+function rememberMatches(record: ManagerRecord, method: string, context: unknown, rules: unknown): unknown {
+  const filtered = filterAthanor(record, rules);
+  if (!Array.isArray(filtered)) return filtered;
+  for (const rule of filtered) {
+    if (rule?._source?.provider === PROVIDER) record.lastMatch.set(String(rule.name), matchContext(method, context));
+  }
+  return filtered;
+}
+
 function patchManager(record: ManagerRecord): void {
   if (record.patched) return;
   for (const method of ["checkDelta", "checkSnapshot", "checkAstSnapshot"]) {
@@ -31,8 +56,8 @@ function patchManager(record: ManagerRecord): void {
       value: (...args: unknown[]) => {
         const result = original.apply(record.manager, args);
         return result && typeof result.then === "function"
-          ? result.then((rules: unknown) => filterAthanor(record, rules))
-          : filterAthanor(record, result);
+          ? result.then((rules: unknown) => rememberMatches(record, method, args[1], rules))
+          : rememberMatches(record, method, args[1], result);
       },
     });
   }
@@ -46,7 +71,10 @@ function captureSession(session: any): void {
   const bridge = state();
   let record = bridge.sessions.get(sessionId);
   if (!record || record.manager !== manager) {
-    record = { manager, session, active: new Set(), known: new Set(), patched: false, guard: null };
+    record = {
+      manager, session, active: new Set(), known: new Set(), patched: false, guard: null,
+      lastMatch: new Map(),
+    };
     bridge.sessions.set(sessionId, record);
   }
   record.session = session;
@@ -106,6 +134,61 @@ export function syncLessonTtsr(args: { ctx: any; plan: NativeLessonPlan }) {
   const guardWarning = armBlockGuard(record, args.plan.rules.filter((entry) => entry.block).map((entry) => entry.rule));
   if (guardWarning) warnings.push(guardWarning);
   return { active: next.size, added, warnings };
+}
+
+export type LessonFireBinding = HostBinding;
+
+// A native rule names its lesson in `path` (athanor://lessons/<family>/<id>) and
+// carries its own patterns, so the ledger row needs nothing the plan did not send.
+function lessonIdentity(rule: Record<string, any>): { family: string; id: number } | null {
+  const match = /^athanor:\/\/lessons\/([a-z]+)\/(\d+)$/.exec(String(rule?.path ?? ""));
+  return match ? { family: match[1], id: Number(match[2]) } : null;
+}
+
+function patternFor(rule: Record<string, any>, kind: "regex" | "ast"): string | undefined {
+  const patterns = rule?.[kind === "ast" ? "astCondition" : "condition"];
+  return Array.isArray(patterns) && patterns.length === 1 ? String(patterns[0]) : undefined;
+}
+
+async function recordFire(binding: LessonFireBinding, rule: Record<string, any>, match: LastMatch, urgency: "block" | "remind"): Promise<boolean> {
+  const lesson = lessonIdentity(rule);
+  if (!lesson) {
+    console.warn(`[athanor] native fire ${rule?.name} has no lesson path; not recorded`);
+    return false;
+  }
+  // The Host adds `session` from the sender; the row carries the rest.
+  const params = {
+    room: binding.room, family: lesson.family, id: lesson.id,
+    surface: match.surface, tool: match.tool, path: match.path,
+    patternKind: match.patternKind, matchedPattern: patternFor(rule, match.patternKind), urgency,
+  };
+  try {
+    await requestOrgan(binding, "lesson_trigger_record", params, { write: true, timeoutMs: 10_000 });
+    return true;
+  } catch (error) {
+    // The fire already happened; a lost ledger row must stay visible, never fatal.
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`[athanor] lesson ${lesson.family}#${lesson.id} fired but the ledger refused it: ${reason}`);
+    return false;
+  }
+}
+
+/** Ledger rows for the Athanor rules OMP just announced through `ttsr_triggered`. */
+export async function recordNativeFires(binding: LessonFireBinding, rules: Array<Record<string, any>>): Promise<number> {
+  const record = state().sessions.get(binding.session);
+  if (!record) return 0;
+  let recorded = 0;
+  for (const rule of rules) {
+    if (rule?._source?.provider !== PROVIDER) continue;
+    const match = record.lastMatch.get(String(rule.name));
+    if (!match) {
+      console.warn(`[athanor] native fire ${rule.name} has no match context; not recorded`);
+      continue;
+    }
+    const urgency = rule.interruptMode === "never" ? "remind" : "block";
+    if (await recordFire(binding, rule, match, urgency)) recorded += 1;
+  }
+  return recorded;
 }
 
 // The native manager interrupts a stream once per session (repeatMode "once"),
@@ -169,8 +252,15 @@ function pathCandidates(rawPath: string, cwd: string): string[] {
   return [...new Set([raw, absolute])];
 }
 
-/** A `tool_call` refusal when an edit or write would put a block lesson's match on disk. */
-export async function blockLessonRefusal(event: any, ctx: any): Promise<{ block: true; reason: string } | undefined> {
+/**
+ * A `tool_call` refusal when an edit or write would put a block lesson's match on disk.
+ * With a binding, every refusal also lands in the ledger before the refusal returns.
+ */
+export async function blockLessonRefusal(
+  event: any,
+  ctx: any,
+  binding?: LessonFireBinding,
+): Promise<{ block: true; reason: string } | undefined> {
   const sessionId = String(ctx?.sessionManager?.getSessionId?.() ?? "").trim();
   const record = state().sessions.get(sessionId);
   const guard = record?.guard;
@@ -183,6 +273,7 @@ export async function blockLessonRefusal(event: any, ctx: any): Promise<{ block:
 
   const cwd = String(ctx?.cwd ?? process.cwd());
   const hits = new Map<string, Record<string, unknown>>();
+  const matches = new Map<string, LastMatch>();
   try {
     for (const [index, snapshot] of snapshots.entries()) {
       const context = {
@@ -192,16 +283,28 @@ export async function blockLessonRefusal(event: any, ctx: any): Promise<{ block:
         streamKey: `athanor-block:${event?.toolCallId ?? randomUUID()}#${index}`,
         filePaths: snapshot.paths.flatMap((path) => pathCandidates(path, cwd)),
       };
-      const matched = [
-        ...guard.manager.checkSnapshot(snapshot.digest, context),
-        ...(await guard.manager.checkAstSnapshot(snapshot.digest, context)),
-      ];
-      for (const rule of matched) hits.set(String(rule.name), guard.rules.get(String(rule.name)) ?? rule);
+      const regexHits: any[] = guard.manager.checkSnapshot(snapshot.digest, context);
+      const astHits: any[] = await guard.manager.checkAstSnapshot(snapshot.digest, context);
+      const kinds: Array<[any[], "regex" | "ast"]> = [[regexHits, "regex"], [astHits, "ast"]];
+      for (const [matched, patternKind] of kinds) {
+        for (const rule of matched) {
+          const name = String(rule.name);
+          hits.set(name, guard.rules.get(name) ?? rule);
+          if (!matches.has(name)) matches.set(name, { patternKind, surface: "tool", tool: event.toolName, path: snapshot.paths[0] });
+        }
+      }
     }
   } finally {
     guard.manager.resetBuffer?.();
   }
   if (hits.size === 0) return undefined;
+
+  if (binding) {
+    for (const [name, match] of matches) {
+      const rule = hits.get(name);
+      if (rule) await recordFire(binding, rule, match, "block");
+    }
+  }
 
   const reasons = [...hits.values()].map((rule) => `${rule.path}\n${rule.content}`);
   return { block: true, reason: `Refused by The Athanor block lesson:\n\n${reasons.join("\n\n")}` };

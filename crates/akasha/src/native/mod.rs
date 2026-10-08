@@ -4,18 +4,18 @@ use crate::migrations::{migration_pool, run_migrations};
 use crate::{
     AppError, Config, DesignDocumentQueryParams, DesignDocumentWriteParams, EntityResolveParams,
     LessonContextParams, LessonDeleteParams, LessonQueryParams, LessonTriggerMatchParams,
-    LessonUpdateParams, OutcomeClass, QuestBoardParams, QuestChargebookParams, QuestClaimParams,
-    QuestClockParams, QuestEvidenceParams, QuestPostParams, QuestReportParams,
-    SubstrateHealthOptions, TrustedBinding, anamnesis, anamnesis_write, canon_read, canon_write,
-    cluster_maintenance, design_document_query, design_document_write, entity_resolve,
-    giga_candidate_list, giga_conversation_ingest, giga_event_claim, giga_event_finish,
-    giga_event_ingest, giga_event_replay, giga_promote, giga_queue_maintenance, giga_review,
-    giga_tool_promote, giga_tool_review, hallway_create, hallway_inbox, hallway_join,
-    hallway_knock, hallway_knock_policy, hallway_read, lesson_context, lesson_delete, lesson_query,
-    lesson_trigger_match, lesson_update, paper_boat_sleep, paper_boat_wake, quest_board,
-    quest_chargebook, quest_claim, quest_clock, quest_evidence, quest_post, quest_report, recall,
-    remember, restart_claim, restart_request, restart_status, restart_transition, restart_verify,
-    validate_trusted_binding,
+    LessonTriggerRecordParams, LessonUpdateParams, OutcomeClass, QuestBoardParams,
+    QuestChargebookParams, QuestClaimParams, QuestClockParams, QuestEvidenceParams,
+    QuestPostParams, QuestReportParams, SubstrateHealthOptions, TrustedBinding, anamnesis,
+    anamnesis_write, canon_read, canon_write, cluster_maintenance, design_document_query,
+    design_document_write, entity_resolve, giga_candidate_list, giga_conversation_ingest,
+    giga_event_claim, giga_event_finish, giga_event_ingest, giga_event_replay, giga_promote,
+    giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review, hallway_create,
+    hallway_inbox, hallway_join, hallway_knock, hallway_knock_policy, hallway_read, lesson_context,
+    lesson_delete, lesson_query, lesson_trigger_match, lesson_trigger_record, lesson_update,
+    paper_boat_sleep, paper_boat_wake, quest_board, quest_chargebook, quest_claim, quest_clock,
+    quest_evidence, quest_post, quest_report, recall, remember, restart_claim, restart_request,
+    restart_status, restart_transition, restart_verify, validate_trusted_binding,
 };
 use hearth::{
     CanonReadRequest, CanonWriteRequest,
@@ -82,6 +82,7 @@ pub enum ProtocolRequest {
     LessonUpdate(LessonUpdateParams),
     LessonDelete(LessonDeleteParams),
     LessonTriggerMatch(LessonTriggerMatchParams),
+    LessonTriggerRecord(LessonTriggerRecordParams),
     DesignDocumentQuery(DesignDocumentQueryParams),
     DesignDocumentWrite(DesignDocumentWriteParams),
     EntityResolve(EntityResolveParams),
@@ -232,6 +233,9 @@ pub fn decode_envelope(
         "lesson_trigger_match" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::LessonTriggerMatch)
             .map_err(|error| invalid_params(error.to_string())),
+        "lesson_trigger_record" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::LessonTriggerRecord)
+            .map_err(|error| invalid_params(error.to_string())),
         "design_document_query" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::DesignDocumentQuery)
             .map_err(|error| invalid_params(error.to_string())),
@@ -361,6 +365,7 @@ pub fn operation_name(request: &ProtocolRequest) -> &'static str {
         ProtocolRequest::LessonUpdate(_) => "lesson_update",
         ProtocolRequest::LessonDelete(_) => "lesson_delete",
         ProtocolRequest::LessonTriggerMatch(_) => "lesson_trigger_match",
+        ProtocolRequest::LessonTriggerRecord(_) => "lesson_trigger_record",
         ProtocolRequest::DesignDocumentQuery(_) => "design_document_query",
         ProtocolRequest::DesignDocumentWrite(_) => "design_document_write",
         ProtocolRequest::EntityResolve(_) => "entity_resolve",
@@ -571,6 +576,7 @@ pub async fn execute_service(
         | ProtocolRequest::LessonUpdate(_)
         | ProtocolRequest::LessonDelete(_)
         | ProtocolRequest::LessonTriggerMatch(_)
+        | ProtocolRequest::LessonTriggerRecord(_)
         | ProtocolRequest::DesignDocumentQuery(_)
         | ProtocolRequest::DesignDocumentWrite(_)
         | ProtocolRequest::EntityResolve(_)
@@ -831,6 +837,12 @@ pub async fn execute_service(
                         }
                         ProtocolRequest::LessonTriggerMatch(request) => {
                             match lesson_trigger_match(pool, request).await {
+                                Ok(result) => success_json(id, result)?,
+                                Err(error) => app_error(id, operation, error),
+                            }
+                        }
+                        ProtocolRequest::LessonTriggerRecord(request) => {
+                            match lesson_trigger_record(pool, request).await {
                                 Ok(result) => success_json(id, result)?,
                                 Err(error) => app_error(id, operation, error),
                             }

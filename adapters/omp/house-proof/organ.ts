@@ -3,7 +3,7 @@ import { hostCommand, HostRefused, HostUnavailable, sendHostCommand, type HostBi
 export type OrganOperation =
   | "canon_write" | "canon_read" | "remember" | "paper_boat_sleep" | "paper_boat_wake"
   | "recall" | "vault_recall" | "anamnesis" | "anamnesis_write"
-  | "lesson_query" | "lesson_update" | "lesson_delete" | "lesson_trigger_match"
+  | "lesson_query" | "lesson_update" | "lesson_delete" | "lesson_trigger_match" | "lesson_trigger_record"
   | "design_document_query" | "design_document_write" | "entity_resolve"
   | "hallway_create" | "hallway_join" | "hallway_post" | "hallway_read" | "hallway_inbox"
   | "hallway_knock_policy" | "hallway_knock"

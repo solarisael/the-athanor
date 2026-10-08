@@ -50,6 +50,14 @@ impl PatternKind {
             Self::Ast => "ast",
         }
     }
+
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "regex" => Ok(Self::Regex),
+            "ast" => Ok(Self::Ast),
+            _ => Err("patternKind must be regex or ast".to_owned()),
+        }
+    }
 }
 
 /// How loudly a fired lesson interrupts. NULL in the column means block:

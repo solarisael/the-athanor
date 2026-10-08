@@ -171,6 +171,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0032_insula_seven_day_retention.sql",
         sql: include_str!("../../../substrate/migrations/0032_insula_seven_day_retention.sql"),
     },
+    Migration {
+        version: 33,
+        name: "0033_lesson_trigger_native_fires.sql",
+        sql: include_str!("../../../substrate/migrations/0033_lesson_trigger_native_fires.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

@@ -5,7 +5,7 @@ pub(crate) use engine::validate_patterns;
 use crate::config::{AppError, ROOM_KEY_RE};
 use chrono::{DateTime, Utc};
 use engine::{CompiledTriggerSet, Surface, TriggerRow, cached_set, match_surfaces, store_set};
-use hearth::lesson_triggers::{LessonTriggerSpec, SurfaceKind};
+use hearth::lesson_triggers::{LessonTriggerSpec, PatternKind, SurfaceKind, Urgency};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Postgres, QueryBuilder, Row};
 use std::collections::HashMap;
@@ -309,5 +309,109 @@ pub async fn lesson_trigger_match(
         ok: true,
         fired,
         warnings: outcome.warnings,
+    })
+}
+
+/// One fire that OMP's native matcher already decided. The substrate writes the
+/// ledger row and matches nothing, so the adapter's matcher stays the only one.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct LessonTriggerRecordParams {
+    pub room: String,
+    pub session: String,
+    pub family: String,
+    pub id: i64,
+    pub surface: String,
+    #[serde(default)]
+    pub tool: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    pub pattern_kind: String,
+    /// Absent when the rule carries several patterns of that kind: OMP reports
+    /// the rule that fired, never the pattern.
+    #[serde(default)]
+    pub matched_pattern: Option<String>,
+    pub urgency: String,
+}
+
+impl LessonTriggerRecordParams {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if !ROOM_KEY_RE.is_match(&self.room) {
+            return Err(AppError::Invalid("room must be a lowercase slug".into()));
+        }
+        if self.session.trim().is_empty() {
+            return Err(AppError::Invalid("session must not be empty".into()));
+        }
+        if self.family.trim().is_empty() {
+            return Err(AppError::Invalid("family must not be empty".into()));
+        }
+        SurfaceKind::parse(&self.surface).map_err(AppError::Invalid)?;
+        PatternKind::parse(&self.pattern_kind).map_err(AppError::Invalid)?;
+        Urgency::parse(&self.urgency).map_err(AppError::Invalid)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LessonTriggerRecordResult {
+    pub ok: bool,
+    pub event_id: i64,
+    /// Ledger rows for this lesson in this room, including this one.
+    pub fires: i64,
+}
+
+pub async fn lesson_trigger_record(
+    pool: &PgPool,
+    params: LessonTriggerRecordParams,
+) -> Result<LessonTriggerRecordResult, AppError> {
+    params.validate()?;
+    let known: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM lessons WHERE lesson_key=$1 AND id=$2")
+            .bind(&params.family)
+            .bind(params.id)
+            .fetch_optional(pool)
+            .await?;
+    if known.is_none() {
+        return Err(AppError::Invalid(format!(
+            "no {} lesson with id {}",
+            params.family, params.id
+        )));
+    }
+
+    let mut tx = pool.begin().await?;
+    let (event_id,): (i64,) = sqlx::query_as(
+        "INSERT INTO lesson_trigger_events
+         (lesson_key,lesson_id,room,session_id,surface,tool_name,path,pattern_kind,
+          matched_pattern,urgency)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         RETURNING id",
+    )
+    .bind(&params.family)
+    .bind(params.id)
+    .bind(&params.room)
+    .bind(&params.session)
+    .bind(&params.surface)
+    .bind(params.tool.as_deref())
+    .bind(params.path.as_deref())
+    .bind(&params.pattern_kind)
+    .bind(params.matched_pattern.as_deref())
+    .bind(&params.urgency)
+    .fetch_one(&mut *tx)
+    .await?;
+    let (fires,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM lesson_trigger_events WHERE room=$1 AND lesson_key=$2 AND lesson_id=$3",
+    )
+    .bind(&params.room)
+    .bind(&params.family)
+    .bind(params.id)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+
+    Ok(LessonTriggerRecordResult {
+        ok: true,
+        event_id,
+        fires,
     })
 }

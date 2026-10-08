@@ -78,9 +78,10 @@ pub use lesson::{
     LessonContextFilters, LessonContextMatch, LessonContextParams, LessonContextRecord,
     LessonContextResult, LessonDeleteParams, LessonFamily, LessonFilters, LessonMutationKind,
     LessonMutationReceipt, LessonQueryParams, LessonQueryResult, LessonRecord, LessonTaxonomy,
-    LessonTriggerFired, LessonTriggerMatchParams, LessonTriggerMatchResult, LessonTriggerSurface,
-    LessonUpdateParams, design_document_query, design_document_write, lesson_context,
-    lesson_delete, lesson_query, lesson_trigger_match, lesson_update,
+    LessonTriggerFired, LessonTriggerMatchParams, LessonTriggerMatchResult,
+    LessonTriggerRecordParams, LessonTriggerRecordResult, LessonTriggerSurface, LessonUpdateParams,
+    design_document_query, design_document_write, lesson_context, lesson_delete, lesson_query,
+    lesson_trigger_match, lesson_trigger_record, lesson_update,
 };
 pub use paper_boat::{paper_boat_sleep, paper_boat_wake};
 pub use presence::{

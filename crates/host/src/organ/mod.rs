@@ -315,7 +315,7 @@ fn bind_identity(
             put(params, "spirit", &host.spirit);
             put(params, "session", &meta.sender_session);
         }
-        LessonTriggerMatch => put(params, "session", &meta.sender_session),
+        LessonTriggerMatch | LessonTriggerRecord => put(params, "session", &meta.sender_session),
         VaultRecall => put(params, "room_dir", &host.room_dir.to_string_lossy()),
         _ => {}
     }

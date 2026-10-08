@@ -19,6 +19,7 @@ pub use query::{
 };
 pub(crate) use trigger::validate_patterns;
 pub use trigger::{
-    LessonTriggerFired, LessonTriggerMatchParams, LessonTriggerMatchResult, LessonTriggerSurface,
-    lesson_trigger_match,
+    LessonTriggerFired, LessonTriggerMatchParams, LessonTriggerMatchResult,
+    LessonTriggerRecordParams, LessonTriggerRecordResult, LessonTriggerSurface,
+    lesson_trigger_match, lesson_trigger_record,
 };

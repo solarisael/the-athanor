@@ -28,9 +28,11 @@ use std::{
 use summoning::AnamnesisWriteRequest;
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+
 fn backup_error_class(error: &BackupError) -> &'static str {
     error.failure_code().as_str()
 }
+
 
 async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -691,6 +693,34 @@ mod tests {
             r#"{"protocol":1,"id":"t3","method":"lesson_trigger_match","params":{"room":"kodo","surfaces":[]}}"#,
         );
         assert!(matches!(missing, Err(ProtocolError::InvalidParams(_))));
+    }
+
+    #[test]
+    fn lesson_trigger_record_protocol_is_strict_and_camel_cased() {
+        let (_, request) = decode_line(
+            r#"{"protocol":1,"id":"r1","method":"lesson_trigger_record","params":{"room":"kodo","session":"s-1","family":"coding","id":389,"surface":"tool","tool":"write","path":"a.ts","patternKind":"ast","urgency":"block"}}"#,
+        );
+        match request.unwrap() {
+            ProtocolRequest::LessonTriggerRecord(request) => {
+                assert_eq!(request.family, "coding");
+                assert_eq!(request.id, 389);
+                assert_eq!(request.pattern_kind, "ast");
+                assert_eq!(request.matched_pattern, None);
+                assert!(request.validate().is_ok());
+            }
+            _ => panic!("expected lesson trigger record"),
+        }
+        let (_, snake) = decode_line(
+            r#"{"protocol":1,"id":"r2","method":"lesson_trigger_record","params":{"room":"kodo","session":"s-1","family":"coding","id":389,"surface":"tool","pattern_kind":"ast","urgency":"block"}}"#,
+        );
+        assert!(matches!(snake, Err(ProtocolError::InvalidParams(_))));
+        let (_, unknown_kind) = decode_line(
+            r#"{"protocol":1,"id":"r3","method":"lesson_trigger_record","params":{"room":"kodo","session":"s-1","family":"coding","id":389,"surface":"tool","patternKind":"judge","urgency":"block"}}"#,
+        );
+        match unknown_kind.unwrap() {
+            ProtocolRequest::LessonTriggerRecord(request) => assert!(request.validate().is_err()),
+            _ => panic!("expected lesson trigger record"),
+        }
     }
 
     #[test]

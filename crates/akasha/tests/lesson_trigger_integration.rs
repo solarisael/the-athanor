@@ -9,8 +9,9 @@
 //! scope, remind beside block, unknown extension beside known).
 
 use akasha::{
-    LessonMutationReceipt, LessonTriggerMatchParams, LessonTriggerMatchResult,
-    LessonTriggerSurface, LessonUpdateParams, lesson_trigger_match, lesson_update,
+    AppError, LessonMutationReceipt, LessonTriggerMatchParams, LessonTriggerMatchResult,
+    LessonTriggerRecordParams, LessonTriggerSurface, LessonUpdateParams, lesson_trigger_match,
+    lesson_trigger_record, lesson_update,
 };
 use serde_json::{Value, json};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -111,7 +112,7 @@ async fn temp_trigger_pool() -> TestResult<PgPool> {
             tool_name TEXT,
             path TEXT,
             pattern_kind TEXT NOT NULL CHECK (pattern_kind IN ('regex','ast')),
-            matched_pattern TEXT NOT NULL,
+            matched_pattern TEXT,
             urgency TEXT NOT NULL CHECK (urgency IN ('block','remind')),
             fired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             FOREIGN KEY (lesson_key, lesson_id)
@@ -484,6 +485,71 @@ async fn every_fire_writes_its_ledger_row_and_dies_with_its_lesson() -> TestResu
         0,
         "deleting the lesson must cascade its ledger rows"
     );
+    Ok(())
+}
+
+// Kills: the record op growing a matcher of its own, or dropping the lesson
+// existence check so the FK error surfaces as a 500 instead of a refusal.
+// red-proof: delete the `SELECT id FROM lessons` guard in lesson_trigger_record.
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the trigger tables are session-temporary"]
+async fn a_native_fire_lands_in_the_ledger_without_a_pattern_and_counts_room_fires() -> TestResult {
+    let pool = temp_trigger_pool().await?;
+    let mut lesson = Trigger::regex(925, "Native-fired lesson", "eval\\(");
+    lesson.condition = vec!["eval\\(", "exec\\("];
+    insert_trigger(&pool, &lesson).await?;
+
+    let fire = |session: &str, pattern: Option<&str>| LessonTriggerRecordParams {
+        room: "kodo".into(),
+        session: session.into(),
+        family: "coding".into(),
+        id: 925,
+        surface: "prose".into(),
+        tool: None,
+        path: None,
+        pattern_kind: "regex".into(),
+        matched_pattern: pattern.map(str::to_owned),
+        urgency: "remind".into(),
+    };
+    let first = lesson_trigger_record(&pool, fire("session-n1", None)).await?;
+    assert_eq!(first.fires, 1);
+    let second = lesson_trigger_record(&pool, fire("session-n2", Some("exec\\("))).await?;
+    assert_eq!(
+        second.fires, 2,
+        "fires counts the whole room, every session"
+    );
+    assert!(second.event_id > first.event_id);
+
+    let row = sqlx::query(
+        "SELECT surface,tool_name,pattern_kind,matched_pattern,urgency
+         FROM lesson_trigger_events WHERE id=$1",
+    )
+    .bind(first.event_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(row.try_get::<String, _>("surface")?, "prose");
+    assert_eq!(row.try_get::<Option<String>, _>("tool_name")?, None);
+    assert_eq!(row.try_get::<String, _>("pattern_kind")?, "regex");
+    assert_eq!(
+        row.try_get::<Option<String>, _>("matched_pattern")?,
+        None,
+        "OMP names the rule, never the pattern; the ledger must not invent one"
+    );
+    assert_eq!(row.try_get::<String, _>("urgency")?, "remind");
+
+    let mut unknown = fire("session-n3", None);
+    unknown.id = 926;
+    match lesson_trigger_record(&pool, unknown).await {
+        Err(AppError::Invalid(message)) => assert!(message.contains("926"), "{message}"),
+        other => panic!("an unknown lesson must be refused as invalid, got {other:?}"),
+    }
+    let mut bad_kind = fire("session-n3", None);
+    bad_kind.pattern_kind = "judge".into();
+    assert!(matches!(
+        lesson_trigger_record(&pool, bad_kind).await,
+        Err(AppError::Invalid(_))
+    ));
+    assert_eq!(ledger_count(&pool).await?, 2, "refusals write nothing");
     Ok(())
 }
 

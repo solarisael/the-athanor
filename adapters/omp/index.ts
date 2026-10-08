@@ -61,6 +61,7 @@ import {
   blockLessonRefusal,
   capturedAgentSession,
   installLessonTtsrBridge,
+  recordNativeFires,
   syncLessonTtsr,
   contextLessonManagerAvailable,
 } from "./house-proof/lesson-ttsr.ts";
@@ -811,7 +812,8 @@ export default function solarisaelHouseProof(pi, release) {
   });
   pi.on("tool_call", async (event, ctx) => {
     try {
-      return await blockLessonRefusal(event, ctx);
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      return await blockLessonRefusal(event, ctx, { room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) });
     } catch (error) {
       // tool_call errors fail closed, so a broken guard would refuse every write in the
       // session. The native TTSR interrupt still fires once; the operator sees this degrade.
@@ -819,6 +821,17 @@ export default function solarisaelHouseProof(pi, release) {
       console.warn(`[athanor] Block lesson guard degraded on ${event?.toolName}: ${reason}`);
       ctx?.ui?.notify?.(`Athanor block lessons unguarded for this call: ${reason}`, "warning");
       return undefined;
+    }
+  });
+  // OMP's matcher decided the fire; the ledger only learns it happened.
+  pi.on("ttsr_triggered", async (event, ctx) => {
+    if (!Array.isArray(event?.rules)) return;
+    try {
+      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      await recordNativeFires({ room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) }, event.rules);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[athanor] native lesson fire not recorded: ${reason}`);
     }
   });
   pi.on("message_start", async (event, ctx) => {

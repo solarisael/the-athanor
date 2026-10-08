@@ -251,6 +251,7 @@ async fn read_board(
         house_id: state.house_id.as_ref().clone(),
         states: request.states,
         limit: request.limit,
+        titles_only: false,
     };
     if let Err(refusal) = params.validate() {
         return refused(refusal);

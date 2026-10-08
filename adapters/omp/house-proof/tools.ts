@@ -1674,8 +1674,9 @@ export function registerSolarisaelTools(pi, release) {
     description: "Read this House's Docket board: quests by deadline, soonest first, each with its state, importance, claim epoch, and acceptance verdict counts. The board is a read and carries no capability. It offers work and never assigns it, and an empty board is an empty board rather than an instruction to invent one.",
     parameters: z.object({
       houseId: z.string().optional().describe("House to read. Defaults to this installation's House id."),
-      states: z.array(z.string()).optional().describe("Quest states to include, such as offered or claimed. Omit for the substrate's own default set."),
+      states: z.array(z.string()).optional().describe("Quest states to include, such as offered or claimed. Omit for offered and claimed; pass [\"all\"] for every state."),
       limit: z.number().optional().describe("Maximum quests to return. Omit for the substrate default."),
+      titlesOnly: z.boolean().optional().describe("When true, every quest comes back with an empty body, so a long board stays small enough to pick from by title."),
     }).strict(),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -1686,6 +1687,7 @@ export function registerSolarisaelTools(pi, release) {
       const result = await requestRustDomain(binding, "quest_board", {
         states: params.states?.length ? params.states : undefined,
         limit: params.limit,
+        titlesOnly: params.titlesOnly,
       }, signal, false);
       return {
         isError: result.ok !== true,

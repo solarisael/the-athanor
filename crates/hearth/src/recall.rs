@@ -8,10 +8,11 @@ const MAX_RECALL_TOP_K: u32 = 1_000;
 /// reranking sidecar.
 pub const MAX_RERANK_CANDIDATE_TOP_K: u32 = 64;
 
-/// Most records a manual projection hands back whole. This is the same seat
-/// count the Host viewport keeps for one presentation; the cap trims by count
-/// and says so in `warnings`, it never clips a selected record's body.
-pub const MANUAL_RECORD_CAP: usize = 5;
+/// Most records a manual projection hands back whole. A manual read is a
+/// deliberate ask, so it seats more than the automatic working set the Host
+/// viewport keeps per turn; the cap trims by count and says so in `warnings`,
+/// it never clips a selected record's body.
+pub const MANUAL_RECORD_CAP: usize = 12;
 
 /// How a recall's selected records reach the caller.
 ///

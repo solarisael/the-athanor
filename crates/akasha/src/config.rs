@@ -32,12 +32,10 @@ const DEFAULT_GIGA_NUM_CTX: u32 = 32_768;
 /// passages may legitimately take this long. Recall does not share it — see
 /// `RECALL_EMBED_TIMEOUT`.
 const DEFAULT_EMBEDDING_MODEL_TIMEOUT_SECS: u64 = 20;
-/// How long a recall waits for its one query embedding before the semantic
-/// lane is given up and the lexical lanes answer alone. Warm embed is ~0.1 s,
-/// contended 0.6–2.2 s; under the old shared 20 s every stuck-Ollama recall
-/// became a 21 s recall (three per day, measured 2026-09-05). Past 3 s the
-/// lexical answer now is worth more than the semantic answer later.
-pub(crate) const RECALL_EMBED_TIMEOUT: Duration = Duration::from_secs(3);
+/// A cold Ollama model takes well over 3 s on its first query embedding.
+/// The lexical lanes still answer alone past this bound, so the longer wait
+/// costs one slow recall, never a missing one.
+pub(crate) const RECALL_EMBED_TIMEOUT: Duration = Duration::from_secs(20);
 /// How long one pool acquire may take, reconnects included. A pooled socket
 /// Postgres already dropped is pinged out in milliseconds; this bounds the
 /// silent socket and the House that is not there yet. Under the old 120 s an

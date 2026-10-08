@@ -108,10 +108,10 @@ const MAX_TERM_CHARS: usize = 128;
 const MAX_REASONS: usize = 5;
 const MAX_REASON_CHARS: usize = 256;
 const MAX_CANDIDATE_EXCERPT_CHARS: usize = 900;
-// Seats one presentation keeps. The automatic working set and the manual
-// record read share the count; only the manual read fills each seat with the
-// whole record (`hearth::MANUAL_RECORD_CAP`, the same number, owned upstream
-// so the substrate and this viewport can never disagree on how many).
+// Seats one automatic presentation keeps. A manual record read seats more
+// (`hearth::MANUAL_RECORD_CAP`): it is a deliberate ask and fills each seat
+// with the whole record, while this count rides every turn under the context
+// budget.
 const MAX_KEPT_CANDIDATES: usize = 5;
 // Warnings are one line each. An automatic turn reads a handful under its
 // budget; a manual read keeps every warning whole, because each missing,
@@ -712,8 +712,8 @@ pub fn apply_viewport(
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_CANDIDATE_EXCERPT_CHARS, MAX_CANON_ASSERTION_CHARS, MAX_WARNINGS_AUTOMATIC,
-        ViewportSession, apply_viewport,
+        MAX_CANDIDATE_EXCERPT_CHARS, MAX_CANON_ASSERTION_CHARS, MAX_KEPT_CANDIDATES,
+        MAX_WARNINGS_AUTOMATIC, ViewportSession, apply_viewport,
     };
     use hearth::{MANUAL_RECORD_CAP, RecallProjection};
     use protocol::{RecallResultInput, RecallViewportMode};
@@ -1022,13 +1022,15 @@ mod tests {
             MAX_WARNINGS_AUTOMATIC,
             "the automatic budget stays"
         );
+        // The automatic seat count is its own number; the overflow is whatever
+        // the manual-sized input leaves past it.
         assert_eq!(
             auto.presentation.retrieval_candidates.len(),
-            MANUAL_RECORD_CAP
+            MAX_KEPT_CANDIDATES
         );
         assert_eq!(
             auto.diagnostics.reasons.get("record-cap"),
-            Some(&3),
+            Some(&((MANUAL_RECORD_CAP + 3 - MAX_KEPT_CANDIDATES) as u64)),
             "automatic overflow is accounted in diagnostics"
         );
         assert!(

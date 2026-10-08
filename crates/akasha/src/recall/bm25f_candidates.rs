@@ -12,11 +12,11 @@ use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, BTreeSet};
 
 const BM25F_TOP_K: usize = 8;
-// enough: 4_096 is the ranked prefilter ceiling; past it the truncation
+// enough: 16_384 is the ranked prefilter ceiling; past it the truncation
 // warning below still says the ranker never saw the rest.
-const BM25F_MAX_CANDIDATES: i64 = 4_096;
-const BM25F_BROAD_TOP_K: usize = 4_096;
-const BM25F_BROAD_MAX_CANDIDATES: i64 = 4_096;
+const BM25F_MAX_CANDIDATES: i64 = 16_384;
+const BM25F_BROAD_TOP_K: usize = 16_384;
+const BM25F_BROAD_MAX_CANDIDATES: i64 = 16_384;
 
 #[derive(Clone, Copy)]
 struct Bm25fAverageLengths {

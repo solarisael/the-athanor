@@ -317,16 +317,28 @@ pub async fn read(
         acked_mentions = bells::acknowledge(&mut tx, id, &request.room, &message_ids).await?;
 
         let mut state_changed = acked_mentions > 0;
-        let mut covered_sequence = room_read_sequence;
-        for message in &messages {
-            if message.sequence <= covered_sequence {
-                continue;
-            }
-            if message.sequence != covered_sequence + 1 {
-                break;
-            }
-            covered_sequence = message.sequence;
-        }
+        // A whole-hallway read that starts at or past the room position has
+        // seen everything up to its last row; without this the Bell kept
+        // counting rows the reader had already read past. Thread reads see
+        // only one thread, so they keep the contiguous walk.
+        let start_sequence = if thread_id.is_some() {
+            None
+        } else if after > 0 && !messages.is_empty() {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT sequence FROM hallway_messages WHERE hallway_id=$1 AND id=$2",
+            )
+            .bind(id)
+            .bind(after)
+            .fetch_optional(&mut *tx)
+            .await?
+        } else {
+            Some(0)
+        };
+        let covered_sequence = covered_room_sequence(
+            room_read_sequence,
+            start_sequence,
+            messages.iter().map(|message| message.sequence),
+        );
         if covered_sequence > room_read_sequence {
             room_read_sequence = covered_sequence;
             state_changed = true;
@@ -367,6 +379,69 @@ pub async fn read(
         thread: request.thread,
         wake_policy: "manual".into(),
     })
+}
+
+// `start_sequence` is the sequence the read began after, or None when the read
+// cannot vouch for every row before its window: a thread-filtered read, or an
+// `after` id that names no message in this hallway.
+fn covered_room_sequence(
+    room_read_sequence: i64,
+    start_sequence: Option<i64>,
+    returned: impl Iterator<Item = i64>,
+) -> i64 {
+    if start_sequence.is_some_and(|start| start >= room_read_sequence) {
+        return returned.fold(room_read_sequence, i64::max);
+    }
+    let mut covered_sequence = room_read_sequence;
+    for sequence in returned {
+        if sequence <= covered_sequence {
+            continue;
+        }
+        if sequence != covered_sequence + 1 {
+            break;
+        }
+        covered_sequence = sequence;
+    }
+    covered_sequence
+}
+
+#[cfg(test)]
+mod tests {
+    use super::covered_room_sequence;
+
+    #[test]
+    fn forward_read_from_past_the_room_position_covers_its_last_row() {
+        // Room at 61, read after the message at sequence 64, returns 65.
+        assert_eq!(covered_room_sequence(61, Some(64), [65].into_iter()), 65);
+    }
+
+    #[test]
+    fn read_from_behind_the_room_position_never_skips_unread_rows() {
+        assert_eq!(
+            covered_room_sequence(61, Some(10), [11, 12, 13, 14, 15].into_iter()),
+            61
+        );
+        assert_eq!(
+            covered_room_sequence(61, Some(10), [11, 61, 62, 63, 65].into_iter()),
+            63
+        );
+    }
+
+    #[test]
+    fn thread_read_keeps_the_contiguous_walk() {
+        assert_eq!(covered_room_sequence(61, None, [65].into_iter()), 61);
+        assert_eq!(
+            covered_room_sequence(61, None, [62, 63, 65].into_iter()),
+            63
+        );
+    }
+
+    #[test]
+    fn read_from_the_start_covers_everything_it_returned() {
+        assert_eq!(covered_room_sequence(0, Some(0), [1, 2, 4].into_iter()), 4);
+        assert_eq!(covered_room_sequence(3, Some(0), [1, 2, 4].into_iter()), 4);
+        assert_eq!(covered_room_sequence(3, Some(0), [1, 2, 5].into_iter()), 3);
+    }
 }
 
 // The Pulse panel's newest-first page. `read` above owns every cursor, Bell

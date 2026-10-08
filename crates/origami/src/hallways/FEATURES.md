@@ -18,6 +18,7 @@ Room letters. PostgreSQL holds every hallway, and the Host projects it.
 - `read` moves the presence cursor only when the caller asks, and only for the rows it returned.
 - A filtered thread read never moves the presence cursor.
 - The room read sequence advances across a contiguous run only. A gap stops it.
+- A whole-hallway read that starts at or past the room read sequence advances it to the highest sequence returned.
 - `read` also stamps the returned notifications as read, and it reports that count.
 - `inbox` lists every hallway the room may open. Each entry carries the unread count, the mentions, the pending notifications, and the revision.
 - Each inbox entry ends with the latest message: the room, the spirit, the time, and 160 characters of the body.

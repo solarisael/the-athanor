@@ -156,9 +156,9 @@ async function recordFire(binding: LessonFireBinding, rule: Record<string, any>,
     console.warn(`[athanor] native fire ${rule?.name} has no lesson path; not recorded`);
     return false;
   }
-  // The Host adds `session` from the sender; the row carries the rest.
+  // The Host binds `room` and `session` from the sender and refuses callers that send them.
   const params = {
-    room: binding.room, family: lesson.family, id: lesson.id,
+    family: lesson.family, id: lesson.id,
     surface: match.surface, tool: match.tool, path: match.path,
     patternKind: match.patternKind, matchedPattern: patternFor(rule, match.patternKind), urgency,
   };

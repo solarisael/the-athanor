@@ -93,9 +93,9 @@ test("a block refusal and a native fire both land in the ledger with the matcher
       binding,
     );
     expect(refusal?.block).toBe(true);
-    // The Host adds `session` from the sender, so the params carry none.
+    // The Host adds `room` and `session` from the sender, so the params carry neither.
     expect(record.mock.calls).toEqual([[binding, "lesson_trigger_record", {
-      room: "kodo", family: "coding", id: 389,
+      family: "coding", id: 389,
       surface: "tool", tool: "write", path: "a.ts",
       patternKind: "ast", matchedPattern: "try { $$$BODY } catch ($ERR) { }", urgency: "block",
     }, { write: true, timeoutMs: 10_000 }]]);
@@ -106,7 +106,7 @@ test("a block refusal and a native fire both land in the ledger with the matcher
     expect(fired.map((rule: any) => rule.path)).toEqual(["athanor://lessons/coding/175"]);
     expect(await recordNativeFires(binding, fired)).toBe(1);
     expect(record.mock.calls[0]?.[2]).toEqual({
-      room: "kodo", family: "coding", id: 175,
+      family: "coding", id: 175,
       surface: "prose", tool: undefined, path: undefined,
       patternKind: "regex", matchedPattern: undefined, urgency: "remind",
     });

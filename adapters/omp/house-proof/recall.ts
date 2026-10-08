@@ -1,96 +1,60 @@
-import { RustJsonlTransport, RustTransportError, TransportUnavailableError } from "../rust-transport.ts";
-import { discoverRustExecutable } from "../discovery.ts";
+import { requestOrgan, organFailure } from "./organ.ts";
+import type { HostBinding } from "./host.ts";
 import type { ResolvedRecallMode } from "./recall-policy.ts";
 
-const RECALL_SEMANTIC_MIN_SIM = 0.40;
-const RECALL_CONTENT_MIN_SIM = 0.30;
 const RECALL_TIMEOUT_MS = 120_000;
-const rustRecallTransports = new Map<string, RustJsonlTransport>();
 
-function text(value: unknown): string {
-  return String(value ?? "").trim();
+type AgentContext = {
+  agent?: { kind: string; name: string; parentId?: string };
+};
+
+export function automaticRecallAllowed(ctx: AgentContext): boolean {
+  return ctx.agent?.kind !== "sub";
 }
 
-function boundedStderr(stderr: unknown): string {
-  return String(stderr || "")
-    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s@/]+@/gi, "$1[redacted]@")
-    .replace(/(\b(?:token|password|authorization)\s*[=:]\s*)(?:Bearer\s+)?\S+/gi, "$1[redacted]")
-    .slice(0, 2_000);
+export function parentContextRequest(ctx: AgentContext): string | null {
+  if (ctx.agent?.kind !== "sub" || ctx.agent.name === "memory-research") return null;
+  const destination = ctx.agent.parentId ? `agent://${ctx.agent.parentId}` : null;
+  return [
+    "Ask Parent protocol (Ask Mama / Ask Daddy): use your task packet and supplied lessons.",
+    "For missing intent, historical decisions, or memory context, ask your spawning parent a specific question.",
+    destination
+      ? `Send the question with write to ${destination}. Include what you need and which decision it blocks.`
+      : "No parent address is available. Return the missing-context question as a blocker.",
+    "Inspect repository facts yourself when the task requires it. Never invent a missing decision or work merely to stay busy.",
+    "Continue only independent parts of the assigned task. If none remain, yield a blocked-context report; the parent can resume you by message.",
+    "If messaging is unavailable, return the question as a blocker. Do not call wait solely to await a parent reply.",
+    "Do not call Recall directly. Your parent retrieves and supplies the relevant evidence.",
+  ].join("\n");
 }
 
-function rustRecallFailure(error: unknown, transport: RustJsonlTransport) {
-  const stderr = boundedStderr(error instanceof RustTransportError ? error.stderr : transport.stderrDiagnostics);
-  // A transport timeout or cancellation keeps its own code: the automatic caller
-  // names a spent budget share by it, and every other failure by its own.
-  if (error instanceof RustTransportError || error instanceof TransportUnavailableError) {
+export function registerSubagentRecallProtocol(pi): void {
+  pi.on("before_agent_start", (_event, ctx: AgentContext) => {
+    const content = parentContextRequest(ctx);
+    if (!content) return;
     return {
-      ok: false,
-      error: error.message,
-      code: error.code,
-      retryable: error.retryable,
-      ...(error.details === undefined ? {} : { details: error.details }),
-      ...(stderr ? { stderr } : {}),
+      message: { customType: "athanor-ask-parent", content, display: false },
     };
-  }
-  return {
-    ok: false,
-    error: "Rust transport request failed",
-    code: "rust_transport_failure",
-    retryable: true,
-    ...(stderr ? { stderr } : {}),
-  };
+  });
+  pi.on("tool_call", (event, ctx: AgentContext) => {
+    const directRecall = event?.toolName === "recall";
+    const deviceRecall = event?.toolName === "write"
+      && /^xd:\/\/recall(?:[/?#]|$)/i.test(String(event?.input?.path ?? "").trim());
+    if (!directRecall && !deviceRecall) return;
+    const reason = parentContextRequest(ctx);
+    if (reason) return { block: true, reason };
+  });
 }
 
-function rustRecallTransport() {
-  const executable = discoverRustExecutable();
-  if (!executable) return null;
-  let transport = rustRecallTransports.get(executable);
-  if (!transport) {
-    transport = new RustJsonlTransport({ executable });
-    rustRecallTransports.set(executable, transport);
-  }
-  return { executable, transport };
-}
-
-function evictRustRecallTransport(executable: string, transport: RustJsonlTransport) {
-  if (rustRecallTransports.get(executable) !== transport) return;
-  rustRecallTransports.delete(executable);
-  void transport.close().catch(() => {});
-}
-
-export function closeRustRecallTransports() {
-  for (const [executable, transport] of rustRecallTransports) {
-    rustRecallTransports.delete(executable);
-    void transport.close().catch(() => {});
-  }
-}
-
-function temporalDecayUnsupported(error: unknown) {
-  return error instanceof RustTransportError
-    && error.code === "invalid_params"
-    && error.message.includes("temporal_decay");
-}
 
 export type RecallProjection = "auto" | "manual";
 
-/**
- * One AKASHA/Vault recall over the Rust transport.
- *
- * `projection` is named by the caller, never inferred from the query:
- * `"auto"` (default) is the passive working set with bounded excerpts;
- * `"manual"` is an operator-visible tool read whose selected records carry
- * their complete database bodies under the substrate's record cap
- * (`hearth::MANUAL_RECORD_CAP`, 5). A manual read never downgrades: a
- * substrate that refuses the `projection` field answers with its own
- * `invalid_params` failure, which is returned whole (`ok: false`) rather than
- * retried for clipped records. Only the automatic `temporal_decay` field keeps
- * its older retry-without-field path.
- */
+// Manual reads retain complete database bodies; automatic reads keep the native excerpt bounds.
 export async function recallWithRouting(
-  effectiveRoomDir: string,
   room: string,
   query: string,
   {
+    binding,
     signal,
     temporalDecay = false,
     projection = "auto",
@@ -98,69 +62,28 @@ export async function recallWithRouting(
     rerankCandidateTopK,
     mode,
   }: {
+    binding: HostBinding;
     signal?: AbortSignal;
     temporalDecay?: boolean;
     projection?: RecallProjection;
     timeoutMs?: number;
     rerankCandidateTopK?: number;
     mode?: ResolvedRecallMode;
-  } = {},
+  },
 ) {
-  const runtime = rustRecallTransport();
-  if (!runtime) {
-    return {
-      ok: false,
-      result: {
-        ok: false,
-        query,
-        error: "Rust Vault/AKASHA runtime is unavailable",
-        code: "rust_runtime_unavailable",
-        retryable: false,
-      },
-    };
-  }
-  const { executable, transport } = runtime;
-  const vaultProfile = !text(process.env.ATHANOR_SUBSTRATE_ROOT);
-  const rerankParams = !vaultProfile
-    && Number.isSafeInteger(rerankCandidateTopK)
-    && rerankCandidateTopK > 0
-    ? { rerank_candidate_top_k: rerankCandidateTopK }
-    : {};
-  const baseParams = vaultProfile
-    ? { room, room_dir: effectiveRoomDir, query, ...rerankParams }
-    : {
-      room,
-      query,
-      semantic_top_k: 8,
-      semantic_min_similarity: RECALL_SEMANTIC_MIN_SIM,
-      content_top_k: 8,
-      content_min_similarity: RECALL_CONTENT_MIN_SIM,
-      ...rerankParams,
-      // Named by the caller's policy decision, never inferred here. The Vault
-      // lane has its own strict params and never carries it.
-      ...(mode ? { mode } : {}),
-    };
-  const decayParams = temporalDecay && !vaultProfile ? { ...baseParams, temporal_decay: true } : baseParams;
-  const manual = projection === "manual" && !vaultProfile;
-  const params = manual ? { ...decayParams, projection: "manual" } : decayParams;
-  const requestOptions = { signal, timeoutMs };
+  const params = {
+    query,
+    ...(Number.isSafeInteger(rerankCandidateTopK) && rerankCandidateTopK > 0
+      ? { rerank_candidate_top_k: rerankCandidateTopK } : {}),
+    ...(mode ? { mode } : {}),
+    ...(temporalDecay ? { temporal_decay: true } : {}),
+    ...(projection === "manual" ? { projection: "manual" } : {}),
+  };
   try {
-    let result;
-    try {
-      result = await transport.request(vaultProfile ? "vault_recall" : "recall", params, requestOptions);
-    } catch (error) {
-      // A manual read keeps its projection on the retry: dropping it would
-      // hand back clipped records under a request that asked for whole ones.
-      if (vaultProfile || !temporalDecay || !temporalDecayUnsupported(error)) throw error;
-      result = await transport.request(
-        "recall",
-        manual ? { ...baseParams, projection: "manual" } : baseParams,
-        requestOptions,
-      );
-    }
+    if (binding.room !== room) throw new Error("foreign room binding refused");
+    const result = await requestOrgan(binding, "recall", params, { signal, timeoutMs });
     return { ok: true, result };
   } catch (error) {
-    if (!transport.usable) evictRustRecallTransport(executable, transport);
-    return { ok: false, result: { ok: false, query, ...rustRecallFailure(error, transport) } };
+    return { ok: false, result: { ok: false, query, ...organFailure(error) } };
   }
 }

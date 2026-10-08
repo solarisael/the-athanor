@@ -1,5 +1,5 @@
-use crate::cranes::broker::{Broker, HALLWAY_SUBJECT_PREFIX};
-use anyhow::{Context, Result};
+use crate::cranes::broker::HALLWAY_SUBJECT_PREFIX;
+use anyhow::Result;
 use hearth::hallway::HallwayPostReceipt;
 use serde::{Deserialize, Serialize};
 
@@ -40,8 +40,13 @@ impl HallwayPostProjection {
     }
 
     pub fn recipients<'a>(&'a self, allowed_rooms: &'a [String]) -> Vec<&'a str> {
-        let rooms = if self.to_rooms.is_empty() { allowed_rooms } else { &self.to_rooms };
-        let mut recipients: Vec<_> = rooms.iter()
+        let rooms = if self.to_rooms.is_empty() {
+            allowed_rooms
+        } else {
+            &self.to_rooms
+        };
+        let mut recipients: Vec<_> = rooms
+            .iter()
             .filter(|room| *room != &self.from_room)
             .map(String::as_str)
             .collect();
@@ -57,20 +62,27 @@ pub async fn publish(
     allowed_rooms: &[String],
     idempotency_key: &str,
 ) -> Result<()> {
-    Broker::hallway_stream(context).await.context("configure hallway stream")?;
     let payload: bytes::Bytes = serde_json::to_vec(projection)?.into();
     let mut failure = None;
     for room in projection.recipients(allowed_rooms) {
         let mut headers = async_nats::HeaderMap::new();
         headers.insert("Nats-Msg-Id", hallway_message_id(idempotency_key, room));
         let sent = async {
-            context.publish_with_headers(hallway_room_subject(room), headers, payload.clone())
-                .await?.await?;
+            context
+                .publish_with_headers(hallway_room_subject(room), headers, payload.clone())
+                .await?
+                .await?;
             Ok::<_, anyhow::Error>(())
-        }.await;
-        if let Err(error) = sent { failure = Some(error); }
+        }
+        .await;
+        if let Err(error) = sent {
+            failure = Some(error);
+        }
     }
-    match failure { Some(error) => Err(error), None => Ok(()) }
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -83,10 +95,17 @@ mod tests {
             ok: true,
             disposition: HallwayPostDisposition::Posted,
             message: HallwayMessage {
-                id: 42, sequence: 7, hallway: "family".into(), room: "kodo".into(),
-                spirit: "Kodo".into(), session: "session".into(), body: "private".into(),
-                reply_to: None, created_at: "2026-09-08T00:00:00Z".into(),
-                thread: "2026-09-08".into(), to_rooms: vec![],
+                id: 42,
+                sequence: 7,
+                hallway: "family".into(),
+                room: "kodo".into(),
+                spirit: "Kodo".into(),
+                session: "session".into(),
+                body: "private".into(),
+                reply_to: None,
+                created_at: "2026-09-08T00:00:00Z".into(),
+                thread: "2026-09-08".into(),
+                to_rooms: vec![],
             },
         }
     }
@@ -107,11 +126,23 @@ mod tests {
         let allowed = vec!["kodo".into(), "kintsu".into(), "tuner".into()];
         let mut receipt = receipt();
         let projection = HallwayPostProjection::from_receipt(&receipt);
-        assert_eq!(projection.recipients(&allowed).into_iter().map(hallway_room_subject).collect::<Vec<_>>(),
-            ["athanor.hallway.room.kintsu", "athanor.hallway.room.tuner"]);
+        assert_eq!(
+            projection
+                .recipients(&allowed)
+                .into_iter()
+                .map(hallway_room_subject)
+                .collect::<Vec<_>>(),
+            ["athanor.hallway.room.kintsu", "athanor.hallway.room.tuner"]
+        );
         receipt.message.to_rooms = vec!["kodo".into(), "tuner".into(), "tuner".into()];
-        assert_eq!(HallwayPostProjection::from_receipt(&receipt).recipients(&allowed), ["tuner"]);
+        assert_eq!(
+            HallwayPostProjection::from_receipt(&receipt).recipients(&allowed),
+            ["tuner"]
+        );
         assert_eq!(hallway_message_id("post-key", "tuner"), "post-key:tuner");
-        assert_ne!(hallway_message_id("post-key", "tuner"), hallway_message_id("post-key", "kintsu"));
+        assert_ne!(
+            hallway_message_id("post-key", "tuner"),
+            hallway_message_id("post-key", "kintsu")
+        );
     }
 }

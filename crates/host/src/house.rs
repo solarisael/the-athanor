@@ -171,10 +171,20 @@ async fn open_house(
     let (bind, pool, nats_url) = house_settings(&rooms)?;
     if let Some(pool) = pool.clone() {
         init_insula_emitter(pool.clone());
+        let stop = cancellation.clone();
+        let retention_pool = pool.clone();
+        let house_id = rooms[0].house_id.clone();
+        tasks.spawn(async move {
+            tokio::select! {
+                _ = stop.cancelled() => {}
+                _ = akasha::native::retention::run(Some(retention_pool), &house_id) => {}
+            }
+        });
         if let Some(nats_url) = nats_url {
             tasks.spawn(DeliveryService::serve(
                 Store::from_pool(pool),
                 nats_url,
+                rooms.first().and_then(|room| room.nats_auth.clone()),
                 cancellation.clone(),
             ));
         }
@@ -223,6 +233,7 @@ fn house_settings(
             ("house identifier", first.house_id == room.house_id),
             ("DATABASE_URL", first.database_url == room.database_url),
             ("ATHANOR_NATS_URL", first.nats_url == room.nats_url),
+            ("NATS credentials", first.nats_auth == room.nats_auth),
         ] {
             if !agrees {
                 return Err(format!(

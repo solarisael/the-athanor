@@ -1,4 +1,4 @@
-use super::enablement::classifier_enabled;
+use super::enablement::GigaEnablement;
 use super::failure::{WorkerFailure, WorkerFailureKind};
 use super::identity::{GIGA_MODEL_MANIFEST_DIGEST, GIGA_MODEL_TAG};
 use crate::config::{HTTP_CLIENT, giga_keep_alive, giga_model_timeout, giga_num_ctx};
@@ -43,8 +43,8 @@ pub(super) fn is_loopback(endpoint: &Url) -> bool {
             .is_ok_and(|address| address.is_loopback())
 }
 
-pub(super) fn ollama_config() -> Result<OllamaConfig, WorkerFailure> {
-    if !classifier_enabled() {
+pub(super) fn ollama_config(enablement: GigaEnablement) -> Result<OllamaConfig, WorkerFailure> {
+    if !enablement.classifier_enabled() {
         return Err(WorkerFailure::new(WorkerFailureKind::Disabled));
     }
     let raw = env::var("ATHANOR_HIPPOCAMPUS_OLLAMA_ENDPOINT")

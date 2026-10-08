@@ -724,6 +724,7 @@ mod tests {
             session: "service:kodo".to_owned(),
             database_url: None,
             nats_url: None,
+            nats_auth: None,
             knock_autonomy: KnockAutonomy::Off,
         }
     }

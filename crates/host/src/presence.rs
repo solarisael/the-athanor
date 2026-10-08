@@ -59,6 +59,11 @@ struct PresenceSession {
     receipts: VecDeque<PresenceReceipt>,
 }
 
+pub(crate) enum SettlementState<'a> {
+    Pending(&'a PresenceContract),
+    Settled(&'a str),
+}
+
 /// One answered request: operation, what was asked, what came back.
 struct ReplayEntry {
     session: String,
@@ -235,6 +240,36 @@ impl PresenceRuntime {
 
     pub fn has_session(&self, session: &str) -> bool {
         self.sessions.contains_key(session)
+    }
+
+    pub(crate) fn has_current_contract(&self, session: &str, contract_id: &str) -> bool {
+        self.sessions
+            .get(session)
+            .and_then(|state| state.active_contract.as_ref())
+            .is_some_and(|contract| contract.contract_id == contract_id)
+    }
+
+    pub(crate) fn settlement_state(
+        &self,
+        session: &str,
+        contract_id: &str,
+    ) -> Option<SettlementState<'_>> {
+        let state = self.sessions.get(session)?;
+        let contract = state
+            .active_contract
+            .as_ref()
+            .filter(|contract| contract.contract_id == contract_id)?;
+        Some(
+            if state
+                .receipts
+                .iter()
+                .any(|receipt| receipt.contract_id == contract_id)
+            {
+                SettlementState::Settled(&contract.contract_id)
+            } else {
+                SettlementState::Pending(contract)
+            },
+        )
     }
 
     /// The session's frame and ledger as this process holds them.

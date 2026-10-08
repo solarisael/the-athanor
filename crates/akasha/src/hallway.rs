@@ -40,6 +40,15 @@ pub async fn hallway_post(
     config: &Config,
     request: HallwayPostRequest,
 ) -> Result<HallwayPostReceipt, AppError> {
+    hallway_post_with_auth(pool, config, request, None).await
+}
+
+pub(crate) async fn hallway_post_with_auth(
+    pool: &PgPool,
+    config: &Config,
+    request: HallwayPostRequest,
+    nats_auth: Option<Option<&origami::cranes::broker::NatsAuth>>,
+) -> Result<HallwayPostReceipt, AppError> {
     let house_tz = config.house_timezone(pool, &request.room).await?;
     let idempotency_key = request.idempotency_key.clone();
     let receipt = messages::post(pool, &house_tz, request)
@@ -48,7 +57,7 @@ pub async fn hallway_post(
     // The write stands when the sea is down; turn-boundary inbox reads reconcile it.
     let published = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        publish_hallway_post(pool, config.nats_url.as_deref(), &receipt, &idempotency_key),
+        publish_hallway_post(pool, config, &receipt, &idempotency_key, nats_auth),
     )
     .await;
     let reason = match published {
@@ -75,14 +84,25 @@ pub async fn hallway_post(
 
 async fn publish_hallway_post(
     pool: &PgPool,
-    nats_url: Option<&str>,
+    config: &Config,
     receipt: &HallwayPostReceipt,
     idempotency_key: &str,
+    nats_auth: Option<Option<&origami::cranes::broker::NatsAuth>>,
 ) -> Result<(), String> {
-    let url = nats_url.ok_or_else(|| "nats_not_configured".to_string())?;
+    let url = config
+        .nats_url
+        .as_deref()
+        .ok_or_else(|| "nats_not_configured".to_string())?;
+    let auth = match nats_auth {
+        Some(Some(auth)) => Some(auth.clone()),
+        Some(None) => return Err("nats_credentials_invalid".into()),
+        None => config
+            .nats_auth()
+            .map_err(|_| "nats_credentials_invalid".to_string())?,
+    };
     let broker = tokio::time::timeout(
         std::time::Duration::from_secs(1),
-        origami::cranes::broker::Broker::connect(url),
+        origami::cranes::broker::Broker::connect(url, auth.as_ref()),
     )
     .await
     .map_err(|_| "connect_timeout".to_string())?

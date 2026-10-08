@@ -190,16 +190,20 @@ Refreshed: 2026-09-13.
 
 ## Verification order
 
+Coding #161, #162, and #463 are unavailable from the current registry.
+Sol approved proceeding with #215, #257, and #260 on 2026-10-05.
+Keep the unavailable references below as provenance; do not invent their bodies or require them for dispatch.
+
 - Coding #329 — Real proof precedes regression seals. Use for: verification order.
 - Coding #346 — Real proof precedes regression seals. Use for: verification order.
 - Coding #155 — Tests are safety nets, not coverage theatre. Use for: regression guards.
-- Coding #161 — Uncontrolled green is not a pass. Use for: isolated proof.
-- Coding #162 — Test the real user path, not a proxy signal. Use for: user-path proof.
+- Unavailable: Coding #161 — Uncontrolled green is not a pass. Historical purpose: isolated proof.
+- Unavailable: Coding #162 — Test the real user path, not a proxy signal. Historical purpose: user-path proof.
 - Coding #190 — Registration is not execution proof. Use for: destination branches.
 - Coding #456 — A test changed with its asserted constant is not a test. Use for: test contracts.
 - Coding #447 — A green probe proves only its exact probe. Use for: proof scope.
 - Coding #458 — Map, cut, two knives, proof, repeat. Use for: adversarial review.
-- Coding #463 — Parallel work is unlanded until the merged tree passes its real gate. Use for: integration proof.
+- Unavailable: Coding #463 — Parallel work is unlanded until the merged tree passes its real gate. Historical purpose: integration proof.
 - Coding #257 — Fake-backed boundary tests are theatre. Use for: boundary fixtures.
 - Coding #240 — Fake-backed boundary tests are theatre. Use for: boundary fixtures.
 - Coding #215 — Integration proof crosses the real boundary. Use for: integration boundaries.
@@ -271,20 +275,23 @@ Refreshed: 2026-09-13.
 - All lessons in a matching section are mandatory; deferred lessons apply only when their named trigger matches.
 - Memory #3383, “Accepted 1.0 boundary,” is the newest program intent and corrects Memory #3378, “Earlier Rust-convergence roadmap pass.”
 - Memory #3376, “One Rust furnace,” carries the shared Vault/AKASHA skeleton.
-- Read `docs/roadmap.md`, `docs/ARCHITECTURE.md`, `docs/RUNTIME_ARCHITECTURE.md`, and `docs/EVIDENCE.md` before implementation; reconcile older delivery order with Memory #3383 before briefing workers.
+- Read `docs/roadmap.md`, `docs/ARCHITECTURE.md`, and `docs/EVIDENCE.md` before implementation.
+  Reconcile older delivery order with Memory #3383 before briefing workers.
 - Prolog/Datalog, Lean/Z3/SyGuS, marketplace work, new cognitive organs, expanded distributed-worker lanes, and the parked Godot client in the private `athanor-godot` repository remain outside the 1.0 program.
 - The 2026-09-02 refactor audit found every listed refactor lesson in the registry but none loaded.
 - House writes use one column-keyed `serde_json::json!` row through `jsonb_populate_record(NULL::table, $1)`; reads use a `#[derive(sqlx::FromRow)]` struct.
 - The reference files are `crates/akasha/src/insula/ingest.rs` and `crates/akasha/src/anamnesis.rs`.
 - Vault and AKASHA share observable domain commands; standalone Vault is file-authoritative and single-writer, while installed AKASHA is PostgreSQL-authoritative and transactional.
 - Migration is a verified one-way authority handoff, never two authoritative writers followed by reconciliation.
-- Before NATS work, query the project registry for a current NATS/outbox lesson; otherwise use `docs/RUNTIME_ARCHITECTURE.md` sections 7.1–7.6 and standalone Memory #3383.
+- Query the project registry for current NATS and outbox lessons before delivery work.
+  Use `docs/ARCHITECTURE.md` and standalone Memory #3383 for the current boundary.
+  `docs/history/2026-10-04-RUNTIME_ARCHITECTURE.md` is historical provenance, not the active ownership map.
 - PostgreSQL owns truth; NATS provides delivery and wake-up through record IDs and bounded routing and integrity metadata, and consumers reload exact records.
 - Vault never requires NATS.
 - The main agent owns the gate that NATS removes more queue, polling, supervision, and failure machinery than it adds; a Delivery kitten owns one lane.
 - Load all twelve listed design lessons before GUI extraction or implementation.
 - `gui-prototype/` is the operator surface; the parked Godot client lives in the private repository `solarisael/athanor-godot`.
-- Use `docs/RUNTIME_ARCHITECTURE.md` sections 4.1 and 4.5 for command, event, snapshot, delta, replay, and resynchronization contracts.
+- Use `docs/ARCHITECTURE.md` sections 3.3 and 8 for command, event, snapshot, delta, replay, and resynchronization contracts.
 - The GUI consumes Host commands and projections; it never owns authority, accesses PostgreSQL or NATS directly, or infers domain state from appearance.
 - Release evidence covers clean installation, Vault-to-AKASHA migration, restart, live and failed replacement, backup, restore, rollback, and exact supported platforms.
 - Recover Memory #3146, “No unsupervised spirit contact without humane peer protocol,” before spirit-contact fanout.

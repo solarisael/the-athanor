@@ -20,6 +20,8 @@ export type HostResponse = Record<string, unknown> & {
 };
 
 export class HostUnavailable extends Error {
+  dispatched = false;
+  code = "transport_unavailable";
   constructor(message: string) {
     super(message);
     this.name = "HostUnavailable";
@@ -148,18 +150,21 @@ export async function sendHostCommand(
   acceptedTypes: ReadonlySet<string>,
   signal?: AbortSignal,
   timeoutMs = HOST_TIMEOUT_MS,
+  { settleDefinitively = false }: { settleDefinitively?: boolean } = {},
 ): Promise<HostResponse> {
   const url = hostRoomWsUrl(text(command.sender_room));
   const token = requiredEnvironment("ATHANOR_HOST_TOKEN");
   const requestTimeoutMs = Number.isFinite(timeoutMs)
-    ? Math.min(30_000, Math.max(250, Math.trunc(timeoutMs)))
+    ? Math.min(command.command_or_event_type === "athanor.organ.call" ? 300_000 : 30_000, Math.max(250, Math.trunc(timeoutMs)))
     : HOST_TIMEOUT_MS;
   return await new Promise<HostResponse>((resolve, reject) => {
     let settled = false;
+    let dispatched = false;
     let socket: WebSocket;
     let onAbort: (() => void) | undefined;
     const finish = (error: unknown, value?: HostResponse) => {
       if (settled) return;
+      if (error instanceof HostUnavailable) error.dispatched = dispatched;
       settled = true;
       clearTimeout(timeout);
       if (onAbort) signal?.removeEventListener("abort", onAbort);
@@ -167,11 +172,19 @@ export async function sendHostCommand(
       if (error) reject(error);
       else resolve(value!);
     };
+    const unavailable = (message: string, code: string) => {
+      const error = new HostUnavailable(message);
+      error.code = code;
+      return error;
+    };
     const timeout = setTimeout(
-      () => finish(new HostUnavailable(`Athanor Host timed out after ${requestTimeoutMs}ms`)),
+      () => finish(unavailable(`Athanor Host timed out after ${requestTimeoutMs}ms`, "request_timeout")),
       requestTimeoutMs,
     );
-    onAbort = () => finish(new HostUnavailable("Athanor Host request aborted"));
+    onAbort = () => {
+      if (settleDefinitively && dispatched) return;
+      finish(unavailable("Athanor Host request aborted", "request_aborted"));
+    };
     if (signal?.aborted) {
       onAbort();
       return;
@@ -184,7 +197,15 @@ export async function sendHostCommand(
       finish(new HostUnavailable(`Athanor Host connection failed: ${text(error)}`));
       return;
     }
-    socket.addEventListener("open", () => socket.send(JSON.stringify(command)));
+    socket.addEventListener("open", () => {
+      if (settled) return;
+      try {
+        socket.send(JSON.stringify(command));
+        dispatched = true;
+      } catch {
+        finish(new HostUnavailable("Athanor Host could not send the command"));
+      }
+    });
     socket.addEventListener("error", () => finish(new HostUnavailable(`Athanor Host is unavailable at ${url}`)));
     socket.addEventListener("close", () => finish(new HostUnavailable("Athanor Host closed before replying")));
     socket.addEventListener("message", (event) => {

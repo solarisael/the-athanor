@@ -19,16 +19,16 @@ Status: current. Verified against the code at commit `a6ab453` on 2026-10-04. Ea
 | The Athanor | The product. It installs, runs, and updates Houses on one machine. | Start menu entry `The Athanor` (`installer/athanor.iss:35-37`) |
 | House | One continuity domain. It holds rooms, spirits, memories, lessons, and canon. One Host serves exactly one House. | Every room must share `house_id`, the bearer, `DATABASE_URL`, and NATS (`crates/host/src/house.rs:205-234`) |
 | room | A directory that holds `.athanor-room.json`, `active_spirit.md`, or the House state file. The key is the marker's `room`, else the folder name in lowercase. | `adapters/omp/house-proof/room.ts:86-127` |
-| spirit | The identity that governs a room. It comes from the marker's `trueName`, then `active_spirit.md`, then the persisted `embodiedSpirit`. The identity is self-asserted, not authenticated. | `room.ts:77-84,112-119`; `tools.ts:818-847` |
+| spirit | The active room identity in native state. Embodiment does not rename the configured agent. Person-level authentication remains separate. | `crates/host/src/room_state.rs`; `crates/host/src/store.rs` |
 | operator | The person who keeps the House. Each room has exactly one operator name. No person identity exists. | `room.ts:77-84`; [`LIMITATIONS.md`](./LIMITATIONS.md#4-identity) |
 | Host | The one `athanor.exe` process that serves every room on loopback. | `crates/host/src/house.rs:86-105,166-202` |
 | Pulse | The operator's web surface. `pulse.exe` or `bun gui-prototype/serve.ts` serves one room on `127.0.0.1:4175`. | `serve.ts:17-18,32-41`; `gui-desktop/src/main.rs:54-56` |
 | keeper | `athanor.exe keeper` runs one OMP session for one room. Exit code 87 counts as an armed restart. | `crates/omp-keeper/src/keeper.rs:194-547,863-918` |
-| substrate | The `athanor-substrate` child process. The adapter speaks to it with one JSON line per request over stdio. | `adapters/omp/rust-transport.ts:569-575` |
+| substrate | Native storage and domain execution. The Host calls the libraries directly; the binary serves administration and keeper operations. | `crates/akasha/src/native/`; `crates/host/src/organ/` |
 | organs | The House tools a spirit calls. 43 are registered. | `adapters/omp/house-proof/tools.ts:491-2011`; `restart-door.ts:574` |
 | Vault | The file-backed storage profile. **Not re-verified at a6ab453**: `crates/vault` decides. Every supported install runs PostgreSQL. | `databaseMode` is `managed` or `external` (`installer.rs:1229-1250`) |
 | AKASHA | The PostgreSQL storage profile: canon, memories, lessons, and hybrid retrieval. Retrieval internals are **Not re-verified at a6ab453** (`crates/akasha`). | PostgreSQL 18.4-2 and pgvector 0.8.6 (`installer/dependencies.json:1-28`) |
-| GIGA | Optional cognitive workers above AKASHA. The tools refuse unless `ATHANOR_GIGA_ENABLED=1`. | `adapters/omp/giga.ts:107-108`; 7 `giga_*` tools (`tools.ts:1377-1575`) |
+| GIGA | Optional cognitive work above AKASHA. The Host owns explicit enablement and worker lifetime. | `crates/host/src/organ/giga.rs`; `adapters/omp/giga.ts` |
 | Hippocampus | The first GIGA worker. It proposes candidate memories and lessons. A candidate is never authority. **Not re-verified at a6ab453**: the GIGA crate decides. | — |
 | Curios | Candidates that a governing spirit keeps for later review. **Not re-verified at a6ab453**: the GIGA store in `crates/akasha` decides. | — |
 | Striatum | The GIGA slice that keeps reviewed lessons warm while a work state persists. **Not re-verified at a6ab453**: `crates/akasha` and `crates/hearth` decide. | Nearest row: the lesson TTSR bridge (`adapters/omp/index.ts:1033-1056`) |
@@ -59,14 +59,14 @@ These names have no code. Do not describe them as current. Each one waits in [`R
 | Release manifest product | `the-athanor` | `crates/athanor-install/src/manifest.rs:7-11` |
 | Release artifact | `The-Athanor-<version>-windows-x64.exe` | `.github/workflows/release.yml:66-74` |
 | Executable | `athanor.exe`: Host, service, installer, keeper, chat, and status | `installer/athanor.iss:27`; `installer.rs:307-318`; `layout.rs:57-61` |
-| Substrate | `athanor-substrate.exe` on Windows; `athanor-substrate` on `linux-x64` and `linux-arm64` | `installer/build-native-release.ps1:146-167`; `adapters/omp/discovery.ts:17-26` |
+| Substrate CLI | `athanor-substrate.exe` in the Windows payload | `installer/build-native-release.ps1`; `crates/akasha/src/main.rs` |
 | Windows service | `SolarisaelAthanor`, display name `Solarisael Athanor` | `installer.rs:334-339`; `layout.rs:5-6`; `boundaries.rs:479-509` |
 | Program root | `%ProgramFiles%/Solarisael/Athanor` | `crates/athanor-install/src/layout.rs:4,22-27,39-45` |
 | Data root | `%ProgramData%/Solarisael/Athanor` | `layout.rs:4,22-27,39-45` |
 | House id, reference House | `solarisael` | `C:/ProgramData/Solarisael/Athanor/config/runtime.json:1-37` |
 | House id, no config supplied | `local` | `installer.rs:1167-1183` |
-| Room marker | `.athanor-room.json`. The legacy `.solarisael-room.json` is renamed in place. | `adapters/omp/house-proof/room.ts:17-28` |
-| Environment prefix | `ATHANOR_`, for example `ATHANOR_PROGRAM_ROOT`, `ATHANOR_DATA_ROOT`, `ATHANOR_HOST_KNOCK_AUTONOMY`, `ATHANOR_HOST_TOKEN`, `ATHANOR_SUBSTRATE_EXE` | `layout.rs:29-37`; `crates/host/src/config.rs:4,21-41`; `host.ts:153`; `discovery.ts:58-78` |
+| Room marker | `.athanor-room.json`. Native startup migrates legacy names before reading room state. | `crates/host/src/store.rs` |
+| Environment prefix | `ATHANOR_`, including Host, state, and native runtime settings | `crates/host/src/config.rs`; `adapters/omp/house-proof/host.ts` |
 
 Two exceptions to the prefix matter:
 

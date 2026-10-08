@@ -21,7 +21,7 @@ type LoaderOptions = {
   programRoot?: string;
   userProfile?: string;
   env?: NodeJS.ProcessEnv;
-  healthProbe?: (endpoint: string) => Promise<boolean>;
+  healthProbe?: (endpoint: string, expectedHostApi: number) => Promise<boolean>;
   /** Host watch period; default HOST_WATCH_INTERVAL_MS. */
   watchIntervalMs?: number;
   /** Aborting stops the Host watch. */
@@ -510,24 +510,32 @@ function parseClientProjection(value: unknown): ClientProjection {
 const HEALTH_REQUEST_TIMEOUT_MS = 500;
 const HOST_WATCH_INTERVAL_MS = 30_000;
 
+class HostApiMismatch extends Error {}
 
-async function defaultHealthProbe(endpoint: string): Promise<boolean> {
+async function defaultHealthProbe(endpoint: string, expectedHostApi: number): Promise<boolean> {
   try {
     const response = await fetch(endpoint, {
       signal: AbortSignal.timeout(HEALTH_REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) return false;
     const body = await response.json() as Record<string, unknown>;
+    const hostApi = body.hostApi ?? 1;
+    if (hostApi !== expectedHostApi) {
+      throw new HostApiMismatch(
+        `Athanor Host API mismatch at ${endpoint}: running ${hostApi}, selected release requires ${expectedHostApi}. Restart the matching native release.`,
+      );
+    }
     const url = new URL(endpoint);
     const route = url.pathname.slice(0, -"/health".length);
     return body.status === "ok"
       && body.websocket_path === `${route}/athanor/v1/ws`;
-  } catch {
+  } catch (error) {
+    if (error instanceof HostApiMismatch) throw error;
     return false;
   }
 }
 
-function watchScopedHost(endpoint: string, options: LoaderOptions, lost: boolean): void {
+function watchScopedHost(endpoint: string, expectedHostApi: number, options: LoaderOptions, lost: boolean): void {
   const probe = options.healthProbe ?? defaultHealthProbe;
   const intervalMs = options.watchIntervalMs ?? HOST_WATCH_INTERVAL_MS;
   let busy = false;
@@ -535,12 +543,15 @@ function watchScopedHost(endpoint: string, options: LoaderOptions, lost: boolean
     if (busy) return;
     busy = true;
     try {
-      if (await probe(endpoint)) {
+      if (await probe(endpoint, expectedHostApi)) {
         if (lost) console.warn(`Athanor Host answers scoped health again at ${endpoint}.`);
         lost = false;
         return;
       }
       if (!lost) console.warn(`Athanor Host is not running at ${endpoint}. Start the Athanor.`);
+      lost = true;
+    } catch (error) {
+      console.warn(error instanceof Error ? error.message : String(error));
       lost = true;
     } finally {
       busy = false;
@@ -624,11 +635,8 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
     ),
     "client projection",
   ));
-
   setUnlessConfigured(env, "ATHANOR_STATE_DIR", client.stateRoot);
-  setUnlessConfigured(env, "ATHANOR_SUBSTRATE_ROOT", nativeRoot.logical);
-  setUnlessConfigured(env, "ATHANOR_SUBSTRATE_EXE", path.join(nativeRoot.logical, "bin", "athanor-substrate.exe"));
-  setUnlessConfigured(env, "PG_BIN_DIR", path.join(nativeRoot.logical, "runtime", "postgresql", "bin"));
+
   setUnlessConfigured(env, "ATHANOR_HOST_HOUSE_ID", client.houseId);
   setUnlessConfigured(env, "ATHANOR_HOST_TOKEN", client.hostToken);
   setUnlessConfigured(env, "ATHANOR_HOST_URL", client.hostUrl);
@@ -639,12 +647,13 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
     releaseId: pointer.releaseId,
     previousReleaseId: pointer.previousReleaseId,
     healthEndpoint: scopedHealthEndpoint(client.hostUrl, client.defaultRoom),
+    hostApi: native.hostApi,
   };
 }
 
 export default async function installedAthanor(pi: unknown, options: LoaderOptions = {}) {
   const modules = configureInstalledAthanor(options);
-  const absent = !await (options.healthProbe ?? defaultHealthProbe)(modules.healthEndpoint);
+  const absent = !await (options.healthProbe ?? defaultHealthProbe)(modules.healthEndpoint, modules.hostApi);
   if (absent) {
     console.warn(`Athanor Host is not running at ${modules.healthEndpoint}. Start the Athanor.`);
   }
@@ -659,5 +668,5 @@ export default async function installedAthanor(pi: unknown, options: LoaderOptio
     previousReleaseId: modules.previousReleaseId,
   });
   await hygiene.default(pi);
-  watchScopedHost(modules.healthEndpoint, options, absent);
+  watchScopedHost(modules.healthEndpoint, modules.hostApi, options, absent);
 }

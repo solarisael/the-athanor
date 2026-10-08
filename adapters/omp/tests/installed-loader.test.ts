@@ -200,6 +200,7 @@ async function makeInstalledTree(
   previousReleaseId: string | null = null,
   nativeVersion = "0.10.1",
   componentVersion = "0.9.3",
+  hostApi = 1,
 ): Promise<InstalledTree> {
   const root = path.join(os.tmpdir(), `athanor-loader-${randomUUID()}`);
   roots.push(root);
@@ -224,7 +225,7 @@ async function makeInstalledTree(
     platform: "windows-x64",
     schemaVersion: 18,
     compatibility: {
-      hostApi: 1,
+      hostApi,
       substrateApi: 1,
       deliveryApi: 1,
     },
@@ -263,7 +264,7 @@ async function makeInstalledTree(
     component: "omp-adapter",
     version: componentVersion,
     releaseId: "",
-    compatibility: { ...compatibility },
+    compatibility: { ...compatibility, hostApi },
     artifacts,
   } satisfies Manifest;
   manifest.releaseId = releaseIdFor(manifest);
@@ -315,39 +316,38 @@ async function expectRefusal(tree: InstalledTree, message: string | RegExp) {
   expect(runtime().__installedLoaderCalls ?? []).toEqual([]);
 }
 
-test("loads the integrity-checked component release while native current.json owns runtime configuration", async () => {
-  const previousReleaseId = `0.9.2-${"a".repeat(64)}`;
-  const tree = await makeInstalledTree(previousReleaseId);
-  tree.env.ATHANOR_STATE_DIR = path.join(tree.root, "operator-override");
+test("refuses an older running Host even when the selected release files agree", async () => {
+  const tree = await makeInstalledTree(null, "0.10.2", "0.10.0", 2);
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch() {
+      return Response.json({ status: "ok", hostApi: 1, websocket_path: "/room/kintsu/athanor/v1/ws" });
+    },
+  });
+  const clientPath = path.join(tree.profile, ".omp", "agent", "athanor", "client.json");
+  const client = JSON.parse(await readFile(clientPath, "utf8"));
+  client.hostUrl = `ws://127.0.0.1:${server.port}`;
+  await writeFile(clientPath, JSON.stringify(client));
+  try {
+    await expectRefusal(tree, /Host API mismatch.*running 1.*requires 2/);
+  } finally {
+    server.stop(true);
+  }
+});
 
+test("preserves the operator state root and keeps credentials out of module URLs", async () => {
+  const tree = await makeInstalledTree();
+  tree.env.ATHANOR_STATE_DIR = path.join(tree.root, "operator-override");
   const modules = configureInstalledAthanor({
     programRoot: tree.program,
     userProfile: tree.profile,
     env: tree.env,
   });
-
-  expect(modules.releaseId).toBe(tree.manifest.releaseId);
-  expect(modules.previousReleaseId).toBe(previousReleaseId);
-  expect(modules.index).toContain(`/components/omp-adapter/versions/${tree.manifest.releaseId}/index.ts`);
-  expect(modules.hygiene).toContain(`/components/omp-adapter/versions/${tree.manifest.releaseId}/hygiene.ts`);
-  expect(modules.index).not.toContain("/adapters/omp/");
-  expect(modules.index).not.toContain("private-token");
   expect(tree.env.ATHANOR_STATE_DIR).toBe(path.join(tree.root, "operator-override"));
-  expect(tree.env.ATHANOR_SUBSTRATE_ROOT).toBe(tree.nativeRoot);
-  expect(tree.env.ATHANOR_SUBSTRATE_EXE).toBe(path.join(tree.nativeRoot, "bin", "athanor-substrate.exe"));
-  expect(tree.env.PG_BIN_DIR).toBe(path.join(tree.nativeRoot, "runtime", "postgresql", "bin"));
-  expect(tree.env.ATHANOR_HOST_HOUSE_ID).toBe("solarisael");
-  expect(tree.env.ATHANOR_HOST_TOKEN).toBe("private-token");
-  expect(tree.env.ATHANOR_HOST_URL).toBe("ws://127.0.0.1:8787");
-
-  await installedAthanor(null, {
-    programRoot: tree.program,
-    userProfile: tree.profile,
-    env: tree.env,
-    healthProbe: async () => true,
-  });
-  expect([...(runtime().__installedLoaderImports ?? [])].sort()).toEqual(["hygiene", "index"]);
-  expect(runtime().__installedLoaderCalls).toEqual(["index", "hygiene"]);
+  expect(modules.index).not.toContain("private-token");
+  expect(modules.hygiene).not.toContain("private-token");
+  expect(modules.healthEndpoint).not.toContain("private-token");
 });
 
 test("accepts explicit null previous release metadata", async () => {

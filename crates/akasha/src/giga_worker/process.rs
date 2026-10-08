@@ -1,4 +1,5 @@
 use super::classify::classify_event;
+use super::enablement::GigaEnablement;
 use super::identity::{
     GIGA_MODEL_MANIFEST_DIGEST, GIGA_MODEL_TAG, GIGA_PROMPT_VERSION, sha256_bytes, source_digest,
 };
@@ -177,6 +178,15 @@ pub async fn giga_process(
     config: &Config,
     claim: &GigaEventClaimReceipt,
 ) -> Result<GigaProcessResult, AppError> {
+    giga_process_with_enablement(pool, config, claim, GigaEnablement::from_env()).await
+}
+
+pub(super) async fn giga_process_with_enablement(
+    pool: &PgPool,
+    config: &Config,
+    claim: &GigaEventClaimReceipt,
+    enablement: GigaEnablement,
+) -> Result<GigaProcessResult, AppError> {
     let (event, attempt_count) = validate_claim(pool, claim).await?;
     let source_hash = source_digest(&event);
     let event_hash = sha256_bytes(event.event_id().as_bytes());
@@ -190,7 +200,7 @@ pub async fn giga_process(
             .fetch_one(pool)
             .await?;
             match existing_candidates {
-                0 => classify_event(&event, &sources).await,
+                0 => classify_event(&event, &sources, enablement).await,
                 1 => {
                     tracing::info!(
                         operation = "giga_process",

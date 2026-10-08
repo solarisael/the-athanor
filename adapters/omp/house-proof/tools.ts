@@ -1,18 +1,16 @@
 // Tool registration for the OMP adapter.
 // Silhouette: expose room/substrate tools; keep hook wiring out of tool bodies.
 
-import { recallWithRouting } from "./recall.ts";
+import { parentContextRequest, recallWithRouting } from "./recall.ts";
 import {
   loadRoomState,
-  normalizeSpiritName,
+  patchRoomState,
   roomCapability,
   roomContext,
-  saveRoomState,
   statePathForRoom,
-  writeActiveSpiritSnapshot,
 } from "./room.ts";
 import { RecallPolicyHostClient } from "./recall-policy.ts";
-import { hostHouseId, hostSessionIdentity } from "./host.ts";
+import { hostHouseId, hostSessionIdentity, type HostBinding } from "./host.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { PAPER_BOAT_GUIDANCE } from "./paper-boat.ts";
 import { boatCast } from "./boat-door.ts";
@@ -25,8 +23,7 @@ import {
   sleepBoat,
   substrateHealth,
 } from "./substrate.ts";
-import { RustJsonlTransport, RustTransportError, RustTransportOutcomeUnknownError } from "../rust-transport.ts";
-import { discoverRustExecutable } from "../discovery.ts";
+import { requestOrgan, organFailure, OrganError, type OrganOperation } from "./organ.ts";
 import { dispatchHouse, familiarStatus, laneStatus } from "./routing.ts";
 import { WRITE_TIMEOUT_MS } from "./constants.ts";
 import {
@@ -53,7 +50,6 @@ import {
 } from "../giga.ts";
 import { registerRestartDoor } from "./restart-door.ts";
 
-const rustRememberTransports = new Map<string, RustJsonlTransport>();
 const LANE_STATUS_HEALTH_TIMEOUT_MS = 3_000;
 const DESIGN_DOCUMENT_TYPES = new Set(["token", "component", "contract", "guideline"]);
 
@@ -123,7 +119,7 @@ export async function closePresenceAndSleep(
   } catch (error) {
     console.warn(`[athanor] Presence close degraded: ${error instanceof Error ? error.message : String(error)}`);
   }
-  return writeBoat(binding.room, closedBody, { signal });
+  return writeBoat(binding, closedBody, { signal });
 }
 
 function refuseDocket(code: string, gate: string, error: string) {
@@ -147,165 +143,29 @@ function docketHouseId(requested: unknown) {
 
 
 
-function rustRememberTransport(): RustJsonlTransport | null {
-  const executable = discoverRustExecutable();
-  if (!executable) return null;
-  let transport = rustRememberTransports.get(executable);
-  if (transport && !transport.usable) {
-    rustRememberTransports.delete(executable);
-    void transport.close().catch(() => {});
-    transport = undefined;
-  }
-  if (!transport) {
-    transport = new RustJsonlTransport({ executable });
-    rustRememberTransports.set(executable, transport);
-  }
-  return transport;
+export async function writeRustCanon({ binding, room, signal, ...params }) {
+  return requestRustDomain(binding, "canon_write", params, signal, true, room);
 }
 
-function evictRustRememberTransport(executable: string, transport: RustJsonlTransport): void {
-  if (rustRememberTransports.get(executable) !== transport) return;
-  rustRememberTransports.delete(executable);
-  void transport.close().catch(() => {});
+export async function readRustCanon({ binding, room, signal, ...params }) {
+  return requestRustDomain(binding, "canon_read", params, signal, false, room);
 }
 
-
-function rustFailureReceipt(error: RustTransportError): Record<string, unknown> {
-  const upstreamDetails = error.details && typeof error.details === "object" && !Array.isArray(error.details)
-    ? error.details as Record<string, unknown>
-    : { upstream_details: error.details ?? null };
-  const stderr = error.stderr.slice(0, 4096);
-  const evidence = Array.isArray(upstreamDetails.evidence) ? [...upstreamDetails.evidence] : [];
-  if (stderr) {
-    evidence.push({
-      source: "rust_stderr",
-      text: stderr,
-      truncated: error.stderr.length > stderr.length,
-    });
-  }
-  return {
-    ok: false,
-    error: error.message,
-    code: error.code,
-    retryable: error.retryable,
-    details: { ...upstreamDetails, evidence },
-  };
-}
-function unknownOutcomeDetails(error: unknown): Record<string, unknown> {
-  const source = error && typeof error === "object" ? error as { details?: unknown } : {};
-  return source.details && typeof source.details === "object" && !Array.isArray(source.details)
-    ? source.details as Record<string, unknown>
-    : {};
-}
-
-function isOutcomeUnknownError(error: unknown): boolean {
-  return error instanceof RustTransportOutcomeUnknownError;
-}
-
-
-
-export async function writeRustCanon({ room, name, kind, summary, aliases, searchBoost, weighty, pointerFiles, summaryAsOf, supersedes, attribution, signal }) {
-  const executable = discoverRustExecutable();
-  const transport = rustRememberTransport();
-  if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
+export async function writeRustMemory({ binding, room, title, body, threads, continues, supersedes, backup = undefined, signal }) {
   try {
-    const receipt = await transport.request("canon_write", {
-      room,
-      name,
-      kind,
-      summary,
-      aliases,
-      searchBoost,
-      weighty,
-      pointerFiles,
-      summaryAsOf,
-      supersedes,
-      attribution,
-    }, {
-      signal: signal || undefined,
-      timeoutMs: WRITE_TIMEOUT_MS,
-      settleDefinitively: true,
-    });
-    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
-      evictRustRememberTransport(executable, transport);
-      return {
-        ok: false,
-        error: "Rust canon write outcome is unknown after dispatch",
-        code: "outcome_unknown",
-        outcome: "unknown",
-        retryable: false,
-      };
-    }
-    return receipt as Record<string, unknown>;
-  } catch (error) {
-    if (!transport.usable) evictRustRememberTransport(executable, transport);
-    if (error instanceof RustTransportError) return rustFailureReceipt(error);
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-      ...(isOutcomeUnknownError(error)
-        ? { code: "outcome_unknown", outcome: "unknown", retryable: false }
-        : {}),
-    };
-  }
-}
-
-export async function readRustCanon({ room, id, name, includeHistory, signal }) {
-  const executable = discoverRustExecutable();
-  const transport = rustRememberTransport();
-  if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
-  try {
-    return await transport.request("canon_read", {
-      room,
-      id,
-      name,
-      includeHistory,
-    }, {
-      signal: signal || undefined,
-      timeoutMs: WRITE_TIMEOUT_MS,
-    }) as Record<string, unknown>;
-  } catch (error) {
-    if (!transport.usable) evictRustRememberTransport(executable, transport);
-    if (error instanceof RustTransportError) return rustFailureReceipt(error);
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-export async function writeRustMemory({ room, title, body, threads, continues, supersedes, backup = undefined, signal }) {
-  const transport = rustRememberTransport();
-  if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
-  try {
-    // PostgreSQL commits before the optional dump; the receipt reports each outcome.
-    const value = await transport.request("remember", {
-      room,
-      kind: "memory",
-      title,
-      body,
-      threads,
-      continues,
-      supersedes,
-      backup,
-    }, {
-      signal: signal || undefined,
-      timeoutMs: WRITE_TIMEOUT_MS,
-      settleDefinitively: true,
-    }) as Record<string, unknown>;
+    const value = await requestOrgan(binding, "remember", {
+      kind: "memory", title, body, threads, continues, supersedes, backup,
+    }, { signal, timeoutMs: WRITE_TIMEOUT_MS, write: true, targetScope: targetScope(binding, room) });
     return { ok: true, ...value, id: value.memory_id, sourcePath: value.source_path };
   } catch (error) {
-    if (error instanceof RustTransportError) return rustFailureReceipt(error);
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return organFailure(error);
   }
 }
 
-async function writeRustLesson({ room, kind, title, body, fields, backup, signal }) {
-  const transport = rustRememberTransport();
-  if (!transport) return { ok: false, error: "Rust substrate executable is unavailable" };
+async function writeRustLesson({ binding, room, kind, title, body, fields, backup, signal }) {
   try {
-    const value = await transport.request("remember", {
-      room,
-      kind,
-      title,
-      body,
+    const value = await requestOrgan(binding, "remember", {
+      kind, title, body,
       shape: fields.shape,
       voice: fields.voice,
       register: fields.register,
@@ -325,92 +185,55 @@ async function writeRustLesson({ room, kind, title, body, fields, backup, signal
       interruptMode: fields.interruptMode,
       repeatCooldownSecs: fields.repeatCooldownSecs,
       backup,
-    }, {
-      signal: signal || undefined,
-      timeoutMs: WRITE_TIMEOUT_MS,
-      settleDefinitively: true,
-    }) as Record<string, unknown>;
+    }, { signal, timeoutMs: WRITE_TIMEOUT_MS, write: true, targetScope: targetScope(binding, room) });
     return { ok: true, ...value, id: value.lesson_id };
   } catch (error) {
-    if (error instanceof RustTransportError) return rustFailureReceipt(error);
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return organFailure(error);
   }
 }
-async function requestRustDomain(method: string, params: Record<string, unknown>, signal?: AbortSignal, write = false) {
-  const executable = discoverRustExecutable();
-  const transport = rustRememberTransport();
-  if (!transport || !executable) return { ok: false, error: "Rust substrate executable is unavailable" };
+
+function targetScope(binding: HostBinding, room?: string): "room" | "house" {
+  if (room === "house") return "house";
+  if (room && room !== binding.room) throw new Error("foreign room target refused");
+  return "room";
+}
+
+async function requestRustDomain(
+  binding: HostBinding,
+  method: OrganOperation,
+  params: Record<string, unknown>,
+  signal?: AbortSignal,
+  write = false,
+  room?: string,
+) {
   try {
-    const result = await transport.request(method, params, {
-      signal: signal || undefined,
-      timeoutMs: WRITE_TIMEOUT_MS,
-      ...(write ? { settleDefinitively: true } : {}),
+    return await requestOrgan(binding, method, params, {
+      signal, timeoutMs: WRITE_TIMEOUT_MS, write, targetScope: targetScope(binding, room),
     });
-    if (!result || typeof result !== "object" || Array.isArray(result)) {
-      if (write) evictRustRememberTransport(executable, transport);
-      return { ok: false, error: `Rust ${method} returned an invalid receipt` };
-    }
-    return result as Record<string, unknown>;
   } catch (error) {
-    if (!transport.usable) evictRustRememberTransport(executable, transport);
-    if (error instanceof RustTransportError) return rustFailureReceipt(error);
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return organFailure(error);
   }
 }
 
-
-function unknownAnamnesisReceipt(error?: unknown): Record<string, unknown> {
-  return {
-    ok: false,
-    error: "Rust anamnesis write outcome is unknown after dispatch",
-    code: "outcome_unknown",
-    outcome: "unknown",
-    retryable: true,
-    details: unknownOutcomeDetails(error),
-  };
-}
-async function writeRustAnamnesis({ room, payload, signal }) {
-  const executable = discoverRustExecutable();
-  const transport = rustRememberTransport();
-  if (!transport || !executable) return { ok: false, error: "Rust substrate executable is unavailable" };
+async function writeRustAnamnesis({ binding, payload, signal }) {
   const operation = payload?.operation;
-  const params = { room, ...payload };
   try {
-    const receipt = await transport.request("anamnesis_write", params, {
-      signal: signal || undefined, timeoutMs: WRITE_TIMEOUT_MS, settleDefinitively: true,
+    const value = await requestOrgan(binding, "anamnesis_write", payload, {
+      signal, timeoutMs: WRITE_TIMEOUT_MS, write: true,
     });
-    if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) {
-      evictRustRememberTransport(executable, transport);
-      return unknownAnamnesisReceipt();
-    }
-    const value = receipt as Record<string, unknown>;
-    if (value.ok !== true || value.operation !== operation || value.room !== room
+    if (value.ok !== true || value.operation !== operation || value.room !== binding.room
       || typeof value.title !== "string"
       || (operation === "add" && value.kind !== "pillar" && value.kind !== "cycle")
       || (operation === "append-rep" && (!Number.isInteger(value.repNumber) || Number(value.repNumber) < 1))
       || value.durable !== true || value.authority !== "postgres"
       || !Array.isArray(value.warnings) || !value.warnings.every((warning) => typeof warning === "string")) {
-      evictRustRememberTransport(executable, transport);
-      return unknownAnamnesisReceipt();
+      throw new OrganError("Rust anamnesis write outcome is unknown after dispatch", "outcome_unknown", false, {
+        execution: { request_dispatched: true, write_outcome: "unknown", retry: "reconcile_first" },
+      });
     }
     return { ok: true, ...value };
   } catch (error) {
-    if (isOutcomeUnknownError(error)) {
-      evictRustRememberTransport(executable, transport);
-      return unknownAnamnesisReceipt(error);
-    }
-    if (!transport.usable) evictRustRememberTransport(executable, transport);
-    if (error instanceof RustTransportError) {
-      return rustFailureReceipt(error);
-    }
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-export function closeRustRememberTransports() {
-  for (const [executable, transport] of rustRememberTransports) {
-    rustRememberTransports.delete(executable);
-    void transport.close().catch(() => {});
+    return organFailure(error);
   }
 }
 
@@ -502,10 +325,18 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "read",
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+      const contextRequest = parentContextRequest(ctx);
+      if (contextRequest) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: contextRequest }],
+          details: { ok: false, code: "ask_parent_context" },
+        };
+      }
       const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
       const session = hostSessionIdentity(ctx, effectiveRoomDir);
       try {
-        const recalled = await recallWithRouting(effectiveRoomDir, room, params.query, { signal: _signal, temporalDecay: false, projection: "manual" });
+        const recalled = await recallWithRouting(room, params.query, { binding: { room, spirit, session }, signal: _signal, temporalDecay: false, projection: "manual" });
         if (!recalled.ok) {
           return {
             isError: true,
@@ -551,6 +382,7 @@ export function registerSolarisaelTools(pi, release) {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
       const result = await readRustCanon({
+        binding: hostBinding(ctx).binding,
         room: params.room === "house" ? "house" : room,
         id: params.id,
         name: params.name,
@@ -595,6 +427,7 @@ export function registerSolarisaelTools(pi, release) {
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { room, spirit, operator } = roomContext(ctx.cwd);
       const result = await writeRustCanon({
+        binding: hostBinding(ctx).binding,
         room: params.room === "house" ? "house" : room,
         name: params.name,
         kind: params.kind,
@@ -665,6 +498,7 @@ export function registerSolarisaelTools(pi, release) {
       const kind = params.kind || "memory";
       const result = kind === "memory"
         ? await writeRustMemory({
+            binding: hostBinding(ctx).binding,
             room: params.room === "house" ? "house" : room,
             title: params.title,
             body: params.body,
@@ -675,6 +509,7 @@ export function registerSolarisaelTools(pi, release) {
             signal,
           })
         : await writeRustLesson({
+            binding: hostBinding(ctx).binding,
             room,
             kind,
             title: params.title,
@@ -724,8 +559,8 @@ export function registerSolarisaelTools(pi, release) {
       expectedTitle: z.string().describe("Exact current title required as a deletion guard (must be non-empty)."),
     }),
     approval: "write",
-    async execute(_toolCallId, params, signal) {
-      const result = await requestRustDomain("lesson_delete", {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "lesson_delete", {
         kind: params.kind,
         id: params.id,
         expectedTitle: params.expectedTitle,
@@ -778,8 +613,8 @@ export function registerSolarisaelTools(pi, release) {
       }).describe("Typed replacement fields for the selected lesson kind."),
     }),
     approval: "write",
-    async execute(_toolCallId, params, signal) {
-      const result = await requestRustDomain("lesson_update", params, signal, true);
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "lesson_update", params, signal, true);
       return {
         isError: !(result.ok === true && result.updated === true),
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -795,8 +630,7 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
-      const result = await catchBoat(room, { signal });
+      const result = await catchBoat(hostBinding(ctx).binding, { signal });
       return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });
@@ -808,8 +642,8 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const state = await loadRoomState(effectiveRoomDir, room, spirit);
+      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      const state = await loadRoomState(ctx, _signal);
       return { content: [{ type: "text", text: JSON.stringify({ path: statePathForRoom(effectiveRoomDir), state }, null, 2) }], details: { room, ok: true } };
     },
   });
@@ -824,24 +658,8 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const current = await loadRoomState(effectiveRoomDir, room, spirit);
-      const embodiedSpirit = params.embodiedSpirit === undefined
-        ? null
-        : normalizeSpiritName(params.embodiedSpirit);
-      if (params.embodiedSpirit !== undefined && !embodiedSpirit) {
-        return refuseToolResult("embodiedSpirit must be 1-80 characters and contain no line breaks or '|'");
-      }
-      const operator = params.operator === undefined ? null : normalizeSpiritName(params.operator);
-      if (params.operator !== undefined && !operator) {
-        return refuseToolResult("operator must be 1-80 characters and contain no line breaks or '|'");
-      }
-      const next = await saveRoomState(effectiveRoomDir, {
-        ...current,
-        ...(operator ? { operator } : {}),
-        ...(embodiedSpirit ? { embodiedSpirit, agentName: embodiedSpirit, lastSpiritChangeAt: new Date().toISOString() } : {}),
-      });
-      await writeActiveSpiritSnapshot(effectiveRoomDir, next);
+      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      const next = await patchRoomState(ctx, params, _signal);
       return { content: [{ type: "text", text: JSON.stringify({ path: statePathForRoom(effectiveRoomDir), state: next }, null, 2) }], details: { room, ok: true } };
     },
   });
@@ -875,8 +693,7 @@ export function registerSolarisaelTools(pi, release) {
       if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 50) {
         return refuseToolResult("limit must be an integer from 1 through 50");
       }
-      const result = await requestRustDomain("lesson_query", {
-        room,
+      const result = await requestRustDomain(hostBinding(ctx).binding, "lesson_query", {
         type: params.type,
         limit: params.limit,
         ...(params.shape?.trim() ? { shape: params.shape.trim() } : {}),
@@ -912,7 +729,7 @@ export function registerSolarisaelTools(pi, release) {
       limit: z.number().default(12).describe("Maximum rows; integer from 1 through 50."),
     }),
     approval: "read",
-    async execute(_toolCallId, params, signal) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       if (typeof params.system !== "string" || !params.system.trim()) {
         return refuseToolResult("system is required");
       }
@@ -922,7 +739,7 @@ export function registerSolarisaelTools(pi, release) {
       if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 50) {
         return refuseToolResult("limit must be an integer from 1 through 50");
       }
-      const result = await requestRustDomain("design_document_query", {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "design_document_query", {
         system: params.system.trim(),
         docType: params.docType,
         name: params.name?.trim() || undefined,
@@ -959,7 +776,7 @@ export function registerSolarisaelTools(pi, release) {
       allowIdentityChange: z.boolean().optional().describe("Allow a superseded row to have a different identity."),
     }),
     approval: "write",
-    async execute(_toolCallId, params, signal) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       if (typeof params.system !== "string" || !params.system.trim()) {
         return refuseToolResult("system is required");
       }
@@ -972,7 +789,7 @@ export function registerSolarisaelTools(pi, release) {
       if (params.supersedes !== undefined && !/^[1-9]\d*$/.test(String(params.supersedes))) {
         return refuseToolResult("supersedes must be a positive numeric document ID");
       }
-      const result = await requestRustDomain("design_document_write", {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "design_document_write", {
         system: params.system,
         docType: params.docType,
         name: params.name,
@@ -1028,7 +845,7 @@ export function registerSolarisaelTools(pi, release) {
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
       const result = await laneStatus(binding);
-      const substrate = await substrateHealth(LANE_STATUS_HEALTH_TIMEOUT_MS);
+      const substrate = await substrateHealth(binding, LANE_STATUS_HEALTH_TIMEOUT_MS);
       const status = { ...result, substrate };
       return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }], details: status };
     },
@@ -1131,19 +948,10 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const current = await loadRoomState(effectiveRoomDir, room, spirit);
-      const hasUpdate = typeof params.enabled === "boolean";
-      const next = hasUpdate
-        ? await saveRoomState(effectiveRoomDir, {
-          ...current,
-          routingMode: {
-            ...(current.routingMode || {}),
-            enabled: params.enabled,
-            updatedAt: new Date().toISOString(),
-          },
-        })
-        : current;
+      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      const next = typeof params.enabled === "boolean"
+        ? await patchRoomState(ctx, { routingModeEnabled: params.enabled }, _signal)
+        : await loadRoomState(ctx, _signal);
       return {
         content: [{ type: "text", text: JSON.stringify({ path: statePathForRoom(effectiveRoomDir), routingMode: next.routingMode }, null, 2) }],
         details: { room, ok: true, routingMode: next.routingMode },
@@ -1230,9 +1038,8 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const current = await loadRoomState(effectiveRoomDir, room, spirit);
-      const modelDefault = { ...(current.modelDefault || {}) };
+      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      const patch: import("./room.ts").RoomStatePatch = {};
       const model = typeof params.model === "string" ? params.model.trim() : "";
   
       if (model) {
@@ -1244,32 +1051,18 @@ export function registerSolarisaelTools(pi, release) {
             details: { room, ok: false, model },
           };
         }
-        modelDefault.model = model;
+        patch.modelDefaultModel = model;
       }
   
       if (params.clear) {
-        modelDefault.enabled = false;
-        modelDefault.model = null;
+        patch.modelDefaultEnabled = false;
+        patch.modelDefaultModel = null;
       }
-      if (typeof params.enabled === "boolean") modelDefault.enabled = params.enabled;
-      if (modelDefault.enabled && !modelDefault.model) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Cannot enable room model default without a model selector." }],
-          details: { room, ok: false },
-        };
-      }
-  
-      const shouldSave = Boolean(model || params.clear || typeof params.enabled === "boolean");
-      const next = shouldSave
-        ? await saveRoomState(effectiveRoomDir, {
-          ...current,
-          modelDefault: {
-            ...modelDefault,
-            updatedAt: new Date().toISOString(),
-          },
-        })
-        : current;
+      if (typeof params.enabled === "boolean") patch.modelDefaultEnabled = params.enabled;
+
+      const next = Object.keys(patch).length
+        ? await patchRoomState(ctx, patch, _signal)
+        : await loadRoomState(ctx, _signal);
   
       let applied = false;
       if (params.applyNow !== false && next.modelDefault?.enabled && next.modelDefault?.model && typeof pi.setModel === "function") {
@@ -1297,12 +1090,14 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "read",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      const { room } = roomContext(ctx.cwd);
       const mode = params.mode;
       if (mode === "consult" && !String(params.query || "").trim()) {
         return refuseToolResult("consult requires a non-empty query");
       }
-      const result = await queryAnamnesis(effectiveRoomDir, room, {
+      const result = await queryAnamnesis(room, {
+        binding: hostBinding(ctx).binding,
+        signal: _signal,
         mode,
         ...(mode === "consult" ? { query: params.query } : {}),
         ...(params.limit !== undefined ? { limit: params.limit } : {}),
@@ -1353,7 +1148,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { binding } = hostBinding(ctx);
       const payload = { ...params };
       if (params.operation === "add") {
       if (params.kind === "pillar" && params.seedRep !== undefined) {
@@ -1362,13 +1157,13 @@ export function registerSolarisaelTools(pi, release) {
       if (!params.kind || !params.fidelity || !params.activation || !String(params.ramp || "").trim()) {
         return refuseToolResult("add requires kind, fidelity, activation, and ramp");
       }
-        const result = await writeRustAnamnesis({ room, payload, signal: _signal });
+        const result = await writeRustAnamnesis({ binding, payload, signal: _signal });
         return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
       }
       if (!Number.isInteger(params.repNumber) || params.repNumber < 1 || !String(params.howItWent || "").trim() || !String(params.portalPull || "").trim() || !String(params.lighter || "").trim() || !Array.isArray(params.sourcePaths)) {
         return refuseToolResult("append-rep requires integer repNumber, howItWent, portalPull, lighter, and sourcePaths");
       }
-      const result = await writeRustAnamnesis({ room, payload, signal: _signal });
+      const result = await writeRustAnamnesis({ binding, payload, signal: _signal });
       return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
     },
   });
@@ -1385,7 +1180,7 @@ export function registerSolarisaelTools(pi, release) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
       try {
-        const result = await requestGigaCandidateList(room, {
+        const result = await requestGigaCandidateList(hostBinding(ctx).binding, {
           ...(params.review_state === undefined ? {} : { reviewState: params.review_state }),
           ...(params.limit === undefined ? {} : { limit: params.limit }),
           signal: _signal,
@@ -1414,7 +1209,7 @@ export function registerSolarisaelTools(pi, release) {
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
       try {
-        const result = await requestGigaHealth(room, { signal: _signal });
+        const result = await requestGigaHealth(hostBinding(ctx).binding, { signal: _signal });
         return normalizeGigaHealth(result);
       } catch (error) {
         return gigaToolFailure(error);
@@ -1432,7 +1227,7 @@ export function registerSolarisaelTools(pi, release) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { room } = roomContext(ctx.cwd);
       try {
-        const result = await requestGigaQueueMaintenance(room, params.operation, {
+        const result = await requestGigaQueueMaintenance(hostBinding(ctx).binding, params.operation, {
           signal: _signal,
         });
         return {
@@ -1459,9 +1254,8 @@ export function registerSolarisaelTools(pi, release) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { room, spirit } = roomContext(ctx.cwd);
       try {
-        const result = await requestGigaReview({
+        const result = await requestGigaReview(hostBinding(ctx).binding, {
           candidate_id: params.candidate_id,
-          room,
           reviewer_id: spirit,
           new_state: params.new_state as GigaSafeReviewState,
           reason: params.reason,
@@ -1516,9 +1310,8 @@ export function registerSolarisaelTools(pi, release) {
             publication_approved: params.publication_approved,
           };
     try {
-      const result = await requestGigaPromote({
+      const result = await requestGigaPromote(hostBinding(ctx).binding, {
         candidate_id: params.candidate_id,
-        room,
         reviewer_id: spirit,
         operator_identity: operator,
         authorization_basis: GIGA_OMP_ROOM_BINDING,
@@ -1605,9 +1398,8 @@ export function registerSolarisaelTools(pi, release) {
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
       const allowedRooms = [...new Set([binding.room, ...params.allowed_rooms])].sort();
-      const result = await requestRustDomain("hallway_create", {
+      const result = await requestRustDomain(binding, "hallway_create", {
         hallway: params.hallway,
-        ...binding,
         allowedRooms,
         idempotencyKey: params.idempotency_key || String(toolCallId),
       }, signal, true);
@@ -1630,9 +1422,8 @@ export function registerSolarisaelTools(pi, release) {
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
-      const result = await requestRustDomain("hallway_join", {
+      const result = await requestRustDomain(binding, "hallway_join", {
         hallway: params.hallway,
-        ...binding,
         idempotencyKey: params.idempotency_key || String(toolCallId),
       }, signal, true);
       return {
@@ -1657,9 +1448,8 @@ export function registerSolarisaelTools(pi, release) {
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
-      const result = await requestRustDomain("hallway_post", {
+      const result = await requestRustDomain(binding, "hallway_post", {
         hallway: params.hallway,
-        ...binding,
         body: params.body,
         replyTo: params.reply_to === 0 ? undefined : params.reply_to,
         toRooms: params.to_rooms ?? [],
@@ -1687,9 +1477,8 @@ export function registerSolarisaelTools(pi, release) {
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
-      const result = await requestRustDomain("hallway_knock_policy", {
+      const result = await requestRustDomain(binding, "hallway_knock_policy", {
         hallway: params.hallway,
-        ...binding,
         mode: params.mode,
         allowedRooms: params.mode === "manual" ? [] : (params.allowed_rooms ?? []),
         maxTurns: params.max_turns ?? 10,
@@ -1718,9 +1507,8 @@ export function registerSolarisaelTools(pi, release) {
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
-      const result = await requestRustDomain("hallway_knock", {
+      const result = await requestRustDomain(binding, "hallway_knock", {
         hallway: params.hallway,
-        ...binding,
         messageId: params.message_id,
         recipientRoom: params.recipient_room,
         parentKnockId: params.parent_knock_id,
@@ -1749,9 +1537,8 @@ export function registerSolarisaelTools(pi, release) {
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
-      const result = await requestRustDomain("hallway_read", {
+      const result = await requestRustDomain(binding, "hallway_read", {
         hallway: params.hallway,
-        ...binding,
         after: params.after,
         thread: params.thread?.trim() || undefined,
         limit: params.limit ?? 50,
@@ -1773,7 +1560,7 @@ export function registerSolarisaelTools(pi, release) {
     approval: "read",
     async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
-      const result = await requestRustDomain("hallway_inbox", { ...binding }, signal, false);
+      const result = await requestRustDomain(binding, "hallway_inbox", {}, signal, false);
       return {
         isError: result.ok !== true,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -1817,12 +1604,12 @@ export function registerSolarisaelTools(pi, release) {
       if (action === "goalDraft" || action === "draft") {
         const houseId = docketHouseId(params.houseId);
         if (!houseId) return refuseDocket("house_unnamed", "houseId", "houseId is required and this installation names no House");
+        if (houseId !== hostHouseId()) return refuseDocket("foreign_house", "houseId", "the Host serves only its configured House");
         if (action === "goalDraft") {
           if (!params.title?.trim() || !params.intent?.trim()) {
             return refuseDocket("incomplete_action", gate, "goalDraft requires title and intent");
           }
           fields = {
-            houseId,
             title: params.title.trim(),
             intent: params.intent,
             priority: params.priority,
@@ -1833,7 +1620,6 @@ export function registerSolarisaelTools(pi, release) {
             return refuseDocket("incomplete_action", gate, "draft requires kind, title, and body");
           }
           fields = {
-            houseId,
             goalId: params.goalId?.trim() || undefined,
             kind: params.kind.trim(),
             title: params.title.trim(),
@@ -1868,9 +1654,8 @@ export function registerSolarisaelTools(pi, release) {
           deadlineAt: params.deadlineAt?.trim() || undefined,
         };
       }
-      const result = await requestRustDomain("quest_post", {
+      const result = await requestRustDomain(binding, "quest_post", {
         action,
-        ...binding,
         capability,
         idempotencyKey: params.idempotencyKey?.trim() || String(toolCallId),
         ...fields,
@@ -1897,9 +1682,8 @@ export function registerSolarisaelTools(pi, release) {
       const { binding } = hostBinding(ctx);
       const houseId = docketHouseId(params.houseId);
       if (!houseId) return refuseDocket("house_unnamed", "houseId", "houseId is required and this installation names no House");
-      const result = await requestRustDomain("quest_board", {
-        ...binding,
-        houseId,
+      if (houseId !== hostHouseId()) return refuseDocket("foreign_house", "houseId", "the Host serves only its configured House");
+      const result = await requestRustDomain(binding, "quest_board", {
         states: params.states?.length ? params.states : undefined,
         limit: params.limit,
       }, signal, false);
@@ -1925,8 +1709,7 @@ export function registerSolarisaelTools(pi, release) {
       if (workerAtTheDoor(ctx, binding)) return refuseWorkerHands("quest_claim");
       if (!capability) return refuseUnprovisionedRoom();
       if (!params.questId?.trim()) return refuseDocket("incomplete_action", "quest_claim", "questId is required");
-      const result = await requestRustDomain("quest_claim", {
-        ...binding,
+      const result = await requestRustDomain(binding, "quest_claim", {
         capability,
         idempotencyKey: params.idempotencyKey?.trim() || String(toolCallId),
         questId: params.questId.trim(),
@@ -1984,8 +1767,7 @@ export function registerSolarisaelTools(pi, release) {
           || !params.verdict || !params.authoredRole)) {
         return refuseDocket("incomplete_action", gate, "settleItem requires itemPosition (1 or greater), verdict, and authoredRole");
       }
-      const result = await requestRustDomain("quest_report", {
-        ...binding,
+      const result = await requestRustDomain(binding, "quest_report", {
         capability,
         idempotencyKey: params.idempotencyKey?.trim() || String(toolCallId),
         questId: params.questId.trim(),
@@ -2019,8 +1801,7 @@ export function registerSolarisaelTools(pi, release) {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);
       if (!params.questId?.trim()) return refuseDocket("incomplete_action", "quest_evidence", "questId is required");
-      const result = await requestRustDomain("quest_evidence", {
-        ...binding,
+      const result = await requestRustDomain(binding, "quest_evidence", {
         questId: params.questId.trim(),
         limit: params.limit,
       }, signal, false);
@@ -2032,12 +1813,8 @@ export function registerSolarisaelTools(pi, release) {
     },
   });
 
-  // The exit door owns its own module; it is handed the substrate seam, the
-  // live transport map, the buffered-turn census, and the loaded release
-  // instead of reaching in here.
   registerRestartDoor(pi, {
     requestDomain: requestRustDomain,
-    transports: rustRememberTransports,
     registerTool: (definition) => registerHouseTool(pi, definition),
     gigaBuffers: gigaBufferedTurnCensus,
     release,

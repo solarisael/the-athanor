@@ -82,5 +82,9 @@ export async function logConversationWindow(
   if (!response.result || typeof response.result !== "object") {
     throw new Error("Athanor Host conversation response omitted result");
   }
+  if (response.result.ok === false) {
+    const errors = Array.isArray(response.result.errors) ? response.result.errors.join("; ") : "";
+    throw new Error(errors || "Athanor Host refused conversation capture");
+  }
   return response.result as ConversationCapture;
 }

@@ -1,40 +1,34 @@
+use serde::{Deserialize, Serialize};
 use std::env;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct GigaCapabilityState {
-    pub capture_enabled: bool,
-    pub classifier_enabled: bool,
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GigaEnablement {
+    pub giga_enabled: bool,
+    pub hippocampus_enabled: bool,
+    pub replay_mode: bool,
 }
 
-pub(crate) fn giga_capability_state_from_flags(
-    giga_enabled: Option<&str>,
-    hippocampus_enabled: Option<&str>,
-    replay_mode: Option<&str>,
-) -> GigaCapabilityState {
-    let capture_enabled = giga_enabled == Some("1");
-    GigaCapabilityState {
-        capture_enabled,
-        classifier_enabled: capture_enabled
-            && hippocampus_enabled == Some("1")
-            && replay_mode != Some("1"),
+impl GigaEnablement {
+    pub fn from_env() -> Self {
+        Self {
+            giga_enabled: env::var("ATHANOR_GIGA_ENABLED").ok().as_deref() == Some("1"),
+            hippocampus_enabled: env::var("ATHANOR_HIPPOCAMPUS_ENABLED").ok().as_deref()
+                == Some("1"),
+            replay_mode: env::var("ATHANOR_REPLAY_MODE").ok().as_deref() == Some("1"),
+        }
+    }
+
+    pub fn capture_enabled(self) -> bool {
+        self.giga_enabled
+    }
+
+    pub fn classifier_enabled(self) -> bool {
+        self.giga_enabled && self.hippocampus_enabled && !self.replay_mode
     }
 }
 
-pub(crate) fn giga_capability_state() -> GigaCapabilityState {
-    let giga_enabled = env::var("ATHANOR_GIGA_ENABLED").ok();
-    let hippocampus_enabled = env::var("ATHANOR_HIPPOCAMPUS_ENABLED").ok();
-    let replay_mode = env::var("ATHANOR_REPLAY_MODE").ok();
-    giga_capability_state_from_flags(
-        giga_enabled.as_deref(),
-        hippocampus_enabled.as_deref(),
-        replay_mode.as_deref(),
-    )
-}
-
-pub(super) fn classifier_enabled() -> bool {
-    giga_capability_state().classifier_enabled
-}
-
 pub(super) fn claim_owner_enabled() -> bool {
-    classifier_enabled() && env::var("ATHANOR_GIGA_CLAIM_OWNER").ok().as_deref() == Some("1")
+    GigaEnablement::from_env().classifier_enabled()
+        && env::var("ATHANOR_GIGA_CLAIM_OWNER").ok().as_deref() == Some("1")
 }

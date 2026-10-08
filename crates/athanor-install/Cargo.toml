@@ -19,6 +19,7 @@ anyhow.workspace = true
 hex.workspace = true
 host = { path = "../host" }
 hearth = { path = "../hearth" }
+origami = { path = "../origami" }
 protocol = { path = "../protocol" }
 interactive-process = { path = "../interactive-process" }
 omp-keeper = { path = "../omp-keeper" }
@@ -38,6 +39,7 @@ uuid.workspace = true
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Services", "Win32_System_Threading"] }
 
 [dev-dependencies]
+async-nats.workspace = true
 tempfile = "3"
 
 [build-dependencies]

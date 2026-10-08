@@ -14,6 +14,7 @@ pub mod insula;
 pub mod insula_writer;
 mod lesson;
 pub mod migrations;
+pub mod native;
 mod paper_boat;
 mod presence;
 mod recall;
@@ -46,7 +47,9 @@ pub use giga::{
     giga_event_finish, giga_event_ingest, giga_event_replay, giga_health, giga_promote,
     giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review,
 };
-pub use giga_worker::{GigaWorkerHandle, giga_process, spawn_giga_worker};
+pub use giga_worker::{
+    GigaEnablement, GigaWorkerHandle, giga_process, spawn_giga_worker, spawn_room_giga_worker,
+};
 pub use hallway::{
     hallway_create, hallway_inbox, hallway_join, hallway_knock, hallway_knock_claim,
     hallway_knock_policy, hallway_knock_settle, hallway_messages, hallway_post, hallway_read,

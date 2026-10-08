@@ -104,7 +104,7 @@ fn component(bytes: &[u8]) -> ComponentManifest {
         compatibility: ComponentCompatibility {
             host_api: 1,
             substrate_api: 1,
-            delivery_api: 1,
+            delivery_api: athanor_install::manifest::NATS_AUTH_DELIVERY_API,
             schema_version: REQUIRED_SCHEMA,
         },
         artifacts: vec![ComponentArtifact {
@@ -129,7 +129,7 @@ fn release(version: &str, bytes: &[u8]) -> ReleaseManifest {
         compatibility: Compatibility {
             host_api: 1,
             substrate_api: 1,
-            delivery_api: 1,
+            delivery_api: athanor_install::manifest::NATS_AUTH_DELIVERY_API,
             postgresql: "18.4-2".into(),
             pgvector: "0.8.6".into(),
             nats_server: "2.14.4".into(),

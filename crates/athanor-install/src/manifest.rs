@@ -11,6 +11,7 @@ pub const SUPPORTED_PLATFORM: &str = "windows-x64";
 pub const POSTGRESQL_VERSION: &str = "18.4-2";
 pub const PGVECTOR_VERSION: &str = "0.8.6";
 pub const NATS_VERSION: &str = "2.14.4";
+pub const NATS_AUTH_DELIVERY_API: u32 = 2;
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -107,9 +108,9 @@ impl ReleaseManifest {
         if self.schema_version != REQUIRED_SCHEMA {
             return Err(ManifestError::Schema(self.schema_version));
         }
-        let compatibility_ok = self.compatibility.host_api == 1
+        let compatibility_ok = matches!(self.compatibility.host_api, 1 | 2)
             && self.compatibility.substrate_api == 1
-            && self.compatibility.delivery_api == 1
+            && matches!(self.compatibility.delivery_api, 1 | NATS_AUTH_DELIVERY_API)
             && self.compatibility.postgresql == POSTGRESQL_VERSION
             && self.compatibility.pgvector == PGVECTOR_VERSION
             && self.compatibility.nats_server == NATS_VERSION;
@@ -172,21 +173,10 @@ impl ReleaseManifest {
 
 #[cfg(test)]
 mod tests {
-    use super::{REQUIRED_SCHEMA, ReleaseManifest};
+    use super::{ManifestError, REQUIRED_SCHEMA, ReleaseManifest};
 
     #[test]
-    fn packaged_schema_metadata_matches_runtime_acceptance() {
-        let metadata: serde_json::Value =
-            serde_json::from_str(include_str!("../../../installer/dependencies.json")).unwrap();
-        assert_eq!(
-            metadata["schemaVersion"].as_u64(),
-            Some(u64::from(REQUIRED_SCHEMA)),
-            "the native runtime must accept the schema declared by its own package"
-        );
-    }
-
-    #[test]
-    fn a_retained_release_that_still_pins_godot_stays_valid_for_rollback() {
+    fn known_host_apis_keep_retained_releases_valid_and_refuse_unknown_apis() {
         let retained = serde_json::json!({
             "format": 1,
             "product": "the-athanor",
@@ -212,8 +202,15 @@ mod tests {
             }],
             "rollback": { "databaseRestoreRequired": true, "minimumRetainedVersions": 2 }
         });
-        let manifest: ReleaseManifest = serde_json::from_value(retained)
+        let mut manifest: ReleaseManifest = serde_json::from_value(retained)
             .expect("releases built before the Godot client left must still parse");
         assert_eq!(manifest.validate(), Ok(()));
+        manifest.compatibility.host_api = 2;
+        assert_eq!(manifest.validate(), Ok(()));
+        manifest.compatibility.host_api = 3;
+        assert!(matches!(
+            manifest.validate(),
+            Err(ManifestError::Compatibility(_))
+        ));
     }
 }

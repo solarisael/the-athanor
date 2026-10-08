@@ -1,192 +1,31 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-
-import * as lessonContext from "../house-proof/lesson-context.ts";
 import { TtsrManager } from "@oh-my-pi/pi-coding-agent/export/ttsr";
-import { blockLessonRefusal, installLessonTtsrBridge, selectPresenceLessons, syncLessonTtsr } from "../house-proof/lesson-ttsr.ts";
-import { lessonMaterials } from "../house-proof/presence-materials.ts";
-import * as host from "../house-proof/host.ts";
-import { compilePresenceContext, type PresenceCompileInput } from "../house-proof/presence.ts";
-import { registerTopLevelSession, retireTopLevelSession } from "../house-proof/top-level-session-fence.ts";
+import { blockLessonRefusal, contextLessonManagerAvailable, installLessonTtsrBridge, syncLessonTtsr } from "../house-proof/lesson-ttsr.ts";
+import type { NativeLessonPlan } from "../house-proof/context.ts";
 
-let query: ReturnType<typeof spyOn<typeof lessonContext, "runLessonQuery">>;
-beforeEach(() => { query = spyOn(lessonContext, "runLessonQuery"); });
-afterEach(() => query.mockRestore());
+const plan: NativeLessonPlan = {
+  token: "native-plan",
+  requiresCredential: false,
+  turnId: "turn",
+  warnings: [],
+  rules: [{
+    block: true,
+    rule: {
+      name: "athanor-coding-389-native",
+      path: "athanor://lessons/coding/389",
+      content: "Do not discard a caught failure.",
+      description: "No empty catch",
+      astCondition: ["try { $$$BODY } catch ($ERR) { }"],
+      scope: ["tool:edit", "tool:write"],
+      interruptMode: "always",
+      _source: { provider: "athanor-lessons", providerName: "The Athanor", path: "athanor://lessons/coding/389", level: "native" },
+    },
+  }],
+};
 
-function lessons(rows: Array<Record<string, unknown>>) {
-  query.mockImplementation(async (_dir, _room, filters) => ({
-    ok: true,
-    lessons: rows.filter((row) => row.type === filters.type),
-  }));
-}
-
-function coding(id: number, extra: Record<string, unknown> = {}) {
-  return { id, type: "coding", title: `Lesson ${id}`, lesson: `Craft body ${id}`, ...extra };
-}
-
-function session() {
-  const rules: Array<Record<string, any>> = [];
-  class AgentSession {
-    sessionManager = { getSessionId: () => id };
-    ttsrManager = {
-      addRule: (rule: Record<string, any>) => { rules.push(rule); return true; },
-      checkDelta: () => rules,
-      checkSnapshot: () => rules,
-      checkAstSnapshot: () => rules,
-    };
-    getContextUsage() { return {}; }
-  }
+test("a supplied native block rule refuses the identical write after the stream interrupt is spent", async () => {
   const id = randomUUID();
-  installLessonTtsrBridge({ pi: { AgentSession } });
-  return { ctx: new AgentSession(), rules };
-}
-
-function sync(ctx: unknown, activeProject: string | null = null) {
-  return syncLessonTtsr({ ctx, roomDir: "test-room", room: "kodo", activeProject });
-}
-
-function presence(result: Awaited<ReturnType<typeof sync>>, mode: Parameters<typeof selectPresenceLessons>[1]) {
-  return lessonMaterials(selectPresenceLessons(result, mode));
-}
-test("sync separates the always-on baseline from deterministic trigger queries", async () => {
-  lessons([]);
-  const { ctx } = session();
-  await sync(ctx, "The Athanor");
-  const filters = query.mock.calls.map((call) => call[2]);
-  expect(filters).toContainEqual({ type: "coding", alwaysOn: true, limit: 50 });
-  for (const family of ["coding", "writing", "design", "audio"]) {
-    expect(filters).toContainEqual({
-      type: family, tag: "ttsr-approved", triggerOnly: true, limit: 50,
-    });
-  }
-  expect(filters).toContainEqual({
-    type: "project", project: "The Athanor",
-    tag: "ttsr-approved", triggerOnly: true, limit: 50,
-  });
-});
-
-test("a full trigger page reports its retrieval ceiling", async () => {
-  lessons(Array.from({ length: 50 }, (_, index) => coding(index + 1, {
-    tags: ["ttsr-approved"], condition: [`guard ${index}`],
-  })));
-  const { ctx } = session();
-  const result = await sync(ctx);
-  expect(result.active).toBe(50);
-  expect(result.warnings).toContain("coding trigger query reached the 50-row ceiling");
-});
-
-
-test("unarmed always-on coding reaches work Presence, not conversation or quiet", async () => {
-  lessons([coding(200, { alwaysOn: true }), coding(224), {
-    id: 400, type: "writing", title: "Writing", lesson: "Not coding craft", alwaysOn: true,
-  }]);
-  const { ctx, rules } = session();
-  const result = await sync(ctx);
-  expect(presence(result, "work").map((material) => material.body)).toEqual(["Craft body 200"]);
-  expect(presence(result, "conversation")).toEqual([]);
-  expect(presence(result, "quiet")).toEqual([]);
-  expect(presence(result, "mixed")).toEqual([]);
-  expect(presence(result, undefined)).toEqual([]);
-  expect(rules).toEqual([]);
-});
-
-test("unapproved triggers never arm while approved guards retain scope and project boundaries", async () => {
-  lessons([
-    coding(1, { condition: ["forbidden"], triggerScope: ["text"] }),
-    coding(2, { tags: ["ttsr-approved"], condition: ["approved"], languageKeys: ["rust"], triggerScope: ["text", "tool:edit"] }),
-    { id: 3, type: "project", title: "Project", lesson: "Project rule", project: "other", tags: ["ttsr-approved"], condition: ["project"], triggerScope: ["text", "tool:write"] },
-  ]);
-  const { ctx, rules } = session();
-  const result = await sync(ctx, "active");
-  expect(rules.map((rule) => rule.condition)).toEqual([["approved"], ["project"]]);
-  expect(rules[0].scope).toEqual(["tool:edit"]);
-  expect(rules[0].globs).toEqual(["**/*.rs"]);
-  expect(rules[1].scope).toEqual(["tool:write"]);
-  expect(rules[1].globs).toEqual(["**/other/**"]);
-  expect(presence(result, "conversation").map((material) => material.body)).toEqual(["Craft body 2", "Project rule"]);
-});
-
-test("a versioned language key globs through its family", async () => {
-  // Kills: looking up LANGUAGE_EXTENSIONS by the raw key, which drops the glob
-  // for `bend-2` and arms the guard on every file instead of Bend sources.
-  lessons([coding(5, { tags: ["ttsr-approved"], condition: ["musttail"], languageKeys: ["bend-2"], triggerScope: ["tool:edit"] })]);
-  const { ctx, rules } = session();
-  await sync(ctx);
-  expect(rules[0].globs).toEqual(["**/*.bend"]);
-});
-
-test("coding baseline survives an unavailable native manager without arming conditional lessons", async () => {
-  lessons([coding(200, { alwaysOn: true }), coding(224, { tags: ["ttsr-approved"], condition: ["rename"] })]);
-  const result = await sync({ sessionID: randomUUID() });
-  expect(presence(result, "work").map((material) => material.body)).toEqual(["Craft body 200"]);
-  expect(presence(result, "conversation")).toEqual([]);
-  expect(result.active).toBe(0);
-  expect(result.warnings).toContain("native OMP TTSR manager unavailable");
-});
-
-test("overlapping baseline and armed lesson speaks once in Presence", async () => {
-  lessons([coding(9, { alwaysOn: true, tags: ["ttsr-approved"], condition: ["plain line"] })]);
-  const { ctx } = session();
-  const result = await sync(ctx);
-  expect(result.active).toBe(1);
-  expect(presence(result, "work").map((material) => material.body)).toEqual(["Craft body 9"]);
-  expect(presence(result, "conversation").map((material) => material.body)).toEqual(["Craft body 9"]);
-});
-
-test("work craft beyond the eighth lesson receives an enact directive within the wire ceiling", async () => {
-  const baseline = Array.from({ length: 10 }, (_, index) => coding(200 + index, {
-    alwaysOn: true,
-    lesson: `Foundation ${index}: ${"plain line ".repeat(120)}`,
-  }));
-  const armed = Array.from({ length: 25 }, (_, index) => coding(1 + index, {
-    tags: ["ttsr-approved"], condition: [`guard ${index}`],
-  }));
-  lessons([...armed, ...baseline]);
-  const { ctx } = session();
-  const result = await sync(ctx);
-  const room = `craft-${randomUUID()}`;
-  const binding = { room, spirit: "Kodo", session: ctx.sessionManager.getSessionId() };
-  const previousHouseId = process.env.ATHANOR_HOST_HOUSE_ID;
-  process.env.ATHANOR_HOST_HOUSE_ID = "test-house";
-  const requests: PresenceCompileInput[] = [];
-  const transport = spyOn(host, "sendHostCommand").mockImplementation(async (command) => {
-    requests.push(command.presence_compile as PresenceCompileInput);
-    return { result: { operation: "compile", value: { contractId: "craft-contract" } } } as host.HostResponse;
-  });
-  registerTopLevelSession(room, binding.session);
-  try {
-    for (const mode of ["work", "conversation"] as const) {
-      await compilePresenceContext({
-        binding, operator: "Sol", prompt: "Meet this turn", turnId: mode,
-        priorFrameId: "craft-frame", lessons: presence(result, mode),
-      });
-    }
-
-    const work = requests[0].directives!;
-    const enacted = work.filter((directive) => directive.sourceIds[0].startsWith("lesson:"));
-    expect(work).toHaveLength(32);
-    expect(enacted.slice(0, 10).map((directive) => directive.sourceIds[0]))
-      .toEqual(baseline.map((row) => `lesson:${row.id}`));
-    expect(enacted[9].kind).toBe("enact");
-    expect(enacted[9].instruction).toBe(baseline[9].lesson.slice(0, 1000));
-    expect(enacted.some((directive) => directive.sourceIds[0] === "lesson:21")).toBe(false);
-    expect(requests[1].directives!.filter((directive) => directive.sourceIds[0].startsWith("lesson:"))
-      .map((directive) => directive.sourceIds[0])).toEqual(armed.map((row) => `lesson:${row.id}`));
-  } finally {
-    if (previousHouseId === undefined) delete process.env.ATHANOR_HOST_HOUSE_ID;
-    else process.env.ATHANOR_HOST_HOUSE_ID = previousHouseId;
-    transport.mockRestore();
-    retireTopLevelSession(room, binding.session);
-  }
-});
-
-test("a block lesson refuses every matching write, not only the one the native interrupt caught", async () => {
-  lessons([coding(389, {
-    tags: ["ttsr-approved"], interruptMode: "block", triggerScope: ["tool:edit", "tool:write"],
-    astCondition: ["try { $$$BODY } catch ($ERR) { }"],
-  })]);
-  const id = randomUUID();
-  // OMP's write tool exposes only matcherDigest; its path comes from the `path` argument.
   const write = { name: "write", matcherDigest: (args: any) => args.content };
   class AgentSession {
     sessionManager = { getSessionId: () => id };
@@ -195,16 +34,22 @@ test("a block lesson refuses every matching write, not only the one the native i
     getContextUsage() { return {}; }
   }
   installLessonTtsrBridge({ pi: { AgentSession } });
-  const ctx: any = new AgentSession();
-  expect((await sync(ctx)).warnings).toEqual([]);
-
-  const attempt = (toolCallId: string, path: string, content: string) =>
-    blockLessonRefusal({ toolName: "write", toolCallId, input: { path, content } }, ctx);
+  const ctx = new AgentSession();
+  expect(contextLessonManagerAvailable(ctx)).toBe(true);
+  expect(syncLessonTtsr({ ctx, plan }).warnings).toEqual([]);
+  const attempt = (toolCallId: string, content: string) =>
+    blockLessonRefusal({ toolName: "write", toolCallId, input: { path: "a.ts", content } }, ctx);
   const swallowed = "try {\n  run();\n} catch (error) { }\n";
-  expect((await attempt("first", "a.ts", swallowed))?.reason).toContain("athanor://lessons/coding/389");
-  // The native interrupt has now spent its once-per-session shot, as the coordinator records it.
-  ctx.ttsrManager.markInjectedByNames(ctx.ttsrManager.getRules().map((rule: { name: string }) => rule.name));
-  expect((await attempt("identical-retry", "a.ts", swallowed))?.reason).toContain("athanor://lessons/coding/389");
-  expect(await attempt("named", "a.ts", "try {\n  run();\n} catch (error) {\n  // probe failure is the answer\n}\n"))
-    .toBeUndefined();
+  expect((await attempt("first", swallowed))?.reason).toContain("athanor://lessons/coding/389");
+  ctx.ttsrManager.markInjectedByNames(ctx.ttsrManager.getRules().map((rule) => rule.name));
+  expect((await attempt("retry", swallowed))?.reason).toContain("athanor://lessons/coding/389");
+  expect(await attempt("handled", "try {\n  run();\n} catch (error) {\n  report(error);\n}\n")).toBeUndefined();
+  syncLessonTtsr({ ctx, plan: { ...plan, rules: [] } });
+  expect(await attempt("retired", swallowed)).toBeUndefined();
+});
+
+test("an unavailable OMP manager cannot report an installed native rule", () => {
+  const ctx = { sessionID: randomUUID() };
+  expect(contextLessonManagerAvailable(ctx)).toBe(false);
+  expect(syncLessonTtsr({ ctx, plan }).active).toBe(0);
 });

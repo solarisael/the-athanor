@@ -3,14 +3,11 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
-import { DEFAULT_COMPACTION_SETTINGS, resolveThresholdTokens } from "@oh-my-pi/pi-agent-core/compaction/compaction";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
 import { untilAborted } from "@oh-my-pi/pi-utils";
 
 import {
   boatCast,
-  boatLineTokens,
-  compactionThresholdTokens,
   HOUSE_DOOR_LINES,
   installBoatDoor,
   resetBoatDoor,
@@ -295,20 +292,6 @@ test("the abort that ends the boat turn is reported as a cast boat, never as a l
   });
 });
 
-test("the boat line sits below OMP's own compaction threshold", () => {
-  const cases = [
-    { window: 1_000_000, settings: {} },
-    { window: 200_000, settings: {} },
-    { window: 200_000, settings: { thresholdPercent: 70 } },
-    { window: 200_000, settings: { thresholdTokens: 120_000 } },
-    { window: 32_000, settings: { reserveTokens: 40_000 } },
-  ];
-  for (const { window, settings } of cases) {
-    const omp = resolveThresholdTokens(window, { ...DEFAULT_COMPACTION_SETTINGS, ...settings });
-    expect(compactionThresholdTokens(window, settings)).toBe(omp);
-    expect(boatLineTokens(window, settings)).toBe(omp - Math.floor(window * 0.1));
-  }
-});
 
 // The seam most likely to lie: that the abort really ends OMP's own agent loop
 // right after `sleep`, with no second model call where the spirit would talk.

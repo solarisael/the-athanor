@@ -5,6 +5,7 @@ import {
   type HostBinding,
   type HostResponse,
 } from "./host.ts";
+import { lifecyclePlan } from "./lifecycle.ts";
 
 const HALLWAY_KNOCK_CLAIM = "athanor.hallway.knock_claim";
 const HALLWAY_KNOCK_CLAIMED = "athanor.hallway.knock_claimed";
@@ -138,8 +139,6 @@ type KnockDoormanState = {
   nextClaimAt: number;
 };
 
-const KNOCK_START_TIMEOUT_MS = 60_000;
-const KNOCK_SETTLEMENT_TIMEOUT_MS = 25_000;
 const KNOCK_POLL_MS = 2_000;
 const KNOCK_WARNING_COOLDOWN_MS = 60_000;
 const KNOCK_CLAIM_BACKOFF_BASE_MS = 5_000;
@@ -275,18 +274,42 @@ async function deliverActiveKnock(state: KnockDoormanState): Promise<void> {
   }
 }
 
-async function settleObservedTurn(state: KnockDoormanState): Promise<void> {
+type KnockPlan = {
+  deliver: boolean;
+  settlements: HallwayKnockSettleOutcome[];
+  failure: string | null;
+};
+
+function planObservedTurn(state: KnockDoormanState): Promise<KnockPlan> {
+  const now = Date.now();
+  return lifecyclePlan(state.binding, {
+    action: "knockPlan",
+    delivered: state.delivered,
+    startSettled: state.startSettled,
+    turnStarted: state.turnStarted,
+    turnEnded: state.turnEnded,
+    deliveredElapsedMs: state.deliveredAt === null ? null : Math.max(0, now - state.deliveredAt),
+    endedElapsedMs: state.turnEndedAt === null ? null : Math.max(0, now - state.turnEndedAt),
+  });
+}
+
+async function settleObservedTurn(state: KnockDoormanState, supplied?: KnockPlan): Promise<void> {
   const active = state.active;
   if (!active || state.settling) return;
   state.settling = true;
   try {
-    if (!state.startSettled) {
-      await settleHallwayKnock(state.binding, active.knockId, "started");
-      state.startSettled = true;
+    const plan = supplied ?? await planObservedTurn(state);
+    if (state.active !== active) return;
+    if (plan.failure) {
+      await failActiveKnock(state, plan.failure);
+      return;
     }
-    if (!state.turnStarted || !state.turnEnded) return;
-    await settleHallwayKnock(state.binding, active.knockId, "completed");
-    clearActiveKnock(state);
+    for (const outcome of plan.settlements) {
+      await settleHallwayKnock(state.binding, active.knockId, outcome);
+      if (state.active !== active) return;
+      if (outcome === "started") state.startSettled = true;
+      if (outcome === "completed") clearActiveKnock(state);
+    }
   } catch (error) {
     warnDoorman(state, error);
   } finally {
@@ -296,39 +319,20 @@ async function settleObservedTurn(state: KnockDoormanState): Promise<void> {
 
 async function tickDoorman(state: KnockDoormanState): Promise<void> {
   if (state.active) {
-    const now = Date.now();
-    if (!state.delivered) {
-      await deliverActiveKnock(state);
-    } else if (
-      !state.startSettled
-      && state.deliveredAt !== null
-      && now - state.deliveredAt >= KNOCK_SETTLEMENT_TIMEOUT_MS
-    ) {
-      await failActiveKnock(
-        state,
-        `recipient turn start did not settle within ${KNOCK_SETTLEMENT_TIMEOUT_MS}ms`,
-      );
-    } else if (
-      !state.turnStarted
-      && state.deliveredAt !== null
-      && now - state.deliveredAt >= KNOCK_START_TIMEOUT_MS
-    ) {
-      await failActiveKnock(
-        state,
-        `recipient turn did not start within ${KNOCK_START_TIMEOUT_MS}ms`,
-      );
-    } else if (
-      state.turnEnded
-      && state.turnEndedAt !== null
-      && now - state.turnEndedAt >= KNOCK_SETTLEMENT_TIMEOUT_MS
-    ) {
-      await failActiveKnock(
-        state,
-        `recipient turn completion did not settle within ${KNOCK_SETTLEMENT_TIMEOUT_MS}ms`,
-      );
-    } else {
-      await settleObservedTurn(state);
-      await interruptActiveTurn(state);
+    const active = state.active;
+    try {
+      const plan = await planObservedTurn(state);
+      if (state.active !== active) return;
+      if (plan.deliver) {
+        await deliverActiveKnock(state);
+      } else if (plan.failure) {
+        await failActiveKnock(state, plan.failure);
+      } else {
+        await settleObservedTurn(state, plan);
+        await interruptActiveTurn(state);
+      }
+    } catch (error) {
+      warnDoorman(state, error);
     }
     return;
   }

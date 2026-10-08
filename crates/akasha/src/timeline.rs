@@ -1,12 +1,10 @@
 //! Newest-first keyset reads for the Pulse panel: the memory scroller, the
 //! single-memory fetch behind its click, and the lesson registry timeline.
 //!
-//! Contract shaped in guild-hall #183/#185. These are pure reads with no
-//! identity parameters: the panel's bearer layer proves reach to the Host,
-//! and nothing here acts as anyone. The memory timeline follows recall's
-//! active-row discipline exactly (no archived, no superseded, no paper
-//! boats); the by-id fetch returns historical rows too, with their authority
-//! fields visible, because an explicit id is a provenance read. Lessons are
+//! The Host supplies the connected room separately from client filters.
+//! Memory reads include that room and the House commons. The timeline keeps
+//! active records only; by-id reads also expose scoped historical records.
+//! Lessons are
 //! ordered by updated_at - the only time key the registry honestly carries
 //! (migrated rows would smuggle an import date as a birthdate) - so a row
 //! edited mid-scroll can move past a cursor; that instability is the named
@@ -88,8 +86,19 @@ pub struct MemoryTimelineResult {
 
 pub async fn memory_timeline(
     pool: &PgPool,
+    authorized_room: &str,
     request: MemoryTimelineParams,
 ) -> Result<MemoryTimelineResult, AppError> {
+    if request
+        .room
+        .as_deref()
+        .is_some_and(|room| room != authorized_room && room != "house")
+    {
+        return Err(refusal(
+            "foreign_room",
+            "memory timeline names a foreign room",
+        ));
+    }
     let (before_created_at, before_id) = match &request.before {
         Some(cursor) => (Some(cursor.created_at), Some(cursor.id)),
         None => (None, None),
@@ -100,6 +109,7 @@ pub async fn memory_timeline(
          FROM memories
          WHERE archived_at IS NULL AND superseded_by IS NULL AND type<>$6
            AND ($1::text IS NULL OR room=$1)
+           AND room IN ($7, 'house')
            AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3))
          ORDER BY created_at DESC,id DESC
          LIMIT $4",
@@ -110,6 +120,7 @@ pub async fn memory_timeline(
     .bind(i64::from(request.limit))
     .bind(TIMELINE_EXCERPT_CHARS)
     .bind(origami::boats::MEMORY_KIND)
+    .bind(authorized_room)
     .fetch_all(pool)
     .await?;
     let memories = rows
@@ -173,14 +184,16 @@ pub struct MemoryReadResult {
 
 pub async fn memory_read(
     pool: &PgPool,
+    authorized_room: &str,
     request: MemoryReadParams,
 ) -> Result<MemoryReadResult, AppError> {
     let row = sqlx::query(
         "SELECT id,room,type,title,date,source_path,threads,superseded_by,
                 archived_at,created_at,updated_at,body
-         FROM memories WHERE id=$1",
+         FROM memories WHERE id=$1 AND room IN ($2, 'house')",
     )
     .bind(request.id)
+    .bind(authorized_room)
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| refusal("unknown_memory", "no memory has this id"))?;

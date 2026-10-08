@@ -10,7 +10,8 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { roomContext } from "./room.ts";
-import { hostSessionIdentity } from "./host.ts";
+import { hostSessionIdentity, type HostBinding } from "./host.ts";
+import type { OrganOperation } from "./organ.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { catchBoat } from "./substrate.ts";
 
@@ -91,7 +92,8 @@ const CREATE_INTENT_RECIPE = [
 type DomainReceipt = Record<string, unknown>;
 
 type DomainRequest = (
-  method: string,
+  binding: HostBinding,
+  method: OrganOperation,
   params: Record<string, unknown>,
   signal?: AbortSignal,
   write?: boolean,
@@ -108,8 +110,6 @@ type GigaBufferCensus = { session?: unknown; cwd?: unknown; turns?: unknown };
 export type RestartDoorDeps = {
   // tools.ts's existing requestRustDomain seam.
   requestDomain: DomainRequest;
-  // tools.ts's live rustRememberTransports map: each entry is a child process.
-  transports: Map<string, RustJsonlTransport>;
   // The house tool registrar, so this tool wears the same feedback renderers.
   registerTool: (definition: Record<string, unknown>) => void;
   // Threaded from configureInstalledAthanor through the adapter entry.
@@ -122,7 +122,7 @@ export type RestartDoorDeps = {
   exitCapability?: (effectiveRoomDir: string) => string | null;
   // Reads the room's latest paper boat. Defaults to the adapter's own wake
   // seam; a read, never a consume.
-  latestBoat?: (room: string, options?: { signal?: AbortSignal }) => Promise<Record<string, unknown>>;
+  latestBoat?: (binding: HostBinding, options?: { signal?: AbortSignal }) => Promise<Record<string, unknown>>;
   requestCapability?: (effectiveRoomDir: string) => string | null;
   verifyCapability?: (effectiveRoomDir: string) => string | null;
   restartIntentId?: () => string | null;
@@ -162,6 +162,14 @@ function report(result: Record<string, unknown>) {
     content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
     details: result,
   };
+}
+
+function successorNotice(ctx: any, message: string, level: "info" | "warning"): void {
+  if (ctx?.hasUI && typeof ctx?.ui?.notify === "function") {
+    ctx.ui.notify(message, level);
+  } else {
+    console.warn(`[athanor] ${message}`);
+  }
 }
 
 function capabilityPath(effectiveRoomDir: string, filename: string): string {
@@ -228,36 +236,6 @@ function intentId(intent: Record<string, unknown>): string {
   return text(intent.intentId ?? intent.id);
 }
 
-// Transport families this door is not handed. Named, because the one map it
-// holds is not the whole process: index.ts:1542-1548 closes seven families on a
-// graceful shutdown and tools.ts owns only the remember map. The door cannot
-// count the rest, so it names them instead of letting one map look like all of
-// them (Kintsu item 3, 2026-08-25).
-const UNENUMERABLE_TRANSPORT_FAMILIES = Object.freeze([
-  "recall",
-  "paper-boat",
-  "anamnesis",
-  "giga",
-  "lesson-trigger",
-  "lesson-context",
-  "entity-resolution",
-]);
-
-// Every map entry is a spawned substrate process holding a JSONL pipe. The exit
-// kills them where a graceful shutdown would close them, so they are named.
-function transportCasualties(transports: Map<string, RustJsonlTransport>) {
-  const open = [...transports.entries()].map(([executable, transport]) => ({
-    executable,
-    usable: transport?.usable !== false,
-  }));
-  return {
-    count: open.length,
-    open,
-    unenumerableFamilies: [...UNENUMERABLE_TRANSPORT_FAMILIES],
-    unenumerableReason:
-      "each of those families keeps its transport map module-private; only the remember map is handed to this door",
-  };
-}
 
 // The harness's own async-job door: ExtensionContext.getAsyncJobSnapshot()
 // returns { running, recent, delivery }, and each item is
@@ -313,7 +291,7 @@ function hubProcessCasualties() {
   };
 }
 
-// Turns buffered for a later GIGA flush. closeGigaTransports() drains them on a
+// Turns buffered for a later GIGA flush. flushGigaTurns() drains them on a
 // graceful shutdown (index.ts:1547) and an armed process.exit never reaches
 // that door, so an armed buffer is a real casualty: counted from giga.ts's
 // read-only census, never guessed.
@@ -478,10 +456,16 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     if (!intentId || verifiedIntent === intentId || verifyingIntent === intentId) return;
     const { room, spirit, effectiveRoomDir } = roomContext(ctx?.cwd);
     const session = hostSessionIdentity(ctx, effectiveRoomDir);
-    if (ctx?.mode !== "tui" || !isEmbodied(room, session)) return;
+    if (!isEmbodied(room, session)) {
+      if (ctx?.mode !== "tui") {
+        successorNotice(ctx, "Athanor restart successor verification skipped: this session is not the room's embodied session.", "warning");
+      }
+      return;
+    }
     const successorProof = text(resolveRestartSuccessorProof());
     if (!successorProof) {
-      ctx?.ui?.notify?.(
+      successorNotice(
+        ctx,
         "Athanor restart successor could not verify: the keeper supplied no successor proof.",
         "warning",
       );
@@ -489,7 +473,8 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     }
     const capability = text(resolveVerifyCapability(effectiveRoomDir));
     if (!capability) {
-      ctx?.ui?.notify?.(
+      successorNotice(
+        ctx,
         "Athanor restart successor could not verify: this room holds no restart_verify capability.",
         "warning",
       );
@@ -497,27 +482,24 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     }
     verifyingIntent = intentId;
     try {
-      const receipt = await deps.requestDomain("restart_verify", {
+      const receipt = await deps.requestDomain({ room, spirit, session }, "restart_verify", {
         intentId,
         successorProof,
-        successorSession: session,
-        room,
-        spirit,
         capability,
       }, undefined, true);
       if (receipt?.ok === false || text(receipt?.state) !== "verified") {
         const code = text(receipt?.code) || "not_verified";
-        ctx?.ui?.notify?.(`Athanor restart successor verification failed (${code}).`, "warning");
+        successorNotice(ctx, `Athanor restart successor verification failed (${code}).`, "warning");
         return;
       }
       verifiedIntent = intentId;
       delete process.env[RESTART_INTENT_ENV];
       delete process.env[RESTART_SUCCESSOR_PROOF_ENV];
-      ctx?.ui?.notify?.("Athanor restart successor verified.", "info");
+      successorNotice(ctx, "Athanor restart successor verified.", "info");
       await continueAfterRestart(ctx, intentId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      ctx?.ui?.notify?.(`Athanor restart successor verification failed: ${message}`, "warning");
+      successorNotice(ctx, `Athanor restart successor verification failed: ${message}`, "warning");
     } finally {
       verifyingIntent = "";
     }
@@ -532,19 +514,31 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
   // carries no intent id at all.
   const continueAfterRestart = async (ctx: any, intentId: string) => {
     const workspace = text(ctx?.cwd) || process.cwd();
+    const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+    const binding = { room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) };
     let intent: Record<string, unknown> | null = null;
     try {
-      const status = await deps.requestDomain("restart_status", { workspace, intentId }, undefined, true);
+      const status = await deps.requestDomain(binding, "restart_status", { workspace, intentId }, undefined, true);
       intent = pendingIntent(status);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      ctx?.ui?.notify?.(`Athanor restart continuation skipped: ${message}`, "warning");
+      successorNotice(ctx, `Athanor restart continuation skipped: ${message}`, "warning");
       return;
     }
-    const mode = text(intent?.mode) || "resume";
-    const reason = text(intent?.reason);
-    if (typeof pi.sendMessage !== "function") return;
+    if (!intent) {
+      successorNotice(ctx, "Athanor restart continuation skipped: the House returned no pending intent.", "warning");
+      return;
+    }
+    const mode = text(intent.mode) || "resume";
+    const reason = text(intent.reason);
+    if (typeof pi.sendMessage !== "function") {
+      successorNotice(ctx, "Athanor restart continuation skipped: OMP cannot enqueue a next turn.", "warning");
+      return;
+    }
     pi.sendMessage(continuationMessage(intentId, mode, reason), { deliverAs: "nextTurn", triggerTurn: true });
+    if (ctx?.mode !== "tui") {
+      successorNotice(ctx, "Athanor restart continuation queued for the next turn.", "info");
+    }
   };
 
   // What the successor is handed. It is a turn, so it is displayed and
@@ -610,7 +604,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       const mode = text(params?.mode);
       const reason = text(params?.reason);
 
-      const status = await deps.requestDomain("restart_status", { workspace }, signal);
+      const status = await deps.requestDomain({ room, spirit, session }, "restart_status", { workspace }, signal);
       if (status?.ok === false) {
         return refuse(
           "restart_status_unreachable",
@@ -701,7 +695,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       // twice and gets the boat both times.
       let boat: Record<string, unknown> | undefined;
       if (effectiveMode === "fresh") {
-        const wake = await resolveLatestBoat(room, { signal });
+        const wake = await resolveLatestBoat({ room, spirit, session }, { signal });
         if (wake?.ok === false) {
           return refuse(
             "fresh_boat_unconfirmed",
@@ -748,16 +742,13 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
         // restart_status showed nothing pending, so a retry that already
         // succeeded finds the intent and arms it instead of forking a second
         // one, and the substrate's storm guard fences the racing edge.
-        const receipt = await deps.requestDomain("restart_request", {
+        const receipt = await deps.requestDomain({ room, spirit, session }, "restart_request", {
           harness: "omp",
           workspace,
           mode,
           sessionId: session,
           reason,
           consentSource: DOOR_CONSENT_SOURCE,
-          requesterRoom: room,
-          requesterSpirit: spirit,
-          requesterSession: session,
           capability: requestCapability,
           idempotencyKey: randomUUID(),
         }, signal, true);
@@ -835,7 +826,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
         dies: {
           asyncJobs: asyncJobCasualties(ctx),
           gigaTurnBuffers: gigaBufferCasualties(deps.gigaBuffers),
-          transports: transportCasualties(deps.transports),
+          transports: { count: 0, open: [], unenumerableFamilies: [], unenumerableReason: null },
           hubProcesses: hubProcessCasualties(),
         },
         // An unclaimed intent retires 300s after restart_request, and an agent
@@ -872,10 +863,9 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     // substrate refuses this arm outright if a token is present. Authority is
     // the room's capability plus this session's own identity, which the
     // substrate compares against the requester the intent recorded.
-    const receipt = await deps.requestDomain("restart_transition", {
+    const receipt = await deps.requestDomain({ room: exit.room, spirit: exit.spirit, session: exit.session }, "restart_transition", {
       intentId: exit.intentId,
       to: "exiting",
-      requesterSession: exit.session,
       capability,
       detail: exitDetail(exit),
     }, undefined, true);

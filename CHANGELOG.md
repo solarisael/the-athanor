@@ -22,9 +22,19 @@ the exact implementation record.
 
 ### Added
 
-- The OMP adapter can judge each finished turn with Jev. It reads the operator's reply and the previous assistant turn, both clipped, and records `turn_verdict` and `recall_verdict` points in Insula.
+- Host API 2 provides typed room, organ, context, judgment, and lifecycle commands.
+  OMP adapter `0.10.0` requires this API.
+  The wire schema remains `1`, and the database schema remains `32`.
+
+- OMP children use the Ask Parent protocol for missing historical context and intent.
+  Automatic Recall stays off for children. Ordinary children also receive a refusal when they call Recall directly.
+  Children ask their spawning parent through existing agent messages and can resume after a blocked-context report.
+  The explicit `memory-research` agent type can use manual Recall. Top-level Recall remains available, and other House hooks remain enabled.
+- The Host can judge each finished turn with Jev.
+  OMP supplies the operator reply and the previous assistant turn.
+  Native code clips the input and records verdict points in Insula.
   The room marker `jevVerdict` turns this on with an explicit grant. It is off by default.
-  The provider is `typesafe` or a `laya` endpoint on loopback. Both use the same request shape.
+  The provider is `typesafe` or a `laya` endpoint on loopback. Both receive the same state and questions.
 - In a top-level House session, a handoff starts with a paper boat. The spirit writes the boat with the real `sleep` tool.
   `/handoff [focus]` asks the spirit for the boat first. The turn stops when `sleep` returns, so the spirit writes no reply text.
   Then the OMP handoff runs with the focus, and the spirit continues after it.
@@ -45,7 +55,7 @@ the exact implementation record.
   The chat doorman sends no new say to OMP while the door is open.
 - Insula records the size of each context block the OMP adapter injects, per organ, as `injection.<organ>` points.
   The `provider_usage` point now carries cache-read and cache-write token counts in `bytes_in` and `bytes_out`.
-- The OMP adapter can sieve the always-on coding lessons with Jev before Presence sends them.
+- The Host can sieve always-on coding lessons with Jev before Presence sends them.
   On a work turn, Jev scores each lesson against the operator prompt. Active mode keeps only the relevant lessons, with a maximum of eight.
   The room marker `jevLessons` turns this on with its own `lesson-sieve` grant. It is off by default.
   Shadow mode, a refusal, a failure, or a deadline keeps the full lesson set and records a receipt.
@@ -75,6 +85,46 @@ the exact implementation record.
   The prototype proxy reads its allow-list from `gui-prototype/live-routes.json`.
 
 ### Changed
+
+- Shared room state, context preparation, judgments, and lifecycle policy move from TypeScript to the native Host.
+  OMP keeps registration, observation, event translation, tool interception, and presentation.
+  Native CLI operations and Host operations share domain execution code.
+- `substrate/deploy-local.ps1` sets `ATHANOR_STATE_DIR` from `runtime.json`
+  `operatorStateRoot` for the Full-mode health proof and restores the caller's value afterward.
+  The proof no longer reports `degraded` because the deploy shell lacks the variable.
+  The 2026-10-06 deployment installed correctly and failed only this proof.
+- The adapter no longer starts substrate children.
+  The Host owns GIGA workers and retention.
+  Worker replacement waits for observed exit.
+  Replay cannot ingest GIGA events or change another producer.
+- The Host owns prepared context and optional Recall exports.
+  Valid replay keeps stable bytes and restores pending settlement information.
+  A settled contract does not become pending again.
+  Identity changes retire the active contract and rebuild derived context.
+  Invalid legacy identity material causes an explicit rebuild without changing the legacy file.
+- Room mutations preserve unrelated policy fields and the manual spirit body.
+  Embodiment changes preserve the configured agent name.
+  Worker task text cannot apply implicit operator directives.
+- The loader compares the running Host API with the selected release.
+  It refuses incompatible running Hosts before loading the adapter.
+  The Host broker identity now permits Hallway publication.
+  Deployment must reload the broker policy.
+- Native judgment credentials remain transient.
+  Native approval controls credential requests, and privacy checks precede provider calls.
+  Native room totals replace the old adapter-local judgment coverage.
+- Lost write responses retain an unknown outcome.
+  Automatic lineage capture waits for positive receipts and quarantines uncertain keys for reconciliation.
+
+- The managed broker uses separate Host and AKASHA credentials, subject permissions, and identity-specific reply inboxes.
+  Delivery API 2 gates broker compatibility. Install and rollback refuse unauthenticated delivery API 1 generations.
+  Local deployment now requires old Host and OMP processes to close before broker activation.
+- Bounded chat and drafts survive Host restart through atomic room-local checkpoints.
+  Streaming drafts do not rewrite the history ring. Failed writes preserve the previously accepted state.
+- Conversation logging refuses directories outside the configured room before writing. The adapter surfaces the refusal.
+  Memory timeline and by-ID reads enforce the configured room plus House commons.
+- Receipt bridge callbacks invalidate only their own connection. Retired clients cannot overwrite recovered bridge health.
+- Headless restart successors now verify and enqueue their continuation.
+  Non-UI outcomes use stderr and do not corrupt JSON/RPC stdout.
 
 - The documentation is rewritten from the code census of 2026-10-04 at commit `a6ab453`. Each claim about the code names its file and line.
   A claim that the census did not confirm carries the label `Not re-verified at a6ab453` and names the code that decides it.

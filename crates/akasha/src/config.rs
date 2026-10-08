@@ -871,16 +871,38 @@ impl AppError {
 
 impl Config {
     pub fn from_env() -> Result<Self, AppError> {
-        Self::from_dotenv(Dotenv::load(dotenv_target()))
+        Self::from_dotenv(Dotenv::load(dotenv_target()), None)
     }
 
     pub fn from_env_file(path: &Path) -> Result<Self, AppError> {
-        Self::from_dotenv(Dotenv::load(Some(path.to_path_buf())))
+        Self::from_dotenv(Dotenv::load(Some(path.to_path_buf())), None)
     }
 
-    fn from_dotenv(dotenv: Dotenv) -> Result<Self, AppError> {
-        let database_url = env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
-            .ok()
+    pub fn for_database(database_url: &str) -> Result<Self, AppError> {
+        Self::from_dotenv(Dotenv::load(dotenv_target()), Some(database_url))
+    }
+
+    pub fn nats_auth(&self) -> Result<Option<origami::cranes::broker::NatsAuth>, AppError> {
+        let username = env::var("ATHANOR_NATS_USERNAME").ok();
+        let password = env::var("ATHANOR_NATS_PASSWORD").ok();
+        match (username, password) {
+            (Some(username), Some(password)) if !username.is_empty() && !password.is_empty() => {
+                Ok(Some(origami::cranes::broker::NatsAuth {
+                    username,
+                    password,
+                }))
+            }
+            (None, None) if self.nats_url.is_none() => Ok(None),
+            _ => Err(AppError::Config(
+                "both ATHANOR_NATS_USERNAME and ATHANOR_NATS_PASSWORD are required".into(),
+            )),
+        }
+    }
+
+    fn from_dotenv(dotenv: Dotenv, database_url: Option<&str>) -> Result<Self, AppError> {
+        let database_url = database_url
+            .map(str::to_owned)
+            .or_else(|| env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL").ok())
             .or_else(|| configured_value("DATABASE_URL", &dotenv))
             .or_else(|| {
                 let host = configured_value("PGHOST", &dotenv)?;
@@ -925,7 +947,7 @@ impl Config {
             } else {
                 EmbeddingMode::Required
             };
-        Ok(Self {
+        let config = Self {
             database_url,
             nats_url: env::var("ATHANOR_NATS_URL")
                 .ok()
@@ -944,7 +966,17 @@ impl Config {
                 }),
             giga_source_room: configured_value("ATHANOR_GIGA_SOURCE_ROOM", &dotenv),
             house_tz: configured_value("ATHANOR_HOUSE_TZ", &dotenv).unwrap_or_default(),
-        })
+        };
+        if config
+            .nats_url
+            .as_deref()
+            .is_some_and(|url| url.contains('@'))
+        {
+            return Err(AppError::Config(
+                "ATHANOR_NATS_URL must not contain credentials".into(),
+            ));
+        }
+        Ok(config)
     }
 
     pub async fn house_timezone(&self, pool: &PgPool, room: &str) -> Result<String, AppError> {
@@ -965,8 +997,13 @@ impl Config {
             .connect_with(options)
             .await
             .map_err(AppError::DatabaseConnect)?;
+        Self::validate_pool(&pool).await?;
+        Ok(pool)
+    }
+
+    pub async fn validate_pool(pool: &PgPool) -> Result<(), AppError> {
         let shape: String = sqlx::query_scalar("SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid WHERE c.relname='memory_chunks' AND a.attname='body_embedding' AND NOT a.attisdropped")
-            .fetch_optional(&pool)
+            .fetch_optional(pool)
             .await
             .map_err(AppError::DatabaseSchema)?
             .ok_or_else(|| {
@@ -977,6 +1014,6 @@ impl Config {
         if shape != "vector(2048)" {
             return Err(AppError::Config("incompatible embedding schema".into()));
         }
-        Ok(pool)
+        Ok(())
     }
 }

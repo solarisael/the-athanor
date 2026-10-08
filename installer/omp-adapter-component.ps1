@@ -28,8 +28,8 @@ function Get-OmpAdapterComponentRuntimeAllowlist {
   # product-owned bin/athanor-omp-loader.ts.
   return [ordered]@{
     files = @(
-      "index.ts", "hygiene.ts", "athanor-root.ts", "discovery.ts", "giga.ts",
-      "kitten-lineage.ts", "rust-transport.ts", "package.json", "bunfig.toml",
+      "index.ts", "hygiene.ts", "athanor-root.ts", "giga.ts",
+      "kitten-lineage.ts", "package.json", "bunfig.toml",
       "README.md", "LICENSE", "NOTICE"
     )
     directories = @("house-proof", "starter-room")

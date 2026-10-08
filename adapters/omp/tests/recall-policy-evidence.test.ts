@@ -1,74 +1,38 @@
-import { describe, expect, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-import {
-  WORK_DECAY_TURNS,
-  activeProjectFromEvidence,
-  hasToolEvidence,
-  markToolEvidence,
-} from "../house-proof/recall-policy.ts";
-
-// Work mode used to be a one-way door: one edit and the Host saw tool evidence
-// for the rest of the session, so Work never walked back into conversation.
+import { activeProjectFromEvidence, markToolEvidence, toolEvidenceRevision } from "../house-proof/recall-policy.ts";
 
 const session = () => ({ room: "kodo", spirit: "Kodo", session: randomUUID() });
 
-describe("work evidence decay", () => {
-  test("the ceiling is a named count of turns", () => {
-    expect(WORK_DECAY_TURNS).toBe(6);
-  });
+test("only a bound touch changes the tool-evidence fact", () => {
+  const binding = session();
+  const sibling = session();
+  expect(toolEvidenceRevision(binding)).toBe(0);
+  markToolEvidence(binding);
+  const first = toolEvidenceRevision(binding);
+  expect(first).toBeGreaterThan(0);
+  expect(toolEvidenceRevision(binding)).toBe(first);
+  expect(toolEvidenceRevision(sibling)).toBe(0);
+  markToolEvidence(binding);
+  expect(toolEvidenceRevision(binding)).toBeGreaterThan(first);
+  const unbound = { ...binding, session: "" };
+  markToolEvidence(unbound);
+  expect(toolEvidenceRevision(unbound)).toBe(0);
+});
 
-  test("holds from the mutate tool through five more turns, then decays on the sixth", () => {
-    const binding = session();
-    expect(hasToolEvidence(binding, 1)).toBe(false);
-
-    markToolEvidence(binding, { paths: ["crates/akasha/src/recall/mod.rs"], cwd: "/repo" });
-
-    expect(hasToolEvidence(binding, 1)).toBe(true);
-    expect(hasToolEvidence(binding, 6)).toBe(true);
-    expect(hasToolEvidence(binding, 7)).toBe(false);
-  });
-
-  test("a new mutate tool restarts the count", () => {
-    const binding = session();
-    markToolEvidence(binding);
-    expect(hasToolEvidence(binding, 9)).toBe(false);
-
-    markToolEvidence(binding);
-
-    expect(hasToolEvidence(binding, 9)).toBe(true);
-    expect(hasToolEvidence(binding, 14)).toBe(true);
-    expect(hasToolEvidence(binding, 15)).toBe(false);
-  });
-
-  test("a turn that asks twice ages the evidence once", () => {
-    const binding = session();
-    markToolEvidence(binding);
-    for (let ask = 0; ask < 12; ask += 1) expect(hasToolEvidence(binding, 3)).toBe(true);
-
-    // The ordinal is the caller's; a read that names no turn never advances it.
-    expect(hasToolEvidence(binding)).toBe(true);
-    expect(hasToolEvidence(binding, 3)).toBe(true);
-  });
-
-  test("decay expires the evidence, not the paths it named", () => {
-    // A worktree keeps `.git` as a file; the project name is that folder's.
-    const repo = join(mkdtempSync(join(tmpdir(), "athanor-evidence-")), "Dragon-Repo");
+test("a worktree file identifies the observed project without granting a filesystem path", () => {
+  const root = mkdtempSync(join(tmpdir(), "athanor-evidence-"));
+  const repo = join(root, "Dragon-Repo");
+  try {
     mkdirSync(repo);
     writeFileSync(join(repo, ".git"), "gitdir: elsewhere\n");
-
     const binding = session();
     markToolEvidence(binding, { paths: ["adapters/omp/index.ts"], cwd: repo });
-    expect(hasToolEvidence(binding, 20)).toBe(false);
     expect(activeProjectFromEvidence(binding)).toBe("dragon-repo");
-  });
-
-  test("an unnamed room or session is never evidence", () => {
-    expect(hasToolEvidence({ room: "", spirit: "Kodo", session: "" }, 1)).toBe(false);
-    markToolEvidence({ room: "kodo", spirit: "Kodo", session: "" });
-    expect(hasToolEvidence({ room: "kodo", spirit: "Kodo", session: "" }, 1)).toBe(false);
-  });
+  } finally {
+    rmSync(root, { recursive: true });
+  }
 });

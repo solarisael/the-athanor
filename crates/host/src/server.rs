@@ -1,3 +1,5 @@
+mod context_session;
+mod native_commands;
 #[path = "surface.rs"]
 mod surface;
 
@@ -65,6 +67,7 @@ use protocol::{
     RecallPolicyMutation, RecallPolicyState, RoutingResultEvent, SHELL_PROJECTION_ID, SHELL_RESULT,
     ShellResultEvent, SnapshotEvent, parse_client_command,
 };
+use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -145,6 +148,8 @@ struct AppState {
     config: Arc<HostConfig>,
     room_store: RoomStateStore,
     runtime: Arc<Mutex<RuntimeState>>,
+    context_sessions: Arc<Mutex<context_session::ContextSessions>>,
+    giga: Arc<Mutex<crate::organ::GigaRoomWorker>>,
     hallway_pool: Option<PgPool>,
     insula_binding: Arc<TrustedBinding>,
     insula: InsulaHost,
@@ -186,9 +191,11 @@ impl Host {
         let insula = InsulaHost::new(&config, pool.clone(), insula_binding.clone())?;
         let panel = PanelHost::new(&config, pool.clone(), insula_binding.clone());
         let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone());
+        room_store.migrate_legacy_files(&config.room_dir)?;
         let projection = room_store.load()?;
         let (durable, cursor, mut sessions) =
             HostDurableStore::open(&config.state_dir, &projection)?;
+        let chat = ChatLog::open(&config.state_dir.join("chat.json"))?;
         if sessions.is_empty() {
             sessions.insert(
                 config.session.clone(),
@@ -215,10 +222,12 @@ impl Host {
                     hallway_inbox_fingerprints: HashMap::new(),
                     hallway_subscriptions: HashMap::new(),
                     knock_poll: KnockPollObservations::default(),
-                    chat: ChatLog::default(),
+                    chat,
                     cursor,
                     durable,
                 })),
+                context_sessions: Arc::new(Mutex::new(context_session::ContextSessions::default())),
+                giga: Arc::new(Mutex::new(crate::organ::GigaRoomWorker::default())),
                 hallway_pool: pool,
                 insula,
                 panel,
@@ -236,6 +245,12 @@ impl Host {
     }
 
     pub(crate) fn spawn_receipt_bridge(&self) {
+        self.state.tasks.spawn(crate::organ::serve_giga(
+            (*self.state.config).clone(),
+            self.state.hallway_pool.clone(),
+            self.state.giga.clone(),
+            self.state.cancellation.clone(),
+        ));
         if let Some(url) = self.state.config.nats_url.clone() {
             self.state
                 .tasks
@@ -264,6 +279,7 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
     Json(json!({
         "status": "ok",
         "schema_version": HOST_SCHEMA_VERSION,
+        "hostApi": protocol::HOST_API_VERSION,
         "websocket_path": format!("{}{DEFAULT_HOST_WS_PATH}", state.config.room_path()),
         "projection_id": RECALL_POLICY_PROJECTION_ID,
         "version": runtime.cursor.version,
@@ -353,6 +369,31 @@ async fn set_hallway_subscription(
     }
 }
 
+async fn cancellable_request(
+    state: &AppState,
+    text: &str,
+    sink: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    source: &mut futures_util::stream::SplitStream<WebSocket>,
+) -> Option<Responses> {
+    let pending = process_text(state, text);
+    tokio::pin!(pending);
+    loop {
+        tokio::select! {
+            result = &mut pending => return Some(result),
+            _ = state.cancellation.cancelled() => return None,
+            incoming = source.next() => match incoming {
+                Some(Ok(Message::Ping(payload))) => {
+                    if sink.send(Message::Pong(payload)).await.is_err() {
+                        return None;
+                    }
+                }
+                Some(Ok(Message::Pong(_))) => {}
+                _ => return None,
+            },
+        }
+    }
+}
+
 async fn handle_socket_inner(
     socket: WebSocket,
     state: AppState,
@@ -433,10 +474,25 @@ async fn handle_socket_inner(
                 let Some(incoming) = incoming else { return; };
                 match incoming {
                     Ok(Message::Text(text)) => {
-                        let requested = serde_json::from_str::<Value>(text.as_str())
-                            .ok()
-                            .and_then(|value| value.get("command_or_event_type").and_then(Value::as_str).map(str::to_owned));
-                        let responses = process_text(&state, text.as_str()).await;
+                        let envelope = serde_json::from_str::<Value>(text.as_str()).ok();
+                        let requested = envelope.as_ref()
+                            .and_then(|value| value.get("command_or_event_type"))
+                            .and_then(Value::as_str);
+                        let read_only_organ = requested == Some(protocol::ORGAN_CALL)
+                            && envelope.as_ref()
+                                .and_then(|value| value.pointer("/organ_request/operation"))
+                                .and_then(|operation| protocol::organ::OrganOperation::deserialize(operation).ok())
+                                .is_some_and(protocol::organ::OrganOperation::is_read_only);
+                        let cancellable = read_only_organ
+                            || matches!(requested, Some(protocol::JUDGMENT_RUN | protocol::CONTEXT_PREPARE | protocol::CONTEXT_LESSON_PLAN));
+                        let responses = if cancellable {
+                            let Some(responses) = cancellable_request(&state, text.as_str(), &mut sink, &mut source).await else {
+                                return;
+                            };
+                            responses
+                        } else {
+                            process_text(&state, text.as_str()).await
+                        };
                         if requested.as_deref() == Some(RECALL_POLICY_SUBSCRIBE)
                             && contains_event(&responses.direct, RECALL_POLICY_SNAPSHOT)
                         {
@@ -572,7 +628,57 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             delta: None,
         };
     }
+    execute_command(state, command, command_hash).await
+}
+
+async fn execute_command(
+    state: &AppState,
+    command: ClientCommand,
+    command_hash: String,
+) -> Responses {
     match command {
+        ClientCommand::PrepareContext { meta, request } => {
+            context_session::prepare(state, meta, request).await
+        }
+        ClientCommand::ContextLessonPlan { meta, request } => {
+            context_session::lesson_plan(state, meta, request).await
+        }
+        command => execute_service_command(state, command, command_hash).await,
+    }
+}
+
+async fn execute_service_command(
+    state: &AppState,
+    command: ClientCommand,
+    command_hash: String,
+) -> Responses {
+    match command {
+        ClientCommand::RoomState { meta, request } => {
+            native_commands::room(state, meta, request).await
+        }
+        ClientCommand::OrganCall { meta, request } => {
+            native_commands::organ(state, meta, request).await
+        }
+        ClientCommand::JudgmentRun { meta, request } => {
+            native_commands::judgment(state, meta, request).await
+        }
+        ClientCommand::LifecyclePlan { meta, request } => {
+            native_commands::lifecycle(state, meta, request).await
+        }
+        ClientCommand::PrepareContext { meta, .. }
+        | ClientCommand::ContextLessonPlan { meta, .. } => {
+            let event = outcome(
+                state,
+                &meta,
+                RECALL_POLICY_COMMAND_REFUSED,
+                Some("context cannot recursively invoke context orchestration".into()),
+            )
+            .await;
+            Responses {
+                direct: vec![serialize(&event)],
+                delta: None,
+            }
+        }
         ClientCommand::PaperBoatReceiptSubscribe { meta } => {
             let receipt_state = state.receipt_tracker.lock().await.state();
             let snapshot = receipt_snapshot(state, Some(&meta), receipt_state);
@@ -726,9 +832,26 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             commit_change(state, &mut runtime, &meta, command_hash, next, None)
         }
         ClientCommand::InvalidateAfterCompaction { meta, summary } => {
+            let mut context = context_session::session(state, &meta.sender_session).await;
             let mut runtime = state.runtime.lock().await;
             if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
                 return response;
+            }
+            if let Err(reason) =
+                context_session::invalidate(state, &meta.sender_session, &mut context)
+            {
+                let event = outcome_with_runtime(
+                    state,
+                    &meta,
+                    RECALL_POLICY_COMMAND_FAILED,
+                    Some(reason),
+                    &runtime,
+                    None,
+                );
+                return Responses {
+                    direct: vec![serialize(&event)],
+                    delta: None,
+                };
             }
             let mut session = runtime
                 .sessions
@@ -899,7 +1022,7 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             lineage_response(state, meta, settled, memories).await
         }
         ClientCommand::LogConversation { meta, request } => {
-            let result = log_conversation(&meta, request);
+            let result = log_conversation(&state.config, &meta, request);
             shell_response(state, meta, result).await
         }
         ClientCommand::PlanTriggerLessons { meta, request } => {
@@ -939,6 +1062,10 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             );
             let sequence = runtime.cursor.sequence;
             drop(runtime);
+            let appended = match appended {
+                Ok(message) => message,
+                Err(reason) => return chat_refusal(state, &meta, &reason).await,
+            };
             chat_appended(state, &meta, appended, sequence).await
         }
         ClientCommand::ChatTurn { meta, payload } => {
@@ -958,6 +1085,10 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             );
             let sequence = runtime.cursor.sequence;
             drop(runtime);
+            let appended = match appended {
+                Ok(message) => message,
+                Err(reason) => return chat_refusal(state, &meta, &reason).await,
+            };
             chat_appended(state, &meta, appended, sequence).await
         }
         ClientCommand::ChatDraft { meta, payload } => {
@@ -976,6 +1107,10 @@ async fn process_text(state: &AppState, text: &str) -> Responses {
             );
             let sequence = runtime.cursor.sequence;
             drop(runtime);
+            let draft = match draft {
+                Ok(draft) => draft,
+                Err(reason) => return chat_refusal(state, &meta, &reason).await,
+            };
             // A late draft for a settled turn changes nothing and is still
             // accepted: the adapter's report was honest when it left.
             if let Some(draft) = draft {
@@ -1006,7 +1141,7 @@ async fn chat_identity(
             chat_refusal(state, meta, "chat command names a foreign room").await,
         ));
     }
-    match state.room_store.identity() {
+    match state.room_store.identity(&state.config.spirit) {
         Ok(identity) => Ok(identity),
         Err(reason) => Err(Box::new(chat_refusal(state, meta, &reason).await)),
     }
@@ -1192,6 +1327,7 @@ async fn open_presence_frame(
     meta: CommandMeta,
     request: PresenceOpenRequest,
 ) -> Responses {
+    let mut runtime = state.runtime.lock().await;
     let authentication = match authenticate_presence(state, &meta) {
         Ok(authentication) => authentication,
         Err(reason) => {
@@ -1201,10 +1337,9 @@ async fn open_presence_frame(
                 OutcomeClass::Refused,
                 Some("not_authenticated"),
             );
-            return presence_refusal(state, &meta, &reason).await;
+            return presence_refusal_sync(state, &meta, reason, runtime.cursor.sequence);
         }
     };
-    let mut runtime = state.runtime.lock().await;
     let carried = match adopt_presence_from_store(state, &mut runtime, &meta.sender_session).await {
         Ok(carried) => carried,
         Err(error) => {
@@ -1258,7 +1393,7 @@ fn authenticate_presence(
     state: &AppState,
     meta: &CommandMeta,
 ) -> Result<PresenceAuthentication, String> {
-    let identity: RoomIdentity = state.room_store.identity()?;
+    let identity: RoomIdentity = state.room_store.identity(&state.config.spirit)?;
     if identity.room != meta.sender_room {
         return Err(format!(
             "Presence sender room {} is not this room",
@@ -1285,6 +1420,22 @@ fn authenticate_presence(
     })
 }
 
+fn presence_binding_for_live_frame(
+    state: &AppState,
+    meta: &CommandMeta,
+    runtime: &RuntimeState,
+) -> Result<PresenceBinding, String> {
+    let binding = authenticate_presence(state, meta)?.binding;
+    if runtime
+        .presence
+        .session_state(&meta.sender_session)
+        .is_some_and(|(frame, _)| frame.binding != binding)
+    {
+        return Err("Presence frame identity is stale; close it before opening anew".into());
+    }
+    Ok(binding)
+}
+
 async fn compile_presence_turn(
     state: &AppState,
     meta: CommandMeta,
@@ -1305,14 +1456,15 @@ async fn compile_presence_turn(
             runtime.cursor.sequence,
         );
     }
+    let binding = match presence_binding_for_live_frame(state, &meta, &runtime) {
+        Ok(binding) => binding,
+        Err(reason) => return presence_refusal_sync(state, &meta, reason, runtime.cursor.sequence),
+    };
     let result = runtime
         .presence
         .compile(&meta.sender_session, &meta.idempotency_key, request);
     let outcome = match &result {
-        Ok(_) => {
-            let binding = presence_binding(state, &meta);
-            persist_presence(state, &runtime, &meta.sender_session, &binding, "compile").await
-        }
+        Ok(_) => persist_presence(state, &runtime, &meta.sender_session, &binding, "compile").await,
         Err(_) => OutcomeClass::Refused,
     };
     presence_point(
@@ -1336,14 +1488,15 @@ async fn settle_presence_turn(
     request: PresenceSettleRequest,
 ) -> Responses {
     let mut runtime = state.runtime.lock().await;
+    let binding = match presence_binding_for_live_frame(state, &meta, &runtime) {
+        Ok(binding) => binding,
+        Err(reason) => return presence_refusal_sync(state, &meta, reason, runtime.cursor.sequence),
+    };
     let result = runtime
         .presence
         .settle(&meta.sender_session, &meta.idempotency_key, request);
     let outcome = match &result {
-        Ok(_) => {
-            let binding = presence_binding(state, &meta);
-            persist_presence(state, &runtime, &meta.sender_session, &binding, "settle").await
-        }
+        Ok(_) => persist_presence(state, &runtime, &meta.sender_session, &binding, "settle").await,
         Err(_) => OutcomeClass::Refused,
     };
     presence_point(
@@ -1417,24 +1570,6 @@ async fn close_presence_frame(
     )
 }
 
-/// The binding the store row carries for a door that did not authenticate a
-/// full open: the room's own identity plus the sender's session.
-fn presence_binding(state: &AppState, meta: &CommandMeta) -> PresenceBinding {
-    let identity = state.room_store.identity().ok();
-    PresenceBinding {
-        room: identity
-            .as_ref()
-            .map(|i| i.room.clone())
-            .unwrap_or_else(|| meta.sender_room.clone()),
-        spirit: identity
-            .as_ref()
-            .map(|i| i.spirit.clone())
-            .unwrap_or_else(|| meta.sender_spirit.clone()),
-        operator: identity.map(|i| i.operator).unwrap_or_default(),
-        session: meta.sender_session.clone(),
-    }
-}
-
 fn presence_response(
     state: &AppState,
     meta: &CommandMeta,
@@ -1466,11 +1601,6 @@ fn presence_response(
         }
         Err(error) => presence_refusal_sync(state, meta, error.to_string(), sequence),
     }
-}
-
-async fn presence_refusal(state: &AppState, meta: &CommandMeta, reason: &str) -> Responses {
-    let runtime = state.runtime.lock().await;
-    presence_refusal_sync(state, meta, reason.to_owned(), runtime.cursor.sequence)
 }
 
 fn presence_refusal_sync(
@@ -1644,18 +1774,24 @@ async fn project_hallway_inbox_inner(
 
 /// Host-owned authority gate for Hallway Knock coordination.
 ///
-/// Runs before any `hallway_pool` access so a disabled Host or a foreign
-/// caller never reaches the database. Authority is read from [`HostConfig`],
-/// never from the caller envelope: a bearer token proves reach to this Host,
-/// not the right to act as another room or spirit.
-fn knock_authority(config: &HostConfig, meta: &CommandMeta) -> Result<(), AppError> {
+/// The Host grant and the bound room state gate claims before pool access.
+fn knock_spirit(state: &AppState, meta: &CommandMeta) -> Result<String, AppError> {
+    let spirit = state
+        .room_store
+        .embodied_spirit(&state.config.spirit)
+        .map_err(AppError::Config)?;
+    knock_authority(&state.config, meta, &spirit)?;
+    Ok(spirit)
+}
+
+fn knock_authority(config: &HostConfig, meta: &CommandMeta, spirit: &str) -> Result<(), AppError> {
     if !config.knock_autonomy.claims_enabled() {
         return Err(AppError::Refusal {
             code: "knock_autonomy_disabled",
             message: "Host Knock autonomy is off; set ATHANOR_HOST_KNOCK_AUTONOMY=claim to enable",
         });
     }
-    if meta.sender_room != config.room || meta.sender_spirit != config.spirit {
+    if meta.sender_room != config.room || meta.sender_spirit != spirit {
         return Err(AppError::Refusal {
             code: "foreign_knock_authority",
             message: "Knock commands must carry this Host's own room and spirit",
@@ -1816,10 +1952,13 @@ async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
         "host",
         "knock_claim",
     ));
-    if let Err(error) = knock_authority(&state.config, &meta) {
-        end_span(span.0.take(), app_error_outcome(&error), Some("app_error"));
-        return hallway_knock_error(state, &meta, "claim", error).await;
-    }
+    let spirit = match knock_spirit(state, &meta) {
+        Ok(spirit) => spirit,
+        Err(error) => {
+            end_span(span.0.take(), app_error_outcome(&error), Some("app_error"));
+            return hallway_knock_error(state, &meta, "claim", error).await;
+        }
+    };
     let Some(pool) = state.hallway_pool.as_ref() else {
         end_span(span.0.take(), OutcomeClass::Degraded, None);
         let failed = outcome(
@@ -1838,7 +1977,7 @@ async fn claim_hallway_knock(state: &AppState, meta: CommandMeta) -> Responses {
         pool,
         HallwayKnockClaimRequest {
             room: state.config.room.clone(),
-            spirit: state.config.spirit.clone(),
+            spirit,
             session: meta.sender_session.clone(),
         },
     )
@@ -1902,10 +2041,13 @@ async fn settle_hallway_knock(
         "host",
         "knock_settle",
     );
-    if let Err(error) = knock_authority(&state.config, &meta) {
-        end_span(span, app_error_outcome(&error), Some("app_error"));
-        return hallway_knock_error(state, &meta, "settlement", error).await;
-    }
+    let spirit = match knock_spirit(state, &meta) {
+        Ok(spirit) => spirit,
+        Err(error) => {
+            end_span(span, app_error_outcome(&error), Some("app_error"));
+            return hallway_knock_error(state, &meta, "settlement", error).await;
+        }
+    };
     let Some(pool) = state.hallway_pool.as_ref() else {
         end_span(span, OutcomeClass::Degraded, None);
         let failed = outcome(
@@ -1924,7 +2066,7 @@ async fn settle_hallway_knock(
         pool,
         HallwayKnockSettleRequest {
             room: state.config.room.clone(),
-            spirit: state.config.spirit.clone(),
+            spirit,
             session: meta.sender_session.clone(),
             knock_id: request.knock_id,
             outcome: request.outcome,
@@ -2128,7 +2270,15 @@ fn append_line(path: &str, content: &str) -> Result<(), String> {
 
 /// Capture the visible conversation: identity, freshness, dedupe marker, and
 /// transcript shape all come from `hearth::conversation`.
-fn log_conversation(meta: &CommandMeta, request: ConversationLogRequest) -> Value {
+fn log_conversation(
+    config: &HostConfig,
+    meta: &CommandMeta,
+    mut request: ConversationLogRequest,
+) -> Value {
+    request.room_dir = match resolve_room_dir(Some(&request.room_dir), config) {
+        Ok(directory) => directory.into_owned(),
+        Err(refusal) => return refusal,
+    };
     let now = chrono::Local::now();
     let captured_at = now
         .with_timezone(&chrono::Utc)
@@ -2564,9 +2714,10 @@ fn validate_command(state: &AppState, command: &ClientCommand) -> Result<(), Str
     {
         return Ok(());
     }
+    let spirit = state.room_store.embodied_spirit(&expected.spirit)?;
     if meta.house_id != expected.house_id
         || meta.sender_room != expected.room
-        || meta.sender_spirit != expected.spirit
+        || meta.sender_spirit != spirit
         || meta.sender_session.trim().is_empty()
         || meta.sender_session.len() > 256
         || meta.recipient != HOST_RECIPIENT
@@ -2854,7 +3005,7 @@ async fn run_hallway_bridge(state: AppState) {
 
 async fn consume_hallway(state: &AppState, url: &str) -> Result<(), &'static str> {
     use origami::cranes::broker::Broker;
-    let client = async_nats::ConnectOptions::new()
+    let client = origami::cranes::broker::connect_options(state.config.nats_auth.as_ref())
         .connection_timeout(Duration::from_secs(1))
         .connect(url)
         .await
@@ -2955,29 +3106,18 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
             return;
         }
         state.receipt_tracker.lock().await.connecting();
-        let callback_state = state.clone();
-        let client = match async_nats::ConnectOptions::new()
+        // Retired connection callbacks must never overwrite a newer bridge's health.
+        let connection_lost = CancellationToken::new();
+        let callback_connection = connection_lost.clone();
+        let client = match origami::cranes::broker::connect_options(state.config.nats_auth.as_ref())
             .event_callback(move |event| {
-                let callback_state = callback_state.clone();
+                let connection_lost = callback_connection.clone();
                 async move {
-                    match event {
-                        async_nats::Event::Disconnected | async_nats::Event::Closed => {
-                            publish_receipt_degradation(
-                                &callback_state,
-                                "AKASHA delivery broker connection was lost",
-                            )
-                            .await;
-                        }
-                        async_nats::Event::Connected => {
-                            let receipt_state = {
-                                let mut tracker = callback_state.receipt_tracker.lock().await;
-                                tracker.connected();
-                                tracker.state()
-                            };
-                            let event = receipt_snapshot(&callback_state, None, receipt_state);
-                            let _ = callback_state.receipts.send(serialize(&event));
-                        }
-                        _ => {}
+                    if matches!(
+                        event,
+                        async_nats::Event::Disconnected | async_nats::Event::Closed
+                    ) {
+                        connection_lost.cancel();
                     }
                 }
             })
@@ -3053,15 +3193,27 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
                 continue;
             }
         };
-        state.receipt_tracker.lock().await.connected();
+        let receipt_state = {
+            let mut tracker = state.receipt_tracker.lock().await;
+            tracker.connected();
+            tracker.state()
+        };
+        let event = receipt_snapshot(&state, None, receipt_state);
+        let _ = state.receipts.send(serialize(&event));
         'replay: loop {
-            let mut messages = match consumer
+            let batch = consumer
                 .fetch()
                 .max_messages(64)
-                .expires(RECEIPT_BATCH_EXPIRES)
-                .messages()
-                .await
-            {
+                .expires(RECEIPT_BATCH_EXPIRES);
+            let fetched = tokio::select! {
+                _ = state.cancellation.cancelled() => return,
+                _ = connection_lost.cancelled() => {
+                    publish_receipt_degradation(&state, "AKASHA delivery broker connection was lost").await;
+                    break 'replay;
+                }
+                result = batch.messages() => result,
+            };
+            let mut messages = match fetched {
                 Ok(messages) => messages,
                 Err(_) => {
                     publish_receipt_degradation(
@@ -3081,6 +3233,10 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
             loop {
                 tokio::select! {
                     _ = state.cancellation.cancelled() => return,
+                    _ = connection_lost.cancelled() => {
+                        publish_receipt_degradation(&state, "AKASHA delivery broker connection was lost").await;
+                        break 'replay;
+                    }
                     _ = &mut deadline => break,
                     incoming = messages.next() => {
                         let Some(incoming) = incoming else {
@@ -3175,7 +3331,12 @@ async fn run_receipt_bridge(state: AppState, nats_url: String) {
             // so an empty batch is the only tell. Ask before pulling again;
             // a lost consumer rebuilds through the outer loop, which also
             // clears the degraded state the disconnect left behind.
-            if consumer.info().await.is_err() {
+            let consumer_exists = tokio::select! {
+                _ = state.cancellation.cancelled() => return,
+                _ = connection_lost.cancelled() => false,
+                result = consumer.info() => result.is_ok(),
+            };
+            if !consumer_exists {
                 publish_receipt_degradation(
                     &state,
                     "AKASHA delivery receipt replay consumer was lost",
@@ -3239,6 +3400,7 @@ mod tests {
             session: "test-session".into(),
             database_url: None,
             nats_url: None,
+            nats_auth: None,
             knock_autonomy,
         }
     }
@@ -3352,10 +3514,10 @@ mod tests {
     #[test]
     fn knock_authority_refuses_every_caller_while_autonomy_is_off() {
         let config = config(KnockAutonomy::Off);
-        let own = knock_authority(&config, &meta("kodo", "Kodo"))
+        let own = knock_authority(&config, &meta("kodo", "Kodo"), &config.spirit)
             .expect_err("a disabled Host must refuse even its own room");
         assert_eq!(refusal_code(own), "knock_autonomy_disabled");
-        let foreign = knock_authority(&config, &meta("kintsu", "Kintsu"))
+        let foreign = knock_authority(&config, &meta("kintsu", "Kintsu"), &config.spirit)
             .expect_err("a disabled Host must refuse a foreign room");
         assert_eq!(refusal_code(foreign), "knock_autonomy_disabled");
     }
@@ -3363,10 +3525,11 @@ mod tests {
     #[test]
     fn enabled_knock_authority_admits_only_this_hosts_own_room_and_spirit() {
         let config = config(KnockAutonomy::Claim);
-        knock_authority(&config, &meta("kodo", "Kodo")).expect("the Host's own binding is allowed");
+        knock_authority(&config, &meta("kodo", "Kodo"), &config.spirit)
+            .expect("the Host's own binding is allowed");
 
         for (room, spirit) in [("kintsu", "Kodo"), ("kodo", "Kintsu"), ("kintsu", "Kintsu")] {
-            let error = knock_authority(&config, &meta(room, spirit))
+            let error = knock_authority(&config, &meta(room, spirit), &config.spirit)
                 .expect_err("a foreign room or spirit must be refused");
             assert_eq!(refusal_code(error), "foreign_knock_authority");
         }

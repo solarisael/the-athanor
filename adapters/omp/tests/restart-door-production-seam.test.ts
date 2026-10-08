@@ -1,10 +1,4 @@
-// Kintsu's proof gap on the second review: every casualty test injected its
-// deps BELOW the tools.ts registration seam, so the census the report consumed
-// was a lookalike the tests built, never the one production threads. This file
-// registers the adapter exactly the way index.ts does - the real entry, the real
-// tools.ts wiring, the real giga.ts census - and drives the real request_restart
-// tool. If the seam ever stops handing the door its census, this goes red and
-// the injected tests stay green, which is precisely the gap being closed.
+// Exercise adapter registration, the Host wire, and the real buffer census. Native authorization needs separate Rust proof.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "node:path";
@@ -12,9 +6,9 @@ import { tmpdir } from "node:os";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
 import solarisaelHouseProof from "../index.ts";
-import { RustJsonlTransport } from "../rust-transport.ts";
+import { roomContext } from "../house-proof/room.ts";
+import { registerTopLevelSession, retireTopLevelSession } from "../house-proof/top-level-session-fence.ts";
 import { __gigaTest, ingestGigaLoggedTurnsDetached } from "../giga.ts";
-import { closeRustRememberTransports } from "../house-proof/tools.ts";
 
 type CapturedTool = {
   name: string;
@@ -54,7 +48,6 @@ const zodStub = {
   unknown: () => makeSchema("unknown"),
 };
 
-const SUBSTRATE_EXE_ENV = "ATHANOR_SUBSTRATE_EXE";
 const EXIT_CAPABILITY_ENV = "ATHANOR_RESTART_EXIT_CAPABILITY";
 const GIGA_ENV = "ATHANOR_GIGA_ENABLED";
 const KEEPER_CONFIG_ENV = "ATHANOR_OMP_KEEPER_CONFIG";
@@ -124,8 +117,9 @@ const PENDING_INTENT = {
   },
 };
 
-const originalRequest = RustJsonlTransport.prototype.request;
-const originalExe = process.env[SUBSTRATE_EXE_ENV];
+const hostKeys = ["ATHANOR_HOST_URL", "ATHANOR_HOST_TOKEN", "ATHANOR_HOST_HOUSE_ID"] as const;
+const originalHost = Object.fromEntries(hostKeys.map((key) => [key, process.env[key]]));
+let server: ReturnType<typeof Bun.serve>;
 const originalGiga = process.env[GIGA_ENV];
 const originalKeeperConfig = process.env[KEEPER_CONFIG_ENV];
 
@@ -135,7 +129,7 @@ let observed: Array<{ method: string; params: any }> = [];
 // path whose sibling `<dir>.jsonl` does not exist (giga.ts isSubagentSessionContext).
 const SESSION_FILE = path.join(tmpdir(), "athanor-production-seam-session", "session.json");
 
-function registerRealAdapter(): CapturedTool {
+function registerRealAdapter(cwd = SEAM_ROOM): CapturedTool {
   const tools: CapturedTool[] = [];
   const pi = {
     zod: zodStub,
@@ -150,6 +144,7 @@ function registerRealAdapter(): CapturedTool {
   };
 
   solarisaelHouseProof(pi as any);
+  registerTopLevelSession(roomContext(cwd).room, "session-under-restart");
 
   const door = tools.find((tool) => tool.name === "request_restart");
   if (!door) throw new Error("the production registration path registered no request_restart tool");
@@ -158,27 +153,49 @@ function registerRealAdapter(): CapturedTool {
 
 beforeEach(() => {
   observed = [];
-  process.env[SUBSTRATE_EXE_ENV] = process.execPath;
   process.env[EXIT_CAPABILITY_ENV] = "production-seam-secret";
   process.env[GIGA_ENV] = "1";
   provisionKeeper(KEEPER_CAPABILITY);
+  provisionSeamRoom(true);
   process.env[KEEPER_CONFIG_ENV] = KEEPER_CONFIG;
   __gigaTest.resetState();
-  RustJsonlTransport.prototype.request = async function (method: string, params: any) {
-    observed.push({ method, params });
-    if (method === "restart_status") return PENDING_INTENT;
-    if (method === "restart_transition") return { ok: true, state: "exiting" };
-    return { ok: false, error: `unexpected method ${method}` };
-  } as typeof RustJsonlTransport.prototype.request;
+  server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request, server) {
+      if (server.upgrade(request, { data: {} })) return;
+      return new Response("WebSocket required", { status: 400 });
+    },
+    websocket: {
+      message(socket, data) {
+        const envelope = JSON.parse(String(data));
+        const { operation: method, params } = envelope.organ_request;
+        observed.push({ method, params });
+        const result = method === "restart_status" ? PENDING_INTENT
+          : method === "restart_transition" ? { ok: true, state: "exiting" }
+          : { ok: false, error: `unexpected method ${method}` };
+        socket.send(JSON.stringify({
+          command_or_event_type: "athanor.organ.result",
+          correlation_id: envelope.message_id,
+          result,
+        }));
+      },
+    },
+  });
+  process.env.ATHANOR_HOST_URL = `ws://127.0.0.1:${server.port}`;
+  process.env.ATHANOR_HOST_TOKEN = "isolated-adapter-wire";
+  process.env.ATHANOR_HOST_HOUSE_ID = "isolated-house";
 });
 
-afterEach(() => {
-  RustJsonlTransport.prototype.request = originalRequest;
-  closeRustRememberTransports();
+afterEach(async () => {
+  await server.stop(true);
+  for (const key of hostKeys) {
+    if (originalHost[key] === undefined) delete process.env[key];
+    else process.env[key] = originalHost[key];
+  }
+  retireTopLevelSession(roomContext(SEAM_ROOM).room, "session-under-restart");
   __gigaTest.resetState();
   delete process.env[EXIT_CAPABILITY_ENV];
-  if (originalExe === undefined) delete process.env[SUBSTRATE_EXE_ENV];
-  else process.env[SUBSTRATE_EXE_ENV] = originalExe;
   if (originalGiga === undefined) delete process.env[GIGA_ENV];
   else process.env[GIGA_ENV] = originalGiga;
   if (originalKeeperConfig === undefined) delete process.env[KEEPER_CONFIG_ENV];
@@ -190,7 +207,7 @@ afterEach(() => {
 describe("exit door through the production registration seam", () => {
   test("reports the GIGA census that tools.ts actually threads, not an injected lookalike", async () => {
     const tool = registerRealAdapter();
-    const cwd = process.cwd();
+    const cwd = SEAM_ROOM;
     const bufferCtx = {
       cwd,
       sessionManager: { getSessionFile: () => SESSION_FILE },
@@ -223,7 +240,7 @@ describe("exit door through the production registration seam", () => {
     const tool = registerRealAdapter();
 
     const result = await tool.execute("call-1", { mode: "resume", reason: "prove the empty case" }, undefined, undefined, {
-      cwd: process.cwd(),
+      cwd: SEAM_ROOM,
       sessionId: "session-under-restart",
     });
 
@@ -243,7 +260,7 @@ describe("exit door through the production registration seam", () => {
     process.env[KEEPER_CONFIG_ENV] = KEEPERLESS_CONFIG;
 
     const result = await tool.execute("call-1", { mode: "resume", reason: "no keeper is watching" }, undefined, undefined, {
-      cwd: process.cwd(),
+      cwd: SEAM_ROOM,
       sessionId: "session-under-restart",
     });
 
@@ -264,7 +281,7 @@ describe("exit door through the production registration seam", () => {
     provisionKeeper(path.join(KEEPER_ROOT, "restart-capability-that-was-never-written"));
 
     const result = await tool.execute("call-1", { mode: "resume", reason: "half a keeper" }, undefined, undefined, {
-      cwd: process.cwd(),
+      cwd: SEAM_ROOM,
       sessionId: "session-under-restart",
     });
 
@@ -279,7 +296,7 @@ describe("exit door through the production registration seam", () => {
     delete process.env[KEEPER_CONFIG_ENV];
     provisionSeamRoom(true);
 
-    const armed = await registerRealAdapter().execute("call-1", { mode: "resume", reason: "the room runtime holds the pair" }, undefined, undefined, {
+    const armed = await registerRealAdapter(SEAM_ROOM).execute("call-1", { mode: "resume", reason: "the room runtime holds the pair" }, undefined, undefined, {
       cwd: SEAM_ROOM,
       sessionId: "session-under-restart",
     });
@@ -290,7 +307,7 @@ describe("exit door through the production registration seam", () => {
     // The same room, one file short. A fresh registration, because an armed
     // door refuses a second arm by name.
     provisionSeamRoom(false);
-    const refused = await registerRealAdapter().execute("call-1", { mode: "resume", reason: "the capability is gone" }, undefined, undefined, {
+    const refused = await registerRealAdapter(SEAM_ROOM).execute("call-1", { mode: "resume", reason: "the capability is gone" }, undefined, undefined, {
       cwd: SEAM_ROOM,
       sessionId: "session-under-restart",
     });

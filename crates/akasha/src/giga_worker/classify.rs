@@ -1,6 +1,7 @@
 use super::bounds::{
     GIGA_MAX_STORED_RATIONALE_BYTES, GIGA_RATIONALE_TRUNCATION_MARKER, truncate_with_marker,
 };
+use super::enablement::GigaEnablement;
 use super::failure::{WorkerFailure, domain_failure};
 use super::identity::{
     GIGA_MODEL_MANIFEST_DIGEST, GIGA_MODEL_TAG, GIGA_PROMPT_VERSION, candidate_id,
@@ -33,8 +34,9 @@ struct ModelSource<'a> {
 pub(super) async fn classify_event(
     event: &GigaEvent,
     sources: &[ResolvedSource],
+    enablement: GigaEnablement,
 ) -> Result<Option<GigaCandidate>, WorkerFailure> {
-    let config = ollama_config()?;
+    let config = ollama_config(enablement)?;
     verify_ollama_model(&config).await?;
     let model_sources = sources
         .iter()

@@ -64,6 +64,7 @@ pub struct HostConfig {
     pub session: String,
     pub database_url: Option<String>,
     pub nats_url: Option<String>,
+    pub nats_auth: Option<origami::cranes::broker::NatsAuth>,
     pub knock_autonomy: KnockAutonomy,
 }
 

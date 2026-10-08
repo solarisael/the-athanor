@@ -2,7 +2,31 @@
 
 The Athanor Host. One process serves every room of a House over HTTP and WebSocket, on one loopback bind. `athanor.exe` with no arguments starts it; see [`athanor-install`](../athanor-install/FEATURES.md#app).
 
-`src/lib.rs` declares 12 modules. It exports `HostConfig`, `KNOCK_AUTONOMY_ENV`, `KnockAutonomy`, `HostRuntime`, and `start` (`lib.rs:1-15`). `server.rs` mounts `surface.rs` as its own child module (`server.rs:1-2`).
+`src/lib.rs` exports `HostConfig`, `KnockAutonomy`, `HostRuntime`, and `start`.
+The server mounts surface, context, and command handlers as child modules.
+
+### Host API 2 ownership
+
+The following source capabilities pass isolated verification. Deployment remains pending.
+
+| Module | Responsibility |
+|---|---|
+| `room_state.rs` | Typed room mutations, prompt directives, and the derived spirit header |
+| `organ/` | Bound native operations and room-owned GIGA workers |
+| `judgment.rs` | Approved provider execution, privacy checks, deadlines, and result selection |
+| `lifecycle.rs` | Chat selection, answer ownership, Knock deadlines, and the boat margin |
+| `server/context_session/` | Lesson plans, context assembly, replay, identity changes, diagnostics, and cache ownership |
+
+The Host API is `2`; the envelope schema remains `1`.
+The native CLI and Host share domain execution in `akasha::native`.
+Administrative migrations remain outside the service dispatcher.
+The Host owns worker shutdown and waits for exit before replacement.
+
+Context replay returns pending settlement information from the native contract.
+An acknowledged contract does not become pending again.
+Identity changes retire the old contract without reassigning its historical receipts.
+The complete contracts and proof limits appear in [Architecture](../../docs/ARCHITECTURE.md) and [Evidence](../../docs/EVIDENCE.md).
+
 
 ### house
 
@@ -13,17 +37,17 @@ The Athanor Host. One process serves every room of a House over HTTP and WebSock
 - `house_settings` refuses zero rooms and a room configured twice (`house.rs:205-234`).
 - Every room must share the bind address, the bearer token, the House id, `DATABASE_URL`, and `ATHANOR_NATS_URL`. The spirit and the session may differ per room (`house.rs:205-234`).
 - One bearer token serves every room (`house.rs:222`). It proves reach, not identity; see [`LIMITATIONS.md`](../../docs/LIMITATIONS.md#4-identity).
-- The House owns no durable state. It owns a lazy PostgreSQL pool of 8 connections, the Insula emitter, a NATS `DeliveryService` task, a cancellation token, and a task tracker (`house.rs:19,171-181,235-248`).
+- The House owns the shared PostgreSQL pool, Insula emitter, delivery task, retention task, cancellation token, and task tracker.
 - [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md#31-one-process-many-rooms) lists the source of every `HostConfig` field.
 
 ### server
 
-`src/server.rs`, 3457 lines. One `server::Host` serves one room and holds one `HostConfig` (`server.rs:145`).
+`src/server.rs` owns the room's Host configuration and command boundary.
 
 **Routes.**
 
 - The file binds no listener and holds no TLS code. Its output is one axum `Router` (`server.rs:250-258`).
-- `GET /health` has no bearer check. It returns the status, the schema version, the WebSocket path, the cursor version, the sequence, the state hash, AKASHA delivery health, and Insula health (`server.rs:252,261-275`).
+- `GET /health` reports the Host API separately from the envelope schema, plus scoped runtime health.
 - The WebSocket upgrade path is `DEFAULT_HOST_WS_PATH` from `protocol` (`server.rs:253`).
 - The router merges the Insula, panel, and surface routers (`server.rs:255-257`).
 
@@ -47,8 +71,8 @@ The Athanor Host. One process serves every room of a House over HTTP and WebSock
 **Commands.**
 
 - Each text frame passes JSON parse, a semantic hash, `parse_client_command`, then `validate_command` (`server.rs:525-574`).
-- 32 match arms serve 33 command variants (`server.rs:576-963`). [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md#33-the-command-socket) groups them by projection.
-- `validate_command` requires the claimed house id, sender room, sender spirit, scope, and recipient to equal this Host's configuration (`server.rs:2537-2583`).
+- The command families are listed in [Architecture](../../docs/ARCHITECTURE.md#33-the-command-socket).
+- `validate_command` checks configured House and room scope, current embodied spirit, recipient, and envelope constraints.
 - It also requires visibility `operator`, authority class `room_state`, and a non-empty sender session of at most 256 bytes (`server.rs:2567-2581`).
 - `sender_session` is chosen by the caller and is not authenticated.
 - `Subscribe` and `PaperBoatReceiptSubscribe` pass with a blank binding. `Resync` does not (`server.rs:2551-2566`).
@@ -58,7 +82,7 @@ The Athanor Host. One process serves every room of a House over HTTP and WebSock
 - `resolve_room_dir` accepts an empty request or this Host's own room directory. Only `RoutingDispatch` and `FamiliarStatus` use it (`server.rs:2067-2093`).
 - The Host reads the room spellbook and the quest report from disk (`server.rs:2097-2101,2110-2114`).
 - `LogConversation` writes the transcript, the source ledger, and a debug provenance line (`server.rs:2131-2235`).
-- `LogConversation` writes under the `room_dir` the caller sends, with no check (`server.rs:2117-2127`). This is a known defect; see [`LIMITATIONS.md`](../../docs/LIMITATIONS.md#8-known-defects-in-the-current-code).
+- `LogConversation` refuses a foreign `room_dir` before writing. The adapter reports the refusal instead of treating it as a capture.
 - Routing, lineage, and shell answers are typed events: `RoutingResultEvent`, `LineageResultEvent`, and `ShellResultEvent` (`crates/protocol/src/host.rs:48-61`).
 - `meta_for_projection` stamps the event metadata of each answer (`server.rs:2723-2727`).
 
@@ -86,9 +110,9 @@ Not re-verified at a6ab453; `crates/host` (`server.rs`, `receipt.rs`) would deci
 
 `src/chat.rs`. The chat ring of one room.
 
-- The ring is `ChatLog { entries: VecDeque<ChatMessage>, drafts: Vec<ChatDraft>, next_sequence }` (`chat.rs:25-30`).
-- The ring lives in memory in the per-room server runtime. It has no file and no PostgreSQL backing (`server.rs:138,218`; `chat.rs:6-7`).
-- A Host restart empties the ring and the drafts. The sequence starts again at 0.
+- Each room keeps a bounded `ChatLog` with messages, drafts, and a sequence.
+- Atomic room-local checkpoints preserve this presentation state across restart. Streaming drafts have a separate checkpoint.
+- A failed write leaves accepted state unchanged. A settled draft does not return after restart.
 - The Host stamps the sequence itself and increments it after each append. The caller passes the time (`chat.rs:151-162`).
 - Three callers append: `ChatSay` over the socket and `chat/say` over HTTP for operator lines, and `ChatTurn` for spirit lines (`server.rs:934,950`; `surface.rs:85`).
 - `ChatDraft` replaces the live draft (`server.rs:969`).
@@ -253,8 +277,12 @@ Not re-verified at a6ab453; `crates/host` (`config.rs`) would decide:
 
 `src/store.rs`. Durable state on disk.
 
-- `RoomStateStore` reads the room-state JSON. Identity is the room, `embodiedSpirit` with `agentName` as fallback, and the operator (`store.rs:17-35,51-75`).
-- It writes only the `recallPolicy` object and `lastUpdatedAt`, by atomic replace (`store.rs:77-135,471-490`).
+- `RoomStateStore` validates the configured room and current identity.
+  An absent embodiment field can use the configured agent.
+  A malformed identity receives a refusal.
+- Native room mutations and policy writes share the same room mutex.
+  Atomic writes preserve unrelated fields and the manual spirit body.
+  Legacy filename migration runs before the initial store load.
 - `HostDurableStore` keeps three files in `state_dir` (`store.rs:15,285-320,322-441`).
 - `recall-policy-cursor.json` holds the projection id, the version, the sequence, and the state hash.
 - `recall-policy-receipts.json` holds the idempotency key, the body hash, the outcome, and the store time. It keeps at most 512 receipts and drops the oldest.

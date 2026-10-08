@@ -77,17 +77,20 @@ async fn say(
             "sayId must contain 1 to 256 characters",
         );
     }
-    let identity = match state.room_store.identity() {
+    let identity = match state.room_store.identity(&state.config.spirit) {
         Ok(identity) => identity,
         Err(reason) => return error(StatusCode::SERVICE_UNAVAILABLE, reason),
     };
     let mut runtime = state.runtime.lock().await;
-    let message = runtime.chat.say(
+    let message = match runtime.chat.say(
         &identity.operator,
         &request.text,
         &request.say_id,
         now_rfc3339(),
-    );
+    ) {
+        Ok(message) => message,
+        Err(reason) => return error(StatusCode::SERVICE_UNAVAILABLE, reason),
+    };
     if let Some(message) = &message {
         publish_chat(&state, None, message.clone(), runtime.cursor.sequence);
     }
@@ -182,6 +185,7 @@ mod tests {
                 session: "surface-session".into(),
                 database_url: None,
                 nats_url: None,
+                nats_auth: None,
                 knock_autonomy: KnockAutonomy::Off,
             };
             std::fs::create_dir_all(config.room_state_path().parent().unwrap()).unwrap();
@@ -324,5 +328,184 @@ mod tests {
                 "presences": [], "chat": { "entries": 0, "lastAt": null }
             })
         );
+    }
+
+    #[tokio::test]
+    async fn chat_restart_preserves_messages_drafts_and_retry_identity() {
+        let mut fixture = Fixture::new();
+        let say = json!({ "text": "retained across restart", "sayId": "restart-say" });
+        let (status, first) = fixture.post(CHAT_SAY_PATH, say.clone(), true).await;
+        assert_eq!(status, StatusCode::OK);
+        fixture
+            .host
+            .state
+            .runtime
+            .lock()
+            .await
+            .chat
+            .draft(
+                "Kodo",
+                "still composing",
+                "restart-say",
+                vec![],
+                vec![],
+                now_rfc3339(),
+            )
+            .unwrap();
+        let before = fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1;
+        let config = fixture.host.state.config.as_ref().clone();
+        fixture.host =
+            Host::new(config, None, CancellationToken::new(), TaskTracker::new()).unwrap();
+        assert_eq!(
+            fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1,
+            before
+        );
+        let repeated = fixture.post(CHAT_SAY_PATH, say, true).await.1;
+        assert_eq!(repeated["repeated"], true);
+        let next = fixture
+            .post(
+                CHAT_SAY_PATH,
+                json!({ "text": "after restart", "sayId": "next-say" }),
+                true,
+            )
+            .await
+            .1;
+        assert_eq!(
+            next["message"]["sequence"].as_u64().unwrap(),
+            first["message"]["sequence"].as_u64().unwrap() + 1
+        );
+        fixture
+            .host
+            .state
+            .runtime
+            .lock()
+            .await
+            .chat
+            .turn(
+                "Kodo",
+                "settled reply",
+                "restart-say",
+                vec![],
+                vec![],
+                protocol::ChatOutcome::Complete,
+                now_rfc3339(),
+            )
+            .unwrap()
+            .unwrap();
+        let config = fixture.host.state.config.as_ref().clone();
+        fixture.host =
+            Host::new(config, None, CancellationToken::new(), TaskTracker::new()).unwrap();
+        let settled = fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1;
+        assert_eq!(settled["drafts"], json!([]));
+        assert_eq!(settled["messages"][2]["text"], "settled reply");
+    }
+
+    #[tokio::test]
+    async fn failed_chat_save_is_not_accepted_or_broadcast() {
+        let fixture = Fixture::new();
+        let mut deltas = fixture.host.state.chat_deltas.subscribe();
+        std::fs::create_dir(fixture.host.state.config.state_dir.join("chat.json")).unwrap();
+        let (status, _) = fixture
+            .post(
+                CHAT_SAY_PATH,
+                json!({ "text": "must not appear", "sayId": "failed-say" }),
+                true,
+            )
+            .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1["messages"],
+            json!([])
+        );
+        assert!(matches!(
+            deltas.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn failed_draft_save_preserves_the_accepted_draft_across_restart() {
+        let mut fixture = Fixture::new();
+        fixture
+            .host
+            .state
+            .runtime
+            .lock()
+            .await
+            .chat
+            .draft(
+                "Kodo",
+                "accepted draft",
+                "draft-1",
+                vec![],
+                vec![],
+                now_rfc3339(),
+            )
+            .unwrap()
+            .unwrap();
+        let before = fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1;
+        let path = fixture.host.state.config.state_dir.join("chat-drafts.json");
+        let saved = path.with_file_name("chat-drafts.saved");
+        std::fs::rename(&path, &saved).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let result = fixture.host.state.runtime.lock().await.chat.draft(
+            "Kodo",
+            "refused update",
+            "draft-1",
+            vec![],
+            vec![],
+            now_rfc3339(),
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1,
+            before
+        );
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::rename(&saved, &path).unwrap();
+        let config = fixture.host.state.config.as_ref().clone();
+        fixture.host =
+            Host::new(config, None, CancellationToken::new(), TaskTracker::new()).unwrap();
+        assert_eq!(
+            fixture.post(CHAT_SNAPSHOT_PATH, json!({}), true).await.1,
+            before
+        );
+    }
+
+    #[tokio::test]
+    async fn conversation_log_refuses_a_foreign_filesystem_root() {
+        let fixture = Fixture::new();
+        let foreign = fixture.directory.join("foreign");
+        std::fs::create_dir(&foreign).unwrap();
+        for (directory, rejected) in [(&foreign, true), (&fixture.directory, false)] {
+            let message_id = uuid::Uuid::new_v4().to_string();
+            let config = &fixture.host.state.config;
+            let command = json!({
+                "schema_version": protocol::HOST_SCHEMA_VERSION,
+                "message_id": message_id, "correlation_id": message_id,
+                "idempotency_key": message_id, "causation_id": "",
+                "house_id": config.house_id, "sender_room": config.room,
+                "sender_spirit": config.spirit, "sender_session": config.session,
+                "recipient": super::super::HOST_RECIPIENT, "reply_target": config.session,
+                "scope": config.scope(), "visibility": "operator", "authority_class": "room_state",
+                "created_at": now_rfc3339(),
+                "expires_at": (chrono::Utc::now() + chrono::Duration::minutes(1)).to_rfc3339(),
+                "max_hops": 1, "source_record_refs": [],
+                "projection_id": protocol::SHELL_PROJECTION_ID,
+                "command_or_event_type": protocol::SHELL_CONVERSATION_LOG,
+                "conversation_request": {
+                    "roomDir": directory, "sessionId": config.session, "persist": true, "messages": []
+                }
+            });
+            let response =
+                super::super::process_text(&fixture.host.state, &command.to_string()).await;
+            let event: Value = serde_json::from_str(&response.direct[0]).unwrap();
+            if rejected {
+                assert_eq!(event["result"]["status"], "rejected");
+                assert_eq!(std::fs::read_dir(&foreign).unwrap().count(), 0);
+            } else {
+                assert_eq!(event["result"]["errors"], json!([]));
+            }
+        }
     }
 }

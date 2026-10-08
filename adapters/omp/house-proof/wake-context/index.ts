@@ -1,18 +1,19 @@
 import { catchBoat } from "../substrate.ts";
+import type { HostBinding } from "../host.ts";
 
 const AUTOMATIC_WAKE_IO_TIMEOUT_MS = 15_000;
 
 type BoatReader = (
-  room: string,
+  binding: HostBinding,
   options: { timeoutMs: number },
 ) => Promise<Record<string, unknown>>;
 
 export async function receiveAutomaticWake(
-  room: string,
+  binding: HostBinding,
   readBoat: BoatReader = catchBoat,
 ) {
   try {
-    const boat = await readBoat(room, { timeoutMs: AUTOMATIC_WAKE_IO_TIMEOUT_MS });
+    const boat = await readBoat(binding, { timeoutMs: AUTOMATIC_WAKE_IO_TIMEOUT_MS });
     const answered = boat?.ok === true;
     if (!answered) {
       const code = String(boat?.code || "").trim();

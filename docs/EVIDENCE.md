@@ -26,6 +26,116 @@ Private prompts, memory titles, source paths, excerpts, entities, threads, and r
 
 The measured records from 2026-07-22 to 2026-09-07 are in [`history/2026-10-04-evidence-records.md`](./history/2026-10-04-evidence-records.md). Each record keeps its own date. None of them is a current release claim.
 
+### Host-owned adapter boundary — 2026-10-06
+
+Status: verified source; deployment remains pending.
+The fixtures use Windows x64, PostgreSQL 18.4, schema 32, NATS 2.14.4, and OMP 18.6.1.
+Vault runs without a database.
+AKASHA uses a separate PostgreSQL process and synthetic records.
+The fixtures leave live House records and installed releases unchanged.
+
+| Contract | Observed result |
+|---|---|
+| Room mutations | Concurrent room and policy writes preserve both changes, unknown fields, and the manual spirit body. |
+| Directive authority | Generated input cannot apply operator directives. Invalid names and arbitrary state fields receive refusals. |
+| Context replay | A real Host returns identical prepared bytes and the pending settlement descriptor on replay. |
+| Pre-adoption compaction | Compaction preserves later legacy adoption. The native regression keeps the wake letter and removes stale Recall. |
+| Settlement recovery | Acknowledged contracts remain acknowledged. The adapter does not rearm them after replay. |
+| Identity changes | Real Vault and AKASHA calls rotate the frame, preserve `agentName`, and refuse settlement of the retired contract. |
+| Vault | The Host performs real file retrieval without PostgreSQL. |
+| AKASHA | Native writes produce durable records, stable retry identities, and explicit House targets. Direct SQL inspection confirms the rows. |
+| Backup | A native write produces a dump. File size and SHA-256 match the receipt, and `pg_restore --list` reads the archive. |
+| GIGA | Native enablement starts and stops the worker. Replay cannot change the producer. |
+| Shared lifecycle | Real Host calls select chat work, bound answer ownership, apply Knock deadlines, and calculate the boat margin. |
+| Provider execution | Real Typesafe calls return a mode, turn verdict, and active Recall rerank. A secret-shaped packet receives a refusal. |
+| OMP integration | A real OMP process loads the source adapter and receives native Presence during context preparation. |
+| Broker permissions | The real broker accepts Host-owned Hallway publication and preserves the existing authentication and subject refusals. |
+| Packaging | Native release and adapter component contract scripts pass. The loader refuses an older running Host despite matching selected files. |
+
+The OMP probe stops before the primary model request.
+It does not prove a complete generated answer, every tool journey, or a new installed release.
+The backup check does not include a restore.
+
+The complete Rust workspace gate passes.
+The Host gate contains 92 cases after the replay and adoption regressions.
+The JSONL binary gate passes 21 cases.
+The adapter gate passes 153 cases across 18 files.
+Environment-gated tests remain distinct from these ordinary gates.
+The real broker case runs separately with `ATHANOR_NATS_TEST_SERVER`.
+
+```text
+cargo test --workspace
+cargo test -p host -p protocol -p akasha -p athanor-install --lib
+cargo test -p akasha --bin athanor-substrate
+cargo test -p athanor-install --lib generated_credentials_enforce_delivery_and_reply_boundaries -- --ignored
+bun run test:omp
+pwsh -NoProfile -File installer/native-release-contract.test.ps1
+pwsh -NoProfile -File installer/omp-adapter-component.test.ps1
+```
+
+Live probes expose defects that the adapter fixtures do not cover.
+A replay initially omitted pending settlement data.
+A real broker initially refused the Host's new publication responsibility.
+Independent review also finds a pre-adoption compaction defect.
+Its failing regression passes after the cache ownership correction.
+All three paths pass after source corrections.
+
+The provider samples use synthetic content and an existing private credential.
+The credential remains transient and is absent from published artifacts.
+One mode call returns `work`, and one verdict returns `continued`.
+The two-card rerank retains both cards.
+These samples prove execution and response handling, not relevance precision or general judgment quality.
+
+Long-session quality, trigger accuracy, cross-machine behavior, and the broad UI walk remain separate proof work.
+
+
+### Windows defect repairs — 2026-10-05
+
+Scope: the development source, a Windows x64 Host process, NATS 2.14.4, and an isolated PostgreSQL database.
+The database used the real migration sequence through version 32.
+All records and credentials used by the proof fixtures were synthetic.
+The native House release was not replaced.
+
+| Contract | Observed result |
+|---|---|
+| Broker authentication | Anonymous and wrong-password connections were refused. |
+| Broker permissions | Authorized stream creation, consumer creation, publication, delivery, and acknowledgement succeeded in a fresh JetStream directory. |
+| Identity separation | The AKASHA publisher could not publish Boat events, manage streams, or subscribe to Host reply inboxes. |
+| Broker restart | The repaired Host reconnected, recreated its receipt consumer, and retained connected health after retired clients closed. |
+| Chat restart | Separate Windows processes retained messages, drafts, sequence, and retry identity. A settled draft did not return. |
+| Chat write failure | A refused draft write preserved accepted state in memory and after process restart. |
+| Filesystem scope | A real WebSocket conversation command refused a foreign directory before writing. |
+| Memory scope | Real HTTP/PostgreSQL reads admitted own-room and shared records. Foreign filters and IDs were refused. |
+| Optional broker failure | Native Recall and a committed Hallway post remained available without broker credentials. No broker connection was attempted. |
+| Knock inheritance | Real PostgreSQL transitions accepted an omitted root parent, inherited six turns for an omitted child budget, and refused a conflicting budget. |
+| Legacy rescue backup | The Windows writer produced a WSL dump that restored its synthetic record. A failed dump left no completed or partial proof file. |
+
+The first authenticated broker smoke exposed incorrect consumer-create permissions.
+The first broker restart exposed a stale-client health callback.
+Both paths passed after their source repairs.
+
+Verification commands:
+
+```text
+cargo test --workspace
+pwsh -NoProfile -File adapters/omp/deploy-local.ps1 -TestsOnly
+cargo test -p athanor-install --lib generated_credentials_enforce_delivery_and_reply_boundaries -- --ignored
+cargo test -p akasha --test timeline_integration -- --ignored
+cargo test -p akasha --test recall_reference_integration -- --ignored
+cargo test -p akasha --test presence_session_integration -- --ignored
+```
+
+The workspace command passed; its environment-gated tests remained explicitly ignored.
+The separate commands passed one real-broker test, three timeline tests, three Recall-reference tests, and one Presence-persistence test.
+The adapter command passed 280 tests.
+The Recall proof requires a test-named database and `ATHANOR_SUBSTRATE_TEST_SCHEMA`; its first invocation refused incomplete fixture configuration.
+The broker test requires `ATHANOR_NATS_TEST_SERVER`.
+
+Limits: this does not prove an installed API 1-to-2 upgrade, unprivileged operator access, or a complete registered-OMP lifecycle.
+Long-session quality, trigger accuracy, and the historical cross-machine failure set remain open.
+The legacy rescue patch is outside this repository's release payload.
+
+
 ## Next public evidence
 
 The public proof program for the current release, `0.5.4` (`package.json:3`), expands the evidence surface in this order.

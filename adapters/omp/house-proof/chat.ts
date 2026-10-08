@@ -28,12 +28,11 @@ import { hostCommand, sendHostCommand, HostUnavailable, type HostBinding } from 
 import { topLevelSession } from "./top-level-session-fence.ts";
 import { conversationText } from "./text.ts";
 import { generatedTurnKey } from "./turn-origin.ts";
+import { lifecyclePlan } from "./lifecycle.ts";
 
 const CHAT_PROJECTION_ID = "chat";
-const CHAT_SUBSCRIBE = "athanor.chat.subscribe";
 const CHAT_TURN = "athanor.chat.turn";
 const CHAT_DRAFT = "athanor.chat.draft";
-const SNAPSHOT = new Set(["athanor.chat.snapshot"]);
 const SAY = "athanor-chat-say";
 // A say's turn can start from the say itself or from a boat door it opened.
 const SAY_ORIGINS = new Set([SAY, BOAT_REQUEST, AFTER_HANDOFF]);
@@ -123,18 +122,6 @@ function sayMessage(line: ChatLine): Record<string, unknown> {
   };
 }
 
-function parseLines(response: Record<string, any>): ChatLine[] {
-  const messages = Array.isArray(response?.messages) ? response.messages : [];
-  return messages
-    .filter((message: any) => message && typeof message === "object")
-    .map((message: any) => ({
-      sequence: Number(message.sequence ?? 0),
-      author: String(message.author ?? ""),
-      authorName: String(message.authorName ?? ""),
-      text: String(message.text ?? ""),
-      turnId: String(message.turnId ?? ""),
-    }));
-}
 
 async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
   if (state.stopped || state.ticking || state.reporting) return;
@@ -147,30 +134,26 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
   if (typeof state.ctx?.isIdle === "function" && !state.ctx.isIdle()) return;
   state.ticking = true;
   try {
-    const snapshot = await sendHostCommand(
-      hostCommand(state.binding, CHAT_SUBSCRIBE, CHAT_PROJECTION_ID, {}),
-      SNAPSHOT,
+    const { next } = await lifecyclePlan<{ next: ChatLine | null }>(
+      state.binding,
+      { action: "chatNext" },
     );
     // The snapshot request yields: the session may have started another turn
     // or been retired while the Host was answering.
     if (state.stopped || topLevelSession(state.binding.room) !== state.binding.session) return;
     if (typeof state.ctx?.isIdle === "function" && !state.ctx.isIdle()) return;
     if (boatDoorOpen()) return;
-    const lines = parseLines(snapshot);
-    const answered = new Set(
-      lines.filter((line) => line.author === "spirit").map((line) => line.turnId),
-    );
-    const unanswered = lines
-      .filter((line) => line.author === "operator" && !answered.has(line.turnId))
-      .sort((a, b) => a.sequence - b.sequence);
-    const next = unanswered[0];
+    // The Host selects the next unanswered say from its own ring.
     if (!next) return;
+    const command = handoffCommand(next.text);
+    const nearLimit = !command && await overBoatLine(state.ctx);
+    if (state.stopped || topLevelSession(state.binding.room) !== state.binding.session) return;
+    if (typeof state.ctx?.isIdle === "function" && !state.ctx.isIdle()) return;
+    if (boatDoorOpen()) return;
     state.pendingSayId = next.turnId;
     state.draft = { text: "", thinking: [], completedThinking: [], owned: false, steps: [], reports: 0, dirty: false, flushing: false, timer: null };
 
-    const command = handoffCommand(next.text);
-    if (command || overBoatLine(state.ctx)) {
-      const nearLimit = !command;
+    if (command || nearLimit) {
       const opened = openSurfaceDoor(state.ctx, {
         sayId: next.turnId,
         focus: command?.focus,
@@ -200,6 +183,7 @@ export function startChatDoorman(pi: any, ctx: any, binding: HostBinding): void 
   const previous = chatDoormen.get(key);
   if (previous) {
     previous.ctx = ctx;
+    previous.binding = binding;
     previous.pi = pi;
     return;
   }
@@ -234,27 +218,24 @@ export async function noteChatTurnEnd(
   if (!state || state.stopped || !state.pendingSayId || state.settledReport) return;
   if (topLevelSession(state.binding.room) !== state.binding.session) return;
   const sayId = state.pendingSayId;
-  const originIndex = messages.findLastIndex((message) =>
-    message?.role === "custom"
-    && SAY_ANSWERS.has(message.customType)
-    && message.details?.sayId === sayId
-  );
-  if (originIndex < 0) return;
-  const afterOrigin = messages.slice(originIndex + 1);
-  const nextOrigin = afterOrigin.findIndex((message) =>
-    message?.role === "user" || generatedTurnKey(message) !== null
-  );
-  const ownedMessages = nextOrigin < 0 ? afterOrigin : afterOrigin.slice(0, nextOrigin);
-  // A delayed snapshot may include async-result follow-ups after this say's
-  // answer. Keep its first settled response, never the latest session reply.
-  // OMP re-samples pause_turn stops, so those are progress, not completion.
-  const assistantIndex = ownedMessages.findIndex(isSettledAssistant);
-  if (assistantIndex < 0) return;
-  const assistant = ownedMessages[assistantIndex];
-  const thinking = ownedMessages.slice(0, assistantIndex + 1).flatMap(displayableThinking);
-  const outcome = assistant.stopReason === "error" || assistant.stopReason === "aborted"
-    ? assistant.stopReason : "complete";
-  await settleSay(state, sayId, { text: conversationText(assistant), thinking, outcome });
+  const observations = messages.map((message) => {
+    const sayOrigin = message?.role === "custom" && SAY_ANSWERS.has(message.customType);
+    const origin = sayOrigin || message?.role === "user" || generatedTurnKey(message) !== null;
+    return {
+      kind: origin ? "origin" : message?.role === "assistant" ? "assistant" : "other",
+      sayId: sayOrigin ? message.details?.sayId ?? null : null,
+      text: message?.role === "assistant" ? conversationText(message) : "",
+      thinking: displayableThinking(message),
+      settled: isSettledAssistant(message),
+      stopReason: typeof message?.stopReason === "string" ? message.stopReason : null,
+    };
+  });
+  const { answer } = await lifecyclePlan<{
+    answer: { text: string; thinking: string[]; outcome: "complete" | "error" | "aborted" } | null;
+  }>(binding, { action: "chatOutcome", sayId, messages: observations });
+  if (state.stopped || state.pendingSayId !== sayId || state.settledReport) return;
+  if (topLevelSession(state.binding.room) !== state.binding.session) return;
+  if (answer) await settleSay(state, sayId, answer);
 }
 
 async function settleSay(

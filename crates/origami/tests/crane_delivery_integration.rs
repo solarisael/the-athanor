@@ -496,7 +496,7 @@ async fn run_contract(pool: &PgPool) -> TestResult {
     assert_eq!(payload["event_kind"], BOAT_READY_EVENT_KIND);
     assert_eq!(payload["record_id"], memory_id.to_string());
 
-    let broker = Broker::connect(&nats_url()).await?;
+    let broker = Broker::connect(&nats_url(), None).await?;
     let receipt_client = async_nats::connect(nats_url()).await?;
     let mut receipt_messages = receipt_client.subscribe(RECEIPT_SUBJECT).await?;
     let mut boat_subjects = receipt_client.subscribe("athanor.boat.ready").await?;
@@ -796,6 +796,7 @@ async fn serve_delivers_until_cancelled_and_leaves_no_lease_behind() -> TestResu
         let cranes = tokio::spawn(DeliveryService::serve(
             Store::from_pool(pool.clone()),
             nats_url(),
+            None,
             cancellation.clone(),
         ));
 

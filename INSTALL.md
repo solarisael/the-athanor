@@ -26,13 +26,37 @@ GUI (`build-native-release.ps1:136,146-167`). The web Pulse runs under Bun from
 a source checkout. The `pulse.exe` window is a separate build
 (`scripts/install-pulse.ps1:18-61`).
 
+## Authenticated broker rollout
+
+Delivery API 2 provides authenticated NATS clients.
+The Host API 2 cutover additionally requires matching native and OMP adapter components.
+
+Close the House Host and every OMP session before activating this release.
+The canonical deployment driver refuses an active Host listener or installed substrate child.
+It does not terminate user sessions.
+
+Run `substrate/deploy-local.ps1` from the verified source checkout.
+If you use a deployment checkout, synchronize the verified source before running the driver.
+Do not deploy an older checkout over the installed repairs.
+
+The driver supplies the existing OMP configuration, private client path, and operator principal to the installer.
+The installer preserves credentials across later updates.
+It writes `secrets/nats-server.conf` and protects the client projections.
+The Host now publishes Hallway pointers, so deployment must restart the broker with the new permission.
+Start the matching Host before reopening OMP.
+The loader refuses an older running Host when the selected component requires API 2.
+
+Warning: a delivery API 2 installer refuses installation or rollback to an unauthenticated delivery API 1 release.
+The first authenticated release needs another authenticated generation for normal rollback.
+Database backups do not make an old broker authentication-capable.
+
 ## Versions
 
-The source version is `0.5.4` (`package.json:3`). A local build installs
-`0.5.4+dev.<UTC yyyyMMddHHmm>.<short HEAD>` (`substrate/deploy-local.ps1:55-65`).
-The reference workstation runs `0.5.4+dev.202609282201.0e4ea3c`
-(`%ProgramFiles%\Solarisael\Athanor\current.json:2`). Older labels such as
-`0.9.6` and `1.0.0-rc.3` are history. The examples below use `<version>`.
+The product source version is `0.5.4`, and the OMP component version is `0.10.0`.
+Local native builds add a timestamp and source revision to the product version.
+Read `current.json` and the component pointer for the selected installed versions.
+Do not infer installed state from source versions or older documentation.
+The examples below use `<version>`.
 
 ## Verify and install
 

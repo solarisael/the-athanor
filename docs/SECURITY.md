@@ -52,10 +52,16 @@ What the installer does today:
 | `D/secrets/runtime-secrets.json` | `hostToken` and `postgresPassword` (32 random bytes each), plus `externalDatabaseUrl` (`installer.rs:1254-1286`) | Inheritance removed; full control for SYSTEM and Administrators only (`boundaries.rs:353-381`). Applied to `D`, the folder, and the file (`installer.rs:239,1259-1261,1286`) |
 | `%USERPROFILE%/.omp/agent/athanor/client.json` | A copy of `hostToken`, plus `houseId`, `stateRoot`, `hostUrl`, `defaultRoom`, `rooms` (`installer.rs:1316-1340`) | An ACL for the operator user on the folder and the file (`installer.rs:1333,1338`; `boundaries.rs:383-436`) |
 | `ATHANOR_HOST_TOKEN` in the OMP environment | The bearer. The loader sets it when the variable is empty (`adapters/omp/installed-loader.ts:554-556,628-634`) | None. The adapter sends it as `Authorization: Bearer` (`adapters/omp/house-proof/host.ts:43-47,153,182`) |
-| The substrate child's environment | The full `process.env`, with any token or database URL in it (`adapters/omp/rust-transport.ts:564-567`; `adapters/omp/house-proof/substrate.ts:17-33`) | None |
+| Native Host configuration | Database and broker credentials remain in native execution. OMP no longer forwards its environment to substrate children. | Native configuration and existing secret ACLs |
 | The Docket capability | The environment wins, else a room-capability file (`adapters/omp/house-proof/tools.ts:78-99`; `room.ts:147-155`) | Not re-verified at `a6ab453`; `adapters/omp/house-proof/room.ts` decides the file location |
 
 Both Pulse proxies read `hostToken` from the secrets file (`gui-prototype/serve.ts:62`; `gui-desktop/src/main.rs:49-50,56`).
+
+Native judgments can receive an approved provider credential through the authenticated loopback connection.
+The credential remains transient and does not enter context caches or receipts.
+The installed Host broker identity can publish Hallway pointers.
+The exact subject permission is `athanor.hallway.room.>`.
+Existing restrictions on unrelated subjects remain unchanged.
 
 Warning: Off Windows, both ACL functions do nothing and report success (`boundaries.rs:377-380,431-435`).
 

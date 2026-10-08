@@ -30,6 +30,7 @@ pub use event_ingest::giga_event_ingest;
 pub use event_replay::giga_event_replay;
 pub(crate) use event_store::event_from_store;
 pub use health::giga_health;
+pub(crate) use health::giga_health_with_enablement;
 pub use promotion::giga_promote;
 pub use queue::giga_queue_maintenance;
 pub use review::giga_review;

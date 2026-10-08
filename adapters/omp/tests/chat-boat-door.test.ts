@@ -23,10 +23,12 @@ const savedEnv: Record<string, string | undefined> = {};
 
 let host: ReturnType<typeof fakeHost>;
 
-// Answers only the chat ring: snapshot, turn, draft.
+// Native policy is scripted here; these cases exercise the OMP handoff sequence.
 function fakeHost() {
   const lines: Array<Record<string, any>> = [];
   const commands: Array<Record<string, any>> = [];
+  let next: Record<string, unknown> | null = null;
+  const answers: Array<{ text: string; thinking: string[]; outcome: string } | null> = [];
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -42,8 +44,19 @@ function fakeHost() {
         const reply = (kind: string, extra: Record<string, unknown> = {}) =>
           socket.send(JSON.stringify({ correlation_id: command.message_id, command_or_event_type: kind, ...extra }));
         if (type === "athanor.chat.subscribe") return reply("athanor.chat.snapshot", { messages: lines });
+        if (type === "athanor.lifecycle.plan") {
+          const request = command.lifecycle_request;
+          if (request.action === "chatNext") {
+            return reply("athanor.lifecycle.result", { result: { next } });
+          }
+          if (request.action === "chatOutcome") {
+            if (answers.length === 0) return reply(`${type}.command_refused`, { reason: "unscripted outcome" });
+            return reply("athanor.lifecycle.result", { result: { answer: answers.shift() } });
+          }
+        }
         if (type === "athanor.chat.turn") {
           lines.push({ author: "spirit", ...command.chat_turn });
+          if (next?.turnId === command.chat_turn.turnId) next = null;
           return reply("athanor.chat.command_accepted");
         }
         if (type === "athanor.chat.draft") return reply("athanor.chat.command_accepted");
@@ -54,8 +67,11 @@ function fakeHost() {
   process.env.ATHANOR_HOST_URL = `ws://127.0.0.1:${server.port}`;
   return {
     server,
-    say: (turnId: string, text: string) =>
-      lines.push({ author: "operator", authorName: "Sol", turnId, sequence: lines.length + 1, text }),
+    say: (turnId: string, text: string) => {
+      next = { author: "operator", authorName: "Sol", turnId, sequence: lines.length + 1, text };
+      lines.push(next);
+    },
+    answer: (text: string | null) => answers.push(text === null ? null : { text, thinking: [], outcome: "complete" }),
     turns: () => commands.filter((c) => c.command_or_event_type === "athanor.chat.turn").map((c) => c.chat_turn),
   };
 }
@@ -138,6 +154,7 @@ test("/handoff from Pulse casts the boat, hands off, and the turn after answers 
   noteChatMessageStart(sent[0]);
   noteChatToolStart({ toolCallId: "t-sleep", toolName: "write", intent: "Casting the paper boat" });
   boatCast(ctx);
+  host.answer(null);
   await agentEnd([sent[0], sleepCall]);
   await settle();
   expect(handoffs).toEqual(["keep the Pulse thread"]);
@@ -145,6 +162,7 @@ test("/handoff from Pulse casts the boat, hands off, and the turn after answers 
 
   expect(sent[1].customType).toBe("athanor-after-handoff");
   expect(sent[1].details).toEqual({ sayId: "say-1" });
+  host.answer("hi solzinho, I'm back");
   await agentEnd([sent[1], reply("hi solzinho, I'm back")]);
   expect(host.turns()).toEqual([expect.objectContaining({
     turnId: "say-1",
@@ -161,12 +179,14 @@ test("a Pulse say over the boat line waits for the boat and the handoff, then is
   expect(sent.map((m) => m.customType)).toEqual(["athanor-boat-before-handoff"]);
 
   boatCast(ctx);
+  host.answer(null);
   await agentEnd([sent[0], sleepCall]);
   await settle();
   expect(handoffs).toEqual([undefined]);
   expect(sent.map((m) => m.customType)).toEqual(["athanor-boat-before-handoff", "athanor-chat-say"]);
   expect(sent[1].content).toContain("how is the dragon doing?");
 
+  host.answer("doing great");
   await agentEnd([sent[1], reply("doing great")]);
   expect(host.turns().map((turn: any) => [turn.turnId, turn.text])).toEqual([["say-2", "doing great"]]);
 });
@@ -175,6 +195,7 @@ test("a Pulse /handoff that ends without a boat or a handoff is Cancelled, not l
   const noBoat = omp();
   host.say("say-3", "/handoff");
   await noBoat.poll();
+  host.answer(null);
   await noBoat.agentEnd([noBoat.sent[0], reply("oops, I talked instead")]);
   await settle();
   expect(host.turns()).toEqual([expect.objectContaining({ turnId: "say-3", text: "", outcome: "aborted" })]);
@@ -185,6 +206,7 @@ test("a Pulse /handoff that ends without a boat or a handoff is Cancelled, not l
   host.say("say-4", "/handoff");
   await failed.poll();
   boatCast(failed.ctx);
+  host.answer(null);
   await failed.agentEnd([failed.sent[0], sleepCall]);
   await settle();
   expect(host.turns().at(-1)).toEqual(expect.objectContaining({ turnId: "say-4", text: "", outcome: "aborted" }));

@@ -12,6 +12,7 @@ use summoning::presence::{
 };
 
 pub const HOST_SCHEMA_VERSION: u8 = 1;
+pub const HOST_API_VERSION: u32 = 2;
 pub const PAPER_BOAT_RECEIPT_PROJECTION_ID: &str = "paper_boat_receipt";
 pub const PAPER_BOAT_RECEIPT_SUBSCRIBE: &str = "athanor.paper_boat_receipt.subscribe";
 pub const PAPER_BOAT_RECEIPT_SNAPSHOT: &str = "athanor.paper_boat_receipt.snapshot";
@@ -86,6 +87,22 @@ pub const CHAT_SNAPSHOT: &str = "athanor.chat.snapshot";
 pub const CHAT_DELTA: &str = "athanor.chat.delta";
 pub const CHAT_COMMAND_ACCEPTED: &str = "athanor.chat.command_accepted";
 pub const CHAT_COMMAND_REFUSED: &str = "athanor.chat.command_refused";
+pub const ROOM_PROJECTION_ID: &str = "room";
+pub const ROOM_STATE: &str = "athanor.room.state";
+pub const ROOM_STATE_RESULT: &str = "athanor.room.state_result";
+pub const ORGAN_PROJECTION_ID: &str = "organ";
+pub const ORGAN_CALL: &str = "athanor.organ.call";
+pub const ORGAN_RESULT: &str = "athanor.organ.result";
+pub const JUDGMENT_PROJECTION_ID: &str = "judgment";
+pub const JUDGMENT_RUN: &str = "athanor.judgment.run";
+pub const JUDGMENT_RESULT: &str = "athanor.judgment.result";
+pub const LIFECYCLE_PROJECTION_ID: &str = "lifecycle";
+pub const LIFECYCLE_PLAN: &str = "athanor.lifecycle.plan";
+pub const LIFECYCLE_RESULT: &str = "athanor.lifecycle.result";
+pub const CONTEXT_PREPARE: &str = "athanor.context.prepare";
+pub const CONTEXT_PREPARED: &str = "athanor.context.prepared";
+pub const CONTEXT_LESSON_PLAN: &str = "athanor.context.lesson_plan";
+pub const CONTEXT_LESSON_PLANNED: &str = "athanor.context.lesson_planned";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -597,6 +614,16 @@ struct RawClientCommand {
     chat_turn: Option<ChatTurnPayload>,
     #[serde(default)]
     chat_draft: Option<ChatDraftPayload>,
+    #[serde(default)]
+    room_request: Option<Value>,
+    #[serde(default)]
+    organ_request: Option<crate::organ::OrganRequest>,
+    #[serde(default)]
+    judgment_request: Option<Value>,
+    #[serde(default)]
+    lifecycle_request: Option<Value>,
+    #[serde(default)]
+    context_prepare: Option<Value>,
 }
 
 /// One conversation-capture request: the visible window as the harness renders
@@ -850,6 +877,11 @@ impl RawClientCommand {
                 SHELL_PROJECTION_ID
             }
             CHAT_SUBSCRIBE | CHAT_SAY | CHAT_TURN | CHAT_DRAFT => CHAT_PROJECTION_ID,
+            ROOM_STATE => ROOM_PROJECTION_ID,
+            ORGAN_CALL => ORGAN_PROJECTION_ID,
+            JUDGMENT_RUN => JUDGMENT_PROJECTION_ID,
+            LIFECYCLE_PLAN => LIFECYCLE_PROJECTION_ID,
+            CONTEXT_PREPARE | CONTEXT_LESSON_PLAN => CONTEXT_PROJECTION_ID,
             _ => RECALL_POLICY_PROJECTION_ID,
         };
         if self.projection_id != expected_projection {
@@ -1046,6 +1078,30 @@ pub enum ClientCommand {
         meta: CommandMeta,
         payload: ChatDraftPayload,
     },
+    RoomState {
+        meta: CommandMeta,
+        request: Value,
+    },
+    OrganCall {
+        meta: CommandMeta,
+        request: crate::organ::OrganRequest,
+    },
+    JudgmentRun {
+        meta: CommandMeta,
+        request: Value,
+    },
+    LifecyclePlan {
+        meta: CommandMeta,
+        request: Value,
+    },
+    PrepareContext {
+        meta: CommandMeta,
+        request: Value,
+    },
+    ContextLessonPlan {
+        meta: CommandMeta,
+        request: Value,
+    },
 }
 
 impl ClientCommand {
@@ -1082,6 +1138,12 @@ impl ClientCommand {
             | Self::ChatSubscribe { meta }
             | Self::ChatSay { meta, .. }
             | Self::ChatTurn { meta, .. }
+            | Self::RoomState { meta, .. }
+            | Self::OrganCall { meta, .. }
+            | Self::JudgmentRun { meta, .. }
+            | Self::LifecyclePlan { meta, .. }
+            | Self::PrepareContext { meta, .. }
+            | Self::ContextLessonPlan { meta, .. }
             | Self::ChatDraft { meta, .. }
             | Self::Acknowledge { meta, .. } => meta,
         }
@@ -1113,6 +1175,93 @@ impl CommandParseError {
     }
 }
 
+impl RawClientCommand {
+    fn native_command(
+        &mut self,
+        meta: CommandMeta,
+    ) -> Result<Option<ClientCommand>, CommandParseError> {
+        let kind = self.command_or_event_type.as_str();
+        for (present, allowed) in [
+            (self.room_request.is_some(), &[ROOM_STATE][..]),
+            (self.organ_request.is_some(), &[ORGAN_CALL][..]),
+            (self.judgment_request.is_some(), &[JUDGMENT_RUN][..]),
+            (self.lifecycle_request.is_some(), &[LIFECYCLE_PLAN][..]),
+            (
+                self.context_prepare.is_some(),
+                &[CONTEXT_PREPARE, CONTEXT_LESSON_PLAN][..],
+            ),
+        ] {
+            if present && !allowed.contains(&kind) {
+                return Err(CommandParseError::from_meta(
+                    &meta,
+                    "native payload belongs only to its command",
+                ));
+            }
+        }
+        if !matches!(
+            kind,
+            ROOM_STATE
+                | ORGAN_CALL
+                | JUDGMENT_RUN
+                | LIFECYCLE_PLAN
+                | CONTEXT_PREPARE
+                | CONTEXT_LESSON_PLAN
+        ) {
+            return Ok(None);
+        }
+        self.no_command_payload(&meta)?;
+        if [
+            self.hallway_knock_settle.is_some(),
+            self.akasha_recall_query.is_some(),
+            self.akasha_lesson_query.is_some(),
+            self.presence_open.is_some(),
+            self.presence_compile.is_some(),
+            self.presence_settle.is_some(),
+            self.presence_close.is_some(),
+            self.chat_say.is_some(),
+            self.chat_turn.is_some(),
+            self.chat_draft.is_some(),
+        ]
+        .contains(&true)
+        {
+            return Err(CommandParseError::from_meta(
+                &meta,
+                "native command carries another command's payload",
+            ));
+        }
+        let missing =
+            || CommandParseError::from_meta(&meta, "native command requires its request payload");
+        let command = match kind {
+            ROOM_STATE => ClientCommand::RoomState {
+                request: self.room_request.take().ok_or_else(missing)?,
+                meta,
+            },
+            ORGAN_CALL => ClientCommand::OrganCall {
+                request: self.organ_request.take().ok_or_else(missing)?,
+                meta,
+            },
+            JUDGMENT_RUN => ClientCommand::JudgmentRun {
+                request: self.judgment_request.take().ok_or_else(missing)?,
+                meta,
+            },
+            LIFECYCLE_PLAN => ClientCommand::LifecyclePlan {
+                request: self.lifecycle_request.take().ok_or_else(missing)?,
+                meta,
+            },
+            CONTEXT_PREPARE => ClientCommand::PrepareContext {
+                request: self.context_prepare.take().ok_or_else(missing)?,
+                meta,
+            },
+            CONTEXT_LESSON_PLAN => ClientCommand::ContextLessonPlan {
+                request: self.context_prepare.take().ok_or_else(missing)?,
+                meta,
+            },
+            _ => unreachable!(),
+        };
+        Ok(Some(command))
+    }
+}
+
 pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseError> {
     let fallback_message_id = value
         .get("message_id")
@@ -1124,7 +1273,7 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
-    let raw: RawClientCommand = serde_json::from_value(value).map_err(|error| {
+    let mut raw: RawClientCommand = serde_json::from_value(value).map_err(|error| {
         CommandParseError::new(
             fallback_message_id,
             fallback_idempotency_key,
@@ -1132,6 +1281,9 @@ pub fn parse_client_command(value: Value) -> Result<ClientCommand, CommandParseE
         )
     })?;
     let meta = raw.meta()?;
+    if let Some(command) = raw.native_command(meta.clone())? {
+        return Ok(command);
+    }
     if raw.hallway_knock_settle.is_some() && raw.command_or_event_type != HALLWAY_KNOCK_SETTLE {
         return Err(CommandParseError::from_meta(
             &meta,

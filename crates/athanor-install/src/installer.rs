@@ -63,6 +63,10 @@ pub(crate) struct RuntimeSecrets {
     pub(crate) host_token: String,
     pub(crate) postgres_password: String,
     pub(crate) external_database_url: Option<String>,
+    #[serde(default)]
+    pub(crate) host_nats_auth: Option<origami::cranes::broker::NatsAuth>,
+    #[serde(default)]
+    pub(crate) akasha_nats_auth: Option<origami::cranes::broker::NatsAuth>,
 }
 
 impl RuntimeSecrets {
@@ -71,6 +75,102 @@ impl RuntimeSecrets {
             .clone()
             .unwrap_or_else(|| crate::endpoints::managed_database_url(&self.postgres_password))
     }
+}
+
+fn nats_server_config(secrets: &RuntimeSecrets) -> Result<String> {
+    let host = secrets
+        .host_nats_auth
+        .as_ref()
+        .context("Host NATS credentials are missing")?;
+    let akasha = secrets
+        .akasha_nats_auth
+        .as_ref()
+        .context("AKASHA NATS credentials are missing")?;
+    for (auth, expected_user) in [(host, "athanor-host"), (akasha, "athanor-akasha")] {
+        if auth.username != expected_user
+            || auth.password.len() != 64
+            || !auth.password.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            bail!("installed NATS credentials are invalid");
+        }
+    }
+
+    let streams = [
+        origami::cranes::broker::BOAT_READY_STREAM_NAME,
+        origami::cranes::broker::CRANE_STREAM_NAME,
+        origami::cranes::broker::RECEIPT_STREAM_NAME,
+        origami::cranes::broker::HALLWAY_STREAM_NAME,
+    ];
+    let mut api_publish = vec!["$JS.API.INFO".to_owned()];
+    for stream in streams {
+        api_publish.push(format!("$JS.API.STREAM.INFO.{stream}"));
+        api_publish.push(format!("$JS.API.STREAM.CREATE.{stream}"));
+        api_publish.push(format!("$JS.API.CONSUMER.INFO.{stream}.>"));
+        api_publish.push(format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.>"));
+    }
+    for stream in [
+        origami::cranes::broker::BOAT_READY_STREAM_NAME,
+        origami::cranes::broker::CRANE_STREAM_NAME,
+        origami::cranes::broker::HALLWAY_STREAM_NAME,
+        origami::cranes::broker::RECEIPT_STREAM_NAME,
+    ] {
+        api_publish.push(format!("$JS.API.CONSUMER.CREATE.{stream}.>"));
+    }
+    let host_publish = [
+        api_publish,
+        vec![
+            "$JS.ACK.>".into(),
+            origami::cranes::broker::BOAT_READY_SUBJECT.into(),
+            origami::cranes::broker::CRANE_SUBJECT_FILTER.into(),
+            origami::cranes::broker::RECEIPT_SUBJECT.into(),
+            "athanor.hallway.room.>".into(),
+        ],
+    ]
+    .concat();
+    let host_subscribe = [
+        origami::cranes::broker::BOAT_READY_SUBJECT,
+        origami::cranes::broker::CRANE_SUBJECT_FILTER,
+        origami::cranes::broker::RECEIPT_SUBJECT,
+        "athanor.hallway.room.>",
+        "_INBOX.athanor-host.>",
+    ];
+    Ok(format!(
+        r#"authorization {{
+  users = [
+    {{
+      user: "{}"
+      password: "{}"
+      permissions: {{
+        publish: {{ allow: [{}] }}
+        subscribe: {{ allow: [{}] }}
+      }}
+    }}
+    {{
+      user: "{}"
+      password: "{}"
+      permissions: {{
+        publish: {{ allow: ["athanor.hallway.room.>"] }}
+        subscribe: {{ allow: ["_INBOX.athanor-akasha.>"] }}
+      }}
+    }}
+  ]
+}}
+"#,
+        host.username,
+        host.password,
+        host_publish
+            .iter()
+            .map(|subject| format!("{subject:?}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        host_subscribe
+            .iter()
+            .map(|subject| format!("{subject:?}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        akasha.username,
+        akasha.password,
+    ))
 }
 
 // ponytail: reads the pre-0.5.4 per-room-port runtime.json for one upgrade
@@ -210,6 +310,9 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
     pub fn install(&self, request: InstallRequest) -> Result<InstallOutcome> {
         let _operation = OperationLock::acquire()?;
         request.manifest.validate()?;
+        if request.manifest.compatibility.delivery_api != crate::manifest::NATS_AUTH_DELIVERY_API {
+            bail!("this installer requires a release with authenticated NATS delivery");
+        }
         let house = self.resolve_house_config(&request)?;
         house.validate()?;
         self.preflight(&request, &house)?;
@@ -220,6 +323,16 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             .is_some_and(|value| value.version == request.manifest.version)
         {
             bail!("release {} is already installed", request.manifest.version);
+        }
+        if request.operator_integration.is_none() && self.fs.exists(&self.layout.config()) {
+            if let Ok(previous) =
+                serde_json::from_slice::<RuntimeConfig>(&self.fs.read(&self.layout.config())?)
+                && (previous.omp_config_path.is_some() || previous.client_config_path.is_some())
+            {
+                bail!(
+                    "updating an installed OMP integration requires all three OMP integration arguments"
+                );
+            }
         }
         let fallback_root = request.staging.join("components/omp-adapter");
         let fallback_component = read_verified_component(self.fs, &fallback_root)?;
@@ -399,6 +512,9 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             bail!("rollback release {previous} is not retained");
         }
         let previous_manifest = self.read_verified_native_manifest(&previous)?;
+        if previous_manifest.compatibility.delivery_api != crate::manifest::NATS_AUTH_DELIVERY_API {
+            bail!("rollback refused: the retained release cannot enforce NATS authentication");
+        }
         let (component_before, component_next) = self.component_transition_for(
             &previous_manifest,
             &self
@@ -893,6 +1009,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             self.layout.omp_adapter_current(),
             self.layout.config(),
             self.layout.secrets(),
+            self.layout.data.join("secrets/nats-server.conf"),
             self.layout.app(),
             self.layout.omp_loader(),
         ];
@@ -906,6 +1023,11 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         if let Some(integration) = &request.operator_integration {
             paths.push(integration.omp_config_path.clone());
             paths.push(integration.client_config_path.clone());
+            paths.push(
+                integration
+                    .client_config_path
+                    .with_file_name("athanor-nats-auth.json"),
+            );
         }
         let files = paths
             .into_iter()
@@ -1257,33 +1379,50 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             .context("runtime secret has no parent directory")?;
         self.fs.create_dir_all(secrets_dir)?;
         self.fs.restrict_acl(secrets_dir)?;
-        if self.fs.exists(&self.layout.secrets()) {
-            self.fs.restrict_acl(&self.layout.secrets())?;
-        }
-        if !self.fs.exists(&self.layout.secrets()) {
+
+        let mut secrets = if self.fs.exists(&secrets_path) {
+            self.fs.restrict_acl(&secrets_path)?;
+            serde_json::from_slice::<RuntimeSecrets>(&self.fs.read(&secrets_path)?)?
+        } else {
             let mut host = [0_u8; 32];
             let mut database = [0_u8; 32];
             self.secrets.fill(&mut host)?;
             self.secrets.fill(&mut database)?;
-            let secrets = RuntimeSecrets {
+            RuntimeSecrets {
                 host_token: hex::encode(host),
                 postgres_password: hex::encode(database),
                 external_database_url: request.external_database_url.clone(),
-            };
-            self.fs.write_atomic(
-                &self.layout.secrets(),
-                &serde_json::to_vec_pretty(&secrets)?,
-            )?;
-        } else if let Some(url) = &request.external_database_url {
-            let mut secrets: RuntimeSecrets =
-                serde_json::from_slice(&self.fs.read(&self.layout.secrets())?)?;
+                host_nats_auth: None,
+                akasha_nats_auth: None,
+            }
+        };
+        if let Some(url) = &request.external_database_url {
             secrets.external_database_url = Some(url.clone());
-            self.fs.write_atomic(
-                &self.layout.secrets(),
-                &serde_json::to_vec_pretty(&secrets)?,
-            )?;
         }
-        self.fs.restrict_acl(&self.layout.secrets())
+        if secrets.host_nats_auth.is_none() {
+            let mut password = [0_u8; 32];
+            self.secrets.fill(&mut password)?;
+            secrets.host_nats_auth = Some(origami::cranes::broker::NatsAuth {
+                username: "athanor-host".into(),
+                password: hex::encode(password),
+            });
+        }
+        if secrets.akasha_nats_auth.is_none() {
+            let mut password = [0_u8; 32];
+            self.secrets.fill(&mut password)?;
+            secrets.akasha_nats_auth = Some(origami::cranes::broker::NatsAuth {
+                username: "athanor-akasha".into(),
+                password: hex::encode(password),
+            });
+        }
+        let server_config = nats_server_config(&secrets)?;
+        self.fs
+            .write_atomic(&secrets_path, &serde_json::to_vec_pretty(&secrets)?)?;
+        self.fs.restrict_acl(&secrets_path)?;
+        let nats_config = self.layout.data.join("secrets/nats-server.conf");
+        self.fs
+            .write_atomic(&nats_config, server_config.as_bytes())?;
+        self.fs.restrict_acl(&nats_config)
     }
 
     fn write_operator_integration(
@@ -1339,6 +1478,17 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             &integration.client_config_path,
             &integration.operator_principal,
         )?;
+        let nats_auth = secrets
+            .akasha_nats_auth
+            .as_ref()
+            .context("AKASHA NATS credentials are missing")?;
+        let nats_auth_path = integration
+            .client_config_path
+            .with_file_name("athanor-nats-auth.json");
+        self.fs
+            .write_atomic(&nats_auth_path, &serde_json::to_vec_pretty(nats_auth)?)?;
+        self.fs
+            .restrict_user_acl(&nats_auth_path, &integration.operator_principal)?;
 
         let config = String::from_utf8(self.fs.read(&integration.omp_config_path)?)?;
         let updated = register_extension(&config, &self.layout.omp_loader());
@@ -1377,3 +1527,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
         Ok(true)
     }
 }
+
+#[cfg(test)]
+#[path = "installer_nats_tests.rs"]
+mod nats_tests;

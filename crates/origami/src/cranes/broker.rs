@@ -11,6 +11,31 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use uuid::Uuid;
 
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NatsAuth {
+    pub username: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for NatsAuth {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NatsAuth")
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
+}
+
+pub fn connect_options(auth: Option<&NatsAuth>) -> async_nats::ConnectOptions {
+    match auth {
+        Some(auth) => async_nats::ConnectOptions::new()
+            .user_and_password(auth.username.clone(), auth.password.clone())
+            .custom_inbox_prefix(format!("_INBOX.{}", auth.username)),
+        None => async_nats::ConnectOptions::new(),
+    }
+}
+
 // Live wire names — JetStream and house-host both hold them, so a
 // change here is a migration, never a rename.
 pub const BOAT_READY_STREAM_NAME: &str = "ATHANOR_BOAT_READY";
@@ -67,10 +92,11 @@ pub struct Broker {
 }
 
 impl Broker {
-    pub async fn connect(url: &str) -> Result<Self> {
-        let client = async_nats::connect(url)
+    pub async fn connect(url: &str, auth: Option<&NatsAuth>) -> Result<Self> {
+        let client = connect_options(auth)
+            .connect(url)
             .await
-            .with_context(|| format!("connect to NATS delivery endpoint {url}"))?;
+            .context("connect to NATS delivery endpoint")?;
         Ok(Self {
             context: jetstream::new(client.clone()),
             client,
@@ -90,7 +116,8 @@ impl Broker {
         allowed_rooms: &[String],
         idempotency_key: &str,
     ) -> Result<()> {
-        crate::hallways::sea::publish(&self.context, projection, allowed_rooms, idempotency_key).await
+        crate::hallways::sea::publish(&self.context, projection, allowed_rooms, idempotency_key)
+            .await
     }
 
     pub fn boat_ready_stream_config() -> jetstream::stream::Config {
@@ -174,14 +201,20 @@ impl Broker {
         Ok(stream)
     }
 
-    pub async fn hallway_consumer(context: &jetstream::Context, room: &str) -> Result<consumer::PullConsumer> {
+    pub async fn hallway_consumer(
+        context: &jetstream::Context,
+        room: &str,
+    ) -> Result<consumer::PullConsumer> {
         let stream = Self::hallway_stream(context).await?;
         let name = format!("athanor-hallway-{room}-v1");
         let expected = Self::lane_consumer_config(
-            &name, "Durable trigger for PostgreSQL hallway inbox projection",
+            &name,
+            "Durable trigger for PostgreSQL hallway inbox projection",
             &crate::hallways::sea::hallway_room_subject(room),
         );
-        let consumer = stream.get_or_create_consumer(&name, expected.clone()).await?;
+        let consumer = stream
+            .get_or_create_consumer(&name, expected.clone())
+            .await?;
         verify_consumer_config(&consumer.cached_info().config, &expected)?;
         Ok(consumer)
     }

@@ -1,8 +1,15 @@
 # Roadmap
 
-Status: planned work only. Checked against the census of commit `a6ab453` (`dev/next`) on 2026-10-04.
+Status: release work with explicit source and deployment states.
 
-This page lists work that is not done. It does not describe the current system. For what the code does, read [`ARCHITECTURE.md`](./ARCHITECTURE.md). For the limits of the code, read [`LIMITATIONS.md`](./LIMITATIONS.md). For words, read [`VOCABULARY.md`](./VOCABULARY.md). For measured results, read [`EVIDENCE.md`](./EVIDENCE.md).
+The Windows repairs were deployed after their isolated verification.
+The Host API 2 cutover is verified in source and awaits deployment.
+Pulse's local proxy guard was installed separately on 2026-10-04.
+
+This page separates completed source work from remaining release work.
+Read [Architecture](./ARCHITECTURE.md) for runtime ownership.
+Read [Limitations](./LIMITATIONS.md) for current constraints.
+Read [Vocabulary](./VOCABULARY.md) for names and [Evidence](./EVIDENCE.md) for measured results.
 
 The product version is `0.5.4` (`package.json:3`). The labels `0.9.6`, `0.11.0`, and `1.0.0-rc.3` are history. They are numerically above the current version, so do not read them as progress.
 
@@ -30,7 +37,7 @@ A Built or Partly built state is a census result for one slice. It does not mean
 | Curios | Keep selected hunches until later context makes them meaningful | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: `crates/akasha`. Automatic resurfacing is Planned. |
 | GIGA Striatum | Keep the right reviewed lessons warm while a work state persists | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: `crates/akasha`. The nearest census row is the adapter lesson bridge (`adapters/omp/index.ts:1033-1056`). Learned work-state behavior is Planned after Docket, shadow first. |
 | Web operator surface | Show House state and send chat through a loopback proxy (`serve.ts` or `pulse.exe`) | Built | Not read-only: the allow-list includes `/live/chat/say` (`gui-prototype/live-routes.json:15`; `chat.js:146`). See [Pulse](./ARCHITECTURE.md#6-pulse). Login and authenticated writes are Planned. |
-| Athanor Host | Give clients authenticated snapshots, deltas, and resync | Built | Recall Policy cursors and bounded receipts persist (`crates/host/src/store.rs:333-369,406-428`). Presence reloads from PostgreSQL (`server.rs:1129-1136`). These guarantees differ by projection. Chat persistence is Planned, see [the chat ring](./ARCHITECTURE.md#34-the-chat-ring). |
+| Athanor Host | Give clients authenticated snapshots, deltas, and resync | Built | Host API 2 adds shared context, judgments, room mutations, and native organ execution. Source and isolated runtime proofs pass. Deployment remains pending. |
 | Session Recall Policy | Make proactive retrieval visible and mode-aware | Built | `crates/host/src/policy.rs:130-347`; `recall_policy` tool (`tools.ts:1176`). |
 | GIGA integrity and refinement transactions | Build candidates from explicit fresh evidence and compare predicted outcomes with observed results | Not re-verified | Not re-verified at `a6ab453`. Deciding crate: `crates/akasha`. |
 | PostgreSQL outbox and NATS delivery | Deliver bounded opaque pointers with explicit duplicate windows and durable PostgreSQL idempotency | Partly built | Host `DeliveryService` (`crates/host/src/house.rs:235-248`). The Host also consumes Hallway post projections from JetStream (`server.rs:2855-2894`). The substrate outbox is not re-verified at `a6ab453`; deciding crate: `crates/akasha`. |
@@ -72,7 +79,7 @@ Three facts change the older plan:
 
 - One Host process serves every room on one port. Each room is nested under `/room/<room>` (`crates/host/src/house.rs:86-105,166-202`). See [One process, many rooms](./ARCHITECTURE.md#31-one-process-many-rooms).
 - The installer ships NATS 2.14.4 (`installer/dependencies.json`). The broker carries more than `boat.ready`: the Host consumes Hallway post projections from JetStream (`crates/host/src/server.rs:2855-2894`).
-- The chat ring is in memory only. A Host restart empties it (`crates/host/src/chat.rs:6-7,25-30`). See [the chat ring](./ARCHITECTURE.md#34-the-chat-ring).
+- The source now checkpoints bounded chat and drafts across restart. Native rollout remains pending. See [the chat ring](./ARCHITECTURE.md#34-the-chat-ring).
 
 ### 1. Freeze the boundary
 
@@ -83,6 +90,8 @@ Do not add Prolog/Datalog, Lean, Z3, SyGuS, marketplace behavior, new cognitive 
 ### 2. Record a parity baseline and close known fixes
 
 The `0.11.0` runtime label is history, not a target. Inventory each TypeScript, Python, and Rust capability with its owner, callers, tests, persistence effects, and failure behavior. Not re-verified at `a6ab453`: no census row covers a baseline record.
+The OMP file census and its Host ownership cutover are complete in source.
+Other legacy capability inventories remain separate work.
 
 Record retrieval results, correction and room-isolation behavior, p50 and p95 latency, install steps, and restart, backup, restore, update, and rollback behavior.
 
@@ -90,14 +99,21 @@ Close the defects in [Known defects](./LIMITATIONS.md#8-known-defects-in-the-cur
 
 ### 3. Make the Host the only client boundary
 
-State: Planned. Today 32 tools go to the substrate child directly, and 4 tools write room files locally (`adapters/omp/house-proof/room.ts:221-222,264`). See [Tools and wires](./ARCHITECTURE.md#43-tools-and-wires).
+State: Built in source; deployment remains pending.
+OMP adapter `0.10.0` requires Host API `2`.
+The adapter no longer starts substrate children or writes shared room state.
 
-The TypeScript adapter also holds the doormen, Presence, the boat door, the restart door, and room identity (`adapters/omp/house-proof/chat.ts`; `presence.ts`; `room.ts:86-127`).
+The Host owns room mutations, context preparation, judgments, cache persistence, and shared lifecycle policy.
+OMP keeps registration, observation, event translation, tool interception, and presentation.
+Native CLI and Host callers share domain execution code.
 
-- Move validation, policy, idempotency, and identity into Rust behind the Host.
-- Keep the OMP adapter as registration, lifecycle translation, transport, and presentation.
-- Define one common record envelope in `hearth`. Not re-verified at `a6ab453`: deciding crate `crates/hearth`. The wire `CommandMeta` exists (`crates/protocol/src/host.rs:789-809`).
-- Prove scope and authorization before ranking with one conformance corpus for Vault and AKASHA. Not re-verified at `a6ab453`: deciding crates `crates/vault`, `crates/akasha`.
+The isolated proof covers Vault retrieval, AKASHA writes and retrieval, backups, worker lifecycle, and a real OMP context hook.
+Real Typesafe calls exercise mode, verdict, and Recall judgment.
+A real broker verifies the Host's new Hallway publication permission.
+
+Deployment requires matching native and adapter components, broker reload, and an OMP restart.
+The compatibility gate refuses an older running Host.
+See [the adapter contract](../adapters/omp/README.md) and [the dated evidence](./EVIDENCE.md).
 
 ### 4. Converge Vault and AKASHA on the Rust core
 
@@ -117,11 +133,11 @@ The Vault-to-AKASHA migration is a one-way authority handoff. Not re-verified at
 
 State: Partly built. The Host runs a `DeliveryService` (`crates/host/src/house.rs:235-248`) and dead-letters bad Hallway projections (`server.rs:2895-2901`).
 
-Warning: the broker has no credentials. NATS starts with `-js -a 127.0.0.1` and no auth (`crates/athanor-install/src/supervisor.rs:417-459`). The NATS URL carries no credentials (`app.rs:17-58`).
+The source now provisions separate Host and AKASHA credentials, subject permissions, and private reply prefixes. The authenticated broker rollout remains pending.
 
-The older gate said: no second lane before credentials and subject ACLs. The Hallway lane already exists, so the gate is broken. Fix the gate before any further lane:
+Delivery API 2 prevents an older generation from reopening an unauthenticated broker. Finish this rollout before adding another delivery lane:
 
-- Add service credentials and subject ACLs.
+- Close old Host and OMP processes, deploy the protected configuration, and verify the installed clients.
 - Decide whether the Hallway projection lane stays before 1.0.
   `crates/akasha/src/hallway.rs:38-104` owns its producer.
   Publication follows the PostgreSQL write and is best-effort.
@@ -137,12 +153,12 @@ State: Partly built. Two proxies share one contract: `serve.ts` under Bun and `p
 
 Routes exist for chat, room state, Docket, Hallway, memory, lessons, Insula, and health. The 1.0 gate still needs:
 
-- persistent chat, so a Host restart keeps the conversation;
+- deployment of the verified bounded chat checkpoints;
 - a session list and resume (`crates/protocol/src/restart/mod.rs:36-38`);
 - more than one room per Pulse process (`serve.ts:34,41`; `proxy.rs:32`);
 - GIGA review and dispatch lineage views;
 - live data in place of dated fixtures (`gui-prototype/app.js:66-93`);
-- login and authenticated writes; the 2026-10-04 source repair adds local Origin/Host checks and awaits deployment;
+- login and authenticated writes; the local Origin/Host guard was installed on 2026-10-04;
 - delivery, backup, migration, and version state that an operator can act on.
 
 Every view must read Host projections. The GUI must not keep a second truth.
@@ -188,7 +204,7 @@ Do these steps in order. PostgreSQL owns records, permissions, idempotency, and 
 
 | Step | Work | State |
 |---|---|---|
-| 1 | Add broker credentials, subject ACLs, stream readiness, and true receipt names | Planned. No NATS auth exists (`supervisor.rs:417-459`; `app.rs:17-58`). |
+| 1 | Add broker credentials, subject ACLs, stream readiness, and true receipt names | Credentials and permissions are verified in source. Installed rollout remains pending; broader delivery evidence stays separate. |
 | 2 | Replace the memory-only Crane reference with a typed authority reference | Not re-verified at `a6ab453`. Deciding crate: `crates/origami`. |
 | 3 | Add crease handlers and PostgreSQL application receipts | Not re-verified at `a6ab453`. Deciding crate: `crates/origami`. |
 | 4 | Prove recipient consumers, dead-letter replay, and NATS rebuild from PostgreSQL | Not re-verified at `a6ab453`. Deciding crate: `crates/host`. |

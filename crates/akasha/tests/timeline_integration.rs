@@ -118,7 +118,7 @@ async fn memory_timeline_scrolls_active_rows_newest_first_with_keyset() -> TestR
     insert_memory(
         &pool,
         1,
-        "room-a",
+        "house",
         "conversa",
         Some("oldest"),
         "b1",
@@ -202,15 +202,20 @@ async fn memory_timeline_scrolls_active_rows_newest_first_with_keyset() -> TestR
     )
     .await?;
 
-    let all = memory_timeline(&pool, timeline_params(json!({}))).await?;
+    let all = memory_timeline(&pool, "room-a", timeline_params(json!({}))).await?;
     assert!(all.ok);
     let ids: Vec<i64> = all.memories.iter().map(|m| m.id).collect();
-    assert_eq!(ids, vec![7, 3, 2, 1], "newest first, exclusions applied");
+    assert_eq!(
+        ids,
+        vec![7, 2, 1],
+        "only own-room and shared active memories"
+    );
     assert_eq!(all.memories[0].excerpt.chars().count(), 500);
-    assert_eq!(all.memories[2].title, "untitled");
+    assert_eq!(all.memories[1].title, "untitled");
 
     let one_room = memory_timeline(
         &pool,
+        "room-b",
         timeline_params(json!({ "room": "room-b", "limit": 10 })),
     )
     .await?;
@@ -218,11 +223,21 @@ async fn memory_timeline_scrolls_active_rows_newest_first_with_keyset() -> TestR
         one_room.memories.iter().map(|m| m.id).collect::<Vec<_>>(),
         vec![3]
     );
+    assert!(
+        memory_timeline(
+            &pool,
+            "room-a",
+            timeline_params(json!({ "room": "room-b" })),
+        )
+        .await
+        .is_err()
+    );
 
     // Keyset cursor: exact chrono object through the driver, never a literal.
     let newest = &all.memories[0];
     let older = memory_timeline(
         &pool,
+        "room-a",
         timeline_params(json!({
             "before": { "createdAt": newest.created_at.to_rfc3339(), "id": newest.id }
         })),
@@ -230,7 +245,7 @@ async fn memory_timeline_scrolls_active_rows_newest_first_with_keyset() -> TestR
     .await?;
     assert_eq!(
         older.memories.iter().map(|m| m.id).collect::<Vec<_>>(),
-        vec![3, 2, 1],
+        vec![2, 1],
         "the cursor page starts strictly after the cursor row"
     );
 
@@ -280,7 +295,7 @@ async fn memory_read_returns_history_with_authority_visible() -> TestResult {
     )
     .await?;
 
-    let current = memory_read(&pool, MemoryReadParams { id: 10 }).await?;
+    let current = memory_read(&pool, "room-a", MemoryReadParams { id: 10 }).await?;
     assert!(current.ok);
     assert_eq!(
         current.memory.body.len(),
@@ -290,19 +305,21 @@ async fn memory_read_returns_history_with_authority_visible() -> TestResult {
     assert_eq!(current.memory.threads, vec!["proof thread".to_owned()]);
     assert_eq!(current.memory.superseded_by, None);
 
-    let history = memory_read(&pool, MemoryReadParams { id: 11 }).await?;
+    let history = memory_read(&pool, "room-a", MemoryReadParams { id: 11 }).await?;
     assert_eq!(
         history.memory.superseded_by,
         Some(10),
         "a superseded memory reads as history with its authority visible"
     );
 
-    let missing = memory_read(&pool, MemoryReadParams { id: 999_999 }).await;
+    let missing = memory_read(&pool, "room-a", MemoryReadParams { id: 999_999 }).await;
     let refusal = missing.expect_err("an unknown id must refuse, not invent");
     assert!(
         refusal.to_string().contains("unknown_memory") || refusal.to_string().contains("no memory"),
         "typed refusal, got: {refusal}"
     );
+    let foreign = memory_read(&pool, "room-b", MemoryReadParams { id: 10 }).await;
+    assert_eq!(foreign.unwrap_err().to_string(), refusal.to_string());
 
     assert!(MemoryReadParams { id: 0 }.validate().is_err());
     Ok(())

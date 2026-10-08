@@ -226,7 +226,7 @@ Shared lessons and explicit shared House scopes are not the same as private cros
 
 ## What House handles automatically
 
-The OMP adapter handles these parts:
+The Host and OMP adapter provide these parts:
 
 - active-room discovery;
 - identity and compact continuity loading;
@@ -240,79 +240,43 @@ Use explicit recall for load-bearing old decisions, names, promises, corrections
 
 ## Tools and the Host
 
-The adapter registers 43 tools: 42 in `adapters/omp/house-proof/tools.ts:491-2011`
-and `request_restart` in `restart-door.ts:574`. Each tool uses one or more of
-these wires (FaroAdapterTools wire legend):
+The adapter registers 43 public tools.
+House operations use authenticated Host commands.
+The adapter does not start substrate children or provide a fallback when the Host is absent.
 
-- **Substrate:** a spawned `athanor-substrate` child over JSONL stdio (tools.ts:339-359).
-- **Host:** the loopback WebSocket `ws://127.0.0.1:8787/room/<room>/athanor/v1/ws`
-  with the Host bearer token (host.ts:146-207).
-- **Room file:** local files in the room directory, through `room.ts`.
-- **In-process:** the adapter process only.
-
-| Family | Tool | Wire and Host need |
+| Family | Tools | Runtime |
 |---|---|---|
-| Continuity | `wake` | Substrate. No Host. |
-| Continuity | `sleep` | Host, then substrate. Degrades without the Host: the boat is still written. |
-| Continuity | `remember` | Substrate. No Host. |
-| Continuity | `recall` | Substrate, then Host. **Fails without the Host.** |
-| Continuity | `canon_read` | Substrate. No Host. |
-| Continuity | `canon_write` | Substrate. No Host. |
-| Lessons | `lessons` | Substrate. No Host. |
-| Lessons | `update_lesson` | Substrate. No Host. |
-| Lessons | `delete_lesson` | Substrate. No Host. |
-| Lessons | `design_doc` | Substrate. No Host. |
-| Lessons | `design_doc_write` | Substrate. No Host. |
-| Anamnesis | `anamnesis` | Substrate. No Host. |
-| Anamnesis | `anamnesis_write` | Substrate. No Host. |
-| Room | `room_state` | Room file (read). No Host. |
-| Room | `set_room_state` | Room files (write). No Host. |
-| Room | `house_routing_mode` | Room file (read and write). No Host. |
-| Room | `house_model_default` | Room file and the OMP model setting. No Host. |
-| Hallway | `hallway_create` | Substrate. No Host. |
-| Hallway | `hallway_join` | Substrate. No Host. |
-| Hallway | `hallway_post` | Substrate. No Host. |
-| Hallway | `hallway_knock_policy` | Substrate. No Host. |
-| Hallway | `hallway_knock` | Substrate. No Host to record the Knock. Delivery needs the Host. |
-| Hallway | `hallway_read` | Substrate. No Host. |
-| Hallway | `hallway_inbox` | Substrate. No Host. |
-| Docket | `quest_post` | Substrate. No Host. |
-| Docket | `quest_board` | Substrate. No Host. |
-| Docket | `quest_claim` | Substrate. No Host. |
-| Docket | `quest_report` | Substrate. No Host. |
-| Docket | `quest_evidence` | Substrate. No Host. |
-| GIGA | `giga_candidate_list` | Substrate (GIGA child). No Host. |
-| GIGA | `giga_health` | Substrate (GIGA child). No Host. |
-| GIGA | `giga_queue_maintenance` | Substrate (GIGA child). No Host. |
-| GIGA | `giga_review` | Substrate (GIGA child). No Host. |
-| GIGA | `giga_promote_memory` | Substrate (GIGA child). No Host. |
-| GIGA | `giga_promote_coding_lesson` | Substrate (GIGA child). No Host. |
-| GIGA | `giga_promote_project_lesson` | Substrate (GIGA child). No Host. |
-| Dispatch | `house_lane_status` | Host, then a substrate health probe. **Fails without the Host.** |
-| Dispatch | `house_dispatch` | Host. **Fails without the Host.** |
-| Dispatch | `familiar_status` | Host. **Fails without the Host.** |
-| Dispatch | `familiar_dispatch` | Host. **Fails without the Host.** |
-| Dispatch | `kitten_lineage_status` | In-process. No Host. |
-| Recall policy | `recall_policy` | Host. **Fails without the Host.** |
-| Restart | `request_restart` | Substrate. No Host. |
+| Continuity | `wake`, `sleep`, `remember`, `recall`, `canon_read`, `canon_write` | Host and native storage |
+| Lessons and design | `lessons`, `update_lesson`, `delete_lesson`, `design_doc`, `design_doc_write` | Host and native storage |
+| Anamnesis | `anamnesis`, `anamnesis_write` | Host and native storage |
+| Room | `room_state`, `set_room_state`, `house_routing_mode`, `house_model_default` | Native state; OMP performs model selection |
+| Hallway | `hallway_create`, `hallway_join`, `hallway_post`, `hallway_knock_policy`, `hallway_knock`, `hallway_read`, `hallway_inbox` | Host and native storage |
+| Docket | `quest_post`, `quest_board`, `quest_claim`, `quest_report`, `quest_evidence` | Host with native capability checks |
+| GIGA | `giga_candidate_list`, `giga_health`, `giga_queue_maintenance`, `giga_review`, `giga_promote_memory`, `giga_promote_coding_lesson`, `giga_promote_project_lesson` | Host-owned native services |
+| Dispatch | `house_lane_status`, `house_dispatch`, `familiar_status`, `familiar_dispatch` | Host |
+| Recall policy | `recall_policy` | Host |
+| Restart | `request_restart` | Native authorization; OMP performs the exit |
+| Local observation | `kitten_lineage_status` | Adapter process |
 
-The GIGA tools refuse with `giga_disabled` unless `ATHANOR_GIGA_ENABLED=1`
-(giga.ts:107-108). The Knock doorman and the inbox Bell projection also need the
-Host (knock.ts:77-114; hallway.ts:26-30). [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md#43-tools-and-wires)
-and [`docs/LIMITATIONS.md`](./docs/LIMITATIONS.md#7-doors-that-need-the-host) give the same split.
+GIGA capture and classification remain opt-in.
+The Host receives explicit enablement from the top-level harness session.
+Read-only GIGA queries do not start workers.
+Replay cannot change another producer.
+
+See [Architecture](./docs/ARCHITECTURE.md#4-the-omp-adapter) for ownership.
+See [Limitations](./docs/LIMITATIONS.md#7-doors-that-need-the-host) for unavailable dependencies.
 
 ## Vault and AKASHA workflows
 
 ### Vault
 
-Vault is the local transparent profile. `recall` uses the Vault lane when
-`ATHANOR_SUBSTRATE_ROOT` is unset (recall.ts:123, 150). Vault still needs the
-Host, and the Host needs PostgreSQL. `recall` fails without the Host
-(tools.ts:516, 526-532). The Host starts only after the PostgreSQL port answers
-(app.rs:88; service.rs:43-46, 83-85).
+The Host chooses retrieval from its bound storage configuration.
+A Host without AKASHA configuration uses native Vault retrieval without PostgreSQL.
+Vault keeps file authority.
+The supported installer still provisions PostgreSQL; a database-free packaged installation is not implemented.
 
-Not re-verified at a6ab453 (the `substrate` crate decides): the rest of this
-section.
+The Host-to-Vault path has a live isolated proof.
+The broader corpus and ranking behavior below retains its earlier verification scope in `crates/vault`.
 
 Vault searches the configured Markdown, JSON, JSONL, and text corpus. Results
 keep the exact source path and Markdown heading, JSON pointer, or JSONL line

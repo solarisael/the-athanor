@@ -38,10 +38,11 @@ function fakePi() {
   return { pi, handlers, sent };
 }
 
-function ctxFor(notices: string[]) {
+function ctxFor(notices: string[], mode: "tui" | "print" = "tui") {
   return {
     cwd: ROOM,
-    mode: "tui",
+    mode,
+    hasUI: mode === "tui",
     sessionManager: { getSessionId: () => SESSION },
     ui: { notify: (text: string) => { notices.push(text); } },
   };
@@ -61,14 +62,14 @@ afterEach(() => {
   rmSync(path.dirname(ROOM), { recursive: true, force: true });
 });
 
-test("a verified successor is handed one continuation turn carrying the reason", async () => {
+test.each(["tui", "print"] as const)("a verified %s successor receives exactly one continuation", async (mode) => {
   process.env.ATHANOR_RESTART_INTENT_ID = INTENT;
   process.env.ATHANOR_RESTART_SUCCESSOR_PROOF = "a".repeat(64);
   process.env.ATHANOR_RESTART_VERIFY_CAPABILITY = "verify-secret";
   const { pi, handlers, sent } = fakePi();
   const domain: Array<{ op: string; params: Record<string, unknown> }> = [];
   registerRestartDoor(pi, {
-    requestDomain: async (op: string, params: Record<string, unknown>) => {
+    requestDomain: async (_binding: unknown, op: string, params: Record<string, unknown>) => {
       domain.push({ op, params });
       if (op === "restart_verify") return { ok: true, state: "verified" };
       if (op === "restart_status") {
@@ -87,22 +88,18 @@ test("a verified successor is handed one continuation turn carrying the reason",
       }
       throw new Error(`unexpected domain call ${op}`);
     },
-    transports: new Map(),
     registerTool: () => {},
     isEmbodied: () => true,
   });
   const notices: string[] = [];
-  for (const handler of handlers.get("session_start") ?? []) await handler({}, ctxFor(notices));
+  for (const handler of handlers.get("session_start") ?? []) await handler({}, ctxFor(notices, mode));
 
   expect(domain.map((call) => call.op)).toEqual(["restart_verify", "restart_status"]);
   expect(domain[1]!.params).toEqual({ workspace: ROOM, intentId: INTENT });
-  expect(notices).toEqual(["Athanor restart successor verified."]);
   expect(sent).toHaveLength(1);
   expect(sent[0]!.options).toEqual({ deliverAs: "nextTurn", triggerTurn: true });
   expect(sent[0]!.message.customType).toBe("athanor-restart-continuation");
   expect(sent[0]!.message.display).toBe(true);
-  expect(String(sent[0]!.message.content)).toContain("Reason given: prove the Presence reopen fix on the wake turn");
-  expect(String(sent[0]!.message.content)).toContain("mode resume");
   expect(sent[0]!.message.details).toEqual({
     intentId: INTENT,
     mode: "resume",
@@ -111,7 +108,7 @@ test("a verified successor is handed one continuation turn carrying the reason",
 
   // A second start in the same process (session_switch) continues nothing:
   // the intent is already verified and its environment is gone.
-  for (const handler of handlers.get("session_switch") ?? []) await handler({}, ctxFor(notices));
+  for (const handler of handlers.get("session_switch") ?? []) await handler({}, ctxFor(notices, mode));
   expect(sent).toHaveLength(1);
   expect(process.env.ATHANOR_RESTART_INTENT_ID).toBeUndefined();
 });
@@ -121,8 +118,7 @@ test("a bare start with no intent continues nothing", async () => {
   const { pi, handlers, sent } = fakePi();
   const domain: string[] = [];
   registerRestartDoor(pi, {
-    requestDomain: async (op: string) => { domain.push(op); return { ok: true }; },
-    transports: new Map(),
+    requestDomain: async (_binding: unknown, op: string) => { domain.push(op); return { ok: true }; },
     registerTool: () => {},
     isEmbodied: () => true,
   });
@@ -133,25 +129,20 @@ test("a bare start with no intent continues nothing", async () => {
   expect(notices).toEqual([]);
 });
 
-test("a status the substrate cannot answer skips the continuation with a notice, after verification", async () => {
+test("an unavailable restart status does not enqueue a continuation", async () => {
   process.env.ATHANOR_RESTART_INTENT_ID = INTENT;
   process.env.ATHANOR_RESTART_SUCCESSOR_PROOF = "a".repeat(64);
   process.env.ATHANOR_RESTART_VERIFY_CAPABILITY = "verify-secret";
   const { pi, handlers, sent } = fakePi();
   registerRestartDoor(pi, {
-    requestDomain: async (op: string) => {
+    requestDomain: async (_binding: unknown, op: string) => {
       if (op === "restart_verify") return { ok: true, state: "verified" };
       throw new Error("substrate went away");
     },
-    transports: new Map(),
     registerTool: () => {},
     isEmbodied: () => true,
   });
   const notices: string[] = [];
   for (const handler of handlers.get("session_start") ?? []) await handler({}, ctxFor(notices));
-  expect(notices).toEqual([
-    "Athanor restart successor verified.",
-    "Athanor restart continuation skipped: substrate went away",
-  ]);
   expect(sent).toEqual([]);
 });

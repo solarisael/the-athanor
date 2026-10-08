@@ -6,19 +6,19 @@ import { existsSync } from "node:fs";
 // the restart door's production-seam test surfaced it.
 import path from "node:path";
 
-import { discoverRustExecutable } from "./discovery.ts";
-import {
-  RustJsonlTransport,
-  RustTransportError,
-  RustTransportOutcomeUnknownError,
-  TransportUnavailableError,
-  type JsonObject,
-} from "./rust-transport.ts";
+import { requestOrgan, OrganError, type OrganOperation } from "./house-proof/organ.ts";
+import { hostSessionIdentity, type HostBinding } from "./house-proof/host.ts";
+type JsonObject = Record<string, unknown>;
 import { roomContext } from "./house-proof/room.ts";
 
 const GIGA_READ_TIMEOUT_MS = 120_000;
 let gigaClosing = false;
-const gigaTransports = new Map<string, RustJsonlTransport>();
+
+export type GigaEnablement = { gigaEnabled: boolean; hippocampusEnabled: boolean; replayMode: boolean };
+
+export async function setGigaEnablement(binding: HostBinding, enablement: GigaEnablement, options: { signal?: AbortSignal } = {}): Promise<JsonObject> {
+  return requestOrgan(binding, "giga_set_enablement", enablement, { signal: options.signal, write: true });
+}
 
 export const GIGA_OMP_ROOM_BINDING = "omp_room_binding" as const;
 export type GigaSafeReviewState = "in_review" | "dismissed" | "unresolved" | "curio" | "expired";
@@ -44,7 +44,6 @@ export type GigaPromotionTarget =
   | { kind: "project_lesson"; title: string; body: string; proof_pattern?: string; trigger_context?: string; language_keys: string[]; technology_keys: string[]; tags: string[]; publication_approved: boolean };
 export type GigaPromotionRequest = {
   candidate_id: string;
-  room: string;
   reviewer_id: string;
   operator_identity: string;
   authorization_basis: typeof GIGA_OMP_ROOM_BINDING;
@@ -61,7 +60,6 @@ export type GigaQueueMaintenanceOperation = "check" | "purge_stuck";
 export type GigaQueueMaintenanceResult = JsonObject;
 export type GigaReviewRequest = {
   candidate_id: string;
-  room: string;
   reviewer_id: string;
   new_state: GigaSafeReviewState;
   reason: string;
@@ -82,48 +80,15 @@ type GigaTurnBuffer = { ctx: any; cwd: string; turns: LoggedTurn[] };
 const gigaTurnBuffers = new Map<string, GigaTurnBuffer>();
 
 
-function gigaTransport(cwd: string = process.cwd()): RustJsonlTransport | null {
-  if (process.env.ATHANOR_GIGA_ENABLED !== "1") return null;
-  const executable = discoverRustExecutable();
-  if (!executable) return null;
-  const trusted = roomContext(cwd);
-  const key = `${executable}\0${trusted.room}\0${trusted.effectiveRoomDir}`;
-  let transport = gigaTransports.get(key);
-  if (!transport) {
-    transport = new RustJsonlTransport({
-      executable,
-      cwd: trusted.effectiveRoomDir,
-      env: {
-        ATHANOR_GIGA_SOURCE_ROOM: trusted.room,
-        ATHANOR_GIGA_CLAIM_OWNER: "1",
-      },
-    });
-    gigaTransports.set(key, transport);
-  }
-  return transport;
-}
-
-function requireGigaTransport(): RustJsonlTransport {
+async function requestObject(binding: HostBinding, method: OrganOperation, params: JsonObject, options: { signal?: AbortSignal; write?: boolean; timeoutMs?: number } = {}): Promise<JsonObject> {
   if (process.env.ATHANOR_GIGA_ENABLED !== "1") {
-    throw Object.assign(new Error("GIGA is disabled"), { code: "giga_disabled", retryable: false, details: { enabled: false } });
+    throw new OrganError("GIGA is disabled", "giga_disabled", false, { enabled: false });
   }
-  const transport = gigaTransport();
-  if (!transport) {
-    throw Object.assign(new Error("GIGA transport is unavailable"), { code: "giga_transport_unavailable", retryable: true, details: { enabled: true, transport_available: false } });
-  }
-  return transport;
-}
-
-async function requestObject(method: string, params: JsonObject, options: { signal?: AbortSignal; write?: boolean; timeoutMs?: number } = {}): Promise<JsonObject> {
-  return await requireGigaTransport().request(method, params, {
-    signal: options.signal,
-    timeoutMs: options.timeoutMs,
-    ...(options.write ? { settleDefinitively: true } : {}),
-  }) as JsonObject;
+  return requestOrgan(binding, method, params, options);
 }
 
 export function gigaTransportFailure(error: unknown): { code: string; message: string; retryable: boolean; details?: unknown } {
-  if (error instanceof RustTransportError || error instanceof TransportUnavailableError || error instanceof RustTransportOutcomeUnknownError) {
+  if (error instanceof OrganError) {
     return { code: error.code, message: error.message, retryable: error.retryable, details: error.details };
   }
   if (error && typeof error === "object") {
@@ -135,38 +100,40 @@ export function gigaTransportFailure(error: unknown): { code: string; message: s
   return { code: "giga_transport_failure", message: error instanceof Error ? error.message : "GIGA transport failed", retryable: false };
 }
 
-export async function requestGigaCandidateList(room: string, options: { reviewState?: string; limit?: number; signal?: AbortSignal } = {}): Promise<GigaCandidateListResult> {
-  return await requestObject("giga_candidate_list", {
-    room,
+export async function requestGigaCandidateList(binding: HostBinding, options: { reviewState?: string; limit?: number; signal?: AbortSignal } = {}): Promise<GigaCandidateListResult> {
+  return await requestObject(binding, "giga_candidate_list", {
     review_state: options.reviewState ?? null,
     limit: options.limit ?? 50,
   }, { signal: options.signal, timeoutMs: GIGA_READ_TIMEOUT_MS }) as GigaCandidateListResult;
 }
 
-export async function requestGigaReview(request: GigaReviewRequest, options: { signal?: AbortSignal } = {}): Promise<GigaReviewResult> {
-  return await requestObject("giga_tool_review", request as unknown as JsonObject, { signal: options.signal, write: true }) as GigaReviewResult;
+export async function requestGigaReview(binding: HostBinding, request: GigaReviewRequest, options: { signal?: AbortSignal } = {}): Promise<GigaReviewResult> {
+  return await requestObject(binding, "giga_tool_review", request as unknown as JsonObject, { signal: options.signal, write: true }) as GigaReviewResult;
 }
 
-export async function requestGigaPromote(request: GigaPromotionRequest, options: { signal?: AbortSignal } = {}): Promise<GigaPromotionResult> {
-  return await requestObject("giga_tool_promote", request as unknown as JsonObject, { signal: options.signal, write: true });
+export async function requestGigaPromote(binding: HostBinding, request: GigaPromotionRequest, options: { signal?: AbortSignal } = {}): Promise<GigaPromotionResult> {
+  return await requestObject(binding, "giga_tool_promote", request as unknown as JsonObject, { signal: options.signal, write: true });
 }
 
-export async function requestGigaHealth(room: string, options: { signal?: AbortSignal } = {}): Promise<GigaHealthResult> {
-  return await requestObject("giga_health", { room }, { signal: options.signal, timeoutMs: GIGA_READ_TIMEOUT_MS }) as GigaHealthResult;
+export async function requestGigaHealth(binding: HostBinding, options: { signal?: AbortSignal } = {}): Promise<GigaHealthResult> {
+  return await requestObject(binding, "giga_health", {}, { signal: options.signal, timeoutMs: GIGA_READ_TIMEOUT_MS }) as GigaHealthResult;
 }
 
-export async function requestGigaQueueMaintenance(room: string, operation: GigaQueueMaintenanceOperation, options: { signal?: AbortSignal } = {}): Promise<GigaQueueMaintenanceResult> {
-  return await requestObject("giga_queue_maintenance", { room, operation, scope: "room" }, { signal: options.signal, timeoutMs: GIGA_READ_TIMEOUT_MS, write: true });
+export async function requestGigaQueueMaintenance(binding: HostBinding, operation: GigaQueueMaintenanceOperation, options: { signal?: AbortSignal } = {}): Promise<GigaQueueMaintenanceResult> {
+  return await requestObject(binding, "giga_queue_maintenance", { operation, scope: "room" }, { signal: options.signal, timeoutMs: GIGA_READ_TIMEOUT_MS, write: true });
 }
 
 async function ingestLoggedTurns(ctx: any, loggedTurns: LoggedTurn[]): Promise<void> {
-  if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || loggedTurns.length === 0) return;
+  if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || process.env.ATHANOR_REPLAY_MODE === "1" || loggedTurns.length === 0) return;
   try {
     const trusted = roomContext(ctx?.cwd || process.cwd());
-    const transport = gigaTransport(ctx?.cwd || process.cwd());
-    if (!transport) return;
-    await transport.request("giga_conversation_ingest", {
-      room: trusted.room,
+    const binding = { room: trusted.room, spirit: trusted.spirit, session: hostSessionIdentity(ctx, trusted.effectiveRoomDir) };
+    await requestObject(binding, "giga_conversation_ingest", {
+      enablement: {
+        gigaEnabled: process.env.ATHANOR_GIGA_ENABLED === "1",
+        hippocampusEnabled: process.env.ATHANOR_HIPPOCAMPUS_ENABLED === "1",
+        replayMode: process.env.ATHANOR_REPLAY_MODE === "1",
+      },
       project_keys: process.env.ATHANOR_GIGA_PROJECT_KEY ? [process.env.ATHANOR_GIGA_PROJECT_KEY] : [],
       turns: loggedTurns.map((turn) => ({
         role: turn.role,
@@ -182,7 +149,7 @@ async function ingestLoggedTurns(ctx: any, loggedTurns: LoggedTurn[]): Promise<v
   }
 }
 
-function isSubagentSessionContext(ctx: any): boolean {
+export function isSubagentSessionContext(ctx: any): boolean {
   try {
     const sessionFile = ctx?.sessionManager?.getSessionFile?.();
     return typeof sessionFile !== "string" || !sessionFile || existsSync(`${path.dirname(sessionFile)}.jsonl`);
@@ -192,7 +159,7 @@ function isSubagentSessionContext(ctx: any): boolean {
 }
 
 export function ingestGigaLoggedTurnsDetached(ctx: any, loggedTurns: LoggedTurn[]): void {
-  if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || !Array.isArray(loggedTurns) || loggedTurns.length === 0 || isSubagentSessionContext(ctx)) return;
+  if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || process.env.ATHANOR_REPLAY_MODE === "1" || !Array.isArray(loggedTurns) || loggedTurns.length === 0 || isSubagentSessionContext(ctx)) return;
   const cwd = String(ctx?.cwd || "");
   for (const turn of loggedTurns) {
     const key = `${cwd}\0${String(turn.sessionID ?? "")}`;
@@ -214,7 +181,7 @@ export function flushGigaTurnsDetached(ctx: any): void {
 
 // Read-only census of turns still waiting for a flush, for the callers that
 // must report what an exit destroys. Buffered turns are a real casualty:
-// closeGigaTransports drains them on a graceful shutdown, and a process.exit
+// flushGigaTurns drains them on a graceful shutdown, and a process.exit
 // never reaches that door. Counts only - never turn content - and it mutates
 // nothing, so reporting can never cost a flush.
 export function gigaBufferedTurnCensus(): Array<{ session: string; cwd: string; turns: number }> {
@@ -227,21 +194,17 @@ export function gigaBufferedTurnCensus(): Array<{ session: string; cwd: string; 
     }));
 }
 
-export async function closeGigaTransports(): Promise<void> {
+export async function flushGigaTurns(): Promise<void> {
   const pending = [...gigaTurnBuffers.values()].filter((buffer) => buffer.turns.length);
   gigaTurnBuffers.clear();
   await Promise.allSettled(pending.map((buffer) => ingestLoggedTurns(buffer.ctx, buffer.turns)));
   gigaClosing = true;
-  const closing = [...gigaTransports.values()].map((transport) => transport.close());
-  gigaTransports.clear();
-  await Promise.allSettled(closing);
 }
 
 export const __gigaTest = Object.freeze({
   isSubagentSessionContext,
   resetState() {
     gigaClosing = false;
-    gigaTransports.clear();
     gigaTurnBuffers.clear();
   },
 });

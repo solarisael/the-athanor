@@ -2,6 +2,10 @@
 
 Status: current. Verified against the code at commit `a6ab453` on 2026-10-04. Each limit names the code that imposes it. The architecture that these limits belong to is in [`ARCHITECTURE.md`](./ARCHITECTURE.md). The work that removes them is in [`ROADMAP.md`](./ROADMAP.md).
 
+The earlier Windows repairs were deployed after isolated verification.
+The Host API 2 cutover is source-verified and awaits deployment.
+Pulse's separate proxy installation was verified on 2026-10-04.
+
 ## 1. Supported install
 
 - The only supported target is Windows 11 x64 with OMP as the harness. The release manifest requires platform `windows-x64` (`crates/athanor-install/src/manifest.rs:104-106`). The release workflow has one job, `windows-x64` (`.github/workflows/release.yml:17-18`).
@@ -24,11 +28,10 @@ Status: current. Verified against the code at commit `a6ab453` on 2026-10-04. Ea
 
 - The Host cannot start. `athanor` with no arguments calls `service::ensure_running` before it binds, and the non-Windows path fails (`crates/athanor-install/src/app.rs:88`; `service.rs:319-322`). `athanor start` reports the Host refused after 20 seconds (`cli/start.rs:119-137`).
 - The installed OMP loader requires platform `windows-x64` and `USERPROFILE` (`adapters/omp/installed-loader.ts:376,565`). A Linux session must load `adapters/omp/index.ts` directly.
-- Fixed Windows paths. `serve.ts:17-18`, `gui-desktop/src/main.rs:54-56`, and `adapters/omp/rust-transport.ts:60` read `C:/ProgramData/Solarisael/Athanor/...`. On Linux the proxies refuse to start and the adapter fills no NATS URL.
+- Fixed Windows paths remain in the Pulse launchers. The adapter no longer discovers substrate or broker processes.
 - The service, the installer, ACL hardening, and the release are Windows only. Off Windows, ACL hardening reports success and does nothing (`crates/athanor-install/src/boundaries.rs:377-380,431-435`).
 - The keeper lock does not exclude a second keeper off Windows, and a kill reaches only the direct child (`crates/omp-keeper/src/keeper.rs:82-87,128-136`).
 - The automatic Recall timeout is 2,000 ms off Windows and 8,000 ms on Windows (`adapters/omp/house-proof/constants.ts:16`).
-- A headless relaunch never verifies or continues a restart. The successor returns silently unless `ctx.mode === 'tui'` (`adapters/omp/house-proof/restart-door.ts:481`).
 
 The substrate has run on Linux before: the organ matrix of 2026-08-30 ran on a NixOS laptop. That run used hand-written units, not this code path.
 
@@ -37,15 +40,15 @@ The substrate has run on Linux before: the organ matrix of 2026-08-30 ran on a N
 - No person identity exists anywhere. One bearer token serves every room of a House and proves reach, not identity (`crates/host/src/house.rs:205-234`; `server.rs:282,301-323`).
 - A chat say is `{room, text, say_id}`. The Host stamps `author_name` from the room file's single `operator` (`crates/protocol/src/host.rs:743-748`; `crates/host/src/surface.rs:85`). Two people in one room get the same name.
 - `CommandMeta` has `sender_room`, `sender_spirit`, and `sender_session`, and no `sender_operator`. `sender_session` is caller-chosen (`protocol/src/host.rs:789-809`; `server.rs:2567-2581`).
-- Each room has exactly one operator. The adapter derives room, spirit, and operator from the working directory and room files, and `set_room_state` rewrites them (`adapters/omp/house-proof/room.ts:99-127`; `tools.ts:818-847`). This is self-asserted identity.
-- Presence tells the spirit to "meet `<operator>`" and the boat door names `Sol` unless a room overrides it (`presence.ts:130,199`; `boat-door.ts:44-67`).
+- Each room has one operator. Native room state owns the current identity. A shared bearer still does not prove person-level authority.
+- The boat door names `Sol` unless the room supplies `handoff-door.md`. This remains OMP presentation text.
 - Pulse has no login. The proxy injects the shared bearer for any local caller (`serve.ts:60-63`; `gui-desktop/src/proxy.rs:99`).
 
 ## 5. Rooms and sessions
 
 - One Host process serves every room. One Pulse process serves one room (`serve.ts:34,41`; `proxy.rs:32`). `app.js` holds one connected room (`app.js:1514-1528`).
 - The installer has no room-add command and refuses an already-installed version (`crates/athanor-install/src/installer.rs:217-223`; `cli/manage.rs:32-134`). Manual configuration does not require a new release. [Add a room](../INSTALL.md#add-a-room) lists the configuration surfaces and the remaining procedure gaps.
-- The chat ring and drafts are lost on Host restart, and the sequence restarts at 0 (`crates/host/src/chat.rs:6-7,25-30`; `server.rs:218`).
+- Bounded chat and draft checkpoints survive Host restart. Corrupt checkpoints refuse room startup.
 - No list-sessions or resume-session command exists on the wire (`crates/protocol/src/restart/mod.rs:36-38`). Pulse shows `New session unavailable` (`app.js:741`). The keeper's first spawn is always fresh (`keeper.rs:188,812-823`).
 - Pulse mirrors only chat-born turns. Turns typed in the OMP terminal never enter the ring.
 - With no logged-in Windows user, only PostgreSQL and NATS run. The Host, the keepers, OMP, and Pulse are user processes (`cli/start.rs:119-125`; `harness/config.rs:25-29`).
@@ -54,23 +57,28 @@ The substrate has run on Linux before: the organ matrix of 2026-08-30 ran on a N
 
 - Everything binds loopback. The Host refuses a non-loopback bind (`crates/host/src/config.rs:92-120`). The adapter refuses a non-loopback Host URL (`host.ts:88-90`). Both proxies bind `127.0.0.1`.
 - No TLS anywhere. A public door needs a TLS reverse proxy in front of the Pulse proxy.
-- The 2026-10-04 source repair checks the canonical loopback Host and Origin in both Pulse proxies. It is not deployed. These checks do not provide operator authentication or a public-network deployment policy. The desktop webview still has no CSP.
+- The Pulse guard was installed and verified on 2026-10-04. It checks canonical loopback Host and Origin headers. It provides neither operator authentication nor a public-network deployment policy. The desktop webview still has no CSP.
 - `/health` is unauthenticated and exposes `state_hash`, version, sequence, and Insula health (`server.rs:252,261-275`).
 - The bearer is checked once at the WebSocket upgrade. Frames are not re-authenticated (`server.rs:282,432-483`).
 - The harness control door cannot be reached from outside the Host process. Its token is random per run and never exported (`app.rs:92`; `harness/control.rs:17-18`).
 
 ## 7. Doors that need the Host
 
-Six tools fail without a live Host: `recall`, `house_lane_status`, `familiar_status`, `familiar_dispatch`, `house_dispatch`, `recall_policy` (`adapters/omp/house-proof/tools.ts:526-532`). `sleep` degrades. Knock claim and delivery and the inbox Bell projection need the Host (`knock.ts:77-114`; `hallway.ts:26-30`). All seven `hallway_*` tools and all five `quest_*` tools go to the substrate child and work without the Host.
+All House tool operations now require the Host.
+The adapter does not fall back to a substrate child when the Host is absent.
+Local lineage diagnostics and OMP-specific guards remain local.
 
-Retrieval is fail-open for PostgreSQL and embeddings. It is not fail-open for a missing Host: `recall` discards the substrate result and returns an error (`tools.ts:516,526-532`).
+Vault retrieval runs through the Host without PostgreSQL.
+AKASHA failures remain explicit, and optional embedding failures preserve lexical retrieval.
+The generic organ boundary does not make every native write idempotent.
+Unknown write outcomes require reconciliation before retry.
 
 ## 8. Known defects in the current code
 
-- `LogConversation` creates directories and appends files under a caller-chosen `room_dir` with no check (`server.rs:2117-2127,2131-2235`). The comment at `server.rs:2064-2066` claims otherwise.
+- Conversation logging refuses directories outside its configured room before writing.
 - `room/state` returns every presence `session` and `operator` to any bearer holder (`surface.rs:118-121,133`).
-- Pulse sediment sends `room = item.room` for foreign shelves (`gui-prototype/sediment/index.js:112`). Host enforcement of that room is unknown.
-- `serve.ts:3-6` says the prototype writes nothing. `/live/chat/say` writes a chat turn.
+- Memory timeline and by-ID reads enforce the configured room plus House commons. Foreign filters and IDs receive refusals.
+- Pulse's chat route writes a turn. The serving header now describes the proxy boundary accurately.
 - `pulse.js` and `mechanics.js` show fixtures dated 2026-08-20 and 2026-08-18 until a live round answers.
 
 [`BUGS.md`](../BUGS.md) tracks each of these.

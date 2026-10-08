@@ -15,6 +15,8 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { lifecyclePlan } from "./lifecycle.ts";
+import type { HostBinding } from "./host.ts";
 
 // OMP's agent loop stops before the next model call on this abort reason; its
 // own `yield` tool ends turns the same way (pi-agent-core agent-loop.ts).
@@ -78,7 +80,7 @@ export type BoatDoorDeps = {
   session(ctx: any): any;
   isTopLevel(ctx: any): boolean;
   /** Context tokens above the boat line: negative below it, undefined when unknown or compaction is off. */
-  tokensOverBoatLine(ctx: any): number | undefined;
+  tokensOverBoatLine(ctx: any): number | undefined | Promise<number | undefined>;
   room(ctx: any): { dir: string; spirit: string };
 };
 
@@ -136,8 +138,8 @@ export function boatDoorOpen(): boolean {
   return door !== null;
 }
 
-export function overBoatLine(ctx: any): boolean {
-  const over = installed?.tokensOverBoatLine(ctx);
+export async function overBoatLine(ctx: any): Promise<boolean> {
+  const over = await installed?.tokensOverBoatLine(ctx);
   return over !== undefined && over >= 0;
 }
 
@@ -159,7 +161,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
   installed = deps;
   installedPi = pi;
 
-  pi.on("input", (event: any, ctx: any) => {
+  pi.on("input", async (event: any, ctx: any) => {
     if (event?.source !== "interactive") return undefined;
     const text = String(event.text ?? "").trim();
 
@@ -173,7 +175,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
 
     const command = handoffCommand(text);
     const normalMessage = !command && text !== "" && !text.startsWith("/");
-    const over = normalMessage ? deps.tokensOverBoatLine(ctx) : undefined;
+    const over = normalMessage ? await deps.tokensOverBoatLine(ctx) : undefined;
     const nearLine = over !== undefined && over >= 0;
     if (!command && !nearLine) return undefined;
     if (!deps.isTopLevel(ctx)) return undefined;
@@ -236,14 +238,16 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
   // Near the limit the boat turn can overflow, or trip OMP's mid-turn
   // compaction before `sleep` runs. Only the boat turn's requests lose the old
   // tool output; the session keeps every result for the handoff.
-  pi.on("context", (event: any, ctx: any) => {
+  pi.on("context", async (event: any, ctx: any) => {
     if (door?.stage !== "boat" || door.sessionId !== sessionIdOf(ctx)) return undefined;
     const messages: any[] = event?.messages ?? [];
 
     // Decided once: later requests in this turn report the smaller usage, and
     // would otherwise put the old output back.
     if (door.setAside === undefined) {
-      const over = deps.tokensOverBoatLine(ctx) ?? 0;
+      const observedDoor = door;
+      const over = (await deps.tokensOverBoatLine(ctx)) ?? 0;
+      if (door !== observedDoor || door.stage !== "boat") return undefined;
       door.setAside = over > 0 ? oldToolResultsToFree(messages, over) : 0;
       if (door.setAside > 0) {
         ctx?.ui?.notify?.(`The context is tight: ${door.setAside} old tool results are set aside so the paper boat fits.`, "info");
@@ -463,12 +467,15 @@ export function compactionThresholdTokens(contextWindow: number, settings: Compa
   return Math.max(0, Math.min(contextWindow - 1, contextWindow - budgetReserve));
 }
 
-/**
- * Where the door opens on a normal message: a tenth of the window below OMP's
- * threshold, so the answering turn usually cannot cross it first. A turn that
- * crosses it anyway meets the session_before_compact veto instead.
- * enough: an overflow still compacts without a boat; only the threshold waits.
- */
-export function boatLineTokens(contextWindow: number, settings: CompactionThresholdSettings): number {
-  return compactionThresholdTokens(contextWindow, settings) - Math.floor(contextWindow * 0.1);
+export async function boatLineTokens(
+  binding: HostBinding,
+  contextWindow: number,
+  settings: CompactionThresholdSettings,
+): Promise<number> {
+  const result = await lifecyclePlan<{ tokens: number }>(binding, {
+    action: "boatLine",
+    contextWindow,
+    compactionThreshold: compactionThresholdTokens(contextWindow, settings),
+  });
+  return result.tokens;
 }

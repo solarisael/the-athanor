@@ -21,8 +21,8 @@
     }
   },
   "components": {
-    "hostApi": 1,
+    "hostApi": 2,
     "substrateApi": 1,
-    "deliveryApi": 1
+    "deliveryApi": 2
   }
 }

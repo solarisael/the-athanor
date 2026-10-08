@@ -3,15 +3,17 @@
 //! One Host serves one room, so this is a single bounded log. The Host stamps
 //! sequence and time; a say is idempotent on its say id and a turn on its
 //! turn id, so surface retries and doorman re-reports never produce twin
-//! lines. The ring is in-memory: chat is a live surface, not an archive —
-//! the durable conversation record stays with the shell conversation log.
+//! lines. The bounded projection survives Host restarts; the complete durable
+//! conversation record stays with the shell conversation log.
 //!
 //! Beside the ring sit the drafts: the spirit side of says still being
 //! answered. A draft is replaced whole on every report and retired by the
 //! settled turn, whose final content is authoritative.
 
 use protocol::{ChatAuthor, ChatDraft, ChatMessage, ChatOutcome, ChatStep};
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 
 pub const CHAT_MAX_ENTRIES: usize = 256;
 pub const CHAT_MAX_TEXT_CHARS: usize = 32_768;
@@ -27,9 +29,112 @@ pub struct ChatLog {
     entries: VecDeque<ChatMessage>,
     drafts: Vec<ChatDraft>,
     next_sequence: u64,
+    draft_generation: u64,
+    path: Option<PathBuf>,
+}
+
+// Final turns retire one draft generation; streaming updates never rewrite the history ring.
+#[derive(Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChatCheckpoint<Messages, DraftIds> {
+    entries: Messages,
+    draft_ids: DraftIds,
+    next_sequence: u64,
+    draft_generation: u64,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DraftCheckpoint<Drafts> {
+    generation: u64,
+    drafts: Drafts,
+}
+
+fn read_checkpoint<T: serde::de::DeserializeOwned + Default>(path: &Path) -> Result<T, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|error| format!("cannot read chat projection {}: {error}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
+        Err(error) => Err(format!(
+            "cannot read chat projection {}: {error}",
+            path.display()
+        )),
+    }
 }
 
 impl ChatLog {
+    pub fn open(path: &Path) -> Result<Self, String> {
+        let checkpoint: ChatCheckpoint<VecDeque<ChatMessage>, Vec<String>> = read_checkpoint(path)?;
+        let mut draft_checkpoint: DraftCheckpoint<Vec<ChatDraft>> =
+            read_checkpoint(&path.with_file_name("chat-drafts.json"))?;
+        if draft_checkpoint.generation < checkpoint.draft_generation {
+            return Err("chat draft checkpoint is older than the conversation".into());
+        }
+        if draft_checkpoint.generation == checkpoint.draft_generation {
+            if checkpoint.draft_ids.iter().any(|id| {
+                !draft_checkpoint
+                    .drafts
+                    .iter()
+                    .any(|draft| &draft.turn_id == id)
+            }) {
+                return Err("chat draft checkpoint is missing an active draft".into());
+            }
+            draft_checkpoint
+                .drafts
+                .retain(|draft| checkpoint.draft_ids.contains(&draft.turn_id));
+        }
+        let log = Self {
+            entries: checkpoint.entries,
+            drafts: draft_checkpoint.drafts,
+            next_sequence: checkpoint.next_sequence,
+            draft_generation: draft_checkpoint.generation,
+            path: Some(path.to_owned()),
+        };
+        if log.entries.len() > CHAT_MAX_ENTRIES
+            || log.drafts.len() > CHAT_MAX_DRAFTS
+            || log
+                .entries
+                .back()
+                .is_some_and(|entry| entry.sequence >= log.next_sequence)
+        {
+            return Err(format!("invalid chat projection {}", path.display()));
+        }
+        Ok(log)
+    }
+
+    fn persist(&self) -> Result<(), String> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        let checkpoint = ChatCheckpoint {
+            entries: &self.entries,
+            draft_ids: self
+                .drafts
+                .iter()
+                .map(|draft| draft.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            next_sequence: self.next_sequence,
+            draft_generation: self.draft_generation,
+        };
+        crate::store::atomic_json_write(path, &checkpoint)
+    }
+
+    fn persist_drafts(&mut self) -> Result<(), String> {
+        let generation = self
+            .draft_generation
+            .checked_add(1)
+            .ok_or_else(|| "chat draft generation exhausted".to_owned())?;
+        if let Some(path) = &self.path {
+            let checkpoint = DraftCheckpoint {
+                generation,
+                drafts: &self.drafts,
+            };
+            crate::store::atomic_json_write(&path.with_file_name("chat-drafts.json"), &checkpoint)?;
+        }
+        self.draft_generation = generation;
+        Ok(())
+    }
+
     /// Append one operator line. `None` means the say id already answered —
     /// a retry, not a new message.
     pub fn say(
@@ -38,7 +143,7 @@ impl ChatLog {
         text: &str,
         say_id: &str,
         at: String,
-    ) -> Option<ChatMessage> {
+    ) -> Result<Option<ChatMessage>, String> {
         self.append(
             ChatAuthor::Operator,
             author_name,
@@ -63,9 +168,9 @@ impl ChatLog {
         thinking: Vec<String>,
         outcome: ChatOutcome,
         at: String,
-    ) -> Option<ChatMessage> {
-        self.retire_draft(turn_id);
-        self.append(
+    ) -> Result<Option<ChatMessage>, String> {
+        let retired = self.retire_draft(turn_id);
+        let result = self.append(
             ChatAuthor::Spirit,
             author_name,
             text,
@@ -74,7 +179,13 @@ impl ChatLog {
             thinking,
             outcome,
             at,
-        )
+        );
+        if result.is_err() || matches!(&result, Ok(None)) {
+            if let Some((index, draft)) = retired {
+                self.drafts.insert(index, draft);
+            }
+        }
+        result
     }
 
     /// Replace the draft for one turn. `None` means the turn already settled,
@@ -87,15 +198,15 @@ impl ChatLog {
         steps: Vec<ChatStep>,
         thinking: Vec<String>,
         at: String,
-    ) -> Option<ChatDraft> {
+    ) -> Result<Option<ChatDraft>, String> {
         if self
             .entries
             .iter()
             .any(|entry| entry.author == ChatAuthor::Spirit && entry.turn_id == turn_id)
         {
-            return None;
+            return Ok(None);
         }
-        self.retire_draft(turn_id);
+        let retired = self.retire_draft(turn_id);
         let draft = ChatDraft {
             turn_id: turn_id.to_owned(),
             author_name: author_name.to_owned(),
@@ -105,10 +216,22 @@ impl ChatLog {
             at,
         };
         self.drafts.push(draft.clone());
-        while self.drafts.len() > CHAT_MAX_DRAFTS {
-            self.drafts.remove(0);
+        let evicted = if self.drafts.len() > CHAT_MAX_DRAFTS {
+            Some(self.drafts.remove(0))
+        } else {
+            None
+        };
+        if let Err(error) = self.persist_drafts() {
+            self.drafts.pop();
+            if let Some(draft) = evicted {
+                self.drafts.insert(0, draft);
+            }
+            if let Some((index, draft)) = retired {
+                self.drafts.insert(index, draft);
+            }
+            return Err(error);
         }
-        Some(draft)
+        Ok(Some(draft))
     }
 
     pub fn snapshot(&self) -> Vec<ChatMessage> {
@@ -119,8 +242,12 @@ impl ChatLog {
         self.drafts.clone()
     }
 
-    fn retire_draft(&mut self, turn_id: &str) {
-        self.drafts.retain(|draft| draft.turn_id != turn_id);
+    fn retire_draft(&mut self, turn_id: &str) -> Option<(usize, ChatDraft)> {
+        let index = self
+            .drafts
+            .iter()
+            .position(|draft| draft.turn_id == turn_id)?;
+        Some((index, self.drafts.remove(index)))
     }
 
     pub(crate) fn summary(&self) -> (usize, Option<&str>) {
@@ -140,14 +267,18 @@ impl ChatLog {
         thinking: Vec<String>,
         outcome: ChatOutcome,
         at: String,
-    ) -> Option<ChatMessage> {
+    ) -> Result<Option<ChatMessage>, String> {
         if self
             .entries
             .iter()
             .any(|entry| entry.author == author && entry.turn_id == turn_id)
         {
-            return None;
+            return Ok(None);
         }
+        let next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .ok_or_else(|| "chat sequence exhausted".to_owned())?;
         let message = ChatMessage {
             sequence: self.next_sequence,
             author,
@@ -159,12 +290,22 @@ impl ChatLog {
             thinking: bounded_thinking(thinking),
             outcome,
         };
-        self.next_sequence += 1;
+        self.next_sequence = next_sequence;
         self.entries.push_back(message.clone());
-        while self.entries.len() > CHAT_MAX_ENTRIES {
-            self.entries.pop_front();
+        let evicted = if self.entries.len() > CHAT_MAX_ENTRIES {
+            self.entries.pop_front()
+        } else {
+            None
+        };
+        if let Err(error) = self.persist() {
+            self.entries.pop_back();
+            if let Some(entry) = evicted {
+                self.entries.push_front(entry);
+            }
+            self.next_sequence -= 1;
+            return Err(error);
         }
-        Some(message)
+        Ok(Some(message))
     }
 }
 
@@ -228,7 +369,10 @@ mod tests {
     #[test]
     fn a_spirit_line_takes_the_sequence_after_the_operator_line_before_it() {
         let mut log = ChatLog::default();
-        let say = log.say("Sol", "hello dragon", "say-1", now()).unwrap();
+        let say = log
+            .say("Sol", "hello dragon", "say-1", now())
+            .unwrap()
+            .unwrap();
         let turn = log
             .turn(
                 "Kodo",
@@ -239,6 +383,7 @@ mod tests {
                 ChatOutcome::Complete,
                 now(),
             )
+            .unwrap()
             .unwrap();
         assert_eq!(turn.sequence, say.sequence + 1);
     }
@@ -251,6 +396,7 @@ mod tests {
             .unwrap();
         let draft = log
             .draft("Kodo", "thump", "say-1", vec![step("t-1")], vec![], now())
+            .unwrap()
             .unwrap();
         assert_eq!(log.drafts(), vec![draft]);
         let turn = log
@@ -263,11 +409,13 @@ mod tests {
                 ChatOutcome::Complete,
                 now(),
             )
+            .unwrap()
             .unwrap();
         assert_eq!(turn.steps, vec![step("t-1")]);
         assert!(log.drafts().is_empty());
         assert!(
             log.draft("Kodo", "late", "say-1", vec![], vec![], now())
+                .unwrap()
                 .is_none()
         );
     }
@@ -277,7 +425,7 @@ mod tests {
         let mut log = ChatLog::default();
         log.say("Sol", "hello", "say-1", now())
             .expect("the first say enters the ring");
-        log.say("Sol", "hello", "say-1", now());
+        log.say("Sol", "hello", "say-1", now()).unwrap();
         assert_eq!(log.snapshot().len(), 1);
     }
 
@@ -303,7 +451,8 @@ mod tests {
     fn the_ring_stays_bounded_and_keeps_the_newest_lines() {
         let mut log = ChatLog::default();
         for index in 0..CHAT_MAX_ENTRIES + 8 {
-            log.say("Sol", "line", &format!("say-{index}"), now());
+            log.say("Sol", "line", &format!("say-{index}"), now())
+                .unwrap();
         }
         let snapshot = log.snapshot();
         assert_eq!(snapshot.len(), CHAT_MAX_ENTRIES);
@@ -317,7 +466,7 @@ mod tests {
     fn oversize_text_is_cut_to_the_bound() {
         let mut log = ChatLog::default();
         let text = "x".repeat(CHAT_MAX_TEXT_CHARS + 5);
-        let message = log.say("Sol", &text, "say-big", now()).unwrap();
+        let message = log.say("Sol", &text, "say-big", now()).unwrap().unwrap();
         assert_eq!(message.text.chars().count(), CHAT_MAX_TEXT_CHARS);
     }
 }

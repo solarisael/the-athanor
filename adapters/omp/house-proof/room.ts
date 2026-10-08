@@ -1,31 +1,16 @@
-// Room resolution and active-spirit state for the OMP adapter.
-// Silhouette: identify the current room, persist safe state, and refresh active_spirit.md.
+// OMP workspace discovery and the native room-state client.
 
 import path from "node:path";
-import { existsSync, readFileSync, renameSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import { HOUSE_STATE_FILENAME, OBSIDIAN_ROOT, ROOM_CAPABILITY_FILENAME } from "./constants.ts";
+import { hostCommand, hostSessionIdentity, sendHostCommand, HostUnavailable, HostRefused } from "./host.ts";
+import { OrganError } from "./organ.ts";
 
 export function roomNameFromCwd(cwd) {
   return path.basename(String(cwd || "")).toLowerCase();
 }
 
 const ROOM_MARKER_FILENAME = ".athanor-room.json";
-// Legacy pre-cutover names. A room provisioned before the athanor-* naming
-// cutover still carries these on disk; the first read renames the file so the
-// old name disappears from the room instead of being served forever.
-const LEGACY_ROOM_MARKER_FILENAME = ".solarisael-room.json";
-const LEGACY_HOUSE_STATE_FILENAME = "solarisael-house-state.json";
-
-function migrateLegacyFile(currentPath, legacyPath) {
-  if (existsSync(currentPath) || !existsSync(legacyPath)) return;
-  try {
-    renameSync(legacyPath, currentPath);
-  } catch {
-    // A failed rename leaves the legacy file in place; the caller's read of
-    // the current path simply finds nothing, exactly as for a fresh room.
-  }
-}
 const DEFAULT_ROOM = "default-room";
 const RESERVED_ROOM_KEY = "house";
 
@@ -54,7 +39,6 @@ function roomDisplayName(room) {
 function readRoomMarker(roomDir) {
   try {
     const markerPath = path.join(roomDir, ROOM_MARKER_FILENAME);
-    migrateLegacyFile(markerPath, path.join(roomDir, LEGACY_ROOM_MARKER_FILENAME));
     const parsed = JSON.parse(readFileSync(markerPath, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
@@ -65,7 +49,6 @@ function readRoomMarker(roomDir) {
 function readPersistedHouseState(roomDir) {
   try {
     const statePath = path.join(roomDir, ".omp", "runtime", HOUSE_STATE_FILENAME);
-    migrateLegacyFile(statePath, path.join(roomDir, ".omp", "runtime", LEGACY_HOUSE_STATE_FILENAME));
     const parsed = JSON.parse(readFileSync(statePath, "utf8"));
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
@@ -109,13 +92,13 @@ export function roomContext(cwd) {
     ? requestedDir
     : path.join(OBSIDIAN_ROOT, DEFAULT_ROOM);
   const persisted = readPersistedHouseState(effectiveRoomDir);
-  const spirit = normalizeDisplayName(marker.trueName)
+  const spirit = normalizeDisplayName(persisted.embodiedSpirit)
+    || normalizeDisplayName(marker.trueName)
     || readActiveSpiritName(effectiveRoomDir)
-    || normalizeDisplayName(persisted.embodiedSpirit)
     || normalizeDisplayName(persisted.agentName)
     || DEFAULT_SPIRIT;
-  const operator = normalizeDisplayName(marker.operator)
-    || normalizeDisplayName(persisted.operator)
+  const operator = normalizeDisplayName(persisted.operator)
+    || normalizeDisplayName(marker.operator)
     || DEFAULT_OPERATOR;
   return {
     room,
@@ -154,112 +137,50 @@ export function roomCapability(effectiveRoomDir, environ = process.env) {
   }
 }
 
-function defaultHouseState(room, spirit, operator = DEFAULT_OPERATOR) {
-  return {
-    version: 1,
-    operator,
-    agentName: spirit,
-    embodiedSpirit: spirit,
-    ignoredSpiritDirective: null,
-    lastSpiritChangeAt: null,
-    lastUpdatedAt: null,
-    routingMode: {
-      enabled: false,
-      updatedAt: null,
-    },
-    modelDefault: {
-      enabled: false,
-      model: null,
-      updatedAt: null,
-    },
-    room,
-  };
-}
+export type RoomStatePatch = {
+  operator?: string;
+  embodiedSpirit?: string;
+  routingModeEnabled?: boolean;
+  modelDefaultEnabled?: boolean;
+  modelDefaultModel?: string | null;
+};
 
-function lastDirectiveValue(text, label) {
-  const pattern = new RegExp(`(?:^|\\n)\\s*${label}:\\s*(.+?)\\s*(?=\\n|$)`, "gi");
-  const matches = Array.from(String(text || "").matchAll(pattern));
-  return matches.length ? (matches.at(-1)?.[1] || "").trim() : null;
-}
-
-function hasDirectiveLine(text, label) {
-  const pattern = new RegExp(`(?:^|\\n)\\s*${label}\\s*(?::\\s*.+)?(?=\\n|$)`, "i");
-  return pattern.test(String(text || ""));
-}
-
-export function normalizeSpiritName(value) {
-  return normalizeDisplayName(value);
-}
-
-export async function loadRoomState(effectiveRoomDir, room, spirit) {
-  const marker = readRoomMarker(effectiveRoomDir);
-  const persisted = readPersistedHouseState(effectiveRoomDir);
-  const operator = normalizeDisplayName(marker.operator)
-    || normalizeDisplayName(persisted.operator)
-    || DEFAULT_OPERATOR;
-  try {
-    const parsed = JSON.parse(await readFile(statePathForRoom(effectiveRoomDir), "utf8"));
-    const defaults = defaultHouseState(room, spirit, operator);
-    return {
-      ...defaults,
-      ...parsed,
-      room,
-      routingMode: { ...defaults.routingMode, ...(parsed.routingMode || {}) },
-      modelDefault: { ...defaults.modelDefault, ...(parsed.modelDefault || {}) },
-    };
-  } catch {
-    return defaultHouseState(room, spirit, operator);
-  }
-}
-
-export async function saveRoomState(effectiveRoomDir, state) {
-  const target = statePathForRoom(effectiveRoomDir);
-  const next = {
-    ...state,
-    lastUpdatedAt: new Date().toISOString(),
-  };
-  await mkdir(path.dirname(target), { recursive: true });
-  await writeFile(target, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-  return next;
-}
-
-export async function applyPromptDirectives(ctx, prompt) {
+async function requestRoomState(ctx: any, request: Record<string, unknown>, signal?: AbortSignal) {
   const { room, spirit, effectiveRoomDir } = roomContext(ctx?.cwd || process.cwd());
-  const current = await loadRoomState(effectiveRoomDir, room, spirit);
-  const updates = {};
-  const operator = lastDirectiveValue(prompt, "Operator");
-  const embody = lastDirectiveValue(prompt, "EMBODY");
-  const dismiss = hasDirectiveLine(prompt, "DISMISS");
-  if (operator) updates.operator = operator;
-  if (dismiss) updates.ignoredSpiritDirective = null;
-  if (embody) {
-    const resolved = normalizeSpiritName(embody);
-    if (resolved) {
-      updates.embodiedSpirit = resolved;
-      updates.agentName = resolved;
-      updates.lastSpiritChangeAt = new Date().toISOString();
-      updates.ignoredSpiritDirective = null;
-    } else {
-      updates.ignoredSpiritDirective = embody;
+  const binding = { room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) };
+  const mutates = request.action !== "read";
+  try {
+    const response = await sendHostCommand(
+      hostCommand(binding, "athanor.room.state", "room", { room_request: request }),
+      new Set(["athanor.room.state_result"]),
+      signal,
+      undefined,
+      { settleDefinitively: mutates },
+    );
+    if (!response.result || typeof response.result !== "object" || Array.isArray(response.result)) {
+      throw new OrganError("Native room state returned an invalid result",
+        mutates ? "outcome_unknown" : "invalid_response", !mutates);
     }
+    return response.result as Record<string, any>;
+  } catch (error) {
+    if (mutates && error instanceof HostUnavailable && error.dispatched && !(error instanceof HostRefused)) {
+      throw new OrganError("Native room state outcome is unknown after dispatch", "outcome_unknown", false, {
+        execution: { request_dispatched: true, write_outcome: "unknown", retry: "reconcile_first" },
+        cause: error.message,
+      });
+    }
+    throw error;
   }
-  const next = Object.keys(updates).length
-    ? await saveRoomState(effectiveRoomDir, { ...current, ...updates })
-    : current;
-  return { effectiveRoomDir, room, spirit, state: next };
 }
 
-export async function writeActiveSpiritSnapshot(effectiveRoomDir, state) {
-  const existing = await readFile(path.join(effectiveRoomDir, "active_spirit.md"), "utf8").catch(() => "");
-  const body = existing.replace(/^# Active Spirit:[^\n]*\nAgent:[^\n]*\nEmbodied:[^\n]*\n\n/, "");
-  const spirit = state.embodiedSpirit || state.agentName || DEFAULT_SPIRIT;
-  const operator = state.operator || DEFAULT_OPERATOR;
-  const content = [
-    `# Active Spirit: ${spirit}`,
-    `Agent: ${state.agentName || spirit} | Operator: ${operator}`,
-    `Embodied: ${spirit} | Conjured: none | Summoned: none`,
-    "",
-    body || `# SPIRIT: ${spirit}\n`,
-  ].join("\n");
-  await writeFile(path.join(effectiveRoomDir, "active_spirit.md"), content, "utf8");
+export function loadRoomState(ctx: any, signal?: AbortSignal) {
+  return requestRoomState(ctx, { action: "read" }, signal);
+}
+
+export function patchRoomState(ctx: any, patch: RoomStatePatch, signal?: AbortSignal) {
+  return requestRoomState(ctx, { action: "patch", ...patch }, signal);
+}
+
+export function applyPromptDirectives(ctx: any, prompt: string, nativeUser: boolean, signal?: AbortSignal) {
+  return requestRoomState(ctx, { action: "applyPrompt", prompt, nativeUser }, signal);
 }

@@ -124,7 +124,7 @@ As built at `a6ab453`:
 - GIGA runs in its own substrate child, one per room. The adapter starts it with the room directory as its working directory and sets `ATHANOR_GIGA_SOURCE_ROOM` and `ATHANOR_GIGA_CLAIM_OWNER=1` (`giga.ts:85-100`). The child starts only when `ATHANOR_GIGA_ENABLED=1` (`giga.ts:86`).
 - Seven tools reach GIGA through that child: `giga_candidate_list`, `giga_health`, `giga_queue_maintenance`, `giga_review`, `giga_promote_memory`, `giga_promote_coding_lesson`, and `giga_promote_project_lesson` (`tools.ts:1377,1409,1425,1450,1538,1554,1575`). Each refuses with `giga_disabled` unless `ATHANOR_GIGA_ENABLED=1` (`giga.ts:107-108`). None needs the Host.
 - `giga_review` and the promotion tools send the spirit name from the room files as `reviewer_id`, and the operator name from the room files as `operator_identity` (`tools.ts:1460-1465,1487,1523`). Both names are self-asserted, not authenticated (`tools.ts:818-847`; `adapters/omp/house-proof/room.ts:112-119`).
-- The core and adapter boundaries use explicit API versions. `hostApi`, `substrateApi`, and `deliveryApi` are all 1 (`crates/athanor-install/src/manifest.rs:11-13`). Hippocampus additions must follow the same compatibility policy.
+- The core and adapter use explicit API versions. `hostApi` and `substrateApi` remain 1. The authenticated broker cutover uses `deliveryApi` 2 (`installer/dependencies.json`).
 
 ## 9. Processing flow
 

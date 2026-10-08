@@ -41,11 +41,12 @@ It runs one listener and nests each room under `/room/<room>` (`crates/host/src/
 The Host refuses a bind that is not loopback (`crates/host/src/config.rs:92-120`).
 One bearer token guards the Host. It proves reach, not identity (`crates/host/src/server.rs:282,301-323`).
 
-The OMP adapter registers 43 tools (`adapters/omp/house-proof/tools.ts:491-2011`; `restart-door.ts:574`).
-Most tools call the Rust substrate child or the Host.
-Some tools read or write local state through TypeScript.
-For example, `set_room_state` writes the room state and `active_spirit.md` (`adapters/omp/house-proof/tools.ts:826-845`; `room.ts:215-264`).
-[Architecture § Tools and wires](./docs/ARCHITECTURE.md#43-tools-and-wires) names the wire for each tool.
+The OMP adapter registers 43 tools.
+House operations use the native Host; local lineage status remains an adapter observation.
+The Host owns room mutations, context preparation, judgments, and native service lifetimes.
+OMP keeps tool registration, event translation, context insertion, and harness actions.
+The Host API 2 cutover is source-verified; deployment remains pending.
+[Architecture](./docs/ARCHITECTURE.md#4-the-omp-adapter) names the ownership boundaries.
 
 The Host starts one keeper for each harness with `autoStart` set.
 The keeper starts OMP, watches it, and relaunches it after an armed restart (`crates/omp-keeper/src/keeper.rs:194-547`).
@@ -71,9 +72,9 @@ It reads `runtime.json` and the Host token from fixed `C:/ProgramData` paths (`s
 `gui-desktop` ships the same surface as `pulse.exe` (`gui-desktop/src/main.rs:30,65-67`).
 Read [Architecture § Pulse](./docs/ARCHITECTURE.md#6-pulse) for the full contract.
 
-**Warning:** the chat ring lives in Host memory only.
-A Host restart empties the ring and the drafts. The sequence starts again at 0 (`crates/host/src/chat.rs:6-7,25-30`; `server.rs:218`).
-Only idempotency receipts, sessions, and the recall-policy cursor persist (`crates/host/src/store.rs:285-441`).
+The 2026-10-05 source repair preserves bounded chat and drafts across Host restarts.
+It uses atomic room-local checkpoints and refuses failed writes (`crates/host/src/chat.rs`).
+The repair passed an isolated Windows process-restart check. Native deployment is still pending.
 
 ## Vault and AKASHA
 

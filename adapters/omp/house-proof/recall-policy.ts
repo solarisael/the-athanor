@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
@@ -95,23 +96,17 @@ function snapshot(event: SnapshotEvent): RecallPolicyHostSnapshot {
   };
 }
 
-// A mutate tool marks work mode and records only enough path state to name the
-// active repository. Lesson selection no longer rides this evidence.
-//
-// enough: evidence decays after WORK_DECAY_TURNS operator turns with no mutate
-// tool, counted from the ordinal its caller reports — a fixed count of turns,
-// never a token or time budget. Any edit or write restarts it. Raise the
-// constant if Work walks back while hands are still on files.
-
-export const WORK_DECAY_TURNS = 6;
+// OMP reports touches and observed project names. The Host owns evidence decay.
 const TOOL_EVIDENCE_SESSION_LIMIT = 256;
 const EVIDENCE_DIR_LIMIT = 8;
 const MUTATE_TOOLS = new Set(["edit", "write"]);
 const EDIT_SECTION_HEADER = /^\[([^#\r\n]+)#[0-9A-F]{4}\]$/;
 const INTERNAL_URI = /^[a-z][a-z0-9+.-]*:\/\//i;
 
-type SessionWorkEvidence = { dirs: Set<string>; markedTurn: number | null; turn: number };
+type SessionWorkEvidence = { dirs: Set<string>; revision: number };
 const toolEvidenceSessions = new Map<string, SessionWorkEvidence>();
+export const TOOL_EVIDENCE_EPOCH = randomUUID();
+let nextToolEvidenceRevision = 0;
 
 export type ToolTouch = { paths?: string[]; cwd?: string };
 
@@ -146,7 +141,7 @@ export function mutateToolPaths(toolName: unknown, input: unknown): string[] {
 }
 
 function touchSession(key: string): SessionWorkEvidence {
-  const evidence = toolEvidenceSessions.get(key) ?? { dirs: new Set<string>(), markedTurn: null, turn: 0 };
+  const evidence = toolEvidenceSessions.get(key) ?? { dirs: new Set<string>(), revision: 0 };
   toolEvidenceSessions.delete(key);
   toolEvidenceSessions.set(key, evidence);
   if (toolEvidenceSessions.size > TOOL_EVIDENCE_SESSION_LIMIT) {
@@ -160,8 +155,7 @@ export function markToolEvidence(binding: HostBinding, touch?: ToolTouch): void 
   const key = evidenceKey(binding);
   if (!key) return;
   const evidence = touchSession(key);
-  // Hands on files restart the count, wherever the session's turns have reached.
-  evidence.markedTurn = evidence.turn;
+  evidence.revision = ++nextToolEvidenceRevision;
   const cwd = String(touch?.cwd ?? "").trim();
   for (const raw of touch?.paths ?? []) {
     const filePath = String(raw ?? "").trim();
@@ -172,20 +166,8 @@ export function markToolEvidence(binding: HostBinding, touch?: ToolTouch): void 
   }
 }
 
-/**
- * True while the session's last mutate tool is fewer than `WORK_DECAY_TURNS`
- * operator turns back. `turn` is the caller's ordinal and is only ever read
- * here: a turn that asks twice must not age the evidence twice. Omitting it
- * reads the evidence without advancing the count.
- */
-export function hasToolEvidence(binding: HostBinding, turn?: number): boolean {
-  const key = evidenceKey(binding);
-  if (!key) return false;
-  const reported = Number.isFinite(turn) ? Math.trunc(turn as number) : null;
-  const evidence = reported === null ? toolEvidenceSessions.get(key) : touchSession(key);
-  if (!evidence) return false;
-  if (reported !== null) evidence.turn = Math.max(evidence.turn, reported);
-  return evidence.markedTurn !== null && evidence.turn - evidence.markedTurn < WORK_DECAY_TURNS;
+export function toolEvidenceRevision(binding: HostBinding): number {
+  return toolEvidenceSessions.get(evidenceKey(binding))?.revision ?? 0;
 }
 
 // Worktrees keep `.git` as a file, not a directory; existsSync covers both.

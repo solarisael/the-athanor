@@ -1,7 +1,4 @@
-use crate::{
-    AppError,
-    giga_worker::{giga_capability_state, giga_classifier_health},
-};
+use crate::{AppError, GigaEnablement, giga_worker::giga_classifier_health};
 use chrono::{DateTime, Utc};
 use protocol::{GigaHealthCount, GigaHealthRequest, GigaHealthResult};
 use sqlx::PgPool;
@@ -9,6 +6,14 @@ use sqlx::PgPool;
 pub async fn giga_health(
     pool: &PgPool,
     request: GigaHealthRequest,
+) -> Result<GigaHealthResult, AppError> {
+    giga_health_with_enablement(pool, request, GigaEnablement::from_env()).await
+}
+
+pub(crate) async fn giga_health_with_enablement(
+    pool: &PgPool,
+    request: GigaHealthRequest,
+    enablement: GigaEnablement,
 ) -> Result<GigaHealthResult, AppError> {
     let room = request.room().to_string();
     let (queue_depth, oldest_age, processed_count, failed_count, last_error, last_error_at, consecutive_failures): (
@@ -55,10 +60,9 @@ pub async fn giga_health(
         count: count as u64,
     })
     .collect();
-    let capabilities = giga_capability_state();
     Ok(GigaHealthResult {
-        capture_enabled: capabilities.capture_enabled,
-        classifier_enabled: capabilities.classifier_enabled,
+        capture_enabled: enablement.capture_enabled(),
+        classifier_enabled: enablement.classifier_enabled(),
         store_healthy: true,
         queue_depth: queue_depth as u64,
         oldest_queue_age_seconds: oldest_age.map(|age| age.max(0) as u64),

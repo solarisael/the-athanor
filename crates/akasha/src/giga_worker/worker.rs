@@ -1,5 +1,5 @@
-use super::enablement::claim_owner_enabled;
-use super::process::giga_process;
+use super::enablement::{GigaEnablement, claim_owner_enabled};
+use super::process::giga_process_with_enablement;
 use crate::{AppError, Config, giga::giga_event_claim};
 use hearth::{GigaEventClaimRequest, RoomKey};
 use sqlx::PgPool;
@@ -21,7 +21,17 @@ pub struct GigaWorkerHandle {
 impl GigaWorkerHandle {
     pub async fn shutdown(self) {
         let _ = self.shutdown.send(true);
-        let _ = self.task.await;
+        if let Err(error) = self.task.await {
+            tracing::error!(
+                panicked = error.is_panic(),
+                cancelled = error.is_cancelled(),
+                "giga_worker_shutdown_failed"
+            );
+        }
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.task.is_finished()
     }
 }
 
@@ -29,6 +39,7 @@ pub(super) async fn giga_worker_loop(
     pool: PgPool,
     config: Config,
     room: RoomKey,
+    enablement: GigaEnablement,
     mut shutdown: watch::Receiver<bool>,
 ) {
     loop {
@@ -60,7 +71,7 @@ pub(super) async fn giga_worker_loop(
                         let _ = changed;
                         return;
                     }
-                    processed = giga_process(&pool, &config, &claim) => processed,
+                    processed = giga_process_with_enablement(&pool, &config, &claim, enablement) => processed,
                 };
                 if let Err(error) = processed {
                     tracing::warn!(operation = "giga_worker", error = %error);
@@ -89,6 +100,17 @@ pub fn spawn_giga_worker(
     if !claim_owner_enabled() {
         return Ok(None);
     }
+    spawn_room_giga_worker(pool, config, GigaEnablement::from_env())
+}
+
+pub fn spawn_room_giga_worker(
+    pool: &PgPool,
+    config: &Config,
+    enablement: GigaEnablement,
+) -> Result<Option<GigaWorkerHandle>, AppError> {
+    if !enablement.classifier_enabled() {
+        return Ok(None);
+    }
     let room = config
         .giga_source_room
         .as_deref()
@@ -100,6 +122,7 @@ pub fn spawn_giga_worker(
         pool.clone(),
         config.clone(),
         room,
+        enablement,
         receiver,
     ));
     Ok(Some(GigaWorkerHandle { shutdown, task }))

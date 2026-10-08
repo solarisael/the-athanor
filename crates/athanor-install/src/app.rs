@@ -20,10 +20,13 @@ pub(crate) fn installed_runtime(layout: &InstallLayout) -> Result<(RuntimeConfig
             .with_context(|| format!("read {}", layout.config().display()))?,
     )?;
     config.validate()?;
-    let secrets = serde_json::from_slice(
+    let secrets: RuntimeSecrets = serde_json::from_slice(
         &fs::read(layout.secrets())
             .with_context(|| format!("read {}", layout.secrets().display()))?,
     )?;
+    if secrets.host_nats_auth.is_none() || secrets.akasha_nats_auth.is_none() {
+        anyhow::bail!("installed NATS credentials are missing; run the canonical upgrade");
+    }
     Ok((config, secrets))
 }
 
@@ -52,6 +55,7 @@ fn host_configs(
             session: format!("app:{}", room.room),
             database_url: Some(database_url.clone()),
             nats_url: Some(nats_url.clone()),
+            nats_auth: secrets.host_nats_auth.clone(),
             knock_autonomy: knock_autonomy.clone(),
         })
         .collect())
@@ -65,7 +69,14 @@ unsafe extern "system" fn console_control(event: u32) -> i32 {
     use windows_sys::Win32::System::Console::{
         CTRL_BREAK_EVENT, CTRL_C_EVENT, CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT,
     };
-    if !matches!(event, CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT | CTRL_LOGOFF_EVENT | CTRL_SHUTDOWN_EVENT) {
+    if !matches!(
+        event,
+        CTRL_C_EVENT
+            | CTRL_BREAK_EVENT
+            | CTRL_CLOSE_EVENT
+            | CTRL_LOGOFF_EVENT
+            | CTRL_SHUTDOWN_EVENT
+    ) {
         return 0;
     }
     if let Some(owner) = CONSOLE_OWNER.get() {
@@ -94,10 +105,16 @@ pub fn run() -> Result<()> {
     let _run_owner = RunOwner(Arc::clone(&owner));
     #[cfg(windows)]
     {
-        CONSOLE_OWNER.set(Arc::clone(&owner))
+        CONSOLE_OWNER
+            .set(Arc::clone(&owner))
             .map_err(|_| anyhow::anyhow!("Athanor console owner is already registered"))?;
-        if unsafe { windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(console_control), 1) } == 0 {
-            anyhow::bail!("Athanor SetConsoleCtrlHandler failed: {}", unsafe { windows_sys::Win32::Foundation::GetLastError() });
+        if unsafe {
+            windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(console_control), 1)
+        } == 0
+        {
+            anyhow::bail!("Athanor SetConsoleCtrlHandler failed: {}", unsafe {
+                windows_sys::Win32::Foundation::GetLastError()
+            });
         }
     }
     let control = ControlServer::bind(Arc::clone(&owner))?;
@@ -108,7 +125,9 @@ pub fn run() -> Result<()> {
     for id in owner.registry().auto_start_ids() {
         match owner.start(id) {
             Ok(_) => harnesses_started.push(id),
-            Err(error) => harnesses_failed.push(serde_json::json!({"id": id, "reason": format!("{error:#}")})),
+            Err(error) => {
+                harnesses_failed.push(serde_json::json!({"id": id, "reason": format!("{error:#}")}))
+            }
         }
     }
     println!(

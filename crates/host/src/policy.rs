@@ -320,6 +320,10 @@ impl RecallPolicySession {
         self.last_refresh_reason = Some("compaction-invalidated".to_owned());
     }
 
+    pub(crate) fn has_pending_recovery(&self) -> bool {
+        self.recovery_state.is_pending()
+    }
+
     pub fn judge_mode(&mut self, mode: RecallResolvedMode) {
         self.judged_mode = Some(mode);
     }

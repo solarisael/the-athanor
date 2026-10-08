@@ -1,7 +1,5 @@
-import { RustJsonlTransport, RustTransportError } from "../rust-transport.ts";
-import { discoverRustExecutable } from "../discovery.ts";
+import { requestOrgan, organFailure } from "./organ.ts";
 
-const rustAnamnesisTransports = new Map<string, RustJsonlTransport>();
 const ANAMNESIS_DEFAULT_LIMIT = 10;
 const ANAMNESIS_MAX_LIMIT = 50;
 const ANAMNESIS_TIMEOUT_MS = 120_000;
@@ -60,13 +58,6 @@ function diagnosticDetails({
   };
 }
 
-function boundedStderr(stderr: unknown): string {
-  return String(stderr || "")
-    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s@/]+@/gi, "$1[redacted]@")
-    .replace(/(\b(?:token|password|authorization)\s*[=:]\s*)(?:Bearer\s+)?\S+/gi, "$1[redacted]")
-    .slice(0, 2000);
-}
-
 function invalidRustAnamnesisFailure(validationError: string, value: unknown) {
   return {
     ok: false,
@@ -92,79 +83,6 @@ function invalidRustAnamnesisFailure(validationError: string, value: unknown) {
   };
 }
 
-function rustAnamnesisTransport(): RustJsonlTransport | null {
-  const executable = discoverRustExecutable();
-  if (!executable) return null;
-  let transport = rustAnamnesisTransports.get(executable);
-  if (!transport) {
-    transport = new RustJsonlTransport({ executable });
-    rustAnamnesisTransports.set(executable, transport);
-  }
-  return transport;
-}
-
-function evictRustAnamnesisTransport(executable: string, transport: RustJsonlTransport): void {
-  if (rustAnamnesisTransports.get(executable) !== transport) return;
-  rustAnamnesisTransports.delete(executable);
-  void transport.close().catch(() => {});
-}
-
-export function closeRustAnamnesisTransports(): void {
-  for (const [executable, transport] of rustAnamnesisTransports) {
-    rustAnamnesisTransports.delete(executable);
-    void transport.close().catch(() => {});
-  }
-}
-
-function rustFailure(error: unknown, transport: RustJsonlTransport) {
-  const stderr = boundedStderr(error instanceof RustTransportError ? error.stderr : transport.stderrDiagnostics);
-  if (error instanceof RustTransportError) {
-    const details = error.details && typeof error.details === "object" && !Array.isArray(error.details)
-      ? {
-        ...error.details,
-        ...(stderr ? {
-          evidence: [
-            ...(Array.isArray(error.details.evidence) ? error.details.evidence : []),
-            { kind: "stderr", text: stderr },
-          ],
-        } : {}),
-      }
-      : stderr ? diagnosticDetails({
-        category: "transport",
-        stage: "request_parse",
-        operation: "anamnesis",
-        owner: { component: "athanor-omp", path: "house-proof/anamnesis.ts", symbol: "rustFailure" },
-        expected: { transport: "a structured Rust response or transport error" },
-        observed: { transport_details: observedShape(error.details) },
-        evidence: [{ kind: "stderr", text: stderr }],
-        targets: ["rust-transport.ts#RustJsonlTransport.request"],
-        nextChecks: [{ action: "inspect", target: "rust-transport.ts#RustJsonlTransport.request" }],
-        execution: { request_dispatched: true, write_outcome: "not_started", retry: error.retryable ? "safe_now" : "after_change" },
-      })
-      : error.details;
-    return { ok: false, error: error.message, code: error.code, retryable: error.retryable, ...(details === undefined ? {} : { details }) };
-  }
-  return {
-    ok: false,
-    error: "Rust transport request failed",
-    code: "rust_transport_failure",
-    retryable: true,
-    details: diagnosticDetails({
-      category: "transport",
-      stage: "request_parse",
-      operation: "anamnesis",
-      owner: { component: "athanor-omp", path: "house-proof/anamnesis.ts", symbol: "rustFailure" },
-      expected: { transport: "a structured Rust response or transport error" },
-      observed: { error_type: error instanceof Error ? error.name : typeof error },
-      evidence: stderr ? [{ kind: "stderr", text: stderr }] : [],
-      targets: ["rust-transport.ts#RustJsonlTransport.request"],
-      nextChecks: [{ action: "inspect", target: "rust-transport.ts#RustJsonlTransport.request" }],
-      execution: { request_dispatched: true, write_outcome: "not_started", retry: "safe_now" },
-    }),
-  };
-}
-
-
 function validRustAnamnesisResult(value: unknown, mode: string, room: string): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "result must be an object";
   const result = value as Record<string, unknown>;
@@ -180,60 +98,30 @@ function validRustAnamnesisResult(value: unknown, mode: string, room: string): s
 
 const EMPTY = { entries: [], warnings: [] };
 
-export async function queryAnamnesis(_effectiveRoomDir, room, options = {}) {
+export async function queryAnamnesis(room, options) {
   const mode = options?.mode === "consult" ? "consult" : "wake";
   const query = String(options?.query || "").trim();
   const timeoutMs = options?.timeoutMs === undefined ? ANAMNESIS_TIMEOUT_MS : Number(options.timeoutMs);
   if (mode === "consult" && !query) return { ok: false, mode, ...EMPTY, error: "consult requires a non-empty query" };
-  const executable = discoverRustExecutable();
-  const transport = rustAnamnesisTransport();
-  if (transport) {
-    const requestedLimit = options?.limit === undefined ? ANAMNESIS_DEFAULT_LIMIT : Number(options.limit);
-    const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(ANAMNESIS_MAX_LIMIT, Math.trunc(requestedLimit))) : ANAMNESIS_DEFAULT_LIMIT;
-    const params = {
-      room,
-      mode,
-      ...(mode === "consult" ? { query } : {}),
-      limit,
+  const requestedLimit = options?.limit === undefined ? ANAMNESIS_DEFAULT_LIMIT : Number(options.limit);
+  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(ANAMNESIS_MAX_LIMIT, Math.trunc(requestedLimit))) : ANAMNESIS_DEFAULT_LIMIT;
+  try {
+    if (options.binding.room !== room) throw new Error("foreign room binding refused");
+    const result = await requestOrgan(options.binding, "anamnesis", {
+      mode, ...(mode === "consult" ? { query } : {}), limit,
+    }, { timeoutMs, signal: options.signal });
+    const validationError = validRustAnamnesisResult(result, mode, room);
+    if (validationError) return { mode, ...EMPTY, ...invalidRustAnamnesisFailure(validationError, result) };
+    const entries = result.entries as Record<string, unknown>[];
+    return {
+      ...result,
+      entries: [...entries],
+      pillars: entries.filter((entry) => entry.kind === "pillar"),
+      cycles: entries.filter((entry) => entry.kind === "cycle"),
     };
-    try {
-      const result = await transport.request("anamnesis", params, { timeoutMs });
-      const validationError = validRustAnamnesisResult(result, mode, room);
-      if (validationError) {
-        evictRustAnamnesisTransport(executable, transport);
-        return { mode, ...EMPTY, ...invalidRustAnamnesisFailure(validationError, result) };
-      }
-      return {
-        ...result,
-        entries: [...result.entries],
-        pillars: result.entries.filter((entry) => (entry as Record<string, unknown>).kind === "pillar"),
-        cycles: result.entries.filter((entry) => (entry as Record<string, unknown>).kind === "cycle"),
-      };
-    } catch (error) {
-      if (!transport.usable) evictRustAnamnesisTransport(executable, transport);
-      return { mode, ...EMPTY, ...rustFailure(error, transport) };
-    }
+  } catch (error) {
+    return { mode, ...EMPTY, ...organFailure(error) };
   }
-  return {
-    ok: false,
-    mode,
-    ...EMPTY,
-    error: "Rust anamnesis transport unavailable",
-    code: "rust_transport_unavailable",
-    retryable: true,
-    details: diagnosticDetails({
-      category: "transport",
-      stage: "startup",
-      operation: "anamnesis",
-      owner: { component: "athanor-omp", path: "house-proof/anamnesis.ts", symbol: "rustAnamnesisTransport" },
-      expected: { transport: "an available Rust JSONL transport" },
-      observed: { executable_configured: Boolean(executable), transport_available: false },
-      evidence: [],
-      targets: ["house-proof/anamnesis.ts#rustAnamnesisTransport"],
-      nextChecks: [{ action: "inspect", target: "house-proof/anamnesis.ts#rustAnamnesisTransport" }],
-      execution: { request_dispatched: false, write_outcome: "not_started", retry: "safe_now" },
-    }),
-  };
 }
 
 function list(value) { return Array.isArray(value) ? value.filter(Boolean).map(String) : []; }

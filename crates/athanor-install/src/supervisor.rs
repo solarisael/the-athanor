@@ -444,6 +444,8 @@ pub fn runtime_plan(
         name: "nats".into(),
         executable: version_root.join("runtime/nats/nats-server.exe"),
         arguments: vec![
+            "-c".into(),
+            data_root.join("secrets/nats-server.conf").into_os_string(),
             "-js".into(),
             "-a".into(),
             LOOPBACK_HOST.into(),

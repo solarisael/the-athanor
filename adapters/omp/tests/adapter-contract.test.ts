@@ -3,27 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { ADAPTER_API_VERSION } from "../index.ts";
-import { analyzeContext, parseContextAnalysisResponse } from "../house-proof/context.ts";
-import { dispatchHouse, familiarStatus, laneStatus } from "../house-proof/routing.ts";
 import { roomContext, supportedRoom } from "../house-proof/room.ts";
 
 describe("OMP adapter contract", () => {
-  test("exports a thin adapter API without loading a sibling TypeScript core", () => {
-    expect(ADAPTER_API_VERSION).toBe(1);
-    expect(typeof analyzeContext).toBe("function");
-    expect(typeof laneStatus).toBe("function");
-    expect(typeof familiarStatus).toBe("function");
-    expect(typeof dispatchHouse).toBe("function");
-  });
-
-  test("refuses a Context Host analysis that omits its query route", () => {
-    expect(() => parseContextAnalysisResponse({
-      correlation_id: "message-1",
-      command_or_event_type: "athanor.context.analyzed",
-      analysis: { roomReminder: "still malformed" },
-    })).toThrow("Context Host analysis omitted the query route");
-  });
 
   test("uses neutral defaults for an unmarked directory", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "omp-adapter-contract-"));

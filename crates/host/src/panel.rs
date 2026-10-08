@@ -329,9 +329,6 @@ async fn read_evidence(
     substrate_response(quest_evidence(pool, params).await)
 }
 
-// The three timeline handlers deserialize the substrate's own param types:
-// no identity to inject, so a second request struct would only restate the
-// contract it copies.
 async fn read_memory_timeline(
     State(state): State<PanelHost>,
     payload: Result<Json<MemoryTimelineParams>, JsonRejection>,
@@ -340,6 +337,13 @@ async fn read_memory_timeline(
         Ok(Json(request)) => request,
         Err(rejection) => return json_rejection(rejection),
     };
+    if request
+        .room
+        .as_deref()
+        .is_some_and(|room| room != state.room.as_str() && room != "house")
+    {
+        return error(StatusCode::FORBIDDEN, "foreign_room");
+    }
     let Some(pool) = state.pool() else {
         return error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -349,7 +353,7 @@ async fn read_memory_timeline(
     if let Err(refusal) = request.validate() {
         return refused(refusal);
     }
-    substrate_response(memory_timeline(pool, request).await)
+    substrate_response(memory_timeline(pool, &state.room, request).await)
 }
 
 async fn read_memory(
@@ -369,7 +373,7 @@ async fn read_memory(
     if let Err(refusal) = request.validate() {
         return refused(refusal);
     }
-    substrate_response(memory_read(pool, request).await)
+    substrate_response(memory_read(pool, &state.room, request).await)
 }
 
 async fn read_lesson_timeline(

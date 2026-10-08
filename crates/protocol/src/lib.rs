@@ -2,6 +2,7 @@
 mod contract;
 pub mod harness;
 mod host;
+pub mod organ;
 /// The restart intent vocabulary keeps its own namespace: consumers name the
 /// door (`protocol::restart::...`) instead of importing a flat re-export.
 pub mod restart;

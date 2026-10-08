@@ -1,30 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
-import { runLessonQuery } from "./lesson-context.ts";
-import type { ResolvedRecallMode } from "./recall-policy.ts";
-import type { RecallRerankInput, RecallRerankPolicy, RecallRerankResult, RerankGrant } from "./recall-judgment.ts";
+import type { NativeLessonPlan } from "./context.ts";
 
 const BRIDGE_STATE = Symbol.for("solarisael.athanor.lesson-ttsr.v1");
 const PROVIDER = "athanor-lessons";
-const FAMILIES = ["coding", "writing", "design", "audio"] as const;
-
-const LANGUAGE_EXTENSIONS: Record<string, string[]> = {
-  rust: ["rs"], typescript: ["ts", "tsx", "mts", "cts"], javascript: ["js", "jsx", "mjs", "cjs"],
-  python: ["py"], powershell: ["ps1", "psm1", "psd1"], shell: ["sh", "bash"], sql: ["sql"],
-  css: ["css", "scss", "sass", "less"], html: ["html", "htm"], markdown: ["md", "mdx"],
-  go: ["go"], ruby: ["rb"], java: ["java"], c: ["c", "h"], cpp: ["cc", "cpp", "hpp"],
-  csharp: ["cs"], lua: ["lua"], zig: ["zig"], gdscript: ["gd"], glsl: ["glsl", "vert", "frag"],
-  wgsl: ["wgsl"], bend: ["bend"],
-};
-
-// Same fold as crates/akasha/src/lesson/registry/keys.rs: `bend-2` globs as `bend`.
-const keyFamily = (key: string) => key.trim().toLowerCase().replace(/(-[0-9]+)+$/, "");
-
-type LessonRow = {
-  id: number; type: string; title: string; lesson: string; proofPattern?: string | null; project?: string | null;
-  languageKeys?: string[]; tags?: string[]; condition?: string[]; astCondition?: string[]; triggerScope?: string[];
-  interruptMode?: "block" | "remind" | null; repeatCooldownSecs?: number | null; alwaysOn?: boolean;
-};
 
 type BlockGuard = { manager: any; rules: Map<string, Record<string, unknown>>; signature: string };
 type ManagerRecord = {
@@ -97,188 +76,20 @@ export function installLessonTtsrBridge(pi: any): string | null {
   return null;
 }
 
-function normalizeProject(value: unknown): string {
-  return String(value ?? "").trim().toLowerCase().replace(/\s+/g, "-");
+export function contextLessonManagerAvailable(ctx: any): boolean {
+  ctx.getContextUsage?.();
+  const sessionId = String(ctx.sessionManager?.getSessionId?.() ?? ctx.sessionID ?? "").trim();
+  return state().sessions.has(sessionId);
 }
 
-function globsFor(row: LessonRow): string[] | undefined {
-  const extensions = [...new Set((row.languageKeys ?? []).flatMap((key) => LANGUAGE_EXTENSIONS[keyFamily(String(key))] ?? []))];
-  const project = normalizeProject(row.project);
-  if (project && extensions.length) return extensions.map((ext) => `**/${project}/**/*.${ext}`);
-  if (project) return [`**/${project}/**`];
-  if (extensions.length) return extensions.map((ext) => `**/*.${ext}`);
-  return undefined;
-}
-
-function nativeRule(row: LessonRow, activeProject: string | null): Record<string, unknown> | null {
-  if (!row.tags?.includes("ttsr-approved")) return null;
-  const condition = (row.condition ?? []).filter(Boolean);
-  const astCondition = (row.astCondition ?? []).filter(Boolean);
-  if (!condition.length && !astCondition.length) return null;
-  const languageBound = (row.languageKeys ?? []).length > 0;
-  const projectBound = row.type === "project" && Boolean(row.project);
-  let scope = (row.triggerScope ?? []).filter(Boolean);
-  if (languageBound) scope = scope.filter((token) => token !== "text");
-  if (projectBound && normalizeProject(row.project) !== normalizeProject(activeProject)) scope = scope.filter((token) => token !== "text");
-  if ((languageBound || projectBound) && scope.length === 0) scope = ["tool"];
-  if (scope.length > 0 && !scope.some((token) => token === "text" || token === "tool" || token.startsWith("tool:"))) return null;
-
-  const identity = JSON.stringify({ condition, astCondition, scope, project: row.project, languageKeys: row.languageKeys, mode: row.interruptMode, body: row.lesson });
-  const digest = createHash("sha256").update(identity).digest("hex").slice(0, 12);
-  const name = `athanor-${row.type}-${row.id}-${digest}`;
-  return {
-    name,
-    path: `athanor://lessons/${row.type}/${row.id}`,
-    content: [row.title, row.lesson, row.proofPattern ? `Proof pattern: ${row.proofPattern}` : ""].filter(Boolean).join("\n\n"),
-    description: row.title,
-    condition: condition.length ? condition : undefined,
-    astCondition: astCondition.length ? astCondition : undefined,
-    scope: scope.length ? scope : undefined,
-    globs: globsFor(row),
-    interruptMode: row.interruptMode === "remind" ? "never" : "always",
-    _source: { provider: PROVIDER, providerName: "The Athanor", path: `athanor://lessons/${row.type}/${row.id}`, level: "native" },
-  };
-}
-
-function rowsFrom(result: unknown): LessonRow[] {
-  if (!result || typeof result !== "object" || (result as any).ok !== true || !Array.isArray((result as any).lessons)) return [];
-  return (result as any).lessons;
-}
-
-export type TtsrLesson = { id: number; body: string };
-export type LessonTtsrSync = {
-  active: number; added: number; warnings: string[]; lessons: TtsrLesson[]; baseline: TtsrLesson[];
-};
-
-export function selectPresenceLessons(
-  synced: Pick<LessonTtsrSync, "lessons" | "baseline">,
-  resolvedMode: ResolvedRecallMode | null | undefined,
-): TtsrLesson[] {
-  const baseline = resolvedMode === "work" ? synced.baseline : [];
-  const selected = new Map(baseline.map((lesson) => [lesson.id, lesson]));
-  for (const lesson of synced.lessons) {
-    if (!selected.has(lesson.id)) selected.set(lesson.id, lesson);
-  }
-
-  return [...selected.values()];
-}
-
-export const LESSON_SIEVE_GRANT: RerankGrant = {
-  markerKey: "jevLessons",
-  purpose: "lesson-sieve",
-  allowFlag: "allowPrivateLessonPackets",
-};
-
-type LessonReranker = {
-  loadPolicy(dir: string, room: string, supplied?: any): Promise<RecallRerankPolicy>;
-  rerank(input: RecallRerankInput): Promise<RecallRerankResult>;
-};
-
-export type LessonSieveInput = {
-  turn: string; roomDir: string; room: string; query: string; baseline: TtsrLesson[];
-  deadline: number | null; signal?: AbortSignal; sessionId?: string; context?: any; supplied?: any;
-};
-export type LessonSieveResult = { baseline: TtsrLesson[]; receipt: Readonly<Record<string, unknown>> };
-type LessonSieveDecision = { keep: Set<number> | null; receipt: Readonly<Record<string, unknown>> };
-
-function fallback(reason: string, status = "refused"): LessonSieveDecision {
-  return { keep: null, receipt: { schemaVersion: "jev-recall-receipt.v1", status, reason, fallbackUsed: true } };
-}
-
-async function decideLessons(reranker: LessonReranker, input: LessonSieveInput): Promise<LessonSieveDecision> {
-  try {
-    const policy = await reranker.loadPolicy(input.roomDir, input.room, input.supplied);
-    if (policy.approved && input.deadline === null) return fallback("deadline");
-    const result = await reranker.rerank({
-      query: input.query,
-      retrievalCandidates: input.baseline,
-      signal: input.signal,
-      ...(input.deadline === null ? {} : { deadline: input.deadline }),
-      sessionId: input.sessionId,
-      context: input.context,
-    });
-    if (result.receipt.status !== "active") return { keep: null, receipt: result.receipt };
-    return { keep: new Set(result.retrievalCandidates.map((lesson) => Number(lesson?.id))), receipt: result.receipt };
-  } catch {
-    return fallback("sieve-failed", "failed");
-  }
-}
-
-// One decision per turn, whatever its outcome: retries replay it so Presence bytes hold for the prompt cache.
-export function createLessonSieve(reranker: LessonReranker, capacity = 64) {
-  const decisions = new Map<string, Promise<LessonSieveDecision>>();
-  return async function sieve(input: LessonSieveInput): Promise<LessonSieveResult> {
-    const key = [
-      input.turn,
-      createHash("sha256").update(input.query).digest("hex"),
-      input.baseline.map((lesson) => lesson.id).join(","),
-    ].join("\0");
-    let decision = decisions.get(key);
-    if (!decision) {
-      decision = decideLessons(reranker, input);
-      decisions.set(key, decision);
-      while (decisions.size > capacity) decisions.delete(decisions.keys().next().value!);
-    }
-    const { keep, receipt } = await decision;
-    return { baseline: keep ? input.baseline.filter((lesson) => keep.has(lesson.id)) : input.baseline, receipt };
-  };
-}
-
-export async function syncLessonTtsr(args: {
-  ctx: any; roomDir: string; room: string; activeProject: string | null;
-}): Promise<LessonTtsrSync> {
+export function syncLessonTtsr(args: { ctx: any; plan: NativeLessonPlan }) {
   args.ctx.getContextUsage?.();
   const sessionId = String(args.ctx.sessionManager?.getSessionId?.() ?? args.ctx.sessionID ?? "").trim();
   const record = state().sessions.get(sessionId);
+  const warnings = [...args.plan.warnings];
+  if (!record) return { active: 0, added: 0, warnings };
 
-  const triggerQueries: Array<{ family: string; result: Promise<Record<string, unknown>> }> =
-    FAMILIES.map((family) => ({
-      family,
-      result: runLessonQuery(args.roomDir, args.room, {
-        type: family, tag: "ttsr-approved", triggerOnly: true, limit: 50,
-      }),
-    }));
-  if (args.activeProject) {
-    triggerQueries.push({
-      family: "project",
-      result: runLessonQuery(args.roomDir, args.room, {
-        type: "project", project: args.activeProject,
-        tag: "ttsr-approved", triggerOnly: true, limit: 50,
-      }),
-    });
-  }
-  const [baselineResult, ...triggerResults] = await Promise.all([
-    runLessonQuery(args.roomDir, args.room, { type: "coding", alwaysOn: true, limit: 50 }),
-    ...triggerQueries.map((query) => query.result),
-  ]);
-  const warnings: string[] = [];
-  const triggerRows = triggerResults.flatMap((result, index) => {
-    const rows = rowsFrom(result);
-    // # enough: 50 guards per family; a visible warning requires a paged trigger API before growth crosses it.
-    if (rows.length === 50) warnings.push(`${triggerQueries[index].family} trigger query reached the 50-row ceiling`);
-    return rows;
-  });
-  const baselineRows = rowsFrom(baselineResult);
-  if (baselineRows.length === 50) warnings.push("coding baseline query reached the 50-row ceiling");
-  const rows = [...new Map(
-    [...triggerRows, ...baselineRows].map((row) => [`${row.type}:${row.id}`, row]),
-  ).values()];
-  const baseline = baselineRows
-    .filter((row) => row.type === "coding" && row.alwaysOn === true)
-    .map((row) => ({ id: row.id, body: row.lesson }));
-  if (!record) {
-    return {
-      active: 0, added: 0,
-      warnings: [...warnings, "native OMP TTSR manager unavailable"],
-      lessons: [], baseline,
-    };
-  }
-
-  const armed = rows.flatMap((row) => {
-    const rule = nativeRule(row, args.activeProject);
-    return rule ? [{ row, rule }] : [];
-  });
-  const rules = armed.map((entry) => entry.rule);
+  const rules = args.plan.rules.map((entry) => entry.rule);
   const next = new Set(rules.map((rule) => String(rule.name)));
   let added = 0;
   for (const rule of rules) {
@@ -292,15 +103,9 @@ export async function syncLessonTtsr(args: {
     }
   }
   record.active = next;
-  const guardWarning = armBlockGuard(record, armed.filter(({ row }) => row.interruptMode === "block").map(({ rule }) => rule));
+  const guardWarning = armBlockGuard(record, args.plan.rules.filter((entry) => entry.block).map((entry) => entry.rule));
   if (guardWarning) warnings.push(guardWarning);
-  return {
-    active: next.size,
-    added,
-    warnings,
-    lessons: armed.map(({ row }) => ({ id: row.id, body: row.lesson })),
-    baseline,
-  };
+  return { active: next.size, added, warnings };
 }
 
 // The native manager interrupts a stream once per session (repeatMode "once"),

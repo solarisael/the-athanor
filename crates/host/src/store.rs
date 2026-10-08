@@ -38,17 +38,19 @@ impl RoomStateStore {
         let root = self.read_root()?;
         projection_from_root(&root, &self.room)
     }
+    pub(crate) fn migrate_legacy_files(&self, room_dir: &Path) -> Result<(), String> {
+        migrate_file(
+            &room_dir.join(".athanor-room.json"),
+            &room_dir.join(".solarisael-room.json"),
+        )?;
+        let parent = self
+            .path
+            .parent()
+            .ok_or_else(|| "room state path has no parent directory".to_owned())?;
+        migrate_file(&self.path, &parent.join("solarisael-house-state.json"))
+    }
 
-    /// The spirit and operator this room actually belongs to.
-    ///
-    /// enough: Presence identity used to be whatever the caller typed into an
-    /// open request. This is the room's own record, the same file
-    /// `set_room_state` writes and `active_spirit.md` mirrors, so a claimed
-    /// operator can be checked instead of believed. `embodiedSpirit` is the
-    /// live field; `agentName` is the older spelling the installer still
-    /// stamps, and it is read only as a fallback so an unmigrated room
-    /// authenticates rather than locking its spirit out.
-    pub fn identity(&self) -> Result<RoomIdentity, String> {
+    pub(crate) fn embodied_spirit(&self, configured: &str) -> Result<String, String> {
         let root = self.read_root()?;
         let object = root
             .as_object()
@@ -60,16 +62,52 @@ impl RoomStateStore {
                 self.room
             ));
         }
-        let spirit = required_string(object, "embodiedSpirit")
-            .or_else(|_| required_string(object, "agentName"))
-            .map_err(|_| {
-                "room state must name the embodied spirit before Presence opens".to_owned()
-            })?;
+        match object.get("embodiedSpirit") {
+            None => Ok(configured.to_owned()),
+            Some(Value::String(spirit)) => {
+                let spirit = spirit.trim();
+                if spirit.is_empty()
+                    || spirit.encode_utf16().count() > 80
+                    || spirit
+                        .chars()
+                        .any(|character| matches!(character, '\r' | '\n' | '|'))
+                {
+                    return Err("room state embodiedSpirit is invalid".into());
+                }
+                Ok(spirit.to_owned())
+            }
+            Some(_) => Err("room state embodiedSpirit must be a string".into()),
+        }
+    }
+
+    pub(crate) fn write_room_state(&self, root: &Value) -> Result<(), String> {
+        projection_from_root(root, &self.room)?;
+        atomic_json_write(&self.path, root)
+    }
+
+    pub(crate) fn write_text_mirror(&self, path: &Path, text: &str) -> Result<(), String> {
+        atomic_text_write(path, text)
+    }
+
+    /// Resolve this room's identity from its bound state and Host configuration.
+    pub fn identity(&self, configured_spirit: &str) -> Result<RoomIdentity, String> {
+        let root = self.read_root()?;
+        let object = root
+            .as_object()
+            .ok_or_else(|| "room state root must be a JSON object".to_owned())?;
+        let room = required_string(object, "room")?;
+        if room != self.room {
+            return Err(format!(
+                "room state belongs to foreign room {room}; configured room is {}",
+                self.room
+            ));
+        }
+        let spirit = self.embodied_spirit(configured_spirit)?;
         let operator = required_string(object, "operator")
             .map_err(|_| "room state must name the operator before Presence opens".to_owned())?;
         Ok(RoomIdentity {
             room: room.to_owned(),
-            spirit: spirit.trim().to_owned(),
+            spirit,
             operator: operator.trim().to_owned(),
         })
     }
@@ -148,6 +186,30 @@ impl RoomStateStore {
         }
         Ok(root)
     }
+}
+
+fn migrate_file(current: &Path, legacy: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(current) {
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("cannot inspect {}: {error}", current.display()));
+        }
+    }
+    match fs::symlink_metadata(legacy) {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!("cannot inspect {}: {error}", legacy.display()));
+        }
+    }
+    fs::rename(legacy, current).map_err(|error| {
+        format!(
+            "cannot migrate {} to {}: {error}",
+            legacy.display(),
+            current.display()
+        )
+    })
 }
 
 fn projection_from_root(root: &Value, configured_room: &str) -> Result<RecallPolicyState, String> {
@@ -468,7 +530,7 @@ pub fn timestamp() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
-fn atomic_json_write(path: &Path, value: &impl Serialize) -> Result<(), String> {
+pub(crate) fn atomic_json_write(path: &Path, value: &impl Serialize) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
@@ -479,6 +541,24 @@ fn atomic_json_write(path: &Path, value: &impl Serialize) -> Result<(), String> 
     let file = AtomicFile::new(path, AllowOverwrite);
     match file.write(|target| -> io::Result<()> {
         target.write_all(&bytes)?;
+        target.sync_all()
+    }) {
+        Ok(()) => Ok(()),
+        Err(AtomicError::Internal(error)) | Err(AtomicError::User(error)) => Err(format!(
+            "cannot atomically replace {}: {error}",
+            path.display()
+        )),
+    }
+}
+
+fn atomic_text_write(path: &Path, text: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    }
+    let file = AtomicFile::new(path, AllowOverwrite);
+    match file.write(|target| -> io::Result<()> {
+        target.write_all(text.as_bytes())?;
         target.sync_all()
     }) {
         Ok(()) => Ok(()),

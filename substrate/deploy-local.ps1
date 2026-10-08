@@ -35,6 +35,26 @@ if ($null -ne $Service -and $Service.Status -notin @("Running", "Stopped")) {
   throw "native Athanor service is $($Service.Status); recover it to Running or Stopped before deployment"
 }
 
+$RuntimePath = Join-Path $env:ProgramData "Solarisael/Athanor/config/runtime.json"
+$RuntimeConfig = Get-Content -LiteralPath $RuntimePath -Raw | ConvertFrom-Json
+$OmpConfig = if ([string]::IsNullOrWhiteSpace([string]$RuntimeConfig.ompConfigPath)) {
+  Join-Path $env:USERPROFILE ".omp/agent/config.yml"
+} else { [string]$RuntimeConfig.ompConfigPath }
+$ClientConfig = if ([string]::IsNullOrWhiteSpace([string]$RuntimeConfig.clientConfigPath)) {
+  Join-Path $env:USERPROFILE ".omp/agent/athanor/client.json"
+} else { [string]$RuntimeConfig.clientConfigPath }
+$OperatorPrincipal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+if (-not (Test-Path -LiteralPath $OmpConfig -PathType Leaf)) {
+  throw "OMP configuration is missing: $OmpConfig"
+}
+$HostListener = Get-NetTCPConnection -State Listen -LocalPort $RuntimeConfig.hostPort -ErrorAction SilentlyContinue
+$ProgramPrefix = [System.IO.Path]::GetFullPath($ProgramRoot).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+$InstalledChildren = Get-CimInstance Win32_Process -Filter "Name = 'athanor-substrate.exe'" |
+  Where-Object { $_.ExecutablePath -and [System.IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($ProgramPrefix, [System.StringComparison]::OrdinalIgnoreCase) }
+if ($HostListener -or $InstalledChildren) {
+  throw "Close the House Host and every OMP session before deployment; NATS credential activation cannot run behind old clients."
+}
+
 function Invoke-Checked {
   param(
     [Parameter(Mandatory = $true)][string]$Label,
@@ -103,7 +123,9 @@ foreach ($Required in @($Manifest, $StagedManager)) {
 # --- install through the staged manager: it carries the new installer code
 # and is not the image the service runs, so it can retire the stable one ---
 Invoke-Checked -Label "install release $Release" -FilePath $StagedManager -ArgumentList @(
-  "update", "--staging", $Payload, "--manifest", $Manifest
+  "update", "--staging", $Payload, "--manifest", $Manifest,
+  "--omp-config", $OmpConfig, "--client-config", $ClientConfig,
+  "--operator-principal", $OperatorPrincipal
 )
 
 # --- the adapter component belongs to the same release: without this step
@@ -121,9 +143,15 @@ if ([string]$Current.version -cne $Release) {
 }
 $Substrate = Join-Path $ProgramRoot "versions/$Release/bin/athanor-substrate.exe"
 $Secrets = Get-Content (Join-Path $env:ProgramData "Solarisael/Athanor/secrets/runtime-secrets.json") -Raw | ConvertFrom-Json
+# The substrate refuses to guess where mutable state lives, and this shell
+# rarely carries ATHANOR_STATE_DIR. The installed runtime config already knows.
+$StateRoot = [string]$RuntimeConfig.operatorStateRoot
+if ([string]::IsNullOrWhiteSpace($StateRoot)) { throw "runtime.json has no operatorStateRoot; the health proof cannot resolve the state root" }
 $SavedDatabaseUrl = $env:DATABASE_URL
+$SavedStateDir = $env:ATHANOR_STATE_DIR
 try {
   $env:DATABASE_URL = [string]$Secrets.externalDatabaseUrl
+  $env:ATHANOR_STATE_DIR = $StateRoot
   # The proof asks the embedder for one real embedding. A cold Ollama model
   # can refuse the first request while it loads, which is not an install
   # failure. Three tries, ten seconds apart, before this counts as red.
@@ -137,6 +165,7 @@ try {
   }
 } finally {
   $env:DATABASE_URL = $SavedDatabaseUrl
+  $env:ATHANOR_STATE_DIR = $SavedStateDir
 }
 
 # Payload trees are disposable after installation; keep this release's for

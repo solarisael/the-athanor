@@ -121,16 +121,16 @@ would decide them.
 
 ### Organs
 
-Named deterministic tools of a House. The supported OMP adapter registers 43:
-42 in `adapters/omp/house-proof/tools.ts:491-2011` and `request_restart` in
-`restart-door.ts:574`. They cover memory, retrieval, lessons, continuity,
-counsel, routing, design-system catalogues, GIGA review, House configuration,
-the Hallway (7 `hallway_*` tools), the Docket (5 `quest_*` tools), and restart.
-[Architecture](./ARCHITECTURE.md#43-tools-and-wires) lists each tool and its
-wire. An organ is not an autonomous agent.
+Organs are named tools of a House.
+The OMP adapter registers 43 public tools for memory, lessons, continuity, counsel, routing, design, GIGA, configuration, Hallway, Docket, and restart.
+House operations use the native Host.
+Local lineage status remains an adapter observation.
+[Architecture](./ARCHITECTURE.md#4-the-omp-adapter) describes the boundary.
+An organ is not an autonomous agent.
 
-Six organs fail without a live Host; `sleep` degrades
-([Limitations](./LIMITATIONS.md#7-doors-that-need-the-host)).
+An absent Host prevents House tool operations.
+The adapter does not fall back to substrate children.
+[Limitations](./LIMITATIONS.md#7-doors-that-need-the-host) names the remaining dependency boundaries.
 
 ### Paper Boat
 

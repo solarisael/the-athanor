@@ -64,11 +64,16 @@ impl DeliveryService {
     /// reconnected; a cancellation is honoured at the next tick boundary, so a
     /// claimed outbox row is always published or released before exit. One
     /// lease owner per call: the outbox lease is what makes a restart safe.
-    pub async fn serve(store: Store, nats_url: String, cancellation: CancellationToken) {
+    pub async fn serve(
+        store: Store,
+        nats_url: String,
+        auth: Option<super::broker::NatsAuth>,
+        cancellation: CancellationToken,
+    ) {
         let lease_owner = Uuid::new_v4();
         while !cancellation.is_cancelled() {
             let flight = async {
-                let broker = Broker::connect(&nats_url).await?;
+                let broker = Broker::connect(&nats_url, auth.as_ref()).await?;
                 broker.configure().await?;
                 Self::new(store.clone(), broker, lease_owner)
                     .ticks(&cancellation)

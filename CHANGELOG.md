@@ -38,8 +38,8 @@ the exact implementation record.
   The adapter calls it through the Host organ door when OMP announces `ttsr_triggered` for an Athanor rule, and when the block guard refuses an edit or write. The Host adds the session.
   Each row names the room, the session, the lesson, the surface, the tool, the path, the matcher kind, and the urgency.
   Migration 0033 makes `matched_pattern` nullable. OMP names the rule that fired, not the pattern. The row carries the pattern only when the rule has one pattern of that kind.
-- Class words set the Recall mode from the operator's message. The first word of a message can be `magus` (work), `bard` or `warlock` (conversation), `rogue` (quiet), or `warrior` (auto).
-  The word sends the same Host command as the `recall_policy` tool, and the mode holds for the session. A class word inside a sentence does nothing.
+- Class words set the Recall mode from the operator's message. A whole word anywhere in the message can be `magus` (work), `bard` or `warlock` (conversation), `rogue` (quiet), or `warrior` (auto).
+  The word sends the same Host command as the `recall_policy` tool, and the mode holds for the session. The first class word in a message wins.
   The mode door rings once when the resolved mode changes, by word or by auto. It adds one visible `athanor-mode-door` message.
   A room can set the door lines in its own `mode-door.md`. The `## work`, `## mixed`, `## conversation`, and `## quiet` sections each replace one House line.
   A missing section keeps the House line. An empty section keeps the door silent for that mode. An unknown section shows a warning.

@@ -23,11 +23,13 @@ export const CLASS_WORDS: Readonly<Record<string, RequestedRecallMode>> = {
   warrior: "auto",
 };
 
-const CLASS_WORD_PATTERN = new RegExp(`^\\s*(${Object.keys(CLASS_WORDS).join("|")})\\b`, "i");
+// Same reach as the Host's ultra-words: a standalone word anywhere in the prompt.
+// A bard in a story flips the mode too; rarer words are the way up if that bites.
+const CLASS_WORD_PATTERN = new RegExp(`\\b(${Object.keys(CLASS_WORDS).join("|")})\\b`, "i");
 
 export type ClassWord = { word: string; mode: RequestedRecallMode };
 
-/** The class word that opens the prompt, if any. Only the first word counts: a bard in a story is not a command. */
+/** The first class word in the prompt, if any. */
 export function classWord(prompt: string): ClassWord | null {
   const match = CLASS_WORD_PATTERN.exec(prompt);
   if (!match) return null;

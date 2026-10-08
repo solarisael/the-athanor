@@ -7,15 +7,15 @@ import { classWord, HOUSE_MODE_DOOR_LINES, modeDoor, readModeDoorLines, resetMod
 
 afterEach(() => resetModeDoors());
 
-// Kills: a word matched anywhere in the prompt, or a case-sensitive match.
-test("only the first word of the prompt is a class word", () => {
+// Kills: a word matched only at the front, a partial-word match, or a case-sensitive match.
+test("a class word anywhere in the prompt sets the mode, whole words only", () => {
   expect(classWord("magus let's fix the ledger uwu")).toEqual({ word: "magus", mode: "work" });
-  expect(classWord("  Bard, how was the gym?")).toEqual({ word: "bard", mode: "conversation" });
+  expect(classWord("ok so, Bard, how was the gym?")).toEqual({ word: "bard", mode: "conversation" });
   expect(classWord("WARLOCK")).toEqual({ word: "warlock", mode: "conversation" });
-  expect(classWord("rogue")).toEqual({ word: "rogue", mode: "quiet" });
+  expect(classWord("let's go rogue for a bit")).toEqual({ word: "rogue", mode: "quiet" });
   expect(classWord("warrior owo")).toEqual({ word: "warrior", mode: "auto" });
-  expect(classWord("the bard in chapter three sings")).toBeNull();
-  expect(classWord("magusfoo")).toBeNull();
+  expect(classWord("bard then magus")).toEqual({ word: "bard", mode: "conversation" });
+  expect(classWord("magusfoo and warriors")).toBeNull();
   expect(classWord("")).toBeNull();
 });
 

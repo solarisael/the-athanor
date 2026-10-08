@@ -38,6 +38,12 @@ the exact implementation record.
   The adapter calls it through the Host organ door when OMP announces `ttsr_triggered` for an Athanor rule, and when the block guard refuses an edit or write. The Host adds the session.
   Each row names the room, the session, the lesson, the surface, the tool, the path, the matcher kind, and the urgency.
   Migration 0033 makes `matched_pattern` nullable. OMP names the rule that fired, not the pattern. The row carries the pattern only when the rule has one pattern of that kind.
+- Class words set the Recall mode from the operator's message. The first word of a message can be `magus` (work), `bard` or `warlock` (conversation), `rogue` (quiet), or `warrior` (auto).
+  The word sends the same Host command as the `recall_policy` tool, and the mode holds for the session. A class word inside a sentence does nothing.
+  The mode door rings once when the resolved mode changes, by word or by auto. It adds one visible `athanor-mode-door` message.
+  A room can set the door lines in its own `mode-door.md`. The `## work`, `## mixed`, `## conversation`, and `## quiet` sections each replace one House line.
+  A missing section keeps the House line. An empty section keeps the door silent for that mode. An unknown section shows a warning.
+  The House line for work asks for the coding lessons, the map, the touched files, and proof. The other House lines are empty.
   The room marker `jevVerdict` turns this on with an explicit grant. It is off by default.
   The provider is `typesafe` or a `laya` endpoint on loopback. Both receive the same state and questions.
 - In a top-level House session, a handoff starts with a paper boat. The spirit writes the boat with the real `sleep` tool.

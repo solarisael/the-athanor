@@ -66,6 +66,7 @@ import {
   contextLessonManagerAvailable,
 } from "./house-proof/lesson-ttsr.ts";
 import { boatLineTokens, installBoatDoor } from "./house-proof/boat-door.ts";
+import { classWord, modeDoor, readModeDoorLines, MODE_DOOR_FILE } from "./house-proof/class-word.ts";
 import {
   CONTEXT_BLOCK_TYPES,
   contextBlockKind,
@@ -845,6 +846,7 @@ export default function solarisaelHouseProof(pi, release) {
       session: hostSessionIdentity(ctx, effectiveRoomDir),
     }, knockId);
   });
+
   pi.on("context", async (event, ctx) => {
     const result = await settleAutomaticContextWithinBudget(async (signal, deadline) => {
       const messages = Array.isArray(event?.messages) ? event.messages : [];
@@ -890,6 +892,15 @@ export default function solarisaelHouseProof(pi, release) {
         }
       }
       const activeProject = activeProjectFromEvidence(binding);
+      const word = capabilities.topLevel ? classWord(prompt) : null;
+      if (word) {
+        try {
+          await new RecallPolicyHostClient(binding).setRequestedMode(word.mode, `${turnId}:class-word`);
+          activities.push(`class word ${word.word}: Recall mode ${word.mode}`);
+        } catch (error) {
+          warnings.push(`class word ${word.word} not applied: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       const plan = await planContextLessons(binding, {
         turnId, activeProject, managerAvailable: contextLessonManagerAvailable(ctx), deadline, nativeUser, capabilities,
       }, signal);
@@ -964,6 +975,31 @@ export default function solarisaelHouseProof(pi, release) {
         display: false,
         attribution: "agent",
       }))]));
+      // enough: the prepared context does not carry the resolved mode, so the door
+      // costs one more local Host read per top-level turn. The way up is a mode
+      // field on PreparedContext.
+      if (capabilities.topLevel) {
+        try {
+          const resolved = (await new RecallPolicyHostClient(binding).inspect()).recallPolicy.resolvedMode;
+          const { lines, problem } = readModeDoorLines(effectiveRoomDir);
+          if (problem) warnings.push(`${MODE_DOOR_FILE}: ${problem} The House lines fill the gap.`);
+          const door = modeDoor(settlementKey, resolved, lines);
+          if (door) {
+            memo.set(turnId, [...(memo.get(turnId) ?? []), {
+              role: "custom",
+              customType: "athanor-mode-door",
+              content: door.text,
+              display: true,
+              details: { from: door.from, to: door.to, word: word?.word ?? null },
+              attribution: "agent",
+              timestamp: Date.now(),
+            }]);
+            activities.push(`mode door: ${door.from ?? "start"} → ${door.to}`);
+          }
+        } catch (error) {
+          warnings.push(`mode door unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       for (const [grant, coverage] of Object.entries(prepared.coverage ?? {})) {
         contextReceipts.set(`${memoSessionKey}:${grant}`, coverage);
       }

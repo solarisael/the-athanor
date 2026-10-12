@@ -4,7 +4,9 @@ param(
   [switch]$SkipTests,
   [string]$Build = "",
   [string]$LinuxHost = "",
-  [string]$SshIdentity = ""
+  [string]$SshIdentity = "",
+  # The Linux Host deploy script lives with the Max client (solarisael/wda-max), not here.
+  [string]$LinuxDeployScript = (Join-Path $PSScriptRoot "../../../wda-max/installer/deploy-linux-host.ps1")
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -13,8 +15,10 @@ if (-not [string]::IsNullOrWhiteSpace($LinuxHost)) {
   if ([string]::IsNullOrWhiteSpace($SshIdentity)) {
     throw "Linux Host deployment requires -SshIdentity."
   }
-  & (Join-Path $PSScriptRoot "../installer/deploy-linux-host.ps1") `
-    -RemoteHost $LinuxHost -IdentityFile $SshIdentity -SkipTests:$SkipTests
+  if (-not (Test-Path -LiteralPath $LinuxDeployScript -PathType Leaf)) {
+    throw "Linux Host deploy script not found: $LinuxDeployScript (checkout solarisael/wda-max beside the-athanor-dev, or pass -LinuxDeployScript)."
+  }
+  & $LinuxDeployScript -RemoteHost $LinuxHost -IdentityFile $SshIdentity -AthanorRoot (Resolve-Path (Join-Path $PSScriptRoot "..")).Path -SkipTests:$SkipTests
   exit 0
 }
 

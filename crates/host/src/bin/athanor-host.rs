@@ -18,6 +18,9 @@ struct CliConfig {
     room_dir: PathBuf,
     state_dir: PathBuf,
     bearer_token_file: PathBuf,
+    /// OMEGA: the one operator this Host process serves. Absent on a local House.
+    #[serde(default)]
+    operator: Option<String>,
 }
 
 #[tokio::main]
@@ -78,6 +81,7 @@ async fn run() -> Result<(), String> {
         nats_url: substrate.nats_url,
         nats_auth,
         knock_autonomy,
+        operator: config.operator,
     };
     host_config.validate()?;
 

@@ -244,6 +244,7 @@ fn host_config(root: &std::path::Path) -> crate::HostConfig {
         nats_url: None,
         nats_auth: None,
         knock_autonomy: crate::config::KnockAutonomy::Off,
+        operator: None,
     };
     let state = config.room_state_path();
     std::fs::create_dir_all(state.parent().unwrap()).unwrap();

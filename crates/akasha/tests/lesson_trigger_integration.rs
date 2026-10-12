@@ -298,6 +298,7 @@ async fn patch_lesson(
         LessonUpdateParams {
             kind: "coding-lesson".into(),
             id,
+            room: "house".into(),
             expected_title: title.into(),
             patch,
         },

@@ -4,21 +4,34 @@ import type { NativeLessonPlan } from "./context.ts";
 import type { HostBinding } from "./host.ts";
 import { requestOrgan } from "./organ.ts";
 
-const BRIDGE_STATE = Symbol.for("solarisael.athanor.lesson-ttsr.v1");
+const BRIDGE_STATE = Symbol.for("solarisael.athanor.lesson-ttsr.v2");
 const PROVIDER = "athanor-lessons";
 
 type BlockGuard = { manager: any; rules: Map<string, Record<string, unknown>>; signature: string };
 // Where OMP's matcher last saw a rule: `ttsr_triggered` names the rule, never the surface.
 type LastMatch = { patternKind: "regex" | "ast"; surface: "tool" | "prose"; tool?: string; path?: string };
+// One record per OMP manager. The manager owns which rules are registered; the
+// record holds only what the current session asked for and where OMP last matched.
 type ManagerRecord = {
-  manager: any; session: any; active: Set<string>; known: Set<string>; patched: boolean; guard: BlockGuard | null;
+  manager: any; session: any; sessionId: string; active: Set<string>; guard: BlockGuard | null;
   lastMatch: Map<string, LastMatch>;
 };
-type BridgeState = { sessions: Map<string, ManagerRecord>; patchedPrototype?: object };
+type BridgeState = {
+  // Current session id -> the record of the manager that session uses. Only live ids stay here.
+  sessions: Map<string, ManagerRecord>;
+  // Patched managers; a dropped manager takes its record with it.
+  managers: WeakMap<object, ManagerRecord>;
+  // Why a live session's manager could not carry the bridge, until it can or the session ends.
+  unsupported: Map<string, string>;
+  patchedPrototype?: object;
+};
+
+const MATCHER_METHODS = ["checkDelta", "checkSnapshot", "checkAstSnapshot"] as const;
+const REQUIRED_METHODS = ["addRule", "getRules", ...MATCHER_METHODS] as const;
 
 function state(): BridgeState {
   const root = globalThis as typeof globalThis & { [BRIDGE_STATE]?: BridgeState };
-  return root[BRIDGE_STATE] ??= { sessions: new Map() };
+  return root[BRIDGE_STATE] ??= { sessions: new Map(), managers: new WeakMap(), unsupported: new Map() };
 }
 
 function filterAthanor(record: ManagerRecord, rules: unknown): unknown {
@@ -46,11 +59,10 @@ function rememberMatches(record: ManagerRecord, method: string, context: unknown
   return filtered;
 }
 
+// Called once per manager, after preflight, so it never leaves a partial wrap.
 function patchManager(record: ManagerRecord): void {
-  if (record.patched) return;
-  for (const method of ["checkDelta", "checkSnapshot", "checkAstSnapshot"]) {
-    const original = record.manager?.[method];
-    if (typeof original !== "function") throw new Error(`OMP TTSR manager has no ${method} method`);
+  for (const method of MATCHER_METHODS) {
+    const original = record.manager[method];
     Object.defineProperty(record.manager, method, {
       configurable: true,
       value: (...args: unknown[]) => {
@@ -61,24 +73,56 @@ function patchManager(record: ManagerRecord): void {
       },
     });
   }
-  record.patched = true;
+}
+
+function unsupportedReason(manager: any): string | null {
+  const missing = REQUIRED_METHODS.filter((method) => typeof manager[method] !== "function");
+  if (missing.length > 0) return `native lesson guards off: OMP TTSR manager lacks ${missing.join(", ")}`;
+  if (!Object.isExtensible(manager)) return "native lesson guards off: OMP TTSR manager is not extensible";
+  const locked = MATCHER_METHODS.filter((method) => Object.getOwnPropertyDescriptor(manager, method)?.configurable === false);
+  if (locked.length > 0) return `native lesson guards off: OMP TTSR methods cannot be wrapped: ${locked.join(", ")}`;
+  return null;
+}
+
+// Drops a session id's lookup and everything its session asked of the manager.
+function detach(bridge: BridgeState, sessionId: string): void {
+  const record = bridge.sessions.get(sessionId);
+  if (!record) return;
+  bridge.sessions.delete(sessionId);
+  record.sessionId = "";
+  record.session = null;
+  record.active = new Set();
+  record.guard = null;
+  record.lastMatch.clear();
 }
 
 function captureSession(session: any): void {
   const sessionId = String(session?.sessionManager?.getSessionId?.() ?? "").trim();
   const manager = session?.ttsrManager;
-  if (!sessionId || !manager || typeof manager.addRule !== "function") return;
+  if (!sessionId || !manager || typeof manager !== "object") return;
   const bridge = state();
-  let record = bridge.sessions.get(sessionId);
-  if (!record || record.manager !== manager) {
-    record = {
-      manager, session, active: new Set(), known: new Set(), patched: false, guard: null,
-      lastMatch: new Map(),
-    };
+  let record = bridge.managers.get(manager);
+  if (!record) {
+    const reason = unsupportedReason(manager);
+    if (reason) {
+      detach(bridge, sessionId);
+      bridge.unsupported.set(sessionId, reason);
+      return;
+    }
+    record = { manager, session, sessionId: "", active: new Set(), guard: null, lastMatch: new Map() };
+    patchManager(record);
+    bridge.managers.set(manager, record);
+  }
+  bridge.unsupported.delete(sessionId);
+  if (record.sessionId !== sessionId) {
+    // The manager moved to another session id (OMP newSession keeps its manager):
+    // the old id's rules and matches belong to the old id and leave with it.
+    if (record.sessionId) detach(bridge, record.sessionId);
+    detach(bridge, sessionId);
+    record.sessionId = sessionId;
     bridge.sessions.set(sessionId, record);
   }
   record.session = session;
-  patchManager(record);
 }
 
 /** The live OMP AgentSession this bridge captured for a session id, if any. */
@@ -96,12 +140,25 @@ export function installLessonTtsrBridge(pi: any): string | null {
   Object.defineProperty(prototype, "getContextUsage", {
     configurable: true,
     value: function (...args: unknown[]) {
-      captureSession(this);
+      try {
+        captureSession(this);
+      } catch (error) {
+        // The bridge never costs OMP its own context usage.
+        console.warn(`[athanor] native lesson bridge not attached: ${error instanceof Error ? error.message : String(error)}`);
+      }
       return original.apply(this, args);
     },
   });
   bridge.patchedPrototype = prototype;
   return null;
+}
+
+/** Forget a session that OMP shut down; its manager stays patched for any later capture. */
+export function releaseLessonTtsrSession(sessionId: string): void {
+  const bridge = state();
+  const id = sessionId.trim();
+  bridge.unsupported.delete(id);
+  detach(bridge, id);
 }
 
 export function contextLessonManagerAvailable(ctx: any): boolean {
@@ -113,27 +170,38 @@ export function contextLessonManagerAvailable(ctx: any): boolean {
 export function syncLessonTtsr(args: { ctx: any; plan: NativeLessonPlan }) {
   args.ctx.getContextUsage?.();
   const sessionId = String(args.ctx.sessionManager?.getSessionId?.() ?? args.ctx.sessionID ?? "").trim();
-  const record = state().sessions.get(sessionId);
+  const bridge = state();
+  const record = bridge.sessions.get(sessionId);
   const warnings = [...args.plan.warnings];
-  if (!record) return { active: 0, added: 0, warnings };
+  if (!record) {
+    const unsupported = bridge.unsupported.get(sessionId);
+    if (unsupported) warnings.push(unsupported);
+    return { active: 0, added: 0, warnings };
+  }
 
-  const rules = args.plan.rules.map((entry) => entry.rule);
-  const next = new Set(rules.map((rule) => String(rule.name)));
+  // The manager is the truth: OMP's replaceRules may have dropped any rule since the last sync.
+  const installed = new Set<string>();
+  for (const rule of record.manager.getRules()) {
+    if (rule?._source?.provider === PROVIDER) installed.add(String(rule.name));
+  }
+  const active = new Set<string>();
   let added = 0;
-  for (const rule of rules) {
+  for (const { rule } of args.plan.rules) {
     const name = String(rule.name);
-    if (record.known.has(name)) continue;
-    if (record.manager.addRule(rule)) {
-      record.known.add(name);
+    if (installed.has(name)) {
+      active.add(name);
+    } else if (record.manager.addRule(rule)) {
+      installed.add(name);
+      active.add(name);
       added += 1;
     } else {
       warnings.push(`native OMP rejected ${name}`);
     }
   }
-  record.active = next;
+  record.active = active;
   const guardWarning = armBlockGuard(record, args.plan.rules.filter((entry) => entry.block).map((entry) => entry.rule));
   if (guardWarning) warnings.push(guardWarning);
-  return { active: next.size, added, warnings };
+  return { active: active.size, added, warnings };
 }
 
 export type LessonFireBinding = HostBinding;

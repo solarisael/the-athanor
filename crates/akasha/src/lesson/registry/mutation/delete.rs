@@ -10,6 +10,7 @@ pub struct LessonDeleteParams {
     pub kind: String,
     #[serde(deserialize_with = "deserialize_i64")]
     pub id: i64,
+    pub room: String,
     pub expected_title: String,
 }
 pub async fn lesson_delete(
@@ -41,13 +42,25 @@ pub async fn lesson_delete(
         ));
     }
     let mut tx = pool.begin().await?;
-    let actual = sqlx::query_scalar::<_, String>(
-        "SELECT title FROM lessons WHERE lesson_key=$1 AND id=$2 FOR UPDATE",
-    )
-    .bind(key)
-    .bind(p.id)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let actual = if key == "coding" {
+        sqlx::query_scalar::<_, String>(
+            "SELECT title FROM lessons WHERE lesson_key=$1 AND id=$2
+             AND (scope='house' OR scope=$3) FOR UPDATE",
+        )
+        .bind(key)
+        .bind(p.id)
+        .bind(&p.room)
+        .fetch_optional(&mut *tx)
+        .await?
+    } else {
+        sqlx::query_scalar::<_, String>(
+            "SELECT title FROM lessons WHERE lesson_key=$1 AND id=$2 FOR UPDATE",
+        )
+        .bind(key)
+        .bind(p.id)
+        .fetch_optional(&mut *tx)
+        .await?
+    };
     let Some(actual) = actual else {
         return Ok(mutation_refusal(
             &p,
@@ -64,13 +77,27 @@ pub async fn lesson_delete(
             LessonMutationKind::Delete,
         ));
     }
-    let changed = sqlx::query("DELETE FROM lessons WHERE lesson_key=$1 AND id=$2 AND title=$3")
+    let changed = if key == "coding" {
+        sqlx::query(
+            "DELETE FROM lessons WHERE lesson_key=$1 AND id=$2 AND title=$3
+             AND (scope='house' OR scope=$4)",
+        )
         .bind(key)
         .bind(p.id)
         .bind(&p.expected_title)
+        .bind(&p.room)
         .execute(&mut *tx)
         .await?
-        .rows_affected();
+        .rows_affected()
+    } else {
+        sqlx::query("DELETE FROM lessons WHERE lesson_key=$1 AND id=$2 AND title=$3")
+            .bind(key)
+            .bind(p.id)
+            .bind(&p.expected_title)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+    };
     if changed != 1 {
         return Ok(mutation_refusal(
             &p,

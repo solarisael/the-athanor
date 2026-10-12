@@ -2,10 +2,21 @@
 [CmdletBinding()]
 param(
   [switch]$SkipTests,
-  [string]$Build = ""
+  [string]$Build = "",
+  [string]$LinuxHost = "",
+  [string]$SshIdentity = ""
 )
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+if (-not [string]::IsNullOrWhiteSpace($LinuxHost)) {
+  if ([string]::IsNullOrWhiteSpace($SshIdentity)) {
+    throw "Linux Host deployment requires -SshIdentity."
+  }
+  & (Join-Path $PSScriptRoot "../installer/deploy-linux-host.ps1") `
+    -RemoteHost $LinuxHost -IdentityFile $SshIdentity -SkipTests:$SkipTests
+  exit 0
+}
 
 # Native deployment for this workstation: run the tests, build one release
 # payload, and hand it to the staged Athanor manager. The manager stages the

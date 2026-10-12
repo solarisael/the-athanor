@@ -210,7 +210,7 @@ Do these steps in order. PostgreSQL owns records, permissions, idempotency, and 
 | 4 | Prove recipient consumers, dead-letter replay, and NATS rebuild from PostgreSQL | Not re-verified at `a6ab453`. Deciding crate: `crates/host`. |
 | 5 | Replace the polled Knock with recipient-scoped NATS wake hints after steps 1-4 | Partly built, out of order. Knock polls every 2 s (`knock.ts:143`). Hallway posts already use JetStream (`server.rs:2855-2894`). |
 | 6 | Add project identity, membership, and typed project records before project notifications | Planned |
-| 7 | Add addressed kitten work only for a proved dormant-worker need | Planned. Kitten lineage uses the Host socket (`adapters/omp/house-proof/lineage.ts:59-113`). |
+| 7 | Add addressed kitten work only for a proved dormant-worker need | Planned. Task notebooks and explicit successor packets use the Host organ socket. Broker-based worker delivery remains separate. |
 | 8 | Announce committed turns to asynchronous subscribers; keep live chat on the Host socket | Planned. Chat uses the Host socket (`adapters/omp/house-proof/chat.ts:43,126-153`). |
 | 9 | Add GIGA wake hints only if several dormant workers need them | Planned |
 

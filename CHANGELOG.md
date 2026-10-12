@@ -20,16 +20,59 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Fixed
+
+- OMP lesson rules return after a prompt rebuild removes them.
+  The adapter checks the native rule list instead of its old registration record.
+- A new OMP session uses its own active lesson rules without retaining the previous session's filter.
+  Session shutdown releases the bridge lookup.
+- An unsupported OMP matcher leaves native context usage available and reports that lesson guards are unavailable.
+  Rejected rules no longer count as active guards.
+- The paper-boat threshold clamps fixed token limits inside the model context window, as OMP does.
+- The installer readiness tests keep their ports reserved until they start listening.
+  Parallel tests can no longer claim those ports and report readiness before the first waiting event.
+- Native release metadata declares schema 34, including the worker lifecycle migration.
+  The native manager can accept the generated product and adapter manifests.
+
 ### Added
+
+- Max can add `wda_recall` to an existing Athanor installation.
+  The local spirit keeps its identity, memory store, and Host connection.
+  The tool reads authorized WDA records through a separate Max process and returns complete bodies with source attribution.
+  It does not publish personal memories or provide access to the VPS filesystem.
+- The Max installer detects registered Athanor installations and offers the additional WDA tool.
+  Unsupported installations retain their files and receive a reason.
+  Unattended setup refuses an explicitly requested integration when the local installation is absent or incompatible.
+  Uninstall removes only its own extension entry and stops if that removal fails.
+- WDA queries coexist with standalone Max sessions and block concurrent home moves.
+  Cancellation or caller loss stops the query and its SSH tunnel.
+
+- The OMP adapter provides `bun run test:omp-compat` for a real CLI compatibility check.
+  It checks lesson matching, prompt rebuilds, and new sessions in a temporary home.
+  It makes no model or Host requests and fails when a required check cannot run.
+  The adapter test dependencies now use OMP `18.8.7`.
 
 - Host API 2 provides typed room, organ, context, judgment, and lifecycle commands.
   OMP adapter `0.10.0` requires this API.
-  The wire schema remains `1`. The database schema is `33`.
+  The wire schema remains `1`. The database schema is `34`.
+
+- Task workers have separate opening, resume, and successor wakes.
+  They receive no room identity, room boat, Anamnesis, Hallway Bell, or Presence.
+  The Host removes old room blocks before worker context replay.
+  Migration 0034 adds task notebooks, instance ownership, handoffs, retained evidence, and disposal receipts.
+  PostgreSQL and the Vault runtime journal enforce the same lifecycle.
+  The `worker_notebook` tool provides bounded reads, notes, acceptance, repair, explicit succession, and whole-swarm disposal.
+  At 40% context usage, a worker receives one warning.
+  At 60%, it enters handoff-only mode with at most two final provider requests.
+  Retirement remains latched across compaction and resume.
+  Failed handoffs preserve their transcript reference and require parent repair.
+  Enrolled results no longer create automatic permanent room memories.
+  Disposal preserves accepted evidence and does not erase backups.
 
 - OMP children use the Ask Parent protocol for missing historical context and intent.
   Automatic Recall stays off for children. Ordinary children also receive a refusal when they call Recall directly.
   Children ask their spawning parent through existing agent messages and can resume after a blocked-context report.
-  The explicit `memory-research` agent type can use manual Recall. Top-level Recall remains available, and other House hooks remain enabled.
+  The explicit `memory-research` agent type can use manual Recall. Top-level Recall remains available.
 - The Host can judge each finished turn with Jev.
   OMP supplies the operator reply and the previous assistant turn.
   Native code clips the input and records verdict points in Insula.

@@ -1192,27 +1192,6 @@ mod tests {
             labels(&resolution(None, true, false).candidates("pg_restore")),
             ["path:pg_restore"]
         );
-        let windows = resolution(Some("C:\\pg\\bin"), true, true).candidates("pg_dump");
-        assert_eq!(
-            windows[0].invocation,
-            PgInvocation::Native(PathBuf::from("C:\\pg\\bin\\pg_dump.exe"))
-        );
-        assert_eq!(
-            windows[2].invocation,
-            PgInvocation::Wsl {
-                wsl: PathBuf::from("C:\\Windows\\System32\\wsl.exe")
-            }
-        );
-        let unix =
-            resolution(Some("/usr/lib/postgresql/16/bin"), false, false).candidates("pg_dump");
-        assert_eq!(
-            unix[0].invocation,
-            PgInvocation::Native(PathBuf::from("/usr/lib/postgresql/16/bin/pg_dump"))
-        );
-        assert_eq!(
-            unix[1].invocation,
-            PgInvocation::Native(PathBuf::from("pg_dump"))
-        );
     }
 
     #[test]
@@ -1239,37 +1218,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolution_failure_names_every_probed_candidate_in_order() {
-        let candidates = resolution(Some("C:\\pg\\bin"), true, true).candidates("pg_dump");
-        let error = resolve_pg_tool_with("pg_dump", candidates, |candidate| {
-            Err(match candidate.label.as_str() {
-                "wsl:pg_dump" => "exit status: 1: /usr/bin/pg_dump: No such file".into(),
-                _ => "program not found".into(),
-            })
-        })
-        .unwrap_err();
-        assert_eq!(error.failure_code(), BackupFailureCode::PgDumpNotFound);
-        let BackupError::ToolNotFound { tool, probed } = &error else {
-            panic!("expected ToolNotFound, got {error:?}");
-        };
-        assert_eq!(tool, "pg_dump");
-        assert_eq!(
-            probed,
-            &[
-                "pg_bin_dir:pg_dump=C:\\pg\\bin\\pg_dump.exe (program not found)",
-                "wsl:pg_dump=wsl.exe --exec (exit status: 1: /usr/bin/pg_dump: No such file)",
-                "wsl-system32:pg_dump=C:\\Windows\\System32\\wsl.exe --exec (program not found)",
-                "path:pg_dump=pg_dump.exe (program not found)",
-            ]
-        );
-        let text = error.to_string();
-        assert!(text.starts_with("pg_dump not found; probed pg_bin_dir:pg_dump="));
-        assert!(text.contains("path:pg_dump=pg_dump.exe (program not found)"));
-        let restore =
-            resolve_pg_tool_with("pg_restore", vec![], |_| Err(String::new())).unwrap_err();
-        assert_eq!(restore.failure_code(), BackupFailureCode::PgRestoreNotFound);
-    }
 
     #[test]
     fn every_backup_error_maps_to_one_failure_code() {

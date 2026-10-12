@@ -39,7 +39,7 @@ Each failed harness has an `id` and a `reason`. A harness failure does not stop 
 On exit, The Athanor stops only the harnesses that it started.
 The OMP adapter never starts The Athanor. If the Host is absent, OMP stays usable
 and reports: `Athanor Host is not running at <endpoint>. Start the Athanor.`
-Six tools fail without the Host. [Tools and the Host](#tools-and-the-host) names them.
+House tools and worker enrollment need the Host. See [Tools and the Host](#tools-and-the-host).
 
 ## Everyday loop
 
@@ -178,6 +178,40 @@ At the beginning of a later session, ask:
 `wake` returns the latest paper boat for the current room. Not re-verified at
 a6ab453 (the `substrate` crate decides): boats remain room-scoped.
 
+## Work with task notebooks
+
+OMP `task` children receive individual wakes and temporary notebooks.
+They do not receive the room's identity, paper boat, Anamnesis, Hallway Bell, or Presence.
+Each notebook belongs to one task lineage within a swarm.
+Sibling workers cannot read each other's books.
+
+Use `worker_notebook` with these actions:
+
+| Action | Use |
+|---|---|
+| `inspect` | Read the owned book and instance summaries. |
+| `read` | Read up to 50 entries after a sequence number. |
+| `append` | Add a worker note or parent evidence. |
+| `accept` | Preserve a self-contained report and evidence before disposal. |
+| `retained` | Read accepted evidence by swarm, including after disposal. |
+| `repair` | Append a parent-attributed repair to an incomplete handoff. |
+| `successor` | Prepare a task packet from an exact retired predecessor. |
+| `dispose` | Remove a whole inactive swarm's transient records. |
+
+Workers use their own bound book.
+Parents control acceptance, repair, succession, and disposal.
+An ordinary completed worker can resume with its own checkpoint.
+At 40% context usage, the worker receives a warning.
+At 60%, it enters handoff-only mode with at most two final provider requests.
+After retirement, the parent must start a successor with the returned task packet.
+A missing or incomplete handoff never selects the room's boat.
+
+Accepted evidence and disposal receipts remain available after disposal.
+For `retained`, use `swarmId` and optional `cursor` and `limit`.
+Only the owning parent session can read this evidence through the notebook tool.
+Existing backups remain unchanged.
+Room books and optional context folding are separate from this worker lifecycle.
+
 ## Consult the Anamnesis Cabinet
 
 The Cabinet preserves load-bearing paths through things already lived.
@@ -240,7 +274,7 @@ Use explicit recall for load-bearing old decisions, names, promises, corrections
 
 ## Tools and the Host
 
-The adapter registers 43 public tools.
+The adapter registers the public tool families below.
 House operations use authenticated Host commands.
 The adapter does not start substrate children or provide a fallback when the Host is absent.
 
@@ -257,6 +291,7 @@ The adapter does not start substrate children or provide a fallback when the Hos
 | Recall policy | `recall_policy` | Host |
 | Restart | `request_restart` | Native authorization; OMP performs the exit |
 | Local observation | `kitten_lineage_status` | Adapter process |
+| Workers | `worker_notebook` | Host; PostgreSQL or a Vault runtime journal |
 
 GIGA capture and classification remain opt-in.
 The Host receives explicit enablement from the top-level harness session.

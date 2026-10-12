@@ -1,4 +1,5 @@
 mod giga;
+mod worker_lifecycle;
 pub(crate) use giga::{GigaRoomWorker, serve as serve_giga};
 
 use crate::HostConfig;
@@ -97,6 +98,15 @@ pub(crate) async fn call(
                 error: error.into(),
             };
         }
+    };
+    // Vault mode keeps worker lifecycle state in the Host runtime journal.
+    // With AKASHA enabled the request goes native; there is no fallback
+    // between stores in either direction.
+    let request = match request {
+        ProtocolRequest::WorkerLifecycle(call) if !host.akasha_enabled() => {
+            return worker_lifecycle::call(host, call);
+        }
+        request => request,
     };
     execute_native(host, pool, meta, request, enablement, giga_worker).await
 }
@@ -237,6 +247,42 @@ fn bound_request(
     request: OrganRequest,
 ) -> Result<ProtocolRequest, ProtocolError> {
     let mut params = request.params;
+    let project_memory = request.operation == OrganOperation::Remember
+        && params.get("kind").and_then(Value::as_str) == Some("memory")
+        && params.contains_key("project");
+    if project_memory {
+        let project = params
+            .get("project")
+            .and_then(Value::as_str)
+            .filter(|key| {
+                key.len() <= 80
+                    && key.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                    })
+                    && key
+                        .as_bytes()
+                        .first()
+                        .is_some_and(u8::is_ascii_alphanumeric)
+                    && key.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+                    && !key.contains("--")
+            })
+            .ok_or_else(|| {
+                ProtocolError::InvalidParams(
+                    "project memory requires a stable lowercase project key".into(),
+                )
+            })?;
+        let project_thread = Value::String(format!("project:{project}"));
+        params.remove("project");
+        let threads = params
+            .entry("threads")
+            .or_insert_with(|| Value::Array(Vec::new()));
+        let threads = threads.as_array_mut().ok_or_else(|| {
+            ProtocolError::InvalidParams("project memory threads must be an array".into())
+        })?;
+        if !threads.contains(&project_thread) {
+            threads.push(project_thread);
+        }
+    }
     if request.target_scope == protocol::organ::OrganTargetScope::House
         && !matches!(
             request.operation,
@@ -267,7 +313,7 @@ fn bound_request(
         }
     }
     bind_identity(host, meta, request.operation, &mut params)?;
-    if request.target_scope == protocol::organ::OrganTargetScope::House {
+    if project_memory || request.target_scope == protocol::organ::OrganTargetScope::House {
         put(&mut params, "room", "house");
     }
     let request = native::decode_envelope(RequestEnvelope {
@@ -301,8 +347,8 @@ fn bind_identity(
 ) -> Result<(), ProtocolError> {
     use OrganOperation::*;
     match operation {
-        LessonUpdate | LessonDelete | DesignDocumentQuery | DesignDocumentWrite
-        | SubstrateHealth => {}
+        DesignDocumentQuery | DesignDocumentWrite | SubstrateHealth => {}
+        LessonUpdate | LessonDelete => put(params, "room", &host.room),
         RestartRequest | RestartStatus | RestartTransition | RestartVerify => {
             return bind_restart(host, meta, operation, params);
         }
@@ -316,6 +362,11 @@ fn bind_identity(
             put(params, "session", &meta.sender_session);
         }
         LessonTriggerMatch | LessonTriggerRecord => put(params, "session", &meta.sender_session),
+        WorkerLifecycle => {
+            put(params, "spirit", &host.spirit);
+            put(params, "session", &meta.sender_session);
+            put(params, "houseId", &host.house_id);
+        }
         VaultRecall => put(params, "room_dir", &host.room_dir.to_string_lossy()),
         _ => {}
     }

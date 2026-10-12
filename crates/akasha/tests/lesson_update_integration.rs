@@ -40,6 +40,7 @@ async fn temp_lesson_pool() -> TestResult<PgPool> {
             lesson_key TEXT NOT NULL,
             id BIGINT NOT NULL,
             title TEXT NOT NULL,
+            scope TEXT NOT NULL DEFAULT 'house',
             project TEXT,
             always_on BOOLEAN NOT NULL DEFAULT FALSE,
             language_keys TEXT[] NOT NULL DEFAULT '{}',
@@ -64,6 +65,7 @@ async fn apply(
         LessonUpdateParams {
             kind: kind.into(),
             id,
+            room: "kintsu".into(),
             expected_title: expected_title.into(),
             patch,
         },
@@ -320,6 +322,89 @@ async fn writing_and_design_lessons_accept_routing_eligibility_fields() -> TestR
         vec!["figma".to_string()]
     );
 
+    pool.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+async fn private_coding_lessons_refuse_foreign_mutation_and_title_disclosure() -> TestResult {
+    let pool = temp_lesson_pool().await?;
+    sqlx::query(
+        "INSERT INTO lessons (lesson_key,id,title,scope) VALUES
+         ('coding',51,'Private lesson title','claudio'),
+         ('coding',52,'Own lesson','kintsu'),
+         ('coding',53,'Shared lesson','house')",
+    )
+    .execute(&pool)
+    .await?;
+
+    for expected in ["unknown title", "Private lesson title"] {
+        let result = apply(
+            &pool,
+            "coding-lesson",
+            51,
+            expected,
+            json!({ "scope": "kintsu" }),
+        )
+        .await?;
+        assert!(matches!(
+            result,
+            LessonMutationReceipt::Refused {
+                actual_title: None,
+                ..
+            }
+        ));
+    }
+    let deleted = akasha::lesson_delete(
+        &pool,
+        akasha::LessonDeleteParams {
+            kind: "coding-lesson".into(),
+            id: 51,
+            room: "kintsu".into(),
+            expected_title: "Private lesson title".into(),
+        },
+    )
+    .await?;
+    assert!(matches!(
+        deleted,
+        LessonMutationReceipt::Refused {
+            actual_title: None,
+            ..
+        }
+    ));
+    let private_scope: String =
+        sqlx::query_scalar("SELECT scope FROM lessons WHERE lesson_key='coding' AND id=51")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(private_scope, "claudio");
+
+    let injected = apply(
+        &pool,
+        "coding-lesson",
+        52,
+        "Own lesson",
+        json!({ "scope": "claudio" }),
+    )
+    .await?;
+    assert!(matches!(injected, LessonMutationReceipt::Refused { .. }));
+    for (id, title) in [(52, "Own lesson"), (53, "Shared lesson")] {
+        let updated = apply(
+            &pool,
+            "coding-lesson",
+            id,
+            title,
+            json!({ "alwaysOn": true }),
+        )
+        .await?;
+        assert!(matches!(
+            updated,
+            LessonMutationReceipt::Updated {
+                always_on: true,
+                ..
+            }
+        ));
+    }
     pool.close().await;
     Ok(())
 }

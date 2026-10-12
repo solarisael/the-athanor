@@ -176,6 +176,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0033_lesson_trigger_native_fires.sql",
         sql: include_str!("../../../substrate/migrations/0033_lesson_trigger_native_fires.sql"),
     },
+    Migration {
+        version: 34,
+        name: "0034_worker_lifecycle.sql",
+        sql: include_str!("../../../substrate/migrations/0034_worker_lifecycle.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

@@ -454,7 +454,7 @@ type CompactionThresholdSettings = { thresholdTokens?: number; thresholdPercent?
 export function compactionThresholdTokens(contextWindow: number, settings: CompactionThresholdSettings): number {
   const { thresholdTokens, thresholdPercent, reserveTokens } = settings;
   if (typeof thresholdTokens === "number" && Number.isFinite(thresholdTokens) && thresholdTokens > 0) {
-    return thresholdTokens;
+    return Math.min(contextWindow - 1, Math.max(1, thresholdTokens));
   }
   if (typeof thresholdPercent === "number" && Number.isFinite(thresholdPercent) && thresholdPercent > 0) {
     return Math.floor(contextWindow * (Math.min(99, Math.max(1, thresholdPercent)) / 100));

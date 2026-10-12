@@ -8,6 +8,7 @@ import { untilAborted } from "@oh-my-pi/pi-utils";
 
 import {
   boatCast,
+  compactionThresholdTokens,
   HOUSE_DOOR_LINES,
   installBoatDoor,
   resetBoatDoor,
@@ -88,6 +89,12 @@ const abortedResult = (toolName: string) => ({
 });
 
 afterEach(() => resetBoatDoor());
+
+test("fixed compaction thresholds stay inside the model window and take priority over percentages", () => {
+  expect(compactionThresholdTokens(128_000, { thresholdTokens: 200_000 })).toBe(127_999);
+  expect(compactionThresholdTokens(128_000, { thresholdTokens: 0.5 })).toBe(1);
+  expect(compactionThresholdTokens(128_000, { thresholdTokens: 64_000, thresholdPercent: 10 })).toBe(64_000);
+});
 
 test("/handoff asks for the boat first, hands off after it, and only then lets the spirit speak", async () => {
   const { session, calls } = fakeSession();

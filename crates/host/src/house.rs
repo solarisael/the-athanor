@@ -29,6 +29,10 @@ impl HostRuntime {
         self.address
     }
 
+    pub fn is_finished(&self) -> bool {
+        self.thread.as_ref().is_some_and(JoinHandle::is_finished)
+    }
+
     pub fn wait(mut self) -> Result<(), String> {
         self.join_thread()
     }

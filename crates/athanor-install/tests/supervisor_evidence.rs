@@ -10,21 +10,23 @@ use athanor_install::supervisor::{
 use std::{
     collections::BTreeMap,
     ffi::OsString,
-    net::{Ipv4Addr, SocketAddr, TcpListener},
+    net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     time::Instant,
 };
+use tokio::net::TcpSocket;
 
 fn cmd_exe() -> PathBuf {
     let system_root = std::env::var_os("SystemRoot").expect("SystemRoot is set on Windows");
     PathBuf::from(system_root).join("System32").join("cmd.exe")
 }
 
-fn unused_port() -> SocketAddr {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind an ephemeral port");
-    let address = listener.local_addr().expect("read the bound address");
-    drop(listener);
-    address
+fn reserved_socket() -> TcpSocket {
+    let socket = TcpSocket::new_v4().expect("create a readiness socket");
+    socket
+        .bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+        .expect("reserve an ephemeral port without listening");
+    socket
 }
 
 fn spec(name: &str, script: &str, ready_at: SocketAddr) -> ProcessSpec {
@@ -47,10 +49,11 @@ fn a_child_that_exits_before_readiness_names_itself_and_keeps_its_stderr() {
     let supervisor = Supervisor {
         processes: NativeProcesses::with_log_dir(logs.path().to_path_buf()),
     };
+    let socket = reserved_socket();
     let specs = vec![spec(
         "broken-child",
         "echo boom: the database is missing 1>&2 & exit 3",
-        unused_port(),
+        socket.local_addr().expect("read the reserved address"),
     )];
     let mut progress = Vec::new();
 
@@ -83,15 +86,17 @@ fn a_child_that_exits_before_readiness_names_itself_and_keeps_its_stderr() {
     );
 }
 
-#[test]
-fn a_slow_child_reports_waiting_progress_before_it_is_ready() {
+#[tokio::test]
+async fn a_slow_child_reports_waiting_progress_before_it_is_ready() {
     let logs = tempfile::tempdir().expect("temp log dir");
     let supervisor = Supervisor {
         processes: NativeProcesses::with_log_dir(logs.path().to_path_buf()),
     };
-    // The readiness port stays closed until the supervisor reports Waiting
-    // once. The child itself only sleeps, longer than one progress interval.
-    let ready_at = unused_port();
+    // Keep the port reserved without accepting connections. Parallel tests
+    // cannot claim it and make this child appear ready before Waiting.
+    let socket = reserved_socket();
+    let ready_at = socket.local_addr().expect("read the reserved address");
+    let mut socket = Some(socket);
     let seconds = START_PROGRESS_INTERVAL.as_secs() + 4;
     let specs = vec![spec(
         "slow-child",
@@ -99,25 +104,26 @@ fn a_slow_child_reports_waiting_progress_before_it_is_ready() {
         ready_at,
     )];
     let mut waiting = 0usize;
-    let mut listener: Option<TcpListener> = None;
+    let mut listener = None;
     let started = Instant::now();
 
-    supervisor
-        .run(&specs, |_, phase| {
-            if phase == StartProgress::Waiting {
-                waiting += 1;
-                if listener.is_none() {
-                    listener = Some(TcpListener::bind(ready_at).expect("open the readiness port"));
-                }
+    let result = supervisor.run(&specs, |_, phase| {
+        if phase == StartProgress::Waiting {
+            waiting += 1;
+            if let Some(socket) = socket.take() {
+                listener = Some(socket.listen(1).expect("open the readiness port"));
             }
-            Ok(())
-        })
-        .expect("the child becomes ready once the port opens");
+        }
+        Ok(())
+    });
+    let elapsed = started.elapsed();
+    let stopped = supervisor.stop(&specs);
+    result.expect("the child becomes ready once the port opens");
+    stopped.expect("stop the slow child");
 
     assert!(waiting >= 1, "at least one Waiting report, got {waiting}");
     assert!(
-        started.elapsed() >= START_PROGRESS_INTERVAL,
+        elapsed >= START_PROGRESS_INTERVAL,
         "readiness could not arrive before the first progress report"
     );
-    supervisor.stop(&specs).expect("stop the slow child");
 }

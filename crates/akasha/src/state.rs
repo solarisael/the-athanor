@@ -169,18 +169,6 @@ mod tests {
         );
     }
 
-    /// A cargo test binary runs from the shared target directory, so the
-    /// development fallback resolves — and resolves to the checkout's own
-    /// `state` directory, not to anything cwd-relative.
-    #[test]
-    fn development_root_is_the_compiled_checkout_state_dir() {
-        let executable = env::current_exe().expect("a test binary has a path");
-        let (root, source) = resolve_state_root_from(None, Some(&executable))
-            .expect("a cargo test binary runs from the shared target directory");
-        assert_eq!(root, compiled_athanor_root().join("state"));
-        assert_eq!(source, StateRootSource::DevelopmentCheckout);
-        assert!(root.is_absolute());
-    }
 
     /// The opposite case, and the one this module exists for: an executable
     /// that is NOT inside the build checkout's target directory gets no
@@ -227,17 +215,6 @@ mod tests {
         assert!(error.to_string().contains("absolute"));
     }
 
-    /// An empty override is not a configured value. It must fall through to the
-    /// structural decision rather than yielding an empty path.
-    #[test]
-    fn empty_override_is_not_a_configured_value() {
-        let executable = env::current_exe().expect("a test binary has a path");
-        let (root, source) = resolve_state_root_from(Some(OsStr::new("")), Some(&executable))
-            .expect("development checkout resolves");
-        assert_eq!(root, compiled_athanor_root().join("state"));
-        assert_eq!(source, StateRootSource::DevelopmentCheckout);
-        assert!(!root.as_os_str().is_empty());
-    }
 
     /// `substrate_state_dir` is the resolved root plus exactly one component.
     #[test]

@@ -382,6 +382,7 @@ async function tickDoorman(state: KnockDoormanState): Promise<void> {
 }
 
 export function startHallwayKnockDoorman(pi: any, ctx: any, binding: HostBinding): void {
+  if (process.env.ATHANOR_HOST_KNOCK_AUTONOMY === "off") return;
   if (
     typeof ctx?.setInterval !== "function"
     || typeof ctx?.setTimeout !== "function"

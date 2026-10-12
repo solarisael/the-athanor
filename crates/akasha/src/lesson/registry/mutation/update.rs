@@ -14,6 +14,7 @@ pub struct LessonUpdateParams {
     pub kind: String,
     #[serde(deserialize_with = "deserialize_i64")]
     pub id: i64,
+    pub room: String,
     pub expected_title: String,
     pub patch: Value,
 }
@@ -71,6 +72,7 @@ pub async fn lesson_update(
     let delete = LessonDeleteParams {
         kind: p.kind.clone(),
         id: p.id,
+        room: p.room.clone(),
         expected_title: p.expected_title.clone(),
     };
     let Some(key) = lesson_key(&p.kind) else {
@@ -182,6 +184,21 @@ pub async fn lesson_update(
             LessonMutationKind::Update,
         ));
     }
+    if key == "coding"
+        && fields.get("scope").is_some_and(|scope| {
+            scope
+                .as_str()
+                .is_none_or(|scope| scope != "house" && scope != p.room.as_str())
+        })
+    {
+        return Ok(mutation_refusal(
+            &delete,
+            "scope must be house or the bound room",
+            None,
+            LessonMutationKind::Update,
+        ));
+    }
+
     // Trigger validation runs before a single row is locked: an uncompilable
     // trigger is a refusal, never a stored pattern that can never fire. A
     // patch is partial, so only the fields it names are judged.
@@ -189,13 +206,25 @@ pub async fn lesson_update(
     patched.validate_fields().map_err(AppError::Invalid)?;
     validate_patterns(&patched).map_err(AppError::Invalid)?;
     let mut tx = pool.begin().await?;
-    let actual = sqlx::query_scalar::<_, String>(
-        "SELECT title FROM lessons WHERE lesson_key=$1 AND id=$2 FOR UPDATE",
-    )
-    .bind(key)
-    .bind(p.id)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let actual = if key == "coding" {
+        sqlx::query_scalar::<_, String>(
+            "SELECT title FROM lessons WHERE lesson_key=$1 AND id=$2
+             AND (scope='house' OR scope=$3) FOR UPDATE",
+        )
+        .bind(key)
+        .bind(p.id)
+        .bind(&p.room)
+        .fetch_optional(&mut *tx)
+        .await?
+    } else {
+        sqlx::query_scalar::<_, String>(
+            "SELECT title FROM lessons WHERE lesson_key=$1 AND id=$2 FOR UPDATE",
+        )
+        .bind(key)
+        .bind(p.id)
+        .fetch_optional(&mut *tx)
+        .await?
+    };
     let Some(actual) = actual else {
         return Ok(mutation_refusal(
             &delete,
@@ -225,6 +254,7 @@ pub async fn lesson_update(
             "exampleText" => "example_text",
             "negationOf" => "negation_of",
             "alwaysOn" => "always_on",
+            "scope" => "scope",
             "clearProject" => "project",
             "astCondition" => "ast_condition",
             "triggerScope" => "trigger_scope",
@@ -315,8 +345,13 @@ pub async fn lesson_update(
         .push(" AND id=")
         .push_bind(p.id)
         .push(" AND title=")
-        .push_bind(&p.expected_title)
-        .push(" RETURNING title, always_on, project");
+        .push_bind(&p.expected_title);
+    if key == "coding" {
+        qb.push(" AND (scope='house' OR scope=")
+            .push_bind(&p.room)
+            .push(")");
+    }
+    qb.push(" RETURNING title, always_on, project");
     let Some((title, always_on, project)) = qb
         .build_query_as::<(String, bool, Option<String>)>()
         .fetch_optional(&mut *tx)

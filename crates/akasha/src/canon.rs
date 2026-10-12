@@ -38,28 +38,23 @@ async fn lock_predecessors(
         return Ok(Vec::new());
     }
     let rows = sqlx::query(
-        "SELECT id,room,name,aliases,authority FROM named_entities WHERE id=ANY($1::bigint[]) ORDER BY id FOR UPDATE",
+        "SELECT id,name,aliases,authority FROM named_entities WHERE id=ANY($1::bigint[]) AND room=$2 ORDER BY id FOR UPDATE",
     )
     .bind(predecessor_ids)
+    .bind(request.room().as_str())
     .fetch_all(&mut **tx)
     .await?;
     if rows.len() != predecessor_ids.len() {
         return Err(AppError::Invalid(
-            "every superseded canon entity ID must exist".into(),
+            "every superseded canon entity must exist in the destination room".into(),
         ));
     }
     let mut prior_names = Vec::new();
     for row in rows {
         let id: i64 = row.try_get("id")?;
-        let room: String = row.try_get("room")?;
         let authority: String = row.try_get("authority")?;
         let name: String = row.try_get("name")?;
         let aliases: Vec<String> = row.try_get("aliases")?;
-        if room != request.room().as_str() {
-            return Err(AppError::Invalid(format!(
-                "canon entity {id} belongs to another room and cannot be superseded"
-            )));
-        }
         if authority != "active" {
             return Err(AppError::Invalid(format!(
                 "canon entity {id} is {authority}; only active authority may be superseded"

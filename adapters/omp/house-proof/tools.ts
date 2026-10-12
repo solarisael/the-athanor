@@ -151,10 +151,10 @@ export async function readRustCanon({ binding, room, signal, ...params }) {
   return requestRustDomain(binding, "canon_read", params, signal, false, room);
 }
 
-export async function writeRustMemory({ binding, room, title, body, threads, continues, supersedes, backup = undefined, signal }) {
+export async function writeRustMemory({ binding, room, title, body, threads, continues, supersedes, project = undefined, backup = undefined, signal }) {
   try {
     const value = await requestOrgan(binding, "remember", {
-      kind: "memory", title, body, threads, continues, supersedes, backup,
+      kind: "memory", title, body, threads, continues, supersedes, project, backup,
     }, { signal, timeoutMs: WRITE_TIMEOUT_MS, write: true, targetScope: targetScope(binding, room) });
     return { ok: true, ...value, id: value.memory_id, sourcePath: value.source_path };
   } catch (error) {
@@ -281,7 +281,7 @@ function gigaToolFailure(error) {
 }
 
 
-function registerHouseTool(pi, definition) {
+export function registerHouseTool(pi, definition) {
   const execute = definition.execute;
   const renderers = createToolRenderers(definition.label, definition.name);
   pi.registerTool({
@@ -478,7 +478,7 @@ export function registerSolarisaelTools(pi, release) {
       voice: z.string().optional().describe("coding, writing, or design lessons: voice (e.g. craft, room-style)."),
       register: z.array(z.string()).optional().describe("writing/design lessons: contexts where the rule applies (e.g. fiction, product-work)."),
       scope: z.string().optional().describe("coding-lesson: scope (house or a room name)."),
-      project: z.string().optional().describe("project-lesson (required) or coding-lesson: project name."),
+      project: z.string().optional().describe("Memory: stable project key; the Host stores it in shared House memory. Project-lesson: required project name. Coding-lesson: optional project name."),
       proofPattern: z.string().optional().describe("coding, project, or design lessons: the proof pattern."),
       triggerContext: z.string().optional().describe("lesson kinds: when the lesson applies and should be retrieved."),
       exampleText: z.string().optional().describe("writing/design lessons: example text."),
@@ -502,6 +502,7 @@ export function registerSolarisaelTools(pi, release) {
             room: params.room === "house" ? "house" : room,
             title: params.title,
             body: params.body,
+            project: params.project,
             threads: params.threads,
             continues: params.continues,
             supersedes: params.supersedes,
@@ -962,7 +963,7 @@ export function registerSolarisaelTools(pi, release) {
   registerHouseTool(pi, {
     name: "kitten_lineage_status",
     label: "Athanor Kitten Lineage Status",
-    description: "Inspect safe lifecycle event counters and payload keys for automatic bounded-worker lineage.",
+    description: "Inspect safe task progress/lifecycle event counters and payload keys. Task results are not written as automatic room memories.",
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {

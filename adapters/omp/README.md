@@ -3,7 +3,7 @@
 This directory contains the OMP component of [The Athanor](../../README.md).
 Adapter version `0.10.0` requires Host API `2`.
 The WebSocket envelope still uses schema version `1`.
-The database schema remains `32`.
+The worker lifecycle requires database schema `34`.
 
 The adapter connects [Oh My Pi](https://github.com/can1357/oh-my-pi) to the native Host.
 It no longer starts substrate children or writes shared room state.
@@ -88,7 +88,6 @@ The Host and native CLI share domain execution code.
 Clearly read-only calls cancel when their client closes.
 Dispatched writes retain definitive execution.
 A lost write response reports `outcome_unknown` and requires reconciliation before retry.
-Automatic lineage writes quarantine uncertain keys instead of treating them as success or retrying them blindly.
 
 ## Context and identity
 
@@ -149,7 +148,7 @@ Its production installation has no eligibility provider and performs no semantic
 | `ATHANOR_GIGA_ENABLED` | Value `1` requests GIGA capture |
 | `ATHANOR_HIPPOCAMPUS_ENABLED` | Value `1` requests classification when GIGA is enabled |
 | `ATHANOR_RECALL_TELEMETRY` | Optional override for the native Recall export |
-| `ATHANOR_DISABLE_KITTEN_LINEAGE` | Controls automatic lineage capture |
+| `ATHANOR_DISABLE_KITTEN_LINEAGE` | Controls task lineage diagnostics; it does not disable the worker lifecycle |
 | `ATHANOR_ROOM_CAPABILITY` | Optional override for the room's Docket capability |
 | `ATHANOR_OMP_KEEPER_CONFIG` | Optional keeper configuration path |
 | `ATHANOR_RESTART_EXIT_CAPABILITY` | Optional restart-exit capability |
@@ -193,13 +192,52 @@ Ordinary children ask their spawning parent for missing historical context or in
 The adapter supplies the actual parent's `agent://` address.
 
 Children continue independent work or return a blocked-context report.
-A parent message can resume the child.
+A parent message can resume a worker that has not retired.
 Children do not invent parent addresses or use `wait` only to await a reply.
 
 The explicit `memory-research` agent type permits manual Recall.
 Its automatic Recall remains off.
 A task display name does not grant that exception.
 This policy is not a process sandbox.
+
+## Worker notebooks and retirement
+
+The adapter enrolls each ordinary `task` child before the child starts.
+Each child receives its own opening wake and task notebook.
+A resumed child receives its checkpoint.
+An explicit successor receives the named predecessor's handoff.
+Children receive no room identity, room boat, Anamnesis, Hallway Bell, or Presence.
+The Host also removes old room blocks before worker context replay.
+
+At 40% context usage, the worker receives one warning to finish its work.
+At 60%, the worker can only complete its handoff.
+Two final provider requests remain available.
+Context usage includes cached tokens.
+Compaction cannot clear the retirement state.
+A retired worker cannot resume work.
+OMP can keep its parked session until normal cleanup.
+
+The `worker_notebook` tool provides bounded reads, notes, acceptance, retained-evidence reads, handoff repair, explicit succession, and whole-swarm disposal.
+The parent receives the exact successor action after retirement.
+The successor action returns a task packet; the parent must call `task` to start it.
+An incomplete handoff requires explicit parent repair before succession.
+Enrolled results no longer create automatic permanent room memories.
+
+PostgreSQL stores AKASHA notebooks.
+Vault stores its journal under `<Host state directory>/worker-lifecycle/`.
+The stores enforce the same ownership and lifecycle rules.
+Vault permits one journal owner and completes interrupted disposal after restart.
+Disposal preserves accepted evidence and receipts.
+It does not erase backups.
+No automatic expiry removes worker records.
+
+Worker enrollment needs the Host.
+An unavailable Host blocks the spawn.
+Use the enrolled `task` tool for worker creation.
+Eval and workpool spawns receive a parent-facing refusal.
+Use `task` instead.
+The `/tan` path has no supported enrollment route; its unbound children cannot work.
+The worker boundary is logical ownership, not a process sandbox.
 
 ## Deployment and proof
 
@@ -216,6 +254,39 @@ Run the adapter suite from this directory:
 ```text
 bun run test
 ```
+
+### OMP compatibility
+
+The adapter test dependencies use OMP `18.8.7`.
+Run the real CLI check after an OMP update or a lesson bridge change:
+
+```text
+bun run test:omp-compat
+```
+
+This command uses `omp` from `PATH`.
+Bun can select the executable from this repository's dependencies.
+To check the workstation installation, pass its executable explicitly.
+For the standard Windows Bun installation, use PowerShell:
+
+```powershell
+bun run test:omp-compat --omp "$env:USERPROFILE/.bun/bin/omp.exe"
+```
+
+The check starts one RPC process with a temporary home and the development lesson bridge.
+It makes no model or Host requests.
+It checks native rules, active lessons, inactive lessons, prompt rebuilds, and new sessions.
+It stops its process and removes its temporary files.
+A missing executable, unsupported API, failed check, or timeout returns a nonzero exit code.
+The default timeout is 60 seconds. Use `--timeout-ms` to change it.
+
+OMP `18.8.7` exposes lesson trigger events without a public per-session rule registration API.
+The adapter therefore retains a narrow bridge to the native matcher.
+It patches each matcher once and uses the matcher's rule list as registration truth.
+New sessions clear the previous session's active filter. Shutdown removes the session lookup.
+An unsupported matcher leaves native context usage available and reports unavailable lesson guards.
+This check does not prove Host, database, or deployment compatibility.
+
 
 Native contract tests and live proof results are recorded in [Evidence](../../docs/EVIDENCE.md).
 Adapter tests do not replace real Host, PostgreSQL, broker, and OMP checks.

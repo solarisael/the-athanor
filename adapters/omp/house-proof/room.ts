@@ -71,7 +71,17 @@ function isRoomDirectory(roomDir) {
     || existsSync(path.join(roomDir, "active_spirit.md"))
     || existsSync(path.join(roomDir, ".omp", "runtime", HOUSE_STATE_FILENAME));
 }
+
+function requestedRoomDirectory(cwd) {
+  const bound = process.env.ATHANOR_CLIENT_ROOM_DIR;
+  if (!bound) return path.resolve(String(cwd || process.cwd()));
+  if (!path.isAbsolute(bound) || !isValidRoomKey(readRoomMarker(bound).room)) {
+    throw new HostUnavailable("the client room projection must name an absolute, provisioned room directory");
+  }
+  return path.resolve(bound);
+}
 export function supportedRoom(cwd) {
+  cwd = requestedRoomDirectory(cwd);
   if (!isRoomDirectory(cwd)) return DEFAULT_ROOM;
   const marker = readRoomMarker(cwd);
   const markerRoom = isValidRoomKey(marker.room) ? marker.room : null;
@@ -80,7 +90,7 @@ export function supportedRoom(cwd) {
 }
 
 export function roomContext(cwd) {
-  const requestedDir = path.resolve(String(cwd || process.cwd()));
+  const requestedDir = requestedRoomDirectory(cwd);
   const recognized = isRoomDirectory(requestedDir);
   const marker = readRoomMarker(requestedDir);
   const markedRoom = isValidRoomKey(marker.room) ? marker.room : null;

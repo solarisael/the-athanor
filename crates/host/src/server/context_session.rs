@@ -197,6 +197,25 @@ async fn prepare_inner(state: &AppState, meta: &CommandMeta, raw: Value) -> Resu
         .filter(|plan| plan.turn_id == request.turn_id)
         .cloned()
         .ok_or("context lesson plan is absent or belongs to another turn")?;
+    if !request.capabilities.top_level {
+        // Workers use their own notebook wake. Drop old room blocks before
+        // either native replay or legacy adoption can reintroduce them.
+        let saved = SavedSession::default();
+        cache::commit(state, &meta.sender_session, &saved)?;
+        context.saved = Some(saved);
+        return Ok(json!({
+            "turns": [],
+            "replayed": false,
+            "nativeOwned": true,
+            "adoption": "rebuilt",
+            "adoptionRejection": request.legacy_rejection,
+            "invalidationReason": "worker-context-isolated",
+            "activities": [],
+            "warnings": [],
+            "presenceSettlement": null,
+            "presenceSettledContractId": null
+        }));
+    }
     let compacted_before_adoption = if context.saved.is_none()
         && request.legacy_memo.is_some()
         && !cache::file(state, &meta.sender_session).exists()

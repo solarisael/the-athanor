@@ -195,11 +195,22 @@ pub(crate) async fn write_memory_tx(
     .execute(&mut **tx)
     .await?;
     for old_id in supersedes.iter().copied().collect::<BTreeSet<_>>() {
-        sqlx::query("UPDATE memories SET superseded_by=$1 WHERE id=$2 AND id<>$1")
-            .bind(memory_id)
-            .bind(bigint(old_id, "supersedes ID")?)
-            .execute(&mut **tx)
-            .await?;
+        let old_id = bigint(old_id, "supersedes ID")?;
+        let changed = sqlx::query(
+            "UPDATE memories SET superseded_by=$1
+             WHERE id=$2 AND room=$3 AND id<>$1",
+        )
+        .bind(memory_id)
+        .bind(old_id)
+        .bind(room)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+        if changed != 1 {
+            return Err(AppError::Invalid(
+                "superseded memory must exist in the destination room".into(),
+            ));
+        }
     }
     sqlx::query("DELETE FROM memory_chunks WHERE memory_id=$1")
         .bind(memory_id)

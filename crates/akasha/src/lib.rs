@@ -23,6 +23,7 @@ mod restart;
 pub mod settings;
 pub mod state;
 mod timeline;
+pub mod worker_lifecycle;
 
 pub use anamnesis::{anamnesis, anamnesis_write};
 pub use backup::{backup, restore};

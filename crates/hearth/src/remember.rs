@@ -276,6 +276,17 @@ impl RememberRequest {
         if supersedes.contains(&0) {
             return Err(DomainError::InvalidSupersedes);
         }
+        if matches!(kind, RememberKind::CodingLesson)
+            && scope
+                .as_deref()
+                .is_some_and(|scope| scope != "house" && scope != room.as_str())
+        {
+            return Err(DomainError::InvalidField {
+                field: "scope".into(),
+                kind: kind.as_str().into(),
+            });
+        }
+
         if matches!(kind, RememberKind::ProjectLesson)
             && project.as_deref().is_none_or(|p| p.trim().is_empty())
         {
@@ -573,14 +584,9 @@ mod tests {
             RememberReceipt::committed(1, room.clone(), " ".into(), BackupOutcome::Skipped, vec![])
                 .is_err()
         );
-        let receipt = RememberReceipt::committed(
-            1,
-            room,
-            "memory.md".into(),
-            BackupOutcome::Skipped,
-            vec![],
-        )
-        .unwrap();
+        let receipt =
+            RememberReceipt::committed(1, room, "memory.md".into(), BackupOutcome::Skipped, vec![])
+                .unwrap();
         assert_eq!(receipt.source_path(), "memory.md");
         assert!(receipt.durable());
         assert_eq!(receipt.authority(), Authority::Full);

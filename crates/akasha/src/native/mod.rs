@@ -78,6 +78,7 @@ pub enum ProtocolRequest {
     RestartTransition(RestartTransitionParams),
     RestartVerify(RestartVerifyParams),
     RestartStatus(RestartStatusParams),
+    WorkerLifecycle(hearth::worker_lifecycle::Call),
     LessonContext(LessonContextParams),
     LessonUpdate(LessonUpdateParams),
     LessonDelete(LessonDeleteParams),
@@ -221,6 +222,9 @@ pub fn decode_envelope(
         "restart_status" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::RestartStatus)
             .map_err(|error| invalid_params(error.to_string())),
+        "worker_lifecycle" => hearth::worker_lifecycle::Call::from_params(envelope.params.clone())
+            .map(ProtocolRequest::WorkerLifecycle)
+            .map_err(invalid_params),
         "lesson_context" => serde_json::from_value(envelope.params.clone())
             .map(ProtocolRequest::LessonContext)
             .map_err(|error| invalid_params(error.to_string())),
@@ -361,6 +365,7 @@ pub fn operation_name(request: &ProtocolRequest) -> &'static str {
         ProtocolRequest::RestartTransition(_) => "restart_transition",
         ProtocolRequest::RestartVerify(_) => "restart_verify",
         ProtocolRequest::RestartStatus(_) => "restart_status",
+        ProtocolRequest::WorkerLifecycle(_) => "worker_lifecycle",
         ProtocolRequest::LessonContext(_) => "lesson_context",
         ProtocolRequest::LessonUpdate(_) => "lesson_update",
         ProtocolRequest::LessonDelete(_) => "lesson_delete",
@@ -446,6 +451,11 @@ pub fn insula_binding(request: &ProtocolRequest) -> TrustedBinding {
         ProtocolRequest::RestartVerify(request) => {
             Some((&request.room, &request.spirit, &request.successor_session))
         }
+        ProtocolRequest::WorkerLifecycle(request) => Some((
+            &request.actor.room,
+            &request.actor.spirit,
+            &request.actor.session,
+        )),
         _ => None,
     };
     let Some((room, spirit, session)) = identity else {
@@ -569,6 +579,8 @@ pub async fn execute_service(
         }
         ProtocolRequest::RestartVerify(request) => request.validate().map_err(AppError::Invalid),
         ProtocolRequest::RestartStatus(request) => request.validate().map_err(AppError::Invalid),
+        // Call::from_params already validated every field at decode.
+        ProtocolRequest::WorkerLifecycle(_) => Ok(()),
         ProtocolRequest::Anamnesis(_)
         | ProtocolRequest::AnamnesisWrite(_)
         | ProtocolRequest::LessonQuery(_)
@@ -807,6 +819,12 @@ pub async fn execute_service(
                         }
                         ProtocolRequest::RestartStatus(request) => {
                             match restart_status(pool, request).await {
+                                Ok(result) => success_json(id, result)?,
+                                Err(error) => app_error(id, operation, error),
+                            }
+                        }
+                        ProtocolRequest::WorkerLifecycle(request) => {
+                            match crate::worker_lifecycle::worker_lifecycle(pool, request).await {
                                 Ok(result) => success_json(id, result)?,
                                 Err(error) => app_error(id, operation, error),
                             }

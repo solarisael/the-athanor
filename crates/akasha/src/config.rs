@@ -301,6 +301,7 @@ fn is_write_operation(operation: &str) -> bool {
             | "giga_tool_review"
             | "hallway_knock_policy"
             | "hallway_knock"
+            | "worker_lifecycle"
     )
 }
 

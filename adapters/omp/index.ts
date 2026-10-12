@@ -9,20 +9,9 @@ import {
   kittenLineageDisabled,
   kittenLifecycleJoinKey,
   noteKittenLifecycle,
-  noteKittenLineageWrite,
   noteKittenProgress,
-  stampAttemptId,
-  type KittenQuestProgress,
 } from "./kitten-lineage.ts";
-import {
-  normalizeQuestMemories,
-  settleQuestLifecycle,
-  type QuestMemory,
-} from "./house-proof/lineage.ts";
-import {
-  hostSessionIdentity,
-  type HostBinding,
-} from "./house-proof/host.ts";
+import { hostSessionIdentity } from "./house-proof/host.ts";
 import {
   adoptTopLevelSession,
   registerTopLevelSession,
@@ -33,7 +22,7 @@ import { responseDigest, settlePresence } from "./house-proof/presence.ts";
 import { logConversationWindow, type ConversationCapture } from "./house-proof/conversation-log.ts";
 import { flushGigaTurns, ingestGigaLoggedTurnsDetached, isSubagentSessionContext, setGigaEnablement } from "./giga.ts";
 import { automaticRecallAllowed, registerSubagentRecallProtocol } from "./house-proof/recall.ts";
-import { writeRustMemory } from "./house-proof/tools.ts";
+import { installWorkerLifecycle, isWorkerSession } from "./house-proof/worker-lifecycle.ts";
 import {
   noteHallwayKnockTurnEnd,
   noteHallwayKnockTurnStart,
@@ -62,6 +51,7 @@ import {
   capturedAgentSession,
   installLessonTtsrBridge,
   recordNativeFires,
+  releaseLessonTtsrSession,
   syncLessonTtsr,
   contextLessonManagerAvailable,
 } from "./house-proof/lesson-ttsr.ts";
@@ -157,14 +147,8 @@ export async function settleAutomaticContextWithinBudget<T>(
 }
 
 const modelDefaultsApplied = new Set();
-const KITTEN_QUEST_WRITE_LIMIT = 1_024;
-const recordedKittenQuests = new Set<string>();
-const kittenQuestWrites = new Map<string, Promise<boolean>>();
-const uncertainKittenQuests = new Map<string, { binding: HostBinding; receipt: Readonly<Record<string, unknown>> }>();
-const kittenQuestProgress = new Map<string, KittenQuestProgress>();
-const kittenRoomsByToolCallId = new Map<string, string>();
-const kittenRoomsByAgentId = new Map<string, string>();
-const kittenBindingsByToolCallId = new Map<string, HostBinding>();
+// Progress join keys seen, for lifecycle diagnostics only.
+const kittenProgressSeen = new Set<string>();
 const pendingPresenceContracts = new Map<
   string,
   { contractId: string; directiveIds: string[]; nonemptyGuardId: string | null }
@@ -348,81 +332,6 @@ function trimOldestSet<T>(set: Set<T>, limit: number): void {
   if (!oldest.done) set.delete(oldest.value);
 }
 
-function cacheKittenTaskRoom(
-  room: string,
-  toolCallId: unknown,
-  input: unknown,
-  binding?: HostBinding,
-): void {
-  const callId = String(toolCallId ?? "").trim();
-  if (callId) {
-    kittenRoomsByToolCallId.set(callId, room);
-    if (binding) kittenBindingsByToolCallId.set(callId, binding);
-    trimOldestMap(kittenRoomsByToolCallId, 1_024);
-    trimOldestMap(kittenBindingsByToolCallId, 1_024);
-  }
-  const tasks = Array.isArray((input as { tasks?: unknown })?.tasks)
-    ? (input as { tasks: Array<{ name?: unknown }> }).tasks
-    : [];
-  for (const task of tasks) {
-    const name = String(task?.name ?? "").trim();
-    if (name) kittenRoomsByAgentId.set(name, room);
-  }
-  trimOldestMap(kittenRoomsByAgentId, 1_024);
-}
-
-async function recordKittenQuest(binding: HostBinding, record: QuestMemory): Promise<boolean> {
-  const key = record.idempotencyKey;
-  if (recordedKittenQuests.has(key)) return true;
-  const uncertain = uncertainKittenQuests.get(key);
-  if (uncertain) {
-    console.warn(`[athanor] Lineage ${key} requires reconciliation; no write was retried.`);
-    return false;
-  }
-  const existing = kittenQuestWrites.get(key);
-  if (existing) return existing;
-  if (uncertainKittenQuests.size + kittenQuestWrites.size >= KITTEN_QUEST_WRITE_LIMIT) {
-    console.warn("[athanor] Automatic lineage writes are paused: the unresolved-write admission bound is full.");
-    return false;
-  }
-
-  const writing = (async () => {
-    try {
-      const result = await writeRustMemory({
-        binding,
-        room: binding.room,
-        title: record.title,
-        body: record.body,
-        threads: record.threads,
-        continues: [],
-        supersedes: [],
-        signal: undefined,
-      });
-      const receipt = result as Record<string, unknown>;
-      const execution = (receipt.details as { execution?: { write_outcome?: unknown } } | undefined)?.execution;
-      if (receipt.code === "outcome_unknown" || receipt.outcome === "unknown" || execution?.write_outcome === "unknown") {
-        uncertainKittenQuests.set(key, { binding, receipt });
-        console.warn("[athanor] Lineage outcome is unknown; reconcile before retrying.", { key, binding, receipt });
-        noteKittenLineageWrite(false);
-        return false;
-      }
-      if (result?.ok !== true) throw new Error("Native lineage write did not succeed");
-      recordedKittenQuests.add(key);
-      trimOldestSet(recordedKittenQuests, KITTEN_QUEST_WRITE_LIMIT);
-      noteKittenLineageWrite(true);
-      return true;
-    } catch {
-      noteKittenLineageWrite(false);
-      return false;
-    }
-  })();
-  kittenQuestWrites.set(key, writing);
-  try {
-    return await writing;
-  } finally {
-    kittenQuestWrites.delete(key);
-  }
-}
 const adoptedContextSessions = new Set<string>();
 
 
@@ -494,8 +403,12 @@ export default function solarisaelHouseProof(pi, release) {
       spirit,
       session: hostSessionIdentity(ctx, effectiveRoomDir),
     };
-    // Worker sessions share session_start, so first-wins adoption protects the
-    // current top-level holder. Only an explicit session switch replaces it.
+    // A worker never holds the room: no top-level adoption, Bell doorman, or
+    // chat doorman, so no later path can mistake it for the room's spirit.
+    if (isWorkerSession(ctx)) return;
+    // Non-worker sessions share session_start too, so first-wins adoption
+    // protects the current top-level holder. Only an explicit session switch
+    // replaces it.
     adoptTopLevelSession(room, binding.session);
     showHouseContextFeedback(ctx, { room, spirit, activities: [] });
     startHallwayKnockDoorman(pi, ctx, binding);
@@ -527,6 +440,7 @@ export default function solarisaelHouseProof(pi, release) {
     activeTurnPrompts.delete(activeTurnPromptKey(room, session));
     retireInsulaSession(room, session);
     retireTopLevelSession(room, session);
+    releaseLessonTtsrSession(session);
     await stopHallwayKnockDoorman({ room, spirit, session });
     stopChatDoorman({ room, spirit, session });
   });
@@ -734,69 +648,25 @@ export default function solarisaelHouseProof(pi, release) {
   });
 
 
+  // Task results never become automatic room memories: workers keep them in
+  // their task book and the parent retains what it accepts. These taps only
+  // feed the kitten_lineage_status diagnostics.
   const stopKittenProgress = pi.events?.on?.("task:subagent:progress", (payload: unknown) => {
     if (kittenLineageDisabled() || !payload || typeof payload !== "object") return;
-    // Dispatch is where a Docket attempt is still known, so the attempt id is
-    // stamped here and travels with the join to settlement.
-    const progress = stampAttemptId(payload as Record<string, unknown>) as KittenQuestProgress;
-    const joinKey = kittenLifecycleJoinKey(progress);
-    noteKittenProgress(progress, joinKey);
+    const joinKey = kittenLifecycleJoinKey(payload);
+    noteKittenProgress(payload, joinKey);
     if (!joinKey) return;
-    kittenQuestProgress.set(joinKey, progress);
-    trimOldestMap(kittenQuestProgress, 1_024);
-    const callId = String(progress.parentToolCallId ?? "").trim();
-    const room = kittenRoomsByToolCallId.get(callId);
-    if (room) kittenRoomsByAgentId.set(joinKey, room);
+    kittenProgressSeen.add(joinKey);
+    trimOldestSet(kittenProgressSeen, 1_024);
   });
 
-  const stopKittenLifecycle = pi.events?.on?.("task:subagent:lifecycle", async (payload: unknown) => {
+  const stopKittenLifecycle = pi.events?.on?.("task:subagent:lifecycle", (payload: unknown) => {
     if (kittenLineageDisabled() || !payload || typeof payload !== "object") return;
     const lifecycle = payload as Record<string, unknown>;
-    const id = String(lifecycle.id ?? "").trim();
     const joinKey = kittenLifecycleJoinKey(lifecycle);
-    const progress = kittenQuestProgress.get(joinKey);
-    noteKittenLifecycle(payload, id, Boolean(progress));
-    if (!progress) return;
-    const toolCallId = String(lifecycle.parentToolCallId ?? progress.parentToolCallId ?? "").trim();
-    const room = kittenRoomsByToolCallId.get(toolCallId)
-      || kittenRoomsByAgentId.get(joinKey)
-      || kittenRoomsByAgentId.get(id);
-    const binding = kittenBindingsByToolCallId.get(toolCallId);
-    if (!room || !binding) return;
-    let settled = false;
-    try {
-      const lineage = await settleQuestLifecycle(
-        binding,
-        toolCallId,
-        progress as Record<string, unknown>,
-        lifecycle,
-        `${toolCallId}:lifecycle`,
-      );
-      settled = lineage.settled;
-      for (const record of lineage.memories) await recordKittenQuest(binding, record);
-    } finally {
-      // The Host decides when a quest is over; the join map is released on its
-      // word, never on a status string read here.
-      if (settled) {
-        kittenQuestProgress.delete(joinKey);
-        kittenRoomsByToolCallId.delete(toolCallId);
-        kittenBindingsByToolCallId.delete(toolCallId);
-        kittenRoomsByAgentId.delete(joinKey);
-        kittenRoomsByAgentId.delete(id);
-      }
-    }
-  });
-
-
-  pi.on("tool_call", async (event, ctx) => {
-    if (event?.toolName !== "task" || kittenLineageDisabled()) return;
-    const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-    const binding = {
-      room,
-      spirit,
-      session: hostSessionIdentity(ctx, effectiveRoomDir),
-    };
-    cacheKittenTaskRoom(room, event.toolCallId, event.input, binding);
+    noteKittenLifecycle(payload, String(lifecycle.id ?? "").trim(), kittenProgressSeen.has(joinKey));
+    const status = String(lifecycle.status ?? "");
+    if (status === "completed" || status === "failed" || status === "aborted") kittenProgressSeen.delete(joinKey);
   });
 
   pi.on("tool_call", async (event, ctx) => {
@@ -864,18 +734,27 @@ export default function solarisaelHouseProof(pi, release) {
       const turnKeys = turnKeysByMessage(messages);
       const turnId = turnKeys.get(origin?.message);
       if (!turnId) return;
+      // A worker keeps only its task-relevant lessons from this hook. Room
+      // state, doormen, model defaults, the room conversation log, and room
+      // context are the room spirit's; the worker lifecycle hook owns the
+      // worker's own wake and request gate.
+      const worker = isWorkerSession(ctx);
       const warnings: string[] = [];
       const activities: string[] = [];
       let houseState = null;
-      try {
-        houseState = await applyPromptDirectives(ctx, prompt, nativeUser, signal);
-      } catch {
-        warnings.push("room state maintenance degraded");
+      if (!worker) {
+        try {
+          houseState = await applyPromptDirectives(ctx, prompt, nativeUser, signal);
+        } catch {
+          warnings.push("room state maintenance degraded");
+        }
       }
       const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx.cwd);
       const binding = { room, spirit, session };
-      startChatDoorman(pi, ctx, binding);
-      startHallwayKnockDoorman(pi, ctx, binding);
+      if (!worker) {
+        startChatDoorman(pi, ctx, binding);
+        startHallwayKnockDoorman(pi, ctx, binding);
+      }
       const modelDefault = houseState?.modelDefault;
       const modelKey = `${room}:${ctx.cwd || effectiveRoomDir}:${modelDefault?.model || ""}`;
       if (modelDefault?.enabled && modelDefault.model && !modelDefaultsApplied.has(modelKey) && typeof pi.setModel === "function") {
@@ -908,6 +787,7 @@ export default function solarisaelHouseProof(pi, release) {
       warnings.push(...synced.warnings);
       if (lessonTtsrInstallWarning) warnings.push(lessonTtsrInstallWarning);
       if (synced.active > 0) activities.push(`${synced.active} native lesson guards`);
+      if (worker) return;
       let conversation: ConversationCapture | null = null;
       try {
         conversation = await logConversationWindow(binding, effectiveRoomDir, ctx, messages, "context",
@@ -1051,32 +931,6 @@ export default function solarisaelHouseProof(pi, release) {
       ctx.ui?.notify?.("Athanor recall policy did not invalidate after compaction.", "warning");
     }
   });
-  pi.on("tool_result", async (event, ctx) => {
-    if (event?.toolName !== "task" || kittenLineageDisabled()) return;
-    const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-    const toolCallId = String(event.toolCallId ?? "").trim();
-    const binding = {
-      room,
-      spirit,
-      session: hostSessionIdentity(ctx, effectiveRoomDir),
-    };
-    cacheKittenTaskRoom(room, toolCallId, event.input, binding);
-    const records = await normalizeQuestMemories(
-      binding,
-      toolCallId,
-      event.input,
-      event.details,
-      `${toolCallId}:result`,
-    );
-    for (const record of records) {
-      const recorded = await recordKittenQuest(binding, record);
-      if (!recorded) {
-        ctx.ui?.notify?.("Athanor could not persist subagent lineage.", "warning");
-        break;
-      }
-    }
-  });
-
 
   pi.on("shutdown", async () => {
     await flushGigaTurns();
@@ -1091,6 +945,7 @@ export default function solarisaelHouseProof(pi, release) {
 
   pi.on("agent_end", async (event, ctx) => {
     const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx?.cwd || process.cwd());
+    const worker = isWorkerSession(ctx);
     const binding = {
       room,
       spirit,
@@ -1103,6 +958,9 @@ export default function solarisaelHouseProof(pi, release) {
     } catch {
       // The doorman degrades on its own warning cadence.
     }
+    // A worker's transcript is its own; it never enters the room's conversation
+    // log, and it holds no Hallway Knock turn.
+    if (worker) return;
     try {
       const capture = await logConversationWindow(
         binding,
@@ -1123,5 +981,6 @@ export default function solarisaelHouseProof(pi, release) {
     }
   });
 
+  installWorkerLifecycle(pi);
   registerSolarisaelTools(pi, release);
 }

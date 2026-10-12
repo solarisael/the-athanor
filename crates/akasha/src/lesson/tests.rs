@@ -173,6 +173,7 @@ fn bigint_guards_accept_decimal_strings_without_javascript_precision_loss() {
     let delete: LessonDeleteParams = serde_json::from_value(serde_json::json!({
         "kind": "coding-lesson",
         "id": "9223372036854775807",
+        "room": "kintsu",
         "expectedTitle": "Exact"
     }))
     .unwrap();

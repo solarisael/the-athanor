@@ -3402,6 +3402,7 @@ mod tests {
             nats_url: None,
             nats_auth: None,
             knock_autonomy,
+            operator: None,
         }
     }
 

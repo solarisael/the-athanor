@@ -66,6 +66,9 @@ pub struct HostConfig {
     pub nats_url: Option<String>,
     pub nats_auth: Option<origami::cranes::broker::NatsAuth>,
     pub knock_autonomy: KnockAutonomy,
+    /// The person this Host process speaks for. The Host stamps it on every
+    /// memory write and recall; no caller can name another one.
+    pub operator: Option<String>,
 }
 
 impl HostConfig {
@@ -99,6 +102,11 @@ impl HostConfig {
         }
         if !protocol::is_safe_room_key(&self.room) {
             return Err("Host room must be a safe non-reserved room key".into());
+        }
+        if let Some(operator) = &self.operator
+            && hearth::OperatorKey::new(operator.as_str()).is_err()
+        {
+            return Err("Host operator must be a safe operator key".into());
         }
         if let Some(url) = &self.nats_url {
             if url.len() > 2048

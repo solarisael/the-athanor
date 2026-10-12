@@ -187,6 +187,7 @@ mod tests {
                 nats_url: None,
                 nats_auth: None,
                 knock_autonomy: KnockAutonomy::Off,
+                operator: None,
             };
             std::fs::create_dir_all(config.room_state_path().parent().unwrap()).unwrap();
             let root = json!({

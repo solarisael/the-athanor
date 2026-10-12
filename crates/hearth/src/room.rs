@@ -26,14 +26,7 @@ impl RoomKey {
         if value == "house" && !allow_house {
             return Err(DomainError::ReservedRoomKey);
         }
-        let valid = !value.is_empty()
-            && !value.starts_with('-')
-            && !value.ends_with('-')
-            && value
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-            && !value.contains("--");
-        if !valid {
+        if !is_safe_key(&value) {
             return Err(DomainError::InvalidRoomKey(value));
         }
         Ok(Self(value))
@@ -42,6 +35,17 @@ impl RoomKey {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Lowercase ASCII words joined by single hyphens; room and operator keys share it.
+pub(crate) fn is_safe_key(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('-')
+        && !value.ends_with('-')
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !value.contains("--")
 }
 
 impl fmt::Display for RoomKey {

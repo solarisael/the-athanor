@@ -4,6 +4,7 @@ mod embedding;
 mod memory_reference;
 mod pointer_files;
 mod profile;
+pub(crate) mod scope;
 mod semantic_vocabulary;
 mod temporal;
 mod thread_neighbors;
@@ -26,6 +27,7 @@ use memory_reference::{
 };
 use pointer_files::protocol_pointer_files;
 use profile::{CanonOrder, apply_and_order, for_mode};
+use scope::ScopeFilter;
 use semantic_vocabulary::{load_semantic_vocabulary_concepts, semantic_vocabulary_terms};
 use serde::Serialize;
 use sqlx::{PgPool, Row};
@@ -269,10 +271,16 @@ pub async fn recall(
     let content_min_similarity = request.content_min_similarity();
     let phase = Phase::start(span, "recall.settings");
     let settings = RoomSettings::load(pool, room).await?;
-    phase.ok();
     let profile = for_mode(mode, settings.recall_mode_profiles_enabled);
     let rooms = vec![room.to_owned(), "house".to_owned()];
     let mut warnings = Vec::new();
+    let scope = ScopeFilter::load(
+        pool,
+        request.operator().map(|operator| operator.as_str()),
+        &mut warnings,
+    )
+    .await?;
+    phase.ok();
     // An explicit memory reference is the cheapest cross-reference the House
     // has, so it is answered by primary key before any ranked lane runs; the
     // reference tokens then leave the ranked vocabulary so a resolved ID can
@@ -280,7 +288,8 @@ pub async fn recall(
     let phase = Phase::start(span, "recall.reference");
     let references = memory_references(query);
     let mut exact_candidates =
-        resolve_memory_references(pool, &rooms, &references, projection, &mut warnings).await?;
+        resolve_memory_references(pool, &rooms, &scope, &references, projection, &mut warnings)
+            .await?;
     phase.ok();
     // A request that names references and nothing else (`memories 4520, 4516
     // and 999`) is a primary-key read: the resolved records in reference
@@ -292,7 +301,7 @@ pub async fn recall(
             apply_manual_record_cap(&mut exact_candidates, &mut warnings);
         }
         let mut retrieval_candidates = exact_candidates;
-        attach_thread_neighbors(pool, span, &mut retrieval_candidates).await?;
+        attach_thread_neighbors(pool, span, &scope, &mut retrieval_candidates).await?;
         return Ok(RecallResult {
             ok: true,
             query: query.to_owned(),
@@ -363,6 +372,7 @@ pub async fn recall(
     let bm25f_candidates = load_bm25f_candidates_for_terms(
         pool,
         &rooms,
+        &scope,
         &references.strip_terms(bm25f::query_terms(query)),
         temporal_decay,
         decay_now,
@@ -394,6 +404,7 @@ pub async fn recall(
     let semantic_lexical_candidates = load_bm25f_candidates_for_terms(
         pool,
         &rooms,
+        &scope,
         &semantic_vocabulary_terms,
         temporal_decay,
         decay_now,
@@ -407,7 +418,7 @@ pub async fn recall(
     let mut semantic_chunks = Vec::new();
     if let Some(vector_text) = vector_text.clone() {
         let phase = Phase::start(span, "recall.semantic");
-        let semantic_rows = sqlx::query(
+        let semantic_sql = format!(
             r#"SELECT memory_id,source_path,title,heading_path,body,char_start,char_end,chunk_index,meta,sim
                FROM (
                  SELECT m.source_path,
@@ -422,19 +433,24 @@ pub async fn recall(
                    AND m.archived_at IS NULL
                    AND m.superseded_by IS NULL
                    AND COALESCE(m.type,'') <> $5
-                   AND c.body_embedding IS NOT NULL
+                   AND c.body_embedding IS NOT NULL{}
                ) ranked
                WHERE sim >= $3
                ORDER BY sim DESC,source_path,chunk_index
                LIMIT $4"#,
-        )
-        .bind(&vector_text)
-        .bind(&rooms)
-        .bind(semantic_min_similarity)
-        .bind(semantic_fetch_limit)
-        .bind(origami::boats::MEMORY_KIND)
-        .fetch_all(pool)
-        .await?;
+            scope.predicate("m", 6)
+        );
+        let semantic_rows = scope
+            .bind(
+                sqlx::query(&semantic_sql)
+                    .bind(&vector_text)
+                    .bind(&rooms)
+                    .bind(semantic_min_similarity)
+                    .bind(semantic_fetch_limit)
+                    .bind(origami::boats::MEMORY_KIND),
+            )
+            .fetch_all(pool)
+            .await?;
         for row in semantic_rows {
             let sim: f64 = row.try_get("sim")?;
             if sim < semantic_min_similarity {
@@ -464,7 +480,7 @@ pub async fn recall(
         if semantic_chunks.is_empty() {
             // The floor query returned nothing; a second cheap roundtrip is
             // acceptable only in this empty case so silence is impossible.
-            let top_sim: Option<f64> = sqlx::query_scalar(
+            let probe_sql = format!(
                 r#"SELECT MAX((1-(c.body_embedding <=> $1::vector))::double precision)
                    FROM memory_chunks c
                    JOIN memories m ON m.id=c.memory_id
@@ -472,13 +488,18 @@ pub async fn recall(
                      AND m.archived_at IS NULL
                      AND m.superseded_by IS NULL
                      AND COALESCE(m.type,'') <> $3
-                     AND c.body_embedding IS NOT NULL"#,
-            )
-            .bind(&vector_text)
-            .bind(&rooms)
-            .bind(origami::boats::MEMORY_KIND)
-            .fetch_one(pool)
-            .await?;
+                     AND c.body_embedding IS NOT NULL{}"#,
+                scope.predicate("m", 4)
+            );
+            let top_sim: Option<f64> = scope
+                .bind_scalar(
+                    sqlx::query_scalar(&probe_sql)
+                        .bind(&vector_text)
+                        .bind(&rooms)
+                        .bind(origami::boats::MEMORY_KIND),
+                )
+                .fetch_one(pool)
+                .await?;
             warnings.push(match top_sim {
                 Some(top) => format!(
                     "semantic lane empty: top sim {top:.2} < floor {semantic_min_similarity:.2} (rooms {})",
@@ -497,6 +518,7 @@ pub async fn recall(
         pool,
         query,
         &rooms,
+        &scope,
         content_min_similarity,
         content_fetch_limit,
         &content_patterns,
@@ -537,22 +559,27 @@ pub async fn recall(
     let mut date_matches = Vec::new();
     if !query_dates.is_empty() {
         let phase = Phase::start(span, "recall.dates");
-        let rows = sqlx::query(
+        let dates_sql = format!(
             "SELECT source_path,title,body,date,dates
-             FROM memories
+             FROM memories m
              WHERE room = ANY($1::text[])
                AND archived_at IS NULL
                AND superseded_by IS NULL
                AND COALESCE(type,'') <> $3
-               AND dates && $2::date[]
+               AND dates && $2::date[]{}
              ORDER BY source_path
              LIMIT 5",
-        )
-        .bind(&rooms)
-        .bind(&query_dates)
-        .bind(origami::boats::MEMORY_KIND)
-        .fetch_all(pool)
-        .await?;
+            scope.predicate("m", 4)
+        );
+        let rows = scope
+            .bind(
+                sqlx::query(&dates_sql)
+                    .bind(&rooms)
+                    .bind(&query_dates)
+                    .bind(origami::boats::MEMORY_KIND),
+            )
+            .fetch_all(pool)
+            .await?;
         for row in rows {
             let source_path: String = row.try_get("source_path")?;
             let title: Option<String> = row.try_get("title")?;
@@ -567,7 +594,7 @@ pub async fn recall(
         phase.ok();
     }
     let phase = Phase::start(span, "recall.threads");
-    let thread_rows = sqlx::query(
+    let threads_sql = format!(
         "SELECT DISTINCT ON (m.id) m.id AS memory_id,m.source_path,
                 coalesce(m.title,'') AS title,t.thread_key,left(m.body,1200) AS body,
                 GREATEST(similarity(t.thread_key,$2),
@@ -581,16 +608,21 @@ pub async fn recall(
            AND COALESCE(m.type,'') <> $4
            AND (t.thread_key ILIKE ANY($3::text[])
                 OR ref.context ILIKE ANY($3::text[])
-                OR m.source_path ILIKE ANY($3::text[]))
+                OR m.source_path ILIKE ANY($3::text[])){}
          ORDER BY m.id,rank DESC,t.thread_key
          LIMIT 8",
-    )
-    .bind(&rooms)
-    .bind(query)
-    .bind(&content_patterns)
-    .bind(origami::boats::MEMORY_KIND)
-    .fetch_all(pool)
-    .await?;
+        scope.predicate("m", 5)
+    );
+    let thread_rows = scope
+        .bind(
+            sqlx::query(&threads_sql)
+                .bind(&rooms)
+                .bind(query)
+                .bind(&content_patterns)
+                .bind(origami::boats::MEMORY_KIND),
+        )
+        .fetch_all(pool)
+        .await?;
     phase.ok();
     let phase = Phase::start(span, "recall.fuse");
     let mut fused: BTreeMap<String, serde_json::Value> = BTreeMap::new();
@@ -819,6 +851,7 @@ pub async fn recall(
             match load_bm25f_candidates_for_terms_broad(
                 pool,
                 &rooms,
+                &scope,
                 &references.strip_terms(bm25f::query_terms(query)),
                 temporal_decay,
                 decay_now,
@@ -851,10 +884,17 @@ pub async fn recall(
     if projection.is_manual() {
         apply_manual_record_cap(&mut retrieval_candidates, &mut warnings);
         let phase = Phase::start(span, "recall.hydrate");
-        hydrate_record_bodies(pool, &rooms, &mut retrieval_candidates, &mut warnings).await?;
+        hydrate_record_bodies(
+            pool,
+            &rooms,
+            &scope,
+            &mut retrieval_candidates,
+            &mut warnings,
+        )
+        .await?;
         phase.ok();
     }
-    attach_thread_neighbors(pool, span, &mut retrieval_candidates).await?;
+    attach_thread_neighbors(pool, span, &scope, &mut retrieval_candidates).await?;
     // Canon lookup matches three ways, ranked. Tokens alone can never match a
     // multi-word name or a hyphenated alias, which is how 42 of 109 rows went
     // dark; widening to ILIKE/tsvector then lets fuzzy hits evict the row the
@@ -987,21 +1027,26 @@ pub async fn recall(
     }
     phase.ok();
     let phase = Phase::start(span, "recall.taxonomy");
-    let memory_types: Vec<String> = sqlx::query_scalar(
+    let memory_types_sql = format!(
         "SELECT DISTINCT type
-         FROM memories
+         FROM memories m
          WHERE room = ANY($1::text[])
            AND archived_at IS NULL
            AND superseded_by IS NULL
-           AND COALESCE(type,'') <> $2
+           AND COALESCE(type,'') <> $2{}
          ORDER BY type
          LIMIT 20",
-    )
-    .bind(&rooms)
-    .bind(origami::boats::MEMORY_KIND)
-    .fetch_all(pool)
-    .await?;
-    let thread_keys: Vec<String> = sqlx::query_scalar(
+        scope.predicate("m", 3)
+    );
+    let memory_types: Vec<String> = scope
+        .bind_scalar(
+            sqlx::query_scalar(&memory_types_sql)
+                .bind(&rooms)
+                .bind(origami::boats::MEMORY_KIND),
+        )
+        .fetch_all(pool)
+        .await?;
+    let thread_keys_sql = format!(
         "SELECT DISTINCT t.thread_key
          FROM threads t
          JOIN thread_events event ON event.thread_id=t.id
@@ -1009,14 +1054,19 @@ pub async fn recall(
          WHERE m.room = ANY($1::text[])
            AND m.archived_at IS NULL
            AND m.superseded_by IS NULL
-           AND COALESCE(m.type,'') <> $2
+           AND COALESCE(m.type,'') <> $2{}
          ORDER BY t.thread_key
          LIMIT 20",
-    )
-    .bind(&rooms)
-    .bind(origami::boats::MEMORY_KIND)
-    .fetch_all(pool)
-    .await?;
+        scope.predicate("m", 3)
+    );
+    let thread_keys: Vec<String> = scope
+        .bind_scalar(
+            sqlx::query_scalar(&thread_keys_sql)
+                .bind(&rooms)
+                .bind(origami::boats::MEMORY_KIND),
+        )
+        .fetch_all(pool)
+        .await?;
     let taxonomy = serde_json::json!({"rooms":rooms,"memoryTypes":memory_types,"threadKeys":thread_keys,"namedEntities":named_entities});
     phase.ok();
     let phase = Phase::start(span, "recall.cluster");
@@ -1025,7 +1075,7 @@ pub async fn recall(
         .ok()
         .and_then(|s| serde_json::to_value(s).ok());
     let cluster_resonance = if let Some(v) = vector_text.as_deref() {
-        cluster_resonance(pool, v, &rooms).await.ok()
+        cluster_resonance(pool, v, &rooms, &scope).await.ok()
     } else {
         None
     };
@@ -1065,6 +1115,7 @@ pub async fn recall(
 async fn attach_thread_neighbors(
     pool: &PgPool,
     span: Option<&EmitterSpan>,
+    scope: &ScopeFilter,
     retrieval_candidates: &mut [serde_json::Value],
 ) -> Result<(), AppError> {
     let memory_ids = retrieval_candidates
@@ -1074,7 +1125,7 @@ async fn attach_thread_neighbors(
         .into_iter()
         .collect::<Vec<_>>();
     let phase = Phase::start(span, "recall.neighbors");
-    let mut neighbors = load_thread_neighbors(pool, &memory_ids).await?;
+    let mut neighbors = load_thread_neighbors(pool, &memory_ids, scope).await?;
     for candidate in retrieval_candidates.iter_mut() {
         let memory_id = candidate["memory_id"].as_i64().unwrap_or_default();
         candidate["thread_neighbors"] =

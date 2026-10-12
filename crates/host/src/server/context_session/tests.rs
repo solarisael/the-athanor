@@ -23,6 +23,7 @@ impl Fixture {
             nats_url: None,
             nats_auth: None,
             knock_autonomy: KnockAutonomy::Off,
+            operator: None,
         };
         crate::store::atomic_json_write(&config.room_state_path(), &json!({
             "room":"test-room","operator":"Operator","agentName":"Test","embodiedSpirit":"Test",

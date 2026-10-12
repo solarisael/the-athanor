@@ -1,4 +1,5 @@
 use crate::config::{AppError, EMBED_DIMENSION};
+use crate::recall::scope::ScopeFilter;
 use crate::settings::RoomSettings;
 use hearth::{
     ClusterExecution, ClusterFreshnessPolicy, ClusterMaintenanceOutcome, ClusterMaintenanceRequest,
@@ -288,12 +289,15 @@ pub async fn cluster_maintenance(
     }
 }
 
+/// Cluster resonance counts and points only at memories the reader could
+/// recall, so a hot chunk never names a hidden row's path or heading.
 pub(crate) async fn cluster_resonance(
     pool: &PgPool,
     vector_text: &str,
     rooms: &[String],
+    scope: &ScopeFilter,
 ) -> Result<serde_json::Value, AppError> {
-    let rows = sqlx::query(
+    let profile_sql = format!(
         "SELECT mc.id,mc.label,COUNT(mm.chunk_id)::bigint AS member_count,
                 (1-(mc.centroid <=> $1::vector))::double precision AS activation
          FROM memory_clusters mc
@@ -305,16 +309,36 @@ pub(crate) async fn cluster_resonance(
            AND m.archived_at IS NULL
            AND m.superseded_by IS NULL
            AND COALESCE(m.type,'') <> $3
-           AND (mc.label IS NULL OR mc.label NOT ILIKE 'paper boat%')
+           AND (mc.label IS NULL OR mc.label NOT ILIKE 'paper boat%'){}
          GROUP BY mc.id,mc.label,mc.centroid
          ORDER BY activation DESC
          LIMIT 8",
-    )
-    .bind(vector_text)
-    .bind(rooms)
-    .bind(origami::boats::MEMORY_KIND)
-    .fetch_all(pool)
-    .await?;
+        scope.predicate("m", 4)
+    );
+    let rows = scope
+        .bind(
+            sqlx::query(&profile_sql)
+                .bind(vector_text)
+                .bind(rooms)
+                .bind(origami::boats::MEMORY_KIND),
+        )
+        .fetch_all(pool)
+        .await?;
+    let hot_sql = format!(
+        "SELECT m.source_path,c.heading_path,
+                (1-(c.body_embedding <=> $1::vector))::double precision AS sim
+         FROM memory_cluster_members mm
+         JOIN memory_chunks c ON c.id=mm.chunk_id
+         JOIN memories m ON m.id=c.memory_id
+         WHERE mm.cluster_id=$2
+           AND m.room=ANY($3::text[])
+           AND m.archived_at IS NULL
+           AND m.superseded_by IS NULL
+           AND COALESCE(m.type,'') <> $4{}
+         ORDER BY sim DESC
+         LIMIT 2",
+        scope.predicate("m", 5)
+    );
     let mut profile = Vec::new();
     let mut hot = Vec::new();
     for (index, r) in rows.iter().enumerate() {
@@ -322,26 +346,16 @@ pub(crate) async fn cluster_resonance(
         let label: Option<String> = r.try_get("label")?;
         profile.push(serde_json::json!({"cluster_id":id,"label":label.clone().unwrap_or_default(),"member_count":r.try_get::<i64,_>("member_count")?,"activation":r.try_get::<f64,_>("activation")?.clamp(0.0,1.0)}));
         if index < 3 {
-            let chunks = sqlx::query(
-                "SELECT m.source_path,c.heading_path,
-                        (1-(c.body_embedding <=> $1::vector))::double precision AS sim
-                 FROM memory_cluster_members mm
-                 JOIN memory_chunks c ON c.id=mm.chunk_id
-                 JOIN memories m ON m.id=c.memory_id
-                 WHERE mm.cluster_id=$2
-                   AND m.room=ANY($3::text[])
-                   AND m.archived_at IS NULL
-                   AND m.superseded_by IS NULL
-                   AND COALESCE(m.type,'') <> $4
-                 ORDER BY sim DESC
-                 LIMIT 2",
-            )
-            .bind(vector_text)
-            .bind(id)
-            .bind(rooms)
-            .bind(origami::boats::MEMORY_KIND)
-            .fetch_all(pool)
-            .await?;
+            let chunks = scope
+                .bind(
+                    sqlx::query(&hot_sql)
+                        .bind(vector_text)
+                        .bind(id)
+                        .bind(rooms)
+                        .bind(origami::boats::MEMORY_KIND),
+                )
+                .fetch_all(pool)
+                .await?;
             let pointers = chunks.into_iter().map(|c| serde_json::json!({"source_path":c.try_get::<String,_>("source_path").unwrap_or_default(),"heading_path":c.try_get::<Option<String>,_>("heading_path").ok().flatten(),"sim":c.try_get::<f64,_>("sim").unwrap_or(0.0).clamp(-1.0,1.0)})).collect::<Vec<_>>();
             if !pointers.is_empty() {
                 hot.push(serde_json::json!({"cluster_id":id,"label":label,"chunks":pointers}));

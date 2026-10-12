@@ -31,6 +31,7 @@
 //! change to a pg_trgm object and is not made here. `SET LOCAL` keeps the
 //! compensation inside this lane's own transaction.
 
+use super::scope::ScopeFilter;
 use crate::config::AppError;
 use sqlx::PgPool;
 use sqlx::postgres::PgRow;
@@ -47,7 +48,9 @@ const LANE_PLANNER_SETTINGS: &str = "SELECT \
 ///
 /// Parameters: `$1` query, `$2` rooms, `$3` minimum similarity, `$4` fetch
 /// limit (`NULL` for no limit), `$5` the memory kind that recall excludes, and
-/// then one parameter per term pattern from `$6`.
+/// then one parameter per term pattern from `$6`. While the operator axis is
+/// active, `scope_filter` follows the type guard and reads the reader key from
+/// the placeholder after the last pattern; inactive, it is empty.
 ///
 /// Two properties the old single-statement shape did not have. The empty-term
 /// case is a different statement instead of a `$5 = '{}' OR ...` guard, so no
@@ -55,7 +58,7 @@ const LANE_PLANNER_SETTINGS: &str = "SELECT \
 /// inner target list, behind `OFFSET 0`, so the outer `sim >= $3` cannot be
 /// pushed back down: `word_similarity` runs exactly once per scoped chunk
 /// instead of once in the filter plus once in the select list.
-pub(crate) fn content_lane_sql(pattern_count: usize) -> String {
+fn content_lane_sql_scoped(pattern_count: usize, scope_filter: &str) -> String {
     let term_filter = if pattern_count == 0 {
         String::new()
     } else {
@@ -77,7 +80,7 @@ pub(crate) fn content_lane_sql(pattern_count: usize) -> String {
            WHERE m.room = ANY($2::text[])
              AND m.archived_at IS NULL
              AND m.superseded_by IS NULL
-             AND COALESCE(m.type,'') <> $5{term_filter}
+             AND COALESCE(m.type,'') <> $5{scope_filter}{term_filter}
            OFFSET 0
          ) lane
          WHERE sim >= $3
@@ -86,18 +89,26 @@ pub(crate) fn content_lane_sql(pattern_count: usize) -> String {
     )
 }
 
+/// The lane SQL a House without operators runs.
+#[cfg(test)]
+pub(crate) fn content_lane_sql(pattern_count: usize) -> String {
+    content_lane_sql_scoped(pattern_count, "")
+}
+
 /// Run the content lane in its own transaction, with the planner settings the
 /// scan needs.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn content_lane_rows(
     pool: &PgPool,
     query: &str,
     rooms: &[String],
+    scope: &ScopeFilter,
     min_similarity: f64,
     fetch_limit: Option<i64>,
     patterns: &[String],
     excluded_kind: &str,
 ) -> Result<Vec<PgRow>, AppError> {
-    let sql = content_lane_sql(patterns.len());
+    let sql = content_lane_sql_scoped(patterns.len(), &scope.predicate("m", patterns.len() + 6));
     let mut tx = pool.begin().await?;
     sqlx::query(LANE_PLANNER_SETTINGS).execute(&mut *tx).await?;
     let mut lane = sqlx::query(&sql)
@@ -109,7 +120,7 @@ pub(crate) async fn content_lane_rows(
     for pattern in patterns {
         lane = lane.bind(pattern.as_str());
     }
-    let rows = lane.fetch_all(&mut *tx).await?;
+    let rows = scope.bind(lane).fetch_all(&mut *tx).await?;
     tx.commit().await?;
     Ok(rows)
 }

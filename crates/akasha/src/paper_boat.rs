@@ -54,6 +54,7 @@ pub async fn paper_boat_sleep(
         &[],
         plan.metadata,
         &prepared,
+        None,
     )
     .await?;
     let outbox_event_id = boats::sleep::ready_pointer(&mut tx, memory_id).await?;

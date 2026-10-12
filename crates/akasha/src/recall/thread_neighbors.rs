@@ -1,4 +1,5 @@
 use super::bounded_excerpt;
+use super::scope::ScopeFilter;
 use crate::config::AppError;
 use sqlx::{PgPool, Row};
 use std::collections::BTreeMap;
@@ -6,11 +7,14 @@ use std::collections::BTreeMap;
 pub(super) async fn load_thread_neighbors(
     pool: &PgPool,
     memory_ids: &[i64],
+    scope: &ScopeFilter,
 ) -> Result<BTreeMap<i64, Vec<serde_json::Value>>, AppError> {
     if memory_ids.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let rows = sqlx::query(
+    let neighbor_scope = scope.predicate("neighbor", 2);
+    let neighbor_successor = scope.visible_successor("neighbor", 2);
+    let sql = format!(
         r#"WITH neighbor_edges AS (
              SELECT current_event.memory_id AS candidate_memory_id,
                     t.thread_key,
@@ -23,7 +27,7 @@ pub(super) async fn load_thread_neighbors(
                       WHEN neighbor.archived_at IS NULL AND neighbor.superseded_by IS NULL
                       THEN 'active' ELSE 'historical'
                     END AS authority_state,
-                    neighbor.superseded_by
+                    {neighbor_successor} AS superseded_by
              FROM thread_events current_event
              JOIN threads t ON t.id=current_event.thread_id
              JOIN thread_event_links link
@@ -33,7 +37,7 @@ pub(super) async fn load_thread_neighbors(
                ON neighbor_event.thread_id=link.thread_id
               AND neighbor_event.id=link.previous_event_id
              JOIN memories neighbor ON neighbor.id=neighbor_event.memory_id
-             WHERE current_event.memory_id = ANY($1::bigint[])
+             WHERE current_event.memory_id = ANY($1::bigint[]){neighbor_scope}
              UNION ALL
              SELECT current_event.memory_id AS candidate_memory_id,
                     t.thread_key,
@@ -46,7 +50,7 @@ pub(super) async fn load_thread_neighbors(
                       WHEN neighbor.archived_at IS NULL AND neighbor.superseded_by IS NULL
                       THEN 'active' ELSE 'historical'
                     END AS authority_state,
-                    neighbor.superseded_by
+                    {neighbor_successor} AS superseded_by
              FROM thread_events current_event
              JOIN threads t ON t.id=current_event.thread_id
              JOIN thread_event_links link
@@ -56,7 +60,7 @@ pub(super) async fn load_thread_neighbors(
                ON neighbor_event.thread_id=link.thread_id
               AND neighbor_event.id=link.next_event_id
              JOIN memories neighbor ON neighbor.id=neighbor_event.memory_id
-             WHERE current_event.memory_id = ANY($1::bigint[])
+             WHERE current_event.memory_id = ANY($1::bigint[]){neighbor_scope}
            ), ranked AS (
              SELECT *,
                     row_number() OVER (
@@ -68,11 +72,12 @@ pub(super) async fn load_thread_neighbors(
            SELECT candidate_memory_id,thread_key,direction,id,title,source_path,body,
                   authority_state,superseded_by
            FROM ranked WHERE ordinal <= 6
-           ORDER BY candidate_memory_id,ordinal"#,
-    )
-    .bind(memory_ids)
-    .fetch_all(pool)
-    .await?;
+           ORDER BY candidate_memory_id,ordinal"#
+    );
+    let rows = scope
+        .bind(sqlx::query(&sql).bind(memory_ids))
+        .fetch_all(pool)
+        .await?;
     let mut by_memory = BTreeMap::new();
     for row in rows {
         let candidate_memory_id: i64 = row.try_get("candidate_memory_id")?;

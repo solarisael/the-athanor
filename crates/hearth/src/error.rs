@@ -39,6 +39,8 @@ pub enum DomainError {
     InvalidPaperBoat { field: String, message: String },
     InvalidLessonTrigger(String),
     InvalidBackupReceipt { field: String, message: String },
+    InvalidOperatorKey(String),
+    InvalidMemoryScope(String),
 }
 impl fmt::Display for DomainError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -113,6 +115,10 @@ impl fmt::Display for DomainError {
             }
             Self::InvalidBackupReceipt { field, message } => {
                 write!(f, "invalid backup receipt {field}: {message}")
+            }
+            Self::InvalidOperatorKey(value) => write!(f, "invalid operator key: {value}"),
+            Self::InvalidMemoryScope(value) => {
+                write!(f, "memory scope must be company, up, or private: {value}")
             }
             Self::InvalidLessonTrigger(message) => write!(f, "invalid lesson trigger: {message}"),
         }

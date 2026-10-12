@@ -20,6 +20,7 @@ pub(crate) use tokens::token_estimate;
 
 use crate::backup;
 use crate::config::{AppError, Config};
+use crate::recall::scope::ScopeFilter;
 use crate::settings::RoomSettings;
 use chrono::Local;
 use hearth::{BackupOutcome, RememberReceipt, RememberRequest};
@@ -31,9 +32,12 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
 /// A memory that names no source path gets a stable one derived from the
-/// fields that make it the same memory on retry.
+/// fields that make it the same memory on retry. The writer is one of them:
+/// two operators writing the same words own two memories, and a write never
+/// lands on (or answers for) a row another operator wrote. A memory without
+/// a writer hashes exactly as it did before the operator axis.
 fn derived_source_path(req: &RememberRequest) -> String {
-    let identity = json!({
+    let mut identity = json!({
         "room": req.room().as_str(),
         "title": req.title(),
         "body": req.body(),
@@ -43,6 +47,9 @@ fn derived_source_path(req: &RememberRequest) -> String {
         }).collect::<Vec<_>>(),
         "supersedes": req.supersedes(),
     });
+    if let Some(operator) = req.operator() {
+        identity["operator"] = json!(operator.as_str());
+    }
     format!(
         "db-only/{}/{:x}",
         req.room(),
@@ -96,6 +103,14 @@ pub async fn remember(
         "origin": "direct-db-write",
         "recorded_at": chrono::Utc::now().to_rfc3339(),
     });
+    // A continuation names a predecessor by ID, so it may only name one the
+    // writer could recall; the writer is the reader here.
+    let writer_scope = ScopeFilter::load(
+        pool,
+        req.operator().map(|operator| operator.as_str()),
+        &mut Vec::new(),
+    )
+    .await?;
     let mut tx = pool.begin().await?;
     let (memory_id, _) = write_memory_tx(
         &mut tx,
@@ -107,9 +122,18 @@ pub async fn remember(
         req.supersedes(),
         meta,
         &prepared,
+        req.operator()
+            .map(|operator| (operator, req.memory_scope())),
     )
     .await?;
-    write_continuations_tx(&mut tx, req.room().as_str(), memory_id, req.continues()).await?;
+    write_continuations_tx(
+        &mut tx,
+        req.room().as_str(),
+        memory_id,
+        req.continues(),
+        &writer_scope,
+    )
+    .await?;
     tx.commit().await?;
     let backup = post_write_backup(pool, cfg, &settings, req.backup(), &mut warnings).await;
     let receipt = RememberReceipt::committed(

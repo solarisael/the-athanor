@@ -32,6 +32,8 @@ const MIGRATIONS: &[&str] = &[
     migration!("0015_canon_authority.sql"),
     migration!("0016_boat_ready_delivery.sql"),
     migration!("0017_crane_delivery.sql"),
+    // The write path names the memory's writer (operator axis).
+    migration!("0035_operator_axis.sql"),
 ];
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;

@@ -99,6 +99,6 @@ pub use restart::{
 pub use settings::RoomSettings;
 pub use timeline::{
     LessonTimelineItem, LessonTimelineParams, LessonTimelineResult, MemoryReadParams,
-    MemoryReadResult, MemoryRecord, MemoryTimelineItem, MemoryTimelineParams, MemoryTimelineResult,
-    lesson_timeline, memory_read, memory_timeline,
+    MemoryReadResult, MemoryReader, MemoryRecord, MemoryTimelineItem, MemoryTimelineParams,
+    MemoryTimelineResult, lesson_timeline, memory_read, memory_timeline,
 };

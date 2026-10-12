@@ -1,4 +1,5 @@
 use super::bounded_excerpt;
+use super::scope::ScopeFilter;
 use super::temporal::{compare_weighted_lane, giga_temporal_factor};
 use crate::bm25f::{
     self, BODY as BM25F_BODY, FieldValue as Bm25fFieldValue, HEADING as BM25F_HEADING,
@@ -28,9 +29,11 @@ struct Bm25fAverageLengths {
     memory_type: f64,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn load_bm25f_candidates_for_terms(
     pool: &PgPool,
     rooms: &[String],
+    scope: &ScopeFilter,
     terms: &[String],
     temporal_decay: bool,
     decay_now: DateTime<Utc>,
@@ -40,6 +43,7 @@ pub(super) async fn load_bm25f_candidates_for_terms(
     load_bm25f_candidates_for_terms_bounded(
         pool,
         rooms,
+        scope,
         terms,
         temporal_decay,
         decay_now,
@@ -55,6 +59,7 @@ pub(super) async fn load_bm25f_candidates_for_terms(
 pub(super) async fn load_bm25f_candidates_for_terms_broad(
     pool: &PgPool,
     rooms: &[String],
+    scope: &ScopeFilter,
     terms: &[String],
     temporal_decay: bool,
     decay_now: DateTime<Utc>,
@@ -64,6 +69,7 @@ pub(super) async fn load_bm25f_candidates_for_terms_broad(
     load_bm25f_candidates_for_terms_bounded(
         pool,
         rooms,
+        scope,
         terms,
         temporal_decay,
         decay_now,
@@ -79,6 +85,7 @@ pub(super) async fn load_bm25f_candidates_for_terms_broad(
 async fn load_bm25f_candidates_for_terms_bounded(
     pool: &PgPool,
     rooms: &[String],
+    scope: &ScopeFilter,
     terms: &[String],
     temporal_decay: bool,
     decay_now: DateTime<Utc>,
@@ -92,7 +99,7 @@ async fn load_bm25f_candidates_for_terms_bounded(
         return Ok(Vec::new());
     }
 
-    let stats = sqlx::query(
+    let stats_sql = format!(
         r#"SELECT count(*)::bigint AS document_count,
                   coalesce(avg(m.bm25f_title_length)::double precision,1.0) AS avg_title,
                   coalesce(avg(c.bm25f_heading_length)::double precision,1.0) AS avg_heading,
@@ -105,12 +112,17 @@ async fn load_bm25f_candidates_for_terms_bounded(
            WHERE m.room = ANY($1::text[])
              AND m.archived_at IS NULL
              AND m.superseded_by IS NULL
-             AND COALESCE(m.type,'') <> $2"#,
-    )
-    .bind(rooms)
-    .bind(origami::boats::MEMORY_KIND)
-    .fetch_one(pool)
-    .await?;
+             AND COALESCE(m.type,'') <> $2{}"#,
+        scope.predicate("m", 3)
+    );
+    let stats = scope
+        .bind(
+            sqlx::query(&stats_sql)
+                .bind(rooms)
+                .bind(origami::boats::MEMORY_KIND),
+        )
+        .fetch_one(pool)
+        .await?;
     let document_count: i64 = stats.try_get("document_count")?;
     if document_count == 0 {
         return Ok(Vec::new());
@@ -124,7 +136,7 @@ async fn load_bm25f_candidates_for_terms_bounded(
         memory_type: stats.try_get("avg_memory_type")?,
     };
 
-    let frequency_rows = sqlx::query(
+    let frequency_sql = format!(
         r#"WITH terms AS MATERIALIZED (
              SELECT term,plainto_tsquery('simple',term) AS query
              FROM unnest($2::text[]) AS term
@@ -135,7 +147,7 @@ async fn load_bm25f_candidates_for_terms_bounded(
              WHERE m.room = ANY($1::text[])
                AND m.archived_at IS NULL
                AND m.superseded_by IS NULL
-               AND COALESCE(m.type,'') <> $3
+               AND COALESCE(m.type,'') <> $3{}
            )
            SELECT term,
                   count(*) FILTER (
@@ -146,12 +158,17 @@ async fn load_bm25f_candidates_for_terms_bounded(
            CROSS JOIN corpus
            GROUP BY term
            ORDER BY term"#,
-    )
-    .bind(rooms)
-    .bind(&terms)
-    .bind(origami::boats::MEMORY_KIND)
-    .fetch_all(pool)
-    .await?;
+        scope.predicate("m", 4)
+    );
+    let frequency_rows = scope
+        .bind(
+            sqlx::query(&frequency_sql)
+                .bind(rooms)
+                .bind(&terms)
+                .bind(origami::boats::MEMORY_KIND),
+        )
+        .fetch_all(pool)
+        .await?;
     let document_frequency = frequency_rows
         .into_iter()
         .map(|row| {
@@ -162,7 +179,7 @@ async fn load_bm25f_candidates_for_terms_bounded(
         })
         .collect::<Result<BTreeMap<_, _>, sqlx::Error>>()?;
 
-    let rows = sqlx::query(
+    let candidates_sql = format!(
         r#"WITH terms AS MATERIALIZED (
              SELECT term,plainto_tsquery('simple',term) AS query
              FROM unnest($2::text[]) AS term
@@ -176,7 +193,7 @@ async fn load_bm25f_candidates_for_terms_bounded(
            WHERE m.room = ANY($1::text[])
              AND m.archived_at IS NULL
              AND m.superseded_by IS NULL
-             AND COALESCE(m.type,'') <> $4
+             AND COALESCE(m.type,'') <> $4{}
              AND EXISTS (
                SELECT 1 FROM terms
                WHERE c.bm25f_text_tsv @@ terms.query
@@ -197,13 +214,18 @@ async fn load_bm25f_candidates_for_terms_bounded(
                 OR m.bm25f_meta_tsv @@ terms.query
            ) DESC,m.id,c.chunk_index
            LIMIT $3"#,
-    )
-    .bind(rooms)
-    .bind(&terms)
-    .bind(candidate_limit)
-    .bind(origami::boats::MEMORY_KIND)
-    .fetch_all(pool)
-    .await?;
+        scope.predicate("m", 5)
+    );
+    let rows = scope
+        .bind(
+            sqlx::query(&candidates_sql)
+                .bind(rooms)
+                .bind(&terms)
+                .bind(candidate_limit)
+                .bind(origami::boats::MEMORY_KIND),
+        )
+        .fetch_all(pool)
+        .await?;
     // `count(*) OVER()` is evaluated before LIMIT, so `total_matches` is the
     // whole matching pool. A pool wider than the prefilter ceiling means the
     // ranker never saw part of it: say so for any term count, since a

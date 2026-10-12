@@ -2,6 +2,7 @@ use crate::authority::Authority;
 use crate::backup::BackupOutcome;
 use crate::error::DomainError;
 use crate::lesson_triggers::LessonTriggerSpec;
+use crate::operator::{MemoryScope, OperatorKey};
 use crate::room::RoomKey;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -136,6 +137,8 @@ pub struct RememberRequest {
     thread_keys: Vec<String>,
     tags: Vec<String>,
     triggers: LessonTriggerSpec,
+    operator: Option<OperatorKey>,
+    memory_scope: MemoryScope,
 }
 
 impl RememberRequest {
@@ -417,7 +420,36 @@ impl RememberRequest {
             thread_keys,
             tags,
             triggers,
+            operator: None,
+            memory_scope: MemoryScope::Company,
         })
+    }
+
+    /// Stamp the writer and the memory's reach. Memory kind only: lessons stay
+    /// off the operator axis in this cut. An absent scope follows the writer
+    /// (`up` with an operator, `company` without one). A row without a writer
+    /// is visible to everyone, so `up` or `private` without one is refused
+    /// rather than stored as a promise the House cannot keep.
+    pub fn with_operator(
+        mut self,
+        operator: Option<OperatorKey>,
+        scope: Option<MemoryScope>,
+    ) -> Result<Self, DomainError> {
+        if self.kind.is_lesson() && (operator.is_some() || scope.is_some()) {
+            return Err(DomainError::InvalidField {
+                field: "operator/memory scope".into(),
+                kind: self.kind.as_str().into(),
+            });
+        }
+        if operator.is_none() && scope.is_some_and(|scope| scope != MemoryScope::Company) {
+            return Err(DomainError::InvalidField {
+                field: "memory scope up/private without a Host operator".into(),
+                kind: self.kind.as_str().into(),
+            });
+        }
+        self.memory_scope = scope.unwrap_or(MemoryScope::default_for(operator.as_ref()));
+        self.operator = operator;
+        Ok(self)
     }
 
     pub fn room(&self) -> &RoomKey {
@@ -488,6 +520,12 @@ impl RememberRequest {
     }
     pub fn triggers(&self) -> &LessonTriggerSpec {
         &self.triggers
+    }
+    pub fn operator(&self) -> Option<&OperatorKey> {
+        self.operator.as_ref()
+    }
+    pub const fn memory_scope(&self) -> MemoryScope {
+        self.memory_scope
     }
 }
 

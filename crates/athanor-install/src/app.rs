@@ -57,6 +57,7 @@ fn host_configs(
             nats_url: Some(nats_url.clone()),
             nats_auth: secrets.host_nats_auth.clone(),
             knock_autonomy: knock_autonomy.clone(),
+            operator: None,
         })
         .collect())
 }

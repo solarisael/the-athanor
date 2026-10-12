@@ -14,9 +14,9 @@ use crate::config::HostConfig;
 use crate::server::authorized;
 use akasha::insula_writer::{EmitterSpan, end_span, start_span};
 use akasha::{
-    LessonTimelineParams, MemoryReadParams, MemoryTimelineParams, OutcomeClass, QuestBoardParams,
-    QuestEvidenceParams, TrustedBinding, hallway_inbox, hallway_messages, lesson_timeline,
-    memory_read, memory_timeline, quest_board, quest_evidence,
+    LessonTimelineParams, MemoryReadParams, MemoryReader, MemoryTimelineParams, OutcomeClass,
+    QuestBoardParams, QuestEvidenceParams, TrustedBinding, hallway_inbox, hallway_messages,
+    lesson_timeline, memory_read, memory_timeline, quest_board, quest_evidence,
 };
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{DefaultBodyLimit, Request, State};
@@ -50,6 +50,8 @@ const DEFAULT_BOARD_LIMIT: u32 = 50;
 pub(crate) struct PanelHost {
     house_id: Arc<String>,
     room: Arc<String>,
+    /// The Host's configured operator; Pulse memory reads see what it may.
+    operator: Arc<Option<String>>,
     spirit: Arc<String>,
     session: Arc<String>,
     bearer_token: Arc<String>,
@@ -115,12 +117,20 @@ impl PanelHost {
         Self {
             house_id: Arc::new(config.house_id.clone()),
             room: Arc::new(config.room.clone()),
+            operator: Arc::new(config.operator.clone()),
             spirit: Arc::new(config.spirit.clone()),
             session: Arc::new(format!("host:{}", config.room)),
             bearer_token: Arc::new(config.bearer_token.clone()),
             observer_binding,
             pool,
             operations: Arc::new(Semaphore::new(MAX_CONCURRENT_OPERATIONS)),
+        }
+    }
+
+    fn memory_reader(&self) -> MemoryReader<'_> {
+        MemoryReader {
+            room: self.room.as_str(),
+            operator: self.operator.as_deref(),
         }
     }
 
@@ -354,7 +364,7 @@ async fn read_memory_timeline(
     if let Err(refusal) = request.validate() {
         return refused(refusal);
     }
-    substrate_response(memory_timeline(pool, &state.room, request).await)
+    substrate_response(memory_timeline(pool, state.memory_reader(), request).await)
 }
 
 async fn read_memory(
@@ -374,7 +384,7 @@ async fn read_memory(
     if let Err(refusal) = request.validate() {
         return refused(refusal);
     }
-    substrate_response(memory_read(pool, &state.room, request).await)
+    substrate_response(memory_read(pool, state.memory_reader(), request).await)
 }
 
 async fn read_lesson_timeline(

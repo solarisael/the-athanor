@@ -1,4 +1,5 @@
 use crate::error::DomainError;
+use crate::operator::OperatorKey;
 use crate::room::RoomKey;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -112,6 +113,7 @@ pub struct RecallRequest {
     projection: RecallProjection,
     rerank_candidate_top_k: u32,
     mode: RecallMode,
+    operator: Option<OperatorKey>,
 }
 
 impl RecallRequest {
@@ -159,6 +161,7 @@ impl RecallRequest {
             projection: RecallProjection::Auto,
             rerank_candidate_top_k: 0,
             mode: RecallMode::Mixed,
+            operator: None,
         })
     }
 
@@ -192,6 +195,13 @@ impl RecallRequest {
         self
     }
 
+    /// Name the reader. Only the Host sets this; a request without one reads
+    /// as no registered operator.
+    pub fn with_operator(mut self, operator: Option<OperatorKey>) -> Self {
+        self.operator = operator;
+        self
+    }
+
     pub fn room(&self) -> &RoomKey {
         &self.room
     }
@@ -221,6 +231,9 @@ impl RecallRequest {
     }
     pub const fn mode(&self) -> RecallMode {
         self.mode
+    }
+    pub fn operator(&self) -> Option<&OperatorKey> {
+        self.operator.as_ref()
     }
 }
 

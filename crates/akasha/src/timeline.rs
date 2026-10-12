@@ -11,9 +11,29 @@
 //! v1 ceiling, tolerable for a registry that changes a few rows a day.
 
 use crate::config::{AppError, ROOM_KEY_RE};
+use crate::recall::scope::ScopeFilter;
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
+
+/// Who reads a Pulse panel: the Host's room and, when the Host names one, its
+/// operator. Both come from the Host's own configuration, never the request.
+/// A bare room reads as no operator: company-wide and pre-axis rows only once
+/// the House has operators, and everything in scope while it has none.
+#[derive(Clone, Copy, Debug)]
+pub struct MemoryReader<'a> {
+    pub room: &'a str,
+    pub operator: Option<&'a str>,
+}
+
+impl<'a> From<&'a str> for MemoryReader<'a> {
+    fn from(room: &'a str) -> Self {
+        Self {
+            room,
+            operator: None,
+        }
+    }
+}
 
 const TIMELINE_EXCERPT_CHARS: i32 = 500;
 const LESSON_FAMILIES: [&str; 5] = ["coding", "project", "writing", "design", "audio"];
@@ -84,11 +104,13 @@ pub struct MemoryTimelineResult {
     pub memories: Vec<MemoryTimelineItem>,
 }
 
-pub async fn memory_timeline(
+pub async fn memory_timeline<'a>(
     pool: &PgPool,
-    authorized_room: &str,
+    reader: impl Into<MemoryReader<'a>>,
     request: MemoryTimelineParams,
 ) -> Result<MemoryTimelineResult, AppError> {
+    let reader = reader.into();
+    let authorized_room = reader.room;
     if request
         .room
         .as_deref()
@@ -103,26 +125,32 @@ pub async fn memory_timeline(
         Some(cursor) => (Some(cursor.created_at), Some(cursor.id)),
         None => (None, None),
     };
-    let rows = sqlx::query(
+    let scope = ScopeFilter::load(pool, reader.operator, &mut Vec::new()).await?;
+    let sql = format!(
         "SELECT id,room,type,COALESCE(title,'untitled') AS title,
                 LEFT(body,$5) AS excerpt,source_path,created_at
-         FROM memories
+         FROM memories m
          WHERE archived_at IS NULL AND superseded_by IS NULL AND type<>$6
            AND ($1::text IS NULL OR room=$1)
            AND room IN ($7, 'house')
-           AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3))
+           AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3)){}
          ORDER BY created_at DESC,id DESC
          LIMIT $4",
-    )
-    .bind(&request.room)
-    .bind(before_created_at)
-    .bind(before_id)
-    .bind(i64::from(request.limit))
-    .bind(TIMELINE_EXCERPT_CHARS)
-    .bind(origami::boats::MEMORY_KIND)
-    .bind(authorized_room)
-    .fetch_all(pool)
-    .await?;
+        scope.predicate("m", 8)
+    );
+    let rows = scope
+        .bind(
+            sqlx::query(&sql)
+                .bind(&request.room)
+                .bind(before_created_at)
+                .bind(before_id)
+                .bind(i64::from(request.limit))
+                .bind(TIMELINE_EXCERPT_CHARS)
+                .bind(origami::boats::MEMORY_KIND)
+                .bind(authorized_room),
+        )
+        .fetch_all(pool)
+        .await?;
     let memories = rows
         .into_iter()
         .map(|row| {
@@ -182,21 +210,27 @@ pub struct MemoryReadResult {
     pub memory: MemoryRecord,
 }
 
-pub async fn memory_read(
+/// A row the reader could not recall reads exactly like a missing one, and a
+/// visible row names its successor only when that successor is visible too.
+pub async fn memory_read<'a>(
     pool: &PgPool,
-    authorized_room: &str,
+    reader: impl Into<MemoryReader<'a>>,
     request: MemoryReadParams,
 ) -> Result<MemoryReadResult, AppError> {
-    let row = sqlx::query(
-        "SELECT id,room,type,title,date,source_path,threads,superseded_by,
+    let reader = reader.into();
+    let scope = ScopeFilter::load(pool, reader.operator, &mut Vec::new()).await?;
+    let sql = format!(
+        "SELECT id,room,type,title,date,source_path,threads,{} AS superseded_by,
                 archived_at,created_at,updated_at,body
-         FROM memories WHERE id=$1 AND room IN ($2, 'house')",
-    )
-    .bind(request.id)
-    .bind(authorized_room)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| refusal("unknown_memory", "no memory has this id"))?;
+         FROM memories m WHERE id=$1 AND room IN ($2, 'house'){}",
+        scope.visible_successor("m", 3),
+        scope.predicate("m", 3)
+    );
+    let row = scope
+        .bind(sqlx::query(&sql).bind(request.id).bind(reader.room))
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| refusal("unknown_memory", "no memory has this id"))?;
     Ok(MemoryReadResult {
         ok: true,
         memory: MemoryRecord {

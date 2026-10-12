@@ -257,6 +257,7 @@ pub async fn giga_promote(
                 &[],
                 metadata.clone(),
                 prepared,
+                None,
             )
             .await?;
             (

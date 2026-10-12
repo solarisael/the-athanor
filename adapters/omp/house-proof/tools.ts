@@ -151,10 +151,10 @@ export async function readRustCanon({ binding, room, signal, ...params }) {
   return requestRustDomain(binding, "canon_read", params, signal, false, room);
 }
 
-export async function writeRustMemory({ binding, room, title, body, threads, continues, supersedes, project = undefined, backup = undefined, signal }) {
+export async function writeRustMemory({ binding, room, title, body, threads, continues, supersedes, project = undefined, scope = undefined, backup = undefined, signal }) {
   try {
     const value = await requestOrgan(binding, "remember", {
-      kind: "memory", title, body, threads, continues, supersedes, project, backup,
+      kind: "memory", title, body, threads, continues, supersedes, project, scope, backup,
     }, { signal, timeoutMs: WRITE_TIMEOUT_MS, write: true, targetScope: targetScope(binding, room) });
     return { ok: true, ...value, id: value.memory_id, sourcePath: value.source_path };
   } catch (error) {
@@ -477,7 +477,7 @@ export function registerSolarisaelTools(pi, release) {
       shape: z.string().optional().describe("lesson kinds: shape taxonomy value (e.g. process, naming, refusal)."),
       voice: z.string().optional().describe("coding, writing, or design lessons: voice (e.g. craft, room-style)."),
       register: z.array(z.string()).optional().describe("writing/design lessons: contexts where the rule applies (e.g. fiction, product-work)."),
-      scope: z.string().optional().describe("coding-lesson: scope (house or a room name)."),
+      scope: z.string().optional().describe("memory: who can read it - company (everyone), up (you and people above you in your unit), or private (only you); the House picks up when it knows your operator, else company. coding-lesson: scope (house or a room name)."),
       project: z.string().optional().describe("Memory: stable project key; the Host stores it in shared House memory. Project-lesson: required project name. Coding-lesson: optional project name."),
       proofPattern: z.string().optional().describe("coding, project, or design lessons: the proof pattern."),
       triggerContext: z.string().optional().describe("lesson kinds: when the lesson applies and should be retrieved."),
@@ -506,6 +506,7 @@ export function registerSolarisaelTools(pi, release) {
             threads: params.threads,
             continues: params.continues,
             supersedes: params.supersedes,
+            scope: params.scope,
             backup: params.backup,
             signal,
           })

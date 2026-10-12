@@ -305,6 +305,7 @@ fn bound_request(
         "requesterSpirit",
         "requesterSession",
         "successorSession",
+        "operator",
     ] {
         if params.contains_key(key) {
             return Err(ProtocolError::InvalidParams(format!(
@@ -369,6 +370,15 @@ fn bind_identity(
         }
         VaultRecall => put(params, "room_dir", &host.room_dir.to_string_lossy()),
         _ => {}
+    }
+    // The operator axis: the Host names the reader and the writer. Lessons stay
+    // off the axis, so only a memory write carries one.
+    let memory_write =
+        operation == Remember && params.get("kind").and_then(Value::as_str) == Some("memory");
+    if let Some(operator) = &host.operator
+        && (operation == Recall || memory_write)
+    {
+        put(params, "operator", operator);
     }
     let draft = operation == QuestPost
         && matches!(

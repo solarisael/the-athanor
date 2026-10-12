@@ -1,8 +1,9 @@
 use super::{chunk_body, derive_dates, embed, normalize_strings, token_estimate};
 use crate::config::{AppError, Config, EmbeddingMode, HTTP_CLIENT};
+use crate::recall::scope::ScopeFilter;
 use crate::settings::RoomSettings;
 use chrono::NaiveDate;
-use hearth::ThreadContinuation;
+use hearth::{MemoryScope, OperatorKey, ThreadContinuation};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use std::collections::{BTreeSet, HashSet};
@@ -86,6 +87,7 @@ pub(crate) async fn write_memory_tx(
     supersedes: &[u64],
     meta: Value,
     prepared: &PreparedMemoryWrite,
+    axis: Option<(&OperatorKey, MemoryScope)>,
 ) -> Result<(i64, bool), AppError> {
     // One jsonb row serves both branches: keys are `memories` column names
     // (0001_initial.sql:19), matched by NAME. The column lists stay written out
@@ -101,15 +103,18 @@ pub(crate) async fn write_memory_tx(
         "body": body,
         "threads": prepared.threads,
         "meta": meta,
+        "operator": axis.map(|(operator, _)| operator.as_str()),
+        "scope": axis.map_or(MemoryScope::Company, |(_, scope)| scope).as_str(),
     });
+    let operator = axis.map(|(operator, _)| operator.as_str());
 
     let (memory_id, inserted) = if memory_type == origami::boats::MEMORY_KIND {
         let inserted_id: Option<i64> = sqlx::query_scalar(
             "INSERT INTO memories
-             (room,type,date,dates,title,source_path,body,threads,meta)
-             SELECT room,type,date,dates,title,source_path,body,threads,meta
+             (room,type,date,dates,title,source_path,body,threads,meta,operator,scope)
+             SELECT room,type,date,dates,title,source_path,body,threads,meta,operator,scope
              FROM jsonb_populate_record(NULL::memories, $1)
-             ON CONFLICT (room,source_path) DO NOTHING
+             ON CONFLICT (room,(COALESCE(operator,'')),source_path) DO NOTHING
              RETURNING id",
         )
         .bind(row)
@@ -120,11 +125,12 @@ pub(crate) async fn write_memory_tx(
         } else {
             let existing: Option<(i64, String, String)> = sqlx::query_as(
                 "SELECT id,type,body FROM memories
-                 WHERE room=$1 AND source_path=$2
+                 WHERE room=$1 AND source_path=$2 AND operator IS NOT DISTINCT FROM $3
                  FOR KEY SHARE",
             )
             .bind(room)
             .bind(source_path)
+            .bind(operator)
             .fetch_optional(&mut **tx)
             .await?;
             match existing {
@@ -141,12 +147,15 @@ pub(crate) async fn write_memory_tx(
             }
         }
     } else {
+        // A memory is (room, writer, source_path): a second operator naming
+        // the same path gets its own row, so this upsert only ever corrects
+        // the writer's own memory.
         sqlx::query_as(
             "INSERT INTO memories
-             (room,type,date,dates,title,source_path,body,threads,meta)
-             SELECT room,type,date,dates,title,source_path,body,threads,meta
+             (room,type,date,dates,title,source_path,body,threads,meta,operator,scope)
+             SELECT room,type,date,dates,title,source_path,body,threads,meta,operator,scope
              FROM jsonb_populate_record(NULL::memories, $1)
-             ON CONFLICT (room,source_path) DO UPDATE
+             ON CONFLICT (room,(COALESCE(operator,'')),source_path) DO UPDATE
              SET type=EXCLUDED.type,date=EXCLUDED.date,dates=EXCLUDED.dates,title=EXCLUDED.title,
                  body=EXCLUDED.body,threads=EXCLUDED.threads,meta=EXCLUDED.meta
              RETURNING id,(xmax=0) AS inserted",
@@ -194,19 +203,25 @@ pub(crate) async fn write_memory_tx(
     .bind(&prepared.threads)
     .execute(&mut **tx)
     .await?;
+    // A writer retires only its own memories in this room. A missing ID, a
+    // foreign room, and another operator's row read the same, so the refusal
+    // never confirms that a hidden row exists.
     for old_id in supersedes.iter().copied().collect::<BTreeSet<_>>() {
         let old_id = bigint(old_id, "supersedes ID")?;
-        let changed = sqlx::query(
+        if old_id == memory_id {
+            continue;
+        }
+        let retired = sqlx::query(
             "UPDATE memories SET superseded_by=$1
-             WHERE id=$2 AND room=$3 AND id<>$1",
+             WHERE id=$2 AND room=$3 AND operator IS NOT DISTINCT FROM $4",
         )
         .bind(memory_id)
         .bind(old_id)
         .bind(room)
+        .bind(operator)
         .execute(&mut **tx)
-        .await?
-        .rows_affected();
-        if changed != 1 {
+        .await?;
+        if retired.rows_affected() == 0 {
             return Err(AppError::Invalid(
                 "superseded memory must exist in the destination room".into(),
             ));
@@ -268,6 +283,7 @@ pub(super) async fn write_continuations_tx(
     room: &str,
     memory_id: i64,
     continuations: &[ThreadContinuation],
+    writer_scope: &ScopeFilter,
 ) -> Result<(), AppError> {
     let mut seen = HashSet::new();
     for continuation in continuations {
@@ -279,7 +295,9 @@ pub(super) async fn write_continuations_tx(
         if previous_memory_id == memory_id {
             return Err(AppError::Invalid("a memory cannot continue itself".into()));
         }
-        let events = sqlx::query(
+        // A predecessor the writer cannot read fails exactly like a missing
+        // one, so a continuation never confirms a hidden row.
+        let sql = format!(
             "SELECT current_event.thread_id,
                     current_event.id AS next_event_id,
                     previous_event.id AS previous_event_id
@@ -289,15 +307,20 @@ pub(super) async fn write_continuations_tx(
              JOIN thread_events previous_event
                ON previous_event.thread_id=t.id AND previous_event.memory_id=$4
              JOIN memories previous_memory ON previous_memory.id=previous_event.memory_id
-             WHERE t.room=$1 AND t.thread_key=$2 AND previous_memory.room=$1
+             WHERE t.room=$1 AND t.thread_key=$2 AND previous_memory.room=$1{}
              FOR KEY SHARE OF t,current_event,previous_event,previous_memory",
-        )
-        .bind(room)
-        .bind(thread_key)
-        .bind(memory_id)
-        .bind(previous_memory_id)
-        .fetch_optional(&mut **tx)
-        .await?;
+            writer_scope.predicate("previous_memory", 5)
+        );
+        let events = writer_scope
+            .bind(
+                sqlx::query(&sql)
+                    .bind(room)
+                    .bind(thread_key)
+                    .bind(memory_id)
+                    .bind(previous_memory_id),
+            )
+            .fetch_optional(&mut **tx)
+            .await?;
         let Some(events) = events else {
             return Err(AppError::Invalid(format!(
                 "previous memory {previous_memory_id} must share room {room} and thread {thread_key}"

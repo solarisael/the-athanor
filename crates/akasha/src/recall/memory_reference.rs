@@ -1,4 +1,5 @@
 use super::bounded_excerpt;
+use super::scope::ScopeFilter;
 use crate::config::AppError;
 use hearth::{MANUAL_RECORD_CAP, RecallProjection};
 use regex::Regex;
@@ -138,13 +139,15 @@ fn bare_integer(token: &str) -> Option<&str> {
 
 /// Room-scoped primary-key lookup. A row outside `rooms` is refused by ID in
 /// `warnings` and its content never leaves the database; a missing row is
-/// reported the same way. Found rows come back as retrieval candidates in
+/// reported the same way. A row the operator scope hides is never read, so it
+/// reads as not found. Found rows come back as retrieval candidates in
 /// reference order, ready to lead the evidence. Under a manual projection each
 /// candidate also carries `body`, the complete authoritative record; the auto
 /// projection keeps only the bounded excerpt.
 pub(super) async fn resolve_memory_references(
     pool: &PgPool,
     rooms: &[String],
+    scope: &ScopeFilter,
     references: &MemoryReferences,
     projection: RecallProjection,
     warnings: &mut Vec<String>,
@@ -152,15 +155,18 @@ pub(super) async fn resolve_memory_references(
     if references.is_empty() {
         return Ok(Vec::new());
     }
-    let rows = sqlx::query(
+    let sql = format!(
         "SELECT id,room,source_path,coalesce(title,'') AS title,body,
-                archived_at IS NOT NULL AS archived,superseded_by
-         FROM memories
-         WHERE id = ANY($1::bigint[])",
-    )
-    .bind(&references.ids)
-    .fetch_all(pool)
-    .await?;
+                archived_at IS NOT NULL AS archived,{} AS superseded_by
+         FROM memories m
+         WHERE id = ANY($1::bigint[]){}",
+        scope.visible_successor("m", 2),
+        scope.predicate("m", 2)
+    );
+    let rows = scope
+        .bind(sqlx::query(&sql).bind(&references.ids))
+        .fetch_all(pool)
+        .await?;
     let mut candidates = Vec::new();
     for id in &references.ids {
         let Some(row) = rows
@@ -254,6 +260,7 @@ pub(super) fn apply_manual_record_cap(
 pub(super) async fn hydrate_record_bodies(
     pool: &PgPool,
     rooms: &[String],
+    scope: &ScopeFilter,
     candidates: &mut Vec<serde_json::Value>,
     warnings: &mut Vec<String>,
 ) -> Result<(), AppError> {
@@ -267,14 +274,15 @@ pub(super) async fn hydrate_record_bodies(
     if wanted.is_empty() {
         return Ok(());
     }
-    let rows = sqlx::query(
-        "SELECT id,body FROM memories
-         WHERE id = ANY($1::bigint[]) AND room = ANY($2::text[])",
-    )
-    .bind(&wanted)
-    .bind(rooms)
-    .fetch_all(pool)
-    .await?;
+    let sql = format!(
+        "SELECT id,body FROM memories m
+         WHERE id = ANY($1::bigint[]) AND room = ANY($2::text[]){}",
+        scope.predicate("m", 3)
+    );
+    let rows = scope
+        .bind(sqlx::query(&sql).bind(&wanted).bind(rooms))
+        .fetch_all(pool)
+        .await?;
     let mut bodies = std::collections::BTreeMap::new();
     for row in rows {
         let id: i64 = row.try_get("id")?;

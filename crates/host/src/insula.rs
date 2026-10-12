@@ -726,6 +726,7 @@ mod tests {
             nats_url: None,
             nats_auth: None,
             knock_autonomy: KnockAutonomy::Off,
+            operator: None,
         }
     }
 

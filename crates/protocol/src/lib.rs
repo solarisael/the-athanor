@@ -22,9 +22,9 @@ use hearth::{
     GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
     GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
     GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
-    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, RecallMode,
-    RecallProjection, RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails,
-    RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
+    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, MemoryScope,
+    OperatorKey, RecallMode, RecallProjection, RecallRequest, RememberKind, RememberLessonDetails,
+    RememberMemoryDetails, RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
     lesson_triggers::LessonTriggerSpec,
 };
 use serde::{
@@ -134,6 +134,8 @@ pub struct RememberParams {
     pub voice: Option<String>,
     #[serde(default)]
     pub register: Vec<String>,
+    /// Lesson kinds: lesson scope (`house` or a room). Memory: how far the
+    /// memory travels, `company`, `up`, or `private`.
     #[serde(default)]
     pub scope: Option<String>,
     #[serde(default)]
@@ -164,6 +166,10 @@ pub struct RememberParams {
     pub repeat_cooldown_secs: Option<i32>,
     #[serde(default)]
     pub backup: Option<bool>,
+    /// Stamped by the Host from its own configuration; a caller-supplied
+    /// value is refused at the organ boundary. Memory kind only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator: Option<String>,
 }
 
 /// Paper boats keep a backup at the session boundary.
@@ -228,6 +234,10 @@ pub struct RecallParams {
     /// peers read the same bytes as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    /// The reader, stamped by the Host; a caller-supplied value is refused at
+    /// the organ boundary. Skipped on the wire while absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -1493,6 +1503,11 @@ impl TryFrom<RecallParams> for RecallRequest {
     fn try_from(params: RecallParams) -> Result<Self, Self::Error> {
         let room =
             RoomKey::new(params.room).map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
+        let operator = params
+            .operator
+            .map(OperatorKey::new)
+            .transpose()
+            .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
         RecallRequest::new(
             room,
             params.query,
@@ -1518,7 +1533,7 @@ impl TryFrom<RecallParams> for RecallRequest {
                     .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?,
                 None => RecallMode::Mixed,
             };
-            Ok(request.with_mode(mode))
+            Ok(request.with_mode(mode).with_operator(operator))
         })
     }
 }
@@ -1670,7 +1685,8 @@ impl TryFrom<RememberParams> for RememberRequest {
             && (params.source_path.is_some()
                 || !params.threads.is_empty()
                 || !params.continues.is_empty()
-                || !params.supersedes.is_empty())
+                || !params.supersedes.is_empty()
+                || params.operator.is_some())
         {
             return Err(ProtocolError::InvalidParams(
                 "memory-only fields are not valid for lessons".into(),
@@ -1681,7 +1697,6 @@ impl TryFrom<RememberParams> for RememberRequest {
                 || params.shape.is_some()
                 || params.voice.is_some()
                 || !params.register.is_empty()
-                || params.scope.is_some()
                 || params.project.is_some()
                 || params.proof_pattern.is_some()
                 || params.trigger_context.is_some()
@@ -1774,6 +1789,17 @@ impl TryFrom<RememberParams> for RememberRequest {
                 },
             )
         } else {
+            let operator = params
+                .operator
+                .map(OperatorKey::new)
+                .transpose()
+                .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
+            let scope = params
+                .scope
+                .as_deref()
+                .map(MemoryScope::parse)
+                .transpose()
+                .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?;
             RememberRequest::new_memory(
                 room,
                 params.title,
@@ -1786,6 +1812,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                     backup: params.backup.unwrap_or_else(default_remember_backup),
                 },
             )
+            .and_then(|request| request.with_operator(operator, scope))
         };
         result.map_err(|e| ProtocolError::InvalidParams(e.to_string()))
     }
@@ -4907,6 +4934,7 @@ mod tests {
             interrupt_mode: None,
             repeat_cooldown_secs: None,
             backup: Some(true),
+            operator: None,
         };
         assert_eq!(
             RememberRequest::try_from(params).unwrap().supersedes(),
@@ -4941,6 +4969,7 @@ mod tests {
             interrupt_mode: None,
             repeat_cooldown_secs: None,
             backup: Some(true),
+            operator: None,
         };
         assert_eq!(
             RememberRequest::try_from(params).unwrap().supersedes(),
@@ -4975,6 +5004,7 @@ mod tests {
                 interrupt_mode: None,
                 repeat_cooldown_secs: None,
                 backup: Some(true),
+                operator: None,
             };
             assert!(matches!(
                 RememberRequest::try_from(params),

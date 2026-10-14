@@ -1,4 +1,4 @@
-use super::bounded_excerpt;
+use super::evidence::bounded_excerpt;
 use super::scope::ScopeFilter;
 use crate::config::AppError;
 use hearth::{MANUAL_RECORD_CAP, RecallProjection};

@@ -32,8 +32,8 @@ use ::protocol::restart::{
 };
 use chrono::{DateTime, TimeDelta, Utc};
 use omp_keeper::protocol::{
-    HOUSE_UNREACHABLE_CODE, METHOD_RESTART_CLAIM, METHOD_RESTART_STATUS,
-    METHOD_RESTART_TRANSITION, STORM_REFUSAL_CODE,
+    HOUSE_UNREACHABLE_CODE, METHOD_RESTART_CLAIM, METHOD_RESTART_STATUS, METHOD_RESTART_TRANSITION,
+    STORM_REFUSAL_CODE,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -88,7 +88,9 @@ enum Away {
 fn away(ask: u32) -> Option<Away> {
     let spec = std::env::var("FAKE_SUBSTRATE_AWAY").ok()?;
     spec.split(',').find_map(|stretch| {
-        let (range, how) = stretch.split_once(':').expect("away stretch is first-last:how");
+        let (range, how) = stretch
+            .split_once(':')
+            .expect("away stretch is first-last:how");
         let (first, last) = range.split_once('-').expect("away range is first-last");
         let first: u32 = first.parse().expect("away first ask");
         let last: u32 = last.parse().expect("away last ask");
@@ -132,7 +134,9 @@ fn main() {
         let response = match away(ask) {
             Some(Away::Gone) => std::process::exit(0),
             // the real substrate's own words for a Postgres it cannot reach
-            Some(Away::Database) => refusal(&id, HOUSE_UNREACHABLE_CODE, "database connection failed"),
+            Some(Away::Database) => {
+                refusal(&id, HOUSE_UNREACHABLE_CODE, "database connection failed")
+            }
             None => match refuse_bad_shape(&method, &params) {
                 Some(reason) => refusal(&id, "invalid_params", &reason),
                 None => answer(&id, &method, &mode, &params, &mut script),
@@ -324,6 +328,7 @@ fn verified_intent() -> RestartStatusIntent {
         mode: RestartMode::Resume,
         session_id: Some(SESSION_ID.to_string()),
         reason: String::new(),
+        requester_instance_sha256: keeper_child_digest(),
         deadlines: RestartStatusDeadlines {
             expires_at: instant(REQUESTED_TTL_SECS),
             exiting_deadline_at: None,
@@ -339,6 +344,7 @@ fn stranger_intent() -> RestartStatusIntent {
         mode: RestartMode::Resume,
         session_id: Some("session-2".to_string()),
         reason: String::new(),
+        requester_instance_sha256: None,
         deadlines: RestartStatusDeadlines {
             expires_at: instant(REQUESTED_TTL_SECS),
             exiting_deadline_at: None,
@@ -354,6 +360,7 @@ fn exiting_intent(exiting_offset_secs: i64) -> RestartStatusIntent {
         mode: RestartMode::Resume,
         session_id: Some(SESSION_ID.to_string()),
         reason: String::new(),
+        requester_instance_sha256: keeper_child_digest(),
         deadlines: RestartStatusDeadlines {
             expires_at: instant(REQUESTED_TTL_SECS),
             exiting_deadline_at: Some(instant(exiting_offset_secs)),
@@ -375,12 +382,22 @@ fn relaunching_intent(script: &Script, deadlines: &RestartStageDeadlines) -> Res
         mode: RestartMode::Resume,
         session_id: Some(SESSION_ID.to_string()),
         reason: String::new(),
+        requester_instance_sha256: keeper_child_digest(),
         deadlines: RestartStatusDeadlines {
             expires_at: instant(REQUESTED_TTL_SECS),
             exiting_deadline_at: None,
             relaunching_deadline_at: Some((anchor + span(deadlines.relaunching_secs)).to_rfc3339()),
         },
     }
+}
+
+/// The keeper hands its child's instance id to every substrate child too, so
+/// this fixture can report the intent as the keeper's own child's request.
+fn keeper_child_digest() -> Option<String> {
+    use sha2::{Digest, Sha256};
+    std::env::var("ATHANOR_KEEPER_INSTANCE_ID")
+        .ok()
+        .map(|id| format!("{:x}", Sha256::digest(id.as_bytes())))
 }
 
 fn stage_deadlines(mode: &str) -> RestartStageDeadlines {

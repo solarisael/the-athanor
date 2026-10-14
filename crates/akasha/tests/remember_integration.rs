@@ -437,22 +437,20 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                 sqlx::raw_sql(migration!("0001_initial.sql"))
                     .execute(&pool)
                     .await?;
-                // recall's read path spans these migrations: 0006 thread graph,
-                // 0009 bm25f columns, 0010 semantic vocabulary, 0015 canon
-                // authority. An isolated schema missing one fails on shadowed
-                // tables, not on the contract under test.
                 for sql in [
                     migration!("0006_memory_thread_graph.sql"),
+                    migration!("0008_unified_lessons.sql"),
                     migration!("0009_bm25f_memory_search.sql"),
                     migration!("0010_semantic_vocabulary.sql"),
                     migration!("0015_canon_authority.sql"),
+                    migration!("0028_room_settings.sql"),
                 ] {
                     sqlx::raw_sql(sql).execute(&pool).await?;
                 }
 
                 let room = "temporal-decay-integration";
                 let body = "identical lexical durability recall evidence";
-                let old_anchor = (chrono::Utc::now() - chrono::Duration::days(28)).to_rfc3339();
+                let old_anchor = (chrono::Utc::now() - chrono::Duration::days(120)).to_rfc3339();
                 let giga_meta = |durability: f64| {
                     serde_json::json!({
                         "origin": "giga-promotion",
@@ -486,6 +484,13 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     giga_meta(1.0),
                     Some(replacement_id),
                 )
+                .await?;
+                sqlx::query(
+                    "UPDATE memories SET created_at=now()-interval '60 days'
+                     WHERE room=$1 AND source_path='c-legacy'",
+                )
+                .bind(room)
+                .execute(&pool)
                 .await?;
 
                 let cfg = Config {
@@ -523,9 +528,20 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                     .find(|chunk| chunk["source_path"] == "c-legacy")
                     .ok_or("legacy lexical fixture must be recalled")?;
                 require(
-                    legacy["temporal_weight"].as_f64() == Some(1.0)
+                    legacy["temporal_weight"]
+                        .as_f64()
+                        .is_some_and(|weight| (weight - 0.5).abs() < 0.0001)
                         && legacy["durability"].is_null(),
-                    "legacy metadata must retain weight one",
+                    "an unrated 60-day-old memory must retain half its attention weight",
+                )?;
+                let legacy_candidate = decayed
+                    .retrieval_candidates
+                    .iter()
+                    .find(|candidate| candidate["source_path"] == "c-legacy")
+                    .ok_or("unrated memory must survive candidate fusion")?;
+                require(
+                    legacy_candidate["temporal_weight"] == legacy["temporal_weight"],
+                    "BM25F and content fusion must use the same age weight",
                 )?;
                 let relevance = decayed
                     .content_chunks

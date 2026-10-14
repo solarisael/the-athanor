@@ -17,8 +17,7 @@ const rootDocumentationFiles = [
   "USAGE.md",
   "IDENTITY_GUIDE.md",
   "CHANGELOG.md",
-  "HOUSE.md",
-  "LESSON_MAP.md"
+  "HOUSE.md"
 ];
 
 const substitutions = [
@@ -376,7 +375,7 @@ function rewriteMarkdownLinks(markdown, source, target, routes) {
     const hashAt = destination.indexOf("#");
     const pathPart = hashAt === -1 ? destination : destination.slice(0, hashAt);
     const hash = hashAt === -1 ? "" : destination.slice(hashAt);
-    if (!pathPart.toLowerCase().endsWith(".md") && !pathPart.endsWith("/")) return match;
+    if (!/\.(?:md|jsonl)$/i.test(pathPart) && !pathPart.endsWith("/")) return match;
 
     const resolvedSource = resolve(dirname(source), decodeURIComponent(pathPart));
     const resolvedTarget = routes.get(resolvedSource);
@@ -384,7 +383,7 @@ function rewriteMarkdownLinks(markdown, source, target, routes) {
 
     const href = resolvedTarget === target
       ? hash || "./"
-      : `${relativeRouteHref(target, resolvedTarget)}${hash}`;
+      : `${resolvedTarget.endsWith(".jsonl") ? relativeFileHref(target, resolvedTarget) : relativeRouteHref(target, resolvedTarget)}${hash}`;
     return `${prefix}${href}${title}${suffix}`;
   });
 }
@@ -456,7 +455,7 @@ function markdownTitle(markdown, source) {
 }
 
 function documentationPage(title, body, target, routes, stylesRevision) {
-  const docsIndex = routes.get(resolve(sourceDocs, "README.md"));
+  const docsIndex = routes.get(resolve(root, "README.md"));
   const homeHref = relativeRouteHref(target, join(output, "index.html"));
   const appHref = relativeRouteHref(target, join(outputApp, "index.html"));
   const docsHref = relativeRouteHref(target, docsIndex);
@@ -508,6 +507,7 @@ async function buildDocumentation(siteStyles) {
     resolve(source),
     documentationOutputPath(source)
   ]));
+  routes.set(resolve(root, "LESSONS.jsonl"), join(output, "LESSONS.jsonl"));
   const historySource = resolve(sourceDocs, "history");
   const historyTarget = join(outputDocs, "history", "index.html");
   routes.set(historySource, historyTarget);
@@ -533,6 +533,7 @@ async function buildDocumentation(siteStyles) {
   for (const file of ["LICENSE", "NOTICE"]) {
     await cp(join(root, file), join(outputDocs, "project", file));
   }
+  await cp(join(root, "LESSONS.jsonl"), join(output, "LESSONS.jsonl"));
 
   const historySources = documentationSources.filter(source => {
     const historyRelativePath = relative(historySource, source);

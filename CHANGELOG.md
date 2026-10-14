@@ -22,6 +22,28 @@ the exact implementation record.
 
 ### Fixed
 
+- The repository lesson map is now `LESSONS.jsonl`.
+  Eight complete registry queries replace Markdown extraction and route selection.
+  Startup instructions verify every requested family and ID before work.
+  The previous map remains a historical snapshot. Unavailable references remain explicit in the lesson guide.
+  Public documentation includes the raw query file and links its navigation to the project README.
+
+- Restart control checks the keeper and successor credentials before it records a request and before it permits an exit.
+  Missing or stale credentials leave the current session running.
+- Restart provisioning preserves the shared keeper credential when it adds a room.
+  Failed provisioning no longer revokes another room's shared credential.
+- Recall Policy inspection returns the selected home's state path without an undefined-variable error.
+- Restart control binds to an exact process instance and conversation.
+  A sibling workspace session cannot satisfy the keeper's claim or termination fence.
+- Expired restart claims no longer block later requests indefinitely.
+  Ambiguous acknowledgements retain their original target and do not authorize an unconfirmed exit.
+- Large native context preparation no longer expands every WebSocket command frame.
+
+
+- AKASHA lexical queries exclude casual filler and recognized keyboard laughter from ranking and term coverage.
+  Negated reminiscence no longer hides its subject. Actual tool names and canonical names remain searchable.
+- The decision-point audit keeps production code after external test-module declarations instead of reporting a false zero.
+
 - OMP lesson rules return after a prompt rebuild removes them.
   The adapter checks the native rule list instead of its old registration record.
 - A new OMP session uses its own active lesson rules without retaining the previous session's filter.
@@ -35,6 +57,32 @@ the exact implementation record.
   The native manager can accept the generated product and adapter manifests.
 
 ### Added
+
+- The sixteen named kittens and dragonlings receive their role lessons with every wake, resume included.
+  The Host reads the coding lessons tagged `familiar-role:shared` and the familiar's role tag.
+  Each provider context receives every complete body separately from clipped wake text. The open response lists the lesson IDs.
+  One delivery holds at most 65,536 UTF-8 bytes of titles and bodies. A larger curriculum is refused whole and never cut.
+  A required tag without a lesson, an incomplete matching lesson, a failed read, or Vault mode refuses the wake. Other agents receive `familiarLessons: null`.
+  The adapter declares `acceptsFamiliarLessons` on every open. A Host older than this contract refuses that field, and the new Host refuses a familiar wake without it.
+  A familiar's successor keeps the predecessor's agent unless the parent names another.
+  The adapter inserts the latest lesson set once per provider context, including after compaction in the same process.
+  It preserves earlier wake messages and their predecessor handoffs.
+- `/spirit <home-key>` attaches an OMP conversation from a project without moving its working directory.
+  Saved selections survive resume. Explicit detachment overrides launcher defaults.
+- The Host provides portable session registration, controls, status, and personal document operations.
+  Document writes require revisions. Runtime files and escaping paths are excluded.
+- Tern restart uses a private, one-use Athanor launch handoff.
+  It preserves the harness profile, opens a new tab, and verifies the successor.
+- Schema 36 records the process instance associated with each native restart intent.
+  Durable command receipts prevent automatic replay after a Host restart.
+
+
+- Semantic Recall can retry one below-floor query with its subject terms.
+  Retry evidence identifies the pass. Failures preserve lexical results.
+- The shared House spellbook supplies defaults and the common organ guide.
+  Room keys replace shared values whole. Familiar entries replace matching ids.
+  Empty guides and familiar lists clear inherited values.
+  The Host includes the effective guide in prepared context and reports each source layer.
 
 - Max can add `wda_recall` to an existing Athanor installation.
   The local spirit keeps its identity, memory store, and Host connection.

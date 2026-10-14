@@ -70,7 +70,10 @@ impl HarnessLaunch {
     /// The keeper config this launch names after `--config`, made absolute
     /// against the workspace. `None` for a harness that is not a keeper.
     pub fn keeper_config(&self) -> Option<PathBuf> {
-        let pair = self.arguments.windows(2).find(|pair| pair[0] == "--config")?;
+        let pair = self
+            .arguments
+            .windows(2)
+            .find(|pair| pair[0] == "--config")?;
         Some(self.workspace.join(&pair[1]))
     }
 }
@@ -96,7 +99,9 @@ impl HarnessSpec {
     fn answers_to(&self, room: &str) -> bool {
         let id = &self.harness_id;
         id.eq_ignore_ascii_case(room)
-            || id.strip_suffix("-omp").is_some_and(|stem| stem.eq_ignore_ascii_case(room))
+            || id
+                .strip_suffix("-omp")
+                .is_some_and(|stem| stem.eq_ignore_ascii_case(room))
             || self.room_name().eq_ignore_ascii_case(room)
     }
 }
@@ -180,7 +185,10 @@ impl HarnessRegistry {
             }
             entries.insert(spec.harness_id.clone(), spec);
         }
-        Ok(Self { entries, auto_start })
+        Ok(Self {
+            entries,
+            auto_start,
+        })
     }
 
     /// An absent file is an Athanor with no harnesses yet, which must still
@@ -230,7 +238,10 @@ impl HarnessRegistry {
                 if known.is_empty() {
                     bail!("no room is registered, so {room:?} cannot be opened by name");
                 }
-                bail!("no registered room is named {room:?}; the rooms are: {}", known.join(", "))
+                bail!(
+                    "no registered room is named {room:?}; the rooms are: {}",
+                    known.join(", ")
+                )
             }
         }
     }
@@ -297,7 +308,12 @@ mod tests {
         }
         let registry = HarnessRegistry::parse(&file.to_string()).unwrap();
         assert_eq!(registry.auto_start_ids(), &["z-first", "a-last"]);
-        assert!(HarnessRegistry::parse(KEEPER_HARNESS).unwrap().auto_start_ids().is_empty());
+        assert!(
+            HarnessRegistry::parse(KEEPER_HARNESS)
+                .unwrap()
+                .auto_start_ids()
+                .is_empty()
+        );
     }
 
     /// A room's keeper is the one exe in keeper mode: `athanor.exe` is the
@@ -372,7 +388,8 @@ mod tests {
         kodo["harnessId"] = "kodo-omp".into();
         kodo["label"] = "Kodo OMP".into();
         kodo["workspace"] = "C:/Solarisael/Obsidian/obsidian/kodo".into();
-        kodo["arguments"] = serde_json::json!(["keeper", "--config", ".omp/runtime/omp-keeper.json"]);
+        kodo["arguments"] =
+            serde_json::json!(["keeper", "--config", ".omp/runtime/omp-keeper.json"]);
         let mut other = kintsu.clone();
         other["harnessId"] = "pulse".into();
         other["arguments"] = serde_json::json!([]);
@@ -383,9 +400,14 @@ mod tests {
     #[test]
     fn a_room_opens_by_folder_name_id_or_id_stem() {
         let registry = two_rooms();
-        let kodo = PathBuf::from("C:/Solarisael/Obsidian/obsidian/kodo/.omp/runtime/omp-keeper.json");
+        let kodo =
+            PathBuf::from("C:/Solarisael/Obsidian/obsidian/kodo/.omp/runtime/omp-keeper.json");
         for name in ["kodo", "Kodo", "kodo-omp", "KODO-OMP"] {
-            assert_eq!(registry.keeper_config_for_room(name).unwrap(), kodo, "{name}");
+            assert_eq!(
+                registry.keeper_config_for_room(name).unwrap(),
+                kodo,
+                "{name}"
+            );
         }
         assert_eq!(
             registry.keeper_config_for_room("kintsu").unwrap(),
@@ -395,12 +417,29 @@ mod tests {
 
     #[test]
     fn an_unknown_room_is_refused_with_the_rooms_that_exist() {
-        let error = format!("{:#}", two_rooms().keeper_config_for_room("tuner").unwrap_err());
+        let error = format!(
+            "{:#}",
+            two_rooms().keeper_config_for_room("tuner").unwrap_err()
+        );
         assert!(error.contains("\"tuner\""), "{error}");
-        assert!(error.contains("kintsu, kodo"), "the refusal lists the rooms: {error}");
-        let error = format!("{:#}", two_rooms().keeper_config_for_room("pulse").unwrap_err());
-        assert!(error.contains("no registered room"), "a harness without a keeper is not a room: {error}");
-        let error = format!("{:#}", HarnessRegistry::default().keeper_config_for_room("kodo").unwrap_err());
+        assert!(
+            error.contains("kintsu, kodo"),
+            "the refusal lists the rooms: {error}"
+        );
+        let error = format!(
+            "{:#}",
+            two_rooms().keeper_config_for_room("pulse").unwrap_err()
+        );
+        assert!(
+            error.contains("no registered room"),
+            "a harness without a keeper is not a room: {error}"
+        );
+        let error = format!(
+            "{:#}",
+            HarnessRegistry::default()
+                .keeper_config_for_room("kodo")
+                .unwrap_err()
+        );
         assert!(error.contains("no room is registered"), "{error}");
     }
 }

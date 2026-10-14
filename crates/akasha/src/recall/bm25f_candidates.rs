@@ -1,6 +1,6 @@
-use super::bounded_excerpt;
+use super::evidence::bounded_excerpt;
 use super::scope::ScopeFilter;
-use super::temporal::{compare_weighted_lane, giga_temporal_factor};
+use super::temporal::{compare_weighted_lane, memory_temporal_factor};
 use crate::bm25f::{
     self, BODY as BM25F_BODY, FieldValue as Bm25fFieldValue, HEADING as BM25F_HEADING,
     MEMORY_TYPE as BM25F_MEMORY_TYPE, SOURCE_PATH as BM25F_SOURCE_PATH, THREADS as BM25F_THREADS,
@@ -301,7 +301,7 @@ async fn load_bm25f_candidates_for_terms_bounded(
         }
         let meta: serde_json::Value = row.try_get("meta")?;
         let (durability, temporal_weight) = if temporal_decay {
-            giga_temporal_factor(&meta, decay_now, settings)
+            memory_temporal_factor(&meta, row.try_get("created_at")?, decay_now, settings)
         } else {
             (None, 1.0)
         };

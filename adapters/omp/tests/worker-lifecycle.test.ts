@@ -51,7 +51,12 @@ function lifecycleHost() {
   const instances = new Map<string, Instance>();
   const replies = new Map<string, unknown>();
   const calls: Array<{ session: string; params: any }> = [];
-  const hooks: { onPrepare?: (params: any) => void } = {};
+  // onOpen stands in for the Host's familiar lesson door: it may refuse the
+  // open before anything binds, or replace the default null delivery.
+  const hooks: {
+    onPrepare?: (params: any) => void;
+    onOpen?: (params: any, kind: string) => Record<string, unknown> | undefined;
+  } = {};
   let counter = 0;
   const hash = (token: string) => createHash("sha256").update(token).digest("hex");
   const usable = (instance: Instance) => instance.handoff === "complete" || instance.handoff === "repaired";
@@ -100,6 +105,7 @@ function lifecycleHost() {
         if (instance.agentName !== params.agentName) throw new Refusal("agent_mismatch");
         if (instance.state === "retired") throw new Refusal("instance_retired");
         const kind = instance.bound ? "resume" : instance.predecessorId ? "successor" : "opening";
+        const delivered = hooks.onOpen?.(params, kind) ?? { familiarLessons: null };
         instance.bound = session;
         instance.settled = null;
         const predecessor = instance.predecessorId ? instances.get(instance.predecessorId) : null;
@@ -108,6 +114,7 @@ function lifecycleHost() {
           wake: { kind, text: predecessor ? `handoff: ${JSON.stringify(predecessor.report)}` : `${kind} ${instance.instanceId}` },
           lastSequence: books.get(instance.bookId)!.entries.length, handoffRequests: instance.handoffRequests,
           pendingOperations: [...instance.openOps].map((operationId) => ({ operationId, instanceId: instance.instanceId })),
+          ...delivered,
         };
       }
       case "observe": {
@@ -812,5 +819,94 @@ describe("worker boundaries", () => {
     expect((await alternate.emit("tool_call", {
       toolName: "task", toolCallId: "untracked-spawn", input: { task: "nested", solutionSpace: "bounded" },
     })).block).toBe(true);
+  });
+});
+
+describe("named familiar role lessons", () => {
+  const SHARED = "familiar-role:shared";
+  const BUILDER = "familiar-role:builder";
+
+  test("every familiar wake renders the delivered bodies whole beside its wake, resume included", async () => {
+    // Three times the Host's 12,000-character wake clip; the end marker proves nothing was cut.
+    const long = `${"Raise one bounded vertical piece. ".repeat(1_100)}END-OF-LESSON-7`;
+    host.hooks.onOpen = () => ({
+      familiarLessons: {
+        tags: [SHARED, BUILDER],
+        ids: [3, 7],
+        lessons: [{ id: 3, title: "Shared method", lesson: "Report outcomes briefly." }, { id: 7, title: "Builder method", lesson: long }],
+      },
+    });
+    const parent = ompSession("parent-familiar", parentAgent);
+    const enrolled = await spawn(parent, "call-familiar", { agent: "lavra-dragonling", task: "raise the wall", solutionSpace: "s" });
+    const { child, started } = await openChild("child-familiar", enrolled.input.task, "lavra-dragonling");
+    expect(started.message.customType).toBe(WORKER_WAKE_MESSAGE);
+    const initial = await child.emit("context", { messages: [{ role: "custom", ...started.message }] });
+    const content: string = initial.messages[0].content;
+    expect(content).toContain(`(${SHARED}, ${BUILDER})`);
+    expect(content).toContain("Lesson ids: 3, 7.");
+    expect(content).toContain("[Lesson 3] Shared method\nReport outcomes briefly.");
+    expect(content).toContain(`[Lesson 7] Builder method\n${long}`);
+    await request(child, 100);
+    expect(child.state.aborted).toBe(0);
+    expect(host.actions("open").every((call) => call.params.acceptsFamiliarLessons === true)).toBe(true);
+
+    const resumed = await child.emit("before_agent_start", { prompt: "follow-up from parent", systemPrompt: [] });
+    expect(resumed.message.customType).toBe(WORKER_WAKE_MESSAGE);
+    const progress = { role: "assistant", content: "The first boundary is verified." };
+    const currentWake = { role: "custom", ...resumed.message };
+    const predecessorWake = { role: "custom", customType: WORKER_WAKE_MESSAGE, content: "Predecessor handoff: preserve the approval transaction." };
+    const transcript = [predecessorWake, { role: "custom", ...started.message }, progress, currentWake];
+    const provider = await child.emit("context", { messages: transcript });
+    expect(provider.messages[0].content).toBe(content);
+    expect(provider.messages.slice(1)).toEqual(transcript);
+    for (const messages of [[progress], provider.messages]) {
+      const restored = await child.emit("context", { messages });
+      expect(restored.messages.filter((message: any) => message.customType === "athanor-familiar-lessons").map((message: any) => message.content)).toEqual([content]);
+      expect(restored.messages.slice(1)).toEqual(messages.filter((message: any) => message.customType !== "athanor-familiar-lessons"));
+    }
+  });
+
+  test("a refused, malformed, or omitted delivery refuses the worker before it binds", async () => {
+    const parent = ompSession("parent-bare", parentAgent);
+    host.hooks.onOpen = () => { throw new Refusal("familiar_lessons_missing"); };
+    const missing = await spawn(parent, "call-bare", { agent: "talha-dragonling", task: "cut the beam", solutionSpace: "s" });
+    const { child: bare, started: refused } = await openChild("child-bare", missing.input.task, "talha-dragonling");
+    expect(refused.message.customType).toBe(WORKER_NOTICE_MESSAGE);
+    expect(refused.message.content).toContain("familiar_lessons_missing");
+    await request(bare, 100);
+    expect(bare.state.aborted).toBe(2);
+    expect((await bare.emit("tool_call", { toolName: "read", toolCallId: "bare-read", input: { path: "a" } })).block).toBe(true);
+
+    host.hooks.onOpen = () => ({ familiarLessons: { tags: [SHARED], ids: [3], lessons: [{ id: 3, title: "Shared method", lesson: "  " }] } });
+    const hollow = await spawn(parent, "call-hollow", { agent: "kodo-kitten", task: "sweep the hall", solutionSpace: "s" });
+    const { child, started } = await openChild("child-hollow", hollow.input.task, "kodo-kitten");
+    expect(started.message.customType).toBe(WORKER_NOTICE_MESSAGE);
+    expect(started.message.content).toContain("malformed familiar lessons");
+    await request(child, 100);
+    expect(child.state.aborted).toBe(2);
+    // No binding was persisted, so a revived session cannot resume this worker without its lessons.
+    expect(child.entries.some((entry) => entry.data?.stage === "bound")).toBe(false);
+
+    // A Host older than the contract omits the field; the adapter never guesses which agents need lessons.
+    host.hooks.onOpen = () => ({});
+    const legacy = await spawn(parent, "call-legacy", { agent: "task", task: "plain work", solutionSpace: "s" });
+    const { child: unchecked, started: legacyStart } = await openChild("child-legacy", legacy.input.task);
+    expect(legacyStart.message.customType).toBe(WORKER_NOTICE_MESSAGE);
+    expect(legacyStart.message.content).toContain("omitted familiarLessons");
+    await request(unchecked, 100);
+    expect(unchecked.state.aborted).toBe(2);
+  });
+
+  test("a familiar's successor keeps the predecessor's agent by default", async () => {
+    host.hooks.onOpen = () => ({ familiarLessons: { tags: [SHARED], ids: [3], lessons: [{ id: 3, title: "Shared method", lesson: "Report outcomes briefly." }] } });
+    const parent = ompSession("parent-familiar-heir", parentAgent);
+    const enrolled = await spawn(parent, "call-familiar-heir", { agent: "kodo-kitten", task: "sweep the hall", solutionSpace: "s" });
+    const { child } = await openChild("child-familiar-heir", enrolled.input.task, "kodo-kitten");
+    await request(child, 610);
+    await yieldCall(child, "y-familiar-heir", { status: "success", data: { done: "hall swept" } });
+    const [instance] = [...host.instances.values()];
+    expect(instance.state).toBe("retired");
+    await parent.notebook("succ-familiar-heir", { action: "successor", bookId: instance.bookId, instanceId: instance.instanceId });
+    expect(host.actions("prepare").at(-1)!.params.agentName).toBe("kodo-kitten");
   });
 });

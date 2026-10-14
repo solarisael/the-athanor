@@ -1,10 +1,12 @@
 mod bm25f_candidates;
 mod content_lane;
 mod embedding;
+mod evidence;
 mod memory_reference;
 mod pointer_files;
 mod profile;
 pub(crate) mod scope;
+mod semantic;
 mod semantic_vocabulary;
 mod temporal;
 mod thread_neighbors;
@@ -13,7 +15,7 @@ pub use semantic_vocabulary::refresh_semantic_vocabulary;
 
 use crate::bm25f;
 use crate::cluster::{cluster_resonance, cluster_staleness};
-use crate::config::{AppError, Config, EMBED_DIMENSION, EmbeddingMode, HTTP_CLIENT, QUERY_DATE_RE};
+use crate::config::{AppError, Config, EMBED_DIMENSION, EmbeddingMode, HTTP_CLIENT};
 use crate::insula::OutcomeClass;
 use crate::insula_writer::{EmitterSpan, end_span};
 use crate::settings::RoomSettings;
@@ -21,6 +23,10 @@ use bm25f_candidates::{load_bm25f_candidates_for_terms, load_bm25f_candidates_fo
 use chrono::{NaiveDate, Utc};
 use content_lane::content_lane_rows;
 use embedding::{EmbedError, embed_query};
+use evidence::{
+    bounded_excerpt, build_rerank_candidates, candidate_terms, exceeds_excerpt, like_patterns,
+    lookup_terms, query_dates, query_terms, should_build_rerank_candidates,
+};
 use hearth::RecallRequest;
 use memory_reference::{
     apply_manual_record_cap, hydrate_record_bodies, memory_references, resolve_memory_references,
@@ -28,12 +34,13 @@ use memory_reference::{
 use pointer_files::protocol_pointer_files;
 use profile::{CanonOrder, apply_and_order, for_mode};
 use scope::ScopeFilter;
+use semantic::{SEMANTIC_ORIGINAL_EVIDENCE, SemanticLane, vector_literal};
 use semantic_vocabulary::{load_semantic_vocabulary_concepts, semantic_vocabulary_terms};
 use serde::Serialize;
 use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, BTreeSet};
-use temporal::{compare_weighted_lane, giga_temporal_factor, weighted_lane_score};
-use thread_neighbors::load_thread_neighbors;
+use temporal::{compare_weighted_lane, memory_temporal_factor, weighted_lane_score};
+use thread_neighbors::attach_thread_neighbors;
 
 #[derive(Debug, Serialize)]
 pub struct RecallResult {
@@ -66,157 +73,6 @@ pub struct RecallResult {
     pub cluster_resonance: Option<serde_json::Value>,
     #[serde(rename = "rerankCandidates", skip_serializing_if = "Option::is_none")]
     pub rerank_candidates: Option<Vec<serde_json::Value>>,
-}
-
-fn query_dates(query: &str) -> Vec<NaiveDate> {
-    QUERY_DATE_RE
-        .captures_iter(query)
-        .filter_map(|c| {
-            NaiveDate::from_ymd_opt(c[1].parse().ok()?, c[2].parse().ok()?, c[3].parse().ok()?)
-        })
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
-}
-pub(crate) fn query_terms(query: &str) -> Vec<String> {
-    let mut terms = query
-        .split(|c: char| !c.is_alphanumeric())
-        .map(|term| term.trim().to_lowercase())
-        .filter(|term| term.len() >= 2)
-        .collect::<BTreeSet<_>>();
-    // Compound tokens split only on whitespace so `-`, `/`, `.`, `_` survive
-    // inside a token (pais/mais, queue-maintenance); edge punctuation that is
-    // not part of a compound (quotes, commas, trailing periods) is trimmed.
-    terms.extend(
-        query
-            .split_whitespace()
-            .map(|token| {
-                token
-                    .trim_matches(|c: char| !c.is_alphanumeric())
-                    .to_lowercase()
-            })
-            .filter(|token| token.len() >= 2),
-    );
-    terms.into_iter().collect()
-}
-
-pub(crate) fn term_evidence(terms: &[String], fields: &[&str]) -> (Vec<String>, Vec<String>) {
-    let haystack = fields.join(" ").to_lowercase();
-    let matched = terms
-        .iter()
-        .filter(|term| haystack.contains(term.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    let missing = terms
-        .iter()
-        .filter(|term| !matched.contains(term))
-        .cloned()
-        .collect::<Vec<_>>();
-    (matched, missing)
-}
-
-const EXCERPT_MAX_CHARS: usize = 1200;
-
-pub(crate) fn exceeds_excerpt(body: &str) -> bool {
-    body.chars().count() > EXCERPT_MAX_CHARS
-}
-
-pub(crate) fn bounded_excerpt(body: &str) -> String {
-    let excerpt: String = body.chars().take(EXCERPT_MAX_CHARS).collect();
-    if exceeds_excerpt(body) {
-        format!("{excerpt}…")
-    } else {
-        excerpt
-    }
-}
-
-pub(crate) fn candidate_terms(
-    terms: &[String],
-    fields: &[&str],
-) -> (Vec<String>, Vec<String>, f64) {
-    let (matched, missing) = term_evidence(terms, fields);
-    let coverage = if terms.is_empty() {
-        0.0
-    } else {
-        matched.len() as f64 / terms.len() as f64
-    };
-    (matched, missing, coverage)
-}
-
-/// Keep the reranking sidecar deliberately narrower than the regular recall
-/// result. It receives only candidate cards with bounded excerpts; raw lane
-/// arrays, record bodies, canon, taxonomy, and neighbors never enter it.
-fn bounded_rerank_candidate(candidate: &serde_json::Value) -> Option<serde_json::Value> {
-    let memory_id = candidate["memory_id"].as_i64()?;
-    let excerpt = candidate
-        .get("excerpt")
-        .or_else(|| candidate.get("body"))
-        .and_then(serde_json::Value::as_str)?;
-    let mut projected = serde_json::Map::new();
-    for key in [
-        "memory_id",
-        "source_path",
-        "title",
-        "heading_path",
-        "sources",
-        "term_coverage",
-        "matched_terms",
-        "missing_terms",
-        "score",
-        "semantic_score",
-        "content_score",
-        "bm25f_score",
-        "bm25f_fields",
-        "semantic_lexical_score",
-        "semantic_lexical_fields",
-        "durability",
-        "temporal_weight",
-        "reasons",
-        "source",
-        "chunk_index",
-    ] {
-        if let Some(value) = candidate.get(key) {
-            projected.insert(key.to_owned(), value.clone());
-        }
-    }
-    projected.insert("memory_id".to_owned(), serde_json::Value::from(memory_id));
-    projected.insert(
-        "excerpt".to_owned(),
-        serde_json::Value::String(bounded_excerpt(excerpt)),
-    );
-    if !projected.contains_key("score") {
-        let score = candidate
-            .get("bm25f_score")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or_default();
-        projected.insert("score".to_owned(), serde_json::Value::from(score));
-    }
-    Some(serde_json::Value::Object(projected))
-}
-
-fn should_build_rerank_candidates(projection: hearth::RecallProjection, top_k: u32) -> bool {
-    projection.is_auto() && top_k > 0
-}
-
-fn build_rerank_candidates(
-    baseline: &[serde_json::Value],
-    broad: &[serde_json::Value],
-    exact_memory_ids: &BTreeSet<i64>,
-    top_k: usize,
-) -> Vec<serde_json::Value> {
-    let mut seen = BTreeSet::new();
-    baseline
-        .iter()
-        .chain(broad)
-        .filter_map(bounded_rerank_candidate)
-        .filter(|candidate| {
-            let Some(memory_id) = candidate["memory_id"].as_i64() else {
-                return false;
-            };
-            !exact_memory_ids.contains(&memory_id) && seen.insert(memory_id)
-        })
-        .take(top_k)
-        .collect()
 }
 
 /// One phase of a recall, observed as a child of the request's `recall`
@@ -324,10 +180,9 @@ pub async fn recall(
     }
     let query_dates = query_dates(query);
     let query_terms = references.strip_terms(query_terms(query));
-    let content_patterns = query_terms
-        .iter()
-        .map(|term| format!("%{term}%"))
-        .collect::<Vec<_>>();
+    let content_patterns = like_patterns(&query_terms);
+    let canon_terms = references.strip_terms(lookup_terms(query));
+    let canon_patterns = like_patterns(&canon_terms);
     let vector_text = match (cfg.embedding_mode, cfg.embed_url.as_deref()) {
         (EmbeddingMode::Disabled, _) => {
             warnings.push("semantic lane absent: embedding disabled in production".to_string());
@@ -343,14 +198,7 @@ pub async fn recall(
             match embed_query(&HTTP_CLIENT, url, &cfg.embed_model, query, EMBED_DIMENSION).await {
                 Ok(vector) => {
                     phase.ok();
-                    Some(format!(
-                        "[{}]",
-                        vector
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    ))
+                    Some(vector_literal(&vector))
                 }
                 Err(e) => {
                     phase.degraded(match e {
@@ -416,115 +264,48 @@ pub async fn recall(
     let semantic_fetch_limit = (!temporal_decay).then_some(i64::from(semantic_top_k));
     let content_fetch_limit = (!temporal_decay).then_some(i64::from(content_top_k));
     let mut semantic_chunks = Vec::new();
-    if let Some(vector_text) = vector_text.clone() {
-        let phase = Phase::start(span, "recall.semantic");
-        let semantic_sql = format!(
-            r#"SELECT memory_id,source_path,title,heading_path,body,char_start,char_end,chunk_index,meta,sim
-               FROM (
-                 SELECT m.source_path,
-                        m.id AS memory_id,
-                        coalesce(m.title,'') AS title,
-                        coalesce(c.heading_path,'') AS heading_path,
-                        c.body,c.char_start,c.char_end,c.chunk_index,m.meta AS meta,
-                        (1-(c.body_embedding <=> $1::vector))::double precision AS sim
-                 FROM memory_chunks c
-                 JOIN memories m ON m.id=c.memory_id
-                 WHERE m.room = ANY($2::text[])
-                   AND m.archived_at IS NULL
-                   AND m.superseded_by IS NULL
-                   AND COALESCE(m.type,'') <> $5
-                   AND c.body_embedding IS NOT NULL{}
-               ) ranked
-               WHERE sim >= $3
-               ORDER BY sim DESC,source_path,chunk_index
-               LIMIT $4"#,
-            scope.predicate("m", 6)
-        );
-        let semantic_rows = scope
-            .bind(
-                sqlx::query(&semantic_sql)
-                    .bind(&vector_text)
-                    .bind(&rooms)
-                    .bind(semantic_min_similarity)
-                    .bind(semantic_fetch_limit)
-                    .bind(origami::boats::MEMORY_KIND),
+    if let Some(vector_text) = vector_text.as_deref() {
+        let lane = SemanticLane {
+            pool,
+            rooms: &rooms,
+            scope: &scope,
+            min_similarity: semantic_min_similarity,
+            fetch_limit: semantic_fetch_limit,
+            temporal_decay,
+            decay_now,
+            settings: &settings,
+            query_terms: &query_terms,
+        };
+        semantic_chunks = lane
+            .search(
+                cfg,
+                query,
+                &references,
+                vector_text,
+                semantic_top_k > 0,
+                &mut warnings,
+                span,
             )
-            .fetch_all(pool)
             .await?;
-        for row in semantic_rows {
-            let sim: f64 = row.try_get("sim")?;
-            if sim < semantic_min_similarity {
-                continue;
-            }
-            let source_path: String = row.try_get("source_path")?;
-            let title: Option<String> = row.try_get("title")?;
-            let heading_path: Option<String> = row.try_get("heading_path")?;
-            let body: String = row.try_get("body")?;
-            let meta: serde_json::Value = row.try_get("meta")?;
-            let (durability, temporal_weight) = if temporal_decay {
-                giga_temporal_factor(&meta, decay_now, &settings)
-            } else {
-                (None, 1.0)
-            };
-            let (matched_terms, missing_terms, coverage) = candidate_terms(
-                &query_terms,
-                &[
-                    &source_path,
-                    title.as_deref().unwrap_or(""),
-                    heading_path.as_deref().unwrap_or(""),
-                    &body,
-                ],
-            );
-            semantic_chunks.push(serde_json::json!({"memory_id":row.try_get::<i64,_>("memory_id")?,"source_path":source_path,"title":title,"heading_path":heading_path,"body":bounded_excerpt(&body),"char_start":row.try_get::<i32,_>("char_start")?,"char_end":row.try_get::<i32,_>("char_end")?,"chunk_index":row.try_get::<i32,_>("chunk_index")?,"sim":sim,"durability":durability,"temporal_weight":temporal_weight,"matched_terms":matched_terms,"missing_terms":missing_terms,"term_coverage":coverage,"evidence":"semantic cosine similarity"}));
-        }
-        if semantic_chunks.is_empty() {
-            // The floor query returned nothing; a second cheap roundtrip is
-            // acceptable only in this empty case so silence is impossible.
-            let probe_sql = format!(
-                r#"SELECT MAX((1-(c.body_embedding <=> $1::vector))::double precision)
-                   FROM memory_chunks c
-                   JOIN memories m ON m.id=c.memory_id
-                   WHERE m.room = ANY($2::text[])
-                     AND m.archived_at IS NULL
-                     AND m.superseded_by IS NULL
-                     AND COALESCE(m.type,'') <> $3
-                     AND c.body_embedding IS NOT NULL{}"#,
-                scope.predicate("m", 4)
-            );
-            let top_sim: Option<f64> = scope
-                .bind_scalar(
-                    sqlx::query_scalar(&probe_sql)
-                        .bind(&vector_text)
-                        .bind(&rooms)
-                        .bind(origami::boats::MEMORY_KIND),
-                )
-                .fetch_one(pool)
-                .await?;
-            warnings.push(match top_sim {
-                Some(top) => format!(
-                    "semantic lane empty: top sim {top:.2} < floor {semantic_min_similarity:.2} (rooms {})",
-                    rooms.join(",")
-                ),
-                None => format!(
-                    "semantic lane empty: no embedded chunks (rooms {})",
-                    rooms.join(",")
-                ),
-            });
-        }
-        phase.ok();
     }
+    // Without a content term the lane has no filter, and word_similarity over
+    // every scoped chunk would rank the filler itself.
     let phase = Phase::start(span, "recall.content");
-    let content_rows = content_lane_rows(
-        pool,
-        query,
-        &rooms,
-        &scope,
-        content_min_similarity,
-        content_fetch_limit,
-        &content_patterns,
-        origami::boats::MEMORY_KIND,
-    )
-    .await?;
+    let content_rows = if content_patterns.is_empty() {
+        Vec::new()
+    } else {
+        content_lane_rows(
+            pool,
+            query,
+            &rooms,
+            &scope,
+            content_min_similarity,
+            content_fetch_limit,
+            &content_patterns,
+            origami::boats::MEMORY_KIND,
+        )
+        .await?
+    };
     phase.ok();
     let mut content_chunks = Vec::new();
     for row in content_rows {
@@ -535,7 +316,7 @@ pub async fn recall(
         let body: String = row.try_get("body")?;
         let meta: serde_json::Value = row.try_get("meta")?;
         let (durability, temporal_weight) = if temporal_decay {
-            giga_temporal_factor(&meta, decay_now, &settings)
+            memory_temporal_factor(&meta, row.try_get("created_at")?, decay_now, &settings)
         } else {
             (None, 1.0)
         };
@@ -635,7 +416,7 @@ pub async fn recall(
         let score = (c["sim"].as_f64().unwrap_or(0.0) * settings.recall_semantic_similarity_weight
             + 1.0 / (rank as f64 + 1.0) * settings.recall_semantic_rank_weight)
             * c["temporal_weight"].as_f64().unwrap_or(1.0);
-        let mut reasons = vec!["semantic cosine similarity"];
+        let mut reasons = vec![c["evidence"].as_str().unwrap_or(SEMANTIC_ORIGINAL_EVIDENCE)];
         if c["temporal_weight"].as_f64().unwrap_or(1.0) < 1.0 {
             reasons.push("durability-shaped temporal decay");
         }
@@ -663,7 +444,11 @@ pub async fn recall(
             existing["source"] = serde_json::json!("semantic+content");
             existing["durability"] = c["durability"].clone();
             existing["temporal_weight"] = c["temporal_weight"].clone();
-            let mut reasons = vec!["semantic cosine similarity", "lexical word_similarity"];
+            let semantic_reason = existing["reasons"][0]
+                .as_str()
+                .unwrap_or(SEMANTIC_ORIGINAL_EVIDENCE)
+                .to_owned();
+            let mut reasons = vec![semantic_reason.as_str(), "lexical word_similarity"];
             if decayed {
                 reasons.push("durability-shaped temporal decay");
             }
@@ -940,9 +725,9 @@ pub async fn recall(
            LIMIT 12"#,
     )
     .bind(&rooms)
-    .bind(&query_terms)
+    .bind(&canon_terms)
     .bind(query)
-    .bind(&content_patterns)
+    .bind(&canon_patterns)
     .bind(&query_phrase)
     .bind(&settings.house_language)
     .fetch_all(pool)
@@ -1110,36 +895,128 @@ pub async fn recall(
     })
 }
 
-/// Thread neighbors for every candidate that owns a memory: the visible
-/// shoulder of the thread a record sits in, keyed by memory ID.
-async fn attach_thread_neighbors(
-    pool: &PgPool,
-    span: Option<&EmitterSpan>,
-    scope: &ScopeFilter,
-    retrieval_candidates: &mut [serde_json::Value],
-) -> Result<(), AppError> {
-    let memory_ids = retrieval_candidates
-        .iter()
-        .filter_map(|candidate| candidate["memory_id"].as_i64())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let phase = Phase::start(span, "recall.neighbors");
-    let mut neighbors = load_thread_neighbors(pool, &memory_ids, scope).await?;
-    for candidate in retrieval_candidates.iter_mut() {
-        let memory_id = candidate["memory_id"].as_i64().unwrap_or_default();
-        candidate["thread_neighbors"] =
-            serde_json::Value::Array(neighbors.remove(&memory_id).unwrap_or_default());
-    }
-    phase.ok();
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{build_rerank_candidates, should_build_rerank_candidates};
+    use super::evidence::{
+        build_rerank_candidates, candidate_terms, lookup_terms, query_terms,
+        should_build_rerank_candidates, subject_retry_text,
+    };
+    use super::memory_reference::{MemoryReferences, memory_references};
+    use crate::bm25f;
     use hearth::RecallProjection;
     use std::collections::BTreeSet;
+
+    const CASUAL_BEND2: &str = "i don't remember exactly lol what we did around bend2 uwu xzclkm";
+
+    #[test]
+    fn contractions_filler_and_laughter_never_become_lexical_terms() {
+        assert_eq!(query_terms(CASUAL_BEND2), vec!["bend2"]);
+        assert_eq!(bm25f::query_terms(CASUAL_BEND2), vec!["bend2"]);
+        assert_eq!(
+            query_terms("eu acho que tipo, né, kkkk o Bend2 rsrs"),
+            vec!["bend2"]
+        );
+        for query in [
+            "it won't build bend2",
+            "it won’t build bend2",
+            "can't build bend2",
+        ] {
+            assert_eq!(query_terms(query), vec!["bend2", "build"], "{query}");
+            assert_eq!(bm25f::query_terms(query), vec!["bend2", "build"], "{query}");
+        }
+    }
+
+    #[test]
+    fn names_and_identifiers_survive_beside_filler() {
+        let query = "Sol and Kodo wrote Bend2 HVM4 with Taelin's giga_worker.rs, msvcrt and remember, kkkk hahaha xzclkm zxclkmzxclkm";
+        let recall_terms = query_terms(query);
+        let lexical_terms = bm25f::query_terms(query);
+        for subject in [
+            "sol",
+            "kodo",
+            "bend2",
+            "hvm4",
+            "taelin",
+            "giga_worker.rs",
+            "msvcrt",
+            "remember",
+        ] {
+            assert!(recall_terms.iter().any(|term| term == subject), "{subject}");
+            assert!(
+                lexical_terms.iter().any(|term| term == subject),
+                "{subject}"
+            );
+        }
+        assert!(recall_terms.iter().any(|term| term == "taelin's"));
+        for filler in ["and", "with", "kkkk", "hahaha", "xzclkm", "zxclkmzxclkm"] {
+            assert!(!recall_terms.iter().any(|term| term == filler), "{filler}");
+            assert!(!lexical_terms.iter().any(|term| term == filler), "{filler}");
+        }
+    }
+
+    #[test]
+    fn canon_lookup_keeps_a_name_that_is_also_filler() {
+        let query = "what does Like mean lol";
+        assert!(lookup_terms(query).iter().any(|term| term == "like"));
+        assert_eq!(query_terms(query), vec!["mean"]);
+    }
+
+    #[test]
+    fn filler_only_query_has_no_terms_and_no_retry() {
+        let query = "lol uwu kinda sure man... hahaha don't";
+        assert!(query_terms(query).is_empty());
+        assert!(bm25f::query_terms(query).is_empty());
+        assert_eq!(
+            subject_retry_text(query, &MemoryReferences::default()),
+            None
+        );
+    }
+
+    #[test]
+    fn subject_retry_keeps_query_order_and_skips_equivalent_text() {
+        let none = MemoryReferences::default();
+        assert_eq!(
+            subject_retry_text(CASUAL_BEND2, &none).as_deref(),
+            Some("bend2")
+        );
+        assert_eq!(
+            subject_retry_text(
+                "never got playing around bend2 don't remember exactly jev lol",
+                &none
+            )
+            .as_deref(),
+            Some("playing bend2 jev")
+        );
+        assert_eq!(
+            subject_retry_text("it won't build bend2", &none).as_deref(),
+            Some("build bend2")
+        );
+        assert_eq!(subject_retry_text("Bend2 HVM4 Taelin", &none), None);
+    }
+
+    #[test]
+    fn subject_retry_never_embeds_an_exact_reference() {
+        let query = "#4197 lol bend2";
+        assert_eq!(
+            subject_retry_text(query, &memory_references(query)).as_deref(),
+            Some("bend2")
+        );
+    }
+
+    #[test]
+    fn term_coverage_counts_only_content_terms() {
+        let terms = query_terms(CASUAL_BEND2);
+        let subject = candidate_terms(
+            &terms,
+            &["Sol and Kodo built Bend2 HVM4 assembly. The real subject is Bend2."],
+        );
+        assert_eq!(subject, (vec!["bend2".to_owned()], Vec::new(), 1.0));
+        let decoy = candidate_terms(
+            &terms,
+            &["i don't remember exactly lol what we did around uwu xzclkm. casual filler only."],
+        );
+        assert_eq!(decoy, (Vec::new(), vec!["bend2".to_owned()], 0.0));
+    }
 
     #[test]
     fn rerank_pool_is_sidecar_only_and_does_not_mutate_baseline() {

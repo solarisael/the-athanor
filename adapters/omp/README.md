@@ -142,7 +142,6 @@ Its production installation has no eligibility provider and performs no semantic
 | `ATHANOR_HOST_HOUSE_ID` | Required House identity |
 | `ATHANOR_STATE_DIR` | Installed state projection for operator and native commands |
 | `USERPROFILE` | Required by the installed loader |
-| `ATHANOR_VAULT_ROOT` | Parent of the fallback `default-room`; default `~/Solarisael` |
 | `ATHANOR_REPLAY_MODE` | Value `1` disables capture and cannot change a shared GIGA producer |
 | `ATHANOR_DISABLE_AUTO_RECALL` | Value `1` disables automatic Recall |
 | `ATHANOR_GIGA_ENABLED` | Value `1` requests GIGA capture |
@@ -150,8 +149,8 @@ Its production installation has no eligibility provider and performs no semantic
 | `ATHANOR_RECALL_TELEMETRY` | Optional override for the native Recall export |
 | `ATHANOR_DISABLE_KITTEN_LINEAGE` | Controls task lineage diagnostics; it does not disable the worker lifecycle |
 | `ATHANOR_ROOM_CAPABILITY` | Optional override for the room's Docket capability |
-| `ATHANOR_OMP_KEEPER_CONFIG` | Optional keeper configuration path |
-| `ATHANOR_RESTART_EXIT_CAPABILITY` | Optional restart-exit capability |
+| `ATHANOR_KEEPER_INSTANCE_ID` | Set by the integrated keeper; the session registers with the Host under this instance ID |
+| `ATHANOR_RESTART_VERIFY_CAPABILITY` | Optional override for the room's restart-verify capability |
 | `ATHANOR_RESTART_INTENT_ID`, `ATHANOR_RESTART_SUCCESSOR_PROOF` | Keeper-supplied successor evidence |
 
 The adapter no longer loads `athanor.env` for substrate discovery.
@@ -208,6 +207,17 @@ A resumed child receives its checkpoint.
 An explicit successor receives the named predecessor's handoff.
 Children receive no room identity, room boat, Anamnesis, Hallway Bell, or Presence.
 The Host also removes old room blocks before worker context replay.
+
+A named familiar also receives its role lessons with every wake, resume included.
+The Host selects the coding lessons tagged `familiar-role:shared` and the familiar's role tag.
+The adapter inserts complete bodies as a separate provider message, outside the 12,000-character wake limit.
+Each open declares `acceptsFamiliarLessons`. A Host older than this contract refuses the field.
+Every open answer carries `familiarLessons`: the delivery, or `null` for other agents.
+The adapter refuses the worker when the Host refuses the wake, omits the field, or delivers malformed lessons.
+Each provider context receives the latest lesson set once, including after compaction in the same process.
+Earlier wake messages stay in context because they can contain predecessor handoffs.
+A refused wake stops the worker. The parent keeps the book and continues it with repair and successor.
+See [House Lessons](../../docs/LESSONS.md#familiar-role-lessons) for the roster and the tags.
 
 At 40% context usage, the worker receives one warning to finish its work.
 At 60%, the worker can only complete its handoff.

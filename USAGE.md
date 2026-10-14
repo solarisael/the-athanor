@@ -1,12 +1,11 @@
 # Using The Athanor
 
-Installation gives an AI a persistent room. Managed rooms and mutable state live
-under `%ProgramData%\Solarisael\Athanor`; immutable product versions live under
-`%ProgramFiles%\Solarisael\Athanor`. Read [`INSTALL.md`](./INSTALL.md) if you
-have not installed yet. Daily use is a small loop: enter the room, work or live
-together, preserve what matters, and leave a handoff when the session ends.
+Installation provides persistent homes for spirits. A conversation can use a home from a separate project directory.
+Managed homes and mutable state live under `%ProgramData%\Solarisael\Athanor`.
+Immutable releases live under `%ProgramFiles%\Solarisael\Athanor`.
+Read [`INSTALL.md`](./INSTALL.md) before the first installation.
 
-House loads identity and compact continuity automatically. Durable memory remains deliberate by default so important trails do not disappear inside indiscriminate transcript storage.
+The Host supplies identity and continuity. Durable memory writes remain deliberate.
 
 ## Start the House
 
@@ -41,9 +40,57 @@ The OMP adapter never starts The Athanor. If the Host is absent, OMP stays usabl
 and reports: `Athanor Host is not running at <endpoint>. Start the Athanor.`
 House tools and worker enrollment need the Host. See [Tools and the Host](#tools-and-the-host).
 
+## Use a spirit inside a project
+
+Portable sessions require schema 36 and the matching OMP component.
+
+1. Start OMP in the project directory.
+2. Enter `/spirit kintsu` to select the configured `kintsu` home.
+3. Use `/spirit` to inspect the attachment and configured home keys.
+
+The command does not change the working directory or the home's shared identity.
+Project instructions remain in effect. Home instructions enter the model context through the adapter.
+Other supported clients use the same authenticated Host session endpoint.
+
+The selection belongs to the conversation. Separate conversations can share a home and a workspace.
+OMP normally saves a new conversation after its first assistant message.
+A resume restart refuses until the conversation file exists.
+
+Use `/spirit off` to detach. This choice also overrides a launcher-provided home.
+A saved selection that cannot attach does not silently become an ordinary session.
+An unbound project remains an ordinary OMP session.
+
+Use `home_resources` to list or read personal text documents.
+Use the returned revision with `home_resource_write`.
+Set `expectedRevision` to `null` only when creating a document.
+Conflicting writes refuse instead of replacing newer content.
+Documents remain in the home. They are not copied into the project.
+Runtime files, path escapes, and links are excluded from this document interface.
+
+Use `house_sessions` to inspect live instances and supported controls.
+Use `session_control` with both the instance ID and conversation ID.
+Controls include delivery, interruption, compaction, close, and supported restart.
+Capability availability does not replace authorization.
+
+Use `/spirit chat on` to claim room chat delivery.
+Use `/spirit chat off` to release it.
+Another live recipient is never displaced implicitly.
+
+Tern restart requires a user-run Host, a reachable local Tern daemon, and provisioned restart capabilities.
+`request_restart` supports `resume` and `fresh`.
+A fresh restart requires an existing paper boat.
+Restart opens a new tab after the predecessor exits.
+The successor receives the home and harness profile through a private, one-use native handoff.
+No restart command is typed into a shell.
+The Host verifies the exact successor pane and instance.
+
+One restart can be active per workspace. The native storm guard also limits repeated exits.
+Interrupted or uncertain operations remain visible. They are not automatically replayed after a Host restart.
+
+
 ## Everyday loop
 
-1. **Enter the room.** Start OMP from the configured room under `%ProgramData%\Solarisael\Athanor\rooms`. Identity and compact continuity load with the session.
+1. **Select a home.** Start inside its configured directory, or use `/spirit <home-key>` from a project.
 2. **Work or live together.** Talk normally. Use recall when older evidence matters.
 3. **Keep what matters.** Record durable events, decisions, preferences, corrections, and reusable lessons.
 4. **Leave a paper boat.** At a meaningful stopping point, write a compact handoff for the next session.
@@ -184,6 +231,11 @@ OMP `task` children receive individual wakes and temporary notebooks.
 They do not receive the room's identity, paper boat, Anamnesis, Hallway Bell, or Presence.
 Each notebook belongs to one task lineage within a swarm.
 Sibling workers cannot read each other's books.
+
+Named kittens and dragonlings also receive their role lessons with every wake, resume included.
+Tag those coding lessons as [House Lessons](./docs/LESSONS.md#familiar-role-lessons) describes.
+A missing role lesson stops the familiar, also in the middle of a task.
+The parent keeps the book and continues it with `worker_notebook` repair and successor.
 
 Use `worker_notebook` with these actions:
 

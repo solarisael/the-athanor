@@ -15,7 +15,12 @@ fn athanor(arguments: &[&str]) -> std::process::Output {
 
 #[test]
 fn obsolete_and_unknown_modes_are_refused_before_the_runtime_is_read() {
-    for arguments in [&["--room", "kintsu"][..], &["gui"][..], &["manage"][..], &["athanor-manage"][..]] {
+    for arguments in [
+        &["--room", "kintsu"][..],
+        &["gui"][..],
+        &["manage"][..],
+        &["athanor-manage"][..],
+    ] {
         let output = athanor(arguments);
         assert!(!output.status.success());
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -31,7 +36,16 @@ fn help_names_every_door() {
     let output = athanor(&["help"]);
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    for door in ["status", "start", "keeper ROOM", "keeper --config", "chat", "doctor", "install", "service"] {
+    for door in [
+        "status",
+        "start",
+        "keeper ROOM",
+        "keeper --config",
+        "chat",
+        "doctor",
+        "install",
+        "service",
+    ] {
         assert!(stdout.contains(door), "help must name {door}: {stdout}");
     }
 }
@@ -50,8 +64,14 @@ fn a_room_name_is_answered_by_the_harness_registry() {
     let output = athanor(&["keeper", "kodo"]);
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("\"kodo\""), "the refusal names the room asked for: {stderr}");
-    assert!(stderr.contains("harnesses.json"), "the refusal names the registry it read: {stderr}");
+    assert!(
+        stderr.contains("\"kodo\""),
+        "the refusal names the room asked for: {stderr}"
+    );
+    assert!(
+        stderr.contains("harnesses.json"),
+        "the refusal names the registry it read: {stderr}"
+    );
     assert!(!stderr.contains("unknown mode"), "{stderr}");
 }
 

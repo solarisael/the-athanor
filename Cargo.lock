@@ -1813,10 +1813,12 @@ dependencies = [
  "async-nats",
  "atomicwrites",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "futures-util",
  "hearth",
  "hex",
+ "interactive-process",
  "origami",
  "protocol",
  "regex",
@@ -2892,7 +2894,9 @@ dependencies = [
  "protocol",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]

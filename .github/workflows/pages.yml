@@ -14,7 +14,7 @@ on:
       - "USAGE.md"
       - "IDENTITY_GUIDE.md"
       - "CHANGELOG.md"
-      - "LESSON_MAP.md"
+      - "LESSONS.jsonl"
       - "LICENSE"
       - "NOTICE"
       - "HOUSE.md"

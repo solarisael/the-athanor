@@ -122,6 +122,7 @@ mod tests {
             mode: RestartMode::Resume,
             session_id: None,
             reason: String::new(),
+            requester_instance_sha256: None,
             deadlines: RestartStatusDeadlines {
                 expires_at: "2026-08-25T18:05:00+00:00".to_string(),
                 exiting_deadline_at: None,

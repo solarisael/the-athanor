@@ -11,6 +11,7 @@
 //! it returns, so the two stores cannot drift on rules. Nothing here does I/O.
 
 mod engine;
+mod familiar;
 mod model;
 mod request;
 mod wake;
@@ -20,9 +21,9 @@ mod tests;
 
 pub use engine::{
     Applied, Effects, LifecycleError, Step, apply, changed_books, deliver, inspect_caller,
-    page_retained, read_response, refused, render_open, replay, retained_response,
-    unknown_cursor,
+    page_retained, read_response, refused, render_open, replay, retained_response, unknown_cursor,
 };
+pub use familiar::{Familiar, RoleTag, TaggedLesson};
 pub use model::{
     BookRecord, BookState, DispositionRecord, EntryAuthor, EntryRecord, HandoffRecord,
     InstanceRecord, InstanceState, OperationRecord, RequestRecord, RetainedRecord, SwarmRecord,
@@ -56,3 +57,6 @@ pub const INSPECT_SWARM_LIMIT: i64 = 20;
 pub const INSPECT_BOOK_LIMIT: usize = 50;
 pub const INSPECT_INSTANCE_LIMIT: usize = 20;
 pub const PENDING_LIMIT: usize = 50;
+/// Cap on one familiar wake's delivered titles plus bodies, in UTF-8 bytes.
+/// A curriculum above it is refused whole, never cut to fit.
+pub const FAMILIAR_LESSON_LIMIT_BYTES: usize = 64 * 1024;

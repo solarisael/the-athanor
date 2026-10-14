@@ -9,7 +9,7 @@ import path from "node:path";
 import { requestOrgan, OrganError, type OrganOperation } from "./house-proof/organ.ts";
 import { hostSessionIdentity, type HostBinding } from "./house-proof/host.ts";
 type JsonObject = Record<string, unknown>;
-import { roomContext } from "./house-proof/room.ts";
+import { roomBinding } from "./house-proof/room.ts";
 
 const GIGA_READ_TIMEOUT_MS = 120_000;
 let gigaClosing = false;
@@ -76,7 +76,7 @@ type LoggedTurn = {
   hasStableID?: unknown;
 };
 
-type GigaTurnBuffer = { ctx: any; cwd: string; turns: LoggedTurn[] };
+type GigaTurnBuffer = { ctx: any; cwd: string; conversation: string; turns: LoggedTurn[] };
 const gigaTurnBuffers = new Map<string, GigaTurnBuffer>();
 
 
@@ -126,8 +126,10 @@ export async function requestGigaQueueMaintenance(binding: HostBinding, operatio
 async function ingestLoggedTurns(ctx: any, loggedTurns: LoggedTurn[]): Promise<void> {
   if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || process.env.ATHANOR_REPLAY_MODE === "1" || loggedTurns.length === 0) return;
   try {
-    const trusted = roomContext(ctx?.cwd || process.cwd());
-    const binding = { room: trusted.room, spirit: trusted.spirit, session: hostSessionIdentity(ctx, trusted.effectiveRoomDir) };
+    const resolved = roomBinding(ctx);
+    // An ordinary harness session's turns never enter any room's GIGA queue.
+    if (!resolved) return;
+    const binding = resolved.binding;
     await requestObject(binding, "giga_conversation_ingest", {
       enablement: {
         gigaEnabled: process.env.ATHANOR_GIGA_ENABLED === "1",
@@ -160,10 +162,18 @@ export function isSubagentSessionContext(ctx: any): boolean {
 
 export function ingestGigaLoggedTurnsDetached(ctx: any, loggedTurns: LoggedTurn[]): void {
   if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || process.env.ATHANOR_REPLAY_MODE === "1" || !Array.isArray(loggedTurns) || loggedTurns.length === 0 || isSubagentSessionContext(ctx)) return;
+  // Buffers belong to the conversation that logged them. Two conversations in
+  // one workspace never flush each other's turns.
   const cwd = String(ctx?.cwd || "");
+  let conversation: string;
+  try {
+    conversation = hostSessionIdentity(ctx);
+  } catch {
+    return;
+  }
   for (const turn of loggedTurns) {
-    const key = `${cwd}\0${String(turn.sessionID ?? "")}`;
-    const buffered = gigaTurnBuffers.get(key) ?? { ctx, cwd, turns: [] };
+    const key = `${conversation}\0${String(turn.sessionID ?? "")}`;
+    const buffered = gigaTurnBuffers.get(key) ?? { ctx, cwd, conversation, turns: [] };
     buffered.ctx = ctx;
     buffered.turns.push(turn);
     gigaTurnBuffers.set(key, buffered);
@@ -171,9 +181,14 @@ export function ingestGigaLoggedTurnsDetached(ctx: any, loggedTurns: LoggedTurn[
 }
 
 export function flushGigaTurnsDetached(ctx: any): void {
-  const cwd = String(ctx?.cwd || "");
+  let conversation: string;
+  try {
+    conversation = hostSessionIdentity(ctx);
+  } catch {
+    return;
+  }
   for (const [key, buffered] of [...gigaTurnBuffers]) {
-    if (buffered.cwd !== cwd) continue;
+    if (buffered.conversation !== conversation) continue;
     gigaTurnBuffers.delete(key);
     if (buffered.turns.length) void ingestLoggedTurns(buffered.ctx, buffered.turns);
   }

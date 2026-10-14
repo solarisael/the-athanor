@@ -21,9 +21,10 @@ async function fixture(t) {
   await cp(join(root, "site"), join(directory, "site"), { recursive: true });
   await cp(join(root, "node_modules/marked"), join(directory, "node_modules/marked"), { recursive: true });
   await writeFile(join(directory, "package.json"), '{"type":"module"}');
-  for (const name of ["README.md", "INSTALL.md", "USAGE.md", "IDENTITY_GUIDE.md", "CHANGELOG.md", "HOUSE.md", "LESSON_MAP.md", "docs/README.md", "LICENSE", "NOTICE"]) {
+  for (const name of ["README.md", "INSTALL.md", "USAGE.md", "IDENTITY_GUIDE.md", "CHANGELOG.md", "HOUSE.md", "LICENSE", "NOTICE"]) {
     await writeFile(join(directory, name), "# Public documentation\n");
   }
+  await writeFile(join(directory, "LESSONS.jsonl"), '{"type":"coding","ids":[9],"limit":50}\n');
   return directory;
 }
 

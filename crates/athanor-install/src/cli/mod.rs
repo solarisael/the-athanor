@@ -5,6 +5,7 @@
 
 pub mod chat;
 pub mod keeper;
+pub mod launch;
 pub mod manage;
 pub mod start;
 pub mod status;
@@ -22,6 +23,7 @@ start [--service]      Start what is missing. --service starts the Windows servi
 keeper ROOM            Run the OMP keeper for one room, by its harness registry name.\n  \
 keeper --config FILE   Run the OMP keeper for the room whose config is FILE.\n  \
 chat [--room ROOM]     Talk to a room from this terminal.\n  \
+launch-session --manifest FILE\n                         Internal: run a Host-prepared one-use terminal relaunch.\n  \
 doctor                 Check the installation.\n  \
 install --staging DIR --manifest FILE [--external-database-file FILE] [--house-config-file FILE] [--omp-config FILE --client-config FILE --operator-principal NAME]\n  \
 update                 Same options as install.\n  \
@@ -49,11 +51,18 @@ pub fn run(arguments: Vec<String>) -> Result<ExitCode> {
         "start" => start::run(&rest),
         "keeper" => keeper::run(&rest),
         "chat" => chat::run(&rest).map(|()| ExitCode::SUCCESS),
-        "install" | "update" | "install-omp-adapter" | "rollback-omp-adapter" | "doctor"
-        | "rollback" | "uninstall" | "purge" => {
-            manage::run(mode, &rest).map(|()| ExitCode::SUCCESS)
-        }
-        unknown => Err(anyhow::anyhow!("unknown mode {unknown:?}; run athanor help")),
+        protocol::launch::LAUNCH_SESSION_MODE => launch::run(&rest),
+        "install"
+        | "update"
+        | "install-omp-adapter"
+        | "rollback-omp-adapter"
+        | "doctor"
+        | "rollback"
+        | "uninstall"
+        | "purge" => manage::run(mode, &rest).map(|()| ExitCode::SUCCESS),
+        unknown => Err(anyhow::anyhow!(
+            "unknown mode {unknown:?}; run athanor help"
+        )),
     }
 }
 

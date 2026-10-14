@@ -2,6 +2,8 @@
 mod contract;
 pub mod harness;
 mod host;
+/// One-use launch manifests of Host-driven terminal relaunches.
+pub mod launch;
 pub mod organ;
 /// The restart intent vocabulary keeps its own namespace: consumers name the
 /// door (`protocol::restart::...`) instead of importing a flat re-export.
@@ -1332,8 +1334,9 @@ fn is_sensitive_diagnostic_key(key: &str) -> bool {
 }
 
 /// The file backup that followed a durable write, as it rides on the write's
-/// receipt. `status` is `ok`, `failed`, or `skipped`; the receipt fields are
-/// present for `ok`, the failure fields for `failed`, neither for `skipped`.
+/// receipt. `status` is `ok`, `fresh`, `failed`, or `skipped`; the receipt
+/// fields are present for `ok`, `dump_path` and `detail` for `fresh`, the
+/// failure fields for `failed`, neither for `skipped`.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct BackupResult {
     pub status: String,
@@ -1373,6 +1376,10 @@ impl From<&BackupOutcome> for BackupResult {
         };
         match outcome {
             BackupOutcome::Skipped => {}
+            BackupOutcome::Fresh(fresh) => {
+                result.dump_path = Some(fresh.dump_path().into());
+                result.detail = Some(fresh.detail());
+            }
             BackupOutcome::Ok(receipt) => {
                 result.dump_path = Some(receipt.dump_path().into());
                 result.sha256 = Some(receipt.sha256().into());

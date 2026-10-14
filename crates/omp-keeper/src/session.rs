@@ -97,11 +97,19 @@ struct SubstrateSession {
 
 impl SubstrateSession {
     fn start(executable: &Path, state_root: &Path) -> Result<Self> {
-        let mut child = Command::new(executable)
+        let mut command = Command::new(executable);
+        command
             .env("ATHANOR_STATE_DIR", state_root)
+            .env_remove(crate::keeper::KEEPER_INSTANCE_ENV)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        // Diagnostic context only: the substrate authorizes nothing by it, and
+        // the smoke fixture uses it to report the child's own intent.
+        if let Some(instance) = crate::keeper::child_instance() {
+            command.env(crate::keeper::KEEPER_INSTANCE_ENV, instance);
+        }
+        let mut child = command
             .spawn()
             .with_context(|| format!("substrate could not start: {}", executable.display()))?;
         let stdin = child
@@ -154,9 +162,9 @@ impl SubstrateSession {
                 Ok(_) if response.trim().is_empty() => {}
                 Ok(_) => break,
                 Err(error) => {
-                    return Ok(self.line_broke(format!(
-                        "the {method} answer could not be read: {error}"
-                    )));
+                    return Ok(
+                        self.line_broke(format!("the {method} answer could not be read: {error}"))
+                    );
                 }
             }
         }

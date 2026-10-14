@@ -12,7 +12,10 @@
 //!   and starts none.
 
 use super::status;
-use crate::{app::installed_runtime, layout::{InstallLayout, SERVICE_NAME}};
+use crate::{
+    app::installed_runtime,
+    layout::{InstallLayout, SERVICE_NAME},
+};
 use anyhow::{Context, Result};
 use protocol::LOOPBACK_HOST;
 use serde::Serialize;
@@ -52,13 +55,19 @@ pub fn run(arguments: &[String]) -> Result<ExitCode> {
     let layout = InstallLayout::from_environment()?;
     let report = start(&layout, with_service)?;
     println!("{}", serde_json::to_string_pretty(&report)?);
-    Ok(if report.refused.iter().any(|refusal| refusal.reason == NEEDS_ELEVATION) {
-        ExitCode::from(EXIT_NEEDS_ELEVATION)
-    } else if report.ok {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(1)
-    })
+    Ok(
+        if report
+            .refused
+            .iter()
+            .any(|refusal| refusal.reason == NEEDS_ELEVATION)
+        {
+            ExitCode::from(EXIT_NEEDS_ELEVATION)
+        } else if report.ok {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        },
+    )
 }
 
 fn start(layout: &InstallLayout, with_service: bool) -> Result<StartReport> {
@@ -94,7 +103,11 @@ fn start(layout: &InstallLayout, with_service: bool) -> Result<StartReport> {
     // with it, so they are waited for, never started here.
     let service_up = !missing("service") || report.started.iter().any(|name| name == "service");
     for (name, host, port) in [
-        ("postgres", config.database_host.as_str(), config.database_port),
+        (
+            "postgres",
+            config.database_host.as_str(),
+            config.database_port,
+        ),
         ("nats", config.nats_host.as_str(), config.nats_port),
     ] {
         if !missing(name) {
@@ -105,7 +118,10 @@ fn start(layout: &InstallLayout, with_service: bool) -> Result<StartReport> {
             report.refused.push(Refusal {
                 component: name.into(),
                 reason: if service_up {
-                    format!("{name} did not listen on {host}:{port} within {} s", SERVICE_START_TIMEOUT.as_secs())
+                    format!(
+                        "{name} did not listen on {host}:{port} within {} s",
+                        SERVICE_START_TIMEOUT.as_secs()
+                    )
                 } else {
                     "waits for the service".into()
                 },
@@ -118,7 +134,10 @@ fn start(layout: &InstallLayout, with_service: bool) -> Result<StartReport> {
     } else if report.refused.is_empty() {
         let app = layout.app();
         let mut command = Command::new(&app);
-        command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         detach(&mut command);
         command
             .spawn()
@@ -224,15 +243,24 @@ mod tests {
     fn sc_start_answers_are_read_by_their_win32_code() {
         assert!(matches!(classify_sc_start(true, ""), ServiceStart::Started));
         assert!(matches!(
-            classify_sc_start(false, "[SC] StartService FAILED 1056:\r\n\r\nAn instance of the service is already running.\r\n"),
+            classify_sc_start(
+                false,
+                "[SC] StartService FAILED 1056:\r\n\r\nAn instance of the service is already running.\r\n"
+            ),
             ServiceStart::Started
         ));
         assert!(matches!(
-            classify_sc_start(false, "[SC] StartService FAILED 5:\r\n\r\nAccess is denied.\r\n"),
+            classify_sc_start(
+                false,
+                "[SC] StartService FAILED 5:\r\n\r\nAccess is denied.\r\n"
+            ),
             ServiceStart::Denied
         ));
         assert!(matches!(
-            classify_sc_start(false, "[SC] StartService FAILED 1053:\r\n\r\nThe service did not respond.\r\n"),
+            classify_sc_start(
+                false,
+                "[SC] StartService FAILED 1053:\r\n\r\nThe service did not respond.\r\n"
+            ),
             ServiceStart::Failed(_)
         ));
     }

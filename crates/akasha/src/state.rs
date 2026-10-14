@@ -169,7 +169,6 @@ mod tests {
         );
     }
 
-
     /// The opposite case, and the one this module exists for: an executable
     /// that is NOT inside the build checkout's target directory gets no
     /// fallback at all. This is the installed product, including when it runs
@@ -214,7 +213,6 @@ mod tests {
         assert_eq!(error, StateRootError::Relative("relative/state".into()));
         assert!(error.to_string().contains("absolute"));
     }
-
 
     /// `substrate_state_dir` is the resolved root plus exactly one component.
     #[test]

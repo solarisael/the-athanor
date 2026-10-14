@@ -9,7 +9,12 @@ param(
     [string]$StateRoot,
     [ValidateRange(0, 3600)][int]$WatchIntervalSecs = 30,
     [string]$SubstrateEnv = "C:/Solarisael/Obsidian/obsidian/house/state/substrate/.env",
-    [string]$CapabilityScript
+    [string]$CapabilityScript,
+    # A keeper holder file whose secret works, for example another room's
+    # .omp/runtime/restart-capability. Every room's keeper presents the one
+    # shared omp-keeper secret, so each later room copies it from here. Only
+    # the first room of a House omits this, and that room mints the secret.
+    [string]$SourceSecretPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,6 +34,13 @@ if (-not (Test-Path $RoomDir -PathType Container)) {
 }
 if (-not (Test-Path $OmpProgram -PathType Leaf)) {
     throw "OMP program does not exist: $OmpProgram"
+}
+$hasSource = -not [string]::IsNullOrWhiteSpace($SourceSecretPath)
+if ($hasSource -and -not [IO.Path]::IsPathRooted($SourceSecretPath)) {
+    throw "Every keeper path must be absolute: $SourceSecretPath"
+}
+if ($hasSource -and -not (Test-Path -LiteralPath $SourceSecretPath -PathType Leaf)) {
+    throw "SourceSecretPath does not exist: $SourceSecretPath"
 }
 foreach ($argument in $OmpArgs) {
     if ($argument -in @("--continue", "-c", "--resume", "-r") -or $argument.StartsWith("--resume=")) {
@@ -91,13 +103,34 @@ $grants = @(
 )
 $existing = @($grants | Where-Object { Test-Path (Join-Path $runtime $_.File) -PathType Leaf })
 if ($existing.Count -gt 0 -or (Test-Path $configPath -PathType Leaf)) {
-    throw "keeper runtime is already provisioned; rotate individual capabilities with provision-restart-capability.ps1"
+    throw "keeper runtime is already provisioned; repair one capability at a time with provision-restart-capability.ps1 (-SourceSecretPath shares the keeper secret, -Rotate replaces a room key)"
 }
 
 $temporary = "$configPath.new-$PID"
+# Set only when this run created the shared keeper authority. Nobody else can
+# hold that secret yet, so rollback may delete the row.
+$keeperMinted = $false
 try {
     foreach ($grant in $grants) {
-        & $CapabilityScript -Principal $grant.Principal -OperationClass $grant.Operation -HolderDir $runtime -SubstrateEnv $SubstrateEnv
+        $grantArguments = @{
+            Principal = $grant.Principal
+            OperationClass = $grant.Operation
+            HolderDir = $runtime
+            SubstrateEnv = $SubstrateEnv
+        }
+        if ($grant.Operation -ne "restart_claim") {
+            # This room is the only holder of its own keys, and its runtime has
+            # none of them yet. A leftover row has no holder, so it is replaced.
+            $grantArguments.Rotate = $true
+        } elseif ($hasSource) {
+            $grantArguments.SourceSecretPath = $SourceSecretPath
+        }
+        & $CapabilityScript @grantArguments
+        if ($grant.Operation -eq "restart_claim") {
+            # This runtime had no keeper secret. With no source, the claim
+            # succeeds only when it mints the first authority.
+            $keeperMinted = -not $hasSource
+        }
     }
     $config = [ordered]@{
         ompLaunch = @([IO.Path]::GetFullPath($OmpProgram)) + @($OmpArgs)
@@ -115,7 +148,16 @@ try {
     $rollbackFailures = @()
     foreach ($grant in $grants) {
         try {
-            & $CapabilityScript -Principal $grant.Principal -OperationClass $grant.Operation -HolderDir $runtime -SubstrateEnv $SubstrateEnv -Remove
+            if ($grant.Operation -eq "restart_claim" -and -not $keeperMinted) {
+                # Every other room's keeper still presents the shared secret.
+                # Remove only this room's copy and leave the authority row alone.
+                $claimSecret = Join-Path $runtime $grant.File
+                if (Test-Path $claimSecret -PathType Leaf) {
+                    Remove-Item $claimSecret -Force -ErrorAction Stop
+                }
+            } else {
+                & $CapabilityScript -Principal $grant.Principal -OperationClass $grant.Operation -HolderDir $runtime -SubstrateEnv $SubstrateEnv -Remove
+            }
         } catch {
             $rollbackFailures += "$($grant.Principal)/$($grant.Operation): $($_.Exception.Message)"
         }

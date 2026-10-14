@@ -61,6 +61,25 @@ describe("backup receipt on durable-write feedback", () => {
     expect(backupReceiptView({}, undefined).line).toBeNull();
   });
 
+  test("a fresh backup names the covering dump quietly and does not demand attention", () => {
+    const view = backupReceiptView({
+      backup: {
+        status: "fresh",
+        dump_path: "C:/state/backups/solarisael_memory-d2d2bd20.dump",
+        detail: "newest dump is 2.3h old, under the 12h bound; no new dump taken",
+      },
+    }, undefined);
+    expect(view).toEqual({
+      status: "fresh",
+      line: {
+        text: "backup fresh · solarisael_memory-d2d2bd20.dump · newest dump is 2.3h old, under the 12h bound; no new dump taken",
+        color: "dim",
+      },
+      detailLines: [{ text: "dump · C:/state/backups/solarisael_memory-d2d2bd20.dump", color: "dim" }],
+      attention: false,
+    });
+  });
+
   test("the remember frame shows the backup line and turns its header to a warning on failure", () => {
     const okFrame = rendered("remember", {
       memory_id: 4470,

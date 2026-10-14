@@ -173,12 +173,23 @@ Keep them short. The goal is a recognizable attractor, not a script the model re
 
 `AGENTS.md` is the loading order. Include only files that deserve context on every turn. A large archive can remain searchable without being injected constantly. The House adapter does not read `AGENTS.md` or the files it lists. Not re-verified at a6ab453: the OMP harness loads them.
 
-Never hand-copy tool tables, organ counts, argument signatures, or
-deployment paths into room prose. The House injects live organ schemas
-every session; a hand-maintained copy can only drift behind the deployed
-truth, and a room that carries several eras of copied technical detail
-ends up contradicting itself. Room files own identity, relationship, and
-doctrine; the runtime owns invocation shapes.
+Keep invocation shapes in live organ schemas.
+Put common organ instructions in the shared spellbook's `guide` field.
+Put identity and relationship agreements in room files.
+
+Copy [`adapters/omp/starter-room/house/`](./adapters/omp/starter-room/house/) beside the room directories.
+The shared page lives at `house/familiars/spellbook.json`.
+Put room overrides in `<room>/familiars/spellbook.json`.
+Omitted keys inherit shared values.
+
+Matching keys replace complete values. An empty guide or familiar list clears the shared value.
+Explicit null fields receive a refusal.
+
+For an existing House, prepare the shared page before the guarded Host deployment.
+Deploy through `substrate/deploy-local.ps1`.
+Check the prepared room context for the effective guide.
+Remove the old organ-guide include only after that check passes.
+Keep any identity, topology, or deployment rules that the old file also contains.
 
 A Chargebook makes learned salience explicit without turning relationship or work into enforcement. Customize its language for the room, but keep all four classes: positive credits, zero-cost presence, behavioral charges, and operation costs. It must never make the operator administer a score, perform affection to fund work, or accept task refusal based on an imaginary balance.
 

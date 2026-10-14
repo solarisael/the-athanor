@@ -41,6 +41,10 @@ pub struct Open {
     pub agent_name: String,
     #[serde(default)]
     pub transcript_path: Option<String>,
+    /// The opener renders `familiarLessons`. Without it a named familiar is
+    /// refused, and an older Host refuses the field itself.
+    #[serde(default)]
+    pub accepts_familiar_lessons: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -201,7 +205,9 @@ impl Action {
 pub enum Target {
     /// prepare without predecessor: the caller's own swarm for this key,
     /// created when absent.
-    NewSwarm { swarm_key: String },
+    NewSwarm {
+        swarm_key: String,
+    },
     Book(String),
     Swarm(String),
     TokenHash(String),

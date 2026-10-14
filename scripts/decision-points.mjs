@@ -10,11 +10,9 @@
 //   module    <= 60 decision points
 //   crate     warn 50, review 60, refuse above 70
 //
-// Method, stated because the number is only meaningful with it: block comments,
-// line comments, and string literals are stripped first, so prose words like
-// "if", "for", and "or" cannot inflate the count. Everything from the first
-// `#[cfg(test)]` to end of file is dropped, because tests, generated code, and
-// vendored code are excluded from the budget.
+// Strip comments and string literals before counting.
+// Remove test-only imports and external test declarations.
+// An inline test module ends the production section.
 //
 // This is a text counter, not a semantic analyzer. It exists so the number is
 // reproducible and arguable rather than asserted from memory. It reads high on
@@ -53,8 +51,9 @@ function rustFiles(target) {
 
 /** Production source only: no tests, no comments, no string bodies. */
 export function productionSource(source) {
-  const testModule = source.indexOf("#[cfg(test)]");
-  let code = testModule === -1 ? source : source.slice(0, testModule);
+  let code = source.replace(/#\[cfg\(test\)\]\s*(?:use\s+[^;]+;|mod\s+\w+\s*;)/g, "");
+  const testModule = code.indexOf("#[cfg(test)]");
+  if (testModule !== -1) code = code.slice(0, testModule);
   code = code.replace(/\/\*[\s\S]*?\*\//g, " ");
   code = code.split("\n").map((line) => line.replace(/\/\/.*$/, "")).join("\n");
   return code.replace(/"(?:[^"\\]|\\.)*"/g, '""');

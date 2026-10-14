@@ -20,17 +20,75 @@ pub struct Familiar {
     pub appearance: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
+/// The effective spellbook: the House page with the room page laid over it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Spellbook {
     pub version: u8,
     pub collective: String,
-    #[serde(default)]
     pub collective_aliases: Vec<String>,
-    #[serde(default)]
     pub spellbook_aliases: Vec<String>,
-    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub guide: String,
     pub familiars: Vec<Familiar>,
+}
+
+/// One spellbook file as written. A key the page omits inherits the House
+/// value; a key it names replaces that value whole, an empty value included.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct SpellbookPage {
+    #[serde(default, deserialize_with = "present")]
+    pub version: Option<u8>,
+    #[serde(default, deserialize_with = "present")]
+    pub collective: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub collective_aliases: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub spellbook_aliases: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "present")]
+    pub guide: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub familiars: Option<Vec<Familiar>>,
+}
+
+// Missing keys inherit; an explicit null must not silently erase an override.
+fn present<'de, T: Deserialize<'de>, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+impl SpellbookPage {
+    /// Familiars are keyed by id: a room entry replaces the House entry with
+    /// the same id whole, and an explicit empty list clears the chapter.
+    pub fn over(self, house: SpellbookPage) -> SpellbookPage {
+        let familiars = match (self.familiars, house.familiars) {
+            (Some(room), Some(house)) if !room.is_empty() => Some(overlay_familiars(house, room)),
+            (room, house) => room.or(house),
+        };
+        SpellbookPage {
+            version: self.version.or(house.version),
+            collective: self.collective.or(house.collective),
+            collective_aliases: self.collective_aliases.or(house.collective_aliases),
+            spellbook_aliases: self.spellbook_aliases.or(house.spellbook_aliases),
+            guide: self.guide.or(house.guide),
+            familiars,
+        }
+    }
+}
+
+fn overlay_familiars(mut house: Vec<Familiar>, room: Vec<Familiar>) -> Vec<Familiar> {
+    for familiar in room {
+        match house
+            .iter_mut()
+            .find(|inherited| inherited.id.trim() == familiar.id.trim())
+        {
+            Some(inherited) => *inherited = familiar,
+            None => house.push(familiar),
+        }
+    }
+    house
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -55,12 +113,10 @@ fn spellbook_errors(spellbook: &mut Spellbook) -> Vec<String> {
         errors.push("Familiar spellbook version must be 1.".into());
     }
     spellbook.collective = spellbook.collective.trim().into();
-    if spellbook.collective.is_empty() {
-        errors.push("Familiar spellbook collective is required.".into());
+    if spellbook.collective.is_empty() && !spellbook.familiars.is_empty() {
+        errors.push("Familiar spellbook collective is required when it binds familiars.".into());
     }
-    if spellbook.familiars.is_empty() {
-        errors.push("Familiar spellbook requires at least one familiar.".into());
-    }
+    spellbook.guide = spellbook.guide.trim().into();
     unique_nonempty(&mut spellbook.collective_aliases);
     unique_nonempty(&mut spellbook.spellbook_aliases);
     errors
@@ -173,7 +229,15 @@ fn familiar_lookup_errors(
     errors
 }
 
-pub fn validate_spellbook(mut spellbook: Spellbook) -> FamiliarStatus {
+pub fn validate_spellbook(page: SpellbookPage) -> FamiliarStatus {
+    let mut spellbook = Spellbook {
+        version: page.version.unwrap_or_default(),
+        collective: page.collective.unwrap_or_default(),
+        collective_aliases: page.collective_aliases.unwrap_or_default(),
+        spellbook_aliases: page.spellbook_aliases.unwrap_or_default(),
+        guide: page.guide.unwrap_or_default(),
+        familiars: page.familiars.unwrap_or_default(),
+    };
     let mut errors = spellbook_errors(&mut spellbook);
     let mut owners = HashMap::<String, String>::new();
     for (index, familiar) in spellbook.familiars.iter_mut().enumerate() {

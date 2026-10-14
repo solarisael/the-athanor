@@ -1,12 +1,15 @@
 // Tool registration for the OMP adapter.
 // Silhouette: expose room/substrate tools; keep hook wiring out of tool bodies.
 
+import { createHash } from "node:crypto";
+
 import { parentContextRequest, recallWithRouting } from "./recall.ts";
 import {
   loadRoomState,
   patchRoomState,
+  requireRoomBinding,
+  requireRoomContext,
   roomCapability,
-  roomContext,
   statePathForRoom,
 } from "./room.ts";
 import { RecallPolicyHostClient } from "./recall-policy.ts";
@@ -49,20 +52,44 @@ import {
   type GigaHealthResult,
 } from "../giga.ts";
 import { registerRestartDoor } from "./restart-door.ts";
+import {
+  homeResource,
+  homeSessionStatus,
+  issueSessionCommand,
+  SESSION_COMMAND_KINDS,
+  sessionCommandStatus,
+} from "./session.ts";
+import { PortableSessionError } from "./session-transport.ts";
+
+// Host session answers travel verbatim; a refusal keeps the Host's own code
+// (revision_conflict carries currentRevision, path_invalid names traversal).
+async function sessionToolResult(work: () => Promise<Record<string, unknown>>) {
+  try {
+    const result = await work();
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
+  } catch (error) {
+    const refusal = error instanceof PortableSessionError
+      ? { ok: false, error: { ...(error.detail ?? {}), code: error.code, message: error.message } }
+      : { ok: false, error: { code: "failed", message: error instanceof Error ? error.message : String(error) } };
+    return { isError: true, content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }], details: refusal };
+  }
+}
+
+// The Host requires a UUID commandId. Deriving it from the tool call id keeps
+// a replayed tool call on the same command.
+function commandIdFor(toolCallId: string): string {
+  const hex = createHash("sha256").update(`session_control\0${toolCallId}`).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${((parseInt(hex[16], 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
 
 const LANE_STATUS_HEALTH_TIMEOUT_MS = 3_000;
 const DESIGN_DOCUMENT_TYPES = new Set(["token", "component", "contract", "guideline"]);
 
+// Tools act as the session's attached or launched home. An ordinary harness
+// session has none, and every room tool refuses it with the `/spirit` remedy.
 function hostBinding(ctx: any) {
-  const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-  return {
-    binding: {
-      room,
-      spirit,
-      session: hostSessionIdentity(ctx, effectiveRoomDir),
-    },
-    effectiveRoomDir,
-  };
+  const { context, binding } = requireRoomBinding(ctx);
+  return { binding, effectiveRoomDir: context.effectiveRoomDir };
 }
 
 // Docket writes carry an operation-scoped room capability. It is resolved from
@@ -333,8 +360,8 @@ export function registerSolarisaelTools(pi, release) {
           details: { ok: false, code: "ask_parent_context" },
         };
       }
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const { room, spirit } = requireRoomContext(ctx);
+      const session = hostSessionIdentity(ctx);
       try {
         const recalled = await recallWithRouting(room, params.query, { binding: { room, spirit, session }, signal: _signal, temporalDecay: false, projection: "manual" });
         if (!recalled.ok) {
@@ -380,7 +407,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room } = requireRoomContext(ctx);
       const result = await readRustCanon({
         binding: hostBinding(ctx).binding,
         room: params.room === "house" ? "house" : room,
@@ -425,7 +452,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
-      const { room, spirit, operator } = roomContext(ctx.cwd);
+      const { room, spirit, operator } = requireRoomContext(ctx);
       const result = await writeRustCanon({
         binding: hostBinding(ctx).binding,
         room: params.room === "house" ? "house" : room,
@@ -494,7 +521,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room } = requireRoomContext(ctx);
       const kind = params.kind || "memory";
       const result = kind === "memory"
         ? await writeRustMemory({
@@ -644,7 +671,7 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      const { room, effectiveRoomDir } = requireRoomContext(ctx);
       const state = await loadRoomState(ctx, _signal);
       return { content: [{ type: "text", text: JSON.stringify({ path: statePathForRoom(effectiveRoomDir), state }, null, 2) }], details: { room, ok: true } };
     },
@@ -660,7 +687,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      const { room, effectiveRoomDir } = requireRoomContext(ctx);
       const next = await patchRoomState(ctx, params, _signal);
       return { content: [{ type: "text", text: JSON.stringify({ path: statePathForRoom(effectiveRoomDir), state: next }, null, 2) }], details: { room, ok: true } };
     },
@@ -686,7 +713,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room } = requireRoomContext(ctx);
       const project = params.project?.trim();
       const ids = (params.ids ?? []).filter((id) => Number.isInteger(id) && id > 0);
       if (params.type === "project" && !project && ids.length === 0) {
@@ -820,8 +847,8 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const { room, spirit } = requireRoomContext(ctx);
+      const session = hostSessionIdentity(ctx);
       // Sleep is the deliberate session boundary: classify whatever the buffer still holds
       // so the closing batch is not stranded until the next session's shutdown.
       flushGigaTurnsDetached(ctx);
@@ -857,8 +884,9 @@ export function registerSolarisaelTools(pi, release) {
     name: "familiar_status",
     label: "Athanor Familiar Status",
     description: [
-      "Load and validate this room's familiar spellbook.",
-      "The canonical file is familiars/spellbook.json; familiars/litters.json is accepted as a room-level alias.",
+      "Load and validate this room's effective spellbook: the House page with this room's page laid over it.",
+      "Each page is familiars/spellbook.json (familiars/litters.json is accepted as an alias), in the House directory beside the rooms and in this room.",
+      "A room key replaces the House value whole; familiars replace by id; an explicit empty value clears.",
     ].join("\n"),
     parameters: z.object({}),
     approval: "read",
@@ -877,11 +905,11 @@ export function registerSolarisaelTools(pi, release) {
     name: "familiar_dispatch",
     label: "Athanor Familiar Dispatch",
     description: [
-      "Resolve a named familiar or alias from this room's spellbook and build its bounded OMP task packet.",
+      "Resolve a named familiar or alias from this room's effective spellbook (House page plus room page) and build its bounded OMP task packet.",
       "The familiar binds identity to an existing worker lane. This tool validates and packages; the main model still spawns explicitly.",
     ].join("\n"),
     parameters: z.object({
-      familiar: z.string().describe("Familiar id, name, or alias from this room's spellbook."),
+      familiar: z.string().describe("Familiar id, name, or alias from this room's effective spellbook."),
       task: z.string().describe("Exact work packet the familiar should execute."),
       target: z.string().optional().describe("Exact target files/symbols/non-goals when known."),
       context: z.array(z.object({
@@ -891,7 +919,7 @@ export function registerSolarisaelTools(pi, release) {
         reason: z.string().optional().describe("Why this fragment is included."),
       })).optional().describe("Context fragments tagged by exact/gist/image/retrieve-only policy."),
       acceptance: z.array(z.string()).optional().describe("Observable acceptance checks the familiar must satisfy."),
-      lessonBodies: z.array(z.string()).describe("Complete verbatim lesson bodies required by the matching LESSON_MAP sections. Bare IDs and summaries are not delivery."),
+      lessonBodies: z.array(z.string()).describe("Complete verbatim bodies returned by the project's lesson queries and required task-specific retrieval. Bare IDs and summaries are not delivery."),
       risk: z.enum(["low", "medium", "high"]).optional().describe("Dispatch risk label for receipt/context."),
     }),
     approval: "read",
@@ -926,7 +954,7 @@ export function registerSolarisaelTools(pi, release) {
         reason: z.string().optional().describe("Why this fragment is included."),
       })).optional().describe("Context fragments tagged by exact/gist/image/retrieve-only policy."),
       acceptance: z.array(z.string()).optional().describe("Observable acceptance checks the worker must satisfy."),
-      lessonBodies: z.array(z.string()).describe("Complete verbatim lesson bodies required by the matching LESSON_MAP sections. Bare IDs and summaries are not delivery."),
+      lessonBodies: z.array(z.string()).describe("Complete verbatim bodies returned by the project's lesson queries and required task-specific retrieval. Bare IDs and summaries are not delivery."),
       risk: z.enum(["low", "medium", "high"]).optional().describe("Dispatch risk label for receipt/context."),
     }),
     approval: "read",
@@ -950,7 +978,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      const { room, effectiveRoomDir } = requireRoomContext(ctx);
       const next = typeof params.enabled === "boolean"
         ? await patchRoomState(ctx, { routingModeEnabled: params.enabled }, _signal)
         : await loadRoomState(ctx, _signal);
@@ -968,7 +996,7 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room } = requireRoomContext(ctx);
       const output = {
         ok: true,
         room,
@@ -992,8 +1020,8 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const { room, spirit, effectiveRoomDir } = requireRoomContext(ctx);
+      const session = hostSessionIdentity(ctx);
       try {
         const client = new RecallPolicyHostClient({ room, spirit, session });
         const snapshot = params.requestedMode === undefined
@@ -1040,7 +1068,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
+      const { room, effectiveRoomDir } = requireRoomContext(ctx);
       const patch: import("./room.ts").RoomStatePatch = {};
       const model = typeof params.model === "string" ? params.model.trim() : "";
   
@@ -1092,7 +1120,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "read",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room } = requireRoomContext(ctx);
       const mode = params.mode;
       if (mode === "consult" && !String(params.query || "").trim()) {
         return refuseToolResult("consult requires a non-empty query");
@@ -1180,7 +1208,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "read",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room } = requireRoomContext(ctx);
       try {
         const result = await requestGigaCandidateList(hostBinding(ctx).binding, {
           ...(params.review_state === undefined ? {} : { reviewState: params.review_state }),
@@ -1209,7 +1237,7 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({}),
     approval: "read",
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room } = requireRoomContext(ctx);
       try {
         const result = await requestGigaHealth(hostBinding(ctx).binding, { signal: _signal });
         return normalizeGigaHealth(result);
@@ -1227,7 +1255,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room } = roomContext(ctx.cwd);
+      const { room } = requireRoomContext(ctx);
       try {
         const result = await requestGigaQueueMaintenance(hostBinding(ctx).binding, params.operation, {
           signal: _signal,
@@ -1254,7 +1282,7 @@ export function registerSolarisaelTools(pi, release) {
     }),
     approval: "write",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { room, spirit } = roomContext(ctx.cwd);
+      const { room, spirit } = requireRoomContext(ctx);
       try {
         const result = await requestGigaReview(hostBinding(ctx).binding, {
           candidate_id: params.candidate_id,
@@ -1280,7 +1308,7 @@ export function registerSolarisaelTools(pi, release) {
     signal: AbortSignal | undefined,
     ctx: any,
   ) {
-    const { room, spirit, operator } = roomContext(ctx.cwd);
+    const { room, spirit, operator } = requireRoomContext(ctx);
     const target: GigaPromotionTarget = expectedKind === "memory"
       ? {
           kind: "memory",
@@ -1814,6 +1842,106 @@ export function registerSolarisaelTools(pi, release) {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         details: result,
       };
+    },
+  });
+
+  // Personal documents stay in the attached home; these tools read and write
+  // them through the Host, which refuses traversal, dot segments, links and
+  // runtime secrets. Nothing is copied into the workspace.
+  registerHouseTool(pi, {
+    name: "home_resources",
+    label: "Athanor Home Documents",
+    description: [
+      "List or read the personal documents of this conversation's attached Athanor home.",
+      "Paths are relative to the home, '/'-separated. Every result carries the revision a later write must name.",
+    ].join("\n"),
+    parameters: z.object({
+      action: z.enum(["list", "read"]).describe("list documents under prefix, or read one path"),
+      path: z.string().optional().describe("read: the document path relative to the home"),
+      prefix: z.string().optional().describe("list: a directory relative to the home"),
+    }),
+    approval: "read",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      return sessionToolResult(() => params.action === "read"
+        ? homeResource(ctx, { action: "resourceRead", path: String(params.path ?? "") }, signal)
+        : homeResource(ctx, { action: "resourceList", ...(params.prefix ? { prefix: params.prefix } : {}) }, signal));
+    },
+  });
+  registerHouseTool(pi, {
+    name: "home_resource_write",
+    label: "Athanor Home Document Write",
+    description: [
+      "Write one personal document of this conversation's attached Athanor home.",
+      "expectedRevision is the revision your last read or list returned; null creates a new document and refuses an existing one.",
+      "A stale revision refuses with revision_conflict and the current revision; read again before retrying.",
+    ].join("\n"),
+    parameters: z.object({
+      path: z.string().describe("document path relative to the home"),
+      text: z.string().describe("the complete new document text"),
+      expectedRevision: z.string().nullable().describe("current revision, or null to create"),
+    }),
+    approval: "write",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      return sessionToolResult(() => homeResource(ctx, {
+        action: "resourceWrite",
+        path: params.path,
+        text: params.text,
+        expectedRevision: params.expectedRevision ?? null,
+      }, signal));
+    },
+  });
+  registerHouseTool(pi, {
+    name: "house_sessions",
+    label: "Athanor Home Sessions",
+    description: [
+      "Show every harness session the Host has registered for this conversation's home.",
+      "The answer covers connected and disconnected instances, launchers, unsupported controls, chat delivery and restarts.",
+    ].join("\n"),
+    parameters: z.object({}),
+    approval: "read",
+    async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
+      return sessionToolResult(() => homeSessionStatus(ctx, signal));
+    },
+  });
+  registerHouseTool(pi, {
+    name: "session_control",
+    label: "Athanor Session Control",
+    description: [
+      "Issue one control to one exact session instance of this home, or read a control's state.",
+      "Name the target by the instanceId and conversationId house_sessions reports; there is no room-wide or cwd-wide target, and a control for a conversation the instance no longer holds refuses.",
+      "The Host refuses controls a target does not support and targets that are not live. A disconnected lease never authorizes a kill.",
+      "Restart relaunches the target's own conversation in a new tab; to restart this session, use request_restart.",
+    ].join("\n"),
+    parameters: z.object({
+      action: z.enum(["issue", "status"]).describe("issue a control, or read the state of an issued one"),
+      commandId: z.string().optional().describe("status: the commandId to read; issue: optional retry key (a UUID)"),
+      targetInstanceId: z.string().optional().describe("issue: the exact instance id"),
+      targetConversationId: z.string().optional().describe("issue: the exact conversation id house_sessions reports for that instance; a stale one refuses"),
+      kind: z.enum(SESSION_COMMAND_KINDS).optional().describe("issue: deliver, interrupt, compact, close or restart"),
+      text: z.string().optional().describe("deliver: the message text"),
+      mode: z.enum(["steer", "followUp"]).optional().describe("deliver: steer the running turn, or follow up after it"),
+      instructions: z.string().optional().describe("compact: optional summarizer focus"),
+      reason: z.string().optional().describe("close/restart: why; restart requires it"),
+    }),
+    approval: "write",
+    async execute(toolCallId, params, signal, _onUpdate, ctx) {
+      if (params.action === "status") {
+        if (!params.commandId) return refuseToolResult("status requires commandId");
+        return sessionToolResult(() => sessionCommandStatus(ctx, params.commandId, signal));
+      }
+      if (!params.targetInstanceId || !params.targetConversationId || !params.kind) {
+        return refuseToolResult("issue requires targetInstanceId, targetConversationId and kind");
+      }
+      const payload: Record<string, unknown> =
+        params.kind === "deliver" ? { text: params.text ?? "", ...(params.mode ? { mode: params.mode } : {}) }
+        : params.kind === "compact" ? (params.instructions ? { instructions: params.instructions } : {})
+        : params.kind === "close" ? (params.reason ? { reason: params.reason } : {})
+        : params.kind === "restart" ? { reason: params.reason ?? "" }
+        : {};
+      // A retry of the same tool call reuses its key, so the Host answers it
+      // idempotently instead of issuing the control twice.
+      const commandId = params.commandId || commandIdFor(toolCallId);
+      return sessionToolResult(() => issueSessionCommand(ctx, params.targetInstanceId, params.targetConversationId, params.kind, payload, commandId, signal));
     },
   });
 

@@ -1,7 +1,8 @@
 //! Recall answers an explicit memory reference by primary key inside the
 //! room's scope, and hands a named canon entity back whole. A manual
 //! projection reads the selected records whole; an exact-ID-only query is
-//! answered by those records and their warnings alone.
+//! answered by those records and their warnings alone. Casual filler never
+//! becomes ranked evidence, and never hides a subject or a canonical name.
 //!
 //! Run with the isolated PostgreSQL pair:
 //! `ATHANOR_SUBSTRATE_TEST_DATABASE_URL=... ATHANOR_SUBSTRATE_TEST_SCHEMA=solarisael_tuner_test_<you>`
@@ -534,8 +535,7 @@ async fn manual_projection_reads_whole_records_and_exact_only_queries_skip_ranke
         "the auto excerpt of the long record stops before its tail"
     );
 
-    // The record cap trims by count and names what it dropped, for a long
-    // exact list and for a wide natural selection alike.
+    // Exact references exercise the cap without assuming a ranked lane fills it.
     let mut many = vec![long, second];
     for index in 0..MANUAL_RECORD_CAP {
         many.push(
@@ -578,23 +578,6 @@ async fn manual_projection_reads_whole_records_and_exact_only_queries_skip_ranke
         memory_ids(&uncapped_auto.retrieval_candidates),
         many,
         "the auto projection keeps every resolved reference; the viewport budgets it"
-    );
-    let wide = db
-        .recall_with(ROOM, "lattice record porch plan", RecallProjection::Manual)
-        .await?;
-    assert_eq!(wide.retrieval_candidates.len(), MANUAL_RECORD_CAP);
-    assert!(
-        wide.warnings
-            .iter()
-            .any(|w| w.starts_with(&format!("manual record cap {MANUAL_RECORD_CAP}:"))),
-        "a wide natural selection reports its trim: {:?}",
-        wide.warnings
-    );
-    assert!(
-        wide.retrieval_candidates
-            .iter()
-            .all(|candidate| candidate["body"].is_string()),
-        "every kept record is whole"
     );
 
     db.close().await
@@ -668,6 +651,134 @@ async fn named_weighty_canon_returns_its_complete_assertion() -> TestResult {
     let excerpt = hint["entry"]["summary"].as_str().unwrap_or_default();
     assert!(excerpt.ends_with('…'), "a cut excerpt must end visibly");
     assert!(excerpt.chars().count() < long_summary.chars().count());
+
+    db.close().await
+}
+
+fn evidence_terms(candidate: &serde_json::Value) -> Vec<&str> {
+    ["matched_terms", "missing_terms"]
+        .into_iter()
+        .flat_map(|field| candidate[field].as_array().into_iter().flatten())
+        .filter_map(serde_json::Value::as_str)
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
+async fn casual_filler_never_ranks_and_never_hides_a_subject() -> TestResult {
+    let db = Isolated::open("casual_filler").await?;
+    let bend2 = db
+        .memory(
+            ROOM,
+            "Bend2 assembly",
+            "Sol and Kodo built Bend2 HVM4 assembly. The real subject is Bend2.",
+        )
+        .await?;
+    db.memory(
+        ROOM,
+        "Casual filler decoy",
+        "i don't remember exactly lol what we did around uwu xzclkm. casual filler only.",
+    )
+    .await?;
+    let remember_tool = db
+        .memory(
+            ROOM,
+            "remember tool",
+            "The remember tool writes one durable memory per call.",
+        )
+        .await?;
+    let msvcrt = db
+        .memory(
+            ROOM,
+            "msvcrt linkage",
+            "Rust links msvcrt on the windows-gnu target.",
+        )
+        .await?;
+    let won_bet = db
+        .memory(ROOM, "Friday bet", "We won the bet on Friday.")
+        .await?;
+
+    // A negated reminiscence must not outrank its actual subject.
+    let result = db
+        .recall(
+            ROOM,
+            "i don't remember exactly lol what we did around bend2 uwu xzclkm",
+        )
+        .await?;
+    for candidate in &result.retrieval_candidates {
+        for term in evidence_terms(candidate) {
+            assert!(
+                term == "bend2",
+                "filler `{term}` became evidence: {candidate}"
+            );
+        }
+    }
+    let subject = result
+        .retrieval_candidates
+        .iter()
+        .find(|candidate| candidate["memory_id"].as_i64() == Some(bend2))
+        .ok_or("the Bend2 memory must be found")?;
+    assert_eq!(subject["matched_terms"], serde_json::json!(["bend2"]));
+    assert_eq!(subject["term_coverage"].as_f64(), Some(1.0));
+    assert_eq!(
+        result.retrieval_candidates[0]["memory_id"].as_i64(),
+        Some(bend2)
+    );
+
+    // The House tool name and a vowel-less identifier stay subjects.
+    let result = db
+        .recall(ROOM, "how does remember work with msvcrt lol")
+        .await?;
+    let found = memory_ids(&result.retrieval_candidates);
+    assert!(
+        found.contains(&remember_tool),
+        "remember is a subject: {found:?}"
+    );
+    assert!(found.contains(&msvcrt), "msvcrt is a subject: {found:?}");
+
+    // A contraction leaves no fragment: `won't` never finds `won`.
+    let result = db.recall(ROOM, "it won't build bend2").await?;
+    let found = memory_ids(&result.retrieval_candidates);
+    assert!(found.contains(&bend2), "{found:?}");
+    assert!(
+        !found.contains(&won_bet),
+        "`won` leaked from won't: {found:?}"
+    );
+    assert!(
+        result
+            .retrieval_candidates
+            .iter()
+            .all(|candidate| !evidence_terms(candidate).contains(&"won"))
+    );
+
+    db.close().await
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
+async fn canon_names_that_are_also_filler_still_resolve() -> TestResult {
+    let db = Isolated::open("canon_filler_name").await?;
+    // `OK` is shorter than the in-query mention tier's three characters, so
+    // only the exact-token tier over the lookup terms can find it.
+    for name in ["OK", "Like"] {
+        sqlx::query(
+            "INSERT INTO named_entities (room,name,kind,summary,aliases,weighty)
+             VALUES ('house',$1,'concept','A canonical name that is also casual filler.','{}',FALSE)",
+        )
+        .bind(name)
+        .execute(&db.pool)
+        .await?;
+    }
+
+    let result = db.recall(ROOM, "what does ok mean for like lol").await?;
+    for name in ["OK", "Like"] {
+        let entry = result
+            .canon_matches
+            .iter()
+            .find(|m| m["termKey"].as_str() == Some(name))
+            .ok_or_else(|| format!("canon `{name}` must resolve"))?;
+        assert_eq!(entry["entry"]["exact"], serde_json::json!(true), "{name}");
+    }
 
     db.close().await
 }

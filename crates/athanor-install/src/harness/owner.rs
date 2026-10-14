@@ -197,7 +197,8 @@ fn status(state: &mut OwnedState, spec: &HarnessSpec) -> HarnessStatus {
                 Ok(Some(file)) => drop(file),
                 Err(error) => {
                     failure = Some(detail(format!(
-                        "check keeper lock for {}: {error}", config_path.display()
+                        "check keeper lock for {}: {error}",
+                        config_path.display()
                     )));
                 }
             }
@@ -277,17 +278,25 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let config_path = temp.path().join("omp-keeper.json");
         let registry_path = temp.path().join("harnesses.json");
-        std::fs::write(&registry_path, serde_json::json!({
-            "format": 1,
-            "harnesses": [{
-                "harnessId": "held", "label": "held",
-                "program": temp.path().join("must-not-spawn.exe"),
-                "arguments": ["keeper", "--config", config_path],
-                "workspace": temp.path(), "console": "new_window"
-            }]
-        }).to_string()).unwrap();
-        let registry = HarnessRegistry::parse(&std::fs::read_to_string(registry_path).unwrap()).unwrap();
-        let held = omp_keeper::keeper::try_hold_lock(&config_path).unwrap().unwrap();
+        std::fs::write(
+            &registry_path,
+            serde_json::json!({
+                "format": 1,
+                "harnesses": [{
+                    "harnessId": "held", "label": "held",
+                    "program": temp.path().join("must-not-spawn.exe"),
+                    "arguments": ["keeper", "--config", config_path],
+                    "workspace": temp.path(), "console": "new_window"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let registry =
+            HarnessRegistry::parse(&std::fs::read_to_string(registry_path).unwrap()).unwrap();
+        let held = omp_keeper::keeper::try_hold_lock(&config_path)
+            .unwrap()
+            .unwrap();
         let owner = HarnessOwner::new(registry, "test".into());
         let statuses = owner.start("held").unwrap();
         assert_eq!(statuses[0].lifecycle, HarnessLifecycle::Running);
@@ -304,23 +313,42 @@ mod tests {
         let program = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
             .join("System32/WindowsPowerShell/v1.0/powershell.exe");
         let workspace = std::env::temp_dir();
-        let entry = |id: &str| serde_json::json!({
-            "harnessId": id, "label": id, "program": program,
-            "arguments": ["-NoProfile", "-Command", "Start-Sleep -Seconds 60"],
-            "workspace": workspace, "console": "new_window"
-        });
-        let registry = HarnessRegistry::parse(&serde_json::json!({
-            "format": 1, "harnesses": [entry("owned"), entry("external")]
-        }).to_string()).unwrap();
+        let entry = |id: &str| {
+            serde_json::json!({
+                "harnessId": id, "label": id, "program": program,
+                "arguments": ["-NoProfile", "-Command", "Start-Sleep -Seconds 60"],
+                "workspace": workspace, "console": "new_window"
+            })
+        };
+        let registry = HarnessRegistry::parse(
+            &serde_json::json!({
+                "format": 1, "harnesses": [entry("owned"), entry("external")]
+            })
+            .to_string(),
+        )
+        .unwrap();
         let mut external = start_process(&registry.get("external").unwrap().launch).unwrap();
         let owner = HarnessOwner::new(registry, "test".into());
         let result = (|| -> Result<()> {
             owner.start("owned")?;
             owner.shutdown();
             let statuses = owner.list();
-            assert_eq!(statuses.iter().find(|status| status.harness_id == "owned").unwrap().lifecycle, HarnessLifecycle::Stopped);
+            assert_eq!(
+                statuses
+                    .iter()
+                    .find(|status| status.harness_id == "owned")
+                    .unwrap()
+                    .lifecycle,
+                HarnessLifecycle::Stopped
+            );
             assert!(external.try_wait()?.is_none());
-            assert!(owner.start("external").unwrap_err().to_string().contains("shutting down"));
+            assert!(
+                owner
+                    .start("external")
+                    .unwrap_err()
+                    .to_string()
+                    .contains("shutting down")
+            );
             Ok(())
         })();
         external.terminate().unwrap();

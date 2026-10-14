@@ -3,7 +3,7 @@
 
 import { HostUnavailable, hostHttpEndpoint } from "./host.ts";
 import { insulaErrorClass, isInsulaToolOperation } from "./insula.ts";
-import { roomContext } from "./room.ts";
+import { requireRoomContext } from "./room.ts";
 
 export const INSULA_VITALS_PATH = "/athanor/v1/insula/vitals";
 
@@ -407,7 +407,13 @@ export async function showInsulaCockpit(args: unknown, ctx: CockpitContext): Pro
     );
     return;
   }
-  const { room } = roomContext(ctx?.cwd);
+  let room: string;
+  try {
+    room = requireRoomContext(ctx).room;
+  } catch (error) {
+    ctx?.ui?.notify?.(`Athanor /insula is unavailable: ${error instanceof Error ? error.message : String(error)}`, "warning");
+    return;
+  }
   let lines: string[];
   let level: "info" | "warning" = "info";
   try {

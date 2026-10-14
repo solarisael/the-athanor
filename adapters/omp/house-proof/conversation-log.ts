@@ -3,7 +3,7 @@
 // window to the Host. Turn identity, freshness, dedupe, transcript shape, and
 // durability all belong to Rust.
 
-import { OMP_SESSION_ID } from "./constants.ts";
+import { CAPTURE_TIMEOUT_MS } from "./constants.ts";
 import { hostCommand, hostSessionIdentity, sendHostCommand, type HostBinding } from "./host.ts";
 import { conversationText } from "./text.ts";
 
@@ -54,7 +54,7 @@ function visibleMessages(messages: unknown) {
 }
 
 function conversationSessionId(ctx: any): string {
-  return hostSessionIdentity(ctx, OMP_SESSION_ID);
+  return hostSessionIdentity(ctx);
 }
 
 export async function logConversationWindow(
@@ -78,7 +78,7 @@ export async function logConversationWindow(
       messages: visibleMessages(messages),
     },
   });
-  const response = await sendHostCommand(command, ACCEPTED);
+  const response = await sendHostCommand(command, ACCEPTED, undefined, CAPTURE_TIMEOUT_MS);
   if (!response.result || typeof response.result !== "object") {
     throw new Error("Athanor Host conversation response omitted result");
   }

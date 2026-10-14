@@ -1,4 +1,5 @@
 use super::WAKE_LIMIT_CHARS;
+use super::familiar::Familiar;
 use super::model::{EntryRecord, InstanceState, OperationRecord};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -23,7 +24,8 @@ impl WakeKind {
 }
 
 /// Everything an `open` wake needs except entry bodies. The store loads the
-/// entries named by [`WakePlan::sequences`] from the same book, then renders.
+/// entries named by [`WakePlan::sequences`] from the same book, plus the role
+/// lessons of [`WakePlan::familiar`], then renders.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WakePlan {
     pub kind: WakeKind,
@@ -42,6 +44,10 @@ pub struct WakePlan {
     pub handoff_sequence: Option<i64>,
     pub repair_sequence: Option<i64>,
     pub pending: Vec<OperationRecord>,
+    /// The named familiar whose role lessons this wake must carry. Every wake
+    /// carries them, resume included: a revived or compacted session cannot be
+    /// trusted to still hold what an earlier wake delivered.
+    pub familiar: Option<Familiar>,
 }
 
 impl WakePlan {

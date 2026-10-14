@@ -31,7 +31,21 @@ pub(super) async fn judgment(state: &AppState, meta: CommandMeta, request: Value
 pub(super) async fn lifecycle(state: &AppState, meta: CommandMeta, request: Value) -> Responses {
     let result = match serde_json::from_value(request) {
         Ok(request) => {
-            let messages = if matches!(&request, crate::lifecycle::LifecycleRequest::ChatNext) {
+            if let crate::lifecycle::LifecycleRequest::ChatNext { instance_id } = &request
+                && let Err(owner) = state
+                    .portable
+                    .lock()
+                    .await
+                    .chat_recipient(instance_id.as_deref())
+            {
+                // Two attached sessions must never both answer one room turn.
+                let result = Ok(json!({ "next": null, "deliveryOwner": owner }));
+                return result_response(state, meta, LIFECYCLE_RESULT, result).await;
+            }
+            let messages = if matches!(
+                &request,
+                crate::lifecycle::LifecycleRequest::ChatNext { .. }
+            ) {
                 state.runtime.lock().await.chat.snapshot()
             } else {
                 Vec::new()

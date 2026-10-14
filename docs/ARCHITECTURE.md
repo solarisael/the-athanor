@@ -152,7 +152,19 @@ The Recall viewport compacts candidates to fixed ceilings: excerpt 900 character
 
 Recall policy is Host-owned. A refresh needs a non-Quiet mode and one of: explicit lookup, technical project, or pending recovery (`crates/host/src/policy.rs:220-221`). Refresh reasons rank from `post-compaction-recovery` down to `stale-working-set` at 8 turns or 4,096 tokens (`policy.rs:245-273`).
 
-Dispatch is validation and packaging. The Host never spawns a worker: every receipt carries `executed: false` and an accepted packet is `spawnPacket { tool: "task", args }` (`crates/host/src/routing/dispatch.rs:176-177,440-456`). Four lanes exist: `smol-scout`, `smol-executor`, `tester`, `verifier` (`crates/host/src/routing.rs:100-157`). The spellbook lives at `<room_dir>/familiars/spellbook.json` or `litters.json` (`routing.rs:300-301`).
+Dispatch validates requests and makes packets. The Host never starts a worker.
+Every receipt carries `executed: false`.
+Accepted packets contain `spawnPacket { tool: "task", args }`.
+Four lanes exist: `smol-scout`, `smol-executor`, `tester`, and `verifier`.
+
+The loader reads the shared House spellbook before the room page.
+The shared page lives at `<parent of room_dir>/house/familiars/spellbook.json`.
+The room page lives at `<room_dir>/familiars/spellbook.json`.
+Each layer accepts `litters.json` when its primary file is absent.
+
+Room keys replace shared values whole. Familiar entries replace matching `id` entries.
+The Host includes the effective guide in prepared room context.
+Sources: `routing.rs`, `routing/spellbook.rs`, and `server/context_session/assembly.rs`.
 
 ## 4. The OMP adapter
 

@@ -164,11 +164,58 @@ impl BackupFailure {
     }
 }
 
-/// What a write's backup came to. `Skipped` is the write's own choice; the
-/// other two are the backup's answer.
+/// A dump that already covers this write. A requested backup finds one
+/// younger than its bound and reports it instead of pinning PostgreSQL for
+/// another full `pg_dump`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FreshDump {
+    dump_path: String,
+    age_seconds: u64,
+    bound_hours: u64,
+}
+
+impl FreshDump {
+    pub fn new(dump_path: String, age_seconds: u64, bound_hours: u64) -> Result<Self, DomainError> {
+        let dump_path = dump_path.trim().to_owned();
+        if dump_path.is_empty() {
+            return Err(DomainError::InvalidBackupReceipt {
+                field: "dump_path".into(),
+                message: "the fresh dump path is empty".into(),
+            });
+        }
+        Ok(Self {
+            dump_path,
+            age_seconds,
+            bound_hours,
+        })
+    }
+
+    pub fn dump_path(&self) -> &str {
+        &self.dump_path
+    }
+    pub const fn age_seconds(&self) -> u64 {
+        self.age_seconds
+    }
+    pub const fn bound_hours(&self) -> u64 {
+        self.bound_hours
+    }
+    /// One line for the receipt: how old the covering dump is and the bound it sits under.
+    pub fn detail(&self) -> String {
+        format!(
+            "newest dump is {:.1}h old, under the {}h bound; no new dump taken",
+            self.age_seconds as f64 / 3600.0,
+            self.bound_hours
+        )
+    }
+}
+
+/// What a write's backup came to. `Skipped` is the write's own choice;
+/// `Fresh` is the backup declining because a recent dump already covers the
+/// write; the other two are the backup's answer.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BackupOutcome {
     Skipped,
+    Fresh(FreshDump),
     Ok(BackupReceipt),
     Failed(BackupFailure),
 }
@@ -177,6 +224,7 @@ impl BackupOutcome {
     pub const fn status(&self) -> &'static str {
         match self {
             Self::Skipped => "skipped",
+            Self::Fresh(_) => "fresh",
             Self::Ok(_) => "ok",
             Self::Failed(_) => "failed",
         }
@@ -185,6 +233,13 @@ impl BackupOutcome {
     pub const fn receipt(&self) -> Option<&BackupReceipt> {
         match self {
             Self::Ok(receipt) => Some(receipt),
+            _ => None,
+        }
+    }
+
+    pub const fn fresh(&self) -> Option<&FreshDump> {
+        match self {
+            Self::Fresh(fresh) => Some(fresh),
             _ => None,
         }
     }
@@ -336,9 +391,11 @@ mod tests {
         ] {
             let name = code.as_str();
             assert!(
-                name.bytes().enumerate().all(|(index, byte)| byte.is_ascii_lowercase()
-                    || byte.is_ascii_digit()
-                    || (index > 0 && matches!(byte, b'_' | b'.'))),
+                name.bytes()
+                    .enumerate()
+                    .all(|(index, byte)| byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || (index > 0 && matches!(byte, b'_' | b'.'))),
                 "{name} is not a mechanical name"
             );
             assert_eq!(BackupFailureCode::parse(name), Some(code));

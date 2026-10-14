@@ -137,7 +137,7 @@ Example:
 }
 ```
 
-For a local House, deploy the release first. Then provision one room:
+For a local House, deploy the release first. Then provision the first room:
 
 ```powershell
 pwsh crates/omp-keeper/scripts/provision-local.ps1 `
@@ -148,12 +148,31 @@ pwsh crates/omp-keeper/scripts/provision-local.ps1 `
 The script provisions four operation secrets. It writes `omp-keeper.json` in
 the room runtime directory. Start the printed keeper command instead of `omp`.
 
-The pair of files this script writes — `omp-keeper.json` and the
-`restart-capability` it names — is what the OMP adapter reads to know that a
-claimant exists. A room without the pair cannot self-restart: `request_restart`
-refuses it with `no_restart_owner` and records nothing. Before that refusal
-existed, one such request armed an exit that nobody could claim and left a live
-`exiting` intent that refused every later restart for that workspace.
+All rooms share the `omp-keeper` claim credential. Give each later room the
+validated credential from an existing holder:
+
+```powershell
+pwsh crates/omp-keeper/scripts/provision-local.ps1 `
+  -RoomDir <rooms-root>/<new-room> `
+  -OmpProgram <omp-install-dir>/omp.exe `
+  -SourceSecretPath <rooms-root>/<existing-room>/.omp/runtime/restart-capability
+```
+
+Provisioning preserves an existing authority. A missing or stale source causes
+a refusal without a new shared key. Failed provisioning leaves other holders
+valid. The capability script permits `-Rotate` only for room credentials.
+
+The Host checks the claim and verification credentials before it records a
+restart request. It checks them again before it permits the current session
+to exit. Missing or stale credentials leave that session running.
+
+Repair one existing holder with the capability script:
+
+```powershell
+pwsh substrate/provision-restart-capability.ps1 `
+  -HolderDir <rooms-root>/<room>/.omp/runtime `
+  -SourceSecretPath <rooms-root>/<valid-holder>/.omp/runtime/restart-capability
+```
 
 An installed release carries the same door in its keeper component:
 

@@ -67,12 +67,22 @@ pub(crate) fn read(layout: &InstallLayout) -> Result<StatusReport> {
     let (config, secrets) = installed_runtime(layout)?;
     let mut components = vec![
         service_component(),
-        port_component("postgres", &config.database_host, config.database_port, "PostgreSQL"),
+        port_component(
+            "postgres",
+            &config.database_host,
+            config.database_port,
+            "PostgreSQL",
+        ),
         port_component("nats", &config.nats_host, config.nats_port, "NATS"),
         host_component(layout, &config, &secrets.host_token),
     ];
     components.extend(keeper_components(layout)?);
-    components.push(port_component("ollama", LOOPBACK_HOST, OLLAMA_PORT, "Ollama (optional)"));
+    components.push(port_component(
+        "ollama",
+        LOOPBACK_HOST,
+        OLLAMA_PORT,
+        "Ollama (optional)",
+    ));
 
     let missing: Vec<String> = ["service", "postgres", "nats", "host"]
         .iter()
@@ -148,7 +158,10 @@ fn service_component() -> Component {
 fn port_component(name: &str, host: &str, port: u16, label: &str) -> Component {
     let (running, detail) = match probe_port(host, port) {
         Ok(true) => (Some(true), format!("{label} listening on {host}:{port}")),
-        Ok(false) => (Some(false), format!("{label} not listening on {host}:{port}")),
+        Ok(false) => (
+            Some(false),
+            format!("{label} not listening on {host}:{port}"),
+        ),
         Err(error) => (None, format!("{label} address {host}:{port}: {error}")),
     };
     Component {
@@ -189,7 +202,11 @@ fn host_component(layout: &InstallLayout, config: &RuntimeConfig, token: &str) -
                     format!("room {} health answered {status}", config.default_room),
                 )
             }
-            Err(error) => (Some(false), Some(false), format!("health request failed: {error}")),
+            Err(error) => (
+                Some(false),
+                Some(false),
+                format!("health request failed: {error}"),
+            ),
         };
     Component {
         name: "host".into(),
@@ -220,7 +237,10 @@ fn health_answer(port: u16, room: &str, token: &str) -> Result<(u16, String)> {
         .context("no status line")?
         .parse()
         .context("status is not a number")?;
-    let body = answer.split_once("\r\n\r\n").map(|(_, body)| body).unwrap_or("");
+    let body = answer
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap_or("");
     let body = body.replace(char::is_whitespace, "");
     Ok((status, body))
 }
@@ -236,8 +256,14 @@ fn keeper_components(layout: &InstallLayout) -> Result<Vec<Component>> {
         };
         let installed = config_path.is_file();
         let (running, detail) = match omp_keeper::keeper::try_hold_lock(&config_path) {
-            Ok(None) => (Some(true), format!("keeper holds {}", lock_name(&config_path))),
-            Ok(Some(_released)) => (Some(false), format!("no keeper holds {}", lock_name(&config_path))),
+            Ok(None) => (
+                Some(true),
+                format!("keeper holds {}", lock_name(&config_path)),
+            ),
+            Ok(Some(_released)) => (
+                Some(false),
+                format!("no keeper holds {}", lock_name(&config_path)),
+            ),
             Err(error) => (None, format!("lock probe failed: {error}")),
         };
         components.push(Component {
@@ -253,7 +279,9 @@ fn keeper_components(layout: &InstallLayout) -> Result<Vec<Component>> {
 }
 
 fn lock_name(config_path: &Path) -> String {
-    omp_keeper::keeper::lock_path(config_path).display().to_string()
+    omp_keeper::keeper::lock_path(config_path)
+        .display()
+        .to_string()
 }
 
 #[cfg(test)]

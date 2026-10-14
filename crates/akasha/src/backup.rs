@@ -1,7 +1,7 @@
 use crate::insula::OutcomeClass;
 use crate::insula_writer::{record_timed_point, system_binding};
 use chrono::{DateTime, Utc};
-use hearth::{BackupFailure, BackupFailureCode, BackupReceipt};
+use hearth::{BackupFailure, BackupFailureCode, BackupReceipt, FreshDump};
 use percent_encoding::percent_decode_str;
 use protocol::{
     DiagnosticCategory, DiagnosticDetails, DiagnosticEvidence, DiagnosticExecution,
@@ -982,23 +982,62 @@ pub async fn run_post_write(
     outcome
 }
 
-/// `Skipped` when the write did not ask; otherwise the backup's own answer.
+/// A post-write dump younger than this covers the write. Every room's sleep
+/// asks for a backup, and a full `pg_dump` pins PostgreSQL for tens of
+/// seconds while other rooms' turn-end work runs on a three-second budget;
+/// one dump per bound is enough.
+pub const POST_WRITE_FRESH_HOURS: u64 = 12;
+
+/// `Skipped` when the write did not ask; `Fresh` when a dump younger than
+/// [`POST_WRITE_FRESH_HOURS`] already exists; otherwise the backup's own answer.
 pub async fn post_write_outcome(
     pool: &PgPool,
     database_url: &str,
     room_keep: usize,
     requested: bool,
 ) -> hearth::BackupOutcome {
-    post_write_outcome_with(requested, || run_post_write(pool, database_url, room_keep)).await
+    let fresh = requested
+        .then(|| default_backup_dir().ok())
+        .flatten()
+        .and_then(|dir| fresh_dump_in(dir, POST_WRITE_FRESH_HOURS));
+    post_write_outcome_with(requested, fresh, || {
+        run_post_write(pool, database_url, room_keep)
+    })
+    .await
 }
 
-async fn post_write_outcome_with<F, Fut>(requested: bool, runner: F) -> hearth::BackupOutcome
+/// The newest healthy dump in `directory` when it is younger than
+/// `bound_hours`. A missing directory, no dump, a bad header, or an old dump
+/// all answer `None`, and the write takes its own dump.
+pub fn fresh_dump_in(directory: PathBuf, bound_hours: u64) -> Option<FreshDump> {
+    let health = backup_health_in(directory, bound_hours as f64).ok()?;
+    if !health.ok {
+        return None;
+    }
+    let newest = health.newest?;
+    let age_seconds = (health.age_hours? * 3600.0).round().max(0.0) as u64;
+    FreshDump::new(
+        health.directory.join(newest).to_string_lossy().into_owned(),
+        age_seconds,
+        bound_hours,
+    )
+    .ok()
+}
+
+async fn post_write_outcome_with<F, Fut>(
+    requested: bool,
+    fresh: Option<FreshDump>,
+    runner: F,
+) -> hearth::BackupOutcome
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<BackupReceipt, BackupFailure>>,
 {
     if !requested {
         return hearth::BackupOutcome::Skipped;
+    }
+    if let Some(fresh) = fresh {
+        return hearth::BackupOutcome::Fresh(fresh);
     }
     match runner().await {
         Ok(receipt) => hearth::BackupOutcome::Ok(receipt),
@@ -1048,6 +1087,7 @@ mod tests {
     async fn unrequested_backup_skips_runner() {
         let outcome = post_write_outcome_with(
             false,
+            None,
             || -> std::future::Ready<Result<BackupReceipt, BackupFailure>> {
                 panic!("an unrequested backup must not invoke the runner");
             },
@@ -1057,9 +1097,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fresh_dump_answers_without_running() {
+        let fresh = FreshDump::new("memory.dump".into(), 7_200, 12).unwrap();
+        let outcome = post_write_outcome_with(
+            true,
+            Some(fresh.clone()),
+            || -> std::future::Ready<Result<BackupReceipt, BackupFailure>> {
+                panic!("a fresh dump must not invoke the runner");
+            },
+        )
+        .await;
+        assert_eq!(outcome, hearth::BackupOutcome::Fresh(fresh));
+        assert_eq!(outcome.status(), "fresh");
+        assert!(outcome.warning().is_none());
+    }
+
+    #[tokio::test]
     async fn requested_backup_runs_once_and_returns_its_receipt() {
         let mut calls = 0;
-        let outcome = post_write_outcome_with(true, || {
+        let outcome = post_write_outcome_with(true, None, || {
             calls += 1;
             std::future::ready(
                 BackupReceipt::new(
@@ -1077,6 +1133,42 @@ mod tests {
         .await;
         assert_eq!(calls, 1);
         assert!(matches!(outcome, hearth::BackupOutcome::Ok(_)));
+    }
+
+    fn write_dump(dir: &Path, name: &str, age: std::time::Duration) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, b"PGDMP\x00\x00\x00").unwrap();
+        let modified = std::time::SystemTime::now() - age;
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        path
+    }
+
+    #[test]
+    fn fresh_dump_gate_reads_the_newest_dump_against_the_bound() {
+        let dir = std::env::temp_dir().join(format!("athanor-fresh-{}", Uuid::new_v4().simple()));
+        fs::create_dir_all(&dir).unwrap();
+
+        assert!(fresh_dump_in(dir.clone(), 12).is_none(), "an empty directory is not fresh");
+
+        write_dump(&dir, "old.dump", std::time::Duration::from_secs(13 * 3600));
+        assert!(fresh_dump_in(dir.clone(), 12).is_none(), "a 13h dump is past a 12h bound");
+
+        let young = write_dump(&dir, "young.dump", std::time::Duration::from_secs(2 * 3600));
+        let fresh = fresh_dump_in(dir.clone(), 12).expect("a 2h dump is fresh under 12h");
+        assert_eq!(fresh.dump_path(), young.to_string_lossy());
+        assert_eq!(fresh.bound_hours(), 12);
+        assert!((7_000..=7_400).contains(&fresh.age_seconds()), "{}", fresh.age_seconds());
+        assert!(fresh.detail().starts_with("newest dump is 2.0h old, under the 12h bound"));
+
+        fs::write(&young, b"not a dump").unwrap();
+        assert!(fresh_dump_in(dir.clone(), 12).is_none(), "a bad header is not fresh");
+
+        fs::remove_dir_all(&dir).unwrap();
     }
     #[test]
     fn encoded_password() {
@@ -1217,7 +1309,6 @@ mod tests {
             }
         );
     }
-
 
     #[test]
     fn every_backup_error_maps_to_one_failure_code() {

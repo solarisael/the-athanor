@@ -16,9 +16,9 @@ use crate::HostConfig;
 use akasha::AppError;
 use atomicwrites::{AllowOverwrite, AtomicFile, Error as AtomicError};
 use hearth::worker_lifecycle::{
-    Applied, BookState, Call, DispositionRecord, EntryRecord, INSPECT_SWARM_LIMIT,
-    LifecycleError, RequestRecord, RetainedRecord, SwarmRecord, SwarmState, Target, apply,
-    changed_books, deliver, inspect_caller, page_retained, read_response, render_open, replay,
+    Applied, BookState, Call, DispositionRecord, EntryRecord, INSPECT_SWARM_LIMIT, LifecycleError,
+    RequestRecord, RetainedRecord, SwarmRecord, SwarmState, Target, apply, changed_books, deliver,
+    inspect_caller, page_retained, read_response, render_open, replay,
 };
 use protocol::ResponsePayload;
 use serde::{Deserialize, Serialize};
@@ -112,7 +112,9 @@ static JOURNALS: LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<Option<Journal>>>>>> 
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub(crate) fn journal_path(host: &HostConfig) -> PathBuf {
-    host.state_dir.join("worker-lifecycle").join("journal.jsonl")
+    host.state_dir
+        .join("worker-lifecycle")
+        .join("journal.jsonl")
 }
 
 pub(crate) fn call(host: &HostConfig, call: Call) -> ResponsePayload<Value> {
@@ -148,7 +150,8 @@ fn execute(path: &Path, call: &Call) -> Result<Value, Failure> {
 impl Journal {
     fn load(path: &Path) -> Result<Self, Failure> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| io_failure(parent, "cannot create", error))?;
+            fs::create_dir_all(parent)
+                .map_err(|error| io_failure(parent, "cannot create", error))?;
         }
         let lock_path = path.with_extension("lock");
         let ownership_lock = OpenOptions::new()
@@ -158,9 +161,13 @@ impl Journal {
             .truncate(false)
             .open(&lock_path)
             .map_err(|error| io_failure(&lock_path, "cannot open ownership lock", error))?;
-        ownership_lock
-            .try_lock()
-            .map_err(|error| io_failure(&lock_path, "journal already owned or lock unavailable", error))?;
+        ownership_lock.try_lock().map_err(|error| {
+            io_failure(
+                &lock_path,
+                "journal already owned or lock unavailable",
+                error,
+            )
+        })?;
         let mut file = OpenOptions::new()
             .read(true)
             .append(true)
@@ -169,9 +176,10 @@ impl Journal {
             .map_err(|error| io_failure(path, "cannot open", error))?;
         let mut journal = Self {
             path: path.to_path_buf(),
-            file: Some(file
-                .try_clone()
-                .map_err(|error| io_failure(path, "cannot open", error))?),
+            file: Some(
+                file.try_clone()
+                    .map_err(|error| io_failure(path, "cannot open", error))?,
+            ),
             _ownership_lock: ownership_lock,
             needs_compaction: false,
             swarms: HashMap::new(),
@@ -211,7 +219,11 @@ impl Journal {
                 break;
             }
             let commit: Commit = serde_json::from_slice(&line).map_err(|error| {
-                io_failure(path, &format!("corrupt journal line at byte {offset} in"), error)
+                io_failure(
+                    path,
+                    &format!("corrupt journal line at byte {offset} in"),
+                    error,
+                )
             })?;
             if commit.version != JOURNAL_VERSION {
                 return Err(io_failure(
@@ -264,7 +276,10 @@ impl Journal {
             self.books.insert(book.book.book_id.clone(), book);
         }
         for entry in commit.entries {
-            self.entries.entry(entry.book_id.clone()).or_default().push(entry);
+            self.entries
+                .entry(entry.book_id.clone())
+                .or_default()
+                .push(entry);
         }
         self.retained.extend(commit.retained);
         for record in commit.requests {
@@ -299,7 +314,10 @@ impl Journal {
                         && &swarm.swarm_key == swarm_key
                 })
                 .map(|swarm| swarm.swarm_id.clone()),
-            Target::Book(book_id) => self.books.get(book_id).map(|book| book.book.swarm_id.clone()),
+            Target::Book(book_id) => self
+                .books
+                .get(book_id)
+                .map(|book| book.book.swarm_id.clone()),
             Target::Swarm(swarm_id) => self.swarms.contains_key(swarm_id).then(|| swarm_id.clone()),
             Target::TokenHash(hash) => self
                 .tokens
@@ -339,9 +357,9 @@ impl Journal {
                     .max()
             })
             .filter(|(_, swarm_id)| {
-                self.swarms
-                    .get(*swarm_id)
-                    .is_some_and(|swarm| swarm.house_id == actor.house_id && swarm.room == actor.room)
+                self.swarms.get(*swarm_id).is_some_and(|swarm| {
+                    swarm.house_id == actor.house_id && swarm.room == actor.room
+                })
             })
             .max()
             .and_then(|(_, swarm_id)| self.aggregate(swarm_id));
@@ -401,7 +419,9 @@ impl Journal {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default();
-                render_open(&plan, base, &loaded)
+                // Vault mode has no lesson registry: a named familiar's start
+                // is refused here before anything is journaled.
+                render_open(&plan, base, &loaded, None)?
             }
             Applied::Retained {
                 swarm_id,
@@ -451,8 +471,13 @@ impl Journal {
         let mut line = serde_json::to_vec(commit)
             .map_err(|error| io_failure(&self.path, "cannot serialize a commit for", error))?;
         line.push(b'\n');
-        let file = self.file.as_mut()
-            .ok_or_else(|| io_failure(&self.path, "cannot append to closed journal", "reload required"))?;
+        let file = self.file.as_mut().ok_or_else(|| {
+            io_failure(
+                &self.path,
+                "cannot append to closed journal",
+                "reload required",
+            )
+        })?;
         file.write_all(&line)
             .and_then(|()| file.sync_data())
             .map_err(|error| io_failure(&self.path, "cannot append to", error))
@@ -519,10 +544,12 @@ impl Journal {
                 io_failure(&self.path, "cannot atomically compact", error)
             }
         })?;
-        self.file = Some(OpenOptions::new()
-            .append(true)
-            .open(&self.path)
-            .map_err(|error| io_failure(&self.path, "cannot reopen", error))?);
+        self.file = Some(
+            OpenOptions::new()
+                .append(true)
+                .open(&self.path)
+                .map_err(|error| io_failure(&self.path, "cannot reopen", error))?,
+        );
         self.needs_compaction = false;
         Ok(())
     }

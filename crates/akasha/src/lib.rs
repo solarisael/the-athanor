@@ -92,9 +92,10 @@ pub use presence::{
 pub use recall::{RecallResult, recall, refresh_semantic_vocabulary};
 pub use remember::remember;
 pub use restart::{
-    EXIT_UNCLAIMED_REASON, EXITING_DEADLINE_SECS, RELAUNCH_ATTEMPT_LIMIT,
-    RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS, STORM_MAX_EXITING_PER_WINDOW, STORM_WINDOW_SECS,
-    restart_claim, restart_request, restart_status, restart_transition, restart_verify,
+    CLAIMANT_LOST_REASON, EXIT_UNCLAIMED_REASON, EXITING_DEADLINE_SECS, RELAUNCH_ATTEMPT_LIMIT,
+    RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS, RestartPreflightDoor,
+    STORM_MAX_EXITING_PER_WINDOW, STORM_WINDOW_SECS, restart_claim, restart_preflight,
+    restart_request, restart_status, restart_transition, restart_verify,
 };
 pub use settings::RoomSettings;
 pub use timeline::{

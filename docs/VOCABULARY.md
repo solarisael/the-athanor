@@ -41,7 +41,8 @@ Status: current. Verified against the code at commit `a6ab453` on 2026-10-04. Ea
 | Recall | Retrieval of canon, memories, and chunks. The Host owns the proactive Recall policy. | `crates/host/src/policy.rs:130-347`; `recall` needs the Host (`tools.ts:526-532`) |
 | Insula | The House's body sense: events, vitals, spans, and retention. | `crates/host/src/insula.rs:27-38,272-284` |
 | Anamnesis | The Cabinet of counsel drawn from lived repetition. Counsel is never authority. | `anamnesis` (`tools.ts:1290`); `anamnesis_write` (`tools.ts:1321`) |
-| familiars and lanes | Four worker lanes exist: `smol-scout`, `smol-executor`, `tester`, `verifier`. A room's spellbook binds named familiars to them. Dispatch returns a spawn packet. The Host never spawns a worker. | `crates/host/src/routing.rs:100-157,300-301`; `routing/dispatch.rs:176-177,440-456` |
+| spellbook | A shared House page with room-key overrides. It carries the common organ guide and named familiars. | `crates/host/src/routing.rs`; `routing/spellbook.rs`; `server/context_session/assembly.rs` |
+| familiars and lanes | Four worker lanes exist: `smol-scout`, `smol-executor`, `tester`, and `verifier`. The effective spellbook binds familiars to lanes. Dispatch returns a packet. | `crates/host/src/routing.rs`; `routing/dispatch.rs` |
 
 ## 3. Planned names
 

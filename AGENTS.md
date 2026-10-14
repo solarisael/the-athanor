@@ -19,26 +19,27 @@ Doc "current source version" claims track the release train, not each hotfix.
 build scripts, not in docs. Sol bumps versions himself when *he* decides a
 release happens. An agent's job ends at `[Unreleased]`.
 
-## Lessons map — query it every time you work here
+## Lesson queries — execute before each task
 
-Before writing or changing ANY code in this repo, query the lessons registry
-(the `lessons` organ, or `python house/substrate/query_coding_lessons.py` /
-`query_project_lessons.py` from the Obsidian workspace). Once per task, not
-once per session.
+Read the root `LESSONS.jsonl` before implementation or fanout.
+Each line is a complete argument object for `xd://lessons`.
+Submit every line unchanged, once per task.
+Check that every requested ID returns within its stated family.
+Read every returned body before the first edit.
+Give workers the complete returned bodies, inline or through a shared packet.
+Do not skip a batch or replace bodies with bare IDs.
+Stop before editing if a query fails or a requested record is missing.
 
-Retrieval discipline: the lexical query is weak. Widen before concluding
-"no lessons": query by `shape` (e.g. `idempotency`, `refusal`, `verification`,
-`process`), and know the technology-key vocabulary — NATS lessons are keyed
-`nats`/`jetstream`/`nats-jetstream` (lessons 365-369), Go lessons are keyed
-`go-toolchain`/`go-modules` or carry no keys at all (370-374). When a filter
-returns nothing, direct SQL against the `lessons` table is ground truth.
-Versions do not need exact spelling: a trailing number is a version, so
-`bend` finds lessons keyed `bend-2`. Different names still need their own key.
+PostgreSQL owns the lesson bodies.
+Apply each lesson when its trigger matches the task.
+Retrieval does not activate parked projects or authorize additional work.
+Read `docs/LESSONS.md` for unavailable references and the query contract.
+Read `docs/roadmap.md`, `docs/ARCHITECTURE.md`, and `docs/EVIDENCE.md` before implementation.
+Use current owning documentation when historical notes disagree.
 
-Load-bearing rows for this repo's delivery spine: 365-369 (JetStream failure
-contracts, retention authority, ack-deadline-as-lease, dedup-window-ends-
-before-side-effect, diagnose-from-persisted-state), 349 (retry keys carry real
-execution identity), 49/51 (inserts declare their key; migrations idempotent).
+Query the registry for additional task-specific lessons when needed.
+Use shape and technology filters when a lexical query misses relevant guidance.
+Preserve the lesson family with each ID.
 
 ## Main surface (standing, 2026-08-28 — project lesson 462)
 

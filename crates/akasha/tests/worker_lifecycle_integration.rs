@@ -1,6 +1,7 @@
 //! PostgreSQL contract for `worker_lifecycle`: row locking, idempotent retry
-//! under concurrency, append-only entries, token hashing, and disposal.
-//! Each test uses its own house id, so tests share one migrated schema.
+//! under concurrency, append-only entries, token hashing, disposal, and the
+//! role lessons a named familiar must start with. Each test uses its own
+//! house id, so tests share one migrated schema.
 
 use akasha::AppError;
 use akasha::worker_lifecycle::worker_lifecycle;
@@ -154,7 +155,8 @@ async fn concurrent_retries_commit_one_identity() -> TestResult {
 async fn racing_opens_bind_exactly_one_session() -> TestResult {
     let pool = migrated().await?;
     let room = Room::new();
-    room.call(&pool, "parent", "prep", prepare(&room, "0", 'a')).await?;
+    room.call(&pool, "parent", "prep", prepare(&room, "0", 'a'))
+        .await?;
     let (one, two) = tokio::join!(
         room.call(&pool, "child-1", "open", open(&room, 'a')),
         room.call(&pool, "child-2", "open", open(&room, 'a')),
@@ -173,29 +175,45 @@ async fn racing_opens_bind_exactly_one_session() -> TestResult {
 async fn entries_are_append_only_until_whole_swarm_disposal() -> TestResult {
     let pool = migrated().await?;
     let room = Room::new();
-    let prepared = room.call(&pool, "parent", "prep", prepare(&room, "0", 'a')).await?;
+    let prepared = room
+        .call(&pool, "parent", "prep", prepare(&room, "0", 'a'))
+        .await?;
     let book = prepared["bookId"].as_str().unwrap().to_owned();
     let swarm = prepared["swarmId"].as_str().unwrap().to_owned();
     room.call(&pool, "child", "open", open(&room, 'a')).await?;
-    room.call(&pool, "child", "note", json!({"action": "append", "bookId": book, "kind": "note", "body": "laid stones"}))
-        .await?;
-    let update = sqlx::query("UPDATE worker_lifecycle.entries SET body='\"rewritten\"' WHERE book_id=$1")
-        .bind(&book)
-        .execute(&pool)
-        .await;
+    room.call(
+        &pool,
+        "child",
+        "note",
+        json!({"action": "append", "bookId": book, "kind": "note", "body": "laid stones"}),
+    )
+    .await?;
+    let update =
+        sqlx::query("UPDATE worker_lifecycle.entries SET body='\"rewritten\"' WHERE book_id=$1")
+            .bind(&book)
+            .execute(&pool)
+            .await;
     assert!(update.is_err(), "entries must refuse UPDATE");
     let delete = sqlx::query("DELETE FROM worker_lifecycle.entries WHERE book_id=$1")
         .bind(&book)
         .execute(&pool)
         .await;
-    assert!(delete.is_err(), "entries must refuse DELETE before disposal");
+    assert!(
+        delete.is_err(),
+        "entries must refuse DELETE before disposal"
+    );
 
     room.call(&pool, "child", "handoff", json!({"action": "checkpoint", "bookId": book, "report": {"done": "wall"}, "terminal": true}))
         .await?;
     room.call(&pool, "parent", "accept", json!({"action": "accept", "bookId": book, "body": {"report": "wall raised", "evidence": "photo"}}))
         .await?;
     let receipt = room
-        .call(&pool, "parent", "dispose", json!({"action": "dispose", "swarmId": swarm}))
+        .call(
+            &pool,
+            "parent",
+            "dispose",
+            json!({"action": "dispose", "swarmId": swarm}),
+        )
         .await?;
     assert_eq!(receipt["backupsErased"], false);
     let remaining: i64 = sqlx::query_scalar(
@@ -219,12 +237,22 @@ async fn entries_are_append_only_until_whole_swarm_disposal() -> TestResult {
     assert!(retained_delete.is_err(), "retained evidence is append-only");
     // The disposal receipt replays; the disposed book is gone.
     assert_eq!(
-        room.call(&pool, "parent", "dispose", json!({"action": "dispose", "swarmId": swarm}))
-            .await?,
+        room.call(
+            &pool,
+            "parent",
+            "dispose",
+            json!({"action": "dispose", "swarmId": swarm})
+        )
+        .await?,
         receipt
     );
     let read = room
-        .call(&pool, "parent", "read", json!({"action": "read", "bookId": book}))
+        .call(
+            &pool,
+            "parent",
+            "read",
+            json!({"action": "read", "bookId": book}),
+        )
         .await;
     assert_eq!(refusal(read), "unknown_book");
     Ok(())
@@ -237,7 +265,9 @@ async fn entries_are_append_only_until_whole_swarm_disposal() -> TestResult {
 async fn succession_persists_through_postgres() -> TestResult {
     let pool = migrated().await?;
     let room = Room::new();
-    let prepared = room.call(&pool, "parent", "prep", prepare(&room, "0", 'a')).await?;
+    let prepared = room
+        .call(&pool, "parent", "prep", prepare(&room, "0", 'a'))
+        .await?;
     let book = prepared["bookId"].as_str().unwrap().to_owned();
     let first = prepared["instanceId"].as_str().unwrap().to_owned();
     room.call(&pool, "child", "open", open(&room, 'a')).await?;
@@ -250,12 +280,23 @@ async fn succession_persists_through_postgres() -> TestResult {
         assert_eq!(observed["state"], "handoff_only");
         assert_eq!(observed["retireRequired"], request == "o3");
     }
-    room.call(&pool, "child", "settle", json!({"action": "settle", "bookId": book, "outcome": "aborted"}))
-        .await?;
-    assert_eq!(refusal(room.call(&pool, "child", "reopen", open(&room, 'a')).await), "instance_retired");
+    room.call(
+        &pool,
+        "child",
+        "settle",
+        json!({"action": "settle", "bookId": book, "outcome": "aborted"}),
+    )
+    .await?;
+    assert_eq!(
+        refusal(room.call(&pool, "child", "reopen", open(&room, 'a')).await),
+        "instance_retired"
+    );
     let successor = json!({"action": "prepare", "swarmKey": "toolcall-2", "slotKey": "0", "agentName": "task", "task": "continue", "token": token(&room, 'b'), "predecessor": {"bookId": book, "instanceId": first}});
     assert_eq!(
-        refusal(room.call(&pool, "parent", "succ-1", successor.clone()).await),
+        refusal(
+            room.call(&pool, "parent", "succ-1", successor.clone())
+                .await
+        ),
         "handoff_incomplete"
     );
     room.call(&pool, "parent", "repair", json!({"action": "repair", "bookId": book, "instanceId": first, "report": "bash may have run; check first"}))
@@ -280,26 +321,57 @@ async fn succession_persists_through_postgres() -> TestResult {
 async fn retained_evidence_pages_for_its_parent_after_disposal() -> TestResult {
     let pool = migrated().await?;
     let room = Room::new();
-    let prepared = room.call(&pool, "parent", "prep", prepare(&room, "0", 'a')).await?;
+    let prepared = room
+        .call(&pool, "parent", "prep", prepare(&room, "0", 'a'))
+        .await?;
     let book = prepared["bookId"].as_str().unwrap().to_owned();
     let swarm = prepared["swarmId"].as_str().unwrap().to_owned();
     room.call(&pool, "child", "open", open(&room, 'a')).await?;
-    room.call(&pool, "child", "note", json!({"action": "append", "bookId": book, "kind": "note", "body": "transient-only"}))
+    room.call(
+        &pool,
+        "child",
+        "note",
+        json!({"action": "append", "bookId": book, "kind": "note", "body": "transient-only"}),
+    )
+    .await?;
+    room.call(
+        &pool,
+        "child",
+        "done",
+        json!({"action": "checkpoint", "bookId": book, "report": "finished", "terminal": true}),
+    )
+    .await?;
+    for (request, body) in [
+        ("acc-1", "kept-one"),
+        ("acc-2", "kept-two"),
+        ("acc-3", "kept-three"),
+    ] {
+        room.call(
+            &pool,
+            "parent",
+            request,
+            json!({"action": "accept", "bookId": book, "body": body}),
+        )
         .await?;
-    room.call(&pool, "child", "done", json!({"action": "checkpoint", "bookId": book, "report": "finished", "terminal": true}))
-        .await?;
-    for (request, body) in [("acc-1", "kept-one"), ("acc-2", "kept-two"), ("acc-3", "kept-three")] {
-        room.call(&pool, "parent", request, json!({"action": "accept", "bookId": book, "body": body}))
-            .await?;
     }
-    room.call(&pool, "parent", "dispose", json!({"action": "dispose", "swarmId": swarm}))
-        .await?;
+    room.call(
+        &pool,
+        "parent",
+        "dispose",
+        json!({"action": "dispose", "swarmId": swarm}),
+    )
+    .await?;
 
     let mut bodies = Vec::new();
     let mut cursor: Option<String> = None;
     for page_number in 0..3 {
         let page = room
-            .call(&pool, "parent", &format!("page-{page_number}"), json!({"action": "retained", "swarmId": swarm, "after": cursor, "limit": 2}))
+            .call(
+                &pool,
+                "parent",
+                &format!("page-{page_number}"),
+                json!({"action": "retained", "swarmId": swarm, "after": cursor, "limit": 2}),
+            )
             .await?;
         assert!(!page.to_string().contains("transient-only"));
         for record in page["retained"].as_array().unwrap() {
@@ -316,26 +388,140 @@ async fn retained_evidence_pages_for_its_parent_after_disposal() -> TestResult {
     assert_eq!(bodies, ["kept-one", "kept-three", "kept-two"]);
 
     let child = room
-        .call(&pool, "child", "child-read", json!({"action": "retained", "swarmId": swarm}))
+        .call(
+            &pool,
+            "child",
+            "child-read",
+            json!({"action": "retained", "swarmId": swarm}),
+        )
         .await;
     assert_eq!(refusal(child), "parent_only");
     let stranger = Room::new();
     let foreign = stranger
-        .call(&pool, "parent", "foreign-read", json!({"action": "retained", "swarmId": swarm}))
+        .call(
+            &pool,
+            "parent",
+            "foreign-read",
+            json!({"action": "retained", "swarmId": swarm}),
+        )
         .await;
     assert_eq!(refusal(foreign), "unknown_swarm");
 
     let other = room
         .call(&pool, "parent", "prep-other", json!({"action": "prepare", "swarmKey": "toolcall-9", "slotKey": "0", "agentName": "task", "task": "other", "token": token(&room, 'z')}))
         .await?;
-    room.call(&pool, "parent", "acc-other", json!({"action": "accept", "bookId": other["bookId"], "body": "other-swarm"}))
-        .await?;
+    room.call(
+        &pool,
+        "parent",
+        "acc-other",
+        json!({"action": "accept", "bookId": other["bookId"], "body": "other-swarm"}),
+    )
+    .await?;
     let first = room
-        .call(&pool, "parent", "first-page", json!({"action": "retained", "swarmId": swarm, "limit": 1}))
+        .call(
+            &pool,
+            "parent",
+            "first-page",
+            json!({"action": "retained", "swarmId": swarm, "limit": 1}),
+        )
         .await?;
     let wrong_swarm = room
         .call(&pool, "parent", "wrong-cursor", json!({"action": "retained", "swarmId": other["swarmId"], "after": first["retained"][0]["retainedId"]}))
         .await;
     assert_eq!(refusal(wrong_swarm), "unknown_cursor");
+    Ok(())
+}
+
+const SHARED: &str = "familiar-role:shared";
+const BUILDER: &str = "familiar-role:builder";
+
+/// One connection whose `lessons` is a private temporary table, so lesson
+/// rows never leak between tests or into the shared test schema. The store
+/// names `lessons` unqualified, so it reads this table.
+async fn familiar_pool() -> TestResult<PgPool> {
+    migrated().await?.close().await;
+    let options: sqlx::postgres::PgConnectOptions = isolated_database_url().parse()?;
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(|connection, _metadata| {
+            Box::pin(async move {
+                sqlx::query("SELECT set_config('search_path', 'pg_temp', false)")
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect_with(options)
+        .await?;
+    sqlx::query(
+        "CREATE TEMP TABLE lessons (lesson_key TEXT NOT NULL, id BIGINT NOT NULL, scope TEXT NOT NULL, title TEXT NOT NULL, lesson TEXT NOT NULL, tags TEXT[] NOT NULL, PRIMARY KEY (lesson_key, id))",
+    )
+    .execute(&pool)
+    .await?;
+    Ok(pool)
+}
+
+/// One slot for `agent`: the parent's prepare and the child's open.
+fn familiar_slot(room: &Room, agent: &str, seed: char) -> (Value, Value) {
+    (
+        json!({"action": "prepare", "swarmKey": format!("toolcall-{agent}"), "slotKey": "0", "agentName": agent, "task": "raise the wall", "token": token(room, seed)}),
+        json!({"action": "open", "token": token(room, seed), "agentId": format!("0-{agent}"), "agentName": agent, "acceptsFamiliarLessons": true}),
+    )
+}
+
+// Kills: a familiar starting without its tagged bodies, a body truncated on
+// its way through PostgreSQL, one lesson delivered twice, another family's or
+// another room's row admitted, a refused start committing its binding, or a
+// replay or resume answering differently from the committed start.
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; uses its own house id"]
+async fn familiar_starts_carry_whole_tagged_coding_lessons_or_refuse() -> TestResult {
+    let pool = familiar_pool().await?;
+    let room = Room::new();
+    let long = "w".repeat(40_000);
+    sqlx::query(
+        "INSERT INTO lessons (lesson_key,id,scope,title,lesson,tags) VALUES
+            ('coding',3,'house','shared','shared','{familiar-role:shared}'),
+            ('coding',5,'kodo','both','both tags','{familiar-role:shared,familiar-role:builder}'),
+            ('coding',7,'house','long',$1,'{familiar-role:builder,ttsr-approved}'),
+            ('coding',9,'house','tester','tester only','{familiar-role:tester}'),
+            ('coding',11,'elsewhere','foreign','another room','{familiar-role:builder}'),
+            ('project',13,'house','project','another family','{familiar-role:builder}')",
+    )
+    .bind(&long)
+    .execute(&pool)
+    .await?;
+
+    let (prepare, open) = familiar_slot(&room, "lavra-dragonling", 'a');
+    room.call(&pool, "parent", "prep-builder", prepare).await?;
+    let opened = room
+        .call(&pool, "child", "open-builder", open.clone())
+        .await?;
+    let delivered = &opened["familiarLessons"];
+    assert_eq!(delivered["tags"], json!([SHARED, BUILDER]));
+    assert_eq!(delivered["ids"], json!([3, 5, 7]));
+    assert_eq!(delivered["lessons"][2]["lesson"], json!(long));
+    let replayed = room
+        .call(&pool, "child", "open-builder", open.clone())
+        .await?;
+    assert_eq!(replayed, opened);
+    let resumed = room.call(&pool, "child", "resume-builder", open).await?;
+    assert_eq!(resumed["wake"]["kind"], "resume");
+    assert_eq!(resumed["familiarLessons"]["ids"], json!([3, 5, 7]));
+
+    let (prepare, open) = familiar_slot(&room, "talha-dragonling", 'b');
+    room.call(&pool, "parent", "prep-executor", prepare).await?;
+    let missing = room
+        .call(&pool, "child-2", "open-executor", open.clone())
+        .await;
+    assert_eq!(refusal(missing), "familiar_lessons_missing");
+    sqlx::query(
+        "INSERT INTO lessons (lesson_key,id,scope,title,lesson,tags) VALUES ('coding',15,'house','executor','executor','{familiar-role:executor}')",
+    )
+    .execute(&pool)
+    .await?;
+    let opened = room.call(&pool, "child-2", "open-executor", open).await?;
+    assert_eq!(opened["wake"]["kind"], "opening");
+    assert_eq!(opened["familiarLessons"]["ids"], json!([3, 5, 15]));
     Ok(())
 }

@@ -1,0 +1,48 @@
+{
+  "kind": "isolated-source-helper-smoke",
+  "networkRequests": 0,
+  "liveChanges": 0,
+  "checks": [
+    {
+      "claim": "local home route",
+      "result": "observed"
+    },
+    {
+      "claim": "external guild URL refused by current helper",
+      "result": "observed"
+    },
+    {
+      "claim": "process environment replacement changes home destination",
+      "result": "observed"
+    },
+    {
+      "claim": "current invitation config refuses a new guildRole field",
+      "result": "observed"
+    }
+  ],
+  "recordedDateUtc": "2026-10-13",
+  "exitCode": 0,
+  "runtime": "Bun on Windows x64",
+  "scope": "Actual existing pure helpers, no network or federation scenario",
+  "sources": [
+    {
+      "owner": "the-athanor",
+      "path": "adapters/omp/house-proof/host.ts",
+      "sha256Normalized": "96f2d74282cb912047a0698c5762532a2a45b2e6559bf1ac0e985f017344017d"
+    },
+    {
+      "owner": "separate remote client",
+      "path": "client/config.ts",
+      "sha256Normalized": "ba92f8eccbdd7be214cb73b4f59977fdf77c287c8430df1623a9af3bf6aa007f"
+    }
+  ],
+  "inputClass": "Synthetic endpoint, room, House, operator, Host token and pinned-key strings; no live credentials",
+  "notProved": [
+    "Guild HTTPS communication",
+    "Person authentication",
+    "Record authorization",
+    "Persistence",
+    "Migration",
+    "Knock execution"
+  ]
+}

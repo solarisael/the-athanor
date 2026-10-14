@@ -186,6 +186,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0035_operator_axis.sql",
         sql: include_str!("../../../substrate/migrations/0035_operator_axis.sql"),
     },
+    Migration {
+        version: 36,
+        name: "0036_restart_requester_instance.sql",
+        sql: include_str!("../../../substrate/migrations/0036_restart_requester_instance.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

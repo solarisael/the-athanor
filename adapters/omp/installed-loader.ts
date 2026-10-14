@@ -648,6 +648,7 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
     previousReleaseId: pointer.previousReleaseId,
     healthEndpoint: scopedHealthEndpoint(client.hostUrl, client.defaultRoom),
     hostApi: native.hostApi,
+    rooms: client.rooms,
   };
 }
 
@@ -666,6 +667,8 @@ export default async function installedAthanor(pi: unknown, options: LoaderOptio
   await athanor.default(pi, {
     releaseId: modules.releaseId,
     previousReleaseId: modules.previousReleaseId,
+    // The configured homes `/spirit` lists; the Host still authorizes each one.
+    rooms: modules.rooms,
   });
   await hygiene.default(pi);
   watchScopedHost(modules.healthEndpoint, modules.hostApi, options, absent);

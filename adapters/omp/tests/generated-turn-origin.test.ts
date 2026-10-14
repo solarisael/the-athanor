@@ -16,6 +16,7 @@ import { afterEach, beforeEach, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { z } from "zod";
 
 import solarisaelHouseProof from "../index.ts";
 import { registerTopLevelSession, retireTopLevelSession } from "../house-proof/top-level-session-fence.ts";
@@ -28,37 +29,10 @@ const PRESENCE = "athanor-presence-context";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown> | unknown;
 
-// The adapter asks zod for shapes at registration time and never validates
-// with it here; the same recorder the production-seam test uses.
-function makeSchema(kind: string, fields: Record<string, unknown> = {}): any {
-  return {
-    kind,
-    ...fields,
-    describe() { return this; },
-    regex() { return this; },
-    optional() { return this; },
-    strict() { return this; },
-    default() { return this; },
-  };
-}
-
-const zodStub = {
-  string: () => makeSchema("string"),
-  boolean: () => makeSchema("boolean"),
-  number: () => makeSchema("number"),
-  enum: (values: string[]) => makeSchema("enum", { values }),
-  literal: (value: unknown) => makeSchema("literal", { values: [String(value)] }),
-  discriminatedUnion: (_key: string, variants: unknown[]) => makeSchema("discriminatedUnion", { variants }),
-  object: (shape: Record<string, unknown>) => makeSchema("object", { shape }),
-  array: (element: unknown) => makeSchema("array", { element }),
-  record: (key: unknown, value: unknown) => makeSchema("record", { key, value }),
-  unknown: () => makeSchema("unknown"),
-};
-
 function registerAdapter(): Map<string, Handler[]> {
   const handlers = new Map<string, Handler[]>();
   const pi = {
-    zod: zodStub,
+    zod: z,
     setLabel() {},
     on(name: string, handler: Handler) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);

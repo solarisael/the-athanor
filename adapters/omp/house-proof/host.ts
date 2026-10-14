@@ -53,22 +53,27 @@ function requiredEnvironment(name: string): string {
 export function hostHouseId(environ: NodeJS.ProcessEnv = process.env): string | null {
   return text(environ.ATHANOR_HOST_HOUSE_ID) || null;
 }
+// The harness conversation this context belongs to. Only a real harness ID
+// counts: a cwd or a constant would let two conversations in one workspace
+// collide into one Host session, so a missing ID refuses instead.
 export function hostSessionIdentity(context: {
   sessionManager?: { getSessionId?: () => unknown };
   sessionID?: unknown;
   sessionId?: unknown;
-  cwd?: unknown;
-}, fallback: string): string {
+}): string {
+  let managed = "";
   try {
-    const managed = text(context?.sessionManager?.getSessionId?.());
-    if (managed) return managed;
+    managed = text(context?.sessionManager?.getSessionId?.());
   } catch {
-    // A read-only harness identity is preferred, but Host calls remain fail-open.
+    managed = "";
   }
-  return text(context?.sessionID)
-    || text(context?.sessionId)
-    || text(context?.cwd)
-    || text(fallback);
+  const identity = managed || text(context?.sessionID) || text(context?.sessionId);
+  if (!identity) {
+    const error = new HostUnavailable("the harness supplied no session ID, so this session cannot address the Host");
+    error.code = "harness_session_missing";
+    throw error;
+  }
+  return identity;
 }
 
 

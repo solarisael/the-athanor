@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 mod dispatch;
 mod spellbook;
+#[cfg(test)]
+mod tests;
 
 use dispatch::dispatch_with_familiar;
 pub use dispatch::{DispatchReceipt, DispatchRequest, DispatchStatus, DispatcherReceipt, dispatch};
-pub use spellbook::{Familiar, FamiliarStatus, Spellbook, validate_spellbook};
+pub use spellbook::{Familiar, FamiliarStatus, SpellbookPage, validate_spellbook};
 
 const CONTEXT_MODES: &[ContextMode] = &[
     ContextMode::Exact,
@@ -294,9 +297,9 @@ fn familiar_task_name(id: &str) -> String {
         .collect()
 }
 
-/// Room-local spellbook location. The directory, the accepted filenames, and
-/// their precedence are House rules; the adapter only performs the read the
-/// Host asks for.
+/// Spellbook location. The directory, the accepted filenames, and their
+/// precedence are House rules; the adapter only performs the read the Host
+/// asks for.
 pub const SPELLBOOK_DIRECTORY: &str = "familiars";
 pub const SPELLBOOK_FILENAMES: [&str; 2] = ["spellbook.json", "litters.json"];
 
@@ -306,15 +309,23 @@ pub enum SpellbookRead {
     Missing,
     /// The file exists but could not be read.
     Unreadable(String),
-    /// The file was read but is not valid JSON for a spellbook.
+    /// The file was read but is not valid JSON for a spellbook page.
     Malformed(String),
-    Parsed(Spellbook),
+    Parsed(SpellbookPage),
+}
+
+/// The file one layer of the effective spellbook came from.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpellbookSource {
+    pub layer: &'static str,
+    pub path: String,
+    pub alias: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LoadedSpellbook {
-    pub source: Option<String>,
-    pub source_alias: bool,
+    pub sources: Vec<SpellbookSource>,
     pub status: FamiliarStatus,
 }
 
@@ -326,23 +337,74 @@ pub struct SpellbookIdentity {
     pub spellbook_aliases: Vec<String>,
 }
 
-pub fn spellbook_candidates(room_dir: &str) -> Vec<String> {
-    let separator = if room_dir.contains('\\') && !room_dir.contains('/') {
+pub fn spellbook_candidates(directory: &str) -> Vec<String> {
+    let separator = if directory.contains('\\') && !directory.contains('/') {
         '\\'
     } else {
         '/'
     };
-    let base = room_dir.trim_end_matches(['/', '\\']);
+    let base = directory.trim_end_matches(['/', '\\']);
     SPELLBOOK_FILENAMES
         .iter()
         .map(|filename| format!("{base}{separator}{SPELLBOOK_DIRECTORY}{separator}{filename}"))
         .collect()
 }
 
-fn unloaded(source: Option<String>, source_alias: bool, errors: Vec<String>) -> LoadedSpellbook {
+// Rooms share a parent; `house` is the reserved House directory.
+// A parentless room has no shared page.
+fn house_dir(room_dir: &str) -> Option<String> {
+    let room = room_dir.trim_end_matches(['/', '\\']);
+    let separator = room.rfind(['/', '\\'])?;
+    Some(format!("{}house", &room[..=separator]))
+}
+
+/// The first spellbook file found in one directory, parsed or refused.
+fn read_page(
+    layer: &'static str,
+    directory: &str,
+    read: &mut impl FnMut(&str) -> SpellbookRead,
+) -> Option<(SpellbookSource, Result<SpellbookPage, String>)> {
+    spellbook_candidates(directory)
+        .into_iter()
+        .enumerate()
+        .find_map(|(index, path)| {
+            let page = match read(&path) {
+                SpellbookRead::Missing => return None,
+                SpellbookRead::Unreadable(reason) => Err(format!(
+                    "Could not read familiar spellbook '{path}': {reason}"
+                )),
+                SpellbookRead::Malformed(reason) => Err(format!(
+                    "Familiar spellbook '{path}' is not valid JSON: {reason}"
+                )),
+                SpellbookRead::Parsed(page) => {
+                    let mut ids = HashSet::new();
+                    let duplicate = page
+                        .familiars
+                        .as_deref()
+                        .unwrap_or_default()
+                        .iter()
+                        .find(|familiar| !ids.insert(familiar.id.trim()));
+                    match duplicate {
+                        Some(familiar) => Err(format!(
+                            "Familiar spellbook '{path}' repeats id '{}'.",
+                            familiar.id.trim()
+                        )),
+                        None => Ok(page),
+                    }
+                }
+            };
+            let source = SpellbookSource {
+                layer,
+                path,
+                alias: index > 0,
+            };
+            Some((source, page))
+        })
+}
+
+fn unloaded(sources: Vec<SpellbookSource>, errors: Vec<String>) -> LoadedSpellbook {
     LoadedSpellbook {
-        source,
-        source_alias,
+        sources,
         status: FamiliarStatus {
             ok: false,
             errors,
@@ -351,58 +413,49 @@ fn unloaded(source: Option<String>, source_alias: bool, errors: Vec<String>) -> 
     }
 }
 
-/// Resolve the room spellbook: candidate precedence, refusal text, and
-/// validation all belong here. `read` performs one filesystem read per
-/// candidate and reports what it found.
+// Refuse either malformed layer before overlay can hide its invalid entries.
 pub fn load_spellbook(
     room_dir: &str,
     mut read: impl FnMut(&str) -> SpellbookRead,
 ) -> LoadedSpellbook {
-    let candidates = spellbook_candidates(room_dir);
-    for (index, source) in candidates.iter().enumerate() {
-        match read(source) {
-            SpellbookRead::Missing => continue,
-            SpellbookRead::Unreadable(reason) => {
-                return unloaded(
-                    Some(source.clone()),
-                    index > 0,
-                    vec![format!(
-                        "Could not read familiar spellbook '{source}': {reason}"
-                    )],
-                );
-            }
-            SpellbookRead::Malformed(reason) => {
-                return unloaded(
-                    Some(source.clone()),
-                    index > 0,
-                    vec![format!(
-                        "Familiar spellbook '{source}' is not valid JSON: {reason}"
-                    )],
-                );
-            }
-            SpellbookRead::Parsed(spellbook) => {
-                return LoadedSpellbook {
-                    source: Some(source.clone()),
-                    source_alias: index > 0,
-                    status: validate_spellbook(spellbook),
-                };
-            }
+    let layers = [
+        ("house", house_dir(room_dir)),
+        ("room", Some(room_dir.to_owned())),
+    ];
+    let mut sources = Vec::new();
+    let mut book = SpellbookPage::default();
+    for (layer, directory) in &layers {
+        let Some((source, page)) = directory
+            .as_deref()
+            .and_then(|directory| read_page(*layer, directory, &mut read))
+        else {
+            continue;
+        };
+        sources.push(source);
+        match page {
+            Ok(page) => book = page.over(book),
+            Err(refusal) => return unloaded(sources, vec![refusal]),
         }
     }
 
-    let directory = candidates
-        .first()
-        .and_then(|candidate| candidate.rsplit_once(['/', '\\']))
-        .map(|(directory, _)| directory.to_owned())
-        .unwrap_or_else(|| SPELLBOOK_DIRECTORY.into());
-    unloaded(
-        None,
-        false,
-        vec![format!(
-            "No familiar spellbook found in '{directory}'. Tried: {}.",
-            SPELLBOOK_FILENAMES.join(", ")
-        )],
-    )
+    if sources.is_empty() {
+        let tried = layers
+            .iter()
+            .filter_map(|(_, directory)| directory.as_deref())
+            .flat_map(spellbook_candidates)
+            .collect::<Vec<_>>();
+        return unloaded(
+            sources,
+            vec![format!(
+                "No familiar spellbook found. Tried: {}.",
+                tried.join(", ")
+            )],
+        );
+    }
+    LoadedSpellbook {
+        sources,
+        status: validate_spellbook(book),
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -410,15 +463,13 @@ pub fn load_spellbook(
 pub struct FamiliarStatusReceipt {
     #[serde(flatten)]
     pub status: FamiliarStatus,
-    pub source: Option<String>,
-    pub source_alias: bool,
+    pub sources: Vec<SpellbookSource>,
 }
 
 pub fn familiar_status(loaded: LoadedSpellbook) -> FamiliarStatusReceipt {
     FamiliarStatusReceipt {
         status: loaded.status,
-        source: loaded.source,
-        source_alias: loaded.source_alias,
+        sources: loaded.sources,
     }
 }
 
@@ -436,8 +487,7 @@ pub struct HouseDispatchReceipt {
     pub dispatch: DispatchReceipt,
     pub selector: Option<DispatchSelector>,
     pub familiar: Option<Familiar>,
-    pub source: Option<String>,
-    pub source_alias: bool,
+    pub sources: Vec<SpellbookSource>,
     pub spellbook: Option<SpellbookIdentity>,
 }
 
@@ -460,8 +510,7 @@ fn rejected_selector(errors: Vec<String>) -> HouseDispatchReceipt {
         },
         selector: None,
         familiar: None,
-        source: None,
-        source_alias: false,
+        sources: Vec::new(),
         spellbook: None,
     }
 }
@@ -496,8 +545,7 @@ pub fn house_dispatch(
                 value: lane,
             }),
             familiar: None,
-            source: None,
-            source_alias: false,
+            sources: Vec::new(),
             spellbook: None,
         };
     }
@@ -536,8 +584,7 @@ pub fn house_dispatch(
             },
             selector,
             familiar: None,
-            source: loaded.source,
-            source_alias: loaded.source_alias,
+            sources: loaded.sources,
             spellbook: None,
         };
     }
@@ -548,8 +595,7 @@ pub fn house_dispatch(
         dispatch: receipt.dispatch,
         selector,
         familiar: receipt.familiar,
-        source: loaded.source,
-        source_alias: loaded.source_alias,
+        sources: loaded.sources,
         spellbook: matched.then_some(identity).flatten(),
     }
 }

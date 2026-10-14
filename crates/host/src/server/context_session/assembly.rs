@@ -526,9 +526,10 @@ async fn prepare_static_blocks(
             .existing_block_kinds
             .contains(&BlockKind::RoomContext)
         {
+            let guide = house_guide(state, output);
             output.block(
                 BlockKind::RoomContext,
-                analysis.room_reminder.clone(),
+                format!("{}{guide}", analysis.room_reminder),
                 Value::Null,
             );
         }
@@ -568,4 +569,26 @@ async fn prepare_static_blocks(
         output.warnings.push("Hallway Bell unavailable".into());
     }
     analysis
+}
+
+/// The effective spellbook's guide teaches the House organs at startup. An
+/// absent book teaches nothing; a refused one says why instead of going quiet.
+fn house_guide(state: &AppState, output: &mut Assembly) -> String {
+    let loaded = read_room_spellbook(&state.config.room_dir.to_string_lossy());
+    let Some(spellbook) = loaded.status.spellbook else {
+        if !loaded.sources.is_empty() {
+            output.warnings.push(format!(
+                "House spellbook refused: {}",
+                loaded.status.errors.join(" ")
+            ));
+        }
+        return String::new();
+    };
+    if spellbook.guide.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\n<athanor-spellbook>\n{}\n</athanor-spellbook>",
+        spellbook.guide
+    )
 }

@@ -10,7 +10,12 @@ use serde_json::{Value, json};
     deny_unknown_fields
 )]
 pub(crate) enum LifecycleRequest {
-    ChatNext,
+    /// `instanceId` names the portable instance asking; while portable sessions
+    /// are live, only the room's explicit chat owner receives a turn.
+    ChatNext {
+        #[serde(default)]
+        instance_id: Option<String>,
+    },
     ChatOutcome {
         say_id: String,
         messages: Vec<TurnObservation>,
@@ -58,7 +63,7 @@ pub(crate) fn execute(
     messages: &[ChatMessage],
 ) -> Result<Value, String> {
     match request {
-        LifecycleRequest::ChatNext => {
+        LifecycleRequest::ChatNext { .. } => {
             // # enough: the ring caps this scan at 256 rows; index answered turns if that bound grows.
             let next = messages
                 .iter()
@@ -170,7 +175,13 @@ mod tests {
             {"sequence": 3, "author": "operator", "authorName": "Sol", "text": "next", "at": "", "turnId": "next"},
             {"sequence": 2, "author": "spirit", "authorName": "Kintsu", "text": "reply", "at": "", "turnId": "done"}
         ])).unwrap();
-        let result = execute(LifecycleRequest::ChatNext, &messages).unwrap();
+        let result = execute(LifecycleRequest::ChatNext { instance_id: None }, &messages).unwrap();
+        let legacy: LifecycleRequest =
+            serde_json::from_value(json!({"action": "chatNext"})).unwrap();
+        assert!(matches!(
+            legacy,
+            LifecycleRequest::ChatNext { instance_id: None }
+        ));
         assert_eq!(result["next"]["turnId"], "next");
     }
 

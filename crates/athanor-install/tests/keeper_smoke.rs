@@ -807,11 +807,7 @@ fn an_armed_restart_waits_out_a_house_that_blinks_at_every_move() {
         Some(0),
         "a restart the House blinked through still lands:\n{stdout}\n{stderr}"
     );
-    assert_eq!(
-        lines(&tree.runs).len(),
-        2,
-        "omp came back once: {stdout}"
-    );
+    assert_eq!(lines(&tree.runs).len(), 2, "omp came back once: {stdout}");
     assert!(
         stdout.contains("saw the successor verify"),
         "the restart is the House's verified one: {stdout}"
@@ -825,7 +821,11 @@ fn an_armed_restart_waits_out_a_house_that_blinks_at_every_move() {
         "every claim after silence carries the one idempotency key: {claims:?}"
     );
     let transitions = requests_for(&tree.transcript, "restart_transition");
-    assert_eq!(transitions.len(), 2, "one silent transition, then the answered one");
+    assert_eq!(
+        transitions.len(),
+        2,
+        "one silent transition, then the answered one"
+    );
     assert!(
         transitions
             .iter()
@@ -887,7 +887,11 @@ fn a_refusal_after_silence_still_ends_the_loop() {
         &[("FAKE_SUBSTRATE_AWAY", "0-2:database")],
     );
     let stdout = &ran.stdout;
-    assert_eq!(ran.output.status.code(), Some(1), "a refusal is not success");
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "a refusal is not success"
+    );
     assert_eq!(
         methods(&tree.transcript),
         [
@@ -942,7 +946,11 @@ fn the_window_still_ends_an_attempt_while_the_house_is_away() {
         Some(&"failed"),
         "the House heard the failure: {targets:?}"
     );
-    assert_eq!(lines(&tree.runs).len(), 3, "the exit and two attempts: {stdout}");
+    assert_eq!(
+        lines(&tree.runs).len(),
+        3,
+        "the exit and two attempts: {stdout}"
+    );
     std::thread::sleep(Duration::from_secs(3));
     assert!(
         lines(&tree.survived).is_empty(),
@@ -966,7 +974,11 @@ fn an_unarmed_exit_does_not_wait_for_an_absent_house() {
         ],
     );
     let stdout = &ran.stdout;
-    assert_eq!(ran.output.status.code(), Some(1), "an unasked House is not success");
+    assert_eq!(
+        ran.output.status.code(),
+        Some(1),
+        "an unasked House is not success"
+    );
     assert_eq!(methods(&tree.transcript), ["restart_status"], "asked once");
     assert!(
         stdout.contains("without arming a restart"),

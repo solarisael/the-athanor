@@ -1,4 +1,9 @@
-# The Athanor Lesson Map
+# Lesson map before the JSONL cutover — 2026-10-14
+
+Historical snapshot. This file is not an active instruction surface.
+Use [LESSONS.jsonl](../../LESSONS.jsonl) for current query arguments.
+Use [House Lessons](../LESSONS.md#repository-query-file) for execution and missing-record rules.
+The remaining text preserves the previous routing decisions and source gates.
 
 The PostgreSQL lesson registry is authoritative. This file names lessons by number. Query them directly:
 

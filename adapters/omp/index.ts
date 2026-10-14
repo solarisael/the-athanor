@@ -41,8 +41,11 @@ import {
 } from "./house-proof/chat.ts";
 import {
   applyPromptDirectives,
-  roomContext,
+  requireRoomBinding,
+  requireRoomContext,
+  roomBinding,
 } from "./house-proof/room.ts";
+import { installPortableSession, onAttachmentChanged } from "./house-proof/session.ts";
 import { conversationText, messageText } from "./house-proof/text.ts";
 import { anchorTurnAdditions, currentTurnOrigin, turnKeysByMessage } from "./house-proof/turn-origin.ts";
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
@@ -193,8 +196,8 @@ function insulaRequestKey(room: string, session: string): string {
 }
 
 function insulaSessionBinding(ctx: any): { room: string; session: string } {
-  const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
-  return { room, session: hostSessionIdentity(ctx, effectiveRoomDir) };
+  const { binding } = requireRoomBinding(ctx);
+  return { room: binding.room, session: binding.session };
 }
 
 /**
@@ -340,6 +343,9 @@ const adoptedContextSessions = new Set<string>();
 // report loadedRelease as derived state instead of re-resolving the pointer.
 export default function solarisaelHouseProof(pi, release) {
   pi.setLabel("The Athanor");
+  // First, so every later session hook resolves the conversation's restored
+  // home instead of racing its attachment.
+  installPortableSession(pi, release);
   registerSubagentRecallProtocol(pi);
   const lessonTtsrInstallWarning = installLessonTtsrBridge(pi);
   const semanticJudgmentShadow = installSemanticJudgmentShadow(pi);
@@ -354,15 +360,15 @@ export default function solarisaelHouseProof(pi, release) {
   pi.registerCommand?.("jev-recall", {
     description: "Show the last observed completed Jev Recall calls for this native room and Host lifetime",
     handler: (_args, ctx) => {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
-      ctx.ui.notify(JSON.stringify(contextReceipts.get(`${room}:${hostSessionIdentity(ctx, effectiveRoomDir)}:recall`) ?? null, null, 2), "info");
+      const { binding } = requireRoomBinding(ctx);
+      ctx.ui.notify(JSON.stringify(contextReceipts.get(`${binding.room}:${binding.session}:recall`) ?? null, null, 2), "info");
     },
   });
   pi.registerCommand?.("jev-lessons", {
     description: "Show the last observed completed Jev lesson calls for this native room and Host lifetime",
     handler: (_args, ctx) => {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
-      ctx.ui.notify(JSON.stringify(contextReceipts.get(`${room}:${hostSessionIdentity(ctx, effectiveRoomDir)}:lessons`) ?? null, null, 2), "info");
+      const { binding } = requireRoomBinding(ctx);
+      ctx.ui.notify(JSON.stringify(contextReceipts.get(`${binding.room}:${binding.session}:lessons`) ?? null, null, 2), "info");
     },
   });
   pi.registerCommand?.("insula", {
@@ -375,37 +381,76 @@ export default function solarisaelHouseProof(pi, release) {
       ctx.getContextUsage?.();
       return capturedAgentSession(String(ctx.sessionManager?.getSessionId?.() ?? ""));
     },
+    // An ordinary session, or a selected home that is unreachable, never
+    // holds the boat door; the latter already refuses its turns.
     isTopLevel: (ctx) => {
-      const { room, effectiveRoomDir } = roomContext(ctx.cwd);
-      return hostSessionIdentity(ctx, effectiveRoomDir) === topLevelSession(room);
+      try {
+        const resolved = roomBinding(ctx);
+        return Boolean(resolved) && resolved!.binding.session === topLevelSession(resolved!.binding.room);
+      } catch {
+        return false;
+      }
     },
     tokensOverBoatLine: async (ctx) => {
       const usage = ctx.getContextUsage?.();
       const settings = pi.pi?.settings;
       if (!usage?.tokens || !usage.contextWindow || !settings?.get?.("compaction.enabled")) return undefined;
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const binding = { room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) };
-      return usage.tokens - await boatLineTokens(binding, usage.contextWindow, {
+      let resolved: ReturnType<typeof roomBinding> = null;
+      try {
+        resolved = roomBinding(ctx);
+      } catch {
+        return undefined;
+      }
+      if (!resolved) return undefined;
+      return usage.tokens - await boatLineTokens(resolved.binding, usage.contextWindow, {
         thresholdTokens: settings.get("compaction.thresholdTokens"),
         thresholdPercent: settings.get("compaction.thresholdPercent"),
         reserveTokens: settings.get("compaction.reserveTokens"),
       });
     },
     room: (ctx) => {
-      const { spirit, effectiveRoomDir } = roomContext(ctx.cwd);
+      const { spirit, effectiveRoomDir } = requireRoomContext(ctx);
       return { dir: effectiveRoomDir, spirit };
     },
   });
+  // The binding this session runtime currently holds the room with. A switch
+  // to another conversation (attached elsewhere, or ordinary) retires it, so
+  // a doorman of the previous conversation can never answer into this one.
+  let heldBinding: { room: string; spirit: string; session: string } | null = null;
+  const releaseHeldBinding = async () => {
+    const held = heldBinding;
+    heldBinding = null;
+    if (!held) return;
+    activeTurnPrompts.delete(activeTurnPromptKey(held.room, held.session));
+    retireInsulaSession(held.room, held.session);
+    retireTopLevelSession(held.room, held.session);
+    await stopHallwayKnockDoorman(held);
+    stopChatDoorman(held);
+  };
   const showReadyFeedback = async (_event, ctx) => {
-    const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-    const binding = {
-      room,
-      spirit,
-      session: hostSessionIdentity(ctx, effectiveRoomDir),
-    };
+    let resolved: ReturnType<typeof roomBinding> = null;
+    try {
+      resolved = roomBinding(ctx);
+    } catch (error) {
+      // The selected home is unreachable; session.ts already showed why and
+      // refuses execution. No doorman runs for a home this session cannot reach.
+      if (!isWorkerSession(ctx)) await releaseHeldBinding();
+      return;
+    }
+    // An ordinary harness session holds no room.
+    if (!resolved) {
+      if (!isWorkerSession(ctx)) await releaseHeldBinding();
+      return;
+    }
+    const { binding } = resolved;
+    const { room, spirit } = binding;
     // A worker never holds the room: no top-level adoption, Bell doorman, or
     // chat doorman, so no later path can mistake it for the room's spirit.
     if (isWorkerSession(ctx)) return;
+    if (heldBinding && (heldBinding.room !== room || heldBinding.session !== binding.session)) {
+      await releaseHeldBinding();
+    }
+    heldBinding = binding;
     // Non-worker sessions share session_start too, so first-wins adoption
     // protects the current top-level holder. Only an explicit session switch
     // replaces it.
@@ -425,24 +470,53 @@ export default function solarisaelHouseProof(pi, release) {
       }
     }
   };
+  // A `/spirit` attach or detach changes the room this conversation holds
+  // without a harness session event; session.ts announces it here.
+  onAttachmentChanged(pi, (ctx) => showReadyFeedback(undefined, ctx));
   pi.on("session_start", showReadyFeedback);
-  pi.on("session_switch", (event, ctx) => {
-    const { room, effectiveRoomDir } = roomContext(ctx.cwd);
-    const session = hostSessionIdentity(ctx, effectiveRoomDir);
-    activeTurnPrompts.delete(activeTurnPromptKey(room, session));
-    retireStaleInsulaSessions(room, session);
-    registerTopLevelSession(room, session);
+  const adoptSwitchedSession = async (event, ctx) => {
+    let resolved: ReturnType<typeof roomBinding> = null;
+    try {
+      resolved = roomBinding(ctx);
+    } catch {
+      resolved = null;
+    }
+    if (resolved && !isWorkerSession(ctx)) {
+      const { room, session } = resolved.binding;
+      if (heldBinding && (heldBinding.room !== room || heldBinding.session !== session)) {
+        await releaseHeldBinding();
+      }
+      activeTurnPrompts.delete(activeTurnPromptKey(room, session));
+      retireStaleInsulaSessions(room, session);
+      registerTopLevelSession(room, session);
+    }
     return showReadyFeedback(event, ctx);
-  });
+  };
+  pi.on("session_switch", adoptSwitchedSession);
+  pi.on("session_branch", adoptSwitchedSession);
+  pi.on("session_tree", adoptSwitchedSession);
   pi.on("session_shutdown", async (_event, ctx) => {
-    const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-    const session = hostSessionIdentity(ctx, effectiveRoomDir);
-    activeTurnPrompts.delete(activeTurnPromptKey(room, session));
-    retireInsulaSession(room, session);
-    retireTopLevelSession(room, session);
-    releaseLessonTtsrSession(session);
-    await stopHallwayKnockDoorman({ room, spirit, session });
-    stopChatDoorman({ room, spirit, session });
+    let session = "";
+    try {
+      session = hostSessionIdentity(ctx);
+    } catch {
+      session = "";
+    }
+    if (session) releaseLessonTtsrSession(session);
+    if (isWorkerSession(ctx)) {
+      let resolved: ReturnType<typeof roomBinding> = null;
+      try {
+        resolved = roomBinding(ctx);
+      } catch {
+        resolved = null;
+      }
+      if (resolved) {
+        activeTurnPrompts.delete(activeTurnPromptKey(resolved.binding.room, resolved.binding.session));
+        retireInsulaSession(resolved.binding.room, resolved.binding.session);
+      }
+      return;
+    }
+    await releaseHeldBinding();
   });
 
   // The turn's own prompt, as the harness names it. OMP emits
@@ -454,8 +528,9 @@ export default function solarisaelHouseProof(pi, release) {
   // so a prior user prompt can never outlive its turn and be matched again.
   pi.on("before_agent_start", (event, ctx) => {
     try {
-      const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
-      const key = activeTurnPromptKey(room, hostSessionIdentity(ctx, effectiveRoomDir));
+      const resolved = roomBinding(ctx);
+      if (!resolved) return;
+      const key = activeTurnPromptKey(resolved.binding.room, resolved.binding.session);
       const prompt = typeof event?.prompt === "string" ? event.prompt : "";
       if (!prompt) {
         activeTurnPrompts.delete(key);
@@ -476,8 +551,7 @@ export default function solarisaelHouseProof(pi, release) {
     try {
       const toolCallId = String(event?.toolCallId ?? "").trim();
       if (!toolCallId) return;
-      const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
-      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const { room, session } = insulaSessionBinding(ctx);
       const key = insulaToolKey(room, session, toolCallId);
       if (insulaToolSpans.has(key)) return;
       const request = insulaRequestSpans.get(insulaRequestKey(room, session));
@@ -501,8 +575,7 @@ export default function solarisaelHouseProof(pi, release) {
       const toolCallId = String(event?.toolCallId ?? "").trim();
       if (!toolCallId) return;
       const failed = Boolean(event?.isError);
-      const { room, effectiveRoomDir } = roomContext(ctx?.cwd);
-      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const { room, session } = insulaSessionBinding(ctx);
       const key = insulaToolKey(room, session, toolCallId);
       const span = insulaToolSpans.get(key);
       if (span) {
@@ -594,8 +667,9 @@ export default function solarisaelHouseProof(pi, release) {
     // response exactly as the provider returned it.
     const emitted = Boolean(response.trim());
     try {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      const session = hostSessionIdentity(ctx, effectiveRoomDir);
+      const resolved = roomBinding(ctx);
+      if (!resolved) return;
+      const { room, spirit, session } = resolved.binding;
       const key = `${room}\0${session}`;
       const pending = pendingPresenceContracts.get(key);
       if (!pending) return;
@@ -672,8 +746,9 @@ export default function solarisaelHouseProof(pi, release) {
   pi.on("tool_call", async (event, ctx) => {
     if (!isMutateTool(event?.toolName)) return;
     try {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      markToolEvidence({ room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) }, {
+      const resolved = roomBinding(ctx);
+      if (!resolved) return;
+      markToolEvidence(resolved.binding, {
         paths: mutateToolPaths(event.toolName, event.input),
         cwd: String(ctx?.cwd ?? ""),
       });
@@ -683,8 +758,9 @@ export default function solarisaelHouseProof(pi, release) {
   });
   pi.on("tool_call", async (event, ctx) => {
     try {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      return await blockLessonRefusal(event, ctx, { room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) });
+      const resolved = roomBinding(ctx);
+      if (!resolved) return undefined;
+      return await blockLessonRefusal(event, ctx, resolved.binding);
     } catch (error) {
       // tool_call errors fail closed, so a broken guard would refuse every write in the
       // session. The native TTSR interrupt still fires once; the operator sees this degrade.
@@ -698,8 +774,9 @@ export default function solarisaelHouseProof(pi, release) {
   pi.on("ttsr_triggered", async (event, ctx) => {
     if (!Array.isArray(event?.rules)) return;
     try {
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-      await recordNativeFires({ room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) }, event.rules);
+      const resolved = roomBinding(ctx);
+      if (!resolved) return;
+      await recordNativeFires(resolved.binding, event.rules);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[athanor] native lesson fire not recorded: ${reason}`);
@@ -709,19 +786,19 @@ export default function solarisaelHouseProof(pi, release) {
     if (event?.message?.customType !== "athanor-hallway-knock") return;
     const knockId = String(event?.message?.details?.knockId ?? "").trim();
     if (!knockId) return;
-    const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-    await noteHallwayKnockTurnStart({
-      room,
-      spirit,
-      session: hostSessionIdentity(ctx, effectiveRoomDir),
-    }, knockId);
+    const resolved = roomBinding(ctx);
+    if (!resolved) return;
+    await noteHallwayKnockTurnStart(resolved.binding, knockId);
   });
 
   pi.on("context", async (event, ctx) => {
     const result = await settleAutomaticContextWithinBudget(async (signal, deadline) => {
       const messages = Array.isArray(event?.messages) ? event.messages : [];
-      const initial = roomContext(ctx.cwd);
-      const session = hostSessionIdentity(ctx, initial.effectiveRoomDir);
+      const resolvedRoom = roomBinding(ctx);
+      // An ordinary harness session receives no House context.
+      if (!resolvedRoom) return;
+      const initial = resolvedRoom.context;
+      const session = resolvedRoom.binding.session;
       const activePrompt = activeTurnPrompts.get(activeTurnPromptKey(initial.room, session));
       const origin = currentTurnOrigin(messages, activePrompt ?? null);
       const capabilities = {
@@ -749,7 +826,8 @@ export default function solarisaelHouseProof(pi, release) {
           warnings.push("room state maintenance degraded");
         }
       }
-      const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx.cwd);
+      // Room state maintenance may have renamed the embodied spirit or operator.
+      const { room, spirit, operator, effectiveRoomDir } = requireRoomContext(ctx);
       const binding = { room, spirit, session };
       if (!worker) {
         startChatDoorman(pi, ctx, binding);
@@ -914,8 +992,15 @@ export default function solarisaelHouseProof(pi, release) {
 
 
   pi.on("session_compact", async (event, ctx) => {
-    const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-    const hostSession = hostSessionIdentity(ctx, effectiveRoomDir);
+    let resolved: ReturnType<typeof roomBinding> = null;
+    try {
+      resolved = roomBinding(ctx);
+    } catch (error) {
+      ctx.ui?.notify?.(`Athanor recall policy did not invalidate after compaction: ${error instanceof Error ? error.message : String(error)}`, "warning");
+      return;
+    }
+    if (!resolved) return;
+    const { room, spirit, session: hostSession } = resolved.binding;
     const summary = event?.compactionEntry?.summary ?? event?.summary;
     try {
       await new RecallPolicyHostClient({
@@ -944,19 +1029,23 @@ export default function solarisaelHouseProof(pi, release) {
   });
 
   pi.on("agent_end", async (event, ctx) => {
-    const { room, spirit, operator, effectiveRoomDir } = roomContext(ctx?.cwd || process.cwd());
+    let resolved: ReturnType<typeof roomBinding> = null;
+    try {
+      resolved = roomBinding(ctx);
+    } catch {
+      resolved = null;
+    }
+    if (!resolved) return;
+    const { room, spirit, operator, effectiveRoomDir } = resolved.context;
     const worker = isWorkerSession(ctx);
-    const binding = {
-      room,
-      spirit,
-      session: hostSessionIdentity(ctx, effectiveRoomDir),
-    };
+    const binding = resolved.binding;
     // The turn is over: its prompt must not be matched by the next one.
     activeTurnPrompts.delete(activeTurnPromptKey(room, binding.session));
     try {
       await noteChatTurnEnd(binding, event);
-    } catch {
-      // The doorman degrades on its own warning cadence.
+    } catch (error) {
+      // The doorman degrades on its own warning cadence; the turn still ends.
+      console.warn(`[athanor] Chat doorman turn-end failed for ${room}: ${error instanceof Error ? error.message : String(error)}`);
     }
     // A worker's transcript is its own; it never enters the room's conversation
     // log, and it holds no Hallway Knock turn.
@@ -973,9 +1062,12 @@ export default function solarisaelHouseProof(pi, release) {
         process.env.ATHANOR_REPLAY_MODE !== "1",
       );
       ingestGigaLoggedTurnsDetached(ctx, capture.loggedTurns);
-    } catch {
-      ctx.ui?.notify?.("Athanor conversation capture degraded.", "warning");
-      // Capture must never perturb the visible OMP turn.
+    } catch (error) {
+      // Capture must never perturb the visible OMP turn, and the reason must
+      // never vanish: the toast alone is undiagnosable.
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[athanor] Conversation capture degraded for ${room}/${binding.session}: ${reason}`);
+      ctx.ui?.notify?.(`Athanor conversation capture degraded: ${reason}`, "warning");
     } finally {
       await noteHallwayKnockTurnEnd(binding);
     }

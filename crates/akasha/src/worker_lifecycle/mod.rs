@@ -2,14 +2,16 @@
 //! `hearth::worker_lifecycle`; this module only locks one swarm aggregate,
 //! replays committed requests, applies the domain step, and persists the
 //! changed metadata rows plus append-only entries in the same transaction.
+//! A named familiar's tagged coding lessons are read in that transaction on
+//! every wake, so a refused wake commits nothing.
 
 use crate::config::AppError;
 use chrono::{DateTime, Utc};
 use hearth::worker_lifecycle::{
-    Applied, BookRecord, BookState, Call, EntryAuthor, EntryRecord, HandoffRecord,
+    Applied, BookRecord, BookState, Call, EntryAuthor, EntryRecord, Familiar, HandoffRecord,
     INSPECT_SWARM_LIMIT, InstanceRecord, InstanceState, LifecycleError, OperationRecord,
-    RequestRecord, RetainedRecord, SwarmRecord, SwarmState, Target, apply, changed_books,
-    deliver, inspect_caller, read_response, render_open, replay, retained_response,
+    RequestRecord, RetainedRecord, RoleTag, SwarmRecord, SwarmState, TaggedLesson, Target, apply,
+    changed_books, deliver, inspect_caller, read_response, render_open, replay, retained_response,
     unknown_cursor,
 };
 use serde_json::Value;
@@ -81,7 +83,13 @@ pub async fn worker_lifecycle(pool: &PgPool, call: Call) -> Result<Value, AppErr
         }
         Applied::Wake { plan, base } => {
             let entries = entries_at(&mut tx, &plan.book_id, &plan.sequences()).await?;
-            render_open(&plan, base, &entries)
+            let lessons = match plan.familiar {
+                Some(familiar) => {
+                    Some(familiar_lessons(&mut tx, &call.actor.room, familiar).await?)
+                }
+                None => None,
+            };
+            render_open(&plan, base, &entries, lessons).map_err(domain_error)?
         }
         Applied::Retained {
             swarm_id,
@@ -547,6 +555,33 @@ async fn entries_at(
     .await?
     .iter()
     .map(entry_record)
+    .collect()
+}
+
+/// Coding lessons visible in `room` that carry any of the familiar's exact
+/// tags: one row per lesson, bodies whole.
+async fn familiar_lessons(
+    tx: &mut Tx<'_>,
+    room: &str,
+    familiar: Familiar,
+) -> Result<Vec<TaggedLesson>, AppError> {
+    let tags = familiar.tags().map(RoleTag::as_str).collect::<Vec<_>>();
+    sqlx::query(
+        "SELECT id,title,lesson,tags FROM lessons WHERE lesson_key='coding' AND (scope='house' OR scope=$1) AND tags && $2 ORDER BY id",
+    )
+    .bind(room)
+    .bind(tags)
+    .fetch_all(&mut **tx)
+    .await?
+    .iter()
+    .map(|row| -> Result<TaggedLesson, AppError> {
+        Ok(TaggedLesson {
+            id: row.try_get("id")?,
+            title: row.try_get("title")?,
+            lesson: row.try_get("lesson")?,
+            tags: row.try_get("tags")?,
+        })
+    })
     .collect()
 }
 

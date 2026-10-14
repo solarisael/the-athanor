@@ -1,5 +1,7 @@
 mod context_session;
 mod native_commands;
+#[path = "portable.rs"]
+mod portable;
 #[path = "surface.rs"]
 mod surface;
 
@@ -162,6 +164,7 @@ struct AppState {
     hallway_deltas: broadcast::Sender<(String, String)>,
     hallway_operations: Arc<tokio::sync::Semaphore>,
     receipt_tracker: Arc<Mutex<ReceiptTracker>>,
+    portable: Arc<Mutex<portable::Registry>>,
 }
 
 fn host_insula_binding(config: &HostConfig) -> Result<TrustedBinding, String> {
@@ -210,6 +213,7 @@ impl Host {
             config.akasha_enabled(),
             config.nats_url.is_some(),
         )));
+        let portable_registry = portable::Registry::load(&config.state_dir)?;
         Ok(Self {
             state: AppState {
                 config: Arc::new(config),
@@ -240,6 +244,7 @@ impl Host {
                 hallway_deltas,
                 hallway_operations: Arc::new(tokio::sync::Semaphore::new(4)),
                 receipt_tracker,
+                portable: Arc::new(Mutex::new(portable_registry)),
             },
         })
     }
@@ -270,6 +275,7 @@ impl Host {
             .merge(self.state.insula.router())
             .merge(self.state.panel.router())
             .merge(surface::router(self.state.clone()))
+            .merge(portable::router(self.state.clone()))
     }
 }
 
@@ -638,7 +644,8 @@ async fn execute_command(
 ) -> Responses {
     match command {
         ClientCommand::PrepareContext { meta, request } => {
-            context_session::prepare(state, meta, request).await
+            // Keep the large context future out of every WebSocket command frame.
+            Box::pin(context_session::prepare(state, meta, request)).await
         }
         ClientCommand::ContextLessonPlan { meta, request } => {
             context_session::lesson_plan(state, meta, request).await
@@ -2234,13 +2241,13 @@ fn resolve_room_dir<'a>(
     }))
 }
 
-/// The Host owns the filesystem for room-local House files; `core` owns
-/// which files those are and what they must contain.
+/// The Host owns the filesystem for House and room spellbook pages; `routing`
+/// owns which files those are and what they must contain.
 fn read_room_spellbook(room_dir: &str) -> LoadedSpellbook {
     load_spellbook(room_dir, |candidate| {
         match std::fs::read_to_string(candidate) {
             Ok(text) => match serde_json::from_str(&text) {
-                Ok(spellbook) => SpellbookRead::Parsed(spellbook),
+                Ok(page) => SpellbookRead::Parsed(page),
                 Err(error) => SpellbookRead::Malformed(error.to_string()),
             },
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => SpellbookRead::Missing,

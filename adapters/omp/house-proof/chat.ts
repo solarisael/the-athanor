@@ -29,6 +29,7 @@ import { topLevelSession } from "./top-level-session-fence.ts";
 import { conversationText } from "./text.ts";
 import { generatedTurnKey } from "./turn-origin.ts";
 import { lifecyclePlan } from "./lifecycle.ts";
+import { sessionInstanceId } from "./session.ts";
 
 const CHAT_PROJECTION_ID = "chat";
 const CHAT_TURN = "athanor.chat.turn";
@@ -134,9 +135,13 @@ async function tickChatDoorman(state: ChatDoormanState): Promise<void> {
   if (typeof state.ctx?.isIdle === "function" && !state.ctx.isIdle()) return;
   state.ticking = true;
   try {
+    // A live portable instance asks as itself: when the room has portable
+    // sessions, the Host hands a say only to the room's explicit chat owner,
+    // so two attached conversations never answer the same say.
+    const instanceId = sessionInstanceId(state.ctx);
     const { next } = await lifecyclePlan<{ next: ChatLine | null }>(
       state.binding,
-      { action: "chatNext" },
+      { action: "chatNext", ...(instanceId ? { instanceId } : {}) },
     );
     // The snapshot request yields: the session may have started another turn
     // or been retired while the Host was answering.

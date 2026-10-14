@@ -143,29 +143,39 @@ async fn worker_context_discards_room_replay_and_legacy_continuity() {
     let saved = SavedSession {
         turns: vec![cache::TurnBlocks {
             turn_id: "worker".into(),
-            blocks: kinds.into_iter().map(|kind| Block {
-                kind,
-                content: "Parent-only continuity".into(),
-                details: Value::Null,
-                timestamp: 1,
-            }).collect(),
+            blocks: kinds
+                .into_iter()
+                .map(|kind| Block {
+                    kind,
+                    content: "Parent-only continuity".into(),
+                    details: Value::Null,
+                    timestamp: 1,
+                })
+                .collect(),
         }],
         woken: true,
         ..SavedSession::default()
     };
     cache::commit(&fixture.state, &fixture.meta.sender_session, &saved).unwrap();
-    let mut request = fixture.request_for(
-        "worker",
-        Capabilities { automatic_recall: false, top_level: false },
-        false,
-    ).await;
+    let mut request = fixture
+        .request_for(
+            "worker",
+            Capabilities {
+                automatic_recall: false,
+                top_level: false,
+            },
+            false,
+        )
+        .await;
     request["freshConversation"] = json!(true);
     request["legacyMemo"] = legacy("worker", "Another parent memory");
     request["priorPresence"] = json!({
         "frameId": "parent-frame",
         "frameRendered": "Parent identity"
     });
-    let result = prepare_inner(&fixture.state, &fixture.meta, request).await.unwrap();
+    let result = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
     assert_eq!(result["turns"], json!([]));
     assert!(result["presenceSettlement"].is_null());
     assert!(result["presenceSettledContractId"].is_null());
@@ -175,12 +185,19 @@ async fn worker_context_discards_room_replay_and_legacy_continuity() {
 
     // A cold resume must not restore the previous room wake from disk.
     *fixture.state.context_sessions.lock().await = ContextSessions::default();
-    let request = fixture.request_for(
-        "resumed",
-        Capabilities { automatic_recall: false, top_level: false },
-        false,
-    ).await;
-    let resumed = prepare_inner(&fixture.state, &fixture.meta, request).await.unwrap();
+    let request = fixture
+        .request_for(
+            "resumed",
+            Capabilities {
+                automatic_recall: false,
+                top_level: false,
+            },
+            false,
+        )
+        .await;
+    let resumed = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
     assert_eq!(resumed["turns"], json!([]));
 }
 
@@ -688,11 +705,16 @@ async fn lesson_plan_requests_no_typesafe_credential_for_disabled_or_laya_only_g
                 .requires_credential
         );
     }
-    fixture.request_for(
-        "child",
-        Capabilities { automatic_recall: false, top_level: false },
-        false,
-    ).await;
+    fixture
+        .request_for(
+            "child",
+            Capabilities {
+                automatic_recall: false,
+                top_level: false,
+            },
+            false,
+        )
+        .await;
     let context = session(&fixture.state, &fixture.meta.sender_session).await;
     assert!(
         !context

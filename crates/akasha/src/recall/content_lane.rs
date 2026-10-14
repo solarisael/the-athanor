@@ -69,11 +69,11 @@ fn content_lane_sql_scoped(pattern_count: usize, scope_filter: &str) -> String {
         format!("\n             AND ({ors})")
     };
     format!(
-        "SELECT memory_id,source_path,title,heading_path,body,char_start,char_end,chunk_index,meta,sim
+        "SELECT memory_id,source_path,title,heading_path,body,char_start,char_end,chunk_index,meta,created_at,sim
          FROM (
            SELECT m.id AS memory_id,m.source_path,coalesce(m.title,'') AS title,
                   coalesce(c.heading_path,'') AS heading_path,c.body,c.char_start,c.char_end,
-                  c.chunk_index,m.meta AS meta,
+                  c.chunk_index,m.meta AS meta,m.created_at,
                   word_similarity($1,c.body)::double precision AS sim
            FROM memory_chunks c
            JOIN memories m ON m.id=c.memory_id

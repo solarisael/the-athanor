@@ -537,9 +537,9 @@ function resultIdentity(payload: JsonRecord, args: JsonRecord): string {
   return id ? `${kind} #${id}` : kind;
 }
 
-/** The `backup` receipt a durable write carries: `ok`, `failed`, or `skipped`. */
+/** The `backup` receipt a durable write carries: `ok`, `fresh`, `failed`, or `skipped`. */
 export type BackupReceiptView = {
-  status: "ok" | "failed" | "skipped" | "unknown";
+  status: "ok" | "fresh" | "failed" | "skipped" | "unknown";
   line: HouseFrameLine | null;
   detailLines: HouseFrameLine[];
   attention: boolean;
@@ -600,6 +600,19 @@ export function backupReceiptView(payload: JsonRecord, theme: FeedbackTheme | un
       status: "skipped",
       line: { text: "backup skipped", color: "dim" },
       detailLines: [],
+      attention: false,
+    };
+  }
+  if (status === "fresh") {
+    const dumpPath = textValue(backup.dump_path);
+    const detail = textValue(backup.detail);
+    return {
+      status: "fresh",
+      line: {
+        text: `backup fresh${dumpPath ? ` · ${baseName(dumpPath)}` : ""}${detail ? ` · ${detail}` : ""}`,
+        color: "dim",
+      },
+      detailLines: dumpPath ? [{ text: `dump · ${dumpPath}`, color: "dim" }] : [],
       attention: false,
     };
   }
@@ -714,7 +727,7 @@ function createSleepRenderers(label: string) {
       const durable = payload.durable === true;
       const inserted = payload.inserted === true;
       const backup = backupReceiptView(payload, theme);
-      const attention = warnings.length > 0 || !durable || backup.status !== "ok";
+      const attention = warnings.length > 0 || !durable || (backup.status !== "ok" && backup.status !== "fresh");
       const lines: HouseFrameLine[] = [
         {
           text: `${room} · ${displayAuthority(payload.authority)} · ${durable ? "durable" : "durability unconfirmed"}`,

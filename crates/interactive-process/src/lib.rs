@@ -515,3 +515,152 @@ mod platform {
         })
     }
 }
+
+/// Observes one existing process by id without owning it.
+///
+/// On Windows the handle is opened once, so a later process that reuses the
+/// id is never mistaken for the watched one. The watch never terminates.
+pub struct ProcessWatch {
+    inner: watch::Watch,
+}
+
+impl ProcessWatch {
+    pub fn open(process_id: u32) -> io::Result<Self> {
+        watch::Watch::open(process_id).map(|inner| Self { inner })
+    }
+
+    pub fn process_id(&self) -> u32 {
+        self.inner.process_id()
+    }
+
+    /// `true` once the watched process has exited.
+    pub fn has_exited(&self) -> io::Result<bool> {
+        self.inner.has_exited()
+    }
+
+    /// The executable image of the watched process, read through the held
+    /// handle, so a reused process id can never answer for it.
+    pub fn image_path(&self) -> io::Result<std::path::PathBuf> {
+        self.inner.image_path()
+    }
+}
+
+#[cfg(windows)]
+mod watch {
+    use std::{
+        io,
+        os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    };
+    use windows_sys::Win32::{
+        Foundation::{WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT},
+        System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+            QueryFullProcessImageNameW, WaitForSingleObject,
+        },
+    };
+
+    pub(super) struct Watch {
+        process_id: u32,
+        handle: OwnedHandle,
+    }
+
+    impl Watch {
+        pub(super) fn open(process_id: u32) -> io::Result<Self> {
+            // SAFETY: OpenProcess has no pointer arguments; a null answer is an error.
+            let raw = unsafe {
+                OpenProcess(
+                    PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    0,
+                    process_id,
+                )
+            };
+            if raw.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: raw is a fresh process handle this value now owns.
+            let handle = unsafe { OwnedHandle::from_raw_handle(raw as _) };
+            Ok(Self { process_id, handle })
+        }
+
+        pub(super) fn process_id(&self) -> u32 {
+            self.process_id
+        }
+
+        pub(super) fn has_exited(&self) -> io::Result<bool> {
+            // SAFETY: the owned handle stays open for the duration of the call.
+            match unsafe { WaitForSingleObject(self.handle.as_raw_handle() as _, 0) } {
+                WAIT_OBJECT_0 => Ok(true),
+                WAIT_TIMEOUT => Ok(false),
+                WAIT_FAILED => Err(io::Error::last_os_error()),
+                other => Err(io::Error::other(format!(
+                    "unexpected process wait result {other}"
+                ))),
+            }
+        }
+
+        pub(super) fn image_path(&self) -> io::Result<std::path::PathBuf> {
+            use std::os::windows::ffi::OsStringExt;
+            let mut buffer = vec![0u16; 32_768];
+            let mut size = buffer.len() as u32;
+            // SAFETY: the buffer outlives the call and size names its capacity;
+            // flag 0 is PROCESS_NAME_WIN32.
+            let ok = unsafe {
+                QueryFullProcessImageNameW(
+                    self.handle.as_raw_handle() as _,
+                    0,
+                    buffer.as_mut_ptr(),
+                    &mut size,
+                )
+            };
+            if ok == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            buffer.truncate(size as usize);
+            Ok(std::ffi::OsString::from_wide(&buffer).into())
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod watch {
+    use std::{io, path::PathBuf};
+
+    pub(super) struct Watch {
+        process_id: u32,
+        proc_dir: PathBuf,
+    }
+
+    impl Watch {
+        pub(super) fn open(process_id: u32) -> io::Result<Self> {
+            let proc_dir = PathBuf::from(format!("/proc/{process_id}"));
+            if !std::path::Path::new("/proc/self").exists() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "process watch needs /proc on this platform",
+                ));
+            }
+            if !proc_dir.exists() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "process is not running",
+                ));
+            }
+            Ok(Self {
+                process_id,
+                proc_dir,
+            })
+        }
+
+        pub(super) fn process_id(&self) -> u32 {
+            self.process_id
+        }
+
+        pub(super) fn has_exited(&self) -> io::Result<bool> {
+            Ok(!self.proc_dir.exists())
+        }
+
+        pub(super) fn image_path(&self) -> io::Result<PathBuf> {
+            std::fs::read_link(self.proc_dir.join("exe"))
+        }
+    }
+}

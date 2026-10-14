@@ -46,6 +46,21 @@ AKASHA can additionally return canon, named entities, thread candidates,
 semantic and direct-content memory chunks, dates, taxonomy, cluster resonance,
 authority, lifecycle state, and suppression reasons.
 
+AKASHA removes casual English and Portuguese filler from lexical query terms.
+It also removes recognized keyboard laughter.
+Coverage counts the retained content terms.
+Document tokenization does not change.
+Canonical name lookup and exact memory references keep their original terms.
+The `remember` tool remains a subject; a negated phrase such as `don't remember` does not.
+
+Semantic retrieval first embeds the original query.
+If its best visible similarity is below the floor, it can retry once with the retained subject terms.
+An empty, unchanged, or reference-only retry does not run.
+An empty vector corpus does not cause a retry.
+Both passes use the same scope, floor, and limits.
+Retry hits identify their pass in the evidence.
+A retry failure preserves lexical results and adds a warning.
+
 Treat the cited source as evidence. Relevance selects a viewport; it does not
 change the source's authority.
 

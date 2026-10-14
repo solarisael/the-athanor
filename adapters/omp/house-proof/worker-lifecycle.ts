@@ -4,7 +4,8 @@
 // The Host `worker_lifecycle` organ owns every transition, threshold, and
 // ownership rule. This module only translates OMP events into those requests
 // and enforces the answers locally: it enrolls task spawns, binds a child to
-// its reservation, gates the child's model requests and tools on persisted
+// its reservation, renders the role lessons the Host delivers with each named
+// familiar's wake, gates the child's model requests and tools on persisted
 // lifecycle state, persists terminal yields before they leave, and reports
 // retirements back to the parent. A Host failure blocks the unsafe step; it
 // never lets a child run untracked.
@@ -12,7 +13,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { hostSessionIdentity, type HostBinding } from "./host.ts";
 import { OrganError, organFailure, requestOrgan } from "./organ.ts";
-import { roomContext } from "./room.ts";
+import { requireRoomBinding, roomContext } from "./room.ts";
 import { contextBlockKind } from "./context.ts";
 import { conversationText } from "./text.ts";
 import { parentContextRequest } from "./recall.ts";
@@ -21,6 +22,7 @@ import { registerHouseTool } from "./tools.ts";
 export const WORKER_LIFECYCLE_ENTRY = "athanor-worker-lifecycle";
 export const WORKER_WAKE_MESSAGE = "athanor-worker-wake";
 export const WORKER_NOTICE_MESSAGE = "athanor-worker-lifecycle-notice";
+const FAMILIAR_LESSONS_MESSAGE = "athanor-familiar-lessons";
 
 // Each lifecycle request stays far below OMP's 30 s extension handler budget:
 // a timed-out tool_call handler blocks, but a timed-out context handler is
@@ -102,6 +104,8 @@ type SessionState = {
   reservations: Map<string, Reservation>;
   worker: WorkerState | null;
   workerFailure: string | null;
+  /** Kept outside transcript compaction and injected once per provider context. */
+  roleLessons?: string | undefined;
 };
 
 type SlotRecord = {
@@ -297,12 +301,23 @@ function errorText(error: unknown): string {
 // ---------------------------------------------------------------------------
 
 function sessionBinding(ctx: any): HostBinding {
-  const { room, spirit, effectiveRoomDir } = roomContext(ctx?.cwd);
-  return { room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) };
+  return requireRoomBinding(ctx).binding;
 }
 
 function sessionKey(ctx: any): string {
-  return sessionBinding(ctx).session;
+  return hostSessionIdentity(ctx);
+}
+
+// An ordinary harness session (no attached or launched home) keeps OMP's own
+// task and worker behaviour: the House worker protocol never engages. A
+// selected home that is unreachable still counts as a House session, so its
+// gates fail closed instead of silently reverting to ordinary behaviour.
+function ordinarySession(ctx: any): boolean {
+  try {
+    return roomContext(ctx) === null;
+  } catch {
+    return false;
+  }
 }
 
 function emptyWorker(token: string, binding: HostBinding, ids: { swarmId: string; bookId: string; instanceId: string }): WorkerState {
@@ -501,6 +516,38 @@ function measurementNotice(reason: string): string {
   ].join("\n");
 }
 
+type FamiliarLessons = { tags: string[]; lessons: Array<{ id: number; title: string; lesson: string }> };
+
+/**
+ * The role lessons the Host delivered with this wake, or null when the Host
+ * states that this worker is no named familiar. The Host selects them on
+ * every wake and refuses one without them. An answer that omits the field
+ * comes from a Host older than this contract and is refused, as is a
+ * malformed delivery, so a familiar never works bare.
+ */
+function requireFamiliarLessons(opened: Record<string, any>): FamiliarLessons | null {
+  const delivered = opened.familiarLessons;
+  if (delivered === null) return null;
+  const failure = (message: string) => new OrganError(message, "outcome_unknown", false, {
+    action: "open",
+    execution: { request_dispatched: true, write_outcome: "unknown", retry: "reconcile_first" },
+  });
+  if (delivered === undefined) throw failure("worker_lifecycle open omitted familiarLessons; the Host predates the role-lesson contract");
+  const { tags, lessons } = delivered;
+  const whole = Array.isArray(tags) && tags.length > 0 && tags.every((tag: unknown) => typeof tag === "string" && tag !== "")
+    && Array.isArray(lessons) && lessons.length > 0
+    && lessons.every((lesson: any) => Number.isSafeInteger(lesson?.id) && typeof lesson?.title === "string" && typeof lesson?.lesson === "string" && lesson.lesson.trim() !== "");
+  if (!whole) throw failure("worker_lifecycle open delivered malformed familiar lessons");
+  return { tags, lessons };
+}
+
+function familiarLessonsText(delivered: FamiliarLessons): string {
+  return [
+    `Role lessons for this familiar (${delivered.tags.join(", ")}), delivered whole by the House at this wake. They govern how you work; they do not widen the assignment. Lesson ids: ${delivered.lessons.map((lesson) => lesson.id).join(", ")}.`,
+    ...delivered.lessons.map((lesson) => `[Lesson ${lesson.id}] ${lesson.title}\n${lesson.lesson}`),
+  ].join("\n\n");
+}
+
 function wakeMessage(opened: Record<string, any>): string {
   const pending = Array.isArray(opened.pendingOperations) ? opened.pendingOperations : [];
   const wake = opened.wake ?? {};
@@ -542,6 +589,7 @@ function customMessage(customType: string, content: string): Record<string, unkn
 export function scrubWorkerMessages(messages: any[]): any[] {
   const scrubbed: any[] = [];
   for (const message of messages) {
+    if (message?.role === "custom" && message.customType === FAMILIAR_LESSONS_MESSAGE) continue;
     if (message?.role === "custom" && (contextBlockKind(message.customType) || ROOM_DERIVED_MESSAGES.has(message.customType))) continue;
     if (message?.role === "user" && JSON.stringify(message.content ?? "").includes(MARKER_HINT)) {
       const content = typeof message.content === "string"
@@ -964,9 +1012,13 @@ export function installWorkerLifecycle(pi: any): void {
       token,
       agentId: text(ctx?.agent?.id),
       agentName: text(ctx?.agent?.name),
+      // A Host predating role lessons refuses this field, so no familiar wakes bare.
+      acceptsFamiliarLessons: true,
       ...(transcriptPath ? { transcriptPath } : {}),
     });
     requireStrings("open", opened, ["swarmId", "bookId", "instanceId"]);
+    // Validate before the binding is persisted: a restored binding must never lack its lessons.
+    const lessons = requireFamiliarLessons(opened);
     const openedState = lifecycleState("open", opened.state);
     const worker = resume ?? emptyWorker(token, binding, { swarmId: opened.swarmId, bookId: opened.bookId, instanceId: opened.instanceId });
     if (resume && (resume.bookId !== opened.bookId || resume.instanceId !== opened.instanceId)) {
@@ -985,6 +1037,7 @@ export function installWorkerLifecycle(pi: any): void {
     }
     state.worker = worker;
     state.workerFailure = null;
+    state.roleLessons = lessons ? familiarLessonsText(lessons) : undefined;
     // Children run in the parent's process: tell the parent's slot which child
     // took it, so a lifecycle event without a parentToolCallId still settles.
     const slotKey = slotsByToken.get(sha256(token));
@@ -996,15 +1049,19 @@ export function installWorkerLifecycle(pi: any): void {
     return opened;
   }
 
+  function wakeReply(opened: Record<string, any>): { message: Record<string, unknown> } {
+    return { message: { customType: WORKER_WAKE_MESSAGE, content: wakeMessage(opened), display: false } };
+  }
+
   pi.on("before_agent_start", async (event: any, ctx: any) => {
-    if (!isWorkerSession(ctx)) return undefined;
+    if (!isWorkerSession(ctx) || ordinarySession(ctx)) return undefined;
     const state = stateFor(ctx);
     try {
       if (state.worker) {
         if (state.worker.retired) return { message: { customType: WORKER_NOTICE_MESSAGE, content: retiredNotice(state.worker), display: false } };
         const opened = await openWorker(ctx, state, state.worker.token, state.worker);
         if (state.worker.retired) return { message: { customType: WORKER_NOTICE_MESSAGE, content: retiredNotice(state.worker), display: false } };
-        return { message: { customType: WORKER_WAKE_MESSAGE, content: wakeMessage(opened), display: false } };
+        return wakeReply(opened);
       }
       const parsed = parseEnrollmentMarker(event?.prompt);
       if (parsed.kind !== "valid") {
@@ -1014,7 +1071,7 @@ export function installWorkerLifecycle(pi: any): void {
         return { message: { customType: WORKER_NOTICE_MESSAGE, content: `Athanor worker lifecycle refused this worker: ${state.workerFailure}.`, display: false } };
       }
       const opened = await openWorker(ctx, state, parsed.token, null);
-      return { message: { customType: WORKER_WAKE_MESSAGE, content: wakeMessage(opened), display: false } };
+      return wakeReply(opened);
     } catch (error) {
       if (state.worker && error instanceof OrganError && error.code === "instance_retired") {
         markRetired(state.worker, state.worker.handoffComplete, "resume refused: instance retired", true);
@@ -1022,7 +1079,7 @@ export function installWorkerLifecycle(pi: any): void {
       }
       state.workerFailure = `worker open failed: ${errorText(error)}`;
       console.warn(`[athanor] ${state.workerFailure}`);
-      return { message: { customType: WORKER_NOTICE_MESSAGE, content: `Athanor worker lifecycle could not bind this worker (${state.workerFailure}). Work is refused; the parent will see the failure.`, display: false } };
+      return { message: { customType: WORKER_NOTICE_MESSAGE, content: `Athanor worker lifecycle could not bind this worker (${state.workerFailure}). Work is refused; the parent will see the failure. The task book and its recorded entries are kept: after the cause is fixed, the parent continues the book with worker_notebook repair, then successor.`, display: false } };
     }
   });
 
@@ -1131,17 +1188,20 @@ export function installWorkerLifecycle(pi: any): void {
   }
 
   pi.on("session_start", (_event: any, ctx: any) => {
+    if (ordinarySession(ctx)) return;
     // Restore persisted reservations and slot links before any lifecycle event
     // for them can arrive (a cold-revived child settles through these).
     stateFor(ctx);
   });
 
   pi.on("context", async (event: any, ctx: any) => {
-    if (!isWorkerSession(ctx)) return undefined;
+    if (!isWorkerSession(ctx) || ordinarySession(ctx)) return undefined;
     const messages = Array.isArray(event?.messages) ? event.messages : [];
     try {
+      const state = stateFor(ctx);
       const scrubbed = scrubWorkerMessages(messages);
-      const gate = await contextGate(ctx, stateFor(ctx));
+      if (state.roleLessons) scrubbed.unshift(customMessage(FAMILIAR_LESSONS_MESSAGE, state.roleLessons));
+      const gate = await contextGate(ctx, state);
       if (gate.abort) {
         ctx.abort();
         return { messages: [customMessage(WORKER_NOTICE_MESSAGE, gate.notice)] };
@@ -1156,7 +1216,7 @@ export function installWorkerLifecycle(pi: any): void {
   });
 
   pi.on("before_provider_request", async (_event: any, ctx: any) => {
-    if (!isWorkerSession(ctx)) return undefined;
+    if (!isWorkerSession(ctx) || ordinarySession(ctx)) return undefined;
     let allowed = false;
     try {
       allowed = await providerGate(ctx, stateFor(ctx));
@@ -1167,8 +1227,8 @@ export function installWorkerLifecycle(pi: any): void {
     return undefined;
   });
 
-  pi.on("before_subagent_spawn", (event: any) => {
-    if (event?.invocationKind !== "eval") return undefined;
+  pi.on("before_subagent_spawn", (event: any, ctx: any) => {
+    if (event?.invocationKind !== "eval" || ordinarySession(ctx)) return undefined;
     return {
       block: true,
       reason: "Athanor worker lifecycle: eval agent()/workpool spawns cannot carry a worker enrollment, and an unenrolled worker is refused on its first request. Spawn this worker with the task tool instead; it is enrolled automatically.",
@@ -1261,6 +1321,7 @@ export function installWorkerLifecycle(pi: any): void {
   }
 
   pi.on("tool_call", async (event: any, ctx: any) => {
+    if (ordinarySession(ctx)) return undefined;
     const worker = isWorkerSession(ctx);
     if (worker) {
       const roomRefusal = childRoomToolRefusal(event, ctx);
@@ -1276,6 +1337,7 @@ export function installWorkerLifecycle(pi: any): void {
   });
 
   pi.on("tool_result", async (event: any, ctx: any) => {
+    if (ordinarySession(ctx)) return;
     const toolCallId = text(event?.toolCallId);
     if (isWorkerSession(ctx)) {
       const worker = stateFor(ctx).worker;
@@ -1307,7 +1369,7 @@ export function installWorkerLifecycle(pi: any): void {
   });
 
   pi.on("assistant_message", (event: any, ctx: any) => {
-    if (!isWorkerSession(ctx)) return undefined;
+    if (!isWorkerSession(ctx) || ordinarySession(ctx)) return undefined;
     const worker = stateFor(ctx).worker;
     if (!worker || worker.retired) return undefined;
     const said = conversationText(event?.message);
@@ -1329,7 +1391,7 @@ export function installWorkerLifecycle(pi: any): void {
   });
 
   pi.on("session_before_compact", (_event: any, ctx: any) => {
-    if (!isWorkerSession(ctx)) return undefined;
+    if (!isWorkerSession(ctx) || ordinarySession(ctx)) return undefined;
     const worker = stateFor(ctx).worker;
     // Compaction would spend an uncounted model request after the handoff
     // line and could not clear the latch anyway.
@@ -1338,7 +1400,7 @@ export function installWorkerLifecycle(pi: any): void {
   });
 
   pi.on("agent_end", async (event: any, ctx: any) => {
-    if (!isWorkerSession(ctx) || event?.willContinue === true) return;
+    if (!isWorkerSession(ctx) || event?.willContinue === true || ordinarySession(ctx)) return;
     const worker = stateFor(ctx).worker;
     // OMP's yield reminders run after the loop ends and may still use an
     // unspent handoff request; only a spent budget retires here. Native
@@ -1372,7 +1434,7 @@ export function installWorkerLifecycle(pi: any): void {
       body: z.unknown().optional().describe("append/accept: JSON body."),
       report: z.unknown().optional().describe("repair: the complete handoff the parent attests to."),
       discardReason: z.string().optional().describe("dispose: explicit reason for books without accepted evidence."),
-      agent: z.string().optional().describe("successor: agent definition for the successor (default: task)."),
+      agent: z.string().optional().describe("successor: agent definition; defaults to the predecessor's agent. Required when that agent is unknown."),
       name: z.string().optional().describe("successor: optional task name."),
       task: z.string().optional().describe("successor: assignment text; defaults to continuing from the predecessor's handoff."),
       solutionSpace: z.string().optional().describe("successor: solution space for the task packet."),
@@ -1452,11 +1514,14 @@ export function installWorkerLifecycle(pi: any): void {
             const successorRequest = lifecycleRequestId("successor", requested, instanceId);
             const prior = state.reservations.get(successorRequest);
             if (prior?.consumed) return refuse(`the successor packet for ${instanceId} was already spawned; inspect book ${requested}`);
+            const agentName = text(params.agent).toLowerCase() || prior?.agentName
+              || [...state.reservations.values()].find((candidate) => candidate.instanceId === instanceId)?.agentName;
+            if (!agentName) return refuse("the predecessor's agent is unavailable; inspect the book and name the successor agent explicitly");
             const reservation = reserve(state, {
               requestId: successorRequest,
               swarmKey: `successor:${requested}`,
               slotKey: instanceId,
-              agentName: text(params.agent).toLowerCase() || prior?.agentName || "task",
+              agentName,
               task: assignment,
               binding,
               predecessor: { bookId: requested, instanceId },

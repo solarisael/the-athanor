@@ -161,3 +161,10 @@ if (process.env[ISOLATED_POSTGRES_GATE] !== "1") {
   // validation; unlike the production binary it cannot open the substrate.
   process.env.ATHANOR_SUBSTRATE_EXE = process.execPath;
 }
+
+// Session attachment captures the Tern pane it runs in and the keeper's
+// instance. A test run inside a live Tern pane must never inspect that pane
+// or register under a live keeper's identity.
+delete process.env.TERN_PANE;
+delete process.env.TERN_PANE_SOCKET;
+delete process.env.ATHANOR_KEEPER_INSTANCE_ID;

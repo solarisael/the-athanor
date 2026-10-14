@@ -1,11 +1,12 @@
+use super::familiar::{Familiar, TaggedLesson, role_lessons};
 use super::model::{
     BookRecord, BookState, DispositionRecord, EntryAuthor, EntryRecord, HandoffRecord,
     InstanceRecord, InstanceState, OperationRecord, RequestRecord, RetainedRecord, SwarmRecord,
     SwarmState,
 };
 use super::request::{
-    Accept, Action, Actor, Append, Call, Checkpoint, Dispose, Observe, Open, Prepare, Read,
-    Repair, Settle, SettleOutcome, token_hash,
+    Accept, Action, Actor, Append, Call, Checkpoint, Dispose, Observe, Open, Prepare, Read, Repair,
+    Settle, SettleOutcome, token_hash,
 };
 use super::wake::{WakeKind, WakePlan, render};
 use super::{
@@ -70,8 +71,9 @@ pub enum Applied {
         after: i64,
         limit: i64,
     },
-    /// Authorized open: the store loads [`WakePlan::sequences`] from the book,
-    /// then calls [`render_open`].
+    /// Authorized open: the store loads [`WakePlan::sequences`] from the book
+    /// and, for [`WakePlan::familiar`], the familiar's tagged coding lessons,
+    /// then calls [`render_open`] before it commits.
     Wake { plan: WakePlan, base: Value },
     /// Authorized retained read: the store pages this swarm's accepted
     /// evidence in (createdMs, retainedId) order, starting after the cursor
@@ -125,13 +127,29 @@ pub fn read_response(entries: &[EntryRecord], after: i64) -> Value {
     })
 }
 
-pub fn render_open(plan: &WakePlan, mut base: Value, entries: &[EntryRecord]) -> Value {
+/// Render an authorized open. Every open answers `familiarLessons`: `null`
+/// for an ordinary agent, or a named familiar's role lessons beside the
+/// clipped wake text, on every wake. `lessons` is what the store's lesson
+/// registry returned for [`Familiar::tags`], or `None` from a store without
+/// one. A refusal here must leave the open uncommitted.
+pub fn render_open(
+    plan: &WakePlan,
+    mut base: Value,
+    entries: &[EntryRecord],
+    lessons: Option<Vec<TaggedLesson>>,
+) -> Result<Value, LifecycleError> {
+    let delivered = match plan.familiar {
+        Some(familiar) => role_lessons(familiar, lessons)?,
+        None => Value::Null,
+    };
+    let object = base.as_object_mut().expect("open base is an object");
+    object.insert("familiarLessons".into(), delivered);
     let text = render(plan, entries);
-    base.as_object_mut().expect("open base is an object").insert(
+    object.insert(
         "wake".into(),
         json!({"kind": plan.kind.as_str(), "text": text}),
     );
-    base
+    Ok(base)
 }
 
 pub const fn unknown_cursor() -> LifecycleError {
@@ -146,7 +164,9 @@ pub fn retained_response(mut records: Vec<RetainedRecord>, limit: i64) -> Value 
     let limit = usize::try_from(limit).unwrap_or(usize::MAX);
     let more = records.len() > limit;
     records.truncate(limit);
-    let next = more.then(|| records.last().map(|record| record.retained_id.clone())).flatten();
+    let next = more
+        .then(|| records.last().map(|record| record.retained_id.clone()))
+        .flatten();
     json!({
         "ok": true,
         "retained": records,
@@ -176,8 +196,15 @@ pub fn page_retained(
                 + 1
         }
     };
-    let take = usize::try_from(limit).unwrap_or(usize::MAX).saturating_add(1);
-    let page = records.into_iter().skip(start).take(take).cloned().collect();
+    let take = usize::try_from(limit)
+        .unwrap_or(usize::MAX)
+        .saturating_add(1);
+    let page = records
+        .into_iter()
+        .skip(start)
+        .take(take)
+        .cloned()
+        .collect();
     Ok(retained_response(page, limit))
 }
 
@@ -275,7 +302,13 @@ impl Writer<'_> {
     }
 
     fn lifecycle(&mut self, book: usize, instance: usize, body: Value) -> i64 {
-        self.push(book, Some(instance), EntryAuthor::Lifecycle, "lifecycle", body)
+        self.push(
+            book,
+            Some(instance),
+            EntryAuthor::Lifecycle,
+            "lifecycle",
+            body,
+        )
     }
 
     fn done(self, response: Value) -> Step {
@@ -476,7 +509,12 @@ pub fn apply(
 
 fn reservation_key(prepare: &Prepare) -> String {
     // Length-prefix the first component: PostgreSQL text cannot contain NUL.
-    format!("{}:{}{}", prepare.swarm_key.len(), prepare.swarm_key, prepare.slot_key)
+    format!(
+        "{}:{}{}",
+        prepare.swarm_key.len(),
+        prepare.swarm_key,
+        prepare.slot_key
+    )
 }
 
 fn new_instance(
@@ -514,7 +552,10 @@ fn new_instance(
 
 fn prepared(state: &SwarmState, book: usize) -> Value {
     let book_state = &state.books[book];
-    let instance = book_state.instances.last().expect("prepared book has an instance");
+    let instance = book_state
+        .instances
+        .last()
+        .expect("prepared book has an instance");
     json!({
         "ok": true,
         "swarmId": state.swarm.swarm_id,
@@ -599,7 +640,10 @@ fn prepare_successor(
     owner: bool,
     next_id: &mut dyn FnMut() -> String,
 ) -> Result<Step, LifecycleError> {
-    let predecessor = prepare.predecessor.as_ref().expect("successor has predecessor");
+    let predecessor = prepare
+        .predecessor
+        .as_ref()
+        .expect("successor has predecessor");
     if !owner {
         return Err(PARENT_ONLY);
     }
@@ -734,6 +778,12 @@ fn open_reservation(
             "the opening agent does not match the reservation",
         ));
     }
+    if !open.accepts_familiar_lessons && Familiar::named(&instance.agent_name).is_some() {
+        return Err(refused(
+            "familiar_lessons_unsupported",
+            "this opener cannot render familiar role lessons; update the adapter",
+        ));
+    }
     let mut writer = Writer {
         state,
         effects: Effects::default(),
@@ -764,7 +814,11 @@ fn open_reservation(
     let book_state = &state.books[book];
     let instance = &book_state.instances[index];
     let predecessor = (kind == WakeKind::Successor)
-        .then(|| index.checked_sub(1).map(|previous| &book_state.instances[previous]))
+        .then(|| {
+            index
+                .checked_sub(1)
+                .map(|previous| &book_state.instances[previous])
+        })
         .flatten();
     let handoff = predecessor.and_then(|previous| previous.handoff.as_ref());
     let plan = WakePlan {
@@ -791,6 +845,7 @@ fn open_reservation(
             .take(PENDING_LIMIT)
             .cloned()
             .collect(),
+        familiar: Familiar::named(&instance.agent_name),
     };
     let base = json!({
         "ok": true,
@@ -816,7 +871,9 @@ fn read_page(
     worker: Option<usize>,
 ) -> Result<Step, LifecycleError> {
     match worker {
-        Some(index) if writer.state.books[book].instances[index].state == InstanceState::Retired => {
+        Some(index)
+            if writer.state.books[book].instances[index].state == InstanceState::Retired =>
+        {
             return Err(RETIRED);
         }
         Some(_) => {}
@@ -890,7 +947,11 @@ fn append_entry(
             "the entry body exceeds the stored size bound; excerpt it and cite the transcript",
         ));
     }
-    let instance_id = worker.map(|index| writer.state.books[book].instances[index].instance_id.clone());
+    let instance_id = worker.map(|index| {
+        writer.state.books[book].instances[index]
+            .instance_id
+            .clone()
+    });
     if let (Some(index), Some(operation_id)) = (worker, append.operation_id.as_deref()) {
         let book_state = &writer.state.books[book];
         let open = book_state
@@ -913,7 +974,8 @@ fn append_entry(
         } else {
             match open {
                 Some(position)
-                    if Some(&book_state.operations[position].instance_id) == instance_id.as_ref() => {}
+                    if Some(&book_state.operations[position].instance_id)
+                        == instance_id.as_ref() => {}
                 _ => {
                     return Err(refused(
                         "unknown_operation",
@@ -1030,9 +1092,11 @@ fn retire(
     author: EntryAuthor,
 ) {
     let unresolved = writer.state.books[book].operations.clone();
-    let transcript_path = transcript_path
-        .cloned()
-        .or_else(|| writer.state.books[book].instances[index].transcript_path.clone());
+    let transcript_path = transcript_path.cloned().or_else(|| {
+        writer.state.books[book].instances[index]
+            .transcript_path
+            .clone()
+    });
     let sequence = writer.push(
         book,
         Some(index),
@@ -1343,7 +1407,12 @@ fn dispose_swarm(
             row.insert("entryCount".into(), json!(book.book.next_sequence - 1));
             row.insert(
                 "instanceIds".into(),
-                json!(book.instances.iter().map(|i| &i.instance_id).collect::<Vec<_>>()),
+                json!(
+                    book.instances
+                        .iter()
+                        .map(|i| &i.instance_id)
+                        .collect::<Vec<_>>()
+                ),
             );
             row.insert(
                 "disposition".into(),

@@ -17,6 +17,9 @@ serde_json.workspace = true
 # the restart wire vocabulary: states, params, receipts (src/protocol.rs adds only the keeper's JSONL envelope)
 protocol = { path = "../protocol" }
 interactive-process = { path = "../interactive-process" }
+# the child's instance id: minted per spawn, matched by digest before any kill
+sha2.workspace = true
+uuid.workspace = true
 
 
 [dev-dependencies]

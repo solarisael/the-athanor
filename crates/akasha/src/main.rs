@@ -28,11 +28,9 @@ use std::{
 use summoning::AnamnesisWriteRequest;
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-
 fn backup_error_class(error: &BackupError) -> &'static str {
     error.failure_code().as_str()
 }
-
 
 async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
     let argv: Vec<String> = std::env::args().skip(1).collect();

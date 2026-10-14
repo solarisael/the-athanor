@@ -1,93 +1,27 @@
-// The adapter's exit door: one tool arms the restart, one agent_end hook fires
-// it. This lives beside tools.ts because the concern owns a lifecycle fence (an
-// exit may only fall between agents, never inside a tool loop), a handshake exit
-// code the keeper reads, and armed state that no tool grab-bag should hold.
-// Every substrate call and every casualty source arrives through the deps this
-// door is registered with, so the door can be proven without a live House.
+// The adapter's restart door.
+//
+// The Host owns restart coordination (crates/host/src/portable.rs): it
+// records the intent with this instance as the requester, arms exiting,
+// delivers a restart control to this exact instance, watches the process exit
+// through its own handle, and relaunches it in a new Tern tab or through the
+// integrated keeper. No second supervisor lives here.
+//
+// request_restart asks the Host to restart this instance and reports what the
+// exit costs; session.ts applies the delivered control behind exit-guards.ts.
+// A keeper-relaunched successor still verifies itself with the keeper's
+// successor proof (the Host sends keeper successors no restartSuccessor); a
+// Tern successor is verified by the Host when its new instance attaches.
 
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-
-import { roomContext } from "./room.ts";
-import { hostSessionIdentity, type HostBinding } from "./host.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { roomBinding } from "./room.ts";
+import { type HostBinding } from "./host.ts";
 import type { OrganOperation } from "./organ.ts";
 import { topLevelSession } from "./top-level-session-fence.ts";
-import { catchBoat } from "./substrate.ts";
-
-// omp exit code 87 means "armed exit, restart me" (keeper handshake, frozen
-// wire contract v1). Any other code makes the keeper poll restart_status.
-export const ARMED_EXIT_CODE = 87;
-
-// Only a `requested` intent may reach exiting: the substrate refuses a claimed
-// one with exit_not_requested (Kodo's amendment, 2026-08-25), so arming on
-// claimed would buy a refusal at agent_end instead of a restart.
-// These spellings answer to house_protocol::restart, which no TypeScript door
-// can import; that crate stays the authority if the two ever disagree.
-const ARMABLE_STATES = new Set(["requested"]);
-
-// A pending intent is NOT evidence of consent (Kintsu's item-1 verdict,
-// 2026-08-25). restart_status is capability-free and hands the intent id to
-// anyone who asks, so the id proves nothing; the earlier door treated it as
-// proof and called that a consent fence. The exiting arm is now fenced by the
-// room's provisioned restart_exit capability plus the session identity
-// restart_request recorded, which the substrate compares against the intent
-// row itself. Both travel from places a tool caller cannot reach: a secret in
-// the room's runtime config, and the session binding the harness handed us.
-const DETAIL_LIMIT_BYTES = 2048;
-const DETAIL_SOURCE = "omp-adapter";
-
-const MISSING_PREREQUISITE = "restart_status";
-
-// Room-local, operation-scoped restart capabilities, resolved exactly the way
-// room.ts:114-136 resolves the Docket one: the environment override wins for
-// tests and one-room installs, the durable answer is the room-local runtime
-// file, and it is read at call time so provisioning a room never needs a
-// harness restart. Two classes, two secrets, because they are two different
-// rights: restart_request is the right to have the House record an intent,
-// restart_exit is the right to prove one at the door. A secret is spent on the
-// wire and never enters a schema, a parameter, a receipt, or a log line.
-const EXIT_CAPABILITY_ENV = "ATHANOR_RESTART_EXIT_CAPABILITY";
-const EXIT_CAPABILITY_FILENAME = "restart-exit-capability";
-const REQUEST_CAPABILITY_ENV = "ATHANOR_RESTART_REQUEST_CAPABILITY";
-const REQUEST_CAPABILITY_FILENAME = "restart-request-capability";
-const VERIFY_CAPABILITY_ENV = "ATHANOR_RESTART_VERIFY_CAPABILITY";
-const VERIFY_CAPABILITY_FILENAME = "restart-verify-capability";
-const RESTART_INTENT_ENV = "ATHANOR_RESTART_INTENT_ID";
-const RESTART_SUCCESSOR_PROOF_ENV = "ATHANOR_RESTART_SUCCESSOR_PROOF";
-
-// The claimant's own two files, named the way the keeper names them. Exit code
-// 87 is a request, not a restart: only the keeper (`athanor.exe keeper`) claims the intent and
-// starts omp again, and `provision-local.ps1` lays the pair down together —
-// `omp-keeper.json` in the room runtime, and the `restart_claim` secret the
-// config's `capabilityPath` names (`crates/omp-keeper/scripts/provision-local.ps1`,
-// `crates/omp-keeper/src/config.rs`: exactly one of `capability` or
-// `capabilityPath`). Neither file alone is an owner. The environment override
-// wins for tests and for a keeper configured outside its room, exactly as the
-// capability overrides above do.
-const KEEPER_CONFIG_ENV = "ATHANOR_OMP_KEEPER_CONFIG";
-const KEEPER_CONFIG_FILENAME = "omp-keeper.json";
-const PROVISION_KEEPER = "run crates/omp-keeper/scripts/provision-local.ps1"
-  + " (an installed release carries the same script as provision-omp-keeper.ps1),"
-  + " then start this room through `athanor.exe keeper --config <room>/.omp/runtime/omp-keeper.json` instead of omp";
-
-// The House records an intent because the room is provisioned to ask for one,
-// and the operator's standing policy is what that provisioning means. The door
-// never lets a caller declare a stronger consent than the room was given.
-const DOOR_CONSENT_SOURCE = "operator-standing-policy";
-
-// Echoed when this room cannot ask for its own intent, so an operator can
-// provision the room instead of guessing at the wire.
-const CREATE_INTENT_RECIPE = [
-  "This room holds no restart_request capability, so it cannot record its own intent.",
-  `Provision one (${REQUEST_CAPABILITY_ENV}, or the room's runtime ${REQUEST_CAPABILITY_FILENAME} file)`,
-  "and this tool will call restart_request itself:",
-  '{ harness: "omp", workspace, mode: "resume" | "fresh", reason,',
-  ` consentSource: "${DOOR_CONSENT_SOURCE}",`,
-  " requesterRoom, requesterSpirit, requesterSession, sessionId, capability, idempotencyKey }",
-  "consentSource alone is a declaration, not authority: without the capability the",
-  "substrate refuses the call as restart_capability.",
-].join("\n");
+import { issueSessionCommand, requireAttached, type Attachment } from "./session.ts";
+import { PortableSessionError } from "./session-transport.ts";
+import { confirmPaperBoat } from "./exit-guards.ts";
 
 type DomainReceipt = Record<string, unknown>;
 
@@ -107,8 +41,18 @@ type LoadedRelease = {
 // One row per session that still holds turns waiting for a GIGA flush.
 type GigaBufferCensus = { session?: unknown; cwd?: unknown; turns?: unknown };
 
+type IssueCommand = (
+  ctx: any,
+  targetInstanceId: string,
+  targetConversationId: string,
+  kind: "restart",
+  payload: Record<string, unknown>,
+  commandId: string,
+  signal?: AbortSignal,
+) => Promise<Record<string, unknown>>;
+
 export type RestartDoorDeps = {
-  // tools.ts's existing requestRustDomain seam.
+  // tools.ts's existing requestRustDomain seam (restart_status, restart_verify).
   requestDomain: DomainRequest;
   // The house tool registrar, so this tool wears the same feedback renderers.
   registerTool: (definition: Record<string, unknown>) => void;
@@ -116,33 +60,23 @@ export type RestartDoorDeps = {
   release?: LoadedRelease;
   // giga.ts's read-only buffered-turn census.
   gigaBuffers?: () => GigaBufferCensus[] | null;
-  // Resolve the room's two restart secrets at spend time. Both default to the
-  // room's own runtime config; injected in tests so proving a fence never
-  // requires provisioning a real secret.
-  exitCapability?: (effectiveRoomDir: string) => string | null;
-  // Reads the room's latest paper boat. Defaults to the adapter's own wake
-  // seam; a read, never a consume.
-  latestBoat?: (binding: HostBinding, options?: { signal?: AbortSignal }) => Promise<Record<string, unknown>>;
-  requestCapability?: (effectiveRoomDir: string) => string | null;
+  // The keeper's successor proof is verified with the room's restart_verify
+  // capability; injected in tests so proving the fence needs no real secret.
   verifyCapability?: (effectiveRoomDir: string) => string | null;
   restartIntentId?: () => string | null;
   restartSuccessorProof?: () => string | null;
   isEmbodied?: (room: string, session: string) => boolean;
-  exit?: (code: number) => void;
+  // This conversation's live Host registration, and the Host command seam.
+  attachment?: (ctx: any) => Attachment;
+  // Reads the room's latest paper boat; a read, never a consume.
+  latestBoat?: (binding: HostBinding, options?: { signal?: AbortSignal }) => Promise<Record<string, unknown>>;
+  issueCommand?: IssueCommand;
 };
 
-type ArmedExit = {
-  intentId: string;
-  mode: string;
-  room: string;
-  spirit: string;
-  session: string;
-  workspace: string;
-  // Captured at arm time from the tool's trusted ctx, so the exit resolves its
-  // capability against the room that armed it, not whatever ctx agent_end sees.
-  roomDir: string;
-  reason: string;
-};
+const VERIFY_CAPABILITY_ENV = "ATHANOR_RESTART_VERIFY_CAPABILITY";
+const VERIFY_CAPABILITY_FILENAME = "restart-verify-capability";
+const RESTART_INTENT_ENV = "ATHANOR_RESTART_INTENT_ID";
+const RESTART_SUCCESSOR_PROOF_ENV = "ATHANOR_RESTART_SUCCESSOR_PROOF";
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -172,10 +106,6 @@ function successorNotice(ctx: any, message: string, level: "info" | "warning"): 
   }
 }
 
-function capabilityPath(effectiveRoomDir: string, filename: string): string {
-  return path.join(effectiveRoomDir, ".omp", "runtime", filename);
-}
-
 function readCapability(
   effectiveRoomDir: string,
   environKey: string,
@@ -185,40 +115,10 @@ function readCapability(
   const configured = String(environ[environKey] || "").trim();
   if (configured) return configured;
   try {
-    return readFileSync(capabilityPath(effectiveRoomDir, filename), "utf8").trim() || null;
+    return readFileSync(path.join(effectiveRoomDir, ".omp", "runtime", filename), "utf8").trim() || null;
   } catch {
     return null;
   }
-}
-
-// The keeper's provisioned presence, detected where the keeper itself finds it
-// and never asserted from a running process: this door runs inside the child,
-// which cannot see its own parent's authority. The capability is read only to
-// tell a provisioned secret from a blank one, exactly as the keeper's config
-// does; its value is never returned, reported, or logged.
-function restartOwner(
-  effectiveRoomDir: string,
-  environ: NodeJS.ProcessEnv = process.env,
-): { configPath: string; provisioned: boolean } {
-  const configured = String(environ[KEEPER_CONFIG_ENV] || "").trim();
-  const configPath = configured || capabilityPath(effectiveRoomDir, KEEPER_CONFIG_FILENAME);
-  const absent = { configPath, provisioned: false };
-  let config: Record<string, unknown>;
-  try {
-    config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
-  } catch {
-    return absent;
-  }
-  // The config's other legal spelling: the secret in the file itself.
-  if (text(config?.capability)) return { configPath, provisioned: true };
-  const named = text(config?.capabilityPath);
-  if (!named) return absent;
-  try {
-    if (!readFileSync(named, "utf8").trim()) return absent;
-  } catch {
-    return absent;
-  }
-  return { configPath, provisioned: true };
 }
 
 // The contract fixes the intent's fields (id, state, mode, sessionId,
@@ -232,20 +132,9 @@ function pendingIntent(receipt: DomainReceipt): Record<string, unknown> | null {
   return text(intent.intentId ?? intent.id) ? intent : null;
 }
 
-function intentId(intent: Record<string, unknown>): string {
-  return text(intent.intentId ?? intent.id);
-}
-
-
 // The harness's own async-job door: ExtensionContext.getAsyncJobSnapshot()
-// returns { running, recent, delivery }, and each item is
-// Pick<AsyncJob, "id" | "type" | "status" | "label" | "startTime">
-// (pi-coding-agent dist/types/extensibility/extensions/types.d.ts:304,
-// dist/types/async/job-manager.d.ts:4-10). Only `running` is a casualty, and
-// the shape carries no persist or detached field, so nothing here is
-// classified as a survivor: an async job is owned by this session and cannot
-// outlive it. The earlier report filtered on persist/detached, which belong to
-// project-scoped hub processes and never appear on an async job at all.
+// returns { running, recent, delivery }. Only `running` is a casualty: an
+// async job is owned by this session and cannot outlive it.
 const ASYNC_JOB_SOURCE = "ctx.getAsyncJobSnapshot";
 
 function asyncJobCasualties(ctx: any) {
@@ -281,8 +170,7 @@ function asyncJobCasualties(ctx: any) {
 
 // Hub processes (hub op:"start", persist/detached) are project-scoped and live
 // outside this session. The plugin surface exposes no process listing of any
-// kind — only the async-job snapshot above — so this door refuses to classify
-// them at all rather than promise their fate.
+// kind, so this door refuses to classify them rather than promise their fate.
 function hubProcessCasualties() {
   return {
     enumerable: false,
@@ -291,10 +179,8 @@ function hubProcessCasualties() {
   };
 }
 
-// Turns buffered for a later GIGA flush. flushGigaTurns() drains them on a
-// graceful shutdown (index.ts:1547) and an armed process.exit never reaches
-// that door, so an armed buffer is a real casualty: counted from giga.ts's
-// read-only census, never guessed.
+// Turns buffered for a later GIGA flush. session.ts flushes them after the
+// restart is acknowledged and before the exit; the census says what is at stake.
 function gigaBufferCasualties(inspect?: () => GigaBufferCensus[] | null) {
   let buffers: GigaBufferCensus[] | null = null;
   try {
@@ -317,6 +203,7 @@ function gigaBufferCasualties(inspect?: () => GigaBufferCensus[] | null) {
     sessions: bySession.length,
     turns: bySession.reduce((total, buffer) => total + buffer.turns, 0),
     bySession,
+    fate: "flushed after the restart is acknowledged, before the exit",
   };
 }
 
@@ -327,114 +214,15 @@ function loadedRelease(release: LoadedRelease) {
   };
 }
 
-// A tail cut on UTF-16 code units can split a surrogate pair. JSON.stringify
-// serializes the orphan as \udXXX, so it survives the wire and lands in the
-// event log as a broken rune; drop it instead.
-function dropOrphanSurrogate(value: string): string {
-  const last = value.charCodeAt(value.length - 1);
-  return last >= 0xd800 && last <= 0xdbff ? value.slice(0, -1) : value;
-}
-
-// Shrink one field until the SERIALIZED candidate fits. Measuring the raw value
-// against a budget taken from an empty field is the bug Kintsu reproduced: JSON
-// escaping expands as it serializes - one quote or backslash becomes two bytes,
-// one control character becomes six - so a raw-byte budget lied by up to 6x
-// (4,000 quotes "clamped" to 2,048 serialized as 3,883 bytes; 4,000 control
-// characters as 11,223). Only the serialized candidate is what the substrate
-// refuses, so only the serialized candidate is measured here.
-//
-// Termination is load-bearing: each pass keeps at most candidate.length - 1
-// characters, so the string strictly shrinks to "" and the loop ends even when
-// no length can ever fit. The first repair of this function spun forever on a
-// negative budget, and a synchronous spin here cannot be interrupted by a test
-// timeout.
-function fitField(
-  base: Record<string, unknown>,
-  key: string,
-  value: string,
-  limitBytes: number,
-): Record<string, unknown> | null {
-  let candidate = value;
-  while (candidate.length > 0) {
-    const trial = { ...base, [key]: candidate };
-    const bytes = detailBytes(trial);
-    if (bytes <= limitBytes) return trial;
-    // Scale by the observed byte ratio so an escape-heavy field converges in a
-    // few passes instead of one character at a time, and always drop at least
-    // one character so the loop cannot stall.
-    const scaled = Math.floor((candidate.length * limitBytes) / bytes);
-    const keep = Math.max(0, Math.min(candidate.length - 1, scaled));
-    candidate = dropOrphanSurrogate(candidate.slice(0, keep));
-  }
-  return null;
-}
-
-function serialize(detail: Record<string, unknown>): string {
-  return JSON.stringify(detail);
-}
-
-function detailBytes(detail: Record<string, unknown>): number {
-  return Buffer.byteLength(serialize(detail), "utf8");
-}
-
-// This blob is the transition event's only account of the exit, and the
-// substrate refuses an over-budget detail outright - a refused transition means
-// the session never restarts. The identity the substrate verifies is built
-// first, then each account field is added only while the serialized whole still
-// fits, in a declared yielding order: the operator's reason yields first, the
-// session identity last. `truncated` is seeded false so flipping it to true can
-// never add a byte.
-//
-// The comment that stood here claimed the ceiling was "enforced on the
-// SERIALIZED payload" while the clamp underneath measured raw UTF-8 - true for
-// every input the tests fed it, false for anything JSON escapes. Kintsu found
-// it with 4,000 quotes. The claim now matches the code because every measure
-// below runs through detailBytes on a real candidate.
-export function exitDetailFor(exit: ArmedExit, limitBytes: number = DETAIL_LIMIT_BYTES): string {
-  const seed: Record<string, unknown> = { source: DETAIL_SOURCE, session: exit.session, truncated: false };
-  let detail: Record<string, unknown>;
-  if (detailBytes(seed) <= limitBytes) {
-    detail = seed;
-  } else {
-    // Even the identity overflows: keep the field the substrate verifies, cut
-    // to fit, and say so. If nothing fits, the smallest honest blob goes out
-    // and the substrate refuses it loudly instead of this door hanging.
-    detail = fitField({ source: DETAIL_SOURCE, truncated: true }, "session", exit.session, limitBytes)
-      ?? { source: DETAIL_SOURCE, truncated: true };
-  }
-  const account: Array<[string, unknown]> = [
-    ["mode", exit.mode],
-    ["exitCode", ARMED_EXIT_CODE],
-    ["room", exit.room],
-    ["spirit", exit.spirit],
-    ["workspace", exit.workspace],
-    ["reason", exit.reason],
-  ];
-  for (const [key, value] of account) {
-    const candidate = { ...detail, [key]: value };
-    if (detailBytes(candidate) <= limitBytes) {
-      detail = candidate;
-      continue;
-    }
-    detail = { ...detail, truncated: true };
-    if (typeof value !== "string") continue;
-    detail = fitField(detail, key, value, limitBytes) ?? detail;
-  }
-  return serialize(detail);
-}
-
-function exitDetail(exit: ArmedExit): string {
-  return exitDetailFor(exit, DETAIL_LIMIT_BYTES);
+// The Host requires a UUID commandId. Deriving it from the tool call keeps a
+// replayed call on the same command, which the Host answers idempotently.
+function restartCommandId(instanceId: string, toolCallId: string): string {
+  const hex = createHash("sha256").update(`request_restart\0${instanceId}\0${toolCallId}`).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${((parseInt(hex[16], 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
   const z = pi.zod;
-  const exitProcess = deps.exit ?? ((code: number) => process.exit(code));
-  const resolveCapability = deps.exitCapability
-    ?? ((roomDir: string) => readCapability(roomDir, EXIT_CAPABILITY_ENV, EXIT_CAPABILITY_FILENAME));
-  const resolveRequestCapability = deps.requestCapability
-    ?? ((roomDir: string) => readCapability(roomDir, REQUEST_CAPABILITY_ENV, REQUEST_CAPABILITY_FILENAME));
-  const resolveLatestBoat = deps.latestBoat ?? catchBoat;
   const resolveVerifyCapability = deps.verifyCapability
     ?? ((roomDir: string) => readCapability(roomDir, VERIFY_CAPABILITY_ENV, VERIFY_CAPABILITY_FILENAME));
   const resolveRestartIntent = deps.restartIntentId
@@ -443,20 +231,30 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     ?? (() => text(process.env[RESTART_SUCCESSOR_PROOF_ENV]));
   const isEmbodied = deps.isEmbodied
     ?? ((room: string, session: string) => topLevelSession(room) === session);
-  // Armed state is closure-local: one door, one pending exit, no process-wide
-  // flag another registration could inherit.
-  let armed: ArmedExit | null = null;
+  const attachmentFor = deps.attachment ?? requireAttached;
+  const issueCommand: IssueCommand = deps.issueCommand ?? issueSessionCommand;
   let verifiedIntent = "";
   let verifyingIntent = "";
 
-  // The keeper gives only a relaunched OMP the intent id. Verify on startup,
-  // after the earlier session_start hook has established the embodied session.
+  // The integrated keeper gives only a relaunched OMP the intent id and the
+  // successor proof. Verify on startup, after the earlier session_start hook
+  // has established the embodied session.
   const verifySuccessor = async (_event: unknown, ctx: any) => {
     const intentId = text(resolveRestartIntent());
     if (!intentId || verifiedIntent === intentId || verifyingIntent === intentId) return;
-    const { room, spirit, effectiveRoomDir } = roomContext(ctx?.cwd);
-    const session = hostSessionIdentity(ctx, effectiveRoomDir);
-    if (!isEmbodied(room, session)) {
+    let resolved: ReturnType<typeof roomBinding> = null;
+    try {
+      resolved = roomBinding(ctx);
+    } catch (error) {
+      successorNotice(ctx, `Athanor restart successor could not verify: ${error instanceof Error ? error.message : String(error)}`, "warning");
+      return;
+    }
+    if (!resolved) {
+      successorNotice(ctx, "Athanor restart successor could not verify: this conversation holds no home.", "warning");
+      return;
+    }
+    const { binding, context } = resolved;
+    if (!isEmbodied(binding.room, binding.session)) {
       if (ctx?.mode !== "tui") {
         successorNotice(ctx, "Athanor restart successor verification skipped: this session is not the room's embodied session.", "warning");
       }
@@ -471,7 +269,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       );
       return;
     }
-    const capability = text(resolveVerifyCapability(effectiveRoomDir));
+    const capability = text(resolveVerifyCapability(context.effectiveRoomDir));
     if (!capability) {
       successorNotice(
         ctx,
@@ -482,7 +280,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     }
     verifyingIntent = intentId;
     try {
-      const receipt = await deps.requestDomain({ room, spirit, session }, "restart_verify", {
+      const receipt = await deps.requestDomain(binding, "restart_verify", {
         intentId,
         successorProof,
         capability,
@@ -496,7 +294,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       delete process.env[RESTART_INTENT_ENV];
       delete process.env[RESTART_SUCCESSOR_PROOF_ENV];
       successorNotice(ctx, "Athanor restart successor verified.", "info");
-      await continueAfterRestart(ctx, intentId);
+      await continueAfterRestart(ctx, binding, intentId);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       successorNotice(ctx, `Athanor restart successor verification failed: ${message}`, "warning");
@@ -508,14 +306,9 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
   // A restart that nobody continues is a cold boot with history (Sol,
   // 2026-09-05: "nothing triggered continuation after restart"). The successor
   // owes itself one turn: the reason the requester gave, delivered as the
-  // next turn and triggered, so the spirit picks up what it restarted for
-  // instead of waiting for a human to notice it is back. Once per intent:
-  // the verify above short-circuits on a repeated start, and a bare relaunch
-  // carries no intent id at all.
-  const continueAfterRestart = async (ctx: any, intentId: string) => {
+  // next turn and triggered. Once per intent.
+  const continueAfterRestart = async (ctx: any, binding: HostBinding, intentId: string) => {
     const workspace = text(ctx?.cwd) || process.cwd();
-    const { room, spirit, effectiveRoomDir } = roomContext(ctx.cwd);
-    const binding = { room, spirit, session: hostSessionIdentity(ctx, effectiveRoomDir) };
     let intent: Record<string, unknown> | null = null;
     try {
       const status = await deps.requestDomain(binding, "restart_status", { workspace, intentId }, undefined, true);
@@ -568,259 +361,102 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
     name: "request_restart",
     label: "Athanor Restart Request",
     description: [
-      "Arm this omp session's own exit so the keeper can relaunch it.",
-      "The exit never fires inside a turn: it falls at agent_end, after the current agent loop finishes.",
-      "It records the intent itself when the House holds none and this room is provisioned to ask,",
-      "then arms that intent in the same call. It refuses unless this room holds the restart_exit",
-      "capability that proves the exit to the substrate, and unless an omp-keeper is provisioned to",
-      "claim the exit; a room with no keeper cannot self-restart, because nothing would start omp again.",
-      "On arming it reports what dies with the exit: this session's async jobs, buffered GIGA turns,",
-      "open substrate transports, and every casualty class it cannot see, named as unseen.",
+      "Ask the Athanor Host to restart this exact omp session and resume this same conversation.",
+      "The Host records the intent, delivers the restart to this session, waits for this process to exit, and relaunches it:",
+      "in a new Tern tab beside this pane, or through the integrated keeper. The predecessor pane is never closed or typed into.",
+      "The exit never fires inside a turn: the session applies it once idle, and refuses it while async jobs would die.",
+      "It refuses when this conversation has no live Host registration or no launcher that can relaunch it.",
+      "On success it reports what the exit costs: async jobs, buffered GIGA turns, and every casualty class it cannot see.",
     ].join("\n"),
     parameters: z.object({
       mode: z.enum(["resume", "fresh"])
-        .describe("resume relaunches the same invocation and resumes this session; fresh starts a new session after the House confirms a paper boat."),
+        .describe("resume relaunches and resumes this conversation; fresh relaunches a new conversation after the House confirms a paper boat."),
       reason: z.string()
-        .describe("Why this session must restart, in the room's own words; it is stored on the transition event."),
+        .describe("Why this session must restart, in the room's own words; it is stored on the restart intent."),
     }),
     approval: "write",
-    async execute(_toolCallId: string, params: any, signal: AbortSignal, _onUpdate: unknown, ctx: any) {
-      // One door, one pending exit. A second arm while one is live would race
-      // two intents onto a single agent_end, so it is refused by name before
-      // anything is asked of the substrate.
-      if (armed) {
-        return refuse(
-          "already_armed",
-          "request_restart refuses: an exit is already armed for this session and fires at agent_end",
-          { armedIntentId: armed.intentId, armedMode: armed.mode, firesAt: "agent_end" },
-        );
-      }
-
-      const workspace = text(ctx?.cwd) || process.cwd();
-      const { room, spirit, effectiveRoomDir } = roomContext(ctx?.cwd);
-      // The door's own session binding, from the harness context. The exiting
-      // transition is authorized against this and it is never a tool param.
-      const session = hostSessionIdentity(ctx, effectiveRoomDir);
-      const mode = text(params?.mode);
+    async execute(toolCallId: string, params: any, signal: AbortSignal, _onUpdate: unknown, ctx: any) {
+      const mode = text(params?.mode) || "resume";
       const reason = text(params?.reason);
-
-      const status = await deps.requestDomain({ room, spirit, session }, "restart_status", { workspace }, signal);
-      if (status?.ok === false) {
+      if (mode !== "resume" && mode !== "fresh") {
+        return refuse("invalid_mode", "request_restart refuses: mode is resume or fresh");
+      }
+      if (!reason) {
+        return refuse("reason_required", "request_restart refuses: the Host records a reason with every restart intent");
+      }
+      let attachment: Attachment;
+      try {
+        attachment = attachmentFor(ctx);
+      } catch (error) {
         return refuse(
-          "restart_status_unreachable",
-          `request_restart refuses: it cannot read ${MISSING_PREREQUISITE} for this workspace`,
-          { missingPrerequisite: MISSING_PREREQUISITE, workspace, upstream: status },
+          "no_live_registration",
+          `request_restart refuses: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-
-      // Authority before anything is recorded OR armed. An exit armed without
-      // the room's capability buys restart_capability at agent_end, long after
-      // the operator could see why nothing happened - and an intent recorded
-      // for a room that cannot prove it would sit pending until it expired,
-      // spending the storm guard on a restart that could never fire. The
-      // secret is only proven present here; it is spent, and read again, when
-      // the exit actually fires.
-      if (!text(resolveCapability(effectiveRoomDir))) {
+      if (attachment.exiting) {
+        return refuse("already_exiting", "request_restart refuses: this session already acknowledged an exit");
+      }
+      if (!attachment.restart?.supported) {
         return refuse(
-          "restart_capability_unavailable",
-          "request_restart refuses: this room holds no restart_exit capability, and a pending intent alone does not authorize an exit",
+          "restart_unsupported",
+          "request_restart refuses: no launcher the Host can drive is registered for this session",
           {
-            workspace,
-            provision: `provision the room's restart_exit capability: set ${EXIT_CAPABILITY_ENV} or write ${capabilityPath(effectiveRoomDir, EXIT_CAPABILITY_FILENAME)}`,
+            reason: attachment.restart?.reason || attachment.launcherReason || "no launcher",
+            terminal: attachment.terminal ? { session: attachment.terminal.session, pane: attachment.terminal.pane } : attachment.terminalReason,
           },
         );
       }
-
-      // Ownership, before an intent is recorded OR armed. Authority above says
-      // this room may ask; this says somebody is listening. Without a
-      // provisioned keeper the arm still reaches `exiting`, nothing can ever
-      // claim it, and that dead row holds the workspace: every later restart
-      // from this workspace then refuses `intent_pending` until the row is
-      // edited by hand (Kodo, 2026-09-05). One request would cost the room its
-      // restart capability, so this refuses instead of warning.
-      const owner = restartOwner(effectiveRoomDir);
-      if (!owner.provisioned) {
+      if (mode === "resume" && !existsSync(attachment.sessionFile)) {
         return refuse(
-          "no_restart_owner",
-          `request_restart refuses: no omp-keeper is provisioned for this workspace, so nothing could start this session again after the exit; ${PROVISION_KEEPER}.`,
-          {
-            workspace,
-            missingPrerequisite: `${KEEPER_CONFIG_FILENAME} and the restart_claim capability it names`,
-            keeperConfig: owner.configPath,
-            provision: PROVISION_KEEPER,
-          },
+          "conversation_not_saved",
+          "request_restart refuses: OMP has not saved this conversation to disk yet, so a resume relaunch could not find it",
+          { sessionFile: attachment.sessionFile },
         );
       }
-
-      // One state fence, whichever intent we end up arming: a pre-existing one
-      // is checked here, a freshly recorded one right after it is recorded.
-      // Refused at the tool rather than at agent_end, because the substrate
-      // would answer exit_not_requested long after the turn ended, where the
-      // operator can no longer see why nothing happened.
-      const notArmable = (candidate: Record<string, unknown>) => {
-        const candidateState = text(candidate.state);
-        if (ARMABLE_STATES.has(candidateState)) return null;
-        return refuse(
-          "intent_not_armable",
-          `request_restart refuses: the intent for this workspace is ${candidateState || "in an unreported state"}, and only a requested intent may exit`,
-          { missingPrerequisite: MISSING_PREREQUISITE, intentId: intentId(candidate), state: candidateState, workspace },
-        );
-      };
-
-      let intent = pendingIntent(status);
-      let created = false;
-      if (intent) {
-        const refusal = notArmable(intent);
-        if (refusal) return refusal;
-      }
-
-      // The mode the House already agreed to wins over the word the caller
-      // typed, and a disagreement is a refusal rather than a silent override.
-      const pendingMode = intent ? text(intent.mode) : "";
-      if (pendingMode && mode && pendingMode !== mode) {
-        return refuse(
-          "mode_mismatch",
-          `request_restart refuses: the pending intent is ${pendingMode}, not ${mode}`,
-          { intentId: intentId(intent!), intentMode: pendingMode, requestedMode: mode, workspace },
-        );
-      }
-      const effectiveMode = pendingMode || mode;
-
-      // The frozen contract: fresh mode is the same launch "after the House
-      // confirms a paper boat exists for the session's room". Fresh throws this
-      // session's context away, so the letter has to be waiting on the other
-      // side before the door agrees to leave - otherwise the restart is just
-      // amnesia. Confirming never consumes: paper_boat_wake is a pure read, and
-      // crates/akasha/tests/paper_boat_integration.rs wakes one room
-      // twice and gets the boat both times.
+      // The frozen contract: fresh throws this conversation's context away, so
+      // the letter has to be waiting on the other side before the door agrees
+      // to leave. Confirming never consumes: paper_boat_wake is a pure read.
+      // session.ts checks again before it acknowledges the delivered restart.
       let boat: Record<string, unknown> | undefined;
-      if (effectiveMode === "fresh") {
-        const wake = await resolveLatestBoat({ room, spirit, session }, { signal });
-        if (wake?.ok === false) {
-          return refuse(
-            "fresh_boat_unconfirmed",
-            "request_restart refuses: a fresh restart needs a confirmed paper boat, and the House could not be asked for one",
-            { workspace, room, upstreamError: text(wake?.error) },
-          );
+      if (mode === "fresh") {
+        const confirmed = await confirmPaperBoat(ctx, signal, deps.latestBoat);
+        if (!confirmed.ok) {
+          return refuse(confirmed.code, `request_restart refuses: ${confirmed.error}`, {
+            remedy: "write the boat first with the sleep tool, or restart with mode resume to carry this conversation's context",
+          });
         }
-        if (wake?.found !== true) {
-          return refuse(
-            "fresh_without_boat",
-            "request_restart refuses: a fresh restart abandons this session's context and this room has no paper boat waiting",
-            {
-              workspace,
-              room,
-              remedy: "write the boat first with the sleep tool, or restart with mode resume to carry this session's context",
-            },
-          );
-        }
-        boat = {
-          confirmed: true,
-          id: text(wake.id) || null,
-          title: text(wake.title) || null,
-          createdAt: text(wake.createdAt) || null,
-        };
+        boat = confirmed.boat;
       }
-
-      if (!intent) {
-        // Nothing else in the House can open one: the substrate only records an
-        // intent, the keeper only claims one. So the room asking to restart asks
-        // for its own, and only when the operator provisioned it to ask - which
-        // is what makes "operator-standing-policy" true here rather than a
-        // caller's word. This completes the sentence the quest opened with:
-        // the agent requests, the House records, the adapter arms.
-        const requestCapability = text(resolveRequestCapability(effectiveRoomDir));
-        if (!requestCapability) {
-          return refuse(
-            "no_pending_intent",
-            "request_restart refuses: this workspace has no pending restart intent and this room may not open one",
-            { missingPrerequisite: MISSING_PREREQUISITE, workspace, createIntent: CREATE_INTENT_RECIPE },
-          );
-        }
-
-        // A fresh key per genuine creation: the door only reaches here because
-        // restart_status showed nothing pending, so a retry that already
-        // succeeded finds the intent and arms it instead of forking a second
-        // one, and the substrate's storm guard fences the racing edge.
-        const receipt = await deps.requestDomain({ room, spirit, session }, "restart_request", {
-          harness: "omp",
-          workspace,
-          mode,
-          sessionId: session,
-          reason,
-          consentSource: DOOR_CONSENT_SOURCE,
-          capability: requestCapability,
-          idempotencyKey: randomUUID(),
-        }, signal, true);
-
-        if (receipt?.ok === false) {
-          // The substrate's own name travels, minus the secret it was given:
-          // restart_capability, restart_storm and invalid_params each mean a
-          // different repair.
-          const upstreamCode = text(receipt.code) || "refused";
-          return refuse(
-            "restart_request_refused",
-            `request_restart refuses: the House would not record this intent (${upstreamCode})`,
-            { workspace, upstreamCode, upstreamError: text(receipt.error) },
-          );
-        }
-
-        intent = pendingIntent(receipt);
-        if (!intent) {
-          return refuse(
-            "restart_request_unusable",
-            "request_restart refuses: the House accepted the request but named no intent id, so there is nothing to arm",
-            { workspace, upstreamState: text(receipt?.state) },
-          );
-        }
-        created = true;
-        const refusal = notArmable(intent);
-        if (refusal) return refusal;
+      const commandId = restartCommandId(attachment.instanceId, toolCallId);
+      let issued: Record<string, unknown>;
+      try {
+        issued = await issueCommand(ctx, attachment.instanceId, attachment.conversationId, "restart", { reason, mode }, commandId, signal);
+      } catch (error) {
+        const code = error instanceof PortableSessionError ? error.code : "restart_request_failed";
+        return refuse(
+          "restart_request_refused",
+          `request_restart refuses: the Host would not queue this restart (${code})`,
+          { upstreamCode: code, upstreamError: error instanceof Error ? error.message : String(error) },
+        );
       }
-
-      const state = text(intent.state);
-      armed = {
-        intentId: intentId(intent),
-        mode: effectiveMode,
-        room,
-        spirit,
-        session,
-        workspace,
-        roomDir: effectiveRoomDir,
-        reason,
-      };
-
       return report({
         ok: true,
-        armed: true,
-        // True when this call opened the intent itself, false when it armed one
-        // the House already held: the operator can tell a self-request from a
-        // pre-recorded one without reading the event log.
-        created,
+        queued: true,
         tool: "request_restart",
-        firesAt: "agent_end",
-        exitCode: ARMED_EXIT_CODE,
-        intent: {
-          intentId: armed.intentId,
-          state,
-          mode: armed.mode,
-          sessionId: text(intent.sessionId) || null,
-          deadlines: intent.deadlines ?? intent.stageDeadlines ?? null,
-        },
-        // Present only for fresh, because only fresh has to prove it: this is
-        // the letter the next session wakes into.
+        commandId,
+        restartId: text(issued.restartId) || null,
+        deadlineAt: text(issued.deadlineAt) || null,
+        launcher: attachment.restart.launcher,
+        mode,
         ...(boat ? { boat } : {}),
-        workspace,
-        room,
-        spirit,
-        session,
+        appliesAt: "the first idle moment after this turn: the session acknowledges, flushes buffered turns, then exits",
+        instanceId: attachment.instanceId,
+        conversationId: attachment.conversationId,
+        room: attachment.room,
         reason,
-        // What actually proves the exit, said plainly so no reader mistakes the
-        // pending row for consent again.
         authority: {
-          requesterSession: session,
-          capability: "the room's restart_exit capability, read again when the exit fires and never shown",
-          intentIdProves: "nothing: restart_status is capability-free, so the intent id is not evidence of consent",
+          requester: "this exact instance, as registered with the Host; never a tool parameter",
+          intent: "recorded and armed by the Host's existing restart intent authority",
         },
         loadedRelease: loadedRelease(deps.release),
         dies: {
@@ -829,67 +465,8 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
           transports: { count: 0, open: [], unenumerableFamilies: [], unenumerableReason: null },
           hubProcesses: hubProcessCasualties(),
         },
-        // An unclaimed intent retires 300s after restart_request, and an agent
-        // loop can outlive that. The exit then stands down instead of firing,
-        // so the arming report says it rather than letting the silence explain.
-        standsDownIf: "the intent expires before this agent loop ends (intent_expired), the room's capability is revoked, or the substrate refuses the transition",
+        standsDownIf: "async jobs are still running when the session goes idle (the restart is refused), the restart deadline passes first, or the predecessor never exits (the Host launches nothing)",
       });
     },
-  });
-
-  // agent_end, never turn_end: turn_end fires once per provider turn while the
-  // tool loop is still running (census 2.1-2.2), so an exit there would kill
-  // the session between a tool call and its result.
-  pi.on("agent_end", async (_event: unknown, ctx: any) => {
-    const exit = armed;
-    if (!exit) return;
-    // One arming fires one exit. Cleared before the transition so a refused
-    // handshake cannot re-fire on the next agent_end.
-    armed = null;
-
-    // The secret is spent, never stored: it is read again here against the room
-    // that armed the exit, so a capability revoked mid-turn stands the exit
-    // down instead of firing it.
-    const capability = text(resolveCapability(exit.roomDir));
-    if (!capability) {
-      ctx?.ui?.notify?.(
-        "Athanor restart exit stood down (restart_capability_unavailable): the room's restart_exit capability is gone, so the intent never reached exiting.",
-        "warning",
-      );
-      return;
-    }
-
-    // No claimToken: exiting stays tokenless in the keeper-lease sense, and the
-    // substrate refuses this arm outright if a token is present. Authority is
-    // the room's capability plus this session's own identity, which the
-    // substrate compares against the requester the intent recorded.
-    const receipt = await deps.requestDomain({ room: exit.room, spirit: exit.spirit, session: exit.session }, "restart_transition", {
-      intentId: exit.intentId,
-      to: "exiting",
-      capability,
-      detail: exitDetail(exit),
-    }, undefined, true);
-
-    if (receipt?.ok === false) {
-      // A refused transition means the keeper never saw `exiting`, so the
-      // session stays alive instead of dying on a substrate hiccup. The intent
-      // stays pending and the operator can arm again. The substrate's own code
-      // travels into the notice: restart_capability, exit_not_authorized,
-      // exit_not_requested, restart_storm, intent_expired, unknown_intent and
-      // invalid_params each mean a different repair.
-      //
-      // enough: an intent requested by another session is armed and only learns
-      // exit_not_authorized here, at agent_end; a status-side ownSession flag is
-      // the way up if operators ever hit it. Deliberate - pulling the check to
-      // tool time would put a live session id on restart_status, which is
-      // capability-free and callable by the whole machine.
-      const code = text(receipt.code) || "refused";
-      ctx?.ui?.notify?.(`Athanor restart exit stood down (${code}): the intent never reached exiting.`, "warning");
-      return;
-    }
-
-    // The exit waits for this handler to return, so every other agent_end tap
-    // finishes its own write before the process dies.
-    setTimeout(() => exitProcess(ARMED_EXIT_CODE), 0);
   });
 }

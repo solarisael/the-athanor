@@ -4,12 +4,35 @@ use std::{collections::BTreeMap, sync::LazyLock};
 static TOKEN_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[\p{L}\p{N}_:+#./-]+").expect("BM25F token regex must compile"));
 
+// enough: repeated laughter syllables and the operator's `xzclkm` keysmash
+// cluster only; a new spelling joins the alternation, never a heuristic that
+// could swallow an identifier.
+static LAUGHTER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:k{3,}|(?:ha|he|hi|ah|eh|ja|je|rs|ks){2,}h?|(?:(?:xz|zx)(?:clkm)+)+)$")
+        .expect("laughter regex must compile")
+});
+
+// Keep the bilingual vocabulary tabular; `remember` is also a tool name.
+#[rustfmt::skip]
 const STOPWORDS: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "da", "das", "de", "do", "dos",
-    "e", "em", "for", "from", "had", "has", "have", "i", "if", "in", "is", "it", "its", "na",
-    "nas", "no", "nos", "o", "of", "on", "or", "os", "para", "por", "que", "se", "so", "than",
-    "that", "the", "their", "them", "then", "this", "to", "um", "uma", "was", "we", "were", "with",
-    "you",
+    "e", "em", "for", "from", "had", "has", "have", "i", "if", "in", "is", "it", "its", "na", "nas",
+    "no", "nos", "o", "of", "on", "or", "os", "para", "por", "que", "se", "so", "than", "that", "the",
+    "their", "them", "then", "this", "to", "um", "uma", "was", "we", "were", "with", "you",
+    "about", "actually", "again", "all", "also", "am", "any", "around", "ass", "basically", "being",
+    "bro", "can", "cant", "could", "damn", "did", "didnt", "does", "doesnt", "doing", "dont", "dude",
+    "dummy", "even", "ever", "exactly", "fuck", "fucking", "get", "gonna", "got", "gotta", "he", "her",
+    "here", "hey", "him", "his", "hmm", "how", "im", "into", "isnt", "ive", "just", "kek", "kinda",
+    "know", "like", "literally", "ll", "lmao", "lmfao", "lol", "man", "many", "maybe", "me", "much",
+    "my", "nah", "never", "now", "oh", "ok", "okay", "our", "owo", "pretty", "probably", "quite", "re",
+    "really", "rofl", "she", "shit", "should", "some", "something", "sorta", "still", "stuff", "sure",
+    "thats", "there", "these", "they", "thing", "things", "think", "those", "too", "uh", "us", "uwu",
+    "ve", "very", "wanna", "well", "what", "whats", "when", "where", "which", "who", "why", "will",
+    "would", "xd", "yeah", "yep", "yes", "your", "youre",
+    "acho", "aí", "assim", "cara", "coisa", "coisas", "ela", "elas", "ele", "eles", "entao", "então",
+    "essa", "esse", "eu", "foi", "gente", "isso", "isto", "já", "kk", "lá", "mano", "mas", "mesmo",
+    "meu", "minha", "muito", "nao", "não", "ne", "né", "nem", "porque", "pq", "pra", "sei", "sim",
+    "ta", "tá", "tambem", "também", "tb", "tem", "ter", "tipo", "vc", "voce", "você",
 ];
 
 const K1: f64 = 1.2;
@@ -67,14 +90,54 @@ pub(crate) fn tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// True when a lowercased query word or term names a subject: not grammar, not
+/// casual filler, not keyboard laughter. A contraction answers for its stem,
+/// and every `n't` is a negated auxiliary, so `won't` is filler while `sol's`
+/// stays a subject.
+pub(crate) fn is_content_term(term: &str) -> bool {
+    let bare = term.trim_matches(|c: char| !c.is_alphanumeric());
+    let stem = match bare.split_once(['\'', '’']) {
+        Some((stem, "t")) if stem.ends_with('n') => return false,
+        Some((stem, "t" | "s" | "m" | "d" | "re" | "ve" | "ll")) => stem,
+        _ => bare,
+    };
+    !STOPWORDS.contains(&stem) && !LAUGHTER_RE.is_match(bare)
+}
+
+pub(crate) fn content_words(query: &str) -> impl Iterator<Item = &str> {
+    query
+        .split_whitespace()
+        .scan(false, |negated, word| {
+            let lower = word
+                .trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase();
+            let reminiscing = *negated && lower == "remember";
+            *negated = matches!(
+                lower.as_str(),
+                "don't" | "don’t" | "dont" | "can't" | "can’t" | "cannot"
+            );
+            Some((!reminiscing && is_content_term(&lower)).then_some(word))
+        })
+        .flatten()
+}
+
+/// Subject tokens in query order. Filler is judged per whitespace word before
+/// tokenizing, so a contraction never leaves a fragment (`won` of `won't`).
+pub(crate) fn content_tokens(query: &str) -> Vec<String> {
+    content_words(query)
+        .flat_map(tokens)
+        .filter(|term| term.len() >= 2 && is_content_term(term))
+        .collect()
+}
+
 pub(crate) fn query_terms(query: &str) -> Vec<String> {
-    tokens(query)
+    content_tokens(query)
         .into_iter()
-        .filter(|term| term.len() >= 2 && STOPWORDS.binary_search(&term.as_str()).is_err())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect()
 }
+
 pub(crate) fn score(
     query_terms: &[String],
     document_count: u64,

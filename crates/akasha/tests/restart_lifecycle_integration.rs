@@ -1,20 +1,24 @@
-//! The restart plane against a real PostgreSQL schema. One test, fifteen
+//! The restart plane against a real PostgreSQL schema. One test, seventeen
 //! phases: the full lifecycle, the storm guard's counting query, the exit
 //! fence, expiry of an unclaimed request, the stale-token refusal,
 //! one-verify-only, the storm cap at the moment of arming, a lapsed idempotent
 //! replay, an intent that crosses its TTL behind a row lock, the Insula
 //! divergence read, the capability and session authority of each door, one live
-//! intent per workspace, the exact-intent read, and the armed exit no keeper
-//! ever claimed. It is one test on purpose — it owns the whole `restart` schema
-//! and resets it, so it must not race a sibling that does the same.
+//! intent per workspace, the exact-intent read, the armed exit no keeper ever
+//! claimed, the claimant that died with its token, and the preflight of the
+//! doors that run after the exit. It is one test on purpose — it owns the whole
+//! `restart` schema and resets it, so it must not race a sibling that does the
+//! same. The Host's portable restart proof resets it too: run the two one after
+//! the other, never at once.
 //!
 //! Run it against a scratch database only:
 //!   ATHANOR_SUBSTRATE_TEST_DATABASE_URL=postgres://.../restart_intent_scratch \
 //!     cargo test -p akasha --test restart_lifecycle_integration -- --ignored
 
 use akasha::{
-    AppError, EXIT_UNCLAIMED_REASON, EXITING_DEADLINE_SECS, RELAUNCHING_DEADLINE_SECS,
-    REQUESTED_TTL_SECS, STORM_MAX_EXITING_PER_WINDOW, query_unverified_exit, restart_claim,
+    AppError, CLAIMANT_LOST_REASON, EXIT_UNCLAIMED_REASON, EXITING_DEADLINE_SECS,
+    RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS, RestartPreflightDoor,
+    STORM_MAX_EXITING_PER_WINDOW, query_unverified_exit, restart_claim, restart_preflight,
     restart_request, restart_status, restart_transition, restart_verify,
 };
 use protocol::restart::{
@@ -31,6 +35,8 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 const RESTART_MIGRATION: &str = include_str!("../../../substrate/migrations/0026_restart.sql");
 const RESTART_PROOF_MIGRATION: &str =
     include_str!("../../../substrate/migrations/0027_restart_successor_proof.sql");
+const RESTART_INSTANCE_MIGRATION: &str =
+    include_str!("../../../substrate/migrations/0036_restart_requester_instance.sql");
 const KEEPER: &str = "omp-keeper";
 const KEEPER_SECRET: &str = "keeper-capability-secret";
 const ROOM: &str = "kodo";
@@ -65,28 +71,24 @@ async fn fresh_restart() -> TestResult<PgPool> {
         .connect(&isolated_database_url())
         .await?;
     // This proof owns only the dedicated test database and starts from the
-    // same pre-restart state every run.
+    // same pre-restart state every run. 0036 inserts into schema_migrations,
+    // which a freshly reset database may not carry.
     sqlx::query("DROP SCHEMA IF EXISTS restart CASCADE")
         .execute(&pool)
         .await?;
-    sqlx::raw_sql(RESTART_MIGRATION).execute(&pool).await?;
-    sqlx::raw_sql(RESTART_PROOF_MIGRATION)
+    sqlx::query("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())")
         .execute(&pool)
         .await?;
-    // Applied twice on purpose: both restart migrations must re-apply cleanly.
-    sqlx::raw_sql(RESTART_MIGRATION).execute(&pool).await?;
-    sqlx::raw_sql(RESTART_PROOF_MIGRATION)
-        .execute(&pool)
-        .await?;
-    let residuals: Vec<String> = sqlx::query_scalar(
-        "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='restart' AND c.relkind='r' AND c.relname NOT IN ('intents','intent_events','principal_capabilities','successor_proofs')",
-    )
-    .fetch_all(&pool)
-    .await?;
-    assert!(
-        residuals.is_empty(),
-        "the migration left residual relations: {residuals:?}"
-    );
+    // Applied twice on purpose: every restart migration must re-apply cleanly.
+    for _ in 0..2 {
+        sqlx::raw_sql(RESTART_MIGRATION).execute(&pool).await?;
+        sqlx::raw_sql(RESTART_PROOF_MIGRATION)
+            .execute(&pool)
+            .await?;
+        sqlx::raw_sql(RESTART_INSTANCE_MIGRATION)
+            .execute(&pool)
+            .await?;
+    }
     for (principal, operation_class, secret) in [
         (KEEPER, "restart_claim", KEEPER_SECRET),
         (ROOM, "restart_request", REQUEST_SECRET),
@@ -121,6 +123,7 @@ fn room_request_params(room: &str, workspace: &str, key: &str) -> RestartRequest
         requester_room: room.into(),
         requester_spirit: "Kodo".into(),
         requester_session: ROOM_SESSION.into(),
+        requester_instance: Some("6f9a2c1e-0000-4000-8000-000000000001".into()),
         capability: REQUEST_SECRET.into(),
         idempotency_key: key.into(),
     }
@@ -270,6 +273,16 @@ async fn ledger(pool: &PgPool, intent_id: &str) -> TestResult<Vec<String>> {
     )
     .bind(intent_id)
     .fetch_all(pool)
+    .await?)
+}
+
+/// How many intents and ledger rows exist. A call that moves nothing leaves
+/// both where they were.
+async fn census(pool: &PgPool) -> TestResult<(i64, i64)> {
+    Ok(sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM restart.intents), (SELECT COUNT(*) FROM restart.intent_events)",
+    )
+    .fetch_one(pool)
     .await?)
 }
 
@@ -1085,7 +1098,183 @@ async fn restart_intent_lifecycle_holds_its_fences() -> TestResult {
     assert_eq!(
         stored_state(&pool, &watched).await?,
         ("claimed".to_string(), None),
-        "the sweep never touches an intent a keeper already claimed"
+        "the sweep never touches an intent a keeper holds inside its window"
+    );
+
+    // 16. The claimant that died with its token. A Host or keeper that claimed
+    // and then crashed can never fail its own row: the claim token lived in the
+    // dead process. Past the House's own stage deadline the row is dead, and
+    // before this fence it held the workspace forever.
+    // red-proof: drop expire_lost_claims_in_workspace from restart_request.
+    let expected_instance = format!(
+        "{:x}",
+        Sha256::digest(b"6f9a2c1e-0000-4000-8000-000000000001")
+    );
+    let seen = restart_status(
+        &pool,
+        RestartStatusParams {
+            workspace: live_keeper.into(),
+            intent_id: Some(watched.clone()),
+        },
+    )
+    .await?
+    .intent
+    .expect("the claimed intent reads by id");
+    assert_eq!(
+        seen.requester_instance_sha256.as_deref(),
+        Some(expected_instance.as_str()),
+        "status names the requesting process only as its digest"
+    );
+    sqlx::query(
+        "UPDATE restart.intents SET claimed_at=clock_timestamp()-(($2+1) * INTERVAL '1 second') WHERE intent_id=$1::text::uuid",
+    )
+    .bind(&watched)
+    .bind(RELAUNCHING_DEADLINE_SECS)
+    .execute(&pool)
+    .await?;
+    let after_lost_claim =
+        restart_request(&pool, request_params(live_keeper, "live-keeper-3")).await?;
+    assert_ne!(after_lost_claim.intent_id, watched);
+    assert_eq!(
+        stored_state(&pool, &watched).await?,
+        ("failed".to_string(), Some("claimed".to_string())),
+        "a claim past one relaunch window is a dead claimant, and the row says so"
+    );
+    let (reason, actor): (Option<String>, String) = sqlx::query_as(
+        "SELECT detail->>'reason', principal FROM restart.intent_events WHERE intent_id=$1::text::uuid AND event_kind=$2 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(&watched)
+    .bind(RestartState::Failed.as_str())
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(reason.as_deref(), Some(CLAIMANT_LOST_REASON));
+    assert!(actor.starts_with("house:"), "the House failed it ({actor})");
+
+    // The relaunching half: the claimant launched once and died. A successor
+    // past relaunching_deadline_at is already refused by verify, so the row
+    // can never settle itself; the next request settles it and clears the
+    // proof that attempt minted.
+    let lost_claim = restart_claim(
+        &pool,
+        claim_params(&after_lost_claim.intent_id, "live-keeper-3-claim"),
+    )
+    .await?;
+    restart_transition(
+        &pool,
+        RestartTransitionParams {
+            intent_id: after_lost_claim.intent_id.clone(),
+            claim_token: Some(lost_claim.claim_token.clone()),
+            requester_session: None,
+            capability: None,
+            to: RestartTransitionTarget::Relaunching,
+            detail: None,
+        },
+    )
+    .await?;
+    let still_live = restart_request(&pool, request_params(live_keeper, "live-keeper-4")).await;
+    assert_eq!(
+        refusal_code(
+            &still_live.expect_err("a relaunching intent inside its window holds the workspace")
+        ),
+        "intent_pending"
+    );
+    sqlx::query(
+        "UPDATE restart.intents SET relaunching_deadline_at=clock_timestamp()-INTERVAL '1 second' WHERE intent_id=$1::text::uuid",
+    )
+    .bind(&after_lost_claim.intent_id)
+    .execute(&pool)
+    .await?;
+    let after_lost_relaunch =
+        restart_request(&pool, request_params(live_keeper, "live-keeper-5")).await?;
+    assert_ne!(after_lost_relaunch.intent_id, after_lost_claim.intent_id);
+    assert_eq!(
+        stored_state(&pool, &after_lost_claim.intent_id).await?,
+        ("failed".to_string(), Some("relaunching".to_string()))
+    );
+    let proof_rows: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM restart.successor_proofs WHERE intent_id=$1::text::uuid",
+    )
+    .bind(&after_lost_claim.intent_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        proof_rows, 0,
+        "a failed row keeps no proof a late successor could present"
+    );
+    // The dead claimant's token moves nothing afterwards: no second launch.
+    let late_keeper = restart_transition(
+        &pool,
+        RestartTransitionParams {
+            intent_id: after_lost_claim.intent_id.clone(),
+            claim_token: Some(lost_claim.claim_token),
+            requester_session: None,
+            capability: None,
+            to: RestartTransitionTarget::Relaunching,
+            detail: None,
+        },
+    )
+    .await;
+    assert_eq!(
+        refusal_code(&late_keeper.expect_err("a failed intent takes no relaunch")),
+        "illegal_transition"
+    );
+
+    // 17. The doors after the exit, asked before it. The claim and the verify
+    // run only once the predecessor is gone, so a secret refused there strands
+    // the restart: Kintsu's holder kept the keeper secret from before its
+    // rotation, the predecessor exited, the claim refused, and the intent
+    // stayed exiting with nobody able to claim it (2026-10-13). The preflight
+    // runs each door's own fence, so it refuses what the door refuses, passes
+    // what the door passes, and writes nothing.
+    // red-proof: return Ok from restart_preflight; check a door's secret under
+    // the other door's class; drop its validate_slug.
+    let before = census(&pool).await?;
+    restart_preflight(&pool, RestartPreflightDoor::Claim, KEEPER, KEEPER_SECRET).await?;
+    restart_preflight(&pool, RestartPreflightDoor::Verify, ROOM, VERIFY_SECRET).await?;
+    let rotated_away = "the-keeper-secret-before-its-rotation";
+    let stale_claim = restart_preflight(&pool, RestartPreflightDoor::Claim, KEEPER, rotated_away)
+        .await
+        .expect_err("a holder left with a rotated-away keeper secret is refused before the exit");
+    assert_eq!(refusal_code(&stale_claim), "restart_capability");
+    let crossed = restart_preflight(&pool, RestartPreflightDoor::Claim, KEEPER, VERIFY_SECRET)
+        .await
+        .expect_err("a verify secret opens no claim");
+    assert_eq!(refusal_code(&crossed), "restart_capability");
+    // A room provisioned to ask but never to verify: tuner holds only a request
+    // secret here.
+    let unprovisioned =
+        restart_preflight(&pool, RestartPreflightDoor::Verify, OTHER_ROOM, REQUEST_SECRET)
+            .await
+            .expect_err("a room with no restart_verify row cannot sign a successor's return");
+    assert_eq!(refusal_code(&unprovisioned), "restart_capability");
+    let unslugged =
+        restart_preflight(&pool, RestartPreflightDoor::Claim, "Omp-Keeper", KEEPER_SECRET).await;
+    assert!(
+        matches!(unslugged, Err(AppError::Invalid(_))),
+        "the preflight obeys the claim door's slug law"
+    );
+    assert_eq!(
+        census(&pool).await?,
+        before,
+        "a preflight reads one capability row and writes nothing"
+    );
+    // The door it stands in for refuses the same secret by the same name, and
+    // the exit it would have stranded stays armed with no claimant.
+    let stranded = arm_and_exit(&pool, "D:/athanor-wt/preflight", "preflight-1").await?;
+    let door = restart_claim(
+        &pool,
+        RestartClaimParams {
+            capability: rotated_away.into(),
+            ..claim_params(&stranded, "preflight-claim")
+        },
+    )
+    .await
+    .expect_err("the claim door refuses the secret the preflight refused");
+    assert_eq!(refusal_code(&door), refusal_code(&stale_claim));
+    assert_eq!(
+        stored_state(&pool, &stranded).await?,
+        ("exiting".to_string(), None),
+        "a refused claim leaves the exit armed and unclaimed, the state the preflight prevents"
     );
     Ok(())
 }

@@ -5,6 +5,43 @@ The 2026-10-04 census did not walk `crates/akasha`; claims below keep their earl
 
 Lessons preserve reusable guidance in typed stores. They are not a second name for memories.
 
+## Repository query file
+
+The root [LESSONS.jsonl](../LESSONS.jsonl) contains complete arguments for the `lessons` organ.
+Each line is one query. PostgreSQL owns the returned bodies.
+
+1. Read each line as JSON before implementation or fanout.
+2. Submit every line unchanged to `xd://lessons`, once per task.
+3. Check every requested ID within its stated family.
+4. Read every returned body before editing.
+5. Give workers the complete bodies, inline or through a shared packet.
+6. Stop before editing or spawning if a query fails or a requested record is missing.
+
+Apply each lesson when its trigger matches the task.
+Retrieval does not reopen parked work or expand the assignment.
+Folder-specific instructions, including the Pulse interaction rules, still apply.
+Read the current roadmap, architecture, and evidence before implementation.
+Historical source gates do not override those documents.
+
+The file uses the same line format as Multistock.
+No Markdown extraction, route selection, or argument construction is required.
+The agent executes these queries; the filename alone does not start a background service.
+Keep batches below the registry's response limit.
+Keep each family-and-ID pair once.
+
+The 2026-10-14 cutover checks 159 records through eight queries.
+These comprise 127 coding lessons, 20 project lessons, and 12 design lessons.
+The queries include familiar lessons 556–564 and the existing delivery guidance.
+
+Coding lessons 161, 162, and 463 were already unavailable.
+The earlier map records approved replacement guidance in 215, 257, and 260.
+The cutover also finds no coding records for 216, 341, or 375.
+Those references concern disposable transition data and the parked Godot client.
+They remain unresolved and do not appear in executable queries.
+If work requires their missing guidance, stop and resolve that prerequisite.
+The [historical map](./history/2026-10-14-lesson-map.md) preserves the previous routes and source gates.
+
+
 ## Choose the store
 
 | Kind | Use it for | Required boundary |
@@ -120,6 +157,48 @@ Trigger fields are reviewed TTSR authoring data. A lesson enters native OMP enfo
 The Athanor adapter loads approved rules into the active native `TtsrManager`. OMP owns matching, interruption, reminder injection, and retry.
 
 Use OMP `/omfg <complaint>` to author a new guard from an observed offense. Review positive and ordinary negative examples before approval.
+
+## Familiar role lessons
+
+The sixteen named kittens and dragonlings receive their role lessons with every wake, resume included.
+Each one needs the `familiar-role:shared` tag and the tag of its role.
+The Host matches the exact agent definition name, not the spellbook lane.
+The match ignores ASCII letter case and surrounding whitespace.
+
+| Role tag | Familiars |
+|---|---|
+| `familiar-role:scout` | `cisma-kitten`, `faro-dragonling`, `caliper-kitten` |
+| `familiar-role:executor` | `sutura-kitten`, `talha-dragonling`, `kerf-kitten` |
+| `familiar-role:tester` | `tempera-kitten`, `crisol-dragonling`, `burr-kitten` |
+| `familiar-role:verifier` | `prumo-kitten`, `fiel-dragonling`, `plumb-kitten` |
+| `familiar-role:builder` | `forja-kitten`, `lavra-dragonling` |
+| Shared tag only | `kintsu-kitten`, `kodo-kitten` |
+
+Put these tags on coding lessons with the house scope or the room's scope.
+At each wake, the Host reads every matching lesson with its complete body.
+The adapter inserts the latest complete lesson set once per provider context, with the lesson IDs.
+The lessons remain separate from wake messages, so earlier handoffs stay in context.
+The titles and bodies of one delivery use at most 65,536 UTF-8 bytes. The Host never cuts a lesson to fit.
+The Host refuses the wake when a required tag has no lesson, when a matching lesson has no ID, title, or body, or when the delivery is above the limit.
+The adapter declares on each open that it can show these lessons. The Host refuses a familiar wake from an opener without that declaration.
+Vault mode has no lesson store, so it refuses every named familiar.
+Other agents, the lane agents, and the `gu-*` swarm keep the ordinary worker wake.
+
+A refused wake stops the worker, also in the middle of a task.
+The stopped worker cannot write its own handoff.
+The task book and its recorded entries stay.
+Fix the lessons, then continue the book with `worker_notebook` repair and successor. The parent's repair supplies the handoff.
+
+This table is a routing index only. The lesson bodies stay in PostgreSQL.
+
+| Tag | Lesson IDs (2026-10-14) |
+|---|---|
+| `familiar-role:shared` | 175, 468, 558, 562 |
+| `familiar-role:scout` | 203, 204, 556 |
+| `familiar-role:executor` | 557 |
+| `familiar-role:tester` | 155, 215, 560, 561 |
+| `familiar-role:verifier` | 561, 563, 564 |
+| `familiar-role:builder` | 215, 559 |
 
 ## Updating lessons
 

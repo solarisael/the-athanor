@@ -232,7 +232,7 @@ Not re-verified at a6ab453; `crates/host` (`policy.rs`) would decide:
 
 ### routing and dispatch
 
-`src/routing.rs`, `src/routing/dispatch.rs`, and `src/routing/spellbook.rs`. The worker lanes, the room spellbook, and the dispatch packet.
+`src/routing.rs`, `src/routing/dispatch.rs`, and `src/routing/spellbook.rs` own worker lanes, the effective spellbook, and dispatch packets.
 
 - `house_dispatch` takes exactly one lane or one familiar (`routing.rs:471-535`).
 - A constant table holds 4 lanes: `smol-scout`, `smol-executor`, `tester`, and `verifier` (`routing.rs:100-157`).
@@ -241,18 +241,26 @@ Not re-verified at a6ab453; `crates/host` (`policy.rs`) would decide:
 - Dispatch only validates and packages. Every receipt carries `executed: false`, so a refused request still gets a receipt (`dispatch.rs:176-177`).
 - An accepted packet is `spawnPacket { tool: "task", args }`. The Host never spawns a worker (`dispatch.rs:440-456`).
 - The gates: a known lane, a task, one or more complete lesson bodies, acceptance where required, an exact target for editing lanes, and allowed context modes (`dispatch.rs:151-160,183-233`).
-- The spellbook lives at `<room_dir>/familiars/spellbook.json`, then `litters.json`. The first found wins (`routing.rs:300-301`).
-- The spellbook binds familiars and aliases. Ids are kebab-case, and `ompAgent` and `modelRole` come together (`spellbook.rs:52-192`).
-- Spellbook loading asks the caller for each file read. The server supplies the read and the room directory (`routing.rs:354-360`; `server.rs:867-870,2097-2101`).
+- The shared page lives at `<parent of room_dir>/house/familiars/spellbook.json`.
+- The room page lives at `<room_dir>/familiars/spellbook.json`. Each layer accepts `litters.json` when its primary file is absent.
+- Missing room keys inherit shared values. Local keys replace whole values, including empty strings and lists.
+- Explicit null fields receive a refusal instead of silently inheriting shared values.
+- Familiar entries replace shared entries with the same `id`. New ids remain available alongside inherited entries.
+- Duplicate ids within a page receive a refusal before overlay can hide them.
+- The effective book binds familiars and aliases. `ompAgent` and `modelRole` must appear together.
+- An explicit empty familiar list clears inherited familiars. It is valid.
+- Malformed or unreadable files refuse the book and identify their source.
+- The Host adds the effective `guide` to its prepared `room-context` block.
+- A local empty guide removes the shared guide. Organ authorization remains unchanged.
 - `familiar_dispatch` sets the lane from the spellbook. Only `house_dispatch` reaches it; no socket command calls it directly (`routing.rs:230-279`).
 - The socket serves `RoutingStatus`, `RoutingDispatch`, and `FamiliarStatus` (`server.rs:854-882`).
+- `familiar_status` reports ordered `sources` entries with `layer`, `path`, and `alias`.
 
 Not re-verified at a6ab453; `crates/host` (`routing.rs`, `dispatch.rs`) would decide:
 
 - The shared context formats the hints, the acceptance lines, and the lesson bodies.
 - A hint's risk level comes from a closed list.
 - A dispatch cannot override the model role.
-- The fields of the `familiar_status` report.
 
 ### config
 

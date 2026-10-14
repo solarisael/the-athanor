@@ -36,7 +36,7 @@ impl Default for RoomSettings {
             remember_section_split_chars: 4_000,
             remember_chunk_chars: 2_200,
             remember_chunk_overlap_chars: 200,
-            recall_temporal_half_life_days: 7.0,
+            recall_temporal_half_life_days: 60.0,
             recall_temporal_durability_curve_power: 2,
             recall_semantic_similarity_weight: 0.6,
             recall_semantic_rank_weight: 0.4,

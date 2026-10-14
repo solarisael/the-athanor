@@ -215,6 +215,11 @@ pub struct RestartRequestParams {
     /// transition must present this same value, so a request path that writes
     /// anything other than what the adapter's own binding reports arms nothing.
     pub requester_session: String,
+    /// The exact live process instance that asks (the Host's portable
+    /// instanceId, or the integrated keeper's child instance). Optional for
+    /// old callers; an intent without it is never a destructive target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requester_instance: Option<String>,
     /// The requester room's provisioned `restart_request` secret. consentSource
     /// is a declared reason and never authority: Kintsu's door verdict named a
     /// caller-asserted consent source unauthorized, so the room proves itself
@@ -231,6 +236,11 @@ impl RestartRequestParams {
         bounded(&self.requester_room, "requesterRoom", MAX_IDENTIFIER)?;
         bounded(&self.requester_spirit, "requesterSpirit", MAX_IDENTIFIER)?;
         bounded(&self.requester_session, "requesterSession", MAX_IDENTIFIER)?;
+        bounded_option(
+            self.requester_instance.as_ref(),
+            "requesterInstance",
+            MAX_IDENTIFIER,
+        )?;
         bounded(&self.capability, "capability", MAX_IDENTIFIER)?;
         bounded(&self.idempotency_key, "idempotencyKey", MAX_IDENTIFIER)
     }
@@ -432,6 +442,11 @@ pub struct RestartStatusIntent {
     /// to continue what the restart was for.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reason: String,
+    /// sha256 (lowercase hex) of the process instance that requested this
+    /// intent, when one was named. The keeper compares it with its own child's
+    /// instance id before any destructive act.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requester_instance_sha256: Option<String>,
     pub deadlines: RestartStatusDeadlines,
 }
 

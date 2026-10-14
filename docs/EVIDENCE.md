@@ -26,6 +26,87 @@ Private prompts, memory titles, source paths, excerpts, entities, threads, and r
 
 The measured records from 2026-07-22 to 2026-09-07 are in [`history/2026-10-04-evidence-records.md`](./history/2026-10-04-evidence-records.md). Each record keeps its own date. None of them is a current release claim.
 
+### Familiar role lesson delivery — 2026-10-14
+
+Status: source verified. The Host and adapter changes remain undeployed.
+The checks use Windows x64 and an isolated PostgreSQL 18.4 cluster.
+The fixture uses migration 0034 and a temporary lesson table.
+No live worker records change.
+
+| Check | Observed result |
+|---|---|
+| Hearth and Host lifecycle tests | 22 pass. |
+| PostgreSQL lifecycle tests | 6 pass, including real lesson queries and transactional refusal. |
+| Full OMP adapter suite | 195 pass. |
+| Native startup smoke | All 16 named familiars receive exact lesson bodies on open and resume. |
+| Older opener | All 16 names refuse an open without the lesson capability declaration. |
+| Incomplete lesson | A blank required body refuses resume. |
+| Context smoke | Earlier handoffs and resume messages survive removal of stale lesson messages. |
+| Long bodies and limits | Contract tests preserve complete bodies and refuse deliveries above 65,536 UTF-8 bytes. |
+| Touched Rust formatting | The final formatter check passes. |
+
+The native smoke copies authoritative lesson records into the isolated fixture.
+It compares every delivered body with that fixture.
+The temporary smoke program and PostgreSQL cluster are removed after the checks.
+The adapter tests cover lesson restoration after compaction without duplicate bodies.
+They also cover successor identity and malformed delivery.
+
+These checks do not prove an installed OMP child receives the new protocol.
+Deployment must update the Host and adapter together.
+The workspace formatter check reports unrelated changes outside this slice.
+Those files remain unchanged by this work.
+
+
+### Shared spellbook and multi-pass Recall — 2026-10-12
+
+Status: source verified. The installed releases remain unchanged.
+The checks use Windows x64, schema 35, and a disposable PostgreSQL database.
+Real source binaries consume synthetic records and shared/room spellbook files.
+The checks do not change live House records.
+
+| Contract | Observed result |
+|---|---|
+| Lexical noise | The subject replaces the filler decoy as the first result. Its content-term coverage is 1.0. |
+| Real embedding path | Ollama indexes the synthetic records. Recall returns the subject first and reports zero coverage for the decoy. |
+| Below-floor retry | The binary makes two embedding requests. Retry evidence identifies the subject pass. |
+| Original semantic hit | The binary makes one embedding request and does not retry. |
+| Failed retry | The binary preserves the lexical subject and reports the retry failure. |
+| Empty vector corpus | The binary does not make a second embedding request. |
+| Exact references | The binary returns the requested record without embedding. |
+| Canon names | Real PostgreSQL checks preserve exact names that also occur in the filler vocabulary. |
+| Whole-entry overlay | The authenticated Host inherits shared keys and replaces the matching room familiar completely. |
+| Empty overrides | The authenticated Host clears inherited guides and familiar lists. |
+| Explicit null | The Host refuses a null room guide instead of silently inheriting the shared guide. |
+| Refusals | The Host identifies malformed shared files and refuses a caller-selected foreign room directory. |
+| Guide delivery | Prepared room context contains the complete repository starter guide. A room guide replaces it. |
+
+The semantic transition fixture uses deterministic 2048-dimensional vectors.
+It proves request limits, pass attribution, and fallback.
+It does not measure embedding quality.
+The separate Ollama check exercises the real embedding path on the same synthetic records.
+
+Five PostgreSQL Recall contract cases pass.
+The final AKASHA library gate passes, with four environment-gated cases skipped.
+The adapter gate passes 190 tests after its child environment removes live configuration.
+The focused Rust gate also passes before the final Recall ownership extraction.
+The final source Host and substrate builds pass after that extraction.
+
+The decision-point audit compares the initial source snapshot with the final owner boundaries.
+It excludes test blocks, comments, and string bodies.
+It is a text counter, not a semantic analyzer.
+
+| Boundary | Before decision points | After decision points |
+|---|---:|---:|
+| Legacy Recall module | 75 | 58 |
+| Legacy `recall()` function | 60 | 56 |
+| New query/evidence owner | — | 18 |
+| New semantic owner | — | 11 |
+
+The legacy function remains above its ceiling.
+This pass reduces it under the legacy ratchet rule; it does not claim a strict whole-crate budget pass.
+The two features add net production code.
+The ownership cuts remove displaced paths and avoid a second semantic pipeline.
+
 ### Host-owned adapter boundary — 2026-10-06
 
 Status: verified source; deployment remains pending.

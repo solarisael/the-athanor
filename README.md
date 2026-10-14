@@ -152,7 +152,7 @@ Dated records live in [`docs/history/`](./docs/history/). They are provenance, n
 - [Agents](./AGENTS.md): rules for agents that change this repository.
 - [Bugs](./BUGS.md): known defects.
 - [Changelog](./CHANGELOG.md): release history, including retained RC builds.
-- [Lesson map](./LESSON_MAP.md): repository lessons by number. The PostgreSQL registry stays authoritative.
+- [Lesson queries](./LESSONS.jsonl): complete registry requests, one per line. PostgreSQL owns the lesson bodies.
 - [Explaining The Athanor](./docs/EXPLAINING_THE_ATHANOR.md): the concept map.
 - [For latent-space explorers](./docs/FOR_EXPLORERS.md): the architectural argument.
 - [Vocabulary](./docs/VOCABULARY.md): House words and product names.

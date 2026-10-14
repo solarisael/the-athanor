@@ -229,6 +229,9 @@ State: Planned.
 
 OMEGA means **O**rganizational **M**emory, **E**ncryption, **G**overnance, and **A**ccess. It governs one or more Houses for an organization. OMEGA is not a storage profile. The first OMEGA release needs AKASHA.
 
+The [cross-House guild design](GUILD_BRIDGE_DESIGN.md) proposes memberships, Guildkeeper duties, Hallway contact, board access, and scoped record inspection.
+It remains a design candidate. No federation implementation or deployment is claimed.
+
 Starting point: one Host serves one House. The Host refuses rooms that disagree on House id, token, bind, database, or NATS URL (`crates/host/src/house.rs:205-234`). No person identity exists. One bearer proves reach, not identity, see [Identity](./LIMITATIONS.md#4-identity).
 
 Warning: the `house` scope is one shared commons today, with no per-source permissions. Do not put a company's private corpus behind it. See [Organizational boundary](./LIMITATIONS.md#14-organizational-boundary).

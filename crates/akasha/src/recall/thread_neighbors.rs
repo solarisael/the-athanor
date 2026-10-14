@@ -1,10 +1,12 @@
-use super::bounded_excerpt;
+use super::Phase;
+use super::evidence::bounded_excerpt;
 use super::scope::ScopeFilter;
 use crate::config::AppError;
+use crate::insula_writer::EmitterSpan;
 use sqlx::{PgPool, Row};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) async fn load_thread_neighbors(
+async fn load_thread_neighbors(
     pool: &PgPool,
     memory_ids: &[i64],
     scope: &ScopeFilter,
@@ -97,4 +99,28 @@ pub(super) async fn load_thread_neighbors(
             }));
     }
     Ok(by_memory)
+}
+/// Thread neighbors for every candidate that owns a memory: the visible
+/// shoulder of the thread a record sits in, keyed by memory ID.
+pub(super) async fn attach_thread_neighbors(
+    pool: &PgPool,
+    span: Option<&EmitterSpan>,
+    scope: &ScopeFilter,
+    retrieval_candidates: &mut [serde_json::Value],
+) -> Result<(), AppError> {
+    let memory_ids = retrieval_candidates
+        .iter()
+        .filter_map(|candidate| candidate["memory_id"].as_i64())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let phase = Phase::start(span, "recall.neighbors");
+    let mut neighbors = load_thread_neighbors(pool, &memory_ids, scope).await?;
+    for candidate in retrieval_candidates.iter_mut() {
+        let memory_id = candidate["memory_id"].as_i64().unwrap_or_default();
+        candidate["thread_neighbors"] =
+            serde_json::Value::Array(neighbors.remove(&memory_id).unwrap_or_default());
+    }
+    phase.ok();
+    Ok(())
 }

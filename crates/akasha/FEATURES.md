@@ -42,12 +42,20 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 
 - `recall` takes `hearth::RecallRequest`. The wire defaults live on `protocol::RecallParams`.
 - `recall` runs the whole retrieval and fuses the lanes into `retrievalCandidates`. It never fails on one absent lane; it adds a warning instead.
-- The semantic lane embeds the query and ranks chunks by cosine similarity. An empty lane reports the top similarity it found.
-- The content lane ranks chunks by trigram `word_similarity` and filters on the query terms.
+- The semantic lane embeds the original query and ranks chunks by cosine similarity.
+- A below-floor result can cause one subject-term retry with the same scope, floor, and limits.
+- Retry evidence identifies its pass. A retry failure preserves lexical results.
+- The content lane filters on retained content terms and ranks chunks by trigram `word_similarity`.
+- `recall/semantic.rs` owns both semantic passes. `recall/evidence.rs` owns query terms and candidate evidence.
 - `load_bm25f_candidates` and `load_bm25f_candidates_for_terms` load the field-aware lexical candidates over the memory fields.
 - `load_semantic_vocabulary_concepts` reads concept vectors and turns them into extra lexical terms. This is the bridge from meaning to exact words.
 - `refresh_semantic_vocabulary` is the write path of that vocabulary. It re-embeds the concept rows and reports how many it refreshed.
-- `giga_temporal_factor` and `compare_weighted_lane` apply the optional decay by durability. Decay changes the lane order, not the floor.
+- `memory_temporal_factor` applies optional age decay to memories from every origin. The default base half-life is 60 days.
+- Memories use their stored `created_at` timestamp unless valid anchor metadata exists. Reviewed metadata in `meta.giga` supplies durability and the original candidate timestamp.
+- Missing or invalid durability uses the base half-life. Invalid anchor metadata uses `created_at`. Future anchors receive no age penalty.
+- The weight is `2^(-age_days * (1 - durability)^2 / half_life_days)`. Durability 1 receives no age penalty.
+- Semantic, content, and BM25F lanes apply the weight before their final limits. Decay changes ranking, never similarity floors or stored authority.
+- Automatic context requests decay. Explicit recall and write reconciliation leave decay off. Retrieval never updates a memory timestamp.
 - `load_thread_neighbors` attaches the neighbors of each returned memory on its threads.
 - The canon lane matches named entities three ways: whole phrase, exact token, then fuzzy similarity.
 - `protocol_pointer_files` normalizes stored pointer files to the wire shape `{file, lines}`. Legacy strings and extra keys stay in the database.
@@ -230,6 +238,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - The write reuses `prepare_memory_write` and `write_memory_tx`, so a boat is an ordinary memory of the boat kind.
 - The receipt reports whether the row was new, so a repeated sleep is safe.
 - A requested backup runs after the commit, and a failure becomes a warning, not an error.
+- A requested backup does not run when the newest dump is younger than 12 hours. The receipt reports `status: fresh`, the covering dump path, and the dump age. One full `pg_dump` pins PostgreSQL for about 25 seconds, and every room's sleep asks for one.
 - `paper_boat_wake` returns the latest boat for the room.
 
 ### cluster.rs — clusters over the chunk vectors
@@ -244,7 +253,9 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 
 - `score` computes one BM25F score over the weighted fields.
 - Six field weights exist: title, heading, source path, threads, body, and memory type.
-- `tokens` splits Unicode words and keeps code punctuation. `query_terms` drops the stopwords.
+- `tokens` keeps document tokenization unchanged. Query preparation removes casual filler and recognized keyboard laughter.
+- A negated reminiscence removes `remember` as filler. A query about the `remember` tool keeps it.
+- Query coverage counts retained content terms. Canon lookup preserves the original name terms.
 - The scorer returns the matched terms with the score, so recall can show its evidence.
 
 ### entity.rs — alias resolution

@@ -4,8 +4,10 @@
 //! arms the exit, a keeper claims the corpse and relaunches, and the successor
 //! session proves it came back. Five doors and nothing else:
 //! [`restart_request`], [`restart_claim`], [`restart_transition`],
-//! [`restart_verify`], [`restart_status`]. The wire vocabulary lives in
-//! `protocol::restart`; no state literal is re-declared here.
+//! [`restart_verify`], [`restart_status`]. Beside them, [`restart_preflight`]
+//! asks a post-exit door's capability fence before the exit and moves nothing.
+//! The wire vocabulary lives in `protocol::restart`; no state literal is
+//! re-declared here.
 //!
 //! State order (contract v1 as amended 2026-08-25): requested -> exiting ->
 //! claimed -> relaunching -> verified. The keeper only runs after omp is gone,
@@ -56,8 +58,11 @@
 //! `intent_pending`. `restart_request` therefore also sweeps an unclaimed
 //! `exiting` row past its `exiting_deadline_at` into `failed:exit_unclaimed`
 //! and proceeds. Only the request door sweeps it: a keeper that arrives late
-//! must still be able to claim its own overdue exit, and a `claimed` or
-//! `relaunching` row is a live keeper's work that no sweep may take.
+//! must still be able to claim its own overdue exit. A `claimed` or
+//! `relaunching` row is a live keeper's work only inside its stage deadline;
+//! past it the claimant is gone with its token, and the request door fails that
+//! row too (`failed:<stage>`, reason `claimant_lost`). See
+//! `expire_lost_claims_in_workspace`.
 
 mod authority;
 mod proof;
@@ -385,6 +390,64 @@ async fn expire_stranded_exits_in_workspace(
     Ok(())
 }
 
+/// The reason recorded when a claimed or relaunching intent passed its stage
+/// deadline with no terminal move: its claimant is gone.
+pub const CLAIMANT_LOST_REASON: &str = "claimant_lost";
+
+/// A `claimed` or `relaunching` intent whose claimant died keeps the workspace
+/// forever: only the claim token can fail it, and the token lived in the dead
+/// process. The deadlines are the House's own. `relaunching` carries
+/// `relaunching_deadline_at`, and [`restart_verify`] already refuses a
+/// successor past it (`verify_expired`), so a row past that instant can never
+/// verify. `claimed` carries no deadline column; one full relaunch window after
+/// `claimed_at` is the bound, because a live claimant moves to `relaunching`
+/// within seconds of the claim.
+///
+/// This sweep launches nothing and kills nothing. The dead row becomes
+/// `failed:<stage>` with its reason in the ledger, its successor proof is
+/// cleared, and the request behind it proceeds. A claimant still alive and
+/// inside its window is never in this read.
+async fn expire_lost_claims_in_workspace(
+    tx: &mut Transaction<'_, Postgres>,
+    workspace: &str,
+) -> Result<(), AppError> {
+    let rows: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT intent_id::text,state,claim_epoch FROM restart.intents WHERE workspace=$1 AND claim_epoch>0 AND ((state=$2 AND relaunching_deadline_at IS NOT NULL AND relaunching_deadline_at <= clock_timestamp()) OR (state=$3 AND claimed_at IS NOT NULL AND claimed_at + ($4 * INTERVAL '1 second') <= clock_timestamp())) FOR UPDATE",
+    )
+    .bind(workspace)
+    .bind(RestartState::Relaunching.as_str())
+    .bind(RestartState::Claimed.as_str())
+    .bind(RELAUNCHING_DEADLINE_SECS)
+    .fetch_all(&mut **tx)
+    .await?;
+    for (intent_id, stage, claim_epoch) in rows {
+        sqlx::query(
+            "UPDATE restart.intents SET state=$2,failed_stage=$3,updated_at=NOW() WHERE intent_id=$1::text::uuid",
+        )
+        .bind(&intent_id)
+        .bind(RestartState::Failed.as_str())
+        .bind(&stage)
+        .execute(&mut **tx)
+        .await?;
+        clear_successor_proof(tx, &intent_id).await?;
+        insert_event(
+            tx,
+            &intent_id,
+            Some(claim_epoch),
+            RestartState::Failed.as_str(),
+            HOUSE_PRINCIPAL,
+            json!({
+                "reason": CLAIMANT_LOST_REASON,
+                "failedStage": stage,
+                "relaunchingSecs": RELAUNCHING_DEADLINE_SECS,
+            }),
+            None,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 fn refuse_expired() -> AppError {
     refusal(
         "intent_expired",
@@ -447,6 +510,7 @@ pub async fn restart_request(
     }
     expire_lapsed_requests_in_workspace(&mut tx, &request.workspace).await?;
     expire_stranded_exits_in_workspace(&mut tx, &request.workspace).await?;
+    expire_lost_claims_in_workspace(&mut tx, &request.workspace).await?;
 
     refuse_on_live_intent(&mut tx, &request.workspace).await?;
     refuse_on_storm(reached_exiting_in_window(&mut tx, &request.workspace).await?)?;
@@ -470,6 +534,15 @@ pub async fn restart_request(
     let intent_id: String = row.try_get("intent_id")?;
     let state: String = row.try_get("state")?;
     let expires_at: DateTime<Utc> = row.try_get("expires_at")?;
+    if let Some(instance) = request.requester_instance.as_deref() {
+        sqlx::query(
+            "INSERT INTO restart.intent_instances (intent_id,requester_instance) VALUES ($1::text::uuid,$2)",
+        )
+        .bind(&intent_id)
+        .bind(instance)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     insert_event(
         &mut tx,
@@ -483,6 +556,7 @@ pub async fn restart_request(
             "consentSource": request.consent_source.as_str(),
             "requesterSession": request.requester_session,
             "sessionId": request.session_id,
+            "requesterInstance": request.requester_instance,
         }),
         Some(&request.idempotency_key),
     )
@@ -885,9 +959,48 @@ pub async fn restart_verify(
     })
 }
 
+/// A door whose secret is presented only after the predecessor has exited:
+/// the keeper's claim and the successor's verify. [`restart_preflight`] asks
+/// their fence while the predecessor still runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestartPreflightDoor {
+    /// [`restart_claim`]: the claimant principal's `restart_claim` secret.
+    Claim,
+    /// [`restart_verify`]: the `restart_verify` secret of the room that will
+    /// request. The door reads that room off the intent row, and the request
+    /// door writes the requesting room there.
+    Verify,
+}
+
+/// Run one post-exit door's capability fence now, and nothing else: no intent
+/// is read or written and no ledger row lands. The claim and the verify run
+/// only once the predecessor is gone, so a secret that fails there strands the
+/// restart: the exit is armed, nothing claims it, and no successor verifies
+/// (Kintsu, 2026-10-13: a stale keeper secret refused the claim after the
+/// predecessor had exited). Asked before the exit, the same refusal leaves the
+/// session running. A pass grants nothing: each door runs this fence again, so
+/// a secret rotated after the preflight is still refused at the door.
+pub async fn restart_preflight(
+    pool: &PgPool,
+    door: RestartPreflightDoor,
+    principal: &str,
+    capability: &str,
+) -> Result<(), AppError> {
+    let (field, operation_class) = match door {
+        RestartPreflightDoor::Claim => ("claimant", KEEPER_CLAIM_CLASS),
+        RestartPreflightDoor::Verify => ("room", VERIFY_CLASS),
+    };
+    validate_slug(principal, field)?;
+    require_capability(pool, principal, operation_class, capability).await
+}
+
 /// The columns one status row carries. Both reads below project exactly this,
-/// so the receipt cannot depend on which question was asked.
-const STATUS_COLUMNS: &str = "intent_id::text AS intent_id,state,mode,session_id,reason,expires_at,exiting_deadline_at,relaunching_deadline_at";
+/// so the receipt cannot depend on which question was asked. The requesting
+/// process instance travels only as its sha256: a keeper recognizes its own
+/// child's intent, and the read still hands out nothing an arm could use.
+const STATUS_COLUMNS: &str = "i.intent_id::text AS intent_id,i.state,i.mode,i.session_id,i.reason,i.expires_at,i.exiting_deadline_at,i.relaunching_deadline_at,encode(sha256(convert_to(n.requester_instance,'UTF8')),'hex') AS requester_instance_sha256";
+const STATUS_FROM: &str =
+    "restart.intents i LEFT JOIN restart.intent_instances n ON n.intent_id=i.intent_id";
 
 /// Read one intent, and no capability either way: the id this hands out
 /// authorizes nothing (see [`authority`]).
@@ -910,7 +1023,7 @@ pub async fn restart_status(
             // The workspace still scopes the read, so naming an id buys no
             // reach into another workspace's restart.
             sqlx::query(&format!(
-                "SELECT {STATUS_COLUMNS} FROM restart.intents WHERE workspace=$1 AND intent_id=$2::text::uuid"
+                "SELECT {STATUS_COLUMNS} FROM {STATUS_FROM} WHERE i.workspace=$1 AND i.intent_id=$2::text::uuid"
             ))
             .bind(&request.workspace)
             .bind(intent_id)
@@ -919,7 +1032,7 @@ pub async fn restart_status(
         }
         None => {
             sqlx::query(&format!(
-                "SELECT {STATUS_COLUMNS} FROM restart.intents WHERE workspace=$1 AND state = ANY($2) AND (state<>$3 OR expires_at>clock_timestamp()) ORDER BY created_at DESC LIMIT 1"
+                "SELECT {STATUS_COLUMNS} FROM {STATUS_FROM} WHERE i.workspace=$1 AND i.state = ANY($2) AND (i.state<>$3 OR i.expires_at>clock_timestamp()) ORDER BY i.created_at DESC LIMIT 1"
             ))
             .bind(&request.workspace)
             .bind(&live_states()[..])
@@ -948,6 +1061,7 @@ pub async fn restart_status(
             mode: mode_of(&mode)?,
             session_id: row.try_get("session_id")?,
             reason: row.try_get("reason")?,
+            requester_instance_sha256: row.try_get("requester_instance_sha256")?,
             deadlines: RestartStatusDeadlines {
                 expires_at: expires_at.to_rfc3339(),
                 exiting_deadline_at: exiting_deadline_at.map(|at| at.to_rfc3339()),

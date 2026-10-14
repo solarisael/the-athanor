@@ -32,6 +32,39 @@ const SILENCE_RETELL: Duration = Duration::from_secs(60);
 const UNKNOWN_EXIT_CODE: i32 = -1;
 const RESTART_INTENT_ENV: &str = "ATHANOR_RESTART_INTENT_ID";
 const RESTART_SUCCESSOR_PROOF_ENV: &str = "ATHANOR_RESTART_SUCCESSOR_PROOF";
+/// The live instance id of the omp child this keeper started. The adapter
+/// registers itself with the Host under exactly this id, so the restart intent
+/// it arms names this child and no sibling in the same workspace.
+pub(crate) const KEEPER_INSTANCE_ENV: &str = "ATHANOR_KEEPER_INSTANCE_ID";
+
+/// The current child's instance id. One keeper owns one child at a time; a
+/// successor gets a fresh id, so a predecessor's intent never matches it.
+static CHILD_INSTANCE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn mint_child_instance() -> String {
+    let id = uuid::Uuid::new_v4().to_string();
+    *CHILD_INSTANCE.lock().unwrap_or_else(|p| p.into_inner()) = Some(id.clone());
+    id
+}
+
+pub(crate) fn child_instance() -> Option<String> {
+    CHILD_INSTANCE
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
+}
+
+/// Only an intent the keeper's own child requested may end that child.
+fn requested_by_own_child(intent: &RestartStatusIntent) -> bool {
+    use sha2::{Digest, Sha256};
+    match (
+        child_instance(),
+        intent.requester_instance_sha256.as_deref(),
+    ) {
+        (Some(own), Some(digest)) => format!("{:x}", Sha256::digest(own.as_bytes())) == digest,
+        _ => false,
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -140,7 +173,10 @@ pub fn run(config: &KeeperConfig, config_path: &Path) -> Result<Outcome> {
         .with_context(|| format!("hold keeper lock {}", lock_path(config_path).display()))?
     else {
         return Ok(Outcome::Refused {
-            message: format!("another keeper already holds {}", lock_path(config_path).display()),
+            message: format!(
+                "another keeper already holds {}",
+                lock_path(config_path).display()
+            ),
         });
     };
     let control = StopControl::new();
@@ -166,8 +202,12 @@ mod lock_tests {
             "workspace": temp.path(),
             "programRoot": temp.path(),
             "stateRoot": temp.path()
-        })).unwrap();
-        assert!(matches!(run(&config, &config_path).unwrap(), Outcome::Refused { .. }));
+        }))
+        .unwrap();
+        assert!(matches!(
+            run(&config, &config_path).unwrap(),
+            Outcome::Refused { .. }
+        ));
         drop(held);
         assert!(try_hold_lock(&config_path).unwrap().is_some());
     }
@@ -204,7 +244,9 @@ pub fn run_controlled(
             // that cannot be asked right now has not changed its mind, and the
             // House alone decides when the intent is dead: it refuses a lapsed
             // one when asked. So the keeper waits here instead of walking away.
-            until_answered(&mut house, &runtime, |house| ask_status(house, config, None))?
+            until_answered(&mut house, &runtime, |house| {
+                ask_status(house, config, None)
+            })?
         } else {
             match ask_status(&mut house, config, None)? {
                 Answer::Ok(pending) => Heard::Answered(pending),
@@ -231,6 +273,16 @@ pub fn run_controlled(
             }
         };
         let pending = match pending {
+            // A workspace intent another process requested is not this keeper's
+            // to claim: claiming it would relaunch over a sibling's restart.
+            Some(pending) if !requested_by_own_child(&pending) => {
+                house.close()?;
+                println!(
+                    "omp-keeper: intent {} was not requested by this keeper's child; not claiming it",
+                    pending.intent_id
+                );
+                return Ok(ControlledOutcome::Completed(Outcome::Stopped { exit_code }));
+            }
             Some(pending) if status_step(Some(pending.state)) == StatusStep::Claim => pending,
             Some(pending) => {
                 house.close()?;
@@ -822,12 +874,14 @@ fn spawn_omp(
         arguments.extend(["--resume", session_id]);
     }
 
+    let instance = mint_child_instance();
     let child = match runtime.console {
         ConsoleMode::Inherit => {
             let mut command = Command::new(config.program());
             command
                 .env_remove(RESTART_INTENT_ENV)
                 .env_remove(RESTART_SUCCESSOR_PROOF_ENV)
+                .env(KEEPER_INSTANCE_ENV, &instance)
                 .args(&arguments)
                 .current_dir(&config.workspace)
                 .stdin(Stdio::inherit())
@@ -845,6 +899,7 @@ fn spawn_omp(
             command
                 .env_remove(RESTART_INTENT_ENV)
                 .env_remove(RESTART_SUCCESSOR_PROOF_ENV)
+                .env(KEEPER_INSTANCE_ENV, &instance)
                 .args(&arguments)
                 .current_dir(&config.workspace);
             if let Some(restart) = &restart {
@@ -897,7 +952,10 @@ fn watch_child(
         };
         // The intent carries the instant it must be gone by, so the keeper reads
         // that instant instead of timing the stage itself. A keeper that started
-        // after the adapter armed is already late on this first look.
+        // after the adapter armed is already late on this first look. A
+        // workspace match alone is never a target: a sibling session in the
+        // same workspace may own the intent, so only the own child's is read.
+        let watched = watched.filter(requested_by_own_child);
         let state = watched.as_ref().map(|pending| pending.state);
         let exiting_deadline = match watched.as_ref() {
             Some(pending) if pending.state == RestartState::Exiting => Some(deadline(

@@ -28,7 +28,11 @@ pub const KNOCK_MIN_LIFETIME: Duration = Duration::minutes(15);
 
 fn knock_lifetime(max_turns: i16) -> Duration {
     let scaled = KNOCK_TURN_WINDOW * i32::from(max_turns);
-    if scaled > KNOCK_MIN_LIFETIME { scaled } else { KNOCK_MIN_LIFETIME }
+    if scaled > KNOCK_MIN_LIFETIME {
+        scaled
+    } else {
+        KNOCK_MIN_LIFETIME
+    }
 }
 
 // The lease seconds live in a macro because the claim statement splices the

@@ -338,6 +338,28 @@ export function registerSolarisaelTools(pi, release) {
   const z = pi.zod;
 
   registerHouseTool(pi, {
+    name: "orihon",
+    label: "Athanor Orihon",
+    description: "Read bounded provenance records by page, sequence range, or UTC day. Orihon records do not confer memory or canon authority.",
+    parameters: z.object({
+      afterSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("Read after this room sequence."),
+      untilSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("Stop at this room sequence, inclusive."),
+      turnNo: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("Read this room page ordinal."),
+      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Read this UTC source day, YYYY-MM-DD."),
+      limit: z.number().int().min(1).max(200).optional().describe("Maximum rows; the Host defaults to 50."),
+    }),
+    approval: "read",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "orihon", params, signal, false);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
     name: "recall",
     label: "Athanor Recall",
     description: [

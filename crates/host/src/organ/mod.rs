@@ -1,4 +1,5 @@
 mod giga;
+pub(crate) mod orihon;
 mod worker_lifecycle;
 pub(crate) use giga::{GigaRoomWorker, serve as serve_giga};
 
@@ -46,6 +47,12 @@ pub(crate) async fn call(
         }
     };
     let host = &bound;
+    if matches!(
+        request.operation,
+        OrganOperation::Orihon | OrganOperation::OrihonCapture | OrganOperation::OrihonMode
+    ) {
+        return orihon::call(host, pool, meta, request).await;
+    }
     if request.operation == OrganOperation::GigaSetEnablement {
         if request.target_scope != protocol::organ::OrganTargetScope::Room {
             return ResponsePayload::Error {

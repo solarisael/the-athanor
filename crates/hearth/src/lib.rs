@@ -1,7 +1,7 @@
 //! Pure domain rules shared by Athanor concerns.
 
 /// Head of `substrate/migrations/`.
-pub const SUBSTRATE_SCHEMA_VERSION: u32 = 36;
+pub const SUBSTRATE_SCHEMA_VERSION: u32 = 37;
 
 pub mod authority;
 pub mod backup;
@@ -15,6 +15,7 @@ pub mod hallway;
 pub mod lesson_triggers;
 pub mod lineage;
 pub mod operator;
+pub mod orihon;
 pub mod recall;
 pub mod remember;
 pub mod room;

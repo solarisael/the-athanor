@@ -122,11 +122,12 @@ would decide them.
 ### Organs
 
 Organs are named tools of a House.
-The OMP adapter registers 43 public tools for memory, lessons, continuity, counsel, routing, design, GIGA, configuration, Hallway, Docket, and restart.
+The OMP adapter registers public tools for memory, lessons, continuity, counsel, routing, design, GIGA, configuration, Hallway, Docket, restart, and Orihon.
 House operations use the native Host.
 Local lineage status remains an adapter observation.
 [Architecture](./ARCHITECTURE.md#4-the-omp-adapter) describes the boundary.
 An organ is not an autonomous agent.
+Orihon reads the room book. Its records preserve provenance; they do not confer memory or canon authority.
 
 An absent Host prevents House tool operations.
 The adapter does not fall back to substrate children.

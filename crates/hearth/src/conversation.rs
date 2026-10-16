@@ -149,7 +149,10 @@ fn join_path(base: &str, tail: &str) -> String {
 }
 
 pub fn transcript_path(room_dir: &str, date_stamp: &str) -> String {
-    join_path(room_dir, &format!("conversation_log_{date_stamp}.md"))
+    join_path(
+        room_dir,
+        &format!("{}/{date_stamp}.md", crate::orihon::DIRECTORY),
+    )
 }
 
 pub fn transcript_debug_path(room_dir: &str) -> String {

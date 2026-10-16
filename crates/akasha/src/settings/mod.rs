@@ -125,6 +125,8 @@ impl RoomSettings {
                 "backup_keep_count" => settings.backup_keep_count = decode(value)?,
                 "house_language" => settings.house_language = decode(value)?,
                 "house_tz" => settings.house_tz = decode(value)?,
+                // The Host owns recording state, separate from retrieval settings.
+                "orihon" => {}
                 _ => return Err(decode_error(format!("unknown room setting key {key}"))),
             }
         }

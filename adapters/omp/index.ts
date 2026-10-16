@@ -46,6 +46,7 @@ import {
   roomBinding,
 } from "./house-proof/room.ts";
 import { installPortableSession, onAttachmentChanged } from "./house-proof/session.ts";
+import { installOrihon } from "./house-proof/orihon/index.ts";
 import { conversationText, messageText } from "./house-proof/text.ts";
 import { anchorTurnAdditions, currentTurnOrigin, turnKeysByMessage } from "./house-proof/turn-origin.ts";
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
@@ -346,6 +347,7 @@ export default function solarisaelHouseProof(pi, release) {
   // First, so every later session hook resolves the conversation's restored
   // home instead of racing its attachment.
   installPortableSession(pi, release);
+  installOrihon(pi);
   registerSubagentRecallProtocol(pi);
   const lessonTtsrInstallWarning = installLessonTtsrBridge(pi);
   const semanticJudgmentShadow = installSemanticJudgmentShadow(pi);

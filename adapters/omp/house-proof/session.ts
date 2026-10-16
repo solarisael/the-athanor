@@ -182,11 +182,18 @@ function retireInstance(room: string, instanceId: string): void {
 
 type ChangeListener = (ctx: any) => unknown;
 const changeListeners = new WeakMap<object, ChangeListener[]>();
+const shutdownDetachListeners = new WeakMap<object, ChangeListener[]>();
 
 export function onAttachmentChanged(pi: any, listener: ChangeListener): void {
   const listeners = changeListeners.get(pi) ?? [];
   listeners.push(listener);
   changeListeners.set(pi, listeners);
+}
+
+export function onBeforeShutdownDetach(pi: any, listener: ChangeListener): void {
+  const listeners = shutdownDetachListeners.get(pi) ?? [];
+  listeners.push(listener);
+  shutdownDetachListeners.set(pi, listeners);
 }
 
 async function announceChange(pi: any, ctx: any): Promise<void> {
@@ -907,6 +914,13 @@ export function installPortableSession(pi: any, release?: { rooms?: ReleaseRooms
     if (!sessionAttachment(ctx) || runtime.key !== conversationKey(ctx)) await restore(runtime, ctx);
   });
   pi.on("session_shutdown", async (_event: unknown, ctx: any) => {
+    for (const listener of shutdownDetachListeners.get(pi) ?? []) {
+      try {
+        await listener(ctx);
+      } catch (error) {
+        console.warn(`[athanor] pre-shutdown detach listener failed: ${message(error)}`);
+      }
+    }
     if (isSubagent(ctx)) return;
     stopTimers(runtime);
     const attachment = runtime.key ? attachments.get(runtime.key) : null;

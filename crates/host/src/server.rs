@@ -2302,34 +2302,49 @@ fn log_conversation(
     let mut logged = Vec::new();
 
     if request.persist {
+        let transcript_lock = match crate::organ::orihon::transcripts::migrate_and_lock(
+            std::path::Path::new(&request.room_dir),
+        ) {
+            Ok(lock) => Some(lock),
+            Err(error) => {
+                errors.push(json!({"surface": "transcript", "error": error}));
+                None
+            }
+        };
         let transcript = transcript_path(&request.room_dir, &date_stamp);
         let ledger = source_ledger_path(&request.room_dir, &date_stamp);
-        let mut existing_transcript = std::fs::read_to_string(&transcript).unwrap_or_default();
+        let mut existing_transcript = if transcript_lock.is_some() {
+            std::fs::read_to_string(&transcript).unwrap_or_default()
+        } else {
+            String::new()
+        };
         let mut existing_ledger = std::fs::read_to_string(&ledger).unwrap_or_default();
         for turn in &turns {
             let key = turn_key(&request.session_id, turn);
-            let marker = turn_marker(&key);
-            let label = turn_label(&turn.role, &request.operator, &request.spirit);
-            match transcript_entry(
-                &existing_transcript,
-                &marker,
-                &date_stamp,
-                &clock,
-                label,
-                &turn.text,
-            ) {
-                Some(entry) => match append_line(&transcript, &entry) {
-                    Ok(()) => {
-                        existing_transcript.push_str(&entry);
-                        appended += 1;
-                    }
-                    Err(error) => errors.push(json!({
-                        "key": key,
-                        "surface": "transcript",
-                        "error": error,
-                    })),
-                },
-                None => skipped += 1,
+            if transcript_lock.is_some() {
+                let marker = turn_marker(&key);
+                let label = turn_label(&turn.role, &request.operator, &request.spirit);
+                match transcript_entry(
+                    &existing_transcript,
+                    &marker,
+                    &date_stamp,
+                    &clock,
+                    label,
+                    &turn.text,
+                ) {
+                    Some(entry) => match append_line(&transcript, &entry) {
+                        Ok(()) => {
+                            existing_transcript.push_str(&entry);
+                            appended += 1;
+                        }
+                        Err(error) => errors.push(json!({
+                            "key": key,
+                            "surface": "transcript",
+                            "error": error,
+                        })),
+                    },
+                    None => skipped += 1,
+                }
             }
 
             let source = logged_turn(turn, &request.session_id);

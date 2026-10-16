@@ -324,6 +324,43 @@ The Host and OMP adapter provide these parts:
 
 Use explicit recall for load-bearing old decisions, names, promises, corrections, or important memories.
 
+## Orihon: the room book
+
+Orihon records visible user messages, replies, tool calls, tool results, and attributed reports.
+Recording starts in `log` mode by default. An explicit `off` setting persists.
+Use `/orihon status` to see the mode, generation, baseline, and checkpoint.
+Use `/orihon off` to stop new book records.
+Use `/orihon log` to start a new recording generation after `off`.
+
+Each session starts the new generation at its next user page and shows a notice.
+Orihon does not import earlier history or records from an off interval.
+A normal restart keeps the existing generation and resumes from its accepted checkpoint.
+Capture failures show a warning. Ordinary work continues.
+The adapter retries from the retained harness log.
+A missing source remains an explicit gap.
+
+Use the read-only `orihon` tool to read a page, sequence range, or UTC source day.
+Reads return at most 200 records and a continuation cursor.
+The book is provenance. A row records what was said, not what is true.
+Canon and memory outrank the book.
+The navigator and generative folds are not implemented.
+
+AKASHA stores accepted rows in PostgreSQL and exports exact rows to `<room>/orihon/YYYY-MM-DD.jsonl`.
+Vault uses those daily files as its durable book.
+The Host never switches stores after a failure.
+Credential-pattern redaction precedes storage. Arbitrary unmarked secrets are not guaranteed to match those patterns.
+Echoes retain their head and tail within 30,000 Unicode characters.
+Non-echo text is limited to 1 MiB. Prepared batches are limited to 4 MiB.
+Worker sessions and `ATHANOR_REPLAY_MODE=1` do not create book records.
+
+OMP capture excludes model thoughts, injected context, images, and external artifact expansion.
+Tool attempts refused before OMP dispatches `tool_call` are unavailable to this observer.
+OMP retains its own source log; Orihon does not promise power-loss durability for that source.
+The existing Markdown transcript moves to `<room>/orihon/YYYY-MM-DD.md` on its next write.
+Migration preserves bytes and turn markers. A destination conflict preserves both files and refuses the write.
+Orihon mode does not disable the harness log or the existing Markdown transcript.
+
+
 ## Tools and the Host
 
 The adapter registers the public tool families below.
@@ -344,6 +381,7 @@ The adapter does not start substrate children or provide a fallback when the Hos
 | Restart | `request_restart` | Native authorization; OMP performs the exit |
 | Local observation | `kitten_lineage_status` | Adapter process |
 | Workers | `worker_notebook` | Host; PostgreSQL or a Vault runtime journal |
+| Room book | `orihon` | Host; PostgreSQL or a Vault book |
 
 GIGA capture and classification remain opt-in.
 The Host receives explicit enablement from the top-level harness session.

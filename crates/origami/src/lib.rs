@@ -6,4 +6,5 @@
 pub mod boats;
 pub mod cranes;
 pub mod hallways;
+pub mod orihon;
 pub mod sea;

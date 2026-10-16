@@ -38,6 +38,9 @@ pub enum OrganOperation {
     RestartVerify,
     RestartStatus,
     WorkerLifecycle,
+    Orihon,
+    OrihonCapture,
+    OrihonMode,
     GigaSetEnablement,
     GigaConversationIngest,
     GigaCandidateList,
@@ -102,6 +105,9 @@ impl OrganOperation {
             Self::RestartVerify => "restart_verify",
             Self::RestartStatus => "restart_status",
             Self::WorkerLifecycle => "worker_lifecycle",
+            Self::Orihon => "orihon",
+            Self::OrihonCapture => "orihon_capture",
+            Self::OrihonMode => "orihon_mode",
             Self::GigaSetEnablement => "giga_set_enablement",
             Self::GigaConversationIngest => "giga_conversation_ingest",
             Self::GigaCandidateList => "giga_candidate_list",
@@ -126,6 +132,7 @@ impl OrganOperation {
                 | Self::DesignDocumentQuery
                 | Self::EntityResolve
                 | Self::HallwayInbox
+                | Self::Orihon
                 | Self::GigaCandidateList
                 | Self::GigaHealth
                 | Self::SubstrateHealth

@@ -11,6 +11,7 @@ export type OrganOperation =
   | "restart_request" | "restart_transition" | "restart_verify" | "restart_status"
   | "giga_set_enablement" | "giga_conversation_ingest" | "giga_candidate_list" | "giga_tool_review" | "giga_tool_promote"
   | "giga_health" | "giga_queue_maintenance" | "substrate_health"
+  | "orihon" | "orihon_capture" | "orihon_mode"
   | "worker_lifecycle";
 
 export class OrganError extends Error {

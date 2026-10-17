@@ -81,6 +81,33 @@ The proxies expose only `status`, `command`, and `commandStatus` through `/live/
 They refuse attachment, delivery-owner changes, resource writes, and harness acknowledgments through that route.
 The existing Host validates command targets, payloads, capabilities, and retry identity.
 
+## Continuity actions
+
+The Direct composer exposes Record memory, Fold paper boat, and Stop.
+The Direct Memories header also exposes Record memory.
+Stop opens the existing exact-session interrupt review.
+An accepted command does not prove that the session stopped.
+
+Memory and boat actions offer Ask spirit and Write myself.
+Ask spirit requires an exact session, an editable request, and separate confirmation.
+The session command receipt proves delivery state, not a durable write.
+The spirit uses its existing tools and returns its own durable receipt.
+The boat request does not invoke `/handoff`.
+
+Write myself reads `/live/continuity/status` before review.
+The operator reviews the exact text, author, room, and consequence.
+Confirmation sends `/live/continuity/write` with the reviewed `expectedOperator`.
+The Host refuses a changed operator before it writes.
+The Host derives authorship from the room store and visibility from its optional configured operator key.
+It accepts only memory and paper-boat writes through this route.
+
+The native transaction stores the unchanged body and operator authorship.
+The interface requires a canonical durable receipt before it shows success.
+Exact boat repeats reuse their existing record and report that result.
+Manual boats do not close Presence, compact a session, or request a backup.
+Wake identifies an operator-authored handoff separately from previous-spirit continuity.
+Failures retain the draft. Closing a pending dialog does not cancel its write.
+
 ## Record boundaries
 
 House memories explicitly use the `house` scope.

@@ -326,7 +326,7 @@ export function accountStateRows() {
   if (round.status === "live") {
     const health = round.health;
     return [
-      { label: "Surface", value: "Live reads · chat writes only" },
+      { label: "Surface", value: "Live Host connection" },
       { label: "Host", value: `${health.status} · ${hostRoom(health)} room` },
       { label: "Persistence", value: persistenceValue(health.insula) }
     ];

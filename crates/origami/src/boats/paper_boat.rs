@@ -1,4 +1,4 @@
-use hearth::{Authority, BackupOutcome, DomainError, RoomKey};
+use hearth::{Authority, BackupOutcome, DomainError, OperatorKey, RoomKey};
 
 pub const PAPER_BOAT_MAX_BODY_BYTES: usize = 64 * 1024;
 pub const PAPER_BOAT_MAX_UNBOATED: usize = 64;
@@ -8,6 +8,8 @@ pub struct PaperBoatSleepRequest {
     room: RoomKey,
     body: String,
     backup: bool,
+    author: Option<String>,
+    operator: Option<OperatorKey>,
 }
 
 impl PaperBoatSleepRequest {
@@ -25,7 +27,37 @@ impl PaperBoatSleepRequest {
                 message: format!("must be at most {PAPER_BOAT_MAX_BODY_BYTES} UTF-8 bytes"),
             });
         }
-        Ok(Self { room, body, backup })
+        Ok(Self {
+            room,
+            body,
+            backup,
+            author: None,
+            operator: None,
+        })
+    }
+
+    pub fn authored_by_operator(
+        mut self,
+        author: String,
+        operator: Option<OperatorKey>,
+    ) -> Result<Self, DomainError> {
+        if author.trim().is_empty() {
+            return Err(DomainError::InvalidPaperBoat {
+                field: "author".into(),
+                message: "must not be empty".into(),
+            });
+        }
+        self.author = Some(author);
+        self.operator = operator;
+        Ok(self)
+    }
+
+    pub fn author(&self) -> Option<&str> {
+        self.author.as_deref()
+    }
+
+    pub fn operator(&self) -> Option<&OperatorKey> {
+        self.operator.as_ref()
     }
 
     pub fn room(&self) -> &RoomKey {
@@ -152,6 +184,12 @@ pub struct UnboatedMemory {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum PaperBoatAuthor {
+    Operator { name: String },
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PaperBoatRecord {
     pub id: u64,
@@ -160,6 +198,7 @@ pub struct PaperBoatRecord {
     pub date: Option<String>,
     pub source_path: String,
     pub created_at: String,
+    pub author: Option<PaperBoatAuthor>,
     pub unboated: Vec<UnboatedMemory>,
     pub unboated_truncated: bool,
 }
@@ -182,6 +221,14 @@ impl PaperBoatWakeReceipt {
                 return Err(DomainError::InvalidPaperBoat {
                     field: "record".into(),
                     message: "requires a positive ID and non-empty body".into(),
+                });
+            }
+            if let Some(PaperBoatAuthor::Operator { name }) = &boat.author
+                && name.trim().is_empty()
+            {
+                return Err(DomainError::InvalidPaperBoat {
+                    field: "author".into(),
+                    message: "must not be empty".into(),
                 });
             }
             if boat.unboated.len() > PAPER_BOAT_MAX_UNBOATED {

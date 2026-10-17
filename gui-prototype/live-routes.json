@@ -14,5 +14,7 @@
   "/live/lesson/timeline": { "path": "/athanor/v1/lesson/timeline", "method": "POST" },
   "/live/chat/snapshot": { "path": "/athanor/v1/chat/snapshot", "method": "POST" },
   "/live/chat/say": { "path": "/athanor/v1/chat/say", "method": "POST" },
+  "/live/continuity/status": { "path": "/athanor/v1/continuity/status", "method": "POST" },
+  "/live/continuity/write": { "path": "/athanor/v1/continuity/write", "method": "POST" },
   "/live/room/state": { "path": "/athanor/v1/room/state", "method": "POST" }
 }

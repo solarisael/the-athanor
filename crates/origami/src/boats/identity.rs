@@ -25,6 +25,19 @@ pub fn source_identity(room: &str, body: &str) -> String {
     )
 }
 
+pub fn operator_source_identity(room: &str, author: &str, body: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"operator-authored-paper-boat\0");
+    for field in [room, author, body] {
+        digest.update((field.len() as u64).to_be_bytes());
+        digest.update(field.as_bytes());
+    }
+    format!(
+        "{SOURCE_PATH_PREFIX}{:x}{SOURCE_PATH_SUFFIX}",
+        digest.finalize()
+    )
+}
+
 pub fn digest_of(source_path: &str) -> Option<&str> {
     source_path
         .strip_prefix(SOURCE_PATH_PREFIX)

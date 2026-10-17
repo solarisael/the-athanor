@@ -4801,3 +4801,96 @@ input:focus-visible {
     transition-duration: 0s !important;
   }
 }
+
+.continuity-dialog {
+  width: min(44rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  padding: 1rem;
+
+  border: 1px solid var(--bd-region);
+  border-radius: .5rem;
+  background: var(--bg-shell);
+  color: var(--fg-main);
+
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.continuity-dialog::backdrop {
+  background: var(--bg-root);
+  opacity: .8;
+}
+
+.continuity-heading,
+.continuity-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+
+  gap: .5rem;
+}
+
+.continuity-dialog .settings-group {
+  min-width: 0;
+  margin: 1rem 0;
+}
+
+.continuity-dialog :is(input, textarea, select) {
+  width: 100%;
+  min-width: 0;
+  padding: .5rem;
+
+  border: 1px solid var(--bd-settings-control);
+  border-radius: .25rem;
+  background: var(--bg-settings-control);
+  color: var(--fg-main);
+}
+
+.continuity-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.continuity-dialog :is(dd, code) {
+  min-width: 0;
+  margin-inline-start: 0;
+  overflow-wrap: anywhere;
+}
+
+.continuity-dialog [data-continuity-action="confirm"] {
+  padding: .75rem 1rem;
+
+  font-weight: 600;
+
+  border: 2px solid var(--bd-composer-send);
+  border-radius: .25rem;
+  background: var(--bg-composer-send);
+  color: var(--fg-inv);
+}
+
+.continuity-dialog button[aria-pressed="true"] {
+  border-width: 2px;
+  font-weight: 600;
+}
+
+.continuity-dialog button:disabled,
+.composer-tool:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.composer-actions .composer-tool {
+  border-color: var(--bd-control);
+  background: var(--bg-clear);
+  color: var(--fg-soft);
+}
+
+.composer-actions,
+.composer-buttons {
+  flex-wrap: wrap;
+}
+
+.composer-buttons {
+  min-width: 0;
+}

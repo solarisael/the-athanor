@@ -1,6 +1,7 @@
 import { escapeHtml } from "./text.js";
 import { initRepair, queryRepairStatus, startRepair, renderRepair } from "./repair.js";
 import { initSessions, ensureSessionsQueried, renderSessions, handleSessionsClick, handleSessionsChange } from "./sessions/index.js";
+import { initContinuity, continuityOpen, openContinuity, renderContinuity } from "./continuity/index.js";
 import { readPreferences, writePreferences } from "./preferences/index.js";
 import { renderMarkdown } from "./markdown.js";
 import { renderDirectStatus } from "./mechanics-live.js";
@@ -50,7 +51,7 @@ conversations.house = {
 // authority rather than anything the Host reports.
 const ABOUT_STATUS = [
   "About this surface",
-  "This local surface reads Host records and sends operator chat and explicitly confirmed session controls. Memories and lessons remain read-only."
+  "This local surface reads Host records and sends operator chat and confirmed session controls. It offers spirit requests and confirmed operator-authored memories and boats when the Host supports them. Lessons remain read-only."
 ];
 const modeLabels = {
   direct: "Direct messages",
@@ -481,6 +482,10 @@ function updateComposerState() {
   input.placeholder = item.kind === "direct" ? messageLabel : canParticipate ? "Write a message" : "Watching only";
   sendButton.disabled = !canParticipate || !hasText;
   clearButton.hidden = !canParticipate || !hasText;
+  composer.querySelectorAll("[data-continuity-open]").forEach(button => {
+    button.disabled = !canParticipate;
+    button.title = blockedReason ?? "";
+  });
   const refusal = blockedReason ?? (liveChat ? chat.refusal : null);
   sendRefusal.textContent = refusal ?? "";
   sendRefusal.hidden = refusal === null;
@@ -863,7 +868,10 @@ function renderHeaderContext(item) {
     if (item.kind === "hallway") return renderHeaderChip("Read-only Host queries");
     return renderHeaderChip(projectWorkState());
   }
-  if (item.kind === "direct") return renderHeaderChip("Memories · read-only");
+  if (item.kind === "direct") {
+    const reason = composerBlockReason(item);
+    return `<div><button type="button" class="header-verb" data-continuity-open="memory" ${reason ? "disabled" : ""}>Record memory</button>${reason ? `<p role="status">${escapeHtml(reason)}</p>` : ""}</div>`;
+  }
   if (item.kind === "hallway") return renderHeaderChip("Read-only Hallway record");
   if (item.kind === "project") return renderHeaderChip("Docket receipts · read-only");
   return renderHeaderChip(houseRecordLine());
@@ -1401,6 +1409,7 @@ function render() {
   if (state.switcherOpen) renderSwitcher();
   syncChatPanel(item, state.activeView);
   updateComposerState();
+  renderContinuity();
   syncMobileSidebarAccessibility();
   syncMemberDockAccessibility();
   window.requestAnimationFrame(() => revealActiveViewButton(activeViewButton));
@@ -1430,6 +1439,10 @@ function toggleHouse() {
 
 
 houseDoor.addEventListener("click", toggleHouse);
+document.addEventListener("click", event => {
+  const button = event.target.closest("[data-continuity-open]");
+  if (button && !button.disabled) openContinuity(button.dataset.continuityOpen, button);
+});
 conversationList.addEventListener("click", event => {
   const button = event.target.closest("[data-conversation]");
   if (button) openConversation(button.dataset.conversation);
@@ -1637,7 +1650,7 @@ clearButton.addEventListener("click", () => {
 
 
 document.addEventListener("keydown", event => {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.code !== "Space") return;
+  if (continuityOpen() || !(event.ctrlKey || event.metaKey) || event.altKey || event.code !== "Space") return;
   event.preventDefault();
   if (state.switcherOpen) closeSwitcher();
   else openSwitcher();
@@ -1716,7 +1729,7 @@ bellLayer.addEventListener("keydown", event => {
 });
 
 document.addEventListener("keydown", event => {
-  if (state.bellOpen || event.ctrlKey || event.metaKey || event.altKey || event.target.matches("input, textarea, select")) return;
+  if (continuityOpen() || state.bellOpen || event.ctrlKey || event.metaKey || event.altKey || event.target.matches("input, textarea, select")) return;
   const view = SUBJECT_VIEWS[Number(event.key) - 1];
   if (!view) return;
   event.preventDefault();
@@ -1726,7 +1739,7 @@ document.addEventListener("keydown", event => {
 const MODE_ORDER = ["direct", "hallway", "project"];
 
 document.addEventListener("keydown", event => {
-  if (state.bellOpen || !(event.ctrlKey || event.metaKey) || event.altKey || event.target.matches("input, textarea, select")) return;
+  if (continuityOpen() || state.bellOpen || !(event.ctrlKey || event.metaKey) || event.altKey || event.target.matches("input, textarea, select")) return;
   if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
     const target = MODE_ORDER[MODE_ORDER.indexOf(state.mode) + (event.key === "ArrowRight" ? 1 : -1)];
     if (!target) return;
@@ -1805,7 +1818,7 @@ document.querySelectorAll("[data-setting]").forEach(control => {
 });
 
 document.addEventListener("keydown", event => {
-  if (event.key !== "Escape") return;
+  if (continuityOpen() || event.key !== "Escape") return;
   if (state.bellOpen) {
     event.preventDefault();
     closeBell();
@@ -1960,6 +1973,14 @@ initMechanics({ timeline });
 initHealth({ requestRender: render });
 initRepair({ requestRender: render });
 initSessions({ requestRender: render });
+initContinuity({
+  requestRender: render,
+  blockReason: () => composerBlockReason(conversations[state.activeId]),
+  openShelf: () => {
+    openSubjectView("durable");
+    focusActiveSubjectView();
+  }
+});
 document.querySelector("[data-repair-banner]").addEventListener("click", event => {
   const button = event.target.closest("[data-repair]");
   if (!button) return;

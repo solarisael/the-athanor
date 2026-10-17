@@ -1,5 +1,6 @@
 use super::paper_boat::{
-    PAPER_BOAT_MAX_BODY_BYTES, PAPER_BOAT_MAX_UNBOATED, PaperBoatRecord, UnboatedMemory,
+    PAPER_BOAT_MAX_BODY_BYTES, PAPER_BOAT_MAX_UNBOATED, PaperBoatAuthor, PaperBoatRecord,
+    UnboatedMemory,
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::{PgPool, Row};
@@ -20,7 +21,7 @@ pub struct WokenBoat {
 
 pub async fn wake(pool: &PgPool, room: &str) -> BoatResult<WokenBoat> {
     let row = sqlx::query(
-        "SELECT id,title,body,date,source_path,created_at
+        "SELECT id,title,body,date,source_path,created_at,meta->'author' AS author
          FROM memories
          WHERE room=$1 AND type=$2
          ORDER BY created_at DESC,id DESC
@@ -58,6 +59,13 @@ pub async fn wake(pool: &PgPool, room: &str) -> BoatResult<WokenBoat> {
     let title: Option<String> = row.try_get("title")?;
     let date: Option<NaiveDate> = row.try_get("date")?;
     let source_path: String = row.try_get("source_path")?;
+    let author = row
+        .try_get::<Option<serde_json::Value>, _>("author")?
+        .map(serde_json::from_value::<PaperBoatAuthor>)
+        .transpose()
+        .map_err(|_| {
+            super::error::BoatError::Invalid("paper boat author metadata is invalid".into())
+        })?;
     Ok(WokenBoat {
         boat: Some(PaperBoatRecord {
             id: positive_id(id)?,
@@ -66,6 +74,7 @@ pub async fn wake(pool: &PgPool, room: &str) -> BoatResult<WokenBoat> {
             date: date.map(|value| value.to_string()),
             source_path: bounded_utf8(&source_path, MAX_SOURCE_PATH_BYTES).0,
             created_at: created_at.to_rfc3339(),
+            author,
             unboated,
             unboated_truncated,
         }),

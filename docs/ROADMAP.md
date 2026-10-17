@@ -152,6 +152,8 @@ Vault does not need NATS.
 State: Partly built. The connected web cutover uses existing capabilities across all 18 screen families.
 Both proxies support configured room selection and bounded session controls.
 The interface removes fixture records and preserves explicit unavailable states.
+Direct continuity actions support exact-session spirit requests and confirmed operator-authored memory and paper-boat writes.
+The new write routes require the updated Host. Source implementation does not establish installed availability.
 See the [screen inventory](../gui-prototype/NAVIGATION_MAP.md).
 
 Remaining capabilities:
@@ -159,7 +161,7 @@ Remaining capabilities:
 - Session creation and a persistent conversation-history selector.
 - Operator-authored Hallway posts, acknowledgments, thread selection, seals, folds, and live presence.
 - Typed configuration snapshots and bounded setting mutations.
-- Durable memory writes, full lesson-body reads, and canon editing.
+- Full lesson-body reads, canon editing, and durable correction workflows.
 - GIGA review and worker lineage views.
 - Docket writes and project involvement controls.
 - Login and person-scoped authorization beyond the existing local bearer boundary.

@@ -15,6 +15,25 @@ let proposal = null;
 let notice = "";
 let submitting = false;
 const receipts = new Map();
+let workflow = null;
+
+export function beginSessionWorkflow(kind, text = "") {
+  workflow = { kind };
+  selection = null;
+  draft = { ...emptyDraft(), text };
+  proposal = null;
+  notice = "";
+  void queryStatus();
+}
+
+export function endSessionWorkflow() {
+  workflow = null;
+  proposal = null;
+}
+
+export function sessionWorkflowText() {
+  return draft.text;
+}
 
 export function initSessions(options) {
   requestRender = options.requestRender;
@@ -24,7 +43,9 @@ export function ensureSessionsQueried() {
   if (round.status === "idle") return queryStatus();
 }
 
-export function renderSessions() {
+export function renderSessions({ inWorkflow = false, blockedReason = null } = {}) {
+  if (workflow && !inWorkflow) return "";
+  if (workflow && inWorkflow) workflow.blockedReason = blockedReason;
   const pending = round.status === "pending";
   const session = selectedSession();
   return `<section class="mechanics-observatory" data-sessions-surface aria-labelledby="sessions-title">
@@ -70,7 +91,7 @@ export function handleSessionsChange(event) {
   if (field.matches("[data-session-select]")) {
     const session = round.status === "live" ? round.data.sessions.find(row => row.instanceId === field.value) : null;
     selection = session ? { instanceId: session.instanceId, conversationId: session.conversationId } : null;
-    draft = emptyDraft();
+    if (!workflow) draft = emptyDraft();
     proposal = null;
     notice = "";
     requestRender();
@@ -102,7 +123,7 @@ async function queryStatus() {
     round = { status: "live", data, queriedAt: new Date().toISOString() };
     if (selection && !selectedSession()) {
       selection = null;
-      draft = emptyDraft();
+      if (!workflow) draft = emptyDraft();
       notice = "The selected instance and conversation are no longer registered. Select a target again.";
     }
   } catch (error) {
@@ -134,8 +155,9 @@ function renderSelection() {
 }
 
 function renderTarget(session) {
-  const controls = availableControls(session);
-  const unavailable = CONTROLS.filter(kind => !controls.includes(kind));
+  const offered = availableControls(session);
+  const controls = workflow ? offered.filter(kind => kind === workflow.kind) : offered;
+  const unavailable = (workflow ? [workflow.kind] : CONTROLS).filter(kind => !controls.includes(kind));
   return `<section class="settings-group" aria-labelledby="session-target-title">
     <h3 id="session-target-title">Selected target</h3>
     <dl>
@@ -170,12 +192,14 @@ function renderTarget(session) {
         ${option("resume", "Resume the saved conversation", draft.restartMode)}${option("fresh", "Start a fresh conversation", draft.restartMode)}
       </select>
     </label>` : ""}
-    <div class="mechanics-snapshot-status">${controls.map(kind => `<button type="button" id="session-propose-${kind}" class="card-verb" data-session-action="propose" data-session-kind="${kind}" aria-disabled="${submitting}">Review ${LABELS[kind].toLowerCase()}</button>`).join("")}</div>
+    <div class="mechanics-snapshot-status">${controls.map(kind => `<button type="button" id="session-propose-${kind}" class="card-verb" data-session-action="propose" data-session-kind="${kind}" aria-disabled="${submitting || Boolean(workflow?.blockedReason)}">Review ${LABELS[kind].toLowerCase()}</button>`).join("")}</div>
+    ${workflow?.kind === "deliver" ? "<p>Delivery requests a spirit action. A command receipt is not a durable memory or paper-boat receipt.</p>" : ""}
     ${submitting ? "<p role=\"status\">A command request is in flight. Wait for its receipt before another command.</p>" : ""}
   </section>`;
 }
 
 function propose(kind) {
+  if (workflow && kind !== workflow.kind) return;
   const session = selectedSession();
   notice = "";
   proposal = null;
@@ -192,7 +216,7 @@ function propose(kind) {
 }
 
 function renderConfirmation() {
-  const disabled = submitting || typeof globalThis.crypto?.randomUUID !== "function";
+  const disabled = submitting || Boolean(workflow?.blockedReason) || typeof globalThis.crypto?.randomUUID !== "function";
   return `<section class="settings-group" id="session-confirmation" aria-labelledby="session-confirm-title" data-session-confirm tabindex="-1">
     <h3 id="session-confirm-title">Confirm ${escapeHtml(LABELS[proposal.kind].toLowerCase())}</h3>
     <p class="sediment-authority">${escapeHtml(effect(proposal))}</p>
@@ -202,7 +226,7 @@ function renderConfirmation() {
     <p>This confirmation sends one command to this instance and conversation.</p>
     <button type="button" id="session-cancel" class="card-verb" data-session-action="cancel">Cancel proposal</button>
     <button type="button" id="session-confirm" class="card-verb" data-session-action="confirm" aria-disabled="${disabled}">Confirm ${escapeHtml(LABELS[proposal.kind].toLowerCase())} for this exact target</button>
-    ${disabled ? "<p>Confirmation is unavailable while sending or without secure command ID support.</p>" : ""}
+    ${disabled ? `<p>${escapeHtml(workflow?.blockedReason || "Confirmation is unavailable while sending or without secure command ID support.")}</p>` : ""}
   </section>`;
 }
 
@@ -219,7 +243,7 @@ async function confirmCommand() {
 
   const command = proposal;
   const commandId = globalThis.crypto.randomUUID();
-  const receipt = { ...command, commandId, state: "requesting", checking: false };
+  const receipt = { ...command, commandId, state: "requesting", checking: false, continuityRequest: workflow?.kind === "deliver" };
   receipts.set(commandId, receipt);
   proposal = null;
   submitting = true;
@@ -283,6 +307,7 @@ function renderReceipts() {
       return `<article class="settings-group" id="session-receipt-${escapeHtml(receipt.commandId)}" tabindex="-1">
         <h4>${escapeHtml(LABELS[receipt.kind])} · ${escapeHtml(receipt.state)}</h4>
         <p role="status">${pending ? "Pending Host receipt" : terminal ? "Terminal Host receipt" : "Request outcome"}: ${escapeHtml(receipt.state)}</p>
+        ${receipt.continuityRequest ? "<p>Delivery receipt only. Check the selected conversation for the spirit's durable receipt.</p>" : ""}
         ${receipt.state === "receiptUnconfirmed" ? "<p>The command may have reached the Host. Check this command ID. No command is sent again automatically.</p>" : ""}
         ${receipt.state === "outcomeUnknown" ? "<p>The Host cannot establish the command outcome. This receipt does not prove that no effect occurred.</p>" : ""}
         <dl><dt>Command</dt><dd><code>${escapeHtml(receipt.commandId)}</code></dd>

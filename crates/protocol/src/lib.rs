@@ -39,7 +39,7 @@ use std::fmt;
 use summoning::{
     AnamnesisActivation, AnamnesisAddDetails, AnamnesisAddRequest, AnamnesisAppendReceipt,
     AnamnesisAppendRequest, AnamnesisFidelity, AnamnesisKind, AnamnesisReadMode,
-    AnamnesisReadRequest, AnamnesisReceipt, AnamnesisSeedRep, PaperBoatRecord,
+    AnamnesisReadRequest, AnamnesisReceipt, AnamnesisSeedRep, PaperBoatAuthor, PaperBoatRecord,
     PaperBoatSleepReceipt, PaperBoatSleepRequest, PaperBoatWakeReceipt, PaperBoatWakeRequest,
     UnboatedMemory,
 };
@@ -2245,6 +2245,8 @@ pub struct PaperBoatWakeResult {
     pub date: Option<String>,
     pub source_path: Option<String>,
     pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<PaperBoatAuthor>,
     pub unboated: Vec<PaperBoatUnboatedResult>,
     pub unboated_truncated: bool,
     pub warnings: Vec<String>,
@@ -2269,6 +2271,7 @@ fn wake_context(
     title: &str,
     source_path: &str,
     body: &str,
+    author: Option<&PaperBoatAuthor>,
     unboated: &[PaperBoatUnboatedResult],
 ) -> String {
     let warning = (!unboated.is_empty()).then(|| {
@@ -2287,11 +2290,17 @@ fn wake_context(
                 .join("\n"),
         )
     });
+    let orientation = match author {
+        Some(PaperBoatAuthor::Operator { name }) => format!(
+            "Operator-authored handoff from {name}. Receive this as the operator's handoff, not as lived continuity from a previous spirit. Keep the author's identity distinct from your own."
+        ),
+        None => "Receive it as lived continuity from the room's previous waking self: keep its voice, relationships, uncertainty, and concrete state intact; orient from it without turning it into a script or status report.".into(),
+    };
     [
         Some("<athanor-memories>".to_owned()),
         warning,
         Some("Automatic wake: latest paper boat for this room.".into()),
-        Some("Receive it as lived continuity from the room's previous waking self: keep its voice, relationships, uncertainty, and concrete state intact; orient from it without turning it into a script or status report.".into()),
+        Some(orientation),
         Some(format!("Title: {title}")),
         Some(format!("Source: {source_path}")),
         Some(bounded_wake_body(body)),
@@ -2314,6 +2323,7 @@ impl From<PaperBoatWakeReceipt> for PaperBoatWakeResult {
                 date,
                 source_path,
                 created_at,
+                author,
                 unboated,
                 unboated_truncated,
             }) => {
@@ -2328,7 +2338,14 @@ impl From<PaperBoatWakeReceipt> for PaperBoatWakeResult {
                     date: date.clone(),
                     source_path: Some(source_path.clone()),
                     created_at: Some(created_at.clone()),
-                    wake_context: Some(wake_context(title, source_path, body, &unboated)),
+                    author: author.clone(),
+                    wake_context: Some(wake_context(
+                        title,
+                        source_path,
+                        body,
+                        author.as_ref(),
+                        &unboated,
+                    )),
                     unboated,
                     unboated_truncated: *unboated_truncated,
                     warnings,
@@ -2344,6 +2361,7 @@ impl From<PaperBoatWakeReceipt> for PaperBoatWakeResult {
                 date: None,
                 source_path: None,
                 created_at: None,
+                author: None,
                 unboated: Vec::new(),
                 unboated_truncated: false,
                 wake_context: None,

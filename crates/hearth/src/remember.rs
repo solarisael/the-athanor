@@ -139,6 +139,7 @@ pub struct RememberRequest {
     triggers: LessonTriggerSpec,
     operator: Option<OperatorKey>,
     memory_scope: MemoryScope,
+    operator_author: Option<String>,
 }
 
 impl RememberRequest {
@@ -422,6 +423,7 @@ impl RememberRequest {
             triggers,
             operator: None,
             memory_scope: MemoryScope::Company,
+            operator_author: None,
         })
     }
 
@@ -450,6 +452,21 @@ impl RememberRequest {
         self.memory_scope = scope.unwrap_or(MemoryScope::default_for(operator.as_ref()));
         self.operator = operator;
         Ok(self)
+    }
+
+    pub fn authored_by_operator(mut self, author: String) -> Result<Self, DomainError> {
+        if self.kind.is_lesson() || author.trim().is_empty() {
+            return Err(DomainError::InvalidField {
+                field: "operator author".into(),
+                kind: self.kind.as_str().into(),
+            });
+        }
+        self.operator_author = Some(author);
+        Ok(self)
+    }
+
+    pub fn operator_author(&self) -> Option<&str> {
+        self.operator_author.as_deref()
     }
 
     pub fn room(&self) -> &RoomKey {

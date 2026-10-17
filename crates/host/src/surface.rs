@@ -1,5 +1,8 @@
 //! The desktop door shares the room ring and the panel's admission boundary.
 
+#[path = "surface/continuity.rs"]
+mod continuity;
+
 use super::{AppState, now_rfc3339, publish_chat};
 use crate::chat::CHAT_MAX_TEXT_CHARS;
 use axum::extract::{State, rejection::JsonRejection};
@@ -13,6 +16,8 @@ use serde_json::{Value, json};
 pub(crate) const CHAT_SNAPSHOT_PATH: &str = "/athanor/v1/chat/snapshot";
 pub(crate) const CHAT_SAY_PATH: &str = "/athanor/v1/chat/say";
 pub(crate) const ROOM_STATE_PATH: &str = "/athanor/v1/room/state";
+pub(crate) const CONTINUITY_STATUS_PATH: &str = "/athanor/v1/continuity/status";
+pub(crate) const CONTINUITY_WRITE_PATH: &str = "/athanor/v1/continuity/write";
 const MAX_SAY_ID_CHARS: usize = 256;
 
 #[derive(Deserialize)]
@@ -32,6 +37,8 @@ pub(super) fn router(state: AppState) -> Router {
             .route(CHAT_SNAPSHOT_PATH, post(snapshot))
             .route(CHAT_SAY_PATH, post(say))
             .route(ROOM_STATE_PATH, post(room_state))
+            .route(CONTINUITY_STATUS_PATH, post(continuity::status))
+            .route(CONTINUITY_WRITE_PATH, post(continuity::write))
             .with_state(state.clone()),
     )
 }

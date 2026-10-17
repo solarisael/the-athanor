@@ -50,6 +50,9 @@ fn derived_source_path(req: &RememberRequest) -> String {
     if let Some(operator) = req.operator() {
         identity["operator"] = json!(operator.as_str());
     }
+    if let Some(author) = req.operator_author() {
+        identity["author"] = json!({ "kind": "operator", "name": author });
+    }
     format!(
         "db-only/{}/{:x}",
         req.room(),
@@ -99,10 +102,16 @@ pub async fn remember(
     )
     .await?;
     let mut warnings = std::mem::take(&mut prepared.warnings);
-    let meta = json!({
+    let mut meta = json!({
         "origin": "direct-db-write",
         "recorded_at": chrono::Utc::now().to_rfc3339(),
     });
+    if let Some(author) = req.operator_author() {
+        meta["author"] = json!({
+            "kind": "operator",
+            "name": author,
+        });
+    }
     // A continuation names a predecessor by ID, so it may only name one the
     // writer could recall; the writer is the reader here.
     let writer_scope = ScopeFilter::load(

@@ -178,6 +178,9 @@
               <span class="composer-response-status" id="response-status" role="status" hidden></span>
             </div>
             <div class="composer-buttons">
+              <button class="composer-tool" type="button" data-continuity-open="memory">Record memory</button>
+              <button class="composer-tool" type="button" data-continuity-open="paper-boat">Fold paper boat</button>
+              <button class="composer-tool" type="button" data-continuity-open="stop">Stop</button>
               <button class="composer-clear" type="button" hidden>Clear</button>
               <button type="submit" disabled>Send</button>
             </div>
@@ -211,6 +214,8 @@
     </footer>
     <section class="repair-banner" data-repair-banner aria-label="Connection repair" hidden></section>
   </main>
+
+  <dialog class="continuity-dialog" data-continuity-dialog aria-labelledby="continuity-title"></dialog>
 
   <section class="bell-layer" id="bell-layer" aria-hidden="true" hidden>
     <div class="hallway-inbox" role="dialog" aria-modal="true" aria-labelledby="hallway-inbox-title">

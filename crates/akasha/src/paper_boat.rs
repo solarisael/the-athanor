@@ -5,7 +5,7 @@ use crate::config::{AppError, Config};
 use crate::remember::{prepare_memory_write, write_memory_tx};
 use crate::settings::RoomSettings;
 use chrono::Utc;
-use hearth::{BackupOutcome, RoomKey};
+use hearth::{BackupOutcome, MemoryScope, RoomKey};
 use origami::boats;
 use origami::boats::error::BoatError;
 use origami::boats::record::{MAX_WARNING_BYTES, bounded_utf8, positive_id};
@@ -31,7 +31,19 @@ pub async fn paper_boat_sleep(
     let room = request.room().as_str();
     let settings = RoomSettings::load(pool, room).await?;
     let body = request.body();
-    let plan = boats::sleep::plan(room, body, Utc::now());
+    let mut plan = boats::sleep::plan(room, body, Utc::now());
+    if let Some(author) = request.author() {
+        plan.source_path = boats::identity::operator_source_identity(room, author, body);
+        plan.metadata["identity"] = serde_json::json!(format!(
+            "{}:{}",
+            boats::identity::DIGEST_LABEL,
+            boats::identity::digest_of(&plan.source_path).expect("canonical boat source identity"),
+        ));
+        plan.metadata["author"] = serde_json::json!({
+            "kind": "operator",
+            "name": author,
+        });
+    }
     let mut prepared = prepare_memory_write(
         cfg,
         &settings,
@@ -54,7 +66,9 @@ pub async fn paper_boat_sleep(
         &[],
         plan.metadata,
         &prepared,
-        None,
+        request
+            .operator()
+            .map(|author| (author, MemoryScope::default_for(Some(author)))),
     )
     .await?;
     let outbox_event_id = boats::sleep::ready_pointer(&mut tx, memory_id).await?;

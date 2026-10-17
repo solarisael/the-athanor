@@ -22,6 +22,14 @@ the exact implementation record.
 
 ### Fixed
 
+- Direct restores Record memory, Fold paper boat, and Stop as connected actions.
+  Continuity actions separate exact-session spirit requests from operator-authored writes.
+  Manual writes require exact-text review and preserve drafts after failures.
+  The Host checks the reviewed operator before writing and stores authorship separately from visibility identity.
+  Operator-authored boats retain their author through wake. Existing spirit boat identities remain unchanged.
+  Session delivery receipts remain distinct from durable write receipts.
+  These write routes require the updated Host; source completion does not imply deployment.
+
 - The web interface connects its existing screen families to live Host records.
   Configured room selection uses a fresh page lifecycle for each room.
   Direct Status exposes exact session selection, command confirmation, and receipt checks.

@@ -348,6 +348,8 @@ Retrieve these bodies before design or implementation work in this directory. Ex
 - The current cutover connects existing capabilities across every screen.
 - Missing backend capabilities remain unavailable and have separate work records.
 - Remove simulated records and local actions that imply durable writes.
+- Preserve intended actions when removing simulated behavior. A missing connection remains explicit until the real action works.
+- Keep spirit requests and operator-authored records separate. A delivery receipt does not prove a durable write.
 - Keep Direct, Hallways, Projects, and the three semantic slots.
 - Room selection changes the requested room, never the operator into a spirit.
 - A room change starts a new page lifecycle to discard previous room state.

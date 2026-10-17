@@ -22,6 +22,14 @@ the exact implementation record.
 
 ### Fixed
 
+- The web interface connects its existing screen families to live Host records.
+  Configured room selection uses a fresh page lifecycle for each room.
+  Direct Status exposes exact session selection, command confirmation, and receipt checks.
+  Both proxies admit only approved session actions and keep credentials outside the browser.
+  Browser preferences persist locally. Memory shelves and mechanics no longer display dated fixture records.
+  Project evidence loads sequentially to respect the Host operation limit.
+  Missing domain capabilities remain unavailable and have separate roadmap entries.
+
 - The repository lesson map is now `LESSONS.jsonl`.
   Eight complete registry queries replace Markdown extraction and route selection.
   Startup instructions verify every requested family and ID before work.

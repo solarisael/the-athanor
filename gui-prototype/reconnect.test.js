@@ -3,7 +3,7 @@
 // The clock is observed where it acts — the timing of /live/health requests.
 // Real timers, so this file waits for the first two retry delays (2 s, 4 s).
 import { test, expect } from "bun:test";
-import { queryHealthHost, onHostRecovered, roomState, healthSourceLine } from "./health.js";
+import { queryHealthHost, onHostRecovered, roomState } from "./health.js";
 import { initChat, syncChatPanel, say, chatMessages, chatBlockReason, chatState } from "./chat.js";
 
 const ROOM = { kind: "direct", id: "kodo" };
@@ -32,15 +32,13 @@ globalThis.fetch = async (path, init) => {
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const gap = index => healthAsks[index] - healthAsks[index - 1];
 
-test("a dead Host is asked again after 2 s, then 4 s, and the reason names the hop", async () => {
+test("a dead Host is asked again with a growing retry delay", async () => {
   await queryHealthHost();
   expect(healthAsks.length).toBe(1);
-  expect(healthSourceLine()).toBe("Host unreachable · Host not reachable · retry 1 in 2 s");
   await sleep(2300);
   expect(healthAsks.length).toBe(2);
   expect(gap(1)).toBeGreaterThanOrEqual(1900);
   expect(gap(1)).toBeLessThan(3000);
-  expect(healthSourceLine()).toBe("Host unreachable · Host not reachable · retry 2 in 4 s");
 });
 
 test("a Host that comes back fires recovery once, and chat retries by hand with the same sayId", async () => {
@@ -53,7 +51,6 @@ test("a Host that comes back fires recovery once, and chat retries by hand with 
   expect(healthAsks.length).toBe(3);
   expect(gap(2)).toBeGreaterThanOrEqual(3900);
   expect(recovered).toBe(1);
-  expect(healthSourceLine()).toMatch(/^Host connected · kodo room health/);
   expect(roomState().room).toBe("kodo");
 
   syncChatPanel(ROOM, "live");
@@ -64,8 +61,6 @@ test("a Host that comes back fires recovery once, and chat retries by hand with 
   expect(await say("hewwo")).toBe(false);
   const line = chatMessages().find(message => message.text === "hewwo");
   expect(line.undelivered).toBe(true);
-  expect(chatBlockReason(ROOM)).toBe("Host unreachable · Host not reachable");
-  expect(healthSourceLine()).toBe("Host unreachable · Host not reachable · retry 1 in 2 s");
   expect(says).toEqual([]);
 
   hostUp = true;

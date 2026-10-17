@@ -55,11 +55,10 @@ The service supervisor starts the packaged PostgreSQL and NATS with JetStream (`
 ### Pulse
 
 Pulse is the web operator surface in `gui-prototype/`.
-Pulse is not read-only. It reads room state and it sends chat says.
-The proxy allows only `POST` to `/live/*` routes (`gui-prototype/serve.ts:41,44,49-52,58`).
-The allowlist includes `/live/chat/say` (`gui-prototype/live-routes.json:15`).
-`chat.js` posts a say to that route (`gui-prototype/chat.js:146`).
-The Host writes the say and publishes a delta (`crates/host/src/surface.rs:60-95`).
+Pulse reads live records, sends operator chat, and controls explicitly selected sessions.
+Each session command requires a separate confirmation.
+The proxy admits only named routes and approved session actions.
+The Host retains target validation and command authority.
 
 Start Pulse from the repository root:
 
@@ -67,9 +66,10 @@ Start Pulse from the repository root:
 bun gui-prototype/serve.ts
 ```
 
-The proxy binds `127.0.0.1:4175` and serves one room, `kodo` by default.
-It reads `runtime.json` and the Host token from fixed `C:/ProgramData` paths (`serve.ts:16-18,32-33`).
-`gui-desktop` ships the same surface as `pulse.exe` (`gui-desktop/src/main.rs:30,65-67`).
+The proxy binds `127.0.0.1:4175`. The default room is `kodo`.
+The Direct collection lists configured rooms. Selecting another room starts a new page lifecycle.
+The proxy reads its runtime configuration and credentials from protected local files.
+The bearer never enters the browser. `gui-desktop` ships the same surface as `pulse.exe`.
 Read [Architecture § Pulse](./docs/ARCHITECTURE.md#6-pulse) for the full contract.
 
 The 2026-10-05 source repair preserves bounded chat and drafts across Host restarts.

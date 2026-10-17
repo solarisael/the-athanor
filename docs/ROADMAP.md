@@ -149,17 +149,23 @@ Vault does not need NATS.
 
 ### 6. Complete the operator surface
 
-State: Partly built. Two proxies share one contract: `serve.ts` under Bun and `pulse.exe`, a Tauri window (`gui-desktop/src/main.rs:30,65-67`). See [Pulse](./ARCHITECTURE.md#6-pulse).
+State: Partly built. The connected web cutover uses existing capabilities across all 18 screen families.
+Both proxies support configured room selection and bounded session controls.
+The interface removes fixture records and preserves explicit unavailable states.
+See the [screen inventory](../gui-prototype/NAVIGATION_MAP.md).
 
-Routes exist for chat, room state, Docket, Hallway, memory, lessons, Insula, and health. The 1.0 gate still needs:
+Remaining capabilities:
 
-- deployment of the verified bounded chat checkpoints;
-- a session list and resume (`crates/protocol/src/restart/mod.rs:36-38`);
-- more than one room per Pulse process (`serve.ts:34,41`; `proxy.rs:32`);
-- GIGA review and dispatch lineage views;
-- live data in place of dated fixtures (`gui-prototype/app.js:66-93`);
-- login and authenticated writes; the local Origin/Host guard was installed on 2026-10-04;
-- delivery, backup, migration, and version state that an operator can act on.
+- Session creation and a persistent conversation-history selector.
+- Operator-authored Hallway posts, acknowledgments, thread selection, seals, folds, and live presence.
+- Typed configuration snapshots and bounded setting mutations.
+- Durable memory writes, full lesson-body reads, and canon editing.
+- GIGA review and worker lineage views.
+- Docket writes and project involvement controls.
+- Login and person-scoped authorization beyond the existing local bearer boundary.
+- Backup, migration, and version controls beyond existing status and desktop repair.
+
+These items require backend contracts. Disabled controls and read-only screens do not establish their completion.
 
 Every view must read Host projections. The GUI must not keep a second truth.
 

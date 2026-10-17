@@ -50,90 +50,11 @@ function assetRevision(content) {
   return createHash("sha256").update(content).digest("hex").slice(0, 12);
 }
 
-const publicMessages = [
-  "Morning. The interface held its shape overnight.",
-  "I checked the measured state, not only the screenshot.",
-  "Good. Keep the visible boundary exact.",
-  "The collection, instrument, and inspector still agree.",
-  "Open the next route and keep the current subject selected.",
-  "Receipt recorded on this browser-only specimen."
-];
 
 function substitutePublicNames(source) {
   return substitutions.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), source);
 }
 
-function fictionalizeRegistryFixtures(source) {
-  const start = source.indexOf("const houseSurface = {");
-  const end = source.indexOf("\n// The strip's five channels", start);
-  if (start === -1 || end === -1) {
-    throw new Error("Public fixture registry boundary was not found");
-  }
-
-  const fixtures = `const houseSurface = {
-  memories: [
-    { id: "F-101", date: "2026-08-17 10:06", title: "The interface kept one selected subject", scope: "House fixture", detail: "Fictional record for selection and ownership behavior." },
-    { id: "F-102", date: "2026-08-16 21:12", title: "Room memory stayed inside its room", scope: "House fixture", detail: "Fictional record for bounded continuity." },
-    { id: "F-103", date: "2026-08-15 18:40", title: "A shared gathering preserved separate identities", scope: "House fixture", detail: "Fictional record for Hallway anatomy." }
-  ],
-  lessons: [
-    { id: "L-201", date: "2026-08-13 16:20", title: "A surface names only the selected subject", kind: "Project fixture" },
-    { id: "L-202", date: "2026-08-14 17:32", title: "Project conversations stay with their project", kind: "Project fixture" },
-    { id: "L-203", date: "2026-08-14 19:48", title: "Independent effects keep independent lifecycles", kind: "Project fixture" },
-    { id: "L-204", date: "2026-08-15 20:15", title: "A local specimen refuses stale assets", kind: "Project fixture" },
-    { id: "L-205", date: "2026-08-16 15:03", title: "Dense controls still need breathing room", kind: "Coding fixture" },
-    { id: "L-206", date: "2026-08-16 22:41", title: "Session provenance is not navigation", kind: "Project fixture" },
-    { id: "L-207", date: "2026-08-17 09:22", title: "Refusals and receipts own their boundaries", kind: "Project fixture" }
-  ]
-};
-
-const roomMemoryShelves = {
-  kintsu: [
-    { id: "F-301", date: "2026-08-16 23:10", title: "The room kept its own working continuity", detail: "Fictional room record for this public specimen." },
-    { id: "F-302", date: "2026-05-28 20:40", title: "A distinct room opened", detail: "Fictional room record for identity boundaries." }
-  ],
-  kodo: [],
-  tuner: [
-    { id: "F-303", date: "2026-08-16 19:05", title: "Rendered proof held across every central view", detail: "Fictional room record with no durable source." },
-    { id: "F-304", date: "2026-08-16 20:31", title: "A screenshot exposed an occluded edge", detail: "Fictional room record with no durable source." }
-  ]
-};
-`;
-
-  return source.slice(0, start) + fixtures + source.slice(end);
-}
-
-
-function sanitizeFixtureScript(source) {
-  let messageIndex = 0;
-  let sanitized = substitutePublicNames(fictionalizeRegistryFixtures(source));
-
-  sanitized = sanitized.replace(/text: "(?:[^"\\]|\\.)*"/g, () => {
-    const text = publicMessages[messageIndex % publicMessages.length];
-    messageIndex += 1;
-    return `text: "${text}"`;
-  });
-
-  sanitized = sanitized
-    .replace(/preview: "(?:[^"\\]|\\.)*"/g, "preview: \"A new addressed message is waiting.\"")
-    .replace(/listPreview: "(?:[^"\\]|\\.)*"/g, "listPreview: \"Ready for the next measured pass.\"")
-    .replace(/glyph: "K"/g, "glyph: \"A\"")
-    .replace(/glyph: "D"/g, "glyph: \"M\"")
-    .replace(/glyph: "T"/g, "glyph: \"V\"")
-    .replace(/glyph: "S"/g, "glyph: \"A\"")
-    .replace(
-      "// a real recall replayed as specimen: the 2026-08-17 20:12 turn, values verbatim from its receipt",
-      "// fictional public recall fixture; no durable record is loaded"
-    )
-    .replace("The cardboard Athanor learned its rooms with Alex and Vale", "The interaction shell learned its room boundaries")
-    .replace("Alex kept Vale in the live chair until the cardboard Athanor held", "Rendered proof held across every central view")
-    .replace("Alex screenshot cut through our controlled proof", "A screenshot exposed a false-positive proof")
-    .replace("The day Alex and Aster gave The Athanor its future anatomy", "The day the three-layer interface anatomy settled")
-    .replace("Morrow Memory - 2026-05-12 (afternoon → evening)", "Room continuity specimen")
-    .replace("session-morrow-hearth-01", "session-morrow-main-01");
-
-  return sanitized;
-}
 
 // This is a reviewed browser boundary, not a recursive copy of the checkout.
 // New modules need an explicit privacy review before they enter this list.
@@ -141,49 +62,20 @@ const appFiles = [
   "index.html", "colors.css", "styles.css", "app.js",
   "text.js", "repair.js", "markdown.js", "mechanics-live.js", "chat.js",
   "hallways.js", "projects.js", "pulse.js", "health.js", "mechanics.js",
-  "board/index.js", "board/hallway-messages.js", "sediment/index.js"
+  "board/index.js", "board/hallway-messages.js", "sediment/index.js",
+  "sessions/index.js", "preferences/index.js"
 ];
 const banned = /\b(?:Sol|Solzinho|Solarisael|Kintsu|Kodo|Tuner|Multistock|Salvia|Hugo|SCV|SGD|uwu|òwó|övö)\b/i;
 const privateConfiguration = /(?:\b[a-z]:[\\/]|\/(?:home|Users)\/|\\\\[a-z0-9._-]+\\|postgres(?:ql)?:\/\/|-----BEGIN [^-]*PRIVATE KEY-----|sk-[a-zA-Z0-9]{20,}|Bearer\s+[a-zA-Z0-9._-]{16,})/i;
 
-function replaceRequired(source, pattern, replacement, boundary) {
-  if (!pattern.test(source)) throw new Error(`Public ${boundary} boundary was not found`);
-  return source.replace(pattern, replacement);
-}
 
 function publicScript(name, source) {
-  let script = name === "app.js" ? sanitizeFixtureScript(source) : substitutePublicNames(source);
+  let script = substitutePublicNames(source);
   if (name === "app.js") {
     script = script.replace(
-      "This page reads one room Host through a local proxy and writes nothing. Displayed conversations are local and are not durable records.",
-      "Public interaction specimen. No Host, model calls, database, delivery, or persistence. Session creation and history are unavailable."
+      "This local surface reads Host records and sends operator chat and explicitly confirmed session controls. Memories and lessons remain read-only.",
+      "Public disconnected interface. Interface preferences stay in this browser. No Host, model calls, delivery, or durable House records."
     );
-  }
-  if (name === "pulse.js") {
-    script = replaceRequired(script, /const PULSE_SNAPSHOT = \{[\s\S]*?\n\};/, `const PULSE_SNAPSHOT = {
-  capturedAt: "not captured",
-  source: "Public specimen · telemetry unavailable",
-  vitalsQuery: "unavailable",
-  retention: { days: "unavailable" },
-  rooms: [], lanes: [], receipts: []
-};`, "Pulse snapshot");
-    script = replaceRequired(script, /function snapshotChannels\(\) \{[\s\S]*?\n\}/, `function snapshotChannels() {
-  return ["Observations", "Tokens", "Loss", "Retention"].map(label => ({
-    label, value: "Unavailable", detail: "No Host or private telemetry in the public specimen."
-  }));
-}`, "Pulse channels");
-    script = script.replace(
-      "Every number recomputable from ${escapeHtml(PULSE_SNAPSHOT.vitalsQuery)} rollups and raw receipt points.",
-      "Telemetry, lanes, and receipts are unavailable in this public specimen."
-    );
-  }
-  if (name === "mechanics.js") {
-    script = replaceRequired(script, /export const HOUSE_MECHANICS_SNAPSHOT = \{[\s\S]*?\n\};/, `export const HOUSE_MECHANICS_SNAPSHOT = {
-  capturedAt: "not published",
-  revision: "Public specimen · operator configuration unavailable",
-  connection: "No Host",
-  categories: []
-};`, "mechanics snapshot");
   }
   // Keep the existing refusal paths, but never contact a Host from public Pages.
   if (/\bfetch\s*\(/.test(script)) {
@@ -238,7 +130,7 @@ async function checkAppAssets(files) {
 function addPublicDisclosure(source) {
   const disclosure = `  <aside class="public-demo-disclosure" role="note" aria-label="Public specimen disclosure">
     <strong>Public interaction specimen.</strong>
-    <span>Fictional fixture records; no Host, model calls, database, delivery, or persistence. Private telemetry and configuration are unavailable.</span>
+    <span>No Host, model calls, delivery, or durable House records. Interface preferences stay in this browser.</span>
     <a href="../">About this demo</a>
   </aside>`;
 
@@ -587,10 +479,7 @@ const siteIndex = (await readFile(siteIndexPath, "utf8"))
 const appIndex = addPublicDisclosure(publicApp.get("index.html"))
   .replace("href=\"colors.css\"", `href=\"colors.css?v=${assetRevision(appColors)}\"`)
   .replace("href=\"styles.css\"", `href=\"styles.css?v=${assetRevision(appStyles)}\"`)
-  .replace("src=\"app.js\"", `src=\"app.js?v=${assetRevision(appScript)}\"`)
-  .replace(/<span class="avatar avatar-user" aria-hidden="true">S<\/span>/g, "<span class=\"avatar avatar-user\" aria-hidden=\"true\">A</span>")
-  .replace(/<span class="account-avatar" aria-hidden="true">S<\/span>/g, "<span class=\"account-avatar\" aria-hidden=\"true\">A</span>")
-  .replace(/<span class="settings-avatar" aria-hidden="true">S<\/span>/g, "<span class=\"settings-avatar\" aria-hidden=\"true\">A</span>");
+  .replace("src=\"app.js\"", `src=\"app.js?v=${assetRevision(appScript)}\"`);
 
 await writeFile(siteIndexPath, siteIndex);
 publicApp.set("index.html", appIndex);

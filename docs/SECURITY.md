@@ -110,8 +110,10 @@ The 2026-10-04 source repair guards both proxies before route handling. It is no
 - Navigation without an Origin header remains available at the canonical loopback URL.
 - These checks prevent browser cross-origin requests. They do not authenticate native clients, which can forge headers.
 - Permitted live calls receive the Host bearer server-side. The page never holds it.
-- The allow-list has 15 routes, including `chat/say` and `room/state` (`gui-prototype/live-routes.json:2-16`; `proxy.rs:30`).
-- The proxy documentation includes chat writes. The route allow-list remains unchanged.
+- The shared route allowlist includes chat, records, health, Insula, and the existing portable session door.
+- Session forwarding permits only `status`, `command`, and `commandStatus`.
+- Both proxies validate `X-Athanor-Room` against configured room keys and refuse repeated headers.
+- Session controls require an explicit target and confirmation. The shared bearer still does not establish person-level identity.
 - The desktop webview has no CSP (`gui-desktop/tauri.conf.json:8`). Its one capability grants no IPC commands (`gui-desktop/capabilities/default.json:1-6`).
 - Nothing in those files restricts where the window can navigate (`tauri.conf.json:5-10`; `gui-desktop/src/main.rs:70-73`).
 
@@ -169,7 +171,7 @@ Room and memory deletion need explicit operator intent and a clear statement of 
 
 ## 14. Public evidence and demonstrations
 
-Public artifacts contain sanitized aggregates and synthetic fixtures. Never publish:
+Public artifacts exclude private records and server configuration. Browser-local interface preferences remain permitted. Never publish:
 
 - raw private turns;
 - memory titles;

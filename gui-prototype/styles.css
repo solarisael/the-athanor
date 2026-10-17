@@ -2218,12 +2218,6 @@ input:focus-visible {
   border-top: 1px solid var(--bd-section);
 }
 
-.composer-continuity-group {
-  display: flex;
-  align-items: center;
-
-  gap: 7px;
-}
 
 .composer-feedback {
   display: grid;
@@ -2234,8 +2228,7 @@ input:focus-visible {
 }
 
 .composer-refusal,
-.composer-response-status,
-.composer-continuity-status {
+.composer-response-status {
   min-width: 0;
 
   font-size: 12px;
@@ -2262,15 +2255,6 @@ input:focus-visible {
   cursor: pointer;
 }
 
-.composer-actions .composer-continuity {
-  padding-inline: 10px;
-
-  font-size: 11px;
-
-  border-color: var(--bd-control);
-  background: var(--bg-clear);
-  color: var(--fg-soft);
-}
 
 .composer-actions .composer-clear {
   border-color: var(--bd-control);
@@ -2279,12 +2263,6 @@ input:focus-visible {
   color: var(--fg-soft);
 }
 
-.composer-actions .composer-stop {
-  border: 2px double var(--bd-composer-stop);
-
-  background: var(--bg-composer-stop);
-  color: var(--fg-main);
-}
 
 .composer-actions button:disabled {
   border-color: var(--bd-control);
@@ -2840,7 +2818,9 @@ input:focus-visible {
   margin-top: 0;
 }
 
-.settings-group select {
+.settings-group select,
+[data-sessions-surface] textarea,
+[data-sessions-surface] input {
   width: 100%;
   min-height: 40px;
   padding: 0 11px;
@@ -2857,6 +2837,48 @@ input:focus-visible {
 .settings-group select:focus-visible {
   border-color: var(--bd-settings-control-focus);
   background: var(--bg-settings-control-hover);
+}
+
+[data-sessions-surface] textarea {
+  min-height: 6em;
+  padding-block: 0.5em;
+  resize: vertical;
+  cursor: text;
+}
+
+[data-sessions-surface] input {
+  cursor: text;
+}
+
+[data-sessions-surface] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+[data-sessions-surface] pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+[data-session-confirm] {
+  font-weight: 700;
+  border-style: double;
+  background: var(--bg-active);
+}
+
+[data-sessions-surface] button[aria-disabled="true"] {
+  border-style: dashed;
+  cursor: wait;
+}
+
+[data-sessions-surface] [tabindex="-1"]:focus {
+  outline: 1px solid var(--bd-focus);
+  outline-offset: -1px;
+}
+
+[data-preference-status] {
+  margin-inline: 1em;
+  color: var(--fg-soft);
 }
 
 .settings-group .setting-row {
@@ -3015,18 +3037,6 @@ input:focus-visible {
   background: var(--bg-hover);
 }
 
-.context-library-selection [data-clear-library-selection] {
-  width: 100%;
-  margin-top: 12px;
-  padding: 8px 10px;
-
-  border: 1px solid var(--bd-control);
-  border-radius: 6px;
-  background: var(--bg-clear);
-  color: var(--fg-soft);
-
-  cursor: pointer;
-}
 
 .context-selection {
   border-style: dashed;
@@ -3659,19 +3669,6 @@ input:focus-visible {
   gap: 18px;
 }
 
-.sediment-fixtures {
-  padding-top: 6px;
-  border-top: 1px solid var(--bd-section);
-}
-
-/* The fixture chip rides the row's own metadata line: the section header states
-   it in markup, and this repeats it per row so no single row can be read out of
-   its shelf and mistaken for something a door sent. */
-[data-fixture-shelf] .durable-entry small::after {
-  content: " · fixture, not from a door";
-
-  color: var(--fg-active);
-}
 
 /* The evidence drawer is a second disclosure inside a quest row, so its own
    rows get narrower columns than a top-level row can afford. */
@@ -3958,9 +3955,6 @@ input:focus-visible {
   color: var(--fg-dim);
 }
 
-[data-durable-results] {
-  display: contents;
-}
 
 .mechanics-results-status {
   margin: -3px 2px 0;
@@ -4327,7 +4321,6 @@ input:focus-visible {
 .card-picker button:focus-visible,
 .collection-door:focus-visible,
 .session-menu-action:focus-visible,
-.durable-entry:focus-visible,
 .library-row:focus-visible,
 .presence-row:focus-visible,
 .inspector-door:focus-visible,
@@ -4746,16 +4739,10 @@ input:focus-visible {
     padding-left: 8px;
   }
 
-  .composer-continuity-group,
   .composer-buttons {
     gap: 5px;
   }
 
-  .composer-actions .composer-continuity {
-    padding-inline: 6px;
-
-    font-size: 10px;
-  }
 
 
   .app-shell[data-hallway="true"] .composer {
@@ -4772,11 +4759,6 @@ input:focus-visible {
     font-size: 10px;
   }
 
-  .app-shell[data-hallway="true"] .composer-actions .composer-continuity {
-    padding-inline: 4px;
-
-    font-size: 9px;
-  }
 
   .composer {
     margin: 0 12px 12px;

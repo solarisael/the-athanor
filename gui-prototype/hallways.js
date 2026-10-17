@@ -61,5 +61,5 @@ export function renderHallwayStatus(item) {
 }
 
 export function renderHallwayRecord(item) {
-  return `<div class="specimen-stack"><section class="membership-card"><h2>${escapeHtml(item.name)}</h2><p>Members · ${escapeHtml(hallwayMembers(item))}</p><p>${escapeHtml(hallwaySourceLine())}</p></section><p>The Host reports no seals or folds for this Hallway</p></div>`;
+  return `<div class="specimen-stack"><section class="membership-card"><h2>${escapeHtml(item.name)}</h2><p>Members · ${escapeHtml(hallwayMembers(item))}</p><p>${escapeHtml(hallwaySourceLine())}</p></section><p>Seals and folds are unavailable in the connected interface.</p></div>`;
 }

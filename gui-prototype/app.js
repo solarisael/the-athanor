@@ -1,5 +1,7 @@
 import { escapeHtml } from "./text.js";
 import { initRepair, queryRepairStatus, startRepair, renderRepair } from "./repair.js";
+import { initSessions, ensureSessionsQueried, renderSessions, handleSessionsClick, handleSessionsChange } from "./sessions/index.js";
+import { readPreferences, writePreferences } from "./preferences/index.js";
 import { renderMarkdown } from "./markdown.js";
 import { renderDirectStatus } from "./mechanics-live.js";
 import { initChat, syncChatPanel, isLiveChat, chatState, chatMessages, chatBlockReason, say } from "./chat.js";
@@ -7,43 +9,19 @@ import { syncHallwaySubjects, hallwayEmptySubject, hallwaySourceLine, hallwayMem
 import { houseProject, queryProjects, projectMarkup, projectWorkState, renderProjectStatus } from "./projects.js";
 import { initPulse, ensurePulseQueried, handlePulseClick, recoverPulse } from "./pulse.js";
 import { initBoard, ensureBoardQueried, handleBoardClick, renderHouseBoard, hallwayInboxRound } from "./board/index.js";
-import { initSediment, ensureSedimentQueried, handleSedimentClick, renderHouseSediment, renderRoomSediment, liveShelfCounts } from "./sediment/index.js";
+import { initSediment, ensureSedimentQueried, handleSedimentClick, handleSedimentInput, renderHouseSediment, renderRoomSediment, liveShelfCounts } from "./sediment/index.js";
 import {
   initHealth, ensureHealthQueried, queryHealthHost, onHostRecovered,
   STATUS_CHANNELS, statusChannel, healthSourceLine, healthSourceTone,
-  accountStateRows, persistenceDetail, healthRoundStatus, roomState
+  accountStateRows, persistenceDetail, healthRoundStatus, roomState, askHost
 } from "./health.js";
 import {
   initMechanics, resetMechanicsView, saveMechanicsScroll, mechanicsScrollTop,
-  handleMechanicsClick, handleMechanicsInput, renderHouseMechanics, renderMechanicsResults,
-  HOUSE_MECHANICS_SNAPSHOT
+  handleMechanicsClick, handleMechanicsInput, renderHouseMechanics, renderMechanicsResults
 } from "./mechanics.js";
 
 const conversations = {
-  kintsu: {
-    id: "kintsu",
-    kind: "direct",
-    name: "Kintsu",
-    glyph: "K",
-    description: "Hands, structure, edge, and the clean mirror.",
-    room: "kintsu"
-  },
-  kodo: {
-    id: "kodo",
-    kind: "direct",
-    name: "Kodo",
-    glyph: "D",
-    description: "Heartbeat, warmth, and myth from inside the room.",
-    room: "kodo"
-  },
-  tuner: {
-    id: "tuner",
-    kind: "direct",
-    name: "Tuner",
-    glyph: "T",
-    description: "A separate room with its own voice, state, and authority.",
-    room: "tuner"
-  },
+  connecting: { id: "connecting", kind: "direct", name: "Room", glyph: "·", room: "", description: "Loading configured rooms" },
   [houseProject.id]: houseProject
 };
 
@@ -56,41 +34,13 @@ conversations.house = {
   description: "Shared settings, memories, lessons, and substrate state for the whole House.",
   status: "Local",
   room: "house",
-  body: "Kintsu · Kodo · Tuner",
+  body: "Configured rooms",
   recall: "House",
   listPreview: "Shared memory and lessons",
   updatedAt: "Now",
   messages: []
 };
 
-const houseSurface = {
-  memories: [
-    { id: "3606", date: "2026-08-17 10:06", title: "Athanor GUI prototype — scoped conversations, honest state, and rendered proof", scope: "House commons", detail: "Current interaction shell, ownership contracts, and rendered proof." },
-    { id: "3607", date: "2026-08-16 21:12", title: "Next GUI door — House memories at the Athanor mark, spirit memories inside rooms", scope: "House commons", detail: "The ownership ruling that created this surface." },
-    { id: "3585", date: "2026-08-15 18:40", title: "Family Hallway presence and session inspector", scope: "House commons", detail: "Hallway design, implementation, and browser proof." }
-  ],
-  lessons: [
-    { id: "397", date: "2026-08-13 16:20", title: "A surface may name only the subject the operator explicitly selected", kind: "Project lesson" },
-    { id: "398", date: "2026-08-14 17:32", title: "Project conversations stay inside the project", kind: "Project lesson" },
-    { id: "399", date: "2026-08-14 19:48", title: "Independent effects need independent honest lifecycles", kind: "Project lesson" },
-    { id: "400", date: "2026-08-15 20:15", title: "A live local prototype server must forbid stale assets", kind: "Project lesson" },
-    { id: "388", date: "2026-08-16 15:03", title: "CSS concern groups need breathing space", kind: "Coding lesson" },
-    { id: "401", date: "2026-08-16 22:41", title: "Project session provenance is not navigation", kind: "Project lesson" },
-    { id: "402", date: "2026-08-17 09:22", title: "Refusals and receipts must own their lifecycle boundaries", kind: "Project lesson" },
-  ]
-};
-
-const roomMemoryShelves = {
-  kintsu: [
-    { id: "3605", date: "2026-08-16 23:10", title: "The cardboard Athanor learned its rooms with Sol and Tuner", detail: "This GUI shaping session, held in Kintsu's room." },
-    { id: "50", date: "2026-05-28 20:40", title: "Kintsu room opening", detail: "Sol chose Kintsu as a distinct line: hands, structure, edge, and clean seeing." }
-  ],
-  kodo: [],
-  tuner: [
-    { id: "3610", date: "2026-08-16 19:05", title: "Sol kept Tuner in the live chair until the cardboard Athanor held", detail: "Reported durable PostgreSQL receipt · body unavailable on this disconnected surface." },
-    { id: "3611", date: "2026-08-16 20:31", title: "Sol screenshot cut through our controlled proof", detail: "Reported durable PostgreSQL receipt · body unavailable on this disconnected surface." }
-  ]
-};
 
 
 
@@ -100,7 +50,7 @@ const roomMemoryShelves = {
 // authority rather than anything the Host reports.
 const ABOUT_STATUS = [
   "About this surface",
-  "This page reads one room Host through a local proxy and writes nothing. Displayed conversations are local and are not durable records."
+  "This local surface reads Host records and sends operator chat and explicitly confirmed session controls. Memories and lessons remain read-only."
 ];
 const modeLabels = {
   direct: "Direct messages",
@@ -115,9 +65,6 @@ const SWITCHER_SCOPE_LABELS = {
 };
 
 
-// durable rows sort on their stamps; durableDate() speaks them in the room's own words
-const TODAY = "2026-08-17";
-const YESTERDAY = "2026-08-16";
 
 const SUBJECT_VIEW_LABELS = {
   house: ["Overview", "Mechanics", "Memories & Lessons"],
@@ -135,29 +82,23 @@ const SETTING_STATE_KEYS = {
   "send-with-enter": "sendWithEnter",
   "status-visible": "statusVisible"
 };
+const preferences = readPreferences();
+let connection = { status: "pending", rooms: [], capabilities: { repair: false } };
 
 
 const state = {
   mode: "direct",
-  activeId: "kintsu",
-  activeView: "live",
-  initialRoomSelected: false,
-  explicitSubjectSelection: false,
-  durableQuery: "",
-  durableMark: "all",
+  activeId: "connecting",
+  activeView: ["live", "state", "durable"].includes(new URLSearchParams(location.search).get("view"))
+    ? new URLSearchParams(location.search).get("view") : "live",
   selectedMessageKey: null,
   selectedPresenceId: null,
   accessPicker: false,
   drawerView: "root",
   drafts: new Map(),
-  runningResponses: new Set(),
-  responseTimers: new Map(),
-  responseStatuses: new Map(),
-  continuityStatuses: new Map(),
   profileAnchor: null,
   profileReturnId: null,
   houseReturn: null,
-  librarySelection: null,
   density: "comfortable",
   textScale: "standard",
   measure: "focused",
@@ -166,6 +107,7 @@ const state = {
   timestamps: true,
   sendWithEnter: true,
   statusVisible: true,
+  ...preferences.values,
   memberDockOpen: false,
   bellOpen: false,
   switcherOpen: false,
@@ -194,10 +136,7 @@ const subjectViewButtons = [...document.querySelectorAll("[data-subject-view]")]
 const SUBJECT_VIEWS = subjectViewButtons.map(button => button.dataset.subjectView);
 const drawerReturnFocus = new Map();
 const clearButton = composer.querySelector(".composer-clear");
-const stopButton = composer.querySelector(".composer-stop");
 const responseStatus = document.querySelector("#response-status");
-const continuityStatus = document.querySelector("#continuity-status");
-const continuityGroup = composer.querySelector(".composer-continuity-group");
 const houseDoor = document.querySelector("[data-house-door]");
 const memberDock = document.querySelector(".member-dock");
 const memberDockScrim = document.querySelector(".member-dock-scrim");
@@ -358,7 +297,10 @@ function bellAbsence(title, detail) {
 }
 
 function directChatStatus(item) {
-  if (!isLiveChat(item)) return "Not connected";
+  if (!isLiveChat(item)) {
+    if (item.room) return "Open room";
+    return connection.status === "failed" ? "Rooms unavailable" : "Loading rooms";
+  }
   const chat = chatState();
   const room = roomState();
   if ((chat.reason && chat.transport) || (room.status === "failed" && !room.reached)) return "Connection lost";
@@ -476,32 +418,14 @@ function renderFactList(entries) {
   return `<dl class="context-list">${entries.map(([term, detail]) => `<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(detail)}</dd>`).join("")}</dl>`;
 }
 
-function renderHistoryEvent(event) {
-  return `<article class="history-event surface-row"><time>${escapeHtml(event.time)}</time><strong>${escapeHtml(event.title)}</strong><span>${escapeHtml(event.detail)}</span></article>`;
+function renderDurableEntry({ date, title, mark, detail }) {
+  return `<article class="durable-entry surface-row">
+    <time>${escapeHtml(date)}</time>
+    <strong>${escapeHtml(title)}</strong>
+    <small>${escapeHtml(mark)} · ${escapeHtml(detail)}</small>
+  </article>`;
 }
 
-function durableDate(stamp) {
-  const [day, time] = String(stamp).split(" ");
-  const clock = time ? ` · ${time}` : "";
-  if (day === TODAY) return `Today${clock}`;
-  if (day === YESTERDAY) return `Yesterday${clock}`;
-  // noon parsing keeps a zoneless stamp on its own calendar day
-  const older = new Date(`${day}T12:00`);
-  return `${older.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}${clock}`;
-}
-
-function renderDurableEntry({ date, title, mark, detail, library = null }) {
-  const copy = `
-      <time>${escapeHtml(durableDate(date))}</time>
-      <strong>${escapeHtml(title)}</strong>
-      <small>${escapeHtml(`${mark} · ${detail}`)}</small>`;
-  if (!library) return `<article class="durable-entry surface-row">${copy}</article>`;
-  const selection = state.librarySelection;
-  const selected = selection?.owner === library.owner && selection?.type === library.type && selection?.id === library.id;
-  return `
-    <button type="button" class="durable-entry surface-row" data-library-type="${escapeHtml(library.type)}" data-library-id="${escapeHtml(library.id)}" aria-pressed="${String(selected)}">${copy}
-    </button>`;
-}
 
 
 
@@ -526,7 +450,7 @@ function renderInspectorDoors(title, doors) {
 
 function activeMessages(item) {
   if (item.kind === "direct") return isLiveChat(item) ? chatMessages() : [];
-  return item.messages;
+  return item.messages ?? [];
 }
 
 function draftKey(item) {
@@ -549,7 +473,6 @@ function updateComposerState() {
   const blockedReason = composerBlockReason(item);
   const canParticipate = blockedReason === null;
   const hasText = input.value.trim().length > 0;
-  const responseRunning = state.runningResponses.has(draftKey(item));
 
   input.readOnly = !canParticipate;
   input.setAttribute("aria-readonly", String(!canParticipate));
@@ -558,14 +481,10 @@ function updateComposerState() {
   input.placeholder = item.kind === "direct" ? messageLabel : canParticipate ? "Write a message" : "Watching only";
   sendButton.disabled = !canParticipate || !hasText;
   clearButton.hidden = !canParticipate || !hasText;
-  stopButton.hidden = liveChat || !responseRunning;
-  // continuity is offered only once the thread has substance to fold or remember
-  continuityGroup.hidden = liveChat || !canParticipate || activeMessages(item).length < 2;
   const refusal = blockedReason ?? (liveChat ? chat.refusal : null);
   sendRefusal.textContent = refusal ?? "";
   sendRefusal.hidden = refusal === null;
-  const key = draftKey(item);
-  let responseMessage = liveChat ? null : state.responseStatuses.get(key) ?? null;
+  let responseMessage = null;
   if (liveChat && chat.unanswered && !chat.reason && !chat.refusal && !chat.sending) {
     const answering = chat.drafts.some(draft => chat.messages.some(message =>
       message.author === "operator" && message.turnId === draft.turnId &&
@@ -574,9 +493,6 @@ function updateComposerState() {
   }
   responseStatus.textContent = responseMessage ?? "";
   responseStatus.hidden = responseMessage === null;
-  const continuityMessage = state.continuityStatuses.get(key) ?? null;
-  continuityStatus.textContent = continuityMessage ?? "";
-  continuityStatus.hidden = continuityMessage === null;
 }
 
 function visibleConversations() {
@@ -591,17 +507,22 @@ function itemIsLive(item) {
 }
 
 function openConversation(id) {
-  state.explicitSubjectSelection = true;
+  const incoming = conversations[id];
+  if (!incoming) return;
+  if (incoming.kind === "direct" && incoming.room && incoming.room !== connection.room) {
+    if (input.value.trim() && !window.confirm("Changing rooms discards this unsent message. Continue?")) return;
+    const next = new URL(location.href);
+    next.searchParams.set("room", incoming.room);
+    next.searchParams.set("view", state.activeView);
+    location.assign(next);
+    return;
+  }
   const outgoing = conversations[state.activeId];
   state.drafts.set(draftKey(outgoing), input.value);
   state.activeId = id;
-  const incoming = conversations[id];
   state.selectedMessageKey = null;
   state.selectedPresenceId = null;
   state.accessPicker = false;
-  state.librarySelection = null;
-  state.durableQuery = "";
-  state.durableMark = "all";
   state.memberDockOpen = false;
   input.value = state.drafts.get(draftKey(incoming)) ?? "";
   input.style.height = "auto";
@@ -622,7 +543,6 @@ function openSubjectView(view, { clearMessage = false } = {}) {
   if (!SUBJECT_VIEWS.includes(view)) return false;
   preserveMechanicsScroll();
   state.activeView = view;
-  state.librarySelection = null;
   state.accessPicker = false;
   if (clearMessage) state.selectedMessageKey = null;
   if (state.activeId === "house" && view === "state") ensurePulseQueried();
@@ -879,7 +799,7 @@ function renderCardPicker(verb, attr, options) {
 
 function renderCollectionDoor() {
   if (state.mode !== "direct") return "";
-  return '<button class="collection-door" type="button" disabled>New spirit · unavailable</button>';
+  return '<p class="collection-door">New spirit · no creation capability</p>';
 }
 
 let renderedConversationList = null;
@@ -943,10 +863,10 @@ function renderHeaderContext(item) {
     if (item.kind === "hallway") return renderHeaderChip("Read-only Host queries");
     return renderHeaderChip(projectWorkState());
   }
-  if (item.kind === "direct") return renderHeaderVerb("Record memory", "memory");
+  if (item.kind === "direct") return renderHeaderChip("Memories · read-only");
   if (item.kind === "hallway") return renderHeaderChip("Read-only Hallway record");
   if (item.kind === "project") return renderHeaderChip("Docket receipts · read-only");
-  return renderHeaderChip(`${houseSediment().length} entries`);
+  return renderHeaderChip(houseRecordLine());
 }
 
 function renderSessionControl(item) {
@@ -1061,109 +981,36 @@ function renderProjectSurface(item) {
   timeline.scrollTop = 0;
 }
 
-function houseSediment() {
-  const memories = houseSurface.memories.map(entry => ({
-    date: entry.date,
-    title: entry.title,
-    mark: "Memory",
-    detail: `#${entry.id} · ${entry.scope}`,
-    library: { owner: "house", type: "memory", id: entry.id }
-  }));
-  const lessons = houseSurface.lessons.map(entry => ({
-    date: entry.date,
-    title: entry.title,
-    mark: "Lesson",
-    detail: `#${entry.id} · ${entry.kind}`,
-    library: { owner: "house", type: "lesson", id: entry.id }
-  }));
-  return [...memories, ...lessons].sort((left, right) => right.date.localeCompare(left.date));
-}
 
-function roomSediment(item) {
-  return [...(roomMemoryShelves[item.id] ?? [])]
-    .sort((left, right) => right.date.localeCompare(left.date))
-    .map(entry => ({
-      date: entry.date,
-      title: entry.title,
-      mark: "Memory",
-      detail: `#${entry.id} · ${entry.detail}`,
-      library: { owner: item.id, type: "memory", id: entry.id }
-    }));
-}
-
-function durableShelf(item) {
-  return item.kind === "house" ? houseSediment() : roomSediment(item);
-}
-
-function durableEntries(item) {
-  const terms = state.durableQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return durableShelf(item).filter(entry => {
-    if (item.kind === "house" && state.durableMark !== "all" && entry.mark !== state.durableMark) return false;
-    if (terms.length === 0) return true;
-    const haystack = `${durableDate(entry.date)} ${entry.date} ${entry.title} ${entry.mark} ${entry.detail}`.toLowerCase();
-    return terms.every(term => haystack.includes(term));
-  });
-}
-
-function durableStatusText(item) {
-  const total = durableShelf(item).length;
-  const shown = durableEntries(item).length;
-  return shown === total ? `${total} entries` : `${shown} of ${total} entries`;
-}
-
-function durableControls(item) {
+function durableControls(item, { query = "", mark = "all", status = "" } = {}) {
   const searchLabel = item.kind === "house" ? "Search memories and lessons" : `Search ${item.name} room memories`;
   const marks = item.kind === "house"
     ? `
       <nav class="shelf-marks" aria-label="Shelf filter">
         ${[["all", "All"], ["Memory", "Memories"], ["Lesson", "Lessons"]].map(([id, label]) => `
-          <button type="button" data-durable-mark="${id}" aria-pressed="${String(state.durableMark === id)}">${label}</button>`).join("")}
+          <button type="button" data-durable-mark="${id}" aria-pressed="${String(mark === id)}">${label}</button>`).join("")}
       </nav>`
     : "";
   return `
     <div class="shelf-controls">
       <label class="shelf-search">
         <span>${escapeHtml(searchLabel)}</span>
-        <input type="search" data-durable-search value="${escapeHtml(state.durableQuery)}" placeholder="Title, mark, #id, date…" autocomplete="off">
+        <input type="search" data-durable-search value="${escapeHtml(query)}" placeholder="Search loaded records…" autocomplete="off">
       </label>
       ${marks}
-      <span class="shelf-status" data-durable-status role="status">${escapeHtml(durableStatusText(item))}</span>
+      <span class="shelf-status" data-durable-status role="status">${escapeHtml(status)}</span>
     </div>`;
 }
 
-function renderDurableRows(item) {
-  const entries = durableEntries(item);
-  if (entries.length === 0) {
-    if (durableShelf(item).length === 0) {
-      return renderEmptyState(`No ${item.kind === "house" ? "shared shelf" : `${item.name} room`} memories available.`);
-    }
-    const subject = item.kind === "house" ? "shared shelves" : `${item.name} room record`;
-    return renderEmptyState(`No entries on the ${subject} match that search.`);
-  }
-  return entries.map(renderDurableEntry).join("");
-}
-
-function renderDurableResults() {
-  const item = conversations[state.activeId];
-  const results = timeline.querySelector("[data-durable-results]");
-  if (!results) return;
-  results.innerHTML = renderDurableRows(item);
-  const status = timeline.querySelector("[data-durable-status]");
-  if (status) status.textContent = durableStatusText(item);
-  timeline.querySelectorAll("[data-durable-mark]").forEach(button => {
-    button.setAttribute("aria-pressed", String(button.dataset.durableMark === state.durableMark));
-  });
-}
-
-// The card and the shelf under it count the same rows, so the fixture count
-// leaves the card on the round it leaves the shelf.
 function houseRecordLine() {
   const live = liveShelfCounts(conversations.house);
   if (!live) {
-    return `${houseSurface.memories.length} memories and ${houseSurface.lessons.length} lessons on the fixture shelf, until the durable doors answer.`;
+    return "House record not queried.";
   }
 
-  return `${live.memories ?? 0} memories and ${live.lessons ?? 0} lessons read from the durable doors so far.`;
+  const memories = live.columns.memories.status === "live" ? `${live.memories} memories loaded` : `Memories ${live.columns.memories.status}`;
+  const lessons = live.columns.lessons?.status === "live" ? `${live.lessons} lessons loaded` : `Lessons ${live.columns.lessons?.status ?? "not queried"}`;
+  return `${memories} · ${lessons}`;
 }
 
 function renderHouseSurface() {
@@ -1173,8 +1020,8 @@ function renderHouseSurface() {
       <div class="overview-grid">
         ${renderOverviewHero("House overview", "Solarisael House", "Shared mechanics, memories, lessons, and substrate state. Spirit-room memory stays inside its room.")}
         <section class="specimen-card"><h3>House record</h3><p>${escapeHtml(houseRecordLine())}</p><button type="button" data-open-subject-view="durable">Open the record</button></section>
-        <section class="specimen-card"><h3>Mechanical observatory</h3><p>${HOUSE_MECHANICS_SNAPSHOT.categories.length} categories with effective values, ownership, health, and consequence.</p><button type="button" data-open-subject-view="state">Open mechanics</button></section>
-        <section class="specimen-card"><h3>Ownership</h3><p>House commons do not absorb Kintsu, Kodo, or Tuner room memory.</p></section>
+        <section class="specimen-card"><h3>Mechanical observatory</h3><p>Observed Host, room, delivery, and retention state.</p><button type="button" data-open-subject-view="state">Open mechanics</button></section>
+        <section class="specimen-card"><h3>Ownership</h3><p>House commons and room records remain separate.</p></section>
       </div>`,
     state: renderHouseMechanics(),
     durable: renderHouseSediment(conversations.house)
@@ -1192,6 +1039,7 @@ function renderRoomMemories(item) {
 }
 
 function renderSubjectView(item) {
+  if (item.kind !== "direct" || state.activeView !== "state") delete timeline.dataset.stateView;
   if (item.kind === "house") {
     renderHouseSurface();
     return;
@@ -1216,12 +1064,27 @@ function renderSubjectView(item) {
 
 
 function renderSubjectState(item) {
-  if (item.kind === "direct") {
-    timeline.innerHTML = renderDirectStatus(item);
-    timeline.scrollTop = 0;
+  if (item.kind !== "direct") {
+    timeline.innerHTML = renderHallwayStatus(item);
     return;
   }
-  timeline.innerHTML = renderHallwayStatus(item);
+  const sameView = timeline.dataset.stateView === item.id;
+  const scroll = sameView ? timeline.scrollTop : 0;
+  const focused = timeline.contains(document.activeElement) ? document.activeElement : null;
+  const focusedId = focused?.id;
+  const selection = focused?.selectionStart;
+  const selectionEnd = focused?.selectionEnd;
+  const openDetails = [...timeline.querySelectorAll("details")].map(node => node.open);
+  timeline.innerHTML = renderDirectStatus(item) + (item.room === connection.room ? renderSessions() : "");
+  timeline.dataset.stateView = item.id;
+  if (sameView) {
+    [...timeline.querySelectorAll("details")].forEach((node, index) => { node.open = openDetails[index] ?? false; });
+    const restored = focusedId ? document.getElementById(focusedId) : null;
+    restored?.focus({ preventScroll: true });
+    if (restored && Number.isInteger(selection)) restored.setSelectionRange(selection, selectionEnd);
+  }
+  timeline.scrollTop = scroll;
+  if (item.room === connection.room) ensureSessionsQueried();
 }
 
 
@@ -1296,50 +1159,18 @@ function renderInspector(item) {
   else if (item.kind === "project") eyebrow = "Project shelf";
   inspectorEyebrow.textContent = eyebrow;
 
-  const librarySelection = state.librarySelection?.owner === item.id ? state.librarySelection : null;
-  if (librarySelection) {
-    let entry;
-    let scope;
-    let scopeLabel = "Scope";
-    let selectionLabel = "Selected memory";
-    if (librarySelection.type === "lesson") {
-      entry = houseSurface.lessons.find(candidate => candidate.id === librarySelection.id);
-      scope = entry?.kind;
-      scopeLabel = "Kind";
-      selectionLabel = "Selected lesson";
-    } else {
-      const memories = item.kind === "house" ? houseSurface.memories : roomMemoryShelves[item.id] ?? [];
-      entry = memories.find(candidate => candidate.id === librarySelection.id);
-      scope = item.kind === "house" ? entry?.scope : `${item.name} room`;
-    }
-    if (entry) {
-      inspectorTitle.textContent = `#${entry.id}`;
-      inspectorContent.innerHTML = `
-        <section class="context-card context-library-selection">
-          <h3>${selectionLabel}</h3>
-          <strong>${escapeHtml(entry.title)}</strong>
-          ${renderFactList([
-            [scopeLabel, scope],
-            ["Authority here", "Local-only metadata · PostgreSQL body unavailable"]
-          ])}
-          <button type="button" data-clear-library-selection>Clear selection</button>
-        </section>`;
-      return;
-    }
-  }
 
   if (item.kind === "house") {
     inspectorTitle.textContent = "Solarisael House";
     inspectorContent.innerHTML = `
-      <section class="context-card"><h3>House pulse</h3>${renderFactList([
-        ["Memories", houseSurface.memories.length],
-        ["Lessons", houseSurface.lessons.length],
-        ["Mechanics", HOUSE_MECHANICS_SNAPSHOT.categories.reduce((sum, category) => sum + category.rows.length, 0)],
-        ["Host", HOUSE_MECHANICS_SNAPSHOT.connection]
+      <section class="context-card"><h3>House state</h3>${renderFactList([
+        ["Record", houseRecordLine()],
+        ["Host", healthSourceLine()],
+        ["Selected room", roomState().room ?? "Not loaded"]
       ])}</section>
       ${renderInspectorDoors("Open", [
-        ["state", `Mechanics · ${HOUSE_MECHANICS_SNAPSHOT.categories.length} categories`],
-        ["durable", `Memories & Lessons · ${houseSurface.memories.length + houseSurface.lessons.length}`]
+        ["state", "Mechanics"],
+        ["durable", "Memories & Lessons"]
       ])}`;
     return;
   }
@@ -1362,9 +1193,9 @@ function renderInspector(item) {
         ["State", chatBlockReason(item) ?? "Live"],
         ["Settled lines", chat.messages.length],
         ["Open drafts", chat.drafts.length],
-        ["Session", "Not reported"],
-        ["Model", "Not reported"],
-        ["Presence", "Not reported"]
+        ["Sessions", "Inspect in Status"],
+        ["Model", roomState().modelDefault ?? "Not reported"],
+        ["Registered presences", roomState().presences?.length ?? "Not reported"]
       ])}</section>
       ${renderInspectorDoors("Navigate", [["state", "Status"], ["durable", "Memories"]])}
       ${selection}`;
@@ -1506,26 +1337,19 @@ function subjectViewLabels(item) {
 
 function render() {
   const repairBanner = document.querySelector("[data-repair-banner]");
-  repairBanner.hidden = healthRoundStatus() !== "failed";
+  repairBanner.hidden = healthRoundStatus() !== "failed" && connection.status !== "failed";
   if (!repairBanner.hidden) {
-    const markup = `<span>${escapeHtml(healthSourceLine())}</span> ${renderRepair()}`;
+    const reason = connection.status === "failed" ? connection.reason : healthSourceLine();
+    const repair = connection.capabilities.repair ? renderRepair() : "";
+    const markup = `<span>${escapeHtml(reason)}</span> ${repair}`;
     if (repairBanner.innerHTML !== markup) repairBanner.innerHTML = markup;
   }
   const connectedRoom = roomState();
-  if (connectedRoom.status === "live" && connectedRoom.room) {
-    const room = connectedRoom.room;
-    if (!Object.hasOwn(conversations, room)) {
-      Object.defineProperty(conversations, room, { enumerable: true, configurable: true, writable: true, value: {
-        id: room, kind: "direct", name: room, glyph: room.slice(0, 1), room,
-        description: "Connected conversation"
-      } });
-    }
-    if (!state.initialRoomSelected && !state.explicitSubjectSelection && conversations[room].kind === "direct") {
-      state.drafts.set(draftKey(conversations[state.activeId]), input.value);
-      state.activeId = room;
-      state.selectedMessageKey = null;
-      input.value = state.drafts.get(draftKey(conversations[room])) ?? "";
-      state.initialRoomSelected = true;
+  if (connectedRoom.status === "live" && connectedRoom.room === connection.room && connectedRoom.spirit) {
+    const item = conversations[connection.room];
+    if (item?.kind === "direct") {
+      item.name = connectedRoom.spirit;
+      item.glyph = connectedRoom.spirit.slice(0, 1);
     }
   }
   const item = conversations[state.activeId];
@@ -1638,29 +1462,12 @@ document.querySelector(".subject-views").addEventListener("click", event => {
 });
 
 inspectorContent.addEventListener("click", event => {
-  if (event.target.closest("[data-clear-library-selection]")) {
-    state.librarySelection = null;
-    render();
-    return;
-  }
   const button = event.target.closest("[data-inspector-view]");
   if (!button) return;
   openSubjectView(button.dataset.inspectorView, { clearMessage: true });
 });
 
 
-let localDraftSeq = 0;
-
-function recordLocalMemory(item) {
-  const shelf = roomMemoryShelves[item.id] ?? (roomMemoryShelves[item.id] = []);
-  shelf.unshift({
-    id: `draft-${++localDraftSeq}`,
-    date: `${TODAY} ${new Date().toTimeString().slice(0, 5)}`,
-    title: "Local memory draft",
-    detail: "Recorded on this surface · local rehearsal, no durable write"
-  });
-  render();
-}
 
 
 function openInterfaceSettings(trigger) {
@@ -1672,7 +1479,6 @@ header.addEventListener("click", event => {
   const item = conversations[state.activeId];
   const verb = event.target.closest("[data-header-verb]");
   if (verb) {
-    if (verb.dataset.headerVerb === "memory") recordLocalMemory(item);
     if (verb.dataset.headerVerb === "settings") openInterfaceSettings(verb);
     return;
   }
@@ -1710,6 +1516,7 @@ profileLayer.addEventListener("click", event => {
 
 
 timeline.addEventListener("click", event => {
+  if (handleSessionsClick(event)) return;
   if (event.target.closest(".message-thinking")) return;
   const item = conversations[state.activeId];
   const connectedChat = event.target.closest("[data-open-connected-chat]");
@@ -1734,12 +1541,6 @@ timeline.addEventListener("click", event => {
   if (handlePulseClick(event)) return;
   if (handleMechanicsClick(event)) return;
   if (handleSedimentClick(event)) return;
-  const durableMark = event.target.closest("[data-durable-mark]");
-  if (durableMark) {
-    state.durableMark = durableMark.dataset.durableMark;
-    renderDurableResults();
-    return;
-  }
   const subjectDoor = event.target.closest("[data-open-subject-view]");
   if (subjectDoor) {
     openSubjectView(subjectDoor.dataset.openSubjectView);
@@ -1755,14 +1556,6 @@ timeline.addEventListener("click", event => {
     openInterfaceSettings(interfaceSettings);
     return;
   }
-  const libraryCard = event.target.closest("[data-library-type][data-library-id]");
-  if (libraryCard) {
-    const next = { owner: state.activeId, type: libraryCard.dataset.libraryType, id: libraryCard.dataset.libraryId };
-    const current = state.librarySelection;
-    state.librarySelection = current?.owner === next.owner && current?.type === next.type && current?.id === next.id ? null : next;
-    render();
-    return;
-  }
   const message = event.target.closest("[data-message-key]");
   if (!message) return;
   state.selectedMessageKey = message.dataset.messageKey;
@@ -1773,12 +1566,11 @@ timeline.addEventListener("click", event => {
 });
 
 timeline.addEventListener("input", event => {
-  if (handleMechanicsInput(event)) return;
-  const shelfSearch = event.target.closest("[data-durable-search]");
-  if (!shelfSearch) return;
-  state.durableQuery = shelfSearch.value;
-  renderDurableResults();
+  if (handleSessionsChange(event)) return;
+  if (handleSedimentInput(event)) return;
+  handleMechanicsInput(event);
 });
+timeline.addEventListener("change", handleSessionsChange);
 
 timeline.addEventListener("keydown", event => {
   if (event.key !== "Enter" && event.key !== " ") return;
@@ -1793,21 +1585,6 @@ timeline.addEventListener("keydown", event => {
   render();
 });
 
-function beginLocalResponse(item) {
-  if (isLiveChat(item)) return;
-  const key = draftKey(item);
-  const priorTimer = state.responseTimers.get(key);
-  if (priorTimer) window.clearTimeout(priorTimer);
-  state.runningResponses.add(key);
-  state.responseStatuses.set(key, "Local response running…");
-  const timer = window.setTimeout(() => {
-    state.runningResponses.delete(key);
-    state.responseTimers.delete(key);
-    state.responseStatuses.set(key, "Local response completed.");
-    updateComposerState();
-  }, 1400);
-  state.responseTimers.set(key, timer);
-}
 
 composer.addEventListener("submit", async event => {
   event.preventDefault();
@@ -1834,16 +1611,9 @@ composer.addEventListener("submit", async event => {
     updateComposerState();
     return;
   }
-  activeMessages(item).push({ author: "Sol", glyph: "S", time: "now", text, live: item.kind === "hallway", local: true });
-  beginLocalResponse(item);
-  input.value = "";
-  input.style.height = "auto";
-  updateComposerState();
-  render();
 });
 
 input.addEventListener("input", () => {
-  state.responseStatuses.delete(draftKey(conversations[state.activeId]));
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
   updateComposerState();
@@ -1861,34 +1631,10 @@ clearButton.addEventListener("click", () => {
   input.value = "";
   input.style.height = "auto";
   state.drafts.set(draftKey(item), "");
-  state.responseStatuses.delete(draftKey(item));
   updateComposerState();
   input.focus({ preventScroll: true });
 });
 
-stopButton.addEventListener("click", () => {
-  const item = conversations[state.activeId];
-  if (isLiveChat(item)) return;
-  const key = draftKey(item);
-  const timer = state.responseTimers.get(key);
-  if (timer) window.clearTimeout(timer);
-  state.responseTimers.delete(key);
-  state.runningResponses.delete(key);
-  state.responseStatuses.set(key, "Local response stopped.");
-  updateComposerState();
-});
-
-composer.addEventListener("click", event => {
-  const action = event.target.closest("[data-chat-action]");
-  if (!action) return;
-  const item = conversations[state.activeId];
-  if (composerBlockReason(item) !== null) return;
-  const message = action.dataset.chatAction === "sleep"
-    ? "Paper boat prepared. Local rehearsal · no durable write."
-    : "Memory draft prepared. Local rehearsal · no durable write.";
-  state.continuityStatuses.set(draftKey(item), message);
-  updateComposerState();
-});
 
 document.addEventListener("keydown", event => {
   if (!(event.ctrlKey || event.metaKey) || event.altKey || event.code !== "Space") return;
@@ -2051,6 +1797,8 @@ document.querySelectorAll("[data-setting]").forEach(control => {
     const stateKey = SETTING_STATE_KEYS[setting];
     if (!stateKey) return;
     state[stateKey] = value;
+    preferences.problem = writePreferences(state);
+    renderPreferenceStatus();
     if (setting === "status-visible") statusPopover.hidden = true;
     render();
   });
@@ -2130,6 +1878,9 @@ function renderStatusStrip() {
 // The block carries its own source line, and the Host's insula reading is spoken
 // in full underneath rather than left buried in the round.
 function renderAccountState() {
+  const operator = roomState().operator ?? "Operator not reported";
+  for (const node of document.querySelectorAll("[data-operator-name]")) node.textContent = operator;
+  for (const node of document.querySelectorAll("[data-operator-glyph]")) node.textContent = roomState().operator?.slice(0, 1) ?? "·";
   const detail = persistenceDetail();
   accountState.innerHTML = accountStateRows()
     .map(row => `<div><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(row.value)}</strong></div>`)
@@ -2203,12 +1954,12 @@ initBoard({ requestRender: () => {
 initSediment({
   requestRender: render,
   renderLead: renderSpecimenLead,
-  renderShelfControls: durableControls,
-  renderFixtureRows: renderDurableRows
+  renderShelfControls: durableControls
 });
 initMechanics({ timeline });
 initHealth({ requestRender: render });
 initRepair({ requestRender: render });
+initSessions({ requestRender: render });
 document.querySelector("[data-repair-banner]").addEventListener("click", event => {
   const button = event.target.closest("[data-repair]");
   if (!button) return;
@@ -2218,9 +1969,49 @@ document.querySelector("[data-repair-banner]").addEventListener("click", event =
 initChat({ requestRender: render });
 render();
 
-// The status strip is on screen from the first frame, so its round opens with
-// the page rather than waiting for a door the operator may never enter.
-ensureHealthQueried();
+function renderPreferenceStatus() {
+  const notice = document.querySelector("[data-preference-status]");
+  notice.textContent = preferences.problem ?? "Saved on this device";
+}
+
+async function connectRooms() {
+  try {
+    const result = await askHost("/local/rooms");
+    if (!Array.isArray(result.rooms) || !result.rooms.every(room => typeof room === "string") ||
+        !result.rooms.includes(result.defaultRoom)) {
+      throw new Error("The local proxy returned an invalid room list");
+    }
+    const requested = new URLSearchParams(location.search).get("room") ?? result.defaultRoom;
+    if (!result.rooms.includes(requested)) throw new Error("This room is not configured on this device");
+    for (const room of result.rooms) {
+      if (room === "house") continue;
+      Object.defineProperty(conversations, room, { enumerable: true, configurable: true, writable: true, value: {
+        id: room, kind: "direct", name: room, glyph: room.slice(0, 1).toUpperCase(),
+        room, description: "Configured room"
+      } });
+    }
+    if (!conversations[requested] || conversations[requested].kind !== "direct") {
+      throw new Error("The configured default is not a conversation room");
+    }
+    state.activeId = requested;
+    delete conversations.connecting;
+    connection = { ...result, room: requested, status: "live", capabilities: result.capabilities ?? { repair: false } };
+    render();
+    ensureHealthQueried();
+  } catch (error) {
+    connection = { ...connection, status: "failed", reason: error.message };
+    if (conversations.connecting) conversations.connecting.description = error.message;
+    render();
+  }
+}
+
+for (const control of document.querySelectorAll("[data-setting]")) {
+  const value = state[SETTING_STATE_KEYS[control.dataset.setting]];
+  if (control.type === "checkbox") control.checked = value;
+  else control.value = value;
+}
+renderPreferenceStatus();
+void connectRooms();
 // A Host that comes back is asked for every open door again: room state and
 // health ride the reconnect round itself, chat asks inside chat.js, and the
 // House board and Pulse ask here. Nothing is re-sent.

@@ -1,310 +1,70 @@
-// House slot 2 combines dated configuration with the shared Host rounds.
-// Pulse keeps its own source; observatory runtime rows use health.js.
-
 import { escapeHtml } from "./text.js";
 import { renderHousePulse } from "./pulse.js";
 import { healthSourceLine, healthSourceTone, roomStateChannel } from "./health.js";
 import { liveMechanic } from "./mechanics-live.js";
 
-// The dated census supplies configuration; liveMechanic replaces runtime fixtures.
-function mechanic(id, label, value, {
-  defaultValue = value,
-  scope = "House",
-  owner = "Code",
-  mutability = "Read-only",
-  secrecy = "Public",
-  apply = "Restart",
-  health = "Defined",
-  consequence
-}) {
-  return { id, label, value, defaultValue, scope, owner, mutability, secrecy, apply, health, consequence };
-}
-
-export const HOUSE_MECHANICS_SNAPSHOT = {
-  capturedAt: "2026-08-18",
-  revision: "source-census-2026-08-18",
-  categories: [
-    {
-      id: "recall-context",
-      label: "Recall & Context",
-      summary: "Retrieval gates, injection bounds, context budgets, and compaction pressure.",
-      rows: [
-        mechanic("recall.semantic-floor", "Semantic similarity floor", "0.40", {
-          health: "Calibrated",
-          consequence: "Lower values admit weaker semantic matches; higher values refuse more retrieval candidates."
-        }),
-        mechanic("recall.content-floor", "Content similarity floor", "0.30", {
-          health: "Calibrated",
-          consequence: "Controls the weakest content lane match allowed into ranked Recall evidence."
-        }),
-        mechanic("recall.top-k", "Recall candidate breadth", "8 semantic · 8 content", {
-          consequence: "Sets the pre-ranking breadth for each retrieval lane before evidence is merged."
-        }),
-        mechanic("recall.injection", "Automatic injection ceiling", "5 candidates · 900-char excerpts · 6000-char bodies", {
-          owner: "Adapter",
-          consequence: "Bounds automatic context growth and prevents one retrieval pass from flooding the conversation."
-        }),
-        mechanic("context.kodo-budget", "Kodo context budget", "1,000,000 tokens · compact at 90%", {
-          scope: "Kodo room",
-          owner: "Adapter",
-          health: "Configured",
-          consequence: "Defines Kodo's larger working window and the point where compaction becomes mandatory."
-        }),
-        mechanic("context.room-budget", "Default room context budget", "400,000 tokens · compact at 70%", {
-          scope: "All other rooms",
-          owner: "Adapter",
-          health: "Configured",
-          consequence: "Defines the ordinary room window and leaves a larger safety margin before model limits."
-        }),
-        mechanic("context.nudge-bands", "Context pressure bands", "40,000 tokens · warn 20 points early", {
-          owner: "Adapter",
-          consequence: "Controls when context-pressure nudges appear and how early the operator sees compaction risk."
-        }),
-        mechanic("timeout.auto-context", "Automatic context timeout", "2s", {
-          owner: "Adapter",
-          consequence: "A slow background context lane yields rather than blocking the conversational turn."
-        }),
-        mechanic("timeout.recall", "Recall and Anamnesis timeout", "120s", {
-          owner: "Adapter",
-          consequence: "Bounds explicit deep retrieval and counsel reads before the tool returns a timeout."
-        })
-      ]
-    },
-    {
-      id: "memory-lessons",
-      label: "Memory, Lessons & Anamnesis",
-      summary: "Durable writes, lesson firing, counsel reads, and paper-boat limits.",
-      rows: [
-        mechanic("memory.write-timeout", "Durable write timeout", "90s", {
-          owner: "Adapter",
-          consequence: "Bounds Remember and other PostgreSQL-authoritative write receipts."
-        }),
-        mechanic("lesson.relevance-floor", "Lesson relevance floor", "0.15", {
-          health: "Calibrated",
-          consequence: "Filters weak lesson matches before the working set can influence a task."
-        }),
-        mechanic("lesson.working-set", "Lesson working set", "6 lessons", {
-          owner: "Adapter",
-          consequence: "Caps the number of lessons braided into one task context."
-        }),
-        mechanic("lesson.trigger-guard", "Lesson trigger guard", "32 patterns · 300ms", {
-          owner: "Adapter",
-          consequence: "Bounds deterministic trigger scanning and prevents pathological lesson matchers from stalling a turn."
-        }),
-        mechanic("anamnesis.read-limit", "Anamnesis read bounds", "10 default · 50 maximum", {
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Controls how much lived counsel one explicit Cabinet read may return."
-        }),
-        mechanic("paper-boat.guardrails", "Paper-boat guardrails", "64 KiB body · 64 unboated rows", {
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Prevents session continuity from accumulating an unbounded unsent backlog."
-        })
-      ]
-    },
-    {
-      id: "giga-embeddings",
-      label: "GIGA & Embeddings",
-      summary: "Stage 1 gates, leases, source windows, model context, and vector health.",
-      rows: [
-        mechanic("giga.integration-gate", "GIGA integration gate", "Environment-gated", {
-          owner: "Environment",
-          mutability: "Environment-owned",
-          health: "Host offline",
-          consequence: "Controls whether Stage 1 processing may start at all."
-        }),
-        mechanic("giga.claim-owner", "GIGA claim ownership", "One owner per leased event", {
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Prevents two workers from processing the same event concurrently."
-        }),
-        mechanic("giga.source-window", "GIGA source window", "8 sources · 8 KiB each · 24 KiB total", {
-          consequence: "Bounds evidence carried into one candidate-generation pass."
-        }),
-        mechanic("giga.lease-attempts", "GIGA lease and attempts", "3600s lease · 5 attempts · 1 candidate", {
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Controls recovery from abandoned work and caps retry amplification."
-        }),
-        mechanic("giga.model-context", "GIGA model context", "32768 tokens · 30m keep-alive", {
-          owner: "Environment",
-          mutability: "Environment-owned",
-          consequence: "Defines the local generation window and how long the model remains warm."
-        }),
-        mechanic("embedding.identity", "Embedding identity", "nomic-embed-text · 768 dimensions", {
-          owner: "Environment",
-          mutability: "Environment-owned",
-          apply: "Migration / reindex",
-          health: "Configured",
-          consequence: "Changing either value invalidates stored vectors and requires a complete re-embedding."
-        }),
-        mechanic("embedding.endpoint", "Embedding endpoint", "Configured · value redacted", {
-          owner: "Environment",
-          mutability: "Environment-owned",
-          secrecy: "Sensitive",
-          health: "Host offline",
-          consequence: "Selects the local or consented remote embedding service without exposing its address here."
-        })
-      ]
-    },
-    {
-      id: "host-delivery",
-      label: "Host, Delivery & Hallways",
-      summary: "Connection timing, delivery health, Hallway bounds, and Bell escalation policy.",
-      rows: [
-        mechanic("host.request-timeout", "Host request timeout", "3s", {
-          owner: "Adapter",
-          consequence: "Keeps ordinary Host calls from freezing the operator surface."
-        }),
-        mechanic("host.diagnostic-timeout", "Host diagnostic timeout", "8s", {
-          owner: "Adapter",
-          consequence: "Allows bounded health inspection more time than ordinary interaction calls."
-        }),
-        mechanic("host.identity-tuple", "Authenticated identity tuple", "House · room · spirit · session", {
-          owner: "Host runtime",
-          apply: "Session start",
-          health: "Host offline",
-          consequence: "Binds every trusted operation to the current House presence without client-supplied identity."
-        }),
-        mechanic("hallway.guardrails", "Hallway guardrails", "32 KiB body · 32 rooms · reads 50 / 200 max", {
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Bounds message size, membership fanout, and one read request."
-        }),
-        mechanic("delivery.channels", "Akasha and NATS delivery", "Unavailable · Host offline", {
-          owner: "Host runtime",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Reports durable authority and immediate-delivery reach when the Host connects."
-        }),
-        mechanic("delivery.retry-state", "Delivery instance and retries", "Unavailable", {
-          owner: "Host runtime",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Would expose the active delivery instance, pending retries, and last failure."
-        }),
-        mechanic("bell.wake-policy", "Bell and wake escalation", "Schema-compatible · policy unset", {
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Policy absent",
-          consequence: "Keeps future live knocks and wake authority explicit before autonomous escalation is enabled."
-        })
-      ]
-    },
-    {
-      id: "rooms-sessions",
-      label: "Rooms & Sessions",
-      summary: "Room identity, Recall policy, routing, model defaults, and active presences.",
-      rows: [
-        mechanic("room.state", "Operator and embodied spirit", "PostgreSQL room state", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Changes the room's trusted operator or embodied spirit and refreshes its live declaration."
-        }),
-        mechanic("room.recall-policy", "Recall policy", "Per room", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Selects whether proactive Recall resolves automatically or follows an explicit room mode."
-        }),
-        mechanic("room.routing-mode", "Worker routing mode", "Per room", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Controls whether bounded work defaults through House worker routing."
-        }),
-        mechanic("room.model-default", "OMP model default", "Per room", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          mutability: "Host-writable",
-          apply: "Next session",
-          health: "Host offline",
-          consequence: "Chooses the room's default OMP model selector at the next applicable session boundary."
-        }),
-        mechanic("room.presences", "Active room presences", "Unavailable", {
-          scope: "Per room",
-          owner: "PostgreSQL",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Would show joined sessions, embodied spirits, and their delivery cursors."
-        }),
-        mechanic("session.delivery-cursor", "Session delivery cursor", "Per authenticated session", {
-          scope: "Per session",
-          owner: "PostgreSQL",
-          apply: "Live",
-          consequence: "Prevents the same durable Hallway attention from being injected twice into one session."
-        })
-      ]
-    },
-    {
-      id: "backups",
-      label: "Backups",
-      summary: "Retention policy, last success, and database reachability.",
-      rows: [
-        mechanic("backup.retention", "Backup retention", "3 Rust · 14 shell", {
-          owner: "Deployment scripts",
-          mutability: "Code-owned",
-          apply: "Deploy",
-          health: "Divergent",
-          consequence: "Two cleanup paths currently retain different counts and should converge before either becomes editable."
-        }),
-        mechanic("backup.last-success", "Last successful backup", "Unavailable", {
-          owner: "Host runtime",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Would prove the newest PostgreSQL preservation point and its age."
-        }),
-        mechanic("database.pool-health", "Database pool and connect health", "Unavailable", {
-          owner: "Host runtime",
-          apply: "Live",
-          health: "Host offline",
-          consequence: "Would expose pool saturation, connection reachability, and the last database failure."
-        })
-      ]
-    },
-    {
-      id: "advanced",
-      label: "Advanced Guardrails",
-      summary: "Canonical evidence bounds, neighbor context, chunking, clustering, and secret handling.",
-      rows: [
-        mechanic("recall.canon-bounds", "Canon injection bounds", "6 matches · 3 files", {
-          owner: "Adapter",
-          consequence: "Caps authoritative canon evidence returned through one Recall pass."
-        }),
-        mechanic("recall.neighbor-bounds", "Thread neighbor bounds", "6 neighbors · 500 chars each", {
-          owner: "Adapter",
-          consequence: "Adds bounded chronology around a matched memory without loading whole threads."
-        }),
-        mechanic("chunk.bounds", "Memory chunk bounds", "400–1200 characters", {
-          apply: "Migration / reindex",
-          consequence: "Changing chunk shape alters retrieval granularity and invalidates existing embedding assumptions."
-        }),
-        mechanic("cluster.rebuild", "Cluster rebuild trigger", "500 new chunks or 7 days", {
-          consequence: "Controls when the memory taxonomy is recomputed from accumulated semantic material."
-        }),
-        mechanic("secret.health-only", "Secret exposure", "Presence and health only", {
-          owner: "Host runtime",
-          mutability: "Never editable here",
-          secrecy: "Secret-health-only",
-          apply: "N/A",
-          health: "Enforced",
-          consequence: "Host tokens, database URLs, and passwords never cross into the GUI snapshot."
-        })
-      ]
-    }
-  ]
-};
+const CATEGORIES = [
+  {
+    id: "recall-context",
+    label: "Recall & Context",
+    summary: "The selected room's Recall policy and published projection cursor.",
+    rows: [
+      { id: "room.recall-policy", label: "Recall policy", source: "Room state", scope: "Selected room" },
+      { id: "recall.projection", label: "Recall projection cursor", source: "Health", scope: "Selected room" }
+    ]
+  },
+  {
+    id: "memory-lessons",
+    label: "Memory, Lessons & Anamnesis",
+    summary: "Configuration availability for memory, lessons, and counsel.",
+    rows: [{ id: "memory.configuration", label: "Memory and lesson settings", source: "No configuration response", scope: "Not reported" }]
+  },
+  {
+    id: "giga-embeddings",
+    label: "GIGA & Embeddings",
+    summary: "Configuration availability for GIGA and embedding services.",
+    rows: [{ id: "giga.configuration", label: "GIGA and embedding settings", source: "No configuration response", scope: "Not reported" }]
+  },
+  {
+    id: "host-delivery",
+    label: "Host, Delivery & Hallways",
+    summary: "Host status and the reported delivery channel.",
+    rows: [
+      { id: "host.status", label: "Host status and API", source: "Health", scope: "Selected room" },
+      { id: "delivery.channels", label: "AKASHA and broker delivery", source: "Health", scope: "Selected room" },
+      { id: "delivery.receipt", label: "Latest delivery receipt", source: "Health", scope: "Selected room" },
+      { id: "delivery.failure", label: "Last delivery failure", source: "Health", scope: "Selected room" }
+    ]
+  },
+  {
+    id: "rooms-sessions",
+    label: "Rooms & Sessions",
+    summary: "Selected room identity, policies, and reported presences.",
+    rows: [
+      { id: "room.state", label: "Operator and embodied spirit", source: "Room state", scope: "Selected room" },
+      { id: "room.routing-mode", label: "Worker routing mode", source: "Room state", scope: "Selected room" },
+      { id: "room.model-default", label: "OMP model default", source: "Room state", scope: "Selected room" },
+      { id: "room.presences", label: "Room presences", source: "Room state", scope: "Selected room" },
+      { id: "room.chat", label: "Room chat state", source: "Room state", scope: "Selected room" }
+    ]
+  },
+  {
+    id: "backups",
+    label: "Backups",
+    summary: "Backup status is not part of the current health response.",
+    rows: [{ id: "backup.status", label: "Backup status and retention", source: "No backup response", scope: "Not reported" }]
+  },
+  {
+    id: "advanced",
+    label: "Advanced Guardrails",
+    summary: "Insula health, returned vitals, and observed retention receipts.",
+    rows: [
+      { id: "insula.health", label: "Insula store health", source: "Health", scope: "Selected Host" },
+      { id: "insula.vitals", label: "Insula vitals coverage", source: "Insula vitals", scope: "Selected room" },
+      { id: "insula.retention", label: "Latest retention receipt", source: "Insula retention", scope: "House" }
+    ]
+  }
+];
 
 
 // Observatory view state: which category filters, what the search says, and
@@ -353,17 +113,14 @@ export function handleMechanicsInput(event) {
 }
 
 function mechanicsHealthTone(health) {
-  if (/offline|absent|divergent|unavailable/i.test(health)) return "attention";
-  if (/calibrated|configured|defined|enforced/i.test(health)) return "steady";
-
-  return "quiet";
+  return health === "Host reported" ? "steady" : "quiet";
 }
 
 function mechanicsEntries() {
   const needle = query.trim().toLowerCase();
   const categories = needle || category === "all"
-    ? HOUSE_MECHANICS_SNAPSHOT.categories
-    : HOUSE_MECHANICS_SNAPSHOT.categories.filter(candidate => candidate.id === category);
+    ? CATEGORIES
+    : CATEGORIES.filter(candidate => candidate.id === category);
 
   return categories.flatMap(group => group.rows
     .map(liveMechanic)
@@ -379,7 +136,7 @@ function renderMechanicRow({ category: group, row }) {
     <details class="mechanics-row" data-mechanic-id="${escapeHtml(row.id)}">
       <summary>
         <span class="mechanics-row-title"><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(group.label)}</small></span>
-        <span class="mechanics-row-value"><small>Effective</small><code>${escapeHtml(row.value)}</code></span>
+        <span class="mechanics-row-value"><small>Observed</small><code>${escapeHtml(row.value)}</code></span>
         <span class="mechanics-row-flags" aria-label="${escapeHtml(`${row.health}; ${row.mutability}`)}">
           <span data-tone="${row.tone ?? mechanicsHealthTone(row.health)}">${escapeHtml(row.health)}</span>
           <span data-tone="quiet">${escapeHtml(row.mutability)}</span>
@@ -387,21 +144,19 @@ function renderMechanicRow({ category: group, row }) {
       </summary>
       <div class="mechanics-row-body">
         <dl>
-          <div><dt>Default</dt><dd>${escapeHtml(row.defaultValue)}</dd></div>
+          <div><dt>Source</dt><dd>${escapeHtml(row.source)}</dd></div>
           <div><dt>Scope</dt><dd>${escapeHtml(row.scope)}</dd></div>
-          <div><dt>Owner</dt><dd>${escapeHtml(row.owner)}</dd></div>
-          <div><dt>Apply</dt><dd>${escapeHtml(row.apply)}</dd></div>
-          <div><dt>Secrecy</dt><dd>${escapeHtml(row.secrecy)}</dd></div>
+          <div><dt>Controls</dt><dd>Read-only</dd></div>
         </dl>
-        <p><strong>Consequence.</strong> ${escapeHtml(row.consequence)}</p>
+        <p>${escapeHtml(row.detail)}</p>
       </div>
     </details>`;
 }
 
 export function renderHouseMechanics() {
   const categoryButtons = [
-    { id: "all", label: "All", count: HOUSE_MECHANICS_SNAPSHOT.categories.reduce((sum, group) => sum + group.rows.length, 0) },
-    ...HOUSE_MECHANICS_SNAPSHOT.categories.map(group => ({ id: group.id, label: group.label, count: group.rows.length }))
+    { id: "all", label: "All", count: CATEGORIES.reduce((sum, group) => sum + group.rows.length, 0) },
+    ...CATEGORIES.map(group => ({ id: group.id, label: group.label, count: group.rows.length }))
   ];
 
   return `
@@ -409,19 +164,17 @@ export function renderHouseMechanics() {
       <header class="mechanics-lead">
         <span class="eyebrow">House mechanics</span>
         <h2 id="mechanics-title">Mechanical observatory</h2>
-        <p>Host-reported runtime values and dated source-census configuration. Missing runtime facts stay not reported.</p>
-        <div class="mechanics-snapshot-status" aria-label="Snapshot status">
+        <p>Observed Host health, selected room state, and Insula responses.</p>
+        <div class="mechanics-snapshot-status" aria-label="Source status">
           <span data-tone="${healthSourceTone()}">${escapeHtml(healthSourceLine())}</span>
           <span data-tone="${roomStateChannel().tone}">${escapeHtml(roomStateChannel().full)} · ${escapeHtml(roomStateChannel().detail)}</span>
-          <span>Source census · ${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.capturedAt)}</span>
-          <span>${escapeHtml(HOUSE_MECHANICS_SNAPSHOT.revision)}</span>
         </div>
       </header>
       ${renderHousePulse()}
       <div class="mechanics-controls">
         <label class="mechanics-search">
           <span>Search every mechanism</span>
-          <input type="search" data-mechanics-search value="${escapeHtml(query)}" placeholder="Recall, timeout, Hallway, backup…" autocomplete="off">
+          <input type="search" data-mechanics-search value="${escapeHtml(query)}" placeholder="Recall, delivery, room, Insula…" autocomplete="off">
         </label>
         <nav class="mechanics-categories" aria-label="Mechanical observatory categories">
           ${categoryButtons.map(button => `
@@ -432,7 +185,7 @@ export function renderHouseMechanics() {
       </div>
       <p class="mechanics-results-status" role="status" aria-live="polite"></p>
       <div class="mechanics-results"></div>
-      <footer>Runtime facts come from shared Host rounds. Source-census configuration is dated above. Every control remains read-only here.</footer>
+      <footer>Settings changes are unavailable through the current HTTP routes.</footer>
     </section>`;
 }
 
@@ -442,7 +195,7 @@ export function renderMechanicsResults() {
 
   const entries = mechanicsEntries();
   const needle = query.trim();
-  const active = HOUSE_MECHANICS_SNAPSHOT.categories.find(candidate => candidate.id === category);
+  const active = CATEGORIES.find(candidate => candidate.id === category);
 
   observatory.querySelectorAll("[data-mechanics-category]").forEach(button => {
     button.setAttribute("aria-pressed", String(button.dataset.mechanicsCategory === category));
@@ -452,5 +205,5 @@ export function renderMechanicsResults() {
     : `${entries.length} mechanism${entries.length === 1 ? "" : "s"} · ${active?.label ?? "All categories"}`;
   observatory.querySelector(".mechanics-results").innerHTML = entries.length > 0
     ? entries.map(renderMechanicRow).join("")
-    : '<div class="mechanics-empty"><strong>No mechanism matches that search.</strong><span>Try Recall, timeout, Hallway, room, or backup.</span></div>';
+    : '<div class="mechanics-empty"><strong>No mechanism matches that search.</strong><span>Try Recall, delivery, room, or Insula.</span></div>';
 }

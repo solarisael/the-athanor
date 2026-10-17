@@ -33,10 +33,11 @@ const room = Bun.env.PULSE_ROOM ?? "kodo";
 const port = Number(Bun.env.PULSE_PORT ?? 4175);
 const hostPort = Number(Bun.env.PULSE_HOST_PORT ?? runtime.hostPort);
 if (!Number.isInteger(hostPort)) throw new Error("no usable hostPort");
-if (!runtime.rooms.some((entry: { room: string }) => entry.room === room)) {
+const rooms = [...new Set<string>(runtime.rooms.map((entry: { room: string }) => entry.room))];
+if (!rooms.includes(room)) {
   throw new Error(`room ${room} is not in runtime.json`);
 }
-const roomPath = `/room/${room}`;
+const roomPath = `/room/${encodeURIComponent(room)}`;
 
 Bun.serve({
   hostname: "127.0.0.1",
@@ -53,22 +54,63 @@ Bun.serve({
     ) return new Response("forbidden origin", { status: 403 });
     const url = new URL(request.url);
 
+    if (url.pathname.startsWith("/local/")) {
+      if (!["/local/rooms", "/local/repair/status", "/local/repair/start"].includes(url.pathname)) {
+        return new Response("unknown local route", { status: 404 });
+      }
+      if (request.method !== "POST") return new Response("POST only", { status: 405 });
+      if (url.pathname !== "/local/rooms") {
+        return Response.json({ error: "Local repair requires the desktop app", hop: "repair" }, { status: 501 });
+      }
+      try {
+        const text = await request.text();
+        const body = text.trim() === "" ? {} : JSON.parse(text);
+        if (body === null || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
+          return new Response("no body fields allowed", { status: 400 });
+        }
+      } catch {
+        return new Response("invalid JSON body", { status: 400 });
+      }
+      return Response.json({ defaultRoom: room, rooms, capabilities: { repair: false } });
+    }
+
     if (url.pathname.startsWith("/live/")) {
       const route = LIVE_ROUTES.get(url.pathname);
       if (!route) return new Response("unknown live route", { status: 404 });
       if (request.method !== "POST") return new Response("POST only", { status: 405 });
+      const selectedRoom = request.headers.get("x-athanor-room") ?? room;
+      if (!rooms.includes(selectedRoom)) return new Response("unknown room", { status: 403 });
+      const selectedRoomPath = `/room/${encodeURIComponent(selectedRoom)}`;
+      let body: string | undefined;
+      if (route.method !== "GET") {
+        try {
+          body = await request.text();
+          if (url.pathname === "/live/session") {
+            const session = JSON.parse(body);
+            if (session === null || typeof session !== "object" || Array.isArray(session)) {
+              return new Response("session body must be a JSON object", { status: 400 });
+            }
+            if (!["status", "command", "commandStatus"].includes(session.action)) {
+              return new Response("session action refused", { status: 403 });
+            }
+            body = JSON.stringify(session);
+          }
+        } catch {
+          return new Response("invalid JSON body", { status: 400 });
+        }
+      }
 
       // Parity with gui-desktop/src/proxy.rs: a transport failure is 502 with
       // the hop named; a Host error passes through with its own status.
       let upstream: Response;
       try {
-        upstream = await fetch(`http://127.0.0.1:${hostPort}${roomPath}${route.path}`, {
+        upstream = await fetch(`http://127.0.0.1:${hostPort}${selectedRoomPath}${route.path}`, {
           method: route.method,
           headers: {
             "content-type": "application/json",
             authorization: `Bearer ${secrets.hostToken}`,
           },
-          body: route.method === "GET" ? undefined : await request.text(),
+          body,
           signal: AbortSignal.timeout(20_000),
         });
       } catch (error) {

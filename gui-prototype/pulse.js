@@ -1,59 +1,8 @@
-// Pulse — the Insula instrument in House slot 2.
-//
-// Owns the stamped PostgreSQL snapshot, the one read-only live wire to a room
-// Host (through the serve.ts proxy, so no credential ever reaches this page),
-// the derivation from vitals rollups, and the rendering. The surface renders
-// the snapshot instantly; one Host query may replace channels and lanes with
-// live rows wearing live chips. Receipts stay snapshot-only because no Host
-// route serves receipt kinds yet.
+// Pulse reads room-scoped Insula rollups and House retention receipts.
 
 import { escapeHtml } from "./text.js";
+import { askHost } from "./health.js";
 
-// One consistent capture: every number below was read from PostgreSQL insula
-// rows inside a single transaction at the stamped moment. Times are −03.
-const PULSE_SNAPSHOT = {
-  capturedAt: "2026-08-20 22:12 −03",
-  source: "PostgreSQL insula snapshot",
-  vitalsQuery: "insula.vitals.minute v1",
-  totals: { spans: 15853, writers: 36, components: 4, window: "16:01–22:12 −03", duplicates: 13, drops: 0 },
-  tokens: { tokensIn: 95690376, tokensOut: 398925, usagePoints: 810 },
-  retention: { receipts: 0, sweepRuns: 13, days: 14, firstExpiry: "2026-09-03" },
-  rooms: [
-    ["kintsu", 8555], ["tuner", 5329], ["kodo", 1660],
-    ["house", 211], ["salvia", 49], ["hugo", 49]
-  ],
-  lanes: [
-    { operation: "knock_claim", component: "house_host", outcomes: { ok: 2436 }, maxDuration: "28.7 ms", errorClasses: "",
-      note: "Doorman claim poll, roughly one span per host every two seconds, aggregated to one lane at render." },
-    { operation: "tool_call", component: "omp_adapter", outcomes: { ok: 1915, error: 29, cancelled: 15 }, maxDuration: "24.6 min", errorClasses: "tool_error 29 · session_shutdown 15" },
-    { operation: "provider_request", component: "omp_adapter", outcomes: { ok: 1800, degraded: 9, cancelled: 5 }, maxDuration: "1.9 min", errorClasses: "partial_context 9 · provider_aborted 5" },
-    { operation: "provider_usage", component: "omp_adapter", outcomes: { ok: 809, degraded: 3 }, maxDuration: "", errorClasses: "usage_unavailable 3" },
-    { operation: "context_assembly", component: "omp_adapter", outcomes: { ok: 801, degraded: 12 }, maxDuration: "2.3 s", errorClasses: "partial_context 12" },
-    { operation: "receipt_projection", component: "house_host", outcomes: { ok: 48, refused: 192 }, maxDuration: "", errorClasses: "" },
-    { operation: "insula_ingest", component: "house_host", outcomes: { ok: 149 }, maxDuration: "67.1 ms", errorClasses: "" },
-    { operation: "tool_result", component: "omp_adapter", outcomes: { ok: 94, error: 1 }, maxDuration: "", errorClasses: "tool_error 1" },
-    { operation: "lesson_trigger_match", component: "athanor_substrate", outcomes: { ok: 86 }, maxDuration: "10.9 ms", errorClasses: "" },
-    { operation: "retention_sweep", component: "athanor_substrate", outcomes: { ok: 13 }, maxDuration: "42.0 ms", errorClasses: "" },
-    { operation: "hallway_projection", component: "house_host", outcomes: { ok: 7 }, maxDuration: "", errorClasses: "" },
-    { operation: "recall_policy_decide", component: "house_host", outcomes: { ok: 7 }, maxDuration: "", errorClasses: "" },
-    { operation: "insula_health", component: "deployment_probe", outcomes: { ok: 5 }, maxDuration: "", errorClasses: "" },
-    { operation: "lesson_query", component: "athanor_substrate", outcomes: { ok: 3 }, maxDuration: "26.0 ms", errorClasses: "" },
-    { operation: "hallway_read", component: "athanor_substrate", outcomes: { ok: 2 }, maxDuration: "13.0 ms", errorClasses: "" },
-    { operation: "hallway_post", component: "athanor_substrate", outcomes: { ok: 2 }, maxDuration: "21.4 ms", errorClasses: "" },
-    { operation: "remember", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "824.9 ms", errorClasses: "" },
-    { operation: "entity_resolve", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "1.9 ms", errorClasses: "" },
-    { operation: "recall", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "9.5 s", errorClasses: "" },
-    { operation: "pg_backup", component: "athanor_substrate", outcomes: { ok: 1 }, maxDuration: "", errorClasses: "" }
-  ],
-  receipts: [
-    { kind: "athanor.recall_policy.command_accepted", component: "house_host", count: 7, lastAt: "22:05 −03", outcome: "ok", latestId: "4772aa88-19e9-4fff-bd40-54ebb8e58a46" },
-    { kind: "athanor.hallway.inbox_projected", component: "house_host", count: 7, lastAt: "22:05 −03", outcome: "ok", latestId: "9bd7575c-cd6f-4db5-bd76-33ae1ae158f1" },
-    { kind: "paper_boat_receipt", component: "house_host", count: 48, lastAt: "21:45 −03", outcome: "ok", latestId: "64212b60-a5a8-445f-ad7f-b2b6b6bfe407" },
-    { kind: "insula.backup", component: "athanor_substrate", count: 1, lastAt: "21:45 −03", outcome: "ok", latestId: "a61389335e22df4f0b0bfee497b0a7ff45ee925f7ea0b34c23d9a6f58f5a7d64" }
-  ]
-};
-
-const KNOCK_NOTE = "Doorman claim poll, roughly one span per host every two seconds, aggregated to one lane at render.";
 const RAW_ONLY = "raw rows only — not carried in rollups";
 const TRACE_LIMIT = 100;
 
@@ -70,9 +19,6 @@ const SPANS_WINDOW = "24h";
 // yet, and the drawer's two columns are duration and outcome.
 const SPANS_PHASE = "end";
 
-// Why a lane may still have no spans to list: the stamped snapshot recorded
-// rollups only, and this read lives on the Host.
-const SNAPSHOT_NO_SPANS = "This lane comes from the stamped PostgreSQL snapshot, which recorded rollups only. Query the Host to list the spans behind a lane.";
 
 // Pulse-local source state: idle → pending → live | failed. Nothing outside
 // this module reads it; the shell sees rendered markup and a render request.
@@ -96,10 +42,9 @@ export function ensurePulseQueried() {
   if (live.status === "idle") queryPulseHost();
 }
 
-// A failed Pulse round is asked again when the Host comes back; a live or
-// never-opened round is left alone, vitals are not cheap.
+// Recovery reopens failed reads without repeating successful cold reads.
 export function recoverPulse() {
-  if (live.status === "failed") queryPulseHost();
+  if (live.status === "failed" || live.retention?.status === "failed") queryPulseHost();
 }
 
 export function handlePulseClick(event) {
@@ -164,16 +109,13 @@ function renderWithSpanFocus(traceId) {
   renderWithFocus(`[data-pulse-span-trace="${CSS.escape(traceId)}"]`);
 }
 
-// The lane's newest settled spans, read from the Host's spans route. The Host
-// scopes this to its own House and room from its trusted binding; the page
-// names only the lane. A snapshot lane, a refusal, an unparsable body, and an
-// empty window are four different states, and each says which it is instead of
-// borrowing another's words.
+// The Host scopes spans to its trusted room binding. Rollups have no trace id,
+// so this read supplies the identities for the trace drawer.
 async function openLaneSpans(key, operation) {
   trace = { key: null, status: "idle" };
 
   if (live.status !== "live") {
-    spans = { key, status: "unavailable", reason: SNAPSHOT_NO_SPANS };
+    spans = { key, status: "unavailable", reason: "Live vitals are not available. Query the Host before opening a lane." };
     renderWithLaneFocus(key);
     return;
   }
@@ -182,25 +124,13 @@ async function openLaneSpans(key, operation) {
   renderWithLaneFocus(key);
 
   try {
-    const response = await fetch("/live/insula/spans", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        operation,
-        phase: SPANS_PHASE,
-        window: SPANS_WINDOW,
-        limit: SPANS_LIMIT
-      })
+    const answer = await askHost("/live/insula/spans", {
+      operation,
+      phase: SPANS_PHASE,
+      window: SPANS_WINDOW,
+      limit: SPANS_LIMIT
     });
-    const raw = await response.text();
-    let answer = null;
-    try {
-      answer = JSON.parse(raw);
-    } catch {
-      throw new Error(`Host answered an unparsable body: ${raw.slice(0, 80)}`);
-    }
-    if (!response.ok) throw new Error(`Host refused: ${answer?.error ?? response.status}`);
-    if (!Array.isArray(answer.rows)) throw new Error("Host answered without a rows collection");
+    if (!Array.isArray(answer?.rows)) throw new Error("Spans response has no rows collection");
 
     spans = {
       key,
@@ -233,20 +163,8 @@ async function openLaneTrace(key, traceId) {
   renderWithSpanFocus(traceId);
 
   try {
-    const response = await fetch("/live/insula/trace", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ traceId, limit: TRACE_LIMIT })
-    });
-    const raw = await response.text();
-    let answer = null;
-    try {
-      answer = JSON.parse(raw);
-    } catch {
-      throw new Error(`Host answered an unparsable body: ${raw.slice(0, 80)}`);
-    }
-    if (!response.ok) throw new Error(`Host refused: ${answer?.error ?? response.status}`);
-    if (!Array.isArray(answer.rows)) throw new Error("Host answered without a rows collection");
+    const answer = await askHost("/live/insula/trace", { traceId, limit: TRACE_LIMIT });
+    if (!Array.isArray(answer?.rows)) throw new Error("Trace response has no rows collection");
 
     trace = {
       key,
@@ -269,7 +187,7 @@ async function openLaneTrace(key, traceId) {
 }
 
 function pulseCount(value) {
-  return value.toLocaleString("en-US");
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString("en-US") : "not reported";
 }
 
 function formatMicroseconds(us) {
@@ -298,24 +216,23 @@ async function queryPulseHost() {
     const end = new Date();
     const start = new Date(end.getTime() - 24 * 3600 * 1000);
 
-    const [vitalsResponse, retentionResponse] = await Promise.all([
-      fetch("/live/insula/vitals", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ start: start.toISOString(), end: end.toISOString(), limit: 4000 })
-      }),
-      fetch("/live/insula/retention", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ limit: 20 })
-      })
+    const [vitals, retention] = await Promise.all([
+      askHost("/live/insula/vitals", { start: start.toISOString(), end: end.toISOString(), limit: 4000 })
+        .then(answer => {
+          if (!Array.isArray(answer?.rows)) throw new Error("Vitals response has no rows collection");
+          return { ...answer, status: "live" };
+        })
+        .catch(error => ({ status: "failed", reason: `Vitals: ${error.message}` })),
+      askHost("/live/insula/retention", { limit: 20 })
+        .then(answer => {
+          if (!Array.isArray(answer?.rows)) throw new Error("Retention response has no rows collection");
+          return { ...answer, status: "live" };
+        })
+        .catch(error => ({ status: "failed", reason: `Retention: ${error.message}` }))
     ]);
-    if (!vitalsResponse.ok || !retentionResponse.ok) {
-      throw new Error(`Host answered ${vitalsResponse.ok ? retentionResponse.status : vitalsResponse.status}`);
-    }
-
     const queriedAt = new Date().toTimeString().slice(0, 5);
-    live = derivePulseLive(await vitalsResponse.json(), await retentionResponse.json(), queriedAt);
+    live = vitals.status === "live" ? derivePulseLive(vitals, retention, queriedAt)
+      : { status: "failed", reason: vitals.reason, retention, queriedAt };
   } catch (error) {
     live = { status: "failed", reason: error instanceof Error ? error.message : "no route to Host" };
   }
@@ -328,110 +245,87 @@ async function queryPulseHost() {
 // rather than imitated.
 function derivePulseLive(vitals, retention, queriedAt) {
   const lanes = new Map();
-  let settled = 0;
-  let tokensIn = 0;
-  let tokensOut = 0;
-  let usagePoints = 0;
-  let drops = 0;
-  let firstMinute = null;
-  let lastMinute = null;
-
-  for (const row of vitals.rows) {
-    if (!firstMinute || row.minute < firstMinute) firstMinute = row.minute;
-    if (!lastMinute || row.minute > lastMinute) lastMinute = row.minute;
-    tokensIn += row.tokensInSum;
-    tokensOut += row.tokensOutSum;
-    drops += row.dropCountSum;
-    if (row.operation === "provider_usage" && row.outcomeClass === "ok") usagePoints += row.eventCount;
-
-    if (row.phase === "start") continue;
-
-    settled += row.eventCount;
+  const sum = (rows, field) => rows.length && rows.every(row => typeof row[field] === "number" && Number.isFinite(row[field]))
+    ? rows.reduce((total, row) => total + row[field], 0)
+    : null;
+  const settledRows = vitals.rows.filter(row => row.phase !== "start");
+  for (const row of settledRows) {
     const key = `${row.component} ${row.operation}`;
-    const lane = lanes.get(key) ?? { operation: row.operation, component: row.component, outcomes: {}, maxUs: null };
-    lane.outcomes[row.outcomeClass] = (lane.outcomes[row.outcomeClass] ?? 0) + row.eventCount;
-    if (row.durationUsMax != null) lane.maxUs = Math.max(lane.maxUs ?? 0, row.durationUsMax);
+    const lane = lanes.get(key) ?? { operation: row.operation, component: row.component, rows: [], outcomes: {}, maxUs: null };
+    lane.rows.push(row);
+    if (typeof row.eventCount === "number") {
+      lane.outcomes[row.outcomeClass] = (lane.outcomes[row.outcomeClass] ?? 0) + row.eventCount;
+    }
+    if (row.durationUsMax != null) lane.maxUs = Math.max(lane.maxUs ?? row.durationUsMax, row.durationUsMax);
     lanes.set(key, lane);
   }
-
-  const laneList = [];
-  for (const lane of lanes.values()) {
-    let laneSettled = 0;
-    for (const count of Object.values(lane.outcomes)) laneSettled += count;
-
-    laneList.push({
-      operation: lane.operation,
-      component: lane.component,
-      outcomes: lane.outcomes,
-      settled: laneSettled,
-      maxDuration: lane.maxUs == null ? "" : formatMicroseconds(lane.maxUs),
-      errorClasses: RAW_ONLY,
-      // Rollups carry no trace identity. The lane no longer needs one: its
-      // drawer asks the Host's spans route by operation and reads the trace
-      // ids back from real rows.
-      note: lane.operation === "knock_claim" ? KNOCK_NOTE : undefined
-    });
-  }
-  laneList.sort((a, b) => b.settled - a.settled);
-
-  const minuteLabel = stamp => stamp ? stamp.slice(11, 16) : "";
-  const window = firstMinute
-    ? `${minuteLabel(firstMinute)}–${minuteLabel(lastMinute)} UTC`
-    : "no rows in window";
-
+  const laneList = [...lanes.values()].map(lane => ({
+    ...lane,
+    settled: sum(lane.rows, "eventCount"),
+    maxDuration: formatMicroseconds(lane.maxUs),
+    errorClasses: RAW_ONLY
+  }));
+  laneList.sort((a, b) => (b.settled ?? -1) - (a.settled ?? -1));
+  const usageRows = vitals.rows.filter(row => row.operation === "provider_usage" && row.outcomeClass === "ok");
   return {
     status: "live",
     queriedAt,
     room: vitals.room,
     spirit: vitals.spirit,
-    truncated: vitals.truncated,
+    start: vitals.start,
+    end: vitals.end,
+    queryName: `${vitals.queryName} v${vitals.queryVersion}`,
+    truncated: vitals.truncated === true,
     lanes: laneList,
-    channels: { settled, window, tokensIn, tokensOut, usagePoints, drops, rows: vitals.rows.length, retentionReceipts: retention.rows.length }
+    retention,
+    channels: {
+      settled: sum(settledRows, "eventCount"),
+      tokensIn: sum(vitals.rows, "tokensInSum"),
+      tokensOut: sum(vitals.rows, "tokensOutSum"),
+      usagePoints: sum(usageRows, "eventCount"),
+      drops: sum(vitals.rows, "dropCountSum"),
+      rows: vitals.rows.length
+    }
   };
+}
+
+export function pulseState() {
+  return live;
 }
 
 // Zero drops and unknown drops are different answers. drop_count_sum only means
 // zero when there were rollup rows to sum; with no rows the honest reading is
 // that this window reports nothing about loss.
 function lossValue(facts) {
-  if (facts.rows === 0) return "Not known";
+  if (facts.drops == null) return "Not reported";
   return facts.drops === 0 ? "0 dropped" : `${pulseCount(facts.drops)} dropped`;
 }
 
 function lossDetail(facts) {
-  if (facts.rows === 0) {
-    return "No rollup rows in window · nothing to sum, so drops are unknown, not zero";
+  if (facts.drops == null) {
+    return "No complete drop count in the returned rollup rows";
   }
   if (facts.drops === 0) {
-    return `No writer drops · drop_count_sum summed to zero across ${pulseCount(facts.rows)} rollup rows`;
+    return `No writer drops in returned rows · drop_count_sum summed to zero across ${pulseCount(facts.rows)} rollup rows`;
   }
   return `writer-side drop_count_sum across ${pulseCount(facts.rows)} rollup rows · duplicates live in raw rows`;
 }
 
 function liveChannels() {
   const facts = live.channels;
-  const retentionValue = facts.retentionReceipts === 0
-    ? "No receipts yet"
-    : `${pulseCount(facts.retentionReceipts)} receipts`;
-
+  const retention = live.retention;
+  const latest = retention.rows?.[0];
+  const coverage = live.truncated ? "partial returned rows" : "returned rows";
   return [
-    { label: "Settled events", value: `${pulseCount(facts.settled)} events`, detail: `${live.room} room · last 24 h · ${facts.window}` },
-    { label: "Tokens", value: `${pulseCount(facts.tokensIn)} in`, detail: `${pulseCount(facts.tokensOut)} out · ${pulseCount(facts.usagePoints)} provider usage points` },
+    { label: "Settled events", value: `${pulseCount(facts.settled)} events`, detail: `${live.room} room · ${coverage} · ${live.start}–${live.end}` },
+    { label: "Tokens", value: `${pulseCount(facts.tokensIn)} in`, detail: `${pulseCount(facts.tokensOut)} out · ${pulseCount(facts.usagePoints)} provider usage points · ${coverage}` },
     { label: "Loss", value: lossValue(facts), detail: lossDetail(facts) },
-    { label: "Retention", value: retentionValue, detail: `house-wide · insula.retention.receipts v1 · ${PULSE_SNAPSHOT.retention.days}-day law` }
-  ];
-}
-
-function snapshotChannels() {
-  const totals = PULSE_SNAPSHOT.totals;
-  const tokens = PULSE_SNAPSHOT.tokens;
-  const retention = PULSE_SNAPSHOT.retention;
-
-  return [
-    { label: "Observations", value: `${pulseCount(totals.spans)} spans`, detail: `${pulseCount(totals.writers)} writers · ${totals.components} components · ${totals.window}` },
-    { label: "Tokens", value: `${pulseCount(tokens.tokensIn)} in`, detail: `${pulseCount(tokens.tokensOut)} out · ${pulseCount(tokens.usagePoints)} provider usage points` },
-    { label: "Loss", value: totals.drops === 0 ? "0 dropped" : `${pulseCount(totals.drops)} dropped`, detail: `${totals.drops === 0 ? "No writer drops in the captured window" : "writer-side drop receipts"} · ${pulseCount(totals.duplicates)} duplicate deliveries collapsed at ingest` },
-    { label: "Retention", value: "No rows expired", detail: `${pulseCount(retention.sweepRuns)} sweep runs · first expiry ${retention.firstExpiry} · ${retention.days}-day law` }
+    {
+      label: "Retention",
+      value: retention.status === "failed" ? "Read failed" : `${pulseCount(retention.rows.length)} returned receipts`,
+      detail: retention.status === "failed" ? retention.reason
+        : `House-wide · ${retention.queryName} v${retention.queryVersion}${retention.truncated ? " · truncated" : ""} · ${latest?.retentionDays == null ? "retention days not reported" : `${latest.retentionDays} days in latest receipt`}`
+    }
   ];
 }
 
@@ -451,17 +345,16 @@ function laneKey(lane) {
 }
 
 function renderLane(lane) {
-  let settled = 0;
+  const settled = lane.settled;
   const split = [];
   const flags = [];
   for (const [outcome, count] of Object.entries(lane.outcomes)) {
-    settled += count;
     split.push(`${pulseCount(count)} ${outcome}`);
     if (outcome !== "ok") flags.push(`<span data-tone="${outcomeTone(outcome)}">${pulseCount(count)} ${escapeHtml(outcome)}</span>`);
   }
-  if (flags.length === 0) flags.push('<span data-tone="steady">all ok</span>');
-
-  const note = lane.note ? `<p>${escapeHtml(lane.note)}</p>` : "";
+  if (flags.length === 0) flags.push(settled == null
+    ? '<span data-tone="quiet">Outcomes not fully reported</span>'
+    : '<span data-tone="steady">all ok</span>');
   const key = laneKey(lane);
   const open = spans.key === key ? " open" : "";
 
@@ -474,12 +367,11 @@ function renderLane(lane) {
       </summary>
       <div class="mechanics-row-body">
         <dl>
-          <div><dt>Outcomes</dt><dd>${escapeHtml(split.join(" · "))}</dd></div>
+          <div><dt>Outcomes</dt><dd>${escapeHtml(split.join(" · ") || "not reported")}</dd></div>
           <div><dt>Max duration</dt><dd>${escapeHtml(lane.maxDuration || "not measured")}</dd></div>
           <div><dt>Error classes</dt><dd>${escapeHtml(lane.errorClasses || "none")}</dd></div>
-          <div><dt>Recompute</dt><dd>${escapeHtml(PULSE_SNAPSHOT.vitalsQuery)}</dd></div>
+          <div><dt>Source</dt><dd>${escapeHtml(live.queryName)}</dd></div>
         </dl>
-        ${note}
         ${renderLaneSpans(key)}
         ${renderLaneTrace(key)}
       </div>
@@ -539,7 +431,7 @@ function spansDrawer(chip, body) {
 // the whole row exists for; the trace id rides a data attribute so the click
 // handler never has to parse rendered text back into an identity.
 function renderSpanChoice(key, row) {
-  const duration = row.durationUs == null ? "open" : formatMicroseconds(row.durationUs);
+  const duration = row.durationUs == null ? "not measured" : formatMicroseconds(row.durationUs);
   const errorFlag = row.errorClass
     ? `<span data-tone="attention">${escapeHtml(row.errorClass)}</span>`
     : "";
@@ -548,7 +440,7 @@ function renderSpanChoice(key, row) {
   return `
             <button type="button" class="pulse-trace-span" aria-pressed="${chosen}"
               data-pulse-span-key="${escapeHtml(key)}" data-pulse-span-trace="${escapeHtml(row.traceId)}">
-              <span class="mechanics-row-title"><strong>${escapeHtml(row.observedAt)}</strong><small>span ${escapeHtml(row.spanId)}</small><code>${escapeHtml(row.traceId)}</code></span>
+              <span class="mechanics-row-title"><strong>${escapeHtml(row.observedAt)}</strong><small>${escapeHtml(row.component)} · span ${escapeHtml(row.spanId)}</small><code>${escapeHtml(row.traceId)}</code></span>
               <span class="mechanics-row-value"><small>Duration</small><code>${escapeHtml(duration)}</code></span>
               <span class="mechanics-row-flags"><span data-tone="${outcomeTone(row.outcomeClass)}">${escapeHtml(row.outcomeClass)}</span>${errorFlag}</span>
             </button>`;
@@ -599,7 +491,7 @@ function traceDrawer(chip, body) {
 // Spans render flat rather than as nested disclosures: a trace is read in
 // order, and a nested toggle would lose its state on the next render.
 function renderTraceSpan(row) {
-  const duration = row.durationUs == null ? "open" : formatMicroseconds(row.durationUs);
+  const duration = row.durationUs == null ? row.phase === "start" ? "open" : "not measured" : formatMicroseconds(row.durationUs);
   const errorFlag = row.errorClass
     ? `<span data-tone="attention">${escapeHtml(row.errorClass)}</span>`
     : "";
@@ -616,24 +508,34 @@ function renderTraceSpan(row) {
 }
 
 function renderReceipt(receipt) {
-  const plural = receipt.count === 1 ? "" : "s";
-
+  const facts = [
+    ["Receipt id", receipt.receiptId],
+    ["Created", receipt.createdAt],
+    ["Retention days", receipt.retentionDays],
+    ["Swept through", receipt.sweptThrough],
+    ["Window start", receipt.windowStart],
+    ["Window end", receipt.windowEnd],
+    ["Deleted events", receipt.eventCount],
+    ["Writers", receipt.writerCount],
+    ["Duplicate count", receipt.duplicateCountSum],
+    ["Drop count", receipt.dropCountSum],
+    ["Tombstone events", receipt.tombstoneEventCount],
+    ["Tombstone writers", receipt.tombstoneWriterCount],
+    ["Coverage hash", receipt.coverageHash],
+    ["Rollup query", receipt.rollupQueryName],
+    ["Rollup version", receipt.rollupQueryVersion],
+    ["Rollup watermark", receipt.rollupWatermark]
+  ];
   return `
     <details class="mechanics-row">
       <summary>
-        <span class="mechanics-row-title"><strong>${escapeHtml(receipt.kind)}</strong><small>${escapeHtml(receipt.component)}</small></span>
-        <span class="mechanics-row-value"><small>Latest</small><code>${escapeHtml(receipt.lastAt)}</code></span>
-        <span class="mechanics-row-flags">
-          <span data-tone="${outcomeTone(receipt.outcome)}">${escapeHtml(receipt.outcome)}</span>
-          <span data-tone="quiet">×${pulseCount(receipt.count)}</span>
-        </span>
+        <span class="mechanics-row-title"><strong>${escapeHtml(receipt.receiptKind ?? "not reported")}</strong><small>House ${escapeHtml(receipt.houseId ?? "not reported")}</small></span>
+        <span class="mechanics-row-value"><small>Deleted events</small><code>${pulseCount(receipt.eventCount)}</code></span>
+        <span class="mechanics-row-flags"><span data-tone="quiet">Retention receipt</span></span>
       </summary>
-      <div class="mechanics-row-body">
-        <dl class="pulse-receipt-detail">
-          <div><dt>Today</dt><dd>${pulseCount(receipt.count)} receipt point${plural}</dd></div>
-          <div><dt>Latest receipt id</dt><dd><code>${escapeHtml(receipt.latestId)}</code></dd></div>
-        </dl>
-      </div>
+      <div class="mechanics-row-body"><dl class="pulse-receipt-detail">
+        ${facts.map(([label, fact]) => `<div><dt>${label}</dt><dd>${escapeHtml(fact == null ? "not reported" : String(fact))}</dd></div>`).join("")}
+      </dl></div>
     </details>`;
 }
 
@@ -648,20 +550,14 @@ function statusChips() {
           <span>Queried ${escapeHtml(live.queriedAt)} local${truncation}</span>`;
   }
 
-  return `
-          ${hostLinkChip()}
-          <span>${escapeHtml(PULSE_SNAPSHOT.source)}</span>
-          <span>Captured ${escapeHtml(PULSE_SNAPSHOT.capturedAt)}</span>`;
+  return hostLinkChip();
 }
 
-// Slot 2 renders two headers — Pulse's own and the observatory's above it. Both
-// chips come from here, so the surface can never say Host connected in one line
-// and Host offline in the line above it.
 export function hostLinkChip() {
-  if (live.status === "live") return '<span data-tone="steady">Host connected</span>';
+  if (live.status === "live") return '<span data-tone="steady">Vitals connected</span>';
   if (live.status === "pending") return '<span data-tone="quiet">Querying Host…</span>';
   if (live.status === "failed") {
-    return `<span data-tone="attention">Host unreachable · ${escapeHtml(live.reason)}</span>`;
+    return `<span data-tone="attention">Pulse read failed · ${escapeHtml(live.reason)}</span>`;
   }
 
   return '<span data-tone="attention">Host not queried</span>';
@@ -669,18 +565,16 @@ export function hostLinkChip() {
 
 export function renderHousePulse() {
   const showingLive = live.status === "live";
-  const channels = showingLive ? liveChannels() : snapshotChannels();
-  const lanes = showingLive ? live.lanes : PULSE_SNAPSHOT.lanes;
-
-  const roomLine = PULSE_SNAPSHOT.rooms.map(([room, spans]) => `${room} ${pulseCount(spans)}`).join(" · ");
+  const channels = showingLive ? liveChannels() : [];
+  const lanes = showingLive ? live.lanes : [];
   const laneStatus = showingLive
-    ? `${lanes.length} lanes · ${live.room} room only · live ${PULSE_SNAPSHOT.vitalsQuery}`
-    : `${lanes.length} lanes · ${roomLine}`;
-
-  let receiptPoints = 0;
-  for (const receipt of PULSE_SNAPSHOT.receipts) receiptPoints += receipt.count;
-  const receiptStatus = `Latest per kind · ${pulseCount(receiptPoints)} points · snapshot ${PULSE_SNAPSHOT.capturedAt} · no Host route yet`;
-
+    ? `${lanes.length} returned lanes · ${live.room} room · ${live.queryName}${live.truncated ? " · truncated" : ""}`
+    : "Live vitals unavailable";
+  const retention = live.retention;
+  const receiptStatus = retention?.status === "live"
+    ? `House-wide · ${retention.queryName} v${retention.queryVersion} · ${retention.rows.length} returned receipts${retention.truncated ? " · truncated" : ""}`
+    : retention?.reason ?? (live.status === "pending" ? "Reading retention…" : "Retention has not been read");
+  const empty = live.status === "pending" ? "Reading Insula…" : live.status === "failed" ? live.reason : "Insula has not been queried.";
   const queryLabel = live.status === "pending" ? "Querying…" : "Query Host";
 
   return `
@@ -689,7 +583,7 @@ export function renderHousePulse() {
         <div>
           <span class="eyebrow">Insula</span>
           <h3 id="house-pulse-title">Pulse</h3>
-          <p>Every number recomputable from ${escapeHtml(PULSE_SNAPSHOT.vitalsQuery)} rollups and raw receipt points.</p>
+          <p>Room vitals and House retention receipts from Insula.</p>
         </div>
         <div class="pulse-status">
           <div class="mechanics-snapshot-status" aria-label="Pulse source status">${statusChips()}</div>
@@ -697,7 +591,7 @@ export function renderHousePulse() {
         </div>
       </header>
 
-      <div class="insula-observation-grid">${channels.map(renderChannel).join("")}
+      <div class="insula-observation-grid">${channels.length ? channels.map(renderChannel).join("") : `<p>${escapeHtml(empty)}</p>`}
       </div>
 
       <section class="pulse-block" aria-labelledby="pulse-lanes-title">
@@ -705,15 +599,15 @@ export function renderHousePulse() {
           <h4 id="pulse-lanes-title">Lanes</h4>
           <small>${escapeHtml(laneStatus)}</small>
         </header>
-        <div class="pulse-rows">${lanes.map(renderLane).join("")}</div>
+        <div class="pulse-rows">${lanes.length ? lanes.map(renderLane).join("") : `<p>${escapeHtml(showingLive ? "No settled lanes in the returned window." : empty)}</p>`}</div>
       </section>
 
       <section class="pulse-block" aria-labelledby="pulse-receipts-title">
         <header class="pulse-block-lead">
-          <h4 id="pulse-receipts-title">Receipts</h4>
+          <h4 id="pulse-receipts-title">Retention receipts</h4>
           <small>${escapeHtml(receiptStatus)}</small>
         </header>
-        <div class="pulse-rows">${PULSE_SNAPSHOT.receipts.map(renderReceipt).join("")}</div>
+        <div class="pulse-rows">${retention?.status === "live" ? retention.rows.length ? retention.rows.map(renderReceipt).join("") : "<p>No retention receipts returned. Retention days are not reported.</p>" : `<p>${escapeHtml(receiptStatus)}</p>`}</div>
       </section>
     </section>`;
 }

@@ -1,6 +1,6 @@
 mod proxy;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use serde::Deserialize;
 use std::{env, path::PathBuf};
 
@@ -109,6 +109,7 @@ fn main() -> anyhow::Result<()> {
     let proxy = proxy::Proxy::new(
         host_port,
         &options.room,
+        config.rooms.into_iter().map(|room| room.room).collect(),
         secrets.host_token,
         options.dev_dir,
         app_exe,

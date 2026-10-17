@@ -46,10 +46,10 @@ The substrate has run on Linux before: the organ matrix of 2026-08-30 ran on a N
 
 ## 5. Rooms and sessions
 
-- One Host process serves every room. One Pulse process serves one room (`serve.ts:34,41`; `proxy.rs:32`). `app.js` holds one connected room (`app.js:1514-1528`).
+- One Host process serves every room. Pulse selects configured rooms and keeps one room active per page lifecycle.
 - The installer has no room-add command and refuses an already-installed version (`crates/athanor-install/src/installer.rs:217-223`; `cli/manage.rs:32-134`). Manual configuration does not require a new release. [Add a room](../INSTALL.md#add-a-room) lists the configuration surfaces and the remaining procedure gaps.
 - Bounded chat and draft checkpoints survive Host restart. Corrupt checkpoints refuse room startup.
-- No list-sessions or resume-session command exists on the wire (`crates/protocol/src/restart/mod.rs:36-38`). Pulse shows `New session unavailable` (`app.js:741`). The keeper's first spawn is always fresh (`keeper.rs:188,812-823`).
+- Pulse lists registered sessions and exposes their offered controls. New session creation and arbitrary saved-history selection remain unavailable.
 - Pulse mirrors only chat-born turns. Turns typed in the OMP terminal never enter the ring.
 - With no logged-in Windows user, only PostgreSQL and NATS run. The Host, the keepers, OMP, and Pulse are user processes (`cli/start.rs:119-125`; `harness/config.rs:25-29`).
 
@@ -79,7 +79,7 @@ Unknown write outcomes require reconciliation before retry.
 - `room/state` returns every presence `session` and `operator` to any bearer holder (`surface.rs:118-121,133`).
 - Memory timeline and by-ID reads enforce the configured room plus House commons. Foreign filters and IDs receive refusals.
 - Pulse's chat route writes a turn. The serving header now describes the proxy boundary accurately.
-- `pulse.js` and `mechanics.js` show fixtures dated 2026-08-20 and 2026-08-18 until a live round answers.
+- Pulse uses observed mechanics and retention data. Typed configuration mutation, GIGA review, and worker lineage still need GUI contracts.
 
 [`BUGS.md`](../BUGS.md) tracks each of these.
 

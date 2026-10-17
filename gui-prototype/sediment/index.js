@@ -1,21 +1,14 @@
-// Sediment — the durable instrument in House slot 3 and in every room's slot 3.
-//
-// Owns the live wires to the room's durable record through the serve.ts proxy:
-// the memory timeline, one memory's full body, and the lesson timeline. It
-// renders no invented rows and keeps the fixture shelf visibly named until
-// live rows actually flow; then the fixtures retire, and not one round earlier.
-//
-// The app owns the fixture data and the fixture row markup. This module owns
-// the doors, the shelf composition, and the keyset walk.
+// The House and room shelves show only rows from the Host.
+// Search and filters apply to loaded pages. The Host owns scope and cursors.
 
 import { escapeHtml } from "../text.js";
+import { askHost } from "../health.js";
 
 const MEMORY_TIMELINE_ROUTE = "/live/memory/timeline";
 const MEMORY_READ_ROUTE = "/live/memory/read";
 const LESSON_TIMELINE_ROUTE = "/live/lesson/timeline";
 const PAGE_LIMIT = 25;
 const EXCERPT_LINE_LIMIT = 220;
-const REFUSAL_DETAIL_LIMIT = 120;
 
 // One shelf per subject, built on first ask and kept for the session: a shelf
 // holds rows the operator has already walked back through, and throwing that
@@ -31,13 +24,11 @@ const openBodies = new Set();
 let requestRender = () => {};
 let renderLead = () => "";
 let renderShelfControls = () => "";
-let renderFixtureRows = () => "";
 
 export function initSediment(options) {
   requestRender = options.requestRender;
   renderLead = options.renderLead;
   renderShelfControls = options.renderShelfControls;
-  renderFixtureRows = options.renderFixtureRows;
 }
 
 // Called from the slot-3 render path, so it asks each shelf once and leaves
@@ -52,6 +43,15 @@ export function ensureSedimentQueried(item) {
 
 export function handleSedimentClick(event) {
   const refresh = event.target.closest("[data-sediment-refresh]");
+  const mark = event.target.closest("[data-durable-mark]");
+  if (mark) {
+    const shelf = shelfFromControl(mark);
+    if (!shelf || !["all", "Memory", "Lesson"].includes(mark.dataset.durableMark)) return false;
+    shelf.mark = mark.dataset.durableMark;
+    paintShelfResults(shelf, mark);
+    return true;
+  }
+
   if (refresh) {
     queryShelf(shelfByKey(refresh.dataset.sedimentShelf));
     return true;
@@ -70,6 +70,30 @@ export function handleSedimentClick(event) {
   return false;
 }
 
+export function handleSedimentInput(event) {
+  const search = event.target.closest("[data-durable-search]");
+  const shelf = search && shelfFromControl(search);
+  if (!shelf) return false;
+
+  shelf.query = search.value;
+  paintShelfResults(shelf, search);
+  return true;
+}
+
+function shelfFromControl(control) {
+  return shelfByKey(control.closest("[data-sediment-surface]")?.dataset.sedimentShelf);
+}
+
+function paintShelfResults(shelf, control) {
+  const surface = control.closest("[data-sediment-surface]");
+  surface.querySelector("[data-sediment-results]").innerHTML = renderColumns(shelf);
+  const status = surface.querySelector("[data-durable-status]");
+  if (status) status.textContent = shelfFilterStatus(shelf);
+  surface.querySelectorAll("[data-durable-mark]").forEach(button => {
+    button.setAttribute("aria-pressed", String(button.dataset.durableMark === shelf.mark));
+  });
+}
+
 // The click arrives before the browser flips <details>, so !row.open reads as
 // "about to open". Nothing here calls preventDefault: the disclosure stays the
 // browser's to run and the fetch only rides along.
@@ -82,8 +106,13 @@ function toggleMemoryBody(row) {
     return true;
   }
 
+  const shelf = shelfByKey(row.dataset.sedimentShelf);
+  const source = shelf?.columns.find(column => column.id === "memories")?.rows
+    .find(memory => memoryKey(shelf, memory) === key);
+  if (!source) return false;
+
   openBodies.add(key);
-  if (bodies.get(key)?.status !== "pending") askMemoryBody(key);
+  if (bodies.get(key)?.status !== "pending") askMemoryBody(key, source);
   return true;
 }
 
@@ -105,17 +134,15 @@ function shelfByKey(key) {
   return shelves.get(key);
 }
 
-// The House shelf reads the room's whole durable record; a room shelf asks the
-// same door for that one room. Lessons are House-wide, so only the House shelf
-// carries a lesson column — the same shape the fixture shelves already have.
+// The House uses the supported House filter, not the combined room-and-House view.
 function buildShelf(key, item) {
-  const roomFilter = item.kind === "house" ? {} : { room: item.room ?? item.id };
+  const roomFilter = { room: item.kind === "house" ? "house" : item.room ?? item.id };
   const columns = [openColumn("memories", "Memories", MEMORY_TIMELINE_ROUTE, "memories", roomFilter, "createdAt")];
   if (item.kind === "house") {
     columns.push(openColumn("lessons", "Lessons", LESSON_TIMELINE_ROUTE, "lessons", {}, "updatedAt"));
   }
 
-  return { key, status: "idle", queriedAt: null, columns };
+  return { key, status: "idle", queriedAt: null, query: "", mark: "all", columns };
 }
 
 // One column of a shelf: its door, filter, cursor timestamp field, rows already
@@ -138,10 +165,12 @@ function openColumn(id, label, route, collection, filter, cursorStamp) {
 }
 
 async function queryShelf(shelf) {
-  if (!shelf || shelf.status === "querying") return;
+  if (!shelf || shelf.status === "querying" || shelf.columns.some(column => column.status === "pending")) return;
 
   shelf.status = "querying";
-  await Promise.all(shelf.columns.map(column => askColumn(column, { append: false })));
+  const pending = Promise.all(shelf.columns.map(column => askColumn(column, { append: false })));
+  requestRender();
+  await pending;
 
   shelf.status = "answered";
   shelf.queriedAt = new Date().toTimeString().slice(0, 5);
@@ -150,9 +179,11 @@ async function queryShelf(shelf) {
 
 async function walkOlder(shelf, columnId) {
   const column = shelf?.columns.find(candidate => candidate.id === columnId);
-  if (!column) return;
+  if (!column || shelf.status === "querying" || column.exhausted || !column.cursor) return;
 
-  await askColumn(column, { append: true });
+  const pending = askColumn(column, { append: true });
+  requestRender();
+  await pending;
   requestRender();
 }
 
@@ -163,32 +194,42 @@ async function askColumn(column, { append }) {
   if (column.status === "pending") return;
 
   column.status = "pending";
+  column.refusal = null;
   const body = { ...column.filter, limit: PAGE_LIMIT };
   if (append && column.cursor) body.before = column.cursor;
 
   const answer = await askDoor(column.route, body);
-  column.status = "answered";
+  column.status = answer.status;
   column.refusal = answer.refusal ?? null;
   if (answer.refusal) return;
 
   const rows = readRows(answer.data, column.collection);
   if (rows === null) {
-    column.refusal = `Host answer carried no ${column.collection} array`;
+    column.status = "failed";
+    column.refusal = `Host answer carried no valid ${column.collection} array`;
     return;
   }
 
-  column.rows = append ? [...column.rows, ...rows] : rows;
+  if (append) column.rows.push(...rows);
+  else column.rows = rows;
   column.exhausted = rows.length < PAGE_LIMIT;
   column.cursor = keysetCursor(column.rows.at(-1), column.cursorStamp);
 }
 
-async function askMemoryBody(key) {
+async function askMemoryBody(key, source) {
   bodies.set(key, { status: "pending" });
   paintMemoryBody(key);
 
-  const answer = await askDoor(MEMORY_READ_ROUTE, { id: parsedId(key) });
+  const answer = await askDoor(MEMORY_READ_ROUTE, { id: Number(source.id) });
+  if (!answer.refusal) {
+    const memory = answer.data?.memory;
+    if (String(memory?.id) !== String(source.id) || memory?.room !== source.room) {
+      answer.status = "failed";
+      answer.refusal = "The memory read answer does not match the selected timeline row.";
+    }
+  }
 
-  bodies.set(key, { status: "answered", readAt: new Date().toTimeString().slice(0, 5), ...answer });
+  bodies.set(key, { readAt: new Date().toTimeString().slice(0, 5), ...answer });
   paintMemoryBody(key);
 }
 
@@ -202,50 +243,26 @@ function paintMemoryBody(key) {
   if (target) target.innerHTML = memoryBodyMarkup(key);
 }
 
-// One door, one answer: the parsed payload, or the exact reason it refused.
-// Kept in the board's shape because both instruments read the same proxy and a
-// second refusal grammar on one page would be one grammar too many.
+// The shared request door supplies the selected room header.
 async function askDoor(route, body) {
   try {
-    const response = await fetch(route, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    const text = await response.text();
-    if (!response.ok) return { refusal: describeRefusal(response.status, text) };
-
-    const payload = parseJson(text);
-    if (payload === undefined) return { refusal: `HTTP ${response.status} · answer was not JSON` };
-
-    return { data: payload };
+    return { status: "live", data: await askHost(route, body) };
   } catch (error) {
-    return { refusal: error instanceof Error ? error.message : "no route to Host" };
+    const status = error?.status;
+    const detail = error instanceof Error ? error.message : error?.detail ?? "no route to Host";
+    return {
+      status: status >= 400 && status < 500 ? "refused" : "failed",
+      refusal: status ? `HTTP ${status} · ${detail}` : detail
+    };
   }
 }
 
-function describeRefusal(status, text) {
-  const typed = parseJson(text);
-  const detail = typeof typed?.error === "string" ? typed.error : text.trim().slice(0, REFUSAL_DETAIL_LIMIT);
-
-  return detail ? `HTTP ${status} · ${detail}` : `HTTP ${status}`;
-}
-
-function parseJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-}
-
-// The wire shape is fixed: an empty array is an honest empty shelf, while a
-// missing or malformed collection is a protocol refusal rather than no rows.
+// A malformed response must not become an empty shelf.
 function readRows(payload, collection) {
   const rows = payload?.[collection];
   if (!Array.isArray(rows)) return null;
 
-  return rows.filter(row => row !== null && typeof row === "object");
+  return rows.every(row => row !== null && typeof row === "object" && !Array.isArray(row)) ? rows : null;
 }
 
 // Each door names its own timestamp field and requires a numeric id. A row
@@ -263,11 +280,6 @@ function fieldText(value) {
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
 
   return "";
-}
-
-function parsedId(value) {
-  const numeric = Number(value);
-  return Number.isInteger(numeric) ? numeric : value;
 }
 
 // Number() first: a Host count never reaches markup as caller text. Duplicated
@@ -302,20 +314,19 @@ function absence(text) {
   return `<p class="sediment-absence">${escapeHtml(text)}</p>`;
 }
 
-// An unmapped proxy path never reaches the Host. Every other failure carries
-// the upstream status and exact refusal body without guessing why it failed.
+// Source states remain separate from the number of loaded rows.
 function doorChip(column) {
-  if (column.status !== "answered") {
-    return `<span data-tone="quiet">${escapeHtml(`${column.label} · asking`)}</span>`;
+  if (column.status === "idle") {
+    return `<span data-tone="quiet">${escapeHtml(`${column.label} · not queried`)}</span>`;
+  }
+  if (column.status === "pending") {
+    return `<span data-tone="quiet">${escapeHtml(`${column.label} · loading`)}</span>`;
   }
   if (!column.refusal) {
-    return `<span data-tone="steady">${escapeHtml(`${column.label} · ${countedNoun(column.rows.length, "row")}`)}</span>`;
-  }
-  if (column.refusal.includes("unknown live route")) {
-    return `<span data-tone="attention">${escapeHtml(`${column.label} · not mapped in this proxy · ${column.refusal}`)}</span>`;
+    return `<span data-tone="steady">${escapeHtml(`${column.label} · ${countedNoun(column.rows.length, "loaded row")}`)}</span>`;
   }
 
-  return `<span data-tone="attention">${escapeHtml(`${column.label} · refused · ${column.refusal}`)}</span>`;
+  return `<span data-tone="attention">${escapeHtml(`${column.label} · ${column.status} · ${column.refusal}`)}</span>`;
 }
 
 function shelfStatusChips(shelf) {
@@ -331,13 +342,13 @@ function memoryBodyMarkup(key) {
   const read = bodies.get(key);
   if (!read || read.status === "pending") return absence("Reading the memory door…");
   if (read.refusal) {
-    return absence(`The memory read door refused: ${read.refusal}. No body is shown.`);
+    return absence(`The memory read ${read.status}: ${read.refusal}`);
   }
 
   const payload = read.data ?? {};
-  const record = payload.memory ?? payload;
-  const body = fieldText(payload.body) || fieldText(payload.memory?.body);
-  const threads = Array.isArray(payload.threads) ? payload.threads : null;
+  const record = payload.memory;
+  const body = fieldText(record?.body);
+  const threads = Array.isArray(record?.threads) ? record.threads : null;
   const threadLine = threads
     ? absence(`${countedNoun(threads.length, "thread")} returned beside this body.`)
     : "";
@@ -364,22 +375,25 @@ function authorityBanner(record) {
   return `<p class="sediment-authority">${escapeHtml(`${authority} · this row is history, not the current record.`)}</p>`;
 }
 
-// Live rows are collapsed first and carry only what the timeline door sends.
-// The body is a second door, asked once, on the operator's own expand.
+// Only a loaded timeline row can open the read door.
+function memoryKey(shelf, row) {
+  const id = Number(row.id);
+  return Number.isSafeInteger(id) && id > 0 ? `${shelf.key}:${id}` : "";
+}
+
 function renderMemoryRow(shelf, row) {
   const id = fieldText(row.id);
-  const key = id || "";
+  const key = memoryKey(shelf, row);
   const excerpt = fieldText(row.excerpt);
   const facts = [fieldText(row.room) || "no room", fieldText(row.type) || "no type"].join(" · ");
 
-  // A row the door sent without an id can be shown but not opened: its body
-  // door takes an id, and this page will not invent one.
+  // The read door requires a positive numeric id.
   if (!key) {
     return `
         <article class="durable-entry sediment-row">
           <time>${escapeHtml(stampLabel(row.createdAt))}</time>
           <strong>${escapeHtml(oneLine(row.title, EXCERPT_LINE_LIMIT) || "no title")}</strong>
-          <small>${escapeHtml(`${facts} · no id, so its body cannot be asked for`)}</small>
+          <small>${escapeHtml(`${facts} · no valid id; the memory body is unavailable`)}</small>
         </article>`;
   }
 
@@ -387,7 +401,7 @@ function renderMemoryRow(shelf, row) {
   return `
         <details class="mechanics-row sediment-row"${open} data-sediment-memory="${escapeHtml(key)}" data-sediment-shelf="${escapeHtml(shelf.key)}">
           <summary data-sediment-body-toggle>
-            <span class="mechanics-row-title"><strong>${escapeHtml(oneLine(row.title, EXCERPT_LINE_LIMIT) || "no title")}</strong><small>${escapeHtml(`#${key} · ${facts}`)}</small></span>
+            <span class="mechanics-row-title"><strong>${escapeHtml(oneLine(row.title, EXCERPT_LINE_LIMIT) || "no title")}</strong><small>${escapeHtml(`#${id} · ${facts}`)}</small></span>
             <span class="mechanics-row-value"><small>Written</small><code>${escapeHtml(stampLabel(row.createdAt))}</code></span>
             <span class="mechanics-row-flags"><span data-tone="quiet">live row</span></span>
           </summary>
@@ -412,28 +426,50 @@ function renderLessonRow(row) {
         </article>`;
 }
 
+function matchingRows(shelf, column) {
+  const mark = column.id === "lessons" ? "Lesson" : "Memory";
+  if (shelf.mark !== "all" && shelf.mark !== mark) return [];
+  const terms = shelf.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return column.rows;
+
+  return column.rows.filter(row => {
+    const text = [
+      `#${fieldText(row.id)}`, row.title, mark, row.room, row.type,
+      row.kindPath, row.createdAt, row.updatedAt, row.excerpt
+    ].map(fieldText).join(" ").toLowerCase();
+    return terms.every(term => text.includes(term));
+  });
+}
+
+function shelfFilterStatus(shelf) {
+  const loaded = shelf.columns.reduce((count, column) => count + column.rows.length, 0);
+  const shown = shelf.columns.reduce((count, column) => count + matchingRows(shelf, column).length, 0);
+  return `${shelfCount(shown)} of ${countedNoun(loaded, "loaded row")} · Search and filters cover loaded pages only.`;
+}
+
 function renderColumnRows(shelf, column) {
-  if (column.status !== "answered") return absence(`Asking the ${column.label} door…`);
-  if (column.rows.length === 0) {
-    return column.refusal
-      ? absence(`The ${column.label} door has not answered with rows: ${column.refusal}. Nothing is shown in its place.`)
-      : absence(`The ${column.label} door answered with no rows.`);
+  let notice = "";
+  if (column.status === "idle") notice = absence(`The ${column.label} door has not been queried.`);
+  else if (column.status === "pending") notice = absence(`Loading ${column.label.toLowerCase()}…`);
+  else if (column.refusal) notice = absence(`${column.label} ${column.status}: ${column.refusal}`);
+  else if (column.rows.length === 0) notice = absence(`The ${column.label} door answered with no rows.`);
+
+  const matches = matchingRows(shelf, column);
+  if (column.rows.length > 0 && matches.length === 0) {
+    return `${notice}${absence(`No loaded ${column.label.toLowerCase()} match the search and filter.`)}`;
   }
-
   const rows = column.id === "lessons"
-    ? column.rows.map(renderLessonRow).join("")
-    : column.rows.map(row => renderMemoryRow(shelf, row)).join("");
-  if (!column.refusal) return rows;
-
-  return `${rows}${absence(`Walking farther through the ${column.label} door refused: ${column.refusal}. The preceding live rows remain.`)}`;
+    ? matches.map(renderLessonRow).join("")
+    : matches.map(row => renderMemoryRow(shelf, row)).join("");
+  return `${notice}${rows}`;
 }
 
 function renderWalkControl(shelf, column) {
-  if (column.status !== "answered" || column.refusal || column.rows.length === 0) return "";
+  if (column.status === "idle" || column.status === "pending" || column.rows.length === 0) return "";
+  if (column.exhausted) return absence(`No older ${column.label.toLowerCase()} remain in this scope.`);
   if (!column.cursor) {
-    return absence(`These rows carry no date to walk back from, so the ${column.label} door cannot be asked for older ones.`);
+    return absence(`The last ${column.label} row has no valid cursor. Older rows are unavailable.`);
   }
-  if (column.exhausted) return absence(`No rows older than these stand behind the ${column.label} door.`);
 
   // # enough: load-more button; virtualization when rows hurt
   return `
@@ -451,39 +487,31 @@ function renderColumn(shelf, column) {
         </header>
         <div class="pulse-rows">${renderColumnRows(shelf, column)}</div>
         ${renderWalkControl(shelf, column)}
+        ${column.id === "lessons" ? absence("Lesson bodies are unavailable. This route returns timeline metadata only.") : ""}
       </section>`;
 }
 
-function liveRowsFlow(shelf) {
-  return shelf.columns.some(column => column.rows.length > 0);
+function renderColumns(shelf) {
+  return shelf.columns
+    .filter(column => shelf.mark === "all" || shelf.mark === (column.id === "lessons" ? "Lesson" : "Memory"))
+    .map(column => renderColumn(shelf, column)).join("");
 }
 
-// The House overview card counts its rows from here, so the card retires its
-// fixture count on the round the shelf below it retires the fixture rows: one
-// retire rule, never two numbers disagreeing on one page. Nothing is built by
-// asking — a card must not open a door.
+// Counts cover loaded live rows, including an observed empty response.
+// The overview must not open a door to obtain its count.
 export function liveShelfCounts(item) {
   const shelf = shelves.get(shelfKey(item));
-  if (!shelf || !liveRowsFlow(shelf)) return null;
+  if (!shelf) return null;
 
-  return Object.fromEntries(shelf.columns.map(column => [column.id, column.rows.length]));
-}
-
-// The fixture shelf is the operator's existing surface and it keeps its search,
-// its marks, and its inspector rows: it is retired only when live rows actually
-// flow, and until then every row on it wears a chip saying what it is.
-function renderFixtureShelf(item, shelf) {
-  if (liveRowsFlow(shelf)) return "";
-
-  return `
-      <section class="pulse-block sediment-fixtures" data-fixture-shelf aria-label="Fixture shelf">
-        <header class="pulse-block-lead">
-          <h4>Fixtures</h4>
-          <small>Written into the page, not read from any door. These rows retire the round live rows arrive.</small>
-        </header>
-        ${renderShelfControls(item)}
-        <div data-durable-results>${renderFixtureRows(item)}</div>
-      </section>`;
+  return {
+    status: shelf.status,
+    ...Object.fromEntries(shelf.columns.map(column => [column.id, column.rows.length])),
+    columns: Object.fromEntries(shelf.columns.map(column => [column.id, {
+      status: column.status,
+      count: column.rows.length,
+      refusal: column.refusal
+    }]))
+  };
 }
 
 function renderShelf(item, eyebrow, title, blurb) {
@@ -492,7 +520,7 @@ function renderShelf(item, eyebrow, title, blurb) {
   return `
     <div class="specimen-stack house-record-stack">
       ${renderLead(eyebrow, title)}
-      <section class="insula-observation house-sediment" data-sediment-surface aria-label="${escapeHtml(`${title} durable doors`)}">
+      <section class="insula-observation house-sediment" data-sediment-surface data-sediment-shelf="${escapeHtml(shelf.key)}" aria-label="${escapeHtml(`${title} durable doors`)}">
         <header class="insula-observation-lead">
           <div>
             <span class="eyebrow">Durable</span>
@@ -501,11 +529,11 @@ function renderShelf(item, eyebrow, title, blurb) {
           </div>
           <div class="pulse-status">
             <div class="mechanics-snapshot-status" aria-label="Durable source status">${shelfStatusChips(shelf)}</div>
-            <button class="card-verb" type="button" data-sediment-refresh data-sediment-shelf="${escapeHtml(shelf.key)}">Query Host</button>
+            <button class="card-verb" type="button" data-sediment-refresh data-sediment-shelf="${escapeHtml(shelf.key)}"${shelf.status === "querying" || shelf.columns.some(column => column.status === "pending") ? " disabled" : ""}>${shelf.status === "querying" || shelf.columns.some(column => column.status === "pending") ? "Loading…" : "Query Host"}</button>
           </div>
         </header>
-        <div class="sediment-shelves">${shelf.columns.map(column => renderColumn(shelf, column)).join("")}</div>
-        ${renderFixtureShelf(item, shelf)}
+        ${renderShelfControls(item, { query: shelf.query, mark: shelf.mark, status: shelfFilterStatus(shelf) })}
+        <div class="sediment-shelves" data-sediment-results>${renderColumns(shelf)}</div>
       </section>
     </div>`;
 }

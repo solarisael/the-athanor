@@ -340,18 +340,24 @@ Retrieve these bodies before design or implementation work in this directory. Ex
 - The main hand keeps intent, integration, taste, and rendered proof.
 - A malformed dispatch is cancelled rather than accepted because its output happens to look useful.
 
-### Promotion gate
+### Connected web surface
 
-- A prototype discovery enters the private `athanor-godot` repository only when all six conditions below are true.
-- Condition 1: Sol has judged the interaction on the rendered surface.
-- Condition 2: the product object and owner are named without archive taxonomy.
-- Condition 3: anatomy, states, refusals, focus, keyboard behavior, responsive behavior, and disclosure are explicit.
-- Condition 4: the production map and the design contracts in the private `athanor-godot` repository have a semantic home for it.
-- Condition 5: the parked Godot client in the private `athanor-godot` repository receives the behavior as a native scene/component contract.
-- Condition 5 boundary: HTML, CSS, and JavaScript syntax are not copied across platforms.
-- Condition 6: Host-owned data and effects remain Host-owned.
-- If a decision is still being felt out, leave it here.
-- Cheap cardboard is allowed to stay cardboard.
+- The web client is the main operator surface.
+- The Godot client remains parked in its separate repository.
+- Hearth names the control center; each organ retains its domain authority.
+- The current cutover connects existing capabilities across every screen.
+- Missing backend capabilities remain unavailable and have separate work records.
+- Remove simulated records and local actions that imply durable writes.
+- Keep Direct, Hallways, Projects, and the three semantic slots.
+- Room selection changes the requested room, never the operator into a spirit.
+- A room change starts a new page lifecycle to discard previous room state.
+- Session controls require an explicit instance and conversation selection.
+- The room chat does not become a selected session transcript.
+- The proxy admits only named routes and approved session actions.
+- Credentials remain outside the browser.
+- Host-owned data and effects remain Host-owned.
+- Confirm consequential actions before sending them.
+- Verify navigation, states, refusals, keyboard focus, and responsive behavior on the rendered surface.
 
 ### Proof before calling a prototype change done
 

@@ -1,9 +1,9 @@
 use axum::{
+    Router,
     body::Bytes,
     extract::{Request, State},
-    http::{header, Method, StatusCode},
+    http::{Method, StatusCode, header},
     response::{IntoResponse, Response},
-    Router,
 };
 use rust_embed::RustEmbed;
 use serde::Deserialize;
@@ -27,6 +27,8 @@ pub struct Proxy {
     routes: HashMap<String, Route>,
     client: reqwest::Client,
     base: String,
+    default_room: String,
+    rooms: Vec<String>,
     token: String,
     dev_dir: Option<PathBuf>,
     app_exe: PathBuf,
@@ -38,19 +40,25 @@ impl Proxy {
     pub fn new(
         host_port: u16,
         room: &str,
+        rooms: Vec<String>,
         token: String,
         dev_dir: Option<PathBuf>,
         app_exe: PathBuf,
         port: u16,
     ) -> anyhow::Result<Self> {
-        let room = percent_encoding::utf8_percent_encode(room, percent_encoding::NON_ALPHANUMERIC);
+        anyhow::ensure!(
+            rooms.iter().any(|configured| configured == room),
+            "launch room is not configured"
+        );
         Ok(Self {
             routes: serde_json::from_str(include_str!("../../gui-prototype/live-routes.json"))?,
             client: reqwest::Client::builder()
                 .redirect(reqwest::redirect::Policy::none())
                 .timeout(std::time::Duration::from_secs(20))
                 .build()?,
-            base: format!("http://127.0.0.1:{host_port}/room/{room}"),
+            base: format!("http://127.0.0.1:{host_port}"),
+            default_room: room.to_owned(),
+            rooms,
             token,
             dev_dir: dev_dir.map(std::fs::canonicalize).transpose()?,
             app_exe,
@@ -61,6 +69,28 @@ impl Proxy {
 
     pub fn router(self) -> Router {
         Router::new().fallback(serve).with_state(Arc::new(self))
+    }
+
+    async fn local_rooms(&self, request: Request) -> Response {
+        let body = match axum::body::to_bytes(request.into_body(), 1024).await {
+            Ok(body) => body,
+            Err(_) => return (StatusCode::BAD_REQUEST, "invalid JSON body").into_response(),
+        };
+        if !body.iter().all(u8::is_ascii_whitespace) {
+            match serde_json::from_slice::<serde_json::Value>(&body) {
+                Ok(serde_json::Value::Object(fields)) if fields.is_empty() => {}
+                Ok(_) => {
+                    return (StatusCode::BAD_REQUEST, "no body fields allowed").into_response();
+                }
+                Err(_) => return (StatusCode::BAD_REQUEST, "invalid JSON body").into_response(),
+            }
+        }
+        axum::Json(serde_json::json!({
+            "defaultRoom": self.default_room,
+            "rooms": self.rooms,
+            "capabilities": { "repair": true }
+        }))
+        .into_response()
     }
 
     async fn repair_status(&self) -> Response {
@@ -99,9 +129,59 @@ impl Proxy {
         if request.method() != Method::POST {
             return (StatusCode::METHOD_NOT_ALLOWED, "POST only").into_response();
         }
+        let mut room_headers = request.headers().get_all("x-athanor-room").iter();
+        let room = match room_headers.next() {
+            None => &self.default_room,
+            Some(value) => {
+                let Some(room) = value.to_str().ok().and_then(|key| {
+                    self.rooms
+                        .iter()
+                        .find(|configured| configured.as_str() == key)
+                }) else {
+                    return (StatusCode::FORBIDDEN, "unknown room").into_response();
+                };
+                room
+            }
+        };
+        if room_headers.next().is_some() {
+            return (StatusCode::FORBIDDEN, "unknown room").into_response();
+        }
+        let session_route = request.uri().path() == "/live/session";
+        let body = if route.method == "GET" {
+            None
+        } else {
+            let bytes = match axum::body::to_bytes(request.into_body(), 2 * 1024 * 1024).await {
+                Ok(bytes) => bytes,
+                Err(_) => return (StatusCode::BAD_REQUEST, "invalid live body").into_response(),
+            };
+            if session_route {
+                let value = match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    Ok(serde_json::Value::Object(fields)) => serde_json::Value::Object(fields),
+                    Ok(_) => {
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            "session body must be a JSON object",
+                        )
+                            .into_response();
+                    }
+                    Err(_) => {
+                        return (StatusCode::BAD_REQUEST, "invalid JSON body").into_response();
+                    }
+                };
+                if !matches!(
+                    value["action"].as_str(),
+                    Some("status" | "command" | "commandStatus")
+                ) {
+                    return (StatusCode::FORBIDDEN, "session action refused").into_response();
+                }
+                Some(Bytes::from(value.to_string()))
+            } else {
+                Some(bytes)
+            }
+        };
         // The Host answering an error passes through with its own status; only a
         // transport failure becomes 502 here, and the body names which hop failed.
-        match self.forward(route, request).await {
+        match self.forward(route, room, body).await {
             Ok(response) => response,
             Err(error) => {
                 let hop = match error.downcast_ref::<reqwest::Error>() {
@@ -122,16 +202,21 @@ impl Proxy {
         }
     }
 
-    async fn forward(&self, route: &Route, request: Request) -> anyhow::Result<Response> {
+    async fn forward(
+        &self,
+        route: &Route,
+        room: &str,
+        body: Option<Bytes>,
+    ) -> anyhow::Result<Response> {
         let method = Method::from_bytes(route.method.as_bytes())?;
+        let room = percent_encoding::utf8_percent_encode(room, percent_encoding::NON_ALPHANUMERIC);
         let mut upstream = self
             .client
-            .request(method.clone(), format!("{}{}", self.base, route.path))
+            .request(method, format!("{}/room/{room}{}", self.base, route.path))
             .bearer_auth(&self.token)
             .header(header::CONTENT_TYPE, "application/json");
-        if method != Method::GET {
-            upstream =
-                upstream.body(axum::body::to_bytes(request.into_body(), 2 * 1024 * 1024).await?);
+        if let Some(body) = body {
+            upstream = upstream.body(body);
         }
         let response = upstream.send().await?;
         let status = response.status();
@@ -175,11 +260,7 @@ async fn serve(State(proxy): State<Arc<Proxy>>, request: Request) -> Response {
     let single = |name: &str| {
         let mut values = headers.get_all(name).iter();
         let first = values.next().and_then(|value| value.to_str().ok());
-        if values.next().is_some() {
-            None
-        } else {
-            first
-        }
+        if values.next().is_some() { None } else { first }
     };
     let origin = single("origin");
     let unsafe_method = request.method() != Method::GET && request.method() != Method::HEAD;
@@ -199,13 +280,16 @@ async fn serve(State(proxy): State<Arc<Proxy>>, request: Request) -> Response {
     }
     if decoded.starts_with("/local/") {
         let path = decoded.into_owned();
-        if path != "/local/repair/status" && path != "/local/repair/start" {
+        if path != "/local/rooms" && path != "/local/repair/status" && path != "/local/repair/start"
+        {
             return (StatusCode::NOT_FOUND, "unknown local route").into_response();
         }
         if request.method() != Method::POST {
             return (StatusCode::METHOD_NOT_ALLOWED, "POST only").into_response();
         }
-        return if path == "/local/repair/status" {
+        return if path == "/local/rooms" {
+            proxy.local_rooms(request).await
+        } else if path == "/local/repair/status" {
             proxy.repair_status().await
         } else {
             proxy.repair_start(request).await
@@ -280,8 +364,8 @@ fn elevated_start(exe: &std::path::Path) -> anyhow::Result<(Vec<u8>, Vec<u8>, Op
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::{
         Foundation::{CloseHandle, WAIT_FAILED},
-        System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE},
-        UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW},
+        System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject},
+        UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW},
     };
     let capture = tempfile::tempdir()?;
     let stdout = capture.path().join("stdout.json");
@@ -299,7 +383,14 @@ fn elevated_start(exe: &std::path::Path) -> anyhow::Result<(Vec<u8>, Vec<u8>, Op
     } else {
         format!("call \"{}\"", batch_path(exe))
     };
-    std::fs::write(&script, format!("@echo off\r\n{invocation} start --service 1>\"{}\" 2>\"{}\"\r\nexit /b %errorlevel%\r\n", batch_path(&stdout), batch_path(&stderr)))?;
+    std::fs::write(
+        &script,
+        format!(
+            "@echo off\r\n{invocation} start --service 1>\"{}\" 2>\"{}\"\r\nexit /b %errorlevel%\r\n",
+            batch_path(&stdout),
+            batch_path(&stderr)
+        ),
+    )?;
     let wide = |value: &std::ffi::OsStr| value.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
     let verb = wide(std::ffi::OsStr::new("runas"));
     let shell = wide(
@@ -355,11 +446,164 @@ fn elevated_start(_exe: &std::path::Path) -> anyhow::Result<(Vec<u8>, Vec<u8>, O
 mod tests {
     use super::*;
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn room_discovery_and_session_refusals_stay_local() {
+        let router = Proxy::new(
+            1,
+            "test",
+            vec!["test".into(), "other".into()],
+            "must-not-leak".into(),
+            None,
+            PathBuf::from("must-not-expose.exe"),
+            4175,
+        )
+        .unwrap()
+        .router();
+        for body in ["", "{}"] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/local/rooms")
+                        .header("host", "127.0.0.1:4175")
+                        .header("origin", "http://127.0.0.1:4175")
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), 8192)
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+                serde_json::json!({
+                    "defaultRoom": "test",
+                    "rooms": ["test", "other"],
+                    "capabilities": { "repair": true }
+                })
+            );
+        }
+        for (path, body, room, status) in [
+            (
+                "/local/rooms",
+                "{\"room\":\"other\"}",
+                "test",
+                StatusCode::BAD_REQUEST,
+            ),
+            ("/local/rooms", "[]", "test", StatusCode::BAD_REQUEST),
+            ("/local/rooms", "null", "test", StatusCode::BAD_REQUEST),
+            ("/local/rooms", "not JSON", "test", StatusCode::BAD_REQUEST),
+            (
+                "/live/session",
+                "{\"action\":\"status\"}",
+                "missing",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"status\"}",
+                "",
+                StatusCode::FORBIDDEN,
+            ),
+            ("/live/health", "{}", "missing", StatusCode::FORBIDDEN),
+            ("/live/session", "not JSON", "test", StatusCode::BAD_REQUEST),
+            ("/live/session", "[]", "test", StatusCode::BAD_REQUEST),
+            ("/live/session", "{}", "test", StatusCode::FORBIDDEN),
+            (
+                "/live/session",
+                "{\"action\":\"status\",\"action\":\"detach\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"attach\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"detach\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"context\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"resourceList\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"resourceRead\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"resourceWrite\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"heartbeat\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"poll\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"acknowledge\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "/live/session",
+                "{\"action\":\"chatDelivery\"}",
+                "test",
+                StatusCode::FORBIDDEN,
+            ),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(path)
+                        .header("host", "127.0.0.1:4175")
+                        .header("origin", "http://127.0.0.1:4175")
+                        .header("x-athanor-room", room)
+                        .body(axum::body::Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), status, "{path} {body} {room}");
+        }
+    }
+
     #[tokio::test]
     async fn foreign_requests_cannot_reach_repair_or_host() {
         let router = Proxy::new(
             1,
             "test",
+            vec!["test".into()],
             String::new(),
             None,
             PathBuf::from("must-not-run.exe"),
@@ -367,7 +611,13 @@ mod tests {
         )
         .unwrap()
         .router();
-        for path in ["/live/chat/say", "/local/repair/start", "/"] {
+        for path in [
+            "/live/chat/say",
+            "/live/session",
+            "/local/rooms",
+            "/local/repair/start",
+            "/",
+        ] {
             for (host, origin) in [
                 ("evil.example", Some("http://evil.example")),
                 ("127.0.0.1:4175", Some("https://evil.example")),
@@ -419,9 +669,17 @@ mod tests {
         let exe = std::env::var_os("ATHANOR_APP_EXE")
             .map(PathBuf::from)
             .unwrap_or(stub);
-        let router = Proxy::new(1, "test", String::new(), None, exe, 4175)
-            .unwrap()
-            .router();
+        let router = Proxy::new(
+            1,
+            "test",
+            vec!["test".into()],
+            String::new(),
+            None,
+            exe,
+            4175,
+        )
+        .unwrap()
+        .router();
         for (path, body, expected) in [
             (
                 "/local/repair/status",
@@ -483,6 +741,7 @@ mod tests {
         let missing = Proxy::new(
             1,
             "test",
+            vec!["test".into()],
             String::new(),
             None,
             PathBuf::from("missing-repair.exe"),
@@ -508,19 +767,29 @@ mod tests {
             .unwrap();
         let error: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(error["hop"], "repair");
-        assert!(error["error"]
-            .as_str()
-            .unwrap()
-            .contains("missing-repair.exe"));
+        assert!(
+            error["error"]
+                .as_str()
+                .unwrap()
+                .contains("missing-repair.exe")
+        );
         let broken_exe = fixture.path().join("broken.cmd");
         std::fs::write(
             &broken_exe,
             "@echo off\r\necho diagnostic from stub 1>&2\r\nexit /b 1\r\n",
         )
         .unwrap();
-        let broken = Proxy::new(1, "test", String::new(), None, broken_exe, 4175)
-            .unwrap()
-            .router();
+        let broken = Proxy::new(
+            1,
+            "test",
+            vec!["test".into()],
+            String::new(),
+            None,
+            broken_exe,
+            4175,
+        )
+        .unwrap()
+        .router();
         let response = broken
             .oneshot(
                 Request::builder()
@@ -539,9 +808,11 @@ mod tests {
             .unwrap();
         let error: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(error["hop"], "repair");
-        assert!(error["error"]
-            .as_str()
-            .unwrap()
-            .contains("diagnostic from stub"));
+        assert!(
+            error["error"]
+                .as_str()
+                .unwrap()
+                .contains("diagnostic from stub")
+        );
     }
 }

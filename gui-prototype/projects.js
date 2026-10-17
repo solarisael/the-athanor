@@ -8,13 +8,21 @@ export const houseProject = {
   status: "Read-only Docket", listPreview: "House work · Docket", updatedAt: "",
   canPost: false, sendReason: "The Host has no project conversation or involvement write door.", messages: []
 };
+let evidenceRequest = null;
+
+async function readEvidence(quests) {
+  for (const quest of quests) await queryDocketEvidence(quest.questId);
+}
 
 export async function queryProjects(view) {
   await ensureBoardQueried();
   if (view === "live") return;
   const round = docketBoardRound();
   if (round.refusal || !Array.isArray(round.data?.quests)) return;
-  await Promise.all(round.data.quests.map(quest => queryDocketEvidence(quest.questId)));
+  if (!evidenceRequest) {
+    evidenceRequest = readEvidence(round.data.quests).finally(() => { evidenceRequest = null; });
+  }
+  await evidenceRequest;
 }
 
 function boardRows() {
@@ -42,6 +50,7 @@ function receipts() {
 }
 
 function evidenceStatus() {
+  if (docketBoardRound().status !== "answered") return "Waiting for the Docket board";
   const rounds = boardRows().map(quest => docketEvidenceRound(quest.questId));
   if (!rounds.length) return "No evidence quests in the current board round.";
   if (rounds.some(round => round.status === "idle")) return "Evidence not queried";

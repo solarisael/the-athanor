@@ -256,24 +256,40 @@ The config fields are `ompLaunch`, `workspace`, `programRoot`, `stateRoot`, `wat
 
 ## 6. Pulse
 
-Pulse is one static module. `gui-prototype/index.html:248` loads `app.js`, which imports every other module. `app.js` holds one connected room at a time (`app.js:1514-1528`); `say(text)` takes no room argument (`chat.js:129-148`). It has no identity field (`app.js:140-173`). `New session` is unavailable (`app.js:733-743`).
+Hearth names the control center. Pulse serves its web interface from `gui-prototype/`.
+The shell preserves Direct, Hallways, Projects, and three semantic slots.
+The [navigation map](../gui-prototype/NAVIGATION_MAP.md) lists all screen families and their owners.
 
-Two proxies share one contract. `gui-prototype/serve.ts` runs under Bun for development. `gui-desktop/src/proxy.rs` ships as `pulse.exe`, a Tauri window; `pulse --serve-only` serves the embedded assets with no window (`gui-desktop/src/main.rs:30,65-67`). Both:
+Two proxies share the same route allowlist.
+`gui-prototype/serve.ts` serves local source under Bun.
+`gui-desktop/src/proxy.rs` serves the embedded assets through `pulse.exe`.
+Both bind loopback and keep the bearer outside the browser.
+Both require the canonical Host and Origin headers before forwarding writes.
+Both refuse cross-site Fetch Metadata.
 
-- bind `127.0.0.1` on port 4175 by default;
-- serve one room per process, from `PULSE_ROOM` or `--room`, default `kodo`;
-- read `C:/ProgramData/Solarisael/Athanor/config/runtime.json` for `hostPort` and `rooms[]`, and `secrets/runtime-secrets.json` for `hostToken`, at fixed paths (`serve.ts:17-18,32-41`; `main.rs:54-56`);
-- forward the 15 routes in `gui-prototype/live-routes.json` to `http://127.0.0.1:<hostPort>/room/<room>/...` and add the bearer server-side (`serve.ts:58-65`; `proxy.rs:97-102`);
-- in the 2026-10-04 source repair, require the canonical loopback Host and reject foreign Origin headers before route handling.
+`POST /local/rooms` returns configured room keys, the default room, and repair support.
+`X-Athanor-Room` selects a configured room for each live request.
+An absent header selects the launch room. Unknown or repeated room headers are refused.
+Selecting another Direct room reloads the page and discards previous room caches.
 
-The source repair also requires Origin for requests other than GET or HEAD.
-It refuses cross-site Fetch Metadata. The separate Pulse installation passed its installed check on 2026-10-04.
+The session route forwards only `status`, `command`, and `commandStatus`.
+The interface requires an explicit instance and conversation selection.
+A separate confirmation names each command's target, payload, and effect.
+The Host owns capability checks, retry identity, deadlines, and receipts.
+The interface never repeats an unconfirmed command automatically.
+Session controls do not change room chat routing.
 
-`pulse.exe` also answers `POST /local/repair/status` and `/local/repair/start`, which run `athanor.exe status` or `athanor.exe start`; `service: true` raises a UAC prompt (`proxy.rs:43-68,163-232`).
+Chat submits `{text, sayId}` through its existing Host route.
+Manual retry retains that identity.
+Memory, lesson, Docket, Hallway, and Insula screens read existing Host projections.
+The shelves contain no fixture records.
+Mechanics and retention values come from observed responses instead of a client-owned census.
+Search covers loaded record pages. Counts never imply database totals.
+Interface preferences remain browser-local.
 
-The chat flow. `say` posts `{text, sayId}` to `/live/chat/say` and shows an optimistic line (`chat.js:129-148`). Then it polls `/live/chat/snapshot` every 2,000 ms, or 400 ms while a draft exists, until each operator row has a spirit row with the same `turnId` (`chat.js:69-81`). A 400 from the Host removes the line with no retry; a transport error marks it undelivered and hands the clock to `health.js`, which retries at 2, 4, 8, then 15 seconds (`chat.js:150-159`; `health.js:23,78-82`). Retry of a say is manual and reuses the same `sayId`.
-
-The other modules read only: the Docket board and evidence, the Hallway inbox and messages, Insula vitals, retention, spans, and trace, and the memory and lesson timelines (`board/index.js`, `pulse.js`, `sediment/index.js`). `pulse.js` and `mechanics.js` still show dated fixtures until a live round answers (`pulse.js:14-54,671-673`; `mechanics.js:23-25`).
+The desktop proxy retains its existing local repair operations.
+Bun reports repair as unavailable.
+Missing domain operations remain unavailable; they do not become local pretend-writes.
 
 ## 7. Installed layout
 

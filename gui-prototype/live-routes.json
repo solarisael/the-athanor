@@ -1,5 +1,6 @@
 {
   "/live/health": { "path": "/health", "method": "GET" },
+  "/live/session": { "path": "/session", "method": "POST" },
   "/live/insula/vitals": { "path": "/athanor/v1/insula/vitals", "method": "POST" },
   "/live/insula/trace": { "path": "/athanor/v1/insula/trace", "method": "POST" },
   "/live/insula/spans": { "path": "/athanor/v1/insula/spans", "method": "POST" },

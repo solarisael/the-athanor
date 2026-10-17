@@ -31,8 +31,8 @@
 
             <div class="sidebar-account">
               <button class="account-button" type="button" data-open-drawer="account" aria-controls="account-pane" aria-expanded="false">
-                <span class="avatar avatar-user" aria-hidden="true">S</span>
-                <span class="account-copy"><strong>Sol</strong><small>Operator</small></span>
+                <span class="avatar avatar-user" data-operator-glyph aria-hidden="true">·</span>
+                <span class="account-copy"><strong data-operator-name>Operator</strong><small>Operator</small></span>
                 <span aria-hidden="true">›</span>
               </button>
             </div>
@@ -48,8 +48,8 @@
             </header>
             <div class="drawer-pane-content account-content">
               <section class="account-summary">
-                <span class="account-avatar" aria-hidden="true">S</span>
-                <div><strong>Sol</strong><span>Local operator · this device</span></div>
+                <span class="account-avatar" data-operator-glyph aria-hidden="true">·</span>
+                <div><strong data-operator-name>Operator</strong><span>Local device</span></div>
               </section>
               <section class="account-state" aria-label="Account state" data-account-state></section>
               <nav class="drawer-menu" aria-label="Account">
@@ -73,8 +73,8 @@
             </header>
             <div class="drawer-pane-content settings-content">
               <section class="settings-identity">
-                <span class="settings-avatar" aria-hidden="true">S</span>
-                <div><strong>Sol</strong><span>Local operator · this device</span></div>
+                <span class="settings-avatar" data-operator-glyph aria-hidden="true">·</span>
+                <div><strong data-operator-name>Operator</strong><span>Local device</span></div>
               </section>
               <section class="settings-group">
                 <h3>Interface</h3>
@@ -142,6 +142,7 @@
                   <input type="checkbox" data-setting="status-visible" checked>
                 </label>
               </section>
+              <p data-preference-status role="status"></p>
             </div>
             <div class="drawer-shortcut"><kbd>Esc</kbd><span>Account</span></div>
           </section>
@@ -172,18 +173,12 @@
           <label class="sr-only" for="message-input">Message</label>
           <textarea id="message-input" rows="1" placeholder="Write a message…"></textarea>
           <div class="composer-actions">
-            <div class="composer-continuity-group" hidden>
-              <button class="composer-continuity" type="button" data-chat-action="sleep">Fold paper boat</button>
-              <button class="composer-continuity" type="button" data-chat-action="memory">Record memory</button>
-            </div>
             <div class="composer-feedback">
               <span class="composer-refusal" id="send-refusal" hidden></span>
               <span class="composer-response-status" id="response-status" role="status" hidden></span>
-              <span class="composer-continuity-status" id="continuity-status" role="status" hidden></span>
             </div>
             <div class="composer-buttons">
               <button class="composer-clear" type="button" hidden>Clear</button>
-              <button class="composer-stop" type="button" hidden>Stop</button>
               <button type="submit" disabled>Send</button>
             </div>
           </div>
@@ -228,7 +223,6 @@
       </header>
       <p class="hallway-inbox-summary" data-hallway-inbox-summary></p>
       <div class="hallway-inbox-list" role="list" aria-label="Hallway threads needing attention"></div>
-      <footer>Local surface · opening a thread acknowledges only the messages shown here. Host and durable delivery remain offline.</footer>
     </div>
   </section>
 

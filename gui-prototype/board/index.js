@@ -14,6 +14,7 @@
 // disagree with it.
 
 import { escapeHtml } from "../text.js";
+import { askHost } from "../health.js";
 import { initHallwayMessages, handleHallwayMessagesClick, renderHallwayDrawer } from "./hallway-messages.js";
 
 const BOARD_ROUTE = "/live/docket/board";
@@ -176,39 +177,13 @@ function paintEvidenceDrawer(questId) {
 // One door, one answer: the parsed payload, or the exact reason it refused.
 async function askDoor(route, body) {
   try {
-    const response = await fetch(route, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    const text = await response.text();
-    if (!response.ok) return { refusal: describeRefusal(response.status, text) };
-
-    const payload = parseJson(text);
-    if (payload === undefined) return { refusal: `HTTP ${response.status} · answer was not JSON` };
-
-    return { data: payload };
+    return { data: await askHost(route, body) };
   } catch (error) {
-    return { refusal: error instanceof Error ? error.message : "no route to Host" };
+    const status = error.status ? `HTTP ${error.status} · ` : "";
+    return { refusal: `${status}${error.message}` };
   }
 }
 
-// A refusal body may be typed JSON from the panel, an empty axum 404, or proxy
-// prose. All three are evidence; this is the one place that untangles them.
-function describeRefusal(status, text) {
-  const typed = parseJson(text);
-  const detail = typeof typed?.error === "string" ? typed.error : text.trim().slice(0, REFUSAL_DETAIL_LIMIT);
-
-  return detail ? `HTTP ${status} · ${detail}` : `HTTP ${status}`;
-}
-
-function parseJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return undefined;
-  }
-}
 
 function boardCount(value) {
   // Number() first: a Host count never reaches markup as caller text.

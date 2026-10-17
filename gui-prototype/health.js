@@ -52,27 +52,41 @@ const HOP_REASONS = {
 
 export async function askHost(path, body = {}) {
   let response;
+  const headers = { "content-type": "application/json" };
+  const room = new URLSearchParams(globalThis.location?.search ?? "").get("room");
+  if (room) headers["x-athanor-room"] = room;
   try {
     response = await fetch(path, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify(body)
     });
   } catch (error) {
     throw Object.assign(new Error("no route to Host"), { status: undefined, hop: null, transport: true, cause: error });
   }
   if (response.ok) return response.json();
-  let reason = `Host answered ${response.status}`;
+  const detail = await response.text();
+  let reason = detail || `Request answered ${response.status}`;
   let hop = null;
+  let code = null;
   if (response.headers.get("content-type")?.includes("application/json")) {
-    const result = await response.json().catch(() => null);
-    if (result && typeof result.error === "string") reason = result.error;
-    if (result && typeof result.hop === "string") {
+    let result;
+    try {
+      result = JSON.parse(detail);
+    } catch {
+      throw Object.assign(new Error(`Invalid error response (${response.status})`), {
+        status: response.status, detail, hop, transport: response.status >= 500
+      });
+    }
+    if (typeof result?.error === "string") reason = result.error;
+    if (typeof result?.error?.message === "string") reason = result.error.message;
+    if (typeof result?.error?.code === "string") code = result.error.code;
+    if (typeof result?.hop === "string") {
       hop = result.hop;
       reason = HOP_REASONS[hop] ?? reason;
     }
   }
-  throw Object.assign(new Error(reason), { status: response.status, hop, transport: response.status >= 500 });
+  throw Object.assign(new Error(reason), { status: response.status, detail, code, hop, transport: response.status >= 500 });
 }
 
 function scheduleRetry() {
@@ -123,15 +137,12 @@ async function queryRoomStateHost() {
     }
     roomRound = { ...room, status: "live", queriedAt: new Date().toTimeString().slice(0, 5) };
   } catch (error) {
-    // A reached Host with no door is a missing fact, never an unreachable Host;
-    // the footer must not say connected while this line says offline. A
-    // transport failure is the opposite case: the Host was not reached.
-    const reached = error.status !== undefined && !error.transport;
+    const reached = error.status !== undefined && !error.transport && !error.hop;
     roomRound = {
       ...roomRound,
       status: "failed",
       reached,
-      reason: reached ? `this Host answers no room-state door (${error.status})` : error.message
+      reason: error.message
     };
   }
   roomInFlight = false;

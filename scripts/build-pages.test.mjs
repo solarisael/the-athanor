@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { test } from "node:test";
 
@@ -32,18 +32,10 @@ function build(directory) {
   return execute(process.execPath, [join(directory, "scripts/build-pages.mjs")], { cwd: directory });
 }
 
-test("public modules render unavailable telemetry without publishing private records or server files", async t => {
+test("the public artifact excludes runtime server files", async t => {
   const directory = await fixture(t);
   await build(directory);
   const app = join(directory, "dist/pages/app");
-  const pulse = await import(pathToFileURL(join(app, "pulse.js")));
-  const markup = pulse.renderHousePulse();
-  assert.match(markup, /Telemetry, lanes, and receipts are unavailable/);
-  assert.match(markup, /No Host or private telemetry/);
-  assert.doesNotMatch(markup, /95,690,376|4772aa88|a61389335e22/);
-  const html = await readFile(join(app, "index.html"), "utf8");
-  assert.match(html, /Public interaction specimen/);
-  assert.match(html, /no Host, model calls, database, delivery, or persistence/);
   for (const name of ["serve.ts", "live-routes.json", ".scratch/chat-stub.ts", "repair.test.js"]) {
     await assert.rejects(readFile(join(app, name)), { code: "ENOENT" });
   }

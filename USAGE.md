@@ -114,8 +114,13 @@ Use `pulse --room <key>` to select a configured room.
 The default room is `kodo`.
 Installation uses the current Windows profile.
 Use `scripts/install-pulse.ps1 -Profile C:\Users\Solarisael -NoDesktop` to select that profile explicitly.
-The app reads the live Host and sends chat through its authenticated proxy.
-Other pages remain read-only.
+Select a configured room from Direct.
+Open Status to inspect its registered sessions.
+Select an exact instance before you review a session command.
+Check the target and effect before confirmation.
+The app keeps room chat separate from session controls.
+Memories, lessons, Hallways, and Docket records remain read-only.
+Interface preferences persist in this browser.
 Use `pulse --serve-only --dev-dir gui-prototype` for local web development.
 The existing `bun gui-prototype/serve.ts` command remains available.
 Run **Athanor Doctor** from the Start menu when you suspect a lifecycle fault.

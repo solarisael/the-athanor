@@ -4,13 +4,16 @@
 // Real timers, so this file waits for the first two retry delays (2 s, 4 s).
 import { test, expect } from "bun:test";
 import { queryHealthHost, onHostRecovered, roomState } from "./health.js";
-import { initChat, syncChatPanel, say, chatMessages, chatBlockReason, chatState } from "./chat.js";
+import { initChat, syncChatPanel, say, querySnapshot, chatMessages, chatBlockReason, chatState } from "./chat.js";
 
 const ROOM = { kind: "direct", id: "kodo" };
 let hostUp = false;
 const healthAsks = [];
 const says = [];
 const ring = [];
+let loseReply = false;
+let invalidReply = false;
+let refuseNextSay = 0;
 
 globalThis.fetch = async (path, init) => {
   if (path === "/live/health") healthAsks.push(Date.now());
@@ -23,8 +26,26 @@ globalThis.fetch = async (path, init) => {
   if (path === "/live/chat/say") {
     const body = JSON.parse(init.body);
     says.push(body.sayId);
-    ring.push({ sequence: ring.length + 1, author: "operator", authorName: "Sol", text: body.text, at: new Date().toISOString(), turnId: body.sayId });
-    return Response.json({ room: "kodo", accepted: true });
+
+    if (refuseNextSay) {
+      const status = refuseNextSay;
+      refuseNextSay = 0;
+      return Response.json({ error: "Retry refused before delivery" }, { status });
+    }
+    const message = { sequence: ring.length + 1, author: "operator", authorName: "Sol", text: body.text, at: new Date().toISOString(), turnId: body.sayId };
+    ring.push(message);
+
+    if (invalidReply) {
+      invalidReply = false;
+      return Response.json({ accepted: true });
+    }
+
+    if (loseReply) {
+      loseReply = false;
+      return Response.json({ error: "Response lost after acceptance" }, { status: 502 });
+    }
+
+    return Response.json({ room: "kodo", accepted: true, repeated: false, message });
   }
   return Response.json({ error: "unknown" }, { status: 404 });
 };
@@ -43,6 +64,8 @@ test("a dead Host is asked again with a growing retry delay", async () => {
 
 test("a Host that comes back fires recovery once, and chat retries by hand with the same sayId", async () => {
   let recovered = 0;
+  let accepted = 0;
+  const onAccepted = () => { accepted += 1; };
   onHostRecovered(() => { recovered += 1; });
   initChat({ requestRender: () => {} });
 
@@ -58,21 +81,72 @@ test("a Host that comes back fires recovery once, and chat retries by hand with 
   expect(chatBlockReason(ROOM)).toBeNull();
 
   hostUp = false;
-  expect(await say("hewwo")).toBe(false);
+  expect(await say("hewwo", onAccepted)).toBe(false);
   const line = chatMessages().find(message => message.text === "hewwo");
-  expect(line.undelivered).toBe(true);
+  expect(line.unconfirmed).toBe(true);
   expect(says).toEqual([]);
 
   hostUp = true;
   await sleep(2300);
   expect(recovered).toBe(2);
   expect(chatState().reason).toBeNull();
-  expect(chatMessages().find(message => message.text === "hewwo").undelivered).toBe(true);
+  expect(chatMessages().find(message => message.text === "hewwo").unconfirmed).toBe(true);
 
-  expect(await say("hewwo")).toBe(true);
+  expect(await say("hewwo", onAccepted)).toBe(true);
   expect(says.length).toBe(1);
+  expect(says[0]).toBe(line.turnId);
+  expect(accepted).toBe(1);
   const settled = chatMessages().filter(message => message.text === "hewwo");
   expect(settled.length).toBe(1);
   expect(settled[0].turnId).toBe(says[0]);
   expect(settled[0].pending).toBe(false);
 }, 15000);
+
+test("snapshot acceptance retires the pending send before an intentional identical message", async () => {
+  let accepted = 0;
+  const onAccepted = () => { accepted += 1; };
+  const writesBefore = says.length;
+  loseReply = true;
+
+  expect(await say("a deliberate repeat", onAccepted)).toBe(false);
+  expect(accepted).toBe(0);
+  expect(chatMessages().find(message => message.text === "a deliberate repeat").unconfirmed).toBe(true);
+
+  await querySnapshot();
+  expect(accepted).toBe(1);
+  expect(says.length).toBe(writesBefore + 1);
+  expect(chatMessages().filter(message => message.text === "a deliberate repeat")).toHaveLength(1);
+
+  expect(await say("a deliberate repeat", onAccepted)).toBe(true);
+  expect(accepted).toBe(2);
+  expect(says[writesBefore + 1]).not.toBe(says[writesBefore]);
+});
+
+test("a refused retry preserves an earlier ambiguous send until snapshot acceptance", async () => {
+  for (const status of [401, 403, 404, 429]) {
+    const text = `ambiguous send followed by ${status}`;
+    let accepted = 0;
+    const onAccepted = () => { accepted += 1; };
+    const writesBefore = says.length;
+    invalidReply = true;
+
+    expect(await say(text, onAccepted)).toBe(false);
+    const turnId = says[writesBefore];
+    refuseNextSay = status;
+
+    expect(await say(text, onAccepted)).toBe(false);
+    expect(says[writesBefore + 1]).toBe(turnId);
+    expect(chatMessages().find(message => message.turnId === turnId)?.unconfirmed).toBe(true);
+    expect(accepted).toBe(0);
+
+    await querySnapshot();
+    expect(accepted).toBe(1);
+    expect(chatState().refusal).toBeNull();
+    expect(chatMessages().filter(message => message.turnId === turnId)).toHaveLength(1);
+    expect(says.length).toBe(writesBefore + 2);
+
+    expect(await say(text, onAccepted)).toBe(true);
+    expect(says[writesBefore + 2]).not.toBe(turnId);
+    expect(accepted).toBe(2);
+  }
+});

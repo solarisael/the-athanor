@@ -22,6 +22,17 @@ the exact implementation record.
 
 ### Fixed
 
+- Direct marks a lost chat reply as unconfirmed until the Host confirms acceptance.
+  Reconciliation retires the send identity and clears only the submitted draft.
+  Newer draft edits remain intact. A later identical message gets a new send identity.
+  A refused retry preserves the identity of an earlier unconfirmed send.
+  Recovery does not automatically repeat a write.
+
+- The release workflow marks native release uploads as prereleases. The installer contains the native runtime, without the Hearth GUI.
+  The public specimen includes the continuity module and the missing guild diagram.
+  Its home page links to the documentation and describes the disconnected interface.
+  The keeper smoke checks successor readiness and survival without requiring a scheduler-dependent startup count.
+
 - Direct restores Record memory, Fold paper boat, and Stop as connected actions.
   Continuity actions separate exact-session spirit requests from operator-authored writes.
   Manual writes require exact-text review and preserve drafts after failures.

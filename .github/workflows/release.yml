@@ -67,7 +67,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
-          generate_release_notes: true
+          prerelease: true
+          name: The Athanor v${{ env.VERSION }} — Native runtime prerelease
+          body: |
+            Native Windows x64 runtime installer. This package does not include the Hearth GUI.
+
+            The attached SHA-256 file identifies the installer bytes.
+            This prerelease does not claim clean-machine installation, upgrade, rollback, or code-signing verification.
+            Test installation and recovery in a non-production environment before use.
           fail_on_unmatched_files: true
           files: |
             dist/The-Athanor-${{ env.VERSION }}-windows-x64.exe

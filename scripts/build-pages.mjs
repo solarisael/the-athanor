@@ -63,7 +63,7 @@ const appFiles = [
   "text.js", "repair.js", "markdown.js", "mechanics-live.js", "chat.js",
   "hallways.js", "projects.js", "pulse.js", "health.js", "mechanics.js",
   "board/index.js", "board/hallway-messages.js", "sediment/index.js",
-  "sessions/index.js", "preferences/index.js"
+  "sessions/index.js", "preferences/index.js", "continuity/index.js"
 ];
 const banned = /\b(?:Sol|Solzinho|Solarisael|Kintsu|Kodo|Tuner|Multistock|Salvia|Hugo|SCV|SGD|uwu|òwó|övö)\b/i;
 const privateConfiguration = /(?:\b[a-z]:[\\/]|\/(?:home|Users)\/|\\\\[a-z0-9._-]+\\|postgres(?:ql)?:\/\/|-----BEGIN [^-]*PRIVATE KEY-----|sk-[a-zA-Z0-9]{20,}|Bearer\s+[a-zA-Z0-9._-]{16,})/i;
@@ -73,7 +73,7 @@ function publicScript(name, source) {
   let script = substitutePublicNames(source);
   if (name === "app.js") {
     script = script.replace(
-      "This local surface reads Host records and sends operator chat and explicitly confirmed session controls. Memories and lessons remain read-only.",
+      "This local surface reads Host records and sends operator chat and confirmed session controls. It offers spirit requests and confirmed operator-authored memories and boats when the Host supports them. Lessons remain read-only.",
       "Public disconnected interface. Interface preferences stay in this browser. No Host, model calls, delivery, or durable House records."
     );
   }

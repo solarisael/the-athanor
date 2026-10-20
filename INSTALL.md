@@ -208,11 +208,11 @@ request a stop, wait 30 s, then kill the verified handle
 4. starts each `autoStart` harness in file order and collects failures without
    stopping (`app.rs:104-113`).
 
-When the Host exits, it stops the harnesses it started (`app.rs:60-75`). A
-harness is usually a keeper, and the keeper starts OMP
-(`crates/omp-keeper/src/keeper.rs:188,812`). Both installed harnesses have
-`autoStart: true`. Read [Architecture § The keeper](./docs/ARCHITECTURE.md#5-the-keeper)
-for the restart loop.
+The Host stops only the harnesses that it starts.
+A keeper starts OMP and owns its restart loop.
+Omit `autoStart` from a registry entry to prevent the Host from starting that harness at startup.
+Start that room explicitly with `athanor keeper <room>`.
+Read [Architecture: The keeper](./docs/ARCHITECTURE.md#5-the-keeper) for the restart loop.
 
 One port serves the whole House:
 

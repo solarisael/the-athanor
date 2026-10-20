@@ -370,7 +370,7 @@ function renderMessage(message, index, selected) {
           <span title="${escapeHtml(time.title)}">${escapeHtml(time.text)}</span>
           ${recipients ? `<span class="message-recipient">To ${escapeHtml(recipients)}</span>` : ""}
           ${message.local ? '<span class="message-delivery">Local-only · undelivered</span>' : ""}
-          ${message.undelivered ? '<span class="message-delivery">Not delivered · send again to retry</span>' : message.pending ? '<span class="message-delivery">Pending · awaiting Host confirmation</span>' : message.draft ? '<span class="message-delivery">Answering…</span>' : ""}
+          ${message.unconfirmed ? '<span class="message-delivery">Outcome unconfirmed · awaiting Host reconciliation</span>' : message.pending ? '<span class="message-delivery">Pending · awaiting Host confirmation</span>' : message.draft ? '<span class="message-delivery">Answering…</span>' : ""}
           ${message.outcome === "error" ? '<span class="message-delivery message-outcome">Failed</span>' : message.outcome === "aborted" ? '<span class="message-delivery message-outcome">Cancelled</span>' : ""}
         </p>
         <div class="message-thinking">${(message.thinking ?? []).map((block, position) => `<details><summary>Thinking ${position + 1}</summary><pre>${escapeHtml(block)}</pre></details>`).join("")}</div>
@@ -453,6 +453,8 @@ function activeMessages(item) {
   if (item.kind === "direct") return isLiveChat(item) ? chatMessages() : [];
   return item.messages ?? [];
 }
+
+const draftVersions = new Map();
 
 function draftKey(item) {
   if (isLiveChat(item)) return `host-chat:${item.id}`;
@@ -1613,20 +1615,32 @@ composer.addEventListener("submit", async event => {
   }
   if (isLiveChat(item)) {
     const key = draftKey(item);
-    const accepted = await say(text);
-    if (accepted) {
+    const version = draftVersions.get(key) ?? 0;
+
+    await say(text, () => {
+      if ((draftVersions.get(key) ?? 0) !== version) return;
+
+      const active = draftKey(conversations[state.activeId]) === key;
+      const draft = active ? input.value : state.drafts.get(key) ?? "";
+
+      if (draft.trim() !== text) return;
+
       state.drafts.set(key, "");
-      if (draftKey(conversations[state.activeId]) === key && input.value.trim() === text) {
+      draftVersions.set(key, version + 1);
+      if (active) {
         input.value = "";
         input.style.height = "auto";
       }
-    }
+    });
     updateComposerState();
     return;
   }
 });
 
 input.addEventListener("input", () => {
+  const key = draftKey(conversations[state.activeId]);
+  draftVersions.set(key, (draftVersions.get(key) ?? 0) + 1);
+
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
   updateComposerState();
@@ -1641,6 +1655,9 @@ input.addEventListener("keydown", event => {
 
 clearButton.addEventListener("click", () => {
   const item = conversations[state.activeId];
+  const key = draftKey(item);
+  draftVersions.set(key, (draftVersions.get(key) ?? 0) + 1);
+
   input.value = "";
   input.style.height = "auto";
   state.drafts.set(draftKey(item), "");

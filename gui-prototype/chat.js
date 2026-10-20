@@ -2,7 +2,6 @@ import { roomState, askHost, noteHostFailure, onHostRecovered } from "./health.j
 
 let round = { status: "idle", messages: [], drafts: [], reason: null };
 let optimistic = [];
-let retry = null;
 let sending = false;
 let refusal = null;
 let poll = null;
@@ -21,7 +20,7 @@ export function isLiveChat(item) {
 }
 
 export function chatState() {
-  return { ...round, sending, refusal, unanswered: hasUnanswered() };
+  return { ...round, sending, refusal: refusal?.message ?? null, unanswered: hasUnanswered() };
 }
 
 // The ring's lines, then the Host's open drafts as spirit lines still
@@ -39,7 +38,7 @@ export function chatMessages() {
     outcome: message.outcome ?? "complete",
     draft: message.draft === true,
     pending: message.pending === true,
-    undelivered: message.undelivered === true
+    unconfirmed: message.unconfirmed === true
   }));
 }
 
@@ -64,11 +63,9 @@ export function syncChatPanel(item, view) {
   if (next) void querySnapshot();
 }
 
-// An undelivered line never reached the Host, so nobody is answering it; only
-// lines the Host holds (or is still confirming) count as open.
 function hasUnanswered() {
   const answered = new Set(round.messages.filter(message => message.author === "spirit").map(message => message.turnId));
-  return optimistic.some(message => !message.undelivered) || round.messages.some(message => message.author === "operator" && !answered.has(message.turnId));
+  return optimistic.some(message => !message.unconfirmed) || round.messages.some(message => message.author === "operator" && !answered.has(message.turnId));
 }
 
 // A dead Host is not polled; the health loop owns that clock and recovery
@@ -76,7 +73,7 @@ function hasUnanswered() {
 function schedulePoll() {
   clearTimeout(poll);
   poll = null;
-  if (round.reason || !hasUnanswered()) return;
+  if (round.reason || (!hasUnanswered() && optimistic.length === 0)) return;
   poll = setTimeout(() => { void querySnapshot(); }, round.drafts?.length ? 400 : 2000);
 }
 
@@ -116,7 +113,14 @@ async function readSnapshot() {
       throw new Error("Invalid chat outcome: expected complete, error, or aborted");
     }
     round = { status: "live", room: result.room, reason: null, messages: result.messages.sort((a, b) => a.sequence - b.sequence), drafts };
-    optimistic = optimistic.filter(message => !round.messages.some(row => row.author === "operator" && row.turnId === message.turnId));
+    optimistic = optimistic.filter(message => {
+      const confirmed = round.messages.some(row => row.author === "operator" &&
+        row.turnId === message.turnId && row.text === message.text);
+
+      if (confirmed) completeSend(message);
+
+      return !confirmed;
+    });
   } catch (error) {
     failRound(error);
   } finally {
@@ -126,37 +130,64 @@ async function readSnapshot() {
   }
 }
 
-export async function say(text) {
+function completeSend(message) {
+  if (message.accepted) return;
+
+  message.accepted = true;
+  message.pending = false;
+  message.unconfirmed = false;
+  if (refusal?.turnId === message.turnId) refusal = null;
+  message.onAccepted();
+}
+
+export async function say(text, onAccepted) {
   if (sending) return false;
-  const attempt = retry?.text === text ? retry : { text, sayId: crypto.randomUUID() };
-  retry = attempt;
+
+  const room = roomState().room;
+  let message = optimistic.find(row => !row.accepted && row.room === room && row.text === text);
+
+  if (!message) {
+    message = {
+      room, author: "operator", authorName: roomState().operator ?? "Operator", text,
+      at: new Date().toISOString(), turnId: crypto.randomUUID(), pending: true
+    };
+    optimistic.push(message);
+  }
+
+  const retryingUnconfirmed = message.unconfirmed === true;
+
+  message.onAccepted = onAccepted;
+  message.unconfirmed = false;
   refusal = null;
   sending = true;
-  // An undelivered line for other text is abandoned; only this text retries.
-  optimistic = optimistic.filter(message => !message.undelivered || message.turnId === attempt.sayId);
-  const line = optimistic.find(message => message.turnId === attempt.sayId);
-  if (line) {
-    line.undelivered = false;
-  } else {
-    optimistic.push({ author: "operator", authorName: roomState().operator ?? "Operator", text,
-      at: new Date().toISOString(), turnId: attempt.sayId, pending: true });
-  }
   requestRender();
+
   try {
-    await askHost("/live/chat/say", attempt);
-    retry = null;
+    const result = await askHost("/live/chat/say", { text, sayId: message.turnId });
+    const accepted = result?.message;
+
+    if (result?.room !== room || result.accepted !== true ||
+      (result.repeated !== true && result.repeated !== false) ||
+      (result.repeated ? accepted !== null :
+        accepted?.author !== "operator" || accepted.turnId !== message.turnId || accepted.text !== text)) {
+      throw new Error("Host answered without matching chat acceptance");
+    }
+
+    completeSend(message);
     await querySnapshot();
     return true;
   } catch (error) {
-    if (error.status === 400) {
-      refusal = error.message;
-      retry = null;
-      optimistic = optimistic.filter(message => message.turnId !== attempt.sayId);
+    if (message.accepted) return true;
+
+    if (!retryingUnconfirmed && error.status >= 400 && error.status < 500) {
+      refusal = { turnId: message.turnId, message: error.message };
+      optimistic = optimistic.filter(row => row !== message);
     } else {
-      const undelivered = optimistic.find(message => message.turnId === attempt.sayId);
-      if (undelivered) undelivered.undelivered = true;
-      failRound(error);
+      message.unconfirmed = true;
+      if (error.transport) failRound(error);
+      else refusal = { turnId: message.turnId, message: error.message };
     }
+
     return false;
   } finally {
     sending = false;

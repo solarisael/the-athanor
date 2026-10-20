@@ -612,8 +612,7 @@ fn a_cmd_shim_launch_starts_omp_with_its_console_and_arguments_intact() {
 /// Child without killing it -- on Windows that is a live omp with no keeper and
 /// an intent stuck in relaunching. A House that merely went silent is waited
 /// for now (see the away tests below); a House that answers nonsense is not
-/// silence, so the keeper cannot follow the relaunch and must put the child
-/// down and say so, on every attempt.
+/// silence, so the keeper must put the child down and exhaust its retry limit.
 #[test]
 fn a_wire_that_breaks_after_the_spawn_leaves_no_orphaned_omp() {
     let tree = tree();
@@ -639,25 +638,24 @@ fn a_wire_that_breaks_after_the_spawn_leaves_no_orphaned_omp() {
         "a broken wire mid-relaunch is not a success:\n{stdout}\n{stderr}"
     );
     assert!(
-        !stdout.contains("saw the successor verify"),
-        "nonsense is never a verify: {stdout}"
+        ready.is_file(),
+        "the relaunched child reached readiness:\n{stdout}\n{stderr}"
     );
+    let transitions = requests_for(&tree.transcript, "restart_transition");
+
     assert_eq!(
-        lines(&tree.runs).len(),
+        transitions.len(),
         3,
-        "the armed exit and two relaunch attempts: {stdout}"
+        "two attempts, then failed:\n{stdout}\n{stderr}"
     );
-    // The guarantee, checked before any wording: outlive the children's own
-    // sleep, because an orphan records itself only once it gets past that.
+    assert_eq!(transitions[2]["params"]["to"], "failed");
+
+    // An orphan records survival only after its own sleep finishes.
     std::thread::sleep(Duration::from_secs(9));
     assert!(
         lines(&tree.survived).is_empty(),
         "the keeper dropped a live omp instead of killing it -- orphaned: {:?}\n{stdout}\n{stderr}",
         lines(&tree.survived)
-    );
-    assert!(
-        stderr.contains("could not follow the relaunch"),
-        "the keeper names what happened to it: {stderr}"
     );
 }
 

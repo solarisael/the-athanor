@@ -12,6 +12,7 @@ import {
   noteKittenProgress,
 } from "./kitten-lineage.ts";
 import { hostSessionIdentity } from "./house-proof/host.ts";
+import { installGuDelivery } from "./house-proof/swarm-delivery/index.ts";
 import {
   adoptTopLevelSession,
   registerTopLevelSession,
@@ -22,7 +23,7 @@ import { responseDigest, settlePresence } from "./house-proof/presence.ts";
 import { logConversationWindow, type ConversationCapture } from "./house-proof/conversation-log.ts";
 import { flushGigaTurns, ingestGigaLoggedTurnsDetached, isSubagentSessionContext, setGigaEnablement } from "./giga.ts";
 import { automaticRecallAllowed, registerSubagentRecallProtocol } from "./house-proof/recall.ts";
-import { installWorkerLifecycle, isWorkerSession } from "./house-proof/worker-lifecycle.ts";
+import { installWorkerLifecycle, isWorkerSession, workerTaskOrigins } from "./house-proof/worker-lifecycle.ts";
 import {
   noteHallwayKnockTurnEnd,
   noteHallwayKnockTurnStart,
@@ -1076,5 +1077,6 @@ export default function solarisaelHouseProof(pi, release) {
   });
 
   installWorkerLifecycle(pi);
+  installGuDelivery(pi, (ctx) => workerTaskOrigins(hostSessionIdentity(ctx)));
   registerSolarisaelTools(pi, release);
 }

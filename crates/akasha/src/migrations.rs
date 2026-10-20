@@ -196,6 +196,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "0037_orihon.sql",
         sql: include_str!("../../../substrate/migrations/0037_orihon.sql"),
     },
+    Migration {
+        version: 38,
+        name: "0038_hallway_knock_default_digest.sql",
+        sql: include_str!("../../../substrate/migrations/0038_hallway_knock_default_digest.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

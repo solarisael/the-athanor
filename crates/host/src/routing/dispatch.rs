@@ -437,6 +437,11 @@ pub(super) fn dispatch_with_familiar(
     let agent =
         (route.is_familiar || route.omp_agent != "task").then(|| route.omp_agent.to_owned());
 
+    // Keep a readable prefix and a fresh UUID suffix within the task tool's 32-character limit.
+    let mut dispatch_id = uuid::Uuid::encode_buffer();
+    let dispatch_id = uuid::Uuid::new_v4().simple().encode_lower(&mut dispatch_id);
+    let task_name = format!("{:.8}{}", route.task_name, &dispatch_id[..24]);
+
     DispatchReceipt {
         ok: true,
         status: DispatchStatus::Ready,
@@ -454,7 +459,7 @@ pub(super) fn dispatch_with_familiar(
             args: SpawnArgs {
                 context: shared_context(&request, lane, &route),
                 tasks: vec![SpawnTask {
-                    name: route.task_name,
+                    name: task_name,
                     agent,
                     task,
                 }],

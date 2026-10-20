@@ -174,11 +174,11 @@ export function renderHouseMechanics() {
       <div class="mechanics-controls">
         <label class="mechanics-search">
           <span>Search every mechanism</span>
-          <input type="search" data-mechanics-search value="${escapeHtml(query)}" placeholder="Recall, delivery, room, Insula…" autocomplete="off">
+          <input id="mechanics-search" type="search" data-mechanics-search value="${escapeHtml(query)}" placeholder="Recall, delivery, room, Insula…" autocomplete="off">
         </label>
         <nav class="mechanics-categories" aria-label="Mechanical observatory categories">
           ${categoryButtons.map(button => `
-            <button type="button" data-mechanics-category="${escapeHtml(button.id)}" aria-pressed="${String(category === button.id)}">
+            <button id="mechanics-category-${escapeHtml(button.id)}" type="button" data-mechanics-category="${escapeHtml(button.id)}" aria-pressed="${String(category === button.id)}">
               <span>${escapeHtml(button.label)}</span><small>${button.count}</small>
             </button>`).join("")}
         </nav>

@@ -1,4 +1,5 @@
 use super::embedding::embed_texts;
+use super::scope::ScopeFilter;
 use crate::bm25f;
 use crate::config::{AppError, Config, EmbeddingMode, HTTP_CLIENT};
 use sqlx::{PgPool, Row};
@@ -31,30 +32,44 @@ pub(super) fn semantic_vocabulary_terms(concepts: &[serde_json::Value]) -> Vec<S
 pub(super) async fn load_semantic_vocabulary_concepts(
     pool: &PgPool,
     rooms: &[String],
+    scope: &ScopeFilter,
     vector_text: &str,
     cfg: &Config,
 ) -> Result<Vec<serde_json::Value>, AppError> {
-    let rows =
-        sqlx::query(
-            r#"SELECT concept, lexical_terms, source_kind,
+    // Thread vectors outlive scope changes, so source visibility must precede LIMIT.
+    let sql = format!(
+        r#"SELECT concept, lexical_terms, source_kind,
                   (1 - (embedding <=> $1::vector))::double precision AS similarity
-           FROM semantic_vocabulary
+           FROM semantic_vocabulary vocabulary
            WHERE room = ANY($2::text[])
              AND approved_source_kind = source_kind
              AND embedding IS NOT NULL
              AND embedding_model = $3
              AND embedding_dimension = $4
              AND embedded_at >= source_updated_at
+             AND CASE WHEN source_kind = 'active_thread' THEN EXISTS (
+                   SELECT 1
+                   FROM thread_events event
+                   JOIN memories m ON m.id = event.memory_id
+                   WHERE event.thread_id = vocabulary.source_key::bigint
+                     AND m.archived_at IS NULL
+                     AND m.superseded_by IS NULL{}
+                 ) ELSE TRUE END
            ORDER BY similarity DESC, concept, source_kind, source_key
            LIMIT $5"#,
+        scope.predicate("m", 6)
+    );
+    let rows = scope
+        .bind(
+            sqlx::query(&sql)
+                .bind(vector_text)
+                .bind(rooms)
+                .bind(&cfg.embed_model)
+                .bind(i32::try_from(cfg.embed_dimension).map_err(|_| {
+                    AppError::Config("embedding dimension exceeds PostgreSQL integer".into())
+                })?)
+                .bind(SEMANTIC_VOCABULARY_TOP_K),
         )
-        .bind(vector_text)
-        .bind(rooms)
-        .bind(&cfg.embed_model)
-        .bind(i32::try_from(cfg.embed_dimension).map_err(|_| {
-            AppError::Config("embedding dimension exceeds PostgreSQL integer".into())
-        })?)
-        .bind(SEMANTIC_VOCABULARY_TOP_K)
         .fetch_all(pool)
         .await?;
     let mut concepts = Vec::with_capacity(rows.len());

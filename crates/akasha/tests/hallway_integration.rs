@@ -28,6 +28,10 @@ const KNOCK_TURNS_MIGRATION: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../substrate/migrations/0031_hallway_knock_turns.sql"
 ));
+const KNOCK_DEFAULT_DIGEST_MIGRATION: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../substrate/migrations/0038_hallway_knock_default_digest.sql"
+));
 
 fn bell_config() -> Config {
     Config {
@@ -95,6 +99,318 @@ async fn hallway_temp_session_exchanges_messages_without_persistent_state() -> T
     pool.close().await;
     result
 }
+#[tokio::test]
+#[ignore = "requires a dedicated PostgreSQL database with the production migrations"]
+async fn hardening_root_knock_uses_one_budget_for_admission_and_replay() -> TestResult {
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&isolated_database_url())
+        .await?;
+    akasha::migrations::run_migrations(&pool).await?;
+    let hallway = format!("hardening-budget-{}", Uuid::new_v4().simple());
+    let session = format!("hardening-{}", Uuid::new_v4().simple());
+    let default_budget = hearth::hallway::HALLWAY_DEFAULT_KNOCK_TURNS;
+    let config = bell_config();
+
+    let result: TestResult = async {
+        hallway_create(
+            &pool,
+            HallwayCreateRequest {
+                hallway: hallway.clone(),
+                room: "kodo".into(),
+                spirit: "Kodo".into(),
+                session: session.clone(),
+                allowed_rooms: vec!["kodo".into(), "kintsu".into()],
+                idempotency_key: "create".into(),
+            },
+        )
+        .await?;
+        let policy = HallwayKnockPolicyRequest {
+            hallway: hallway.clone(),
+            room: "kintsu".into(),
+            spirit: "Kintsu".into(),
+            session: format!("{session}-recipient"),
+            idempotency_key: "narrow-policy".into(),
+            mode: HallwayKnockPolicyMode::AllowList,
+            allowed_rooms: vec!["kodo".into()],
+            max_turns: default_budget - 1,
+        };
+        hallway_knock_policy(&pool, policy.clone()).await?;
+        let message = hallway_post(
+            &pool,
+            &config,
+            HallwayPostRequest {
+                hallway: hallway.clone(),
+                room: "kodo".into(),
+                spirit: "Kodo".into(),
+                session: session.clone(),
+                idempotency_key: "message".into(),
+                body: "An isolated budget proof".into(),
+                reply_to: None,
+                to_rooms: vec!["kintsu".into()],
+            },
+        )
+        .await?;
+        let request: HallwayKnockRequest = serde_json::from_value(serde_json::json!({
+            "hallway": hallway,
+            "room": "kodo",
+            "spirit": "Kodo",
+            "session": session,
+            "idempotencyKey": "knock",
+            "messageId": message.message.id,
+            "recipientRoom": "kintsu"
+        }))?;
+        let refused = hallway_knock(&pool, request.clone()).await;
+
+        if !matches!(
+            refused,
+            Err(AppError::Refusal {
+                code: "knock_turns_exceed_policy",
+                ..
+            })
+        ) {
+            return Err("omitted budget exceeded the recipient ceiling without refusal".into());
+        }
+
+        let stored: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM hallway_knocks WHERE message_id=$1")
+                .bind(message.message.id)
+                .fetch_one(&pool)
+                .await?;
+
+        if stored != 0 {
+            return Err("a refused Knock left a stored request".into());
+        }
+
+        hallway_knock_policy(
+            &pool,
+            HallwayKnockPolicyRequest {
+                idempotency_key: "wide-policy".into(),
+                max_turns: default_budget,
+                ..policy
+            },
+        )
+        .await?;
+        let accepted = hallway_knock(&pool, request.clone()).await?;
+        let replay = hallway_knock(
+            &pool,
+            HallwayKnockRequest {
+                max_turns: Some(default_budget),
+                ..request
+            },
+        )
+        .await?;
+
+        if accepted.knock.max_turns != default_budget
+            || !replay.duplicate
+            || replay.knock.knock_id != accepted.knock.knock_id
+        {
+            return Err("equivalent omitted and explicit budgets did not replay one Knock".into());
+        }
+
+        Ok(())
+    }
+    .await;
+    let cleanup = sqlx::query("DELETE FROM hallway_channels WHERE hallway_key=$1")
+        .bind(&hallway)
+        .execute(&pool)
+        .await;
+    pool.close().await;
+    cleanup?;
+
+    result
+}
+
+#[tokio::test]
+#[ignore = "requires a dedicated PostgreSQL database with the production migrations"]
+async fn hardening_legacy_root_knock_digest_upgrade_preserves_receipts() -> TestResult {
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&isolated_database_url())
+        .await?;
+    akasha::migrations::run_migrations(&pool).await?;
+    let hallway = format!("hardening-upgrade-{}", Uuid::new_v4().simple());
+    let session = format!("upgrade-𝔽-{}", Uuid::new_v4().simple());
+    let spirit = "Kōdō 𝔽";
+    let default_budget = hearth::hallway::HALLWAY_DEFAULT_KNOCK_TURNS;
+    let config = bell_config();
+
+    let result: TestResult = async {
+        hallway_create(
+            &pool,
+            HallwayCreateRequest {
+                hallway: hallway.clone(),
+                room: "kodo".into(),
+                spirit: spirit.into(),
+                session: session.clone(),
+                allowed_rooms: vec!["kodo".into(), "kintsu".into()],
+                idempotency_key: "create".into(),
+            },
+        )
+        .await?;
+        hallway_knock_policy(
+            &pool,
+            HallwayKnockPolicyRequest {
+                hallway: hallway.clone(),
+                room: "kintsu".into(),
+                spirit: "Kintsu".into(),
+                session: format!("{session}-recipient"),
+                idempotency_key: "policy".into(),
+                mode: HallwayKnockPolicyMode::AllowList,
+                allowed_rooms: vec!["kodo".into()],
+                max_turns: default_budget,
+            },
+        )
+        .await?;
+        let mut fixtures = Vec::new();
+
+        for key in [
+            "legacy-omitted",
+            "explicit-four",
+            "explicit-default",
+            "child",
+            "unmatched",
+        ] {
+            let message = hallway_post(
+                &pool,
+                &config,
+                HallwayPostRequest {
+                    hallway: hallway.clone(),
+                    room: "kodo".into(),
+                    spirit: spirit.into(),
+                    session: session.clone(),
+                    idempotency_key: format!("message-{key}"),
+                    body: format!("Upgrade fixture: {key}"),
+                    reply_to: None,
+                    to_rooms: vec!["kintsu".into()],
+                },
+            )
+            .await?;
+            let request = HallwayKnockRequest {
+                hallway: hallway.clone(),
+                room: "kodo".into(),
+                spirit: spirit.into(),
+                session: session.clone(),
+                idempotency_key: key.into(),
+                message_id: message.message.id,
+                recipient_room: "kintsu".into(),
+                parent_knock_id: None,
+                max_turns: Some(if key == "explicit-four" {
+                    4
+                } else {
+                    default_budget
+                }),
+            };
+            let accepted = hallway_knock(&pool, request.clone()).await?;
+            fixtures.push((request, accepted));
+        }
+
+        // Keep UTF-8 identities: Rust counts bytes, not PostgreSQL characters.
+        let old_digest = |request: &HallwayKnockRequest| {
+            origami::sea::idempotency_digest(&[
+                &request.hallway,
+                &request.room,
+                &request.spirit,
+                &request.session,
+                &request.message_id.to_string(),
+                &request.recipient_room,
+                "",
+                "4",
+            ])
+        };
+        let legacy_id = &fixtures[0].1.knock.knock_id;
+        let canonical_digest: String =
+            sqlx::query_scalar("SELECT request_digest FROM hallway_knocks WHERE knock_id=$1::uuid")
+                .bind(legacy_id)
+                .fetch_one(&pool)
+                .await?;
+
+        // Reconstruct the old accepted shape: digest budget 4, stored budget 10.
+        sqlx::query("UPDATE hallway_knocks SET request_digest=$2 WHERE knock_id=$1::uuid")
+            .bind(legacy_id)
+            .bind(old_digest(&fixtures[0].0))
+            .execute(&pool)
+            .await?;
+        sqlx::query(
+            "UPDATE hallway_knocks SET parent_knock_id=$2::uuid,root_knock_id=$2::uuid,
+             turn_index=2,request_digest=$3 WHERE knock_id=$1::uuid",
+        )
+        .bind(&fixtures[3].1.knock.knock_id)
+        .bind(legacy_id)
+        .bind(old_digest(&fixtures[3].0))
+        .execute(&pool)
+        .await?;
+        sqlx::query("UPDATE hallway_knocks SET request_digest='unmatched' WHERE knock_id=$1::uuid")
+            .bind(&fixtures[4].1.knock.knock_id)
+            .execute(&pool)
+            .await?;
+        let mut expected: Vec<serde_json::Value> = sqlx::query_scalar(
+            "SELECT to_jsonb(k) FROM hallway_knocks k
+             JOIN hallway_channels c ON c.id=k.hallway_id
+             WHERE c.hallway_key=$1 ORDER BY k.idempotency_key",
+        )
+        .bind(&hallway)
+        .fetch_all(&pool)
+        .await?;
+        assert_eq!(expected.len(), 5);
+        let legacy_row = expected
+            .iter_mut()
+            .find(|row| row["knock_id"].as_str() == Some(legacy_id.as_str()))
+            .expect("legacy fixture must exist");
+        assert_eq!(legacy_row["max_turns"], serde_json::json!(10));
+        assert_ne!(
+            legacy_row["request_digest"],
+            serde_json::json!(canonical_digest)
+        );
+        legacy_row["request_digest"] = serde_json::json!(canonical_digest);
+
+        for _ in 0..2 {
+            sqlx::raw_sql(KNOCK_DEFAULT_DIGEST_MIGRATION)
+                .execute(&pool)
+                .await?;
+            let actual: Vec<serde_json::Value> = sqlx::query_scalar(
+                "SELECT to_jsonb(k) FROM hallway_knocks k
+                 JOIN hallway_channels c ON c.id=k.hallway_id
+                 WHERE c.hallway_key=$1 ORDER BY k.idempotency_key",
+            )
+            .bind(&hallway)
+            .fetch_all(&pool)
+            .await?;
+            assert_eq!(actual, expected, "only the legacy root digest may change");
+        }
+
+        for budget in [None, Some(default_budget)] {
+            let replay = hallway_knock(
+                &pool,
+                HallwayKnockRequest {
+                    max_turns: budget,
+                    ..fixtures[0].0.clone()
+                },
+            )
+            .await?;
+            assert!(replay.duplicate);
+            assert_eq!(replay.knock, fixtures[0].1.knock);
+        }
+
+        for index in [1, 2] {
+            let replay = hallway_knock(&pool, fixtures[index].0.clone()).await?;
+            assert!(replay.duplicate);
+            assert_eq!(replay.knock, fixtures[index].1.knock);
+        }
+
+        Ok(())
+    }
+    .await;
+    let cleanup = sqlx::query("DELETE FROM hallway_channels WHERE hallway_key=$1")
+        .bind(&hallway)
+        .execute(&pool)
+        .await;
+    pool.close().await;
+    cleanup?;
+
+    result
+}
+
 #[tokio::test]
 #[ignore = "requires a PostgreSQL database where the test may create and drop a schema"]
 async fn hallway_supports_multiple_spirit_instances_and_ordered_messages() -> TestResult {

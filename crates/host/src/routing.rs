@@ -235,11 +235,11 @@ pub fn familiar_dispatch(
     familiar_name: &str,
     mut request: DispatchRequest,
 ) -> FamiliarDispatchReceipt {
-    let Some(spellbook) = status.spellbook else {
+    let Some(mut spellbook) = status.spellbook else {
         return rejected_familiar(status.errors);
     };
     let key = familiar_name.trim().to_lowercase();
-    let familiar = spellbook.familiars.into_iter().find(|familiar| {
+    let familiar = spellbook.familiars.iter().position(|familiar| {
         familiar.id.to_lowercase() == key
             || familiar.name.to_lowercase() == key
             || familiar
@@ -248,11 +248,23 @@ pub fn familiar_dispatch(
                 .any(|alias| alias.to_lowercase() == key)
     });
     let Some(familiar) = familiar else {
+        let ids = spellbook
+            .familiars
+            .iter()
+            .map(|familiar| familiar.id.as_str())
+            .collect::<Vec<_>>();
+
         return rejected_familiar(vec![format!(
-            "Unknown familiar: {}",
-            if key.is_empty() { "<empty>" } else { &key }
+            "Unknown familiar: {}. Valid familiar IDs: {}.",
+            if key.is_empty() { "<empty>" } else { &key },
+            if ids.is_empty() {
+                "<none>".into()
+            } else {
+                ids.join(", ")
+            }
         )]);
     };
+    let familiar = spellbook.familiars.swap_remove(familiar);
 
     request.lane = familiar.lane.clone();
     let mut receipt = dispatch_with_familiar(request, Some(&familiar));

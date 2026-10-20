@@ -33,6 +33,7 @@ let live = { status: "idle" };
 let spans = { key: null, status: "idle" };
 let trace = { key: null, status: "idle" };
 let requestRender = () => {};
+let focusGeneration = 0;
 
 export function initPulse(options) {
   requestRender = options.requestRender;
@@ -91,9 +92,24 @@ export function handlePulseClick(event) {
 // has to be handed its focus back or a keyboard drawer cycle would strand it.
 // The double frame outlasts the shell's own scheduled focus.
 function renderWithFocus(selector) {
+  const generation = ++focusGeneration;
+  const active = document.activeElement;
+  const restoreFocus = active === document.body || active === document.querySelector(selector);
+
   requestRender();
+
+  // A read may replace its drawer, but it does not own a different control's focus.
+  if (!restoreFocus) return;
+
   window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-    document.querySelector(selector)?.focus({ preventScroll: true });
+    if (generation !== focusGeneration) return;
+
+    const target = document.querySelector(selector);
+    const active = document.activeElement;
+
+    if (active !== document.body && active !== target) return;
+
+    target?.focus({ preventScroll: true });
   }));
 }
 
@@ -120,7 +136,8 @@ async function openLaneSpans(key, operation) {
     return;
   }
 
-  spans = { key, status: "pending", operation };
+  const pending = { key, status: "pending", operation };
+  spans = pending;
   renderWithLaneFocus(key);
 
   try {
@@ -130,6 +147,8 @@ async function openLaneSpans(key, operation) {
       window: SPANS_WINDOW,
       limit: SPANS_LIMIT
     });
+
+    if (spans !== pending) return;
     if (!Array.isArray(answer?.rows)) throw new Error("Spans response has no rows collection");
 
     spans = {
@@ -143,6 +162,8 @@ async function openLaneSpans(key, operation) {
       queriedAt: new Date().toTimeString().slice(0, 5)
     };
   } catch (error) {
+    if (spans !== pending) return;
+
     spans = {
       key,
       status: "failed",
@@ -159,11 +180,14 @@ async function openLaneSpans(key, operation) {
 // another's words. There is no missing-identity state here any more: the only
 // door into this function is a span row that carries a real trace id.
 async function openLaneTrace(key, traceId) {
-  trace = { key, status: "pending", traceId };
+  const pending = { key, status: "pending", traceId };
+  trace = pending;
   renderWithSpanFocus(traceId);
 
   try {
     const answer = await askHost("/live/insula/trace", { traceId, limit: TRACE_LIMIT });
+
+    if (trace !== pending) return;
     if (!Array.isArray(answer?.rows)) throw new Error("Trace response has no rows collection");
 
     trace = {
@@ -176,6 +200,8 @@ async function openLaneTrace(key, traceId) {
       queriedAt: new Date().toTimeString().slice(0, 5)
     };
   } catch (error) {
+    if (trace !== pending) return;
+
     trace = {
       key,
       status: "failed",
@@ -360,7 +386,7 @@ function renderLane(lane) {
 
   return `
     <details class="mechanics-row"${open}>
-      <summary data-pulse-lane="${escapeHtml(key)}" data-pulse-operation="${escapeHtml(lane.operation)}">
+      <summary id="pulse-lane-${encodeURIComponent(key)}" data-pulse-lane="${escapeHtml(key)}" data-pulse-operation="${escapeHtml(lane.operation)}">
         <span class="mechanics-row-title"><strong>${escapeHtml(lane.operation)}</strong><small>${escapeHtml(lane.component)}</small></span>
         <span class="mechanics-row-value"><small>Settled</small><code>${pulseCount(settled)} events</code></span>
         <span class="mechanics-row-flags">${flags.join("")}</span>
@@ -438,7 +464,7 @@ function renderSpanChoice(key, row) {
   const chosen = trace.key === key && trace.traceId === row.traceId;
 
   return `
-            <button type="button" class="pulse-trace-span" aria-pressed="${chosen}"
+            <button id="pulse-span-${encodeURIComponent(row.spanId)}" type="button" class="pulse-trace-span" aria-pressed="${chosen}"
               data-pulse-span-key="${escapeHtml(key)}" data-pulse-span-trace="${escapeHtml(row.traceId)}">
               <span class="mechanics-row-title"><strong>${escapeHtml(row.observedAt)}</strong><small>${escapeHtml(row.component)} · span ${escapeHtml(row.spanId)}</small><code>${escapeHtml(row.traceId)}</code></span>
               <span class="mechanics-row-value"><small>Duration</small><code>${escapeHtml(duration)}</code></span>
@@ -587,7 +613,7 @@ export function renderHousePulse() {
         </div>
         <div class="pulse-status">
           <div class="mechanics-snapshot-status" aria-label="Pulse source status">${statusChips()}</div>
-          <button class="card-verb" type="button" data-pulse-refresh>${queryLabel}</button>
+          <button id="pulse-refresh" class="card-verb" type="button" data-pulse-refresh>${queryLabel}</button>
         </div>
       </header>
 

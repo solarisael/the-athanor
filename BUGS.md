@@ -232,3 +232,15 @@ Rows 29 and 30 are Linux-only and are outside this pass.
 - Evidence: A real NATS 2.14.4 process accepted authorized traffic and refused anonymous, wrong-password, forbidden-topic, and cross-identity inbox access.
 - Proof owed: Close old Host and OMP processes, deploy through the canonical driver, and verify the installed credentials and user access.
 - Compatibility boundary: The first API 2 release cannot roll back to an API 1 generation. A later rollback requires another API 2 release.
+
+### 32. Large OMP swarms flood the parent with result envelopes
+
+- State: Repaired in source; not deployed.
+- Truth: The adapter combines adjacent successful gu results from one batch in model context.
+  Failed, cancelled, mixed, image-bearing, and unsupported results keep their native presentation.
+- Evidence: An isolated OMP `18.12.3` run reduced 147 synthetic completion frames from 46,011 to 2,859 characters.
+  The native read tool recovered unchanged JSON through an `agent://` link.
+  Enrollment restoration, parent isolation, and wait counts passed through the native context boundary.
+- Boundary: Native scheduling, transcripts, artifacts, and completion timing remain unchanged.
+  The projection does not promise one wake per batch.
+- Proof owed: Verify the installed adapter after deployment and restart.

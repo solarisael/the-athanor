@@ -37,6 +37,37 @@ Organ parameters cannot replace those fields.
 Explicit House targets remain available for `canon_read`, `canon_write`, and `remember`.
 Docket and restart operations retain their native capability checks.
 
+## Programmatic tool results
+
+OMP `18.12.3` exposes structured organ results through `receipt.details.xdev.inner` in Eval.
+Use this object instead of parsing the display text.
+The display text can contain line numbers or omit large sections.
+
+```javascript
+const receipt = await tool.write({
+  i: "Reading exact lesson body",
+  path: "xd://lessons",
+  content: JSON.stringify({ type: "coding", ids: [9], limit: 1 }),
+});
+const result = receipt.details.xdev.inner;
+if (!result.ok) throw new Error(JSON.stringify(result));
+const lessons = result.lessons;
+```
+
+Use the `:raw` selector when reading an agent's JSON output.
+Parse only output whose declared format is JSON.
+
+```javascript
+const receipt = await tool.read({ i: "Reading worker JSON", path: `agent://${agentId}:raw` });
+const result = JSON.parse(receipt.text);
+```
+
+The `:raw` selector removes display formatting.
+It does not make arbitrary prose valid JSON.
+OMP owns completion timing and full task artifacts.
+The adapter changes only the model-context presentation described below.
+
+
 ## Entry points and installed layout
 
 `index.ts` registers the source extension.
@@ -244,10 +275,27 @@ No automatic expiry removes worker records.
 Worker enrollment needs the Host.
 An unavailable Host blocks the spawn.
 Use the enrolled `task` tool for worker creation.
-Eval and workpool spawns receive a parent-facing refusal.
-Use `task` instead.
+Calls through Eval's `agent()` and `workpool` bypass enrollment and receive a parent-facing refusal.
+Use `tool.task` inside Eval for enrolled workers.
 The `/tan` path has no supported enrollment route; its unbound children cannot work.
 The worker boundary is logical ownership, not a process sandbox.
+
+## Gu result presentation
+
+The adapter combines adjacent successful gu results from one batch into a compact list of `agent://` links.
+Read each full result before using its findings.
+Native transcripts and artifact files stay unchanged.
+
+The worker lifecycle supplies parent-scoped identities for tasks called through Eval.
+Session startup restores those identities from the existing enrollment journal.
+Direct task results can also supply native identity metadata.
+Task names and worker prose never establish identity.
+
+Failed, cancelled, mixed, image-bearing, and unsupported results retain their native presentation.
+Eligible wait snapshots retain exact counts and artifact links.
+The projection does not change worker scheduling, completion timing, or admission rules.
+It does not promise one wake per batch.
+
 
 ## Deployment and proof
 

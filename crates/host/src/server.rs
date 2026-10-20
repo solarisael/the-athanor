@@ -17,8 +17,8 @@ use crate::routing::{
     load_spellbook,
 };
 use crate::store::{
-    DurableReceipt, HostDurableStore, ProjectionCursor, RoomIdentity, RoomStateStore, body_hash,
-    state_hash, timestamp,
+    DurableReceipt, HostDurableStore, PolicyCheckpoint, ProjectionCursor, RoomIdentity,
+    RoomStateStore, body_hash, state_hash, timestamp,
 };
 use crate::viewport::{ViewportSession, apply_viewport};
 use akasha::insula_writer::{EmitterSpan, defer_span, end_span, record_point, start_span};
@@ -195,9 +195,14 @@ impl Host {
         let panel = PanelHost::new(&config, pool.clone(), insula_binding.clone());
         let room_store = RoomStateStore::new(config.room_state_path(), config.room.clone());
         room_store.migrate_legacy_files(&config.room_dir)?;
-        let projection = room_store.load()?;
-        let (durable, cursor, mut sessions) =
-            HostDurableStore::open(&config.state_dir, &projection)?;
+        let (
+            durable,
+            PolicyCheckpoint {
+                projection,
+                cursor,
+                mut sessions,
+            },
+        ) = HostDurableStore::open(&config.state_dir, &room_store)?;
         let chat = ChatLog::open(&config.state_dir.join("chat.json"))?;
         if sessions.is_empty() {
             sessions.insert(
@@ -748,16 +753,17 @@ async fn execute_service_command(
         } => set_requested_mode(state, meta, base_version, requested_mode, command_hash).await,
         ClientCommand::JudgedMode { meta, judged } => {
             let mut runtime = state.runtime.lock().await;
-            let mut session = runtime
-                .sessions
-                .get(&meta.sender_session)
-                .cloned()
-                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            let mut sessions = runtime.sessions.clone();
+            let session = sessions
+                .entry(meta.sender_session.clone())
+                .or_insert_with(|| RecallPolicySession::fresh(&runtime.projection));
             session.judge_mode(judged.mode);
-            runtime
-                .sessions
-                .insert(meta.sender_session.clone(), session);
-            if let Err(reason) = runtime.durable.save_sessions(&runtime.sessions) {
+            let saved = runtime
+                .durable
+                .finish_pending(&state.room_store)
+                .and_then(|()| runtime.durable.save_sessions(&sessions));
+
+            if let Err(reason) = saved {
                 let failed = outcome_with_runtime(
                     state,
                     &meta,
@@ -771,6 +777,8 @@ async fn execute_service_command(
                     delta: None,
                 };
             }
+            runtime.sessions = sessions;
+
             // The judgment moves no projection field, so the reply is the
             // standing snapshot: the caller sees the state it is judging for.
             let snapshot = snapshot(state, &meta, &runtime);
@@ -785,22 +793,19 @@ async fn execute_service_command(
                 return response;
             }
             let requested_mode = runtime.projection.requested_mode;
-            let mut session = runtime
-                .sessions
-                .get(&meta.sender_session)
-                .cloned()
-                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            let mut sessions = runtime.sessions.clone();
+            let session = sessions
+                .entry(meta.sender_session.clone())
+                .or_insert_with(|| RecallPolicySession::fresh(&runtime.projection));
             let decision = session.evaluate(requested_mode, facts);
             let next = session.projection(timestamp());
-            runtime
-                .sessions
-                .insert(meta.sender_session.clone(), session);
             commit_change(
                 state,
                 &mut runtime,
                 &meta,
                 command_hash,
                 next,
+                sessions,
                 Some(decision),
             )
         }
@@ -809,34 +814,42 @@ async fn execute_service_command(
             if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
                 return response;
             }
-            let mut session = runtime
-                .sessions
-                .get(&meta.sender_session)
-                .cloned()
-                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            let mut sessions = runtime.sessions.clone();
+            let session = sessions
+                .entry(meta.sender_session.clone())
+                .or_insert_with(|| RecallPolicySession::fresh(&runtime.projection));
             session.complete_refresh(refresh, timestamp());
             let next = session.projection(timestamp());
-            runtime
-                .sessions
-                .insert(meta.sender_session.clone(), session);
-            commit_change(state, &mut runtime, &meta, command_hash, next, None)
+            commit_change(
+                state,
+                &mut runtime,
+                &meta,
+                command_hash,
+                next,
+                sessions,
+                None,
+            )
         }
         ClientCommand::FailRefresh { meta, reason } => {
             let mut runtime = state.runtime.lock().await;
             if let Some(response) = idempotency_response(state, &runtime, &meta, &command_hash) {
                 return response;
             }
-            let mut session = runtime
-                .sessions
-                .get(&meta.sender_session)
-                .cloned()
-                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            let mut sessions = runtime.sessions.clone();
+            let session = sessions
+                .entry(meta.sender_session.clone())
+                .or_insert_with(|| RecallPolicySession::fresh(&runtime.projection));
             session.fail_refresh(&reason, timestamp());
             let next = session.projection(timestamp());
-            runtime
-                .sessions
-                .insert(meta.sender_session.clone(), session);
-            commit_change(state, &mut runtime, &meta, command_hash, next, None)
+            commit_change(
+                state,
+                &mut runtime,
+                &meta,
+                command_hash,
+                next,
+                sessions,
+                None,
+            )
         }
         ClientCommand::InvalidateAfterCompaction { meta, summary } => {
             let mut context = context_session::session(state, &meta.sender_session).await;
@@ -860,18 +873,27 @@ async fn execute_service_command(
                     delta: None,
                 };
             }
-            let mut session = runtime
-                .sessions
-                .get(&meta.sender_session)
-                .cloned()
-                .unwrap_or_else(|| RecallPolicySession::fresh(&runtime.projection));
+            let mut sessions = runtime.sessions.clone();
+            let session = sessions
+                .entry(meta.sender_session.clone())
+                .or_insert_with(|| RecallPolicySession::fresh(&runtime.projection));
             session.invalidate_after_compaction(&summary);
-            runtime.viewport_sessions.remove(&meta.sender_session);
             let next = session.projection(timestamp());
-            runtime
-                .sessions
-                .insert(meta.sender_session.clone(), session);
-            commit_change(state, &mut runtime, &meta, command_hash, next, None)
+            let response = commit_change(
+                state,
+                &mut runtime,
+                &meta,
+                command_hash,
+                next,
+                sessions,
+                None,
+            );
+
+            if response.delta.is_some() {
+                runtime.viewport_sessions.remove(&meta.sender_session);
+            }
+
+            response
         }
         ClientCommand::AnalyzeContext { meta, request } => {
             let mut runtime = state.runtime.lock().await;
@@ -2453,53 +2475,60 @@ async fn set_requested_mode(
             &runtime,
             None,
         );
-        let _ = runtime.durable.save_receipt(DurableReceipt {
+        if let Err(error) = runtime.durable.save_receipt(DurableReceipt {
             idempotency_key: meta.idempotency_key.clone(),
             body_hash: command_hash,
             outcome: refusal.clone(),
             stored_at: timestamp(),
-        });
+        }) {
+            tracing::warn!(%error, "Recall policy refusal receipt was not persisted");
+        }
         return Responses {
             direct: vec![serialize(&refusal)],
             delta: None,
         };
     }
     let next = apply_requested_mode(&runtime.projection, requested_mode, timestamp());
-    commit_change(state, &mut runtime, &meta, command_hash, next, None)
+    let sessions = runtime.sessions.clone();
+    commit_change(
+        state,
+        &mut runtime,
+        &meta,
+        command_hash,
+        next,
+        sessions,
+        None,
+    )
 }
 
 fn refresh_from_room_state(state: &AppState, runtime: &mut RuntimeState) -> Result<(), String> {
+    runtime.durable.finish_pending(&state.room_store)?;
     let projection = state.room_store.load()?;
     let hash = state_hash(&projection)?;
+
     if hash == runtime.cursor.state_hash {
         return Ok(());
     }
-    let version = runtime
-        .cursor
-        .version
-        .checked_add(1)
-        .ok_or_else(|| "projection version overflow while reloading room state".to_string())?;
-    let sequence = runtime
-        .cursor
-        .sequence
-        .checked_add(1)
-        .ok_or_else(|| "projection sequence overflow while reloading room state".to_string())?;
-    runtime.projection = projection;
-    runtime.cursor = ProjectionCursor {
-        projection_id: RECALL_POLICY_PROJECTION_ID.into(),
-        version,
-        sequence,
-        state_hash: hash,
-    };
-    runtime.sessions.clear();
-    runtime.sessions.insert(
+
+    let cursor = runtime.cursor.advance(hash)?;
+    let sessions = HashMap::from([(
         state.config.session.clone(),
-        RecallPolicySession::fresh(&runtime.projection),
-    );
-    let sessions = runtime.sessions.clone();
-    let cursor = runtime.cursor.clone();
-    runtime.durable.save_sessions(&sessions)?;
-    runtime.durable.save_cursor(&cursor)
+        RecallPolicySession::fresh(&projection),
+    )]);
+    let checkpoint = runtime.durable.commit_policy(
+        &state.room_store,
+        PolicyCheckpoint {
+            projection,
+            cursor,
+            sessions,
+        },
+        None,
+    )?;
+    runtime.projection = checkpoint.projection;
+    runtime.cursor = checkpoint.cursor;
+    runtime.sessions = checkpoint.sessions;
+
+    Ok(())
 }
 
 fn idempotency_response(
@@ -2535,47 +2564,14 @@ fn commit_change(
     meta: &CommandMeta,
     command_hash: String,
     next: RecallPolicyState,
+    sessions: HashMap<String, RecallPolicySession>,
     decision: Option<RecallPolicyDecision>,
 ) -> Responses {
     let has_decision = decision.is_some();
     let mutations = RecallPolicyMutation::between(&runtime.projection, &next);
     let base_version = runtime.cursor.version;
-    let next_version = match base_version.checked_add(1) {
-        Some(version) => version,
-        None => {
-            let failed = outcome_with_runtime(
-                state,
-                meta,
-                RECALL_POLICY_COMMAND_FAILED,
-                Some("projection version overflow".into()),
-                runtime,
-                None,
-            );
-            return Responses {
-                direct: vec![serialize(&failed)],
-                delta: None,
-            };
-        }
-    };
-    let next_sequence = match runtime.cursor.sequence.checked_add(1) {
-        Some(sequence) => sequence,
-        None => {
-            let failed = outcome_with_runtime(
-                state,
-                meta,
-                RECALL_POLICY_COMMAND_FAILED,
-                Some("projection sequence overflow".into()),
-                runtime,
-                None,
-            );
-            return Responses {
-                direct: vec![serialize(&failed)],
-                delta: None,
-            };
-        }
-    };
-    let next_hash = match state_hash(&next) {
-        Ok(hash) => hash,
+    let cursor = match state_hash(&next).and_then(|hash| runtime.cursor.advance(hash)) {
+        Ok(cursor) => cursor,
         Err(reason) => {
             let failed = outcome_with_runtime(
                 state,
@@ -2585,88 +2581,68 @@ fn commit_change(
                 runtime,
                 None,
             );
+
             return Responses {
                 direct: vec![serialize(&failed)],
                 delta: None,
             };
         }
     };
-    if let Err(reason) = state.room_store.write_policy(&next) {
-        let failed = outcome_with_runtime(
+    let next_version = cursor.version;
+    let next_sequence = cursor.sequence;
+    let next_hash = cursor.state_hash.clone();
+    let accepted = CommandOutcomeEvent {
+        meta: event_meta(
             state,
-            meta,
-            RECALL_POLICY_COMMAND_FAILED,
-            Some(reason),
-            runtime,
-            None,
-        );
-        return Responses {
-            direct: vec![serialize(&failed)],
-            delta: None,
-        };
-    }
-    runtime.projection = next;
-    runtime.cursor = ProjectionCursor {
-        projection_id: RECALL_POLICY_PROJECTION_ID.into(),
+            Some(meta),
+            &meta.message_id,
+            &meta.idempotency_key,
+            RECALL_POLICY_COMMAND_ACCEPTED,
+            next_sequence,
+            next_hash.clone(),
+            new_id(),
+        ),
+        reason: None,
         version: next_version,
-        sequence: next_sequence,
-        state_hash: next_hash.clone(),
-    };
-    if let Err(reason) = runtime.durable.save_sessions(&runtime.sessions) {
-        let failed = outcome_with_runtime(
-            state,
-            meta,
-            RECALL_POLICY_COMMAND_FAILED,
-            Some(reason),
-            runtime,
-            None,
-        );
-        return Responses {
-            direct: vec![serialize(&failed)],
-            delta: None,
-        };
-    }
-    if let Err(reason) = runtime.durable.save_cursor(&runtime.cursor) {
-        let failed = outcome_with_runtime(
-            state,
-            meta,
-            RECALL_POLICY_COMMAND_FAILED,
-            Some(reason),
-            runtime,
-            None,
-        );
-        return Responses {
-            direct: vec![serialize(&failed)],
-            delta: None,
-        };
-    }
-    let accepted = outcome_with_runtime(
-        state,
-        meta,
-        RECALL_POLICY_COMMAND_ACCEPTED,
-        None,
-        runtime,
+        state: Some(next.clone()),
         decision,
+    };
+    let committed = runtime.durable.commit_policy(
+        &state.room_store,
+        PolicyCheckpoint {
+            projection: next,
+            cursor,
+            sessions,
+        },
+        Some(DurableReceipt {
+            idempotency_key: meta.idempotency_key.clone(),
+            body_hash: command_hash,
+            outcome: accepted.clone(),
+            stored_at: timestamp(),
+        }),
     );
-    if let Err(reason) = runtime.durable.save_receipt(DurableReceipt {
-        idempotency_key: meta.idempotency_key.clone(),
-        body_hash: command_hash,
-        outcome: accepted.clone(),
-        stored_at: timestamp(),
-    }) {
-        let failed = outcome_with_runtime(
-            state,
-            meta,
-            RECALL_POLICY_COMMAND_FAILED,
-            Some(reason),
-            runtime,
-            None,
-        );
-        return Responses {
-            direct: vec![serialize(&failed)],
-            delta: None,
-        };
-    }
+    let checkpoint = match committed {
+        Ok(checkpoint) => checkpoint,
+        Err(reason) => {
+            let failed = outcome_with_runtime(
+                state,
+                meta,
+                RECALL_POLICY_COMMAND_FAILED,
+                Some(reason),
+                runtime,
+                None,
+            );
+
+            return Responses {
+                direct: vec![serialize(&failed)],
+                delta: None,
+            };
+        }
+    };
+    runtime.projection = checkpoint.projection;
+    runtime.cursor = checkpoint.cursor;
+    runtime.sessions = checkpoint.sessions;
+
     if has_decision {
         record_point(
             state.insula_binding.as_ref(),
@@ -3397,6 +3373,10 @@ fn serialize(value: &impl serde::Serialize) -> String {
 fn new_id() -> String {
     Uuid::new_v4().to_string()
 }
+
+#[cfg(test)]
+#[path = "server/recall_atomicity_tests.rs"]
+mod hardening_recall_atomicity;
 
 #[cfg(test)]
 mod tests {

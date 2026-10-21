@@ -22,6 +22,10 @@ the exact implementation record.
 
 ### Fixed
 
+- `athanor deploy` shows local preparation and installation commands.
+  `prepare` and `install RECEIPT` use the existing guarded deployment driver.
+  `--source DIR` selects the source checkout explicitly.
+  Help explains the shutdown, backup, migration, health, and restart steps.
 - Local deployment supports preparation while the House stays open.
   `-PrepareOnly` builds and verifies one payload and writes a receipt.
   `-PreparedRelease` installs those bytes without another test or build run.

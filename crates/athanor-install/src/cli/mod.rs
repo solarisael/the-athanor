@@ -4,6 +4,7 @@
 //! operator ruled one exe, so they are doors of this one.
 
 pub mod chat;
+mod deploy;
 pub mod keeper;
 pub mod launch;
 pub mod manage;
@@ -25,6 +26,7 @@ keeper --config FILE   Run the OMP keeper for the room whose config is FILE.\n  
 chat [--room ROOM]     Talk to a room from this terminal.\n  \
 launch-session --manifest FILE\n                         Internal: run a Host-prepared one-use terminal relaunch.\n  \
 doctor                 Check the installation.\n  \
+deploy                 Prepare or install a local release. Run athanor deploy help.\n  \
 install --staging DIR --manifest FILE [--external-database-file FILE] [--house-config-file FILE] [--omp-config FILE --client-config FILE --operator-principal NAME]\n  \
 update                 Same options as install.\n  \
 install-omp-adapter --source DIR\n  \
@@ -49,6 +51,7 @@ pub fn run(arguments: Vec<String>) -> Result<ExitCode> {
         "service" => service::dispatch().map(|()| ExitCode::SUCCESS),
         "status" => status::run(),
         "start" => start::run(&rest),
+        "deploy" => deploy::run(&rest),
         "keeper" => keeper::run(&rest),
         "chat" => chat::run(&rest).map(|()| ExitCode::SUCCESS),
         protocol::launch::LAUNCH_SESSION_MODE => launch::run(&rest),

@@ -155,14 +155,23 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 
 `src/cli/`. The one exe's doors. `athanor.exe` with no arguments is the Host; the first argument names every other mode.
 
-- **Modes.** `status`, `start [--service]`, `keeper ROOM`, `keeper --config FILE`, `chat [--room ROOM]`, `doctor`, `install`, `update`, `install-omp-adapter`, `rollback-omp-adapter`, `rollback`, `uninstall`, `purge --confirm-data-loss`, `service`, and `help`.
+- **Modes.** `status`, `start`, `keeper`, `chat`, `deploy`, and `doctor` provide the main operator commands.
+  `install`, `update`, `install-omp-adapter`, `rollback-omp-adapter`, `rollback`, `uninstall`, and `purge` provide installation operations.
+  `service` runs under the Windows service manager. `help` lists the modes.
 - **`status`.** One JSON matrix. Each component reports installed, running, reachable, and healthy, or `null` when the mode has no honest way to know. The service is read through `sc query`; PostgreSQL, NATS, and Ollama through their ports; the Host through its port and its room health route; each registered keeper through its lock. `missing` lists what the House needs and does not have; `elevationRequired` lists the part of `missing` that needs administrator rights.
 - **`start`.** Starts only what `status` reports missing, in order. The service starts only with `--service`, through `sc start`; a denied start is the typed refusal `needs_elevation` and exit code 3. PostgreSQL and NATS are waited for after the service. The Host starts detached and is waited for on its port. Keepers are never started; the report names the command.
+- **`deploy`.** `prepare` runs the source deployment driver with `-PrepareOnly`.
+  `install RECEIPT` runs that driver with `-PreparedRelease`.
+  `--source DIR` selects the checkout explicitly. Invalid selections refuse without fallback.
+  Otherwise, installation searches the receipt ancestry before the current directory ancestry.
+  Preparation searches the current directory ancestry.
+  The CLI passes arguments without a shell expression and reports the driver exit status.
+  Execution requires Windows and PowerShell 7. Help requires no runtime configuration.
 - **`keeper`.** The `omp_keeper` crate's loop for one room. The room is named one of two ways. `keeper ROOM` reads the harness registry and takes the config of the entry that answers to ROOM: its harness id, its id without the `-omp` suffix, or the last folder of its workspace, case-insensitively. A name no entry answers to is refused, and the refusal lists the rooms the registry has. `keeper --config FILE` takes the config path as written.
 - **Bare room words.** The installer never writes a room command. The operator places one `bin\<room>.cmd` per room with the body `@"%~dp0athanor.exe" keeper <room> %*`. The shim resolves the exe beside itself, so an update never leaves it stale.
 - **`chat`.** The terminal mouth for the chat projection.
 - **Installation modes.** They build the layout from `ProgramFiles` and `ProgramData`, then hand the four native seams to the installer. `--staging` and `--manifest` are required for install and update. `--external-database-file`, `--house-config-file`, and the three operator flags are optional; `--omp-config`, `--client-config`, and `--operator-principal` must arrive together.
-- **Help.** `help` prints the mode list with every flag.
+- **Help.** `help` lists the modes. `deploy help` shows preparation, installation, source selection, and downtime instructions.
 
 ### app
 

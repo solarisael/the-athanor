@@ -475,54 +475,7 @@ try {
   $RestoredToolchain = Assert-NativeReleaseToolchain -RepositoryRoot $PinnedRepository
   Assert-True (($RestoredToolchain.cacheKeyMaterial -join "|") -ceq $AcceptedCacheKey) "the restored environment must reproduce the accepted cache key"
 
-  # --- the local deploy driver is thin: tests, one payload, one staged install, proofs ---
-  $DeployScript = Join-Path $PSScriptRoot "../substrate/deploy-local.ps1"
-  $DeployParseErrors = $null
-  $DeployTokens = $null
-  $DeployAst = [Management.Automation.Language.Parser]::ParseFile($DeployScript, [ref]$DeployTokens, [ref]$DeployParseErrors)
-  Assert-True ($DeployParseErrors.Count -eq 0) "the local deploy script must remain valid PowerShell"
-  $DeployCalls = @($DeployAst.FindAll({
-        param($Node)
-        $Node -is [Management.Automation.Language.CommandAst] -and
-        $Node.GetCommandName() -eq "Invoke-Checked"
-      }, $true))
-  $DeploySource = Get-Content $DeployScript -Raw
-  $WorkspaceTests = @($DeployCalls | Where-Object { $_.Extent.Text -match '"test",\s*"--workspace"' })
-  $AdapterTests = @($DeployCalls | Where-Object { $_.Extent.Text -match 'adapters/omp/deploy-local\.ps1.*"-TestsOnly"' })
-  $PayloadBuilds = @($DeployCalls | Where-Object { $_.Extent.Text -match 'installer/build-native-release\.ps1' })
-  $Installs = @($DeployCalls | Where-Object { $_.Extent.Text -match '"update",\s*"--staging",\s*\$Payload,\s*"--manifest",\s*\$Manifest' })
-  $DoctorCalls = @($DeployCalls | Where-Object { $_.Extent.Text -match '"doctor"' })
-  Assert-True ($WorkspaceTests.Count -eq 1) "the deploy driver must run the whole Cargo workspace test suite exactly once"
-  Assert-True ($AdapterTests.Count -eq 1) "the deploy driver must run the OMP adapter tests exactly once, through the adapter's own driver"
-  $AdapterInstalls = @($DeployCalls | Where-Object { $_.Extent.Text -match 'adapters/omp/deploy-local\.ps1.*"-SkipTests"' })
-  Assert-True ($AdapterInstalls.Count -eq 1) "the deploy driver must install the OMP adapter component exactly once, through the adapter's own driver, without rerunning its tests"
-  Assert-True ($PayloadBuilds.Count -eq 1) "the deploy driver must build exactly one native release payload"
-  Assert-True ($PayloadBuilds[0].Extent.Text -match '"-Version",\s*\$Release,\s*"-OutDir",\s*\$Out') "the payload build must receive the release identity and the deploy output directory"
-  Assert-True ($Installs.Count -eq 1) "the deploy driver must install exactly once, through the staged manager's update command"
-  Assert-True ($Installs[0].Extent.Text -match '-FilePath\s+\$StagedManager') "the staged manager must run the update, because it carries the new installer code"
-  Assert-True ($DoctorCalls.Count -eq 1) "installed release manifest proof must retain exactly one Doctor invocation"
-  Assert-True ($DoctorCalls[0].Extent.Text -match '-FilePath\s+\$InstalledManager' -and $DoctorCalls[0].Extent.Text -match '-Label\s+"native release manifest proof"') "the installed manager must run the Doctor proof under its checked label"
-  $TestsAt = $DeploySource.IndexOf('if (-not $SkipTests)', [StringComparison]::Ordinal)
-  $PayloadAt = $DeploySource.IndexOf('installer/build-native-release.ps1', [StringComparison]::Ordinal)
-  $InstallAt = $DeploySource.IndexOf('"update", "--staging"', [StringComparison]::Ordinal)
-  $DoctorAt = $DeploySource.IndexOf('"doctor"', [StringComparison]::Ordinal)
-  $PointerAt = $DeploySource.IndexOf('current.json names', [StringComparison]::Ordinal)
-  $HealthAt = $DeploySource.IndexOf('Full-mode health proof', [StringComparison]::Ordinal)
-  $AdapterInstallAt = $DeploySource.IndexOf('"-SkipTests"', [StringComparison]::Ordinal)
-  Assert-True ($TestsAt -ge 0 -and $TestsAt -lt $PayloadAt -and $PayloadAt -lt $InstallAt -and $InstallAt -lt $AdapterInstallAt -and $AdapterInstallAt -lt $DoctorAt -and $DoctorAt -lt $PointerAt -and $PointerAt -lt $HealthAt) "the driver must order tests, payload, native install, adapter install, Doctor, pointer check, then Full-mode health"
-  $ServicePreflight = $DeploySource.IndexOf('$Service = Get-Service', [StringComparison]::Ordinal)
-  Assert-True ($ServicePreflight -ge 0 -and $ServicePreflight -lt $TestsAt) "service state must be checked before any test or build work"
-  Assert-True ($DeploySource -match '(?s)-notin\s+@\("Running",\s*"Stopped"\).*?recover it to Running or Stopped') "transitional service states must refuse with a recovery instruction"
-  Assert-True ($DeploySource -match 'git -C \$Root rev-parse --short HEAD') "the release build suffix must name the HEAD commit"
-  Assert-True ($DeploySource -match 'status --porcelain --untracked-files=no.*?"\.dirty"') "a release built from modified tracked files must carry the .dirty suffix"
-  Assert-True ($DeploySource -match 'Get-NativeReleaseVersion\s+-RepositoryRoot\s+\$Root\s+-Requested\s+"\$Authority\+\$Build"') "the release identity must be the product version plus one build suffix, validated by the shared contract"
-  Assert-True ($DeploySource -match '\[string\]\$Current\.version\s+-cne\s+\$Release') "the driver must refuse when current.json does not name the release it installed"
-  Assert-True ($DeploySource -match '(?s)VSCMD_ARG_TGT_ARCH.*?Enter-VsDevShell.*?-arch=x64') "the driver must enter an x64 developer shell when the caller did not"
-  Assert-True (-not ($DeploySource -match '\b(Copy|Move)-Item\b')) "the driver must never copy or move files itself; the manager owns the program root"
-  $Removals = @([Regex]::Matches($DeploySource, 'Remove-Item'))
-  Assert-True ($Removals.Count -eq 1 -and $Removals[0].Index -gt $HealthAt) "the driver's only deletion is the payload cleanup after every proof passed"
-  Assert-True ($DeploySource -match '(?s)\$env:DATABASE_URL\s*=\s*\[string\]\$Secrets\.externalDatabaseUrl.*?finally\s*\{\s*\$env:DATABASE_URL\s*=\s*\$SavedDatabaseUrl') "the health proof must borrow the runtime database URL and give it back"
-  Assert-True ($DeploySource -match '(?s)\$HealthTries\s*=\s*3.*?Start-Sleep\s+-Seconds\s+10') "the Full-mode health proof must retry a cold embedder before counting as red"
+  & (Join-Path $PSScriptRoot "prepared-release.test.ps1")
   $AdapterComponentSource = Get-Content (Join-Path $PSScriptRoot "omp-adapter-component.ps1") -Raw
   $AdapterAllowlist = [Regex]::Match($AdapterComponentSource, '(?s)function\s+Get-OmpAdapterComponentRuntimeAllowlist\b.*?\n\}')
   Assert-True ($AdapterAllowlist.Success) "the adapter component runtime allowlist must remain discoverable"

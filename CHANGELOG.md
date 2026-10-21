@@ -22,6 +22,13 @@ the exact implementation record.
 
 ### Fixed
 
+- Local deployment supports preparation while the House stays open.
+  `-PrepareOnly` builds and verifies one payload and writes a receipt.
+  `-PreparedRelease` installs those bytes without another test or build run.
+  The adapter comes from the prepared payload instead of the current checkout.
+  Preparation uses one Cargo build job unless the caller sets another value.
+  Installation retains the shutdown guard, backup, migration, Doctor, and health checks.
+  Cleanup preserves other preparations.
 - GIGA sends source windows with at most eight turns and retains them until acknowledgment.
   Retries preserve source membership, room binding, and project metadata.
   Shutdown joins active requests. Failure diagnostics exclude source text and credentials.

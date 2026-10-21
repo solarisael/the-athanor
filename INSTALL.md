@@ -35,9 +35,9 @@ Close the House Host and every OMP session before activating this release.
 The canonical deployment driver refuses an active Host listener or installed substrate child.
 It does not terminate user sessions.
 
-Run `substrate/deploy-local.ps1` from the verified source checkout.
-If you use a deployment checkout, synchronize the verified source before running the driver.
-Do not deploy an older checkout over the installed repairs.
+Use the two-stage local deployment procedure below.
+Prepare from the verified source checkout.
+Do not prepare an older checkout over the installed repairs.
 
 The driver supplies the existing OMP configuration, private client path, and operator principal to the installer.
 The installer preserves credentials across later updates.
@@ -49,6 +49,52 @@ The loader refuses an older running Host when the selected component requires AP
 Warning: a delivery API 2 installer refuses installation or rollback to an unauthenticated delivery API 1 release.
 The first authenticated release needs another authenticated generation for normal rollback.
 Database backups do not make an old broker authentication-capable.
+
+## Local deployment in two stages
+
+Preparation keeps the House Host and OMP sessions open.
+It runs the workspace and adapter tests, builds the complete payload, and verifies its files.
+It writes `prepared-release.json` beside the payload.
+The receipt binds the release version and manifest hash to the test result.
+The script uses one Cargo build job unless `CARGO_BUILD_JOBS` already has a value.
+
+Run preparation from the source checkout:
+
+```powershell
+pwsh -NoProfile -File .\substrate\deploy-local.ps1 -PrepareOnly
+```
+
+Keep the receipt and its adjacent `payload` directory together.
+Use the receipt path printed by the script.
+Do not change files in the prepared payload.
+Preparation refuses an existing output directory.
+`-SkipTests` records a skipped test gate, not a passed gate.
+
+Close the House Host and every OMP session before installation.
+Run installation from an elevated PowerShell 7 terminal:
+
+```powershell
+pwsh -NoProfile -File .\substrate\deploy-local.ps1 -PreparedRelease '<printed receipt path>'
+```
+
+Installation verifies the receipt and every payload file before it checks the live runtime.
+It installs the prepared native release and the adapter from that same payload.
+It does not run tests or build tools.
+Changes to the source checkout do not change the prepared adapter.
+The manager retains ownership of backups, migrations, service changes, and installed files.
+Doctor and Full-mode health checks follow installation.
+
+A successful installation removes its receipt and retains its payload for inspection.
+The next successful installation can remove that previous payload.
+Other preparations remain intact.
+A failed preparation removes only its own incomplete output directory.
+Restart the Host and OMP after installation.
+
+Without either stage option, the driver prepares the release and then attempts installation.
+An open Host causes installation to refuse after preparation.
+Use the printed receipt for the later installation attempt.
+Do not combine `-PreparedRelease` with preparation or Linux options.
+The Linux deployment path does not use these stages.
 
 ## Versions
 

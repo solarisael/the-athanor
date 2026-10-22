@@ -16,10 +16,19 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - The runtime starts lazily at the first database method. It builds the `Config`, the pool, the GIGA worker, and the Insula emitter.
 - `substrate_health`, `vault_recall`, and `substrate_migrations` answer before the pool opens.
 - `protocol_error_class`, `app_error_class`, and `backup_error_class` name the failure for the observation. `app_error_outcome` marks refusals as refusals.
-- `cli_subcommand` runs five commands: `backup`, `restore`, `health`, `migrations`, and `semantic-vocabulary-refresh`.
+- `cli_subcommand` runs `backup`, `restore`, `health`, `migrations`, `semantic-vocabulary-refresh`, and `orihon-fold`.
 - `spawn_retention_service` checks expired raw observations once each day. The first check waits five minutes.
 - Raw observations expire after seven UTC days. Each sweep checks expiry against the current UTC minute.
 - `WslKeepalive` holds a helper process open on Windows and terminates it on drop.
+
+### orihon_folder/ — selected-page folds
+
+- `orihon-fold` folds one operator-selected page through a local Ollama model.
+- The command stores immutable source snapshots in PostgreSQL or the selected Vault book.
+- Matching source and recipe digests reuse existing folds.
+- Optional context sheds its oldest lines before it blocks an input that fits alone.
+- Source text never loses bytes to meet the model budget. Oversized input refuses.
+- Generated folds remain derived provenance. No background worker, unfold tool, or wake injection starts.
 
 ### remember/ — the durable write
 

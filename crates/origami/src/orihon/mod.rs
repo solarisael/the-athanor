@@ -1,6 +1,7 @@
 mod book;
 mod error;
 mod file;
+pub mod folds;
 mod pg;
 mod prepare;
 mod read;

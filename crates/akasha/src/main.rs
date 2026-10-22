@@ -52,6 +52,9 @@ async fn cli_subcommand() -> Result<bool, Box<dyn std::error::Error>> {
         Ok(out)
     };
     match command.as_str() {
+        "orihon-fold" => {
+            akasha::orihon_folder::run(args).await?;
+        }
         "backup" => {
             let values =
                 expect(&["--output-dir", "--keep"]).map_err(|error| format!("backup: {error}"))?;

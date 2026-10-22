@@ -348,7 +348,7 @@ Use the read-only `orihon` tool to read a page, sequence range, or UTC source da
 Reads return at most 200 records and a continuation cursor.
 The book is provenance. A row records what was said, not what is true.
 Canon and memory outrank the book.
-The navigator and generative folds are not implemented.
+The navigator, binary tree, unfold tool, and automatic fold view are not implemented.
 
 AKASHA stores accepted rows in PostgreSQL and exports exact rows to `<room>/orihon/YYYY-MM-DD.jsonl`.
 Vault uses those daily files as its durable book.
@@ -364,6 +364,52 @@ OMP retains its own source log; Orihon does not promise power-loss durability fo
 The existing Markdown transcript moves to `<room>/orihon/YYYY-MM-DD.md` on its next write.
 Migration preserves bytes and turn markers. A destination conflict preserves both files and refuses the write.
 Orihon mode does not disable the harness log or the existing Markdown transcript.
+
+### Fold one page
+
+Generated folds can lose attribution or meaning. Read the exact sources before you rely on a fold.
+The folder stores derived provenance. It does not create memory or canon.
+It does not change recording mode, run automatically, or inject summaries at wake.
+
+Use the substrate command to fold one selected page:
+
+```powershell
+athanor-substrate.exe orihon-fold --room ROOM --turn-no N --model TAG --env-file PATH
+```
+
+Use a canonical Ollama model tag, including its version suffix.
+The model must support generation with `think: false`.
+The default endpoint is `http://127.0.0.1:11434`.
+Use `--endpoint URL` to select another local Ollama endpoint.
+Remote endpoints, redirects, and environment proxies are refused.
+Run the normal guarded deployment before you use this command against an installed database.
+The command never applies migrations.
+
+For a Vault book, replace `--env-file PATH` with `--book-dir PATH`.
+The directory must contain the room's existing daily Orihon files.
+The folder writes `folds.jsonl` beside those files.
+AKASHA stores folds in `orihon_folds` through migration 0039.
+
+Message folds preserve text verbatim when it fits within 512 UTF-8 bytes.
+Longer messages use the model. A page fold summarizes the message folds.
+Each generated fold has at most five attempts. Oversized or incomplete results refuse without clipping.
+The command reports the source frontier, exact source references, model calls, reused folds, and page text.
+Repeating the same source snapshot and recipe reuses the stored result.
+Late source records produce a separate snapshot revision. Earlier revisions remain unchanged.
+
+One run accepts at most 4,096 records and 4 MiB of source text.
+Model input is limited to 64 KiB. Reference context is limited to 32 KiB.
+The default context setting is 32,768 tokens.
+Use `--num-ctx N` to select a supported model context between 4,096 and 262,144 tokens.
+Larger contexts require more model memory.
+The command checks serialized prompt bytes plus template and output allowances against this setting before every request.
+Each context record occupies one JSON line, with its kind, speaker, and escaped text.
+The folder removes oldest whole context records when the unchanged source input needs more room.
+It also reserves up to 4 KiB for retry history by removing optional context.
+The recipe digest identifies the exact context used.
+This conservative check can refuse input below the byte ceilings. It is not a tokenizer guarantee for arbitrary models.
+Each request has a 120-second deadline. A refusal can leave completed message folds available for reuse.
+Retry history can exhaust the context allowance before five attempts. That refusal stores no generated summary.
 
 
 ## Tools and the Host

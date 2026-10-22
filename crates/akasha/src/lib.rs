@@ -15,6 +15,7 @@ pub mod insula_writer;
 mod lesson;
 pub mod migrations;
 pub mod native;
+pub mod orihon_folder;
 mod paper_boat;
 mod presence;
 mod recall;

@@ -22,6 +22,8 @@ the exact implementation record.
 
 ### Fixed
 
+- The Windows running-image replacement test waits for child readiness before replacing its executable.
+  The test reaps its child when a readiness check or assertion fails.
 - `athanor deploy` shows local preparation and installation commands.
   `prepare` and `install RECEIPT` use the existing guarded deployment driver.
   `--source DIR` selects the source checkout explicitly.
@@ -118,6 +120,10 @@ the exact implementation record.
 
 ### Added
 
+- `orihon-fold` generates source-bound message and page folds through a local Ollama endpoint.
+  PostgreSQL and Vault preserve immutable snapshot revisions and refuse conflicting replays.
+  Model requests preserve complete source input and trim optional context by whole records.
+  This command does not enable per-turn resets, tree navigation, or wake injection.
 - The sixteen named kittens and dragonlings receive their role lessons with every wake, resume included.
   The Host reads the coding lessons tagged `familiar-role:shared` and the familiar's role tag.
   Each provider context receives every complete body separately from clipped wake text. The open response lists the lesson IDs.

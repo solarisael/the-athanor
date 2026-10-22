@@ -558,6 +558,18 @@ impl ServiceManager for ScServiceManager {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::sync::mpsc;
+
+    struct RunningImage(std::process::Child);
+
+    impl Drop for RunningImage {
+        fn drop(&mut self) {
+            // Preserve cleanup when an assertion or readiness check fails.
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
 
     // The deploy case: a session still runs the stable image while the
     // installer lands the next one at the same path. Plain fs::copy fails
@@ -569,12 +581,29 @@ mod tests {
         fs::create_dir_all(&bin)?;
         let system32 = PathBuf::from(std::env::var("SystemRoot")?).join("System32");
         let live = bin.join("athanor.exe");
-        fs::copy(system32.join("ping.exe"), &live)?;
-        let mut running = Command::new(&live)
-            .args(["-n", "30", "127.0.0.1"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
+        fs::copy(system32.join("cmd.exe"), &live)?;
+        let mut running = RunningImage(
+            Command::new(&live)
+                .args(["/D", "/Q", "/K", "echo athanor-image-ready"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()?,
+        );
+        let stdout = running.0.stdout.take().context("capture image readiness")?;
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let reader = thread::spawn(move || {
+            let mut line = String::new();
+            let ready = BufReader::new(stdout).read_line(&mut line).map(|_| line);
+            let _ = ready_tx.send(ready);
+        });
+        let ready = ready_rx
+            .recv_timeout(Duration::from_secs(10))
+            .context("running image did not report readiness")??;
+        reader
+            .join()
+            .map_err(|_| anyhow::anyhow!("image readiness reader panicked"))?;
+        assert_eq!(ready.trim(), "athanor-image-ready");
         let next = temporary.path().join("next.exe");
         fs::copy(system32.join("timeout.exe"), &next)?;
 
@@ -584,7 +613,7 @@ mod tests {
 
         assert_eq!(fs::read(&live)?, fs::read(&next)?);
         assert!(
-            running.try_wait()?.is_none(),
+            running.0.try_wait()?.is_none(),
             "the old session must keep running"
         );
         let retired: Vec<PathBuf> = fs::read_dir(&bin)?
@@ -594,8 +623,8 @@ mod tests {
             .collect();
         assert_eq!(retired.len(), 1, "the live image moved aside exactly once");
 
-        running.kill()?;
-        running.wait()?;
+        running.0.kill()?;
+        running.0.wait()?;
         NativeFileSystem.replace_file(&next, &live)?;
         let remaining = fs::read_dir(&bin)?
             .flatten()

@@ -47,10 +47,7 @@ pub(super) fn enabled(room_dir: &std::path::Path, override_value: Option<&str>) 
             .iter()
             .any(|enabled| value.trim().eq_ignore_ascii_case(enabled));
     }
-    std::fs::read(room_dir.join(".athanor-room.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .is_some_and(|marker| marker["recallTelemetry"] == true)
+    akasha::room_marker::read_room_marker(room_dir)["recallTelemetry"] == true
 }
 
 pub(super) fn redact_text(value: &str, private: &[&str], limit: usize) -> String {

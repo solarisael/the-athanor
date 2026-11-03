@@ -121,6 +121,19 @@ fn load(directory: &Path, room: &str) -> Result<Book, Error> {
     Ok(book)
 }
 
+pub(super) fn source_snapshot(directory: &Path, room: &str) -> Result<Book, Error> {
+    prepare::identity(room, "room")?;
+    match fs::metadata(directory) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Book::default());
+        }
+        Err(error) => return Err(io(directory, error)),
+    }
+    let _lock = lock(directory, false)?;
+    load(directory, room)
+}
+
 fn record_path(directory: &Path, record: &Record) -> PathBuf {
     directory.join(format!("{}.jsonl", &record.said_at[..10]))
 }
@@ -207,29 +220,21 @@ pub fn append_file(
     writable_directory(directory)?;
     let _lock = lock(directory, true)?;
     let mut book = load(directory, room)?;
-    let (selected, appended) = book.plan(room, writer_session, prepared)?;
+    let (selected, appended, reconciled) = book.plan(room, writer_session, prepared)?;
     for seq in &appended {
         append_record(directory, &book.records[seq])?;
     }
     sync_accepted(directory, &book, &selected)?;
-    book.receipt(selected, appended.len())
+    book.receipt(selected, appended.len(), reconciled)
 }
 
 fn read_book(directory: &Path, room: &str, bounds: ReadBounds) -> Result<ReadReceipt, Error> {
-    match fs::metadata(directory) {
-        Ok(_) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(bounds.receipt(Vec::new()));
-        }
-        Err(error) => return Err(io(directory, error)),
-    }
-    let _lock = lock(directory, false)?;
-    let book = load(directory, room)?;
+    let book = source_snapshot(directory, room)?;
     let rows = book
         .records
         .into_values()
         .filter(|record| bounds.includes(record))
-        .take(bounds.request.limit + 1)
+        .take(bounds.request.limit.saturating_add(1))
         .collect();
     Ok(bounds.receipt(rows))
 }
@@ -268,8 +273,9 @@ pub fn export_file(directory: &Path, room: &str, records: &[Record]) -> Result<(
                 ));
             }
         } else {
-            book.validate_link(record)?;
+            // Register the first prelude page before validating its parentless link.
             book.insert(record.clone())?;
+            book.validate_link(record)?;
             appended.push(record.seq);
         }
         selected.push(record.seq);

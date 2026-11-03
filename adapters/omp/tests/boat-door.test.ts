@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
@@ -279,6 +279,26 @@ test("an unknown section in handoff-door.md is named, and the door still opens",
   expect(await emit("input", input("/handoff"))).toEqual({ handled: true });
   expect(sent[0].message.content).toContain(HOUSE_DOOR_LINES.handoff);
   expect(notices.join("\n")).toContain('unknown sections "handof"');
+});
+
+// Kills: the House page ignored, a room section failing to replace a House section,
+// or the spirit slot left unfilled.
+test("the House handoff-door.md speaks for every room, the room page lays over it, and {spirit} is the nickname", async () => {
+  const houseRoot = mkdtempSync(path.join(tmpdir(), "boat-door-house-"));
+  mkdirSync(path.join(houseRoot, "house"));
+  writeFileSync(path.join(houseRoot, "house", "handoff-door.md"), "## handoff\n{spirit}, boat time\n## after\n{spirit}, done\n");
+  const roomDir = path.join(houseRoot, "kodo");
+  mkdirSync(roomDir);
+  writeFileSync(path.join(roomDir, "handoff-door.md"), "## after\nback with you, {spirit}\n");
+
+  const { ctx, emit, sent, notices } = fakePi(fakeSession().session, { roomDir });
+  await emit("input", input("/handoff"));
+  expect(sent[0].message.content).toBe("<athanor-attention>\nkodooo, boat time\n</athanor-attention>");
+  boatCast(ctx);
+  await emit("agent_end", { type: "agent_end" });
+  await settle();
+  expect(sent[1].message.content).toBe("<athanor-attention>\nback with you, kodooo\n</athanor-attention>");
+  expect(notices).toEqual([]);
 });
 
 test("the abort that ends the boat turn is reported as a cast boat, never as a lost one", async () => {

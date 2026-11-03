@@ -5,19 +5,25 @@ use std::process::{Command, ExitCode};
 const DRIVER: &str = "substrate/deploy-local.ps1";
 const HELP: &str = "Usage:
   athanor deploy prepare [--source DIR] [--build LABEL] [--skip-tests]
-  athanor deploy install RECEIPT [--source DIR]
+  athanor deploy install RECEIPT [--source DIR] [--house-config-file FILE]
 
 Prepare tests and builds the release while the House stays open.
 Install uses the prepared bytes. It does not build again.
-Close the House Host and every OMP session before installation.
+Warning: Older Hosts still close the OMP sessions they own.
+Close those sessions before the first update with cutover support.
+Start installation before stopping the House Host.
+Stop the Host when the driver asks you to.
+Cutover-aware OMP sessions stay open while keepers pause their substrate children.
 Run installation from an elevated terminal. It backs up the database,
 applies migrations, installs the release and adapter, and checks health.
-Restart the Host and OMP after installation.
+Start the Host after installation. Open sessions attach again when their
+loaded adapter is compatible; restart OMP to load new adapter code.
 
 Run from The Athanor checkout, or select it with --source DIR.
 Install first looks above the receipt for its checkout, then above the
 current directory. An explicit --source always takes precedence.
 Keep the receipt and its adjacent payload directory together.
+Use --house-config-file only during installation to change the House configuration.
 PowerShell 7 is required. Preparation also needs the build toolchain.
 --skip-tests records an unverified test gate.
 ";
@@ -54,6 +60,18 @@ pub(super) fn run(arguments: &[String]) -> Result<ExitCode> {
         }
         Action::Prepare { .. } => None,
     };
+    let house_config = options
+        .house_config
+        .map(|file| std::path::absolute(cwd.join(file)))
+        .transpose()
+        .context("resolve House configuration file")?;
+
+    if let Some(file) = &house_config
+        && !file.is_file()
+    {
+        bail!("House configuration is not a file: {}", file.display());
+    }
+
     let source = resolve_source(options.source, receipt.as_deref(), &cwd)?;
     println!("Source checkout: {}", source.display());
     let mut command = Command::new("pwsh");
@@ -79,6 +97,9 @@ pub(super) fn run(arguments: &[String]) -> Result<ExitCode> {
                 .context("prepared receipt was not resolved")?;
             println!("Prepared receipt: {}", receipt.display());
             command.arg("-PreparedRelease").arg(receipt);
+            if let Some(file) = &house_config {
+                command.arg("-HouseConfigFile").arg(file);
+            }
         }
     }
 
@@ -107,6 +128,7 @@ enum Action<'a> {
 struct Options<'a> {
     action: Action<'a>,
     source: Option<&'a str>,
+    house_config: Option<&'a str>,
 }
 
 fn is_help(argument: &str) -> bool {
@@ -124,6 +146,7 @@ fn parse(arguments: &[String]) -> Result<Options<'_>> {
     let mut build = None;
     let mut skip_tests = false;
     let mut receipt = None;
+    let mut house_config = None;
     let mut arguments = arguments.iter();
 
     while let Some(argument) = arguments.next() {
@@ -135,6 +158,9 @@ fn parse(arguments: &[String]) -> Result<Options<'_>> {
                 build = Some(option_value(&mut arguments, "--build")?);
             }
             "--skip-tests" if mode == "prepare" && !skip_tests => skip_tests = true,
+            "--house-config-file" if mode == "install" && house_config.is_none() => {
+                house_config = Some(option_value(&mut arguments, "--house-config-file")?);
+            }
             value
                 if mode == "install"
                     && receipt.is_none()
@@ -155,7 +181,11 @@ fn parse(arguments: &[String]) -> Result<Options<'_>> {
         Action::Install(receipt.context("install requires a receipt; run athanor deploy help")?)
     };
 
-    Ok(Options { action, source })
+    Ok(Options {
+        action,
+        source,
+        house_config,
+    })
 }
 
 fn option_value<'a>(arguments: &mut std::slice::Iter<'a, String>, flag: &str) -> Result<&'a str> {

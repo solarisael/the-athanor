@@ -2,7 +2,7 @@ use super::memory_reference::MemoryReferences;
 use crate::bm25f;
 use crate::config::QUERY_DATE_RE;
 use chrono::NaiveDate;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 
 pub(super) fn query_dates(query: &str) -> Vec<NaiveDate> {
     QUERY_DATE_RE
@@ -102,6 +102,125 @@ pub(crate) fn bounded_excerpt(body: &str) -> String {
     }
 }
 
+pub(super) fn source_passage(
+    body: &str,
+    terms: &[String],
+    chunk_index: Option<i64>,
+) -> (String, protocol::RecallPassage) {
+    const WINDOW: usize = 384;
+    const LEADING_CONTEXT: usize = 96;
+    if terms.is_empty() || body.chars().take(WINDOW + 1).count() <= WINDOW {
+        let excerpt: String = body.chars().take(WINDOW).collect();
+        let end = excerpt.chars().count() as u64;
+
+        return (
+            excerpt,
+            protocol::RecallPassage {
+                char_start: 0,
+                char_end: end,
+                chunk_index,
+            },
+        );
+    }
+
+    struct Pattern {
+        characters: Vec<char>,
+        prefix: Vec<usize>,
+        matched: usize,
+        last_start: Option<usize>,
+    }
+    let mut patterns = terms
+        .iter()
+        .filter(|term| !term.is_empty())
+        .map(|term| {
+            let characters: Vec<char> = term.chars().collect();
+            let mut prefix = vec![0; characters.len()];
+            let mut matched = 0;
+            for index in 1..characters.len() {
+                while matched > 0 && characters[index] != characters[matched] {
+                    matched = prefix[matched - 1];
+                }
+                if characters[index] == characters[matched] {
+                    matched += 1;
+                }
+                prefix[index] = matched;
+            }
+            Pattern {
+                characters,
+                prefix,
+                matched: 0,
+                last_start: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    let longest = patterns
+        .iter()
+        .map(|pattern| pattern.characters.len())
+        .max()
+        .unwrap_or(1);
+    // Prefix links keep matching linear per query term. Only the current
+    // passage and the longest folded term need source-offset bookkeeping.
+    let mut folded_offsets = VecDeque::with_capacity(longest);
+    let mut source_offsets = VecDeque::with_capacity(WINDOW);
+    let mut best_distinct = 0;
+    let mut start = 0;
+    let mut start_byte = 0;
+    for (index, (byte, character)) in body.char_indices().enumerate() {
+        source_offsets.push_back((index, byte));
+        if source_offsets.len() > WINDOW {
+            source_offsets.pop_front();
+        }
+        for folded in character.to_lowercase() {
+            folded_offsets.push_back(index);
+            if folded_offsets.len() > longest {
+                folded_offsets.pop_front();
+            }
+            for pattern in &mut patterns {
+                while pattern.matched > 0 && pattern.characters[pattern.matched] != folded {
+                    pattern.matched = pattern.prefix[pattern.matched - 1];
+                }
+                if pattern.characters[pattern.matched] == folded {
+                    pattern.matched += 1;
+                }
+                if pattern.matched == pattern.characters.len() {
+                    pattern.last_start = folded_offsets
+                        .get(folded_offsets.len() - pattern.characters.len())
+                        .copied();
+                    pattern.matched = pattern.prefix[pattern.matched - 1];
+                }
+            }
+        }
+        let window_start = (index + 1).saturating_sub(WINDOW);
+        let mut distinct = 0;
+        let mut earliest = index;
+        for hit in patterns.iter().filter_map(|pattern| pattern.last_start) {
+            if hit >= window_start {
+                distinct += 1;
+                earliest = earliest.min(hit);
+            }
+        }
+        if distinct > best_distinct {
+            best_distinct = distinct;
+            start = window_start.max(earliest.saturating_sub(LEADING_CONTEXT));
+            start_byte = source_offsets[start - window_start].1;
+            if distinct == patterns.len() {
+                break;
+            }
+        }
+    }
+    let excerpt: String = body[start_byte..].chars().take(WINDOW).collect();
+    let end = start + excerpt.chars().count();
+
+    (
+        excerpt,
+        protocol::RecallPassage {
+            char_start: start as u64,
+            char_end: end as u64,
+            chunk_index,
+        },
+    )
+}
+
 pub(crate) fn candidate_terms(
     terms: &[String],
     fields: &[&str],
@@ -146,6 +265,7 @@ fn bounded_rerank_candidate(candidate: &serde_json::Value) -> Option<serde_json:
         "reasons",
         "source",
         "chunk_index",
+        "passage",
     ] {
         if let Some(value) = candidate.get(key) {
             projected.insert(key.to_owned(), value.clone());
@@ -154,7 +274,7 @@ fn bounded_rerank_candidate(candidate: &serde_json::Value) -> Option<serde_json:
     projected.insert("memory_id".to_owned(), serde_json::Value::from(memory_id));
     projected.insert(
         "excerpt".to_owned(),
-        serde_json::Value::String(bounded_excerpt(excerpt)),
+        serde_json::Value::String(excerpt.chars().take(384).collect()),
     );
     if !projected.contains_key("score") {
         let score = candidate

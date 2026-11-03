@@ -25,7 +25,10 @@ pub fn recall(request: VaultRecallRequest) -> Result<VaultRecallResult, VaultErr
             actual: actual_room.to_owned(),
         });
     }
-    let config = load_config(&room_dir)?;
+    let mut config = load_config(&room_dir)?;
+    if let Some(limit) = request.limit {
+        config.settings.max_results = limit.get() as usize;
+    }
     let index = build_index(&config);
     let retrieval_candidates = rank(&index, &request.query, &config.settings);
     Ok(VaultRecallResult {

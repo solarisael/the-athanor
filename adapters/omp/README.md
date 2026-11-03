@@ -92,6 +92,16 @@ An absent Host produces a warning.
 A running Host with an incompatible API produces a refusal before the component loads.
 The health watch continues every 30 seconds.
 
+Every Host attach after load passes the loader's reconnect gate.
+This includes the automatic attach after the Host forgets an instance.
+The gate refuses while `<state root>/cutover/cutover.json` exists, and the session stays disconnected.
+After the marker is gone, the gate reads the installed release and the client projection again.
+It refreshes a projected Host token and Host URL before the attach.
+A changed compatibility field refuses the attach and names the required OMP restart.
+A changed projected House ID or state root also requires a restart.
+That refusal stops the session timers, so no background attach repeats it.
+A changed adapter release with equal compatibility fields attaches; the process keeps the code it loaded.
+
 ## Host transport
 
 Commands use authenticated loopback WebSockets at `/room/<room>/athanor/v1/ws`.
@@ -129,6 +139,12 @@ OMP installs the returned rules into its TTSR manager.
 The Host stores prepared turns under `<Host state directory>/context-turns/<digest>.json`.
 It keeps at most 128 resident sessions.
 Visible-turn pruning removes only turns that leave the supplied context window.
+The Host retains one current Recall block and one current Presence block.
+The adapter removes obsolete derived messages before it anchors the complete Host projection.
+An empty or failed refresh cannot restore an older topical snapshot.
+Context format 2 rebuilds obsolete stored context.
+Only the Recall block displays retrieved topical evidence.
+
 
 Repeated requests reuse stable context bytes while the identity and native Presence contract remain valid.
 Pending settlement information accompanies replay, so a resumed adapter can complete the contract.
@@ -154,6 +170,19 @@ Rust owns Recall reranking, lesson sieving, mode proposals, and turn verdicts.
 The existing room grants remain opt-in.
 Native packet checks precede external provider calls.
 
+Recall planning can choose only among supplied, source-grounded plans.
+It cannot generate query text or hypothetical memories.
+The `jevRecall.grant` object requires `purpose: "recall-rerank"` and `allowPrivateRecallPackets: true`.
+Conversation-aware planning also requires `allowPrivateConversationPackets: true` in that object.
+Without the conversation grant, reranking uses the current request and authorized memory cards only.
+Receipts report the context grant result, provider latency, and available request and response byte counts.
+
+`evals/recall-eval.ts` accepts private case files and uses disposable Host sessions.
+It replays preceding user turns before the evaluated request.
+It scores native presented evidence, not a second retrieval call.
+Missing gold labels remain unscored.
+Its scope report describes the native room and House boundary; it does not claim to exercise scope overrides.
+
 OMP resolves a Typesafe credential only when a native plan requires one.
 Disabled, Laya-only, child-only, and valid replay paths do not request that credential.
 The key remains transient and never enters a context cache, receipt, or diagnostic export.
@@ -163,6 +192,30 @@ An approved plan can request its local credential before a later packet receives
 `jev-shadow` remains an OMP-side observation surface.
 Its production installation has no eligibility provider and performs no semantic judgment.
 `insula` shows the native observations.
+
+GIGA classification uses the separate `jevGiga` room grant:
+
+```json
+{
+  "mode": "active",
+  "provider": "typesafe",
+  "grant": {
+    "purpose": "giga-classify",
+    "allowPrivateConversationPackets": true,
+    "policyRevision": "operator-approved-revision"
+  }
+}
+```
+
+Place this object under `jevGiga` in the room marker after the operator approves remote disclosure.
+The Host rechecks the grant before each request. OMP supplies the Typesafe credential through normal authentication storage.
+Missing or invalid classifier configuration leaves capture available and reports classification as unavailable.
+Contextual classification also uses the existing `jevRecall` private-packet grant.
+Without that grant, Jev receives no recalled records and sees an explicit context refusal.
+The worker preserves the Host's operator scope. A local House uses its existing unbound scope.
+Review unreviewed candidates and resurfaced `in_review` candidates before finalizing the paper boat.
+Simple facts remain canon suggestions until an explicit authorized write accepts them.
+
 
 ## Environment and room inputs
 
@@ -177,6 +230,9 @@ Its production installation has no eligibility provider and performs no semantic
 | `ATHANOR_DISABLE_AUTO_RECALL` | Value `1` disables automatic Recall |
 | `ATHANOR_GIGA_ENABLED` | Value `1` requests GIGA capture |
 | `ATHANOR_HIPPOCAMPUS_ENABLED` | Value `1` requests classification when GIGA is enabled |
+| `ATHANOR_GIGA_BATCH_TURNS` | Host startup setting; release threshold 1–64, default 8 |
+| `ATHANOR_GIGA_BATCH_WAIT_SECONDS` | Host startup setting; oldest waiting age 1–3600 seconds, default 120 |
+| `ATHANOR_GIGA_CONCURRENCY` | Host startup setting; active jobs per room 1–16, default 4 |
 | `ATHANOR_RECALL_TELEMETRY` | Optional override for the native Recall export |
 | `ATHANOR_DISABLE_KITTEN_LINEAGE` | Controls task lineage diagnostics; it does not disable the worker lifecycle |
 | `ATHANOR_ROOM_CAPABILITY` | Optional override for the room's Docket capability |
@@ -205,10 +261,26 @@ OMP performs the final exit with code 87 after native authorization.
 Both TUI and non-TUI successors verify and enqueue their continuation.
 The keeper contract is in [its README](../../crates/omp-keeper/README.md).
 
-The Host owns GIGA workers and waits for worker exit before replacement.
-Top-level sessions send explicit enablement values.
+The Host stores GIGA turn jobs before it acknowledges capture.
+OMP has no GIGA turn buffer. Capture receipts distinguish accepted, duplicate, failed, and skipped turns.
+Missing classifier credentials leave durable capture available.
+
+The Host releases each conversation when its count or oldest-turn deadline is reached.
+New arrivals never postpone the deadline. Released turns run independently within the concurrency limit.
+The Host cancels and joins active jobs before worker replacement.
+Unfinished claims become recoverable after their leases expire.
+
 Children and replay sessions cannot stop another producer.
 Read-only GIGA queries do not start workers.
+Migration 0043 preserves existing candidates and attempt history.
+Replay the replacement turn jobs when old failed windows need recovery.
+Archived windows are excluded from active health counts.
+Health reports unresolved source identities as `identity_conflict_count`.
+Queue maintenance preserves turns that still wait for batch release.
+Invalid stored jobs fail visibly instead of blocking later claims.
+
+Anonymous turns still use the existing position-based fallback identity.
+Compaction can change that position. Harness-supplied message IDs avoid this inherited limitation.
 
 The Host publishes Hallway pointers with its own broker identity.
 Its broker policy therefore permits `athanor.hallway.room.>` publication.
@@ -301,7 +373,18 @@ It does not promise one wake per batch.
 
 Deploy matching native and adapter releases through `substrate/deploy-local.ps1`.
 Restart the broker to load the Host's new publication permission.
-Restart OMP after deployment because transport and tool state remain process-cached.
+OMP sessions can stay open during deployment; see [INSTALL.md](../../INSTALL.md#omp-sessions-during-installation).
+Restart OMP to load new adapter code and tool schemas, because loaded code stays in the process.
+
+Run `bun run test:omp-cutover -- --omp <executable>` for the real-OMP smoke.
+The smoke uses a disposable home and installed tree.
+The probe loads the production session module and its real `reconnectGate`.
+The process attaches to a loopback fake Host.
+The runner writes the marker, stops that Host, and rotates the Host token in the client projection.
+A fresh Host on the same port receives no attach while the marker exists.
+The same OMP process attaches with the rotated token after marker removal.
+A 401 also sends the session through the gate.
+The loader refreshes only credentials it originally supplied.
 
 Do not install this component alone onto Host API 1.
 Retained API 1 release metadata remains readable for rollback.
@@ -313,9 +396,17 @@ Run the adapter suite from this directory:
 bun run test
 ```
 
+Direct test runs refuse live configuration, including `ATHANOR_CLIENT_ROOM_DIR`.
+Use `pwsh -NoProfile -File deploy-local.ps1 -TestsOnly` from an active House session.
+This command clears live configuration for the tests and restores it afterward.
+
 ### OMP compatibility
 
 The adapter test dependencies use OMP `18.8.7`.
+Keep OMP's `snapcompact.systemPrompt` setting at `none` to send operating instructions as text.
+OMP `18.13.3` can omit instruction images after remote compaction or image byte limits.
+This setting does not change `snapcompact.toolResults`.
+
 Run the real CLI check after an OMP update or a lesson bridge change:
 
 ```text

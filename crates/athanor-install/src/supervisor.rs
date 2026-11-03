@@ -243,6 +243,22 @@ impl Processes for NativeProcesses {
 pub struct HostRoomConfig {
     pub room: String,
     pub spirit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator: Option<String>,
+}
+
+impl HostRoomConfig {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !is_safe_room_key(&self.room) || self.spirit.trim().is_empty() {
+            bail!("Host room identity is invalid for {:?}", self.room);
+        }
+        if let Some(operator) = &self.operator {
+            hearth::OperatorKey::new(operator.clone())
+                .with_context(|| format!("invalid operator key for room {:?}", self.room))?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
@@ -305,9 +321,7 @@ impl RuntimeConfig {
         }
         let mut rooms = std::collections::BTreeSet::new();
         for room in &self.rooms {
-            if !is_safe_room_key(&room.room) || room.spirit.trim().is_empty() {
-                bail!("Host room identity is invalid for {:?}", room.room);
-            }
+            room.validate()?;
             if !rooms.insert(room.room.clone()) {
                 bail!("duplicate Host room {:?}", room.room);
             }

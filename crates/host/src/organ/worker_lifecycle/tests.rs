@@ -487,7 +487,8 @@ async fn organ(config: &crate::HostConfig, session: &str, params: Value) -> Resu
         params: params.as_object().unwrap().clone(),
         target_scope: protocol::organ::OrganTargetScope::Room,
     };
-    match crate::organ::call(config, None, &meta(session), request, &giga).await {
+    let live = crate::organ::orihon::live::Room::default();
+    match crate::organ::call(config, None, &meta(session), request, &giga, &live).await {
         protocol::ResponsePayload::Result { result } => Ok(result),
         protocol::ResponsePayload::Error { error } => Err(error.code),
     }

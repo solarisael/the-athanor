@@ -23,6 +23,10 @@ impl BlockKind {
             Self::RoomContext | Self::RoutingMode | Self::WakeContext | Self::AnamnesisWake
         )
     }
+
+    fn dynamic(self) -> bool {
+        matches!(self, Self::RecallContext | Self::PresenceContext)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -43,6 +47,7 @@ pub(super) struct TurnBlocks {
 }
 
 pub(super) const WORK_DECAY_TURNS: u64 = 6;
+pub(super) const CONTEXT_VERSION: u8 = 2;
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -82,6 +87,13 @@ pub(super) struct CacheInvalidation {
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(super) struct RecallSubject {
+    pub turn: protocol::RecallContextTurn,
+    pub project: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(super) struct SavedSession {
     pub version: u8,
     pub turns: Vec<TurnBlocks>,
@@ -95,18 +107,21 @@ pub(super) struct SavedSession {
     pub generation: String,
     #[serde(default)]
     pub last_invalidation: Option<CacheInvalidation>,
+    #[serde(default)]
+    pub recall_subject: Option<RecallSubject>,
 }
 
 impl Default for SavedSession {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: CONTEXT_VERSION,
             turns: Vec::new(),
             woken: false,
             work: WorkEvidence::default(),
             identity_epoch: None,
             generation: String::new(),
             last_invalidation: None,
+            recall_subject: None,
         }
     }
 }
@@ -181,9 +196,11 @@ pub(super) fn load(
         Ok(bytes) => {
             let saved: SavedSession = serde_json::from_slice(&bytes)
                 .map_err(|error| format!("invalid native turn cache: {error}"))?;
-            if saved.version != 1 {
+            if !matches!(saved.version, 1 | CONTEXT_VERSION) {
                 return Err("unsupported native turn cache".into());
             }
+            let mut saved = saved;
+            retain_current_dynamic(&mut saved);
             Ok(saved)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => adopt(legacy, visible),
@@ -197,6 +214,7 @@ fn adopt(legacy: Option<LegacyMemo>, visible: &[String]) -> Result<SavedSession,
         if legacy.version != 1 {
             return Err("unsupported legacy turn cache".into());
         }
+        saved.version = 1;
         let mut seen = std::collections::HashSet::new();
         for turn in legacy.turns {
             if !visible.contains(&turn.turn_id) || !seen.insert(turn.turn_id.clone()) {
@@ -210,6 +228,7 @@ fn adopt(legacy: Option<LegacyMemo>, visible: &[String]) -> Result<SavedSession,
             saved.turns.push(turn);
         }
     }
+    retain_current_dynamic(&mut saved);
     Ok(saved)
 }
 
@@ -217,11 +236,54 @@ pub(super) fn commit(state: &AppState, session: &str, saved: &SavedSession) -> R
     crate::store::atomic_json_write(&file(state, session), saved)
 }
 
-pub(super) fn has_kind(saved: &SavedSession, kind: BlockKind) -> bool {
+pub(super) fn latest(saved: &SavedSession, kind: BlockKind) -> Option<&Block> {
     saved
         .turns
         .iter()
-        .any(|turn| turn.blocks.iter().any(|block| block.kind == kind))
+        .rev()
+        .flat_map(|turn| turn.blocks.iter().rev())
+        .find(|block| block.kind == kind)
+}
+
+pub(super) fn has_kind(saved: &SavedSession, kind: BlockKind) -> bool {
+    latest(saved, kind).is_some()
+}
+
+pub(super) fn retire_recall(saved: &mut SavedSession) -> bool {
+    let mut changed = false;
+    for turn in &mut saved.turns {
+        turn.blocks.retain(|block| {
+            let retain = !block.kind.dynamic();
+            changed |= !retain;
+            retain
+        });
+    }
+
+    changed
+}
+
+fn retain_current_dynamic(saved: &mut SavedSession) {
+    let mut recall = false;
+    let mut presence = false;
+    for turn in saved.turns.iter_mut().rev() {
+        turn.blocks.reverse();
+        turn.blocks.retain(|block| {
+            let seen = match block.kind {
+                BlockKind::RecallContext => Some(&mut recall),
+                BlockKind::PresenceContext => Some(&mut presence),
+                _ => None,
+            };
+
+            if let Some(seen) = seen {
+                if *seen {
+                    return false;
+                }
+                *seen = true;
+            }
+            true
+        });
+        turn.blocks.reverse();
+    }
 }
 
 pub(super) fn merge(saved: &mut SavedSession, turn_id: &str, blocks: Vec<Block>) {
@@ -229,8 +291,13 @@ pub(super) fn merge(saved: &mut SavedSession, turn_id: &str, blocks: Vec<Block>)
         .into_iter()
         .filter(|block| !block.kind.singleton() || !has_kind(saved, block.kind))
         .collect();
-    saved.turns.push(TurnBlocks {
-        turn_id: turn_id.into(),
-        blocks,
-    });
+    if let Some(turn) = saved.turns.iter_mut().find(|turn| turn.turn_id == turn_id) {
+        turn.blocks.extend(blocks);
+    } else {
+        saved.turns.push(TurnBlocks {
+            turn_id: turn_id.into(),
+            blocks,
+        });
+    }
+    retain_current_dynamic(saved);
 }

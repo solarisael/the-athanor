@@ -36,7 +36,7 @@ impl Default for RoomSettings {
             remember_section_split_chars: 4_000,
             remember_chunk_chars: 2_200,
             remember_chunk_overlap_chars: 200,
-            recall_temporal_half_life_days: 60.0,
+            recall_temporal_half_life_days: 15.0,
             recall_temporal_durability_curve_power: 2,
             recall_semantic_similarity_weight: 0.6,
             recall_semantic_rank_weight: 0.4,
@@ -125,8 +125,9 @@ impl RoomSettings {
                 "backup_keep_count" => settings.backup_keep_count = decode(value)?,
                 "house_language" => settings.house_language = decode(value)?,
                 "house_tz" => settings.house_tz = decode(value)?,
-                // The Host owns recording state, separate from retrieval settings.
-                "orihon" => {}
+                // The Host owns recording policy and folder status, separate from retrieval settings.
+                "orihon" | "orihon_folder_status" => {}
+                key if host_recording_key(key) => {}
                 _ => return Err(decode_error(format!("unknown room setting key {key}"))),
             }
         }
@@ -194,6 +195,23 @@ impl RoomSettings {
     }
 }
 
+fn host_recording_key(key: &str) -> bool {
+    [
+        "orihon_default_",
+        "orihon_session_",
+        "orihon_folder_status_orihon_session_",
+    ]
+    .iter()
+    .any(|prefix| {
+        key.strip_prefix(prefix).is_some_and(|digest| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+    })
+}
+
 fn decode<T: DeserializeOwned>(value: Value) -> Result<T, sqlx::Error> {
     serde_json::from_value(value).map_err(|error| sqlx::Error::Decode(Box::new(error)))
 }
@@ -215,6 +233,32 @@ fn decode_error(message: impl Into<String>) -> sqlx::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_rows_do_not_poison_retrieval_settings() {
+        let digest = "a".repeat(64);
+        let mut rows = vec![Ok(("remember_chunk_chars".into(), Value::from(1_800)))];
+        for prefix in [
+            "orihon_default_",
+            "orihon_session_",
+            "orihon_folder_status_orihon_session_",
+        ] {
+            rows.push(Ok((
+                format!("{prefix}{digest}"),
+                serde_json::json!({"mode": "fold"}),
+            )));
+        }
+        let settings = RoomSettings::from_rows(rows).unwrap();
+        assert_eq!(settings.remember_chunk_chars, 1_800);
+
+        for key in [
+            "orihon_session_",
+            "orihon_session_not-a-digest",
+            "orihon_unrecognized",
+        ] {
+            assert!(RoomSettings::from_rows([Ok((key.into(), Value::Null))]).is_err());
+        }
+    }
 
     #[test]
     fn settings_load_rejects_unsupported_retention_policy() {

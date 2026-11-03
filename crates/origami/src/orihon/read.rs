@@ -1,7 +1,7 @@
 use super::error::{Error, invalid};
 use super::prepare::identity;
 use chrono::{Datelike, NaiveDate};
-use hearth::orihon::{MAX_READ_RECORDS, ReadReceipt, ReadRequest, Record};
+use hearth::orihon::{ReadReceipt, ReadRequest, Record};
 
 pub(super) struct ReadBounds {
     pub request: ReadRequest,
@@ -9,8 +9,8 @@ pub(super) struct ReadBounds {
 
 pub(super) fn read_bounds(room: &str, request: ReadRequest) -> Result<ReadBounds, Error> {
     identity(room, "room")?;
-    if request.limit == 0 || request.limit > MAX_READ_RECORDS {
-        return Err(invalid("read limit must be 1 through 200"));
+    if request.limit == 0 || request.limit > u32::MAX as usize {
+        return Err(invalid("read limit must be a positive u32"));
     }
     if request.after_seq.is_some_and(|value| value < 0)
         || request.until_seq.is_some_and(|value| value < 0)

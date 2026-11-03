@@ -132,15 +132,10 @@ fn complete_state(
 }
 
 fn room_marker_operator(room_dir: &Path) -> String {
-    fs::read_to_string(room_dir.join(".athanor-room.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|marker| {
-            marker
-                .get("operator")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
+    akasha::room_marker::read_room_marker(room_dir)
+        .get("operator")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
         .and_then(|operator| normalize_name(&operator).ok())
         .unwrap_or_else(|| "Operator".to_owned())
 }

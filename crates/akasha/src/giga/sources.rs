@@ -209,7 +209,7 @@ pub(super) fn candidate_scope(row: &PgRow) -> Result<GigaScope, AppError> {
     .map_err(domain_error)
 }
 
-pub(super) async fn fresh_candidate_sources(
+pub(crate) async fn fresh_candidate_sources(
     tx: &mut Transaction<'_, Postgres>,
     candidate_id: &str,
 ) -> Result<Vec<GigaSourceRef>, AppError> {

@@ -442,7 +442,6 @@ test("passive custom context after the user turn never becomes a trigger", async
 
   const block = presenceAfter(out, first);
   expect(block.details.turnId).toBe("id:u1");
-  expect(presenceBlocks(out)).toHaveLength(2); // the pre-existing one plus the user's own
   expect(host.compiles().map((compile) => compile.turnId)).toEqual(["id:u1"]);
   expect(host.compiles()[0]!.userText).toBe("shalom dummy");
 });

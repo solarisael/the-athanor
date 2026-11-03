@@ -20,7 +20,7 @@ use hearth::worker_lifecycle::{
     RequestRecord, RetainedRecord, SwarmRecord, SwarmState, Target, apply, changed_books, deliver,
     inspect_caller, page_retained, read_response, render_open, replay,
 };
-use protocol::ResponsePayload;
+use protocol::{ProtocolErrorBody, ResponsePayload};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -127,6 +127,14 @@ pub(crate) fn call(host: &HostConfig, call: Call) -> ResponsePayload<Value> {
 }
 
 fn execute(path: &Path, call: &Call) -> Result<Value, Failure> {
+    with_journal(path, |journal| journal.execute(call))
+}
+
+/// Runs `work` on this process's journal for `path`, loading it on first use.
+fn with_journal<T>(
+    path: &Path,
+    work: impl FnOnce(&mut Journal) -> Result<T, Failure>,
+) -> Result<T, Failure> {
     let slot = {
         let mut journals = JOURNALS
             .lock()
@@ -139,12 +147,32 @@ fn execute(path: &Path, call: &Call) -> Result<Value, Failure> {
     if guard.is_none() {
         *guard = Some(Journal::load(path)?);
     }
-    let journal = guard.as_mut().expect("journal loaded above");
-    let result = journal.execute(call);
+    let result = work(guard.as_mut().expect("journal loaded above"));
     if matches!(result, Err(Failure::Io(_))) {
         *guard = None;
     }
     result
+}
+
+/// The session a worker reports to: the owner of the swarm that holds the newest
+/// lifecycle instance bound to the worker's session.
+pub(crate) struct BoundOwner {
+    pub spirit: String,
+    pub session: String,
+    /// The instance is neither retired nor settled, and its swarm is not disposed.
+    pub live: bool,
+}
+
+/// The owner bound to `session` in this Host's house and room, read from the same
+/// in-process journal every lifecycle call uses.
+pub(crate) fn bound_owner(
+    host: &HostConfig,
+    session: &str,
+) -> Result<Option<BoundOwner>, ProtocolErrorBody> {
+    with_journal(&journal_path(host), |journal| {
+        Ok(journal.bound_owner(&host.house_id, &host.room, session))
+    })
+    .map_err(|failure| failure.into_app().protocol_error_body(METHOD))
 }
 
 impl Journal {
@@ -364,6 +392,30 @@ impl Journal {
             .max()
             .and_then(|(_, swarm_id)| self.aggregate(swarm_id));
         inspect_caller(actor, &owned, bound.as_ref())
+    }
+
+    /// The newest instance bound to `session` among this house and room's swarms.
+    fn bound_owner(&self, house_id: &str, room: &str, session: &str) -> Option<BoundOwner> {
+        self.books
+            .values()
+            .flat_map(|book| {
+                book.instances
+                    .iter()
+                    .filter(move |instance| instance.bound_session.as_deref() == Some(session))
+                    .map(move |instance| (instance, &book.book.swarm_id))
+            })
+            .filter_map(|(instance, swarm_id)| {
+                let swarm = self.swarms.get(swarm_id)?;
+                (swarm.house_id == house_id && swarm.room == room).then_some((instance, swarm))
+            })
+            .max_by(|(a, _), (b, _)| {
+                (a.updated_ms, &a.instance_id).cmp(&(b.updated_ms, &b.instance_id))
+            })
+            .map(|(instance, swarm)| BoundOwner {
+                spirit: swarm.owner_spirit.clone(),
+                session: swarm.owner_session.clone(),
+                live: !instance.inactive() && swarm.disposed_ms.is_none(),
+            })
     }
 
     fn execute(&mut self, call: &Call) -> Result<Value, Failure> {

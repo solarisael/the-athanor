@@ -67,6 +67,7 @@ fn search(fixture: &Fixture, query: &str) -> VaultRecallResult {
         room_dir: fixture.room.clone(),
         room: "work-room".into(),
         query: query.into(),
+        limit: None,
     })
     .unwrap()
 }
@@ -76,6 +77,35 @@ fn write_marker(fixture: &Fixture, knobs: &str) {
         format!(r#"{{"version":1,"room":"work-room","vaultRoots":["../alpha-project","../beta-project"],"vaultIgnore":["private/**"]{knobs}}}"#),
     )
     .unwrap();
+}
+
+#[test]
+fn explicit_result_limit_overrides_the_room_default() {
+    let fixture = fixture();
+    write_marker(&fixture, r#","vaultMaxResults":2"#);
+    for index in 0..80 {
+        fs::write(
+            fixture.alpha.join(format!("orchard-{index}.md")),
+            format!("Orchard evidence {index}"),
+        )
+        .unwrap();
+    }
+
+    assert_eq!(search(&fixture, "orchard").retrieval_candidates.len(), 2);
+    let result = recall(VaultRecallRequest {
+        room_dir: fixture.room.clone(),
+        room: "work-room".into(),
+        query: "orchard".into(),
+        limit: std::num::NonZeroU32::new(75),
+    })
+    .unwrap();
+    assert_eq!(result.retrieval_candidates.len(), 75);
+    assert!(
+        result
+            .retrieval_candidates
+            .iter()
+            .all(|row| row.source_path.contains("orchard-"))
+    );
 }
 #[test]
 fn exact_markdown_recall_is_attributed_and_ignored_paths_stay_absent() {
@@ -154,6 +184,7 @@ fn rejects_room_mismatch_and_refuses_symlink_escape() {
         room_dir: fixture.room.clone(),
         room: "another-room".into(),
         query: "hinge".into(),
+        limit: None,
     })
     .unwrap_err();
     assert!(matches!(mismatch, VaultError::RoomMismatch { .. }));

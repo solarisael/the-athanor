@@ -1073,7 +1073,7 @@ async fn review_resonance_and_room_scope_contracts(pool: &PgPool) -> TestResult 
         GigaCandidateListParams {
             room: ROOM.into(),
             review_state: None,
-            limit: 200,
+            limit: 201,
         }
         .try_into()?,
     )

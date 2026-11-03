@@ -6,6 +6,8 @@ use sqlx::{PgPool, Row, postgres::PgRow};
 fn from_row(row: PgRow) -> Result<Fold, Error> {
     let sources = serde_json::from_value(row.try_get("sources")?)
         .map_err(|_| super::invalid("stored fold sources are malformed"))?;
+    let children = serde_json::from_value(row.try_get("children")?)
+        .map_err(|_| super::invalid("stored fold children are malformed"))?;
     let tries: i16 = row.try_get("tries")?;
     let fold = Fold {
         room: row.try_get("room")?,
@@ -14,6 +16,7 @@ fn from_row(row: PgRow) -> Result<Fold, Error> {
         source_digest: row.try_get("source_digest")?,
         recipe_digest: row.try_get("recipe_digest")?,
         sources,
+        children,
         text: row.try_get("text")?,
         model: row.try_get("model")?,
         tries: u8::try_from(tries).map_err(|_| super::invalid("stored fold tries are invalid"))?,
@@ -48,6 +51,25 @@ pub async fn read_pg(
     row.map(from_row).transpose()
 }
 
+pub async fn list_pg(pool: &PgPool, room: &str) -> Result<Vec<Fold>, Error> {
+    super::prepare::identity(room, "room")?;
+    let rows = sqlx::query(
+        "SELECT * FROM orihon_folds WHERE room=$1
+         ORDER BY level, fold_index, source_digest COLLATE \"C\", recipe_digest COLLATE \"C\"
+         LIMIT 200001",
+    )
+    .bind(room)
+    .fetch_all(pool)
+    .await?;
+    if rows.len() > super::MAX_FOLDS {
+        return Err(super::refusal(
+            "fold_snapshot_limit",
+            "fold snapshot exceeds 200000 folds",
+        ));
+    }
+    rows.into_iter().map(from_row).collect()
+}
+
 pub async fn append_pg(pool: &PgPool, fold: &Fold) -> Result<Fold, Error> {
     validate(fold)?;
     let row = sqlx::query(
@@ -60,6 +82,7 @@ pub async fn append_pg(pool: &PgPool, fold: &Fold) -> Result<Fold, Error> {
         "source_digest": fold.source_digest,
         "recipe_digest": fold.recipe_digest,
         "sources": fold.sources,
+        "children": fold.children,
         "text": fold.text,
         "model": fold.model,
         "tries": fold.tries,

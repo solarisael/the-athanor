@@ -35,7 +35,7 @@ pub async fn giga_candidate_list(
     )
     .bind(request.room().to_string())
     .bind(state)
-    .bind(i64::from(request.limit().min(200)))
+    .bind(i64::from(request.limit()))
     .fetch_all(pool)
     .await?;
     let mut candidates = Vec::with_capacity(rows.len());

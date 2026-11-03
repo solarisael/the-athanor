@@ -369,7 +369,15 @@ pub(super) async fn acknowledge(
                 "no such command for this instance",
             )
         })?;
-    if command.state.terminal() {
+    if command.conversation_id != conversation_id {
+        return Err(Refusal::new(
+            StatusCode::CONFLICT,
+            "conversation_mismatch",
+            "the command belongs to a different conversation",
+        ));
+    }
+    let late_compact = command.kind == "compact" && command.state == CommandState::OutcomeUnknown;
+    if command.state.terminal() && !late_compact {
         if command.state == reached {
             if reached == CommandState::Applied {
                 if let Some(restart_id) = command.restart_id {

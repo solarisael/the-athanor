@@ -40,6 +40,8 @@ impl Book {
                     said_at: "2026-10-22T00:00:00Z".into(),
                     timestamp_observed: false,
                     redacted: false,
+                    fold_text: None,
+                    children: None,
                 }],
             },
         )
@@ -76,6 +78,7 @@ fn page_fold(records: &[Record]) -> Fold {
         index: 0,
         source_digest: folds::source_digest(records),
         recipe_digest: "a".repeat(64),
+        children: Vec::new(),
         sources: records
             .iter()
             .map(|row| SourceRef {

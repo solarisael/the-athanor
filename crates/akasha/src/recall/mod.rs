@@ -25,7 +25,7 @@ use content_lane::content_lane_rows;
 use embedding::{EmbedError, embed_query};
 use evidence::{
     bounded_excerpt, build_rerank_candidates, candidate_terms, exceeds_excerpt, like_patterns,
-    lookup_terms, query_dates, query_terms, should_build_rerank_candidates,
+    lookup_terms, query_dates, query_terms, should_build_rerank_candidates, source_passage,
 };
 use hearth::RecallRequest;
 use memory_reference::{
@@ -125,6 +125,12 @@ pub async fn recall(
     let content_top_k = request.content_top_k();
     let semantic_min_similarity = request.semantic_min_similarity();
     let content_min_similarity = request.content_min_similarity();
+    let manual_limit = i64::from(semantic_top_k.max(content_top_k));
+    let lexical_limit = if projection.is_manual() {
+        manual_limit as usize
+    } else {
+        8
+    };
     let phase = Phase::start(span, "recall.settings");
     let settings = RoomSettings::load(pool, room).await?;
     let profile = for_mode(mode, settings.recall_mode_profiles_enabled);
@@ -143,9 +149,16 @@ pub async fn recall(
     // never be reported as a missing term.
     let phase = Phase::start(span, "recall.reference");
     let references = memory_references(query);
-    let mut exact_candidates =
-        resolve_memory_references(pool, &rooms, &scope, &references, projection, &mut warnings)
-            .await?;
+    let mut exact_candidates = resolve_memory_references(
+        pool,
+        &rooms,
+        &scope,
+        &references,
+        &evidence::query_terms(query),
+        projection,
+        &mut warnings,
+    )
+    .await?;
     phase.ok();
     // A request that names references and nothing else (`memories 4520, 4516
     // and 999`) is a primary-key read: the resolved records in reference
@@ -154,7 +167,11 @@ pub async fn recall(
     // anything, so they must never rank unrelated filler under the answer.
     if references.only_references(query) {
         if projection.is_manual() {
-            apply_manual_record_cap(&mut exact_candidates, &mut warnings);
+            apply_manual_record_cap(
+                &mut exact_candidates,
+                &mut warnings,
+                semantic_top_k.max(content_top_k) as usize,
+            );
         }
         let mut retrieval_candidates = exact_candidates;
         attach_thread_neighbors(pool, span, &scope, &mut retrieval_candidates).await?;
@@ -226,6 +243,7 @@ pub async fn recall(
         decay_now,
         &settings,
         &mut warnings,
+        lexical_limit,
     )
     .await?;
     phase.ok();
@@ -258,6 +276,7 @@ pub async fn recall(
         decay_now,
         &settings,
         &mut warnings,
+        lexical_limit,
     )
     .await?;
     phase.ok();
@@ -329,7 +348,9 @@ pub async fn recall(
                 &body,
             ],
         );
-        content_chunks.push(serde_json::json!({"memory_id":row.try_get::<i64,_>("memory_id")?,"source_path":source_path,"title":title,"heading_path":heading_path,"body":bounded_excerpt(&body),"char_start":row.try_get::<i32,_>("char_start")?,"char_end":row.try_get::<i32,_>("char_end")?,"chunk_index":row.try_get::<i32,_>("chunk_index")?,"ws":sim,"durability":durability,"temporal_weight":temporal_weight,"matched_terms":matched_terms,"missing_terms":missing_terms,"term_coverage":coverage,"evidence":"lexical word_similarity"}));
+        let chunk_index = i64::from(row.try_get::<i32, _>("chunk_index")?);
+        let (excerpt, passage) = source_passage(&body, &query_terms, Some(chunk_index));
+        content_chunks.push(serde_json::json!({"memory_id":row.try_get::<i64,_>("memory_id")?,"source_path":source_path,"title":title,"heading_path":heading_path,"body":excerpt,"passage":passage,"char_start":row.try_get::<i32,_>("char_start")?,"char_end":row.try_get::<i32,_>("char_end")?,"chunk_index":chunk_index,"ws":sim,"durability":durability,"temporal_weight":temporal_weight,"matched_terms":matched_terms,"missing_terms":missing_terms,"term_coverage":coverage,"evidence":"lexical word_similarity"}));
     }
     if temporal_decay {
         semantic_chunks.sort_by(|left, right| compare_weighted_lane(left, right, "sim"));
@@ -349,15 +370,20 @@ pub async fn recall(
                AND COALESCE(type,'') <> $3
                AND dates && $2::date[]{}
              ORDER BY source_path
-             LIMIT 5",
-            scope.predicate("m", 4)
+             LIMIT $4",
+            scope.predicate("m", 5)
         );
         let rows = scope
             .bind(
                 sqlx::query(&dates_sql)
                     .bind(&rooms)
                     .bind(&query_dates)
-                    .bind(origami::boats::MEMORY_KIND),
+                    .bind(origami::boats::MEMORY_KIND)
+                    .bind(if projection.is_manual() {
+                        manual_limit
+                    } else {
+                        5
+                    }),
             )
             .fetch_all(pool)
             .await?;
@@ -377,7 +403,7 @@ pub async fn recall(
     let phase = Phase::start(span, "recall.threads");
     let threads_sql = format!(
         "SELECT DISTINCT ON (m.id) m.id AS memory_id,m.source_path,
-                coalesce(m.title,'') AS title,t.thread_key,left(m.body,1200) AS body,
+                coalesce(m.title,'') AS title,t.thread_key,m.body,
                 GREATEST(similarity(t.thread_key,$2),
                          similarity(coalesce(ref.context,''),$2))::double precision AS rank
          FROM memory_thread_refs ref
@@ -391,8 +417,8 @@ pub async fn recall(
                 OR ref.context ILIKE ANY($3::text[])
                 OR m.source_path ILIKE ANY($3::text[])){}
          ORDER BY m.id,rank DESC,t.thread_key
-         LIMIT 8",
-        scope.predicate("m", 5)
+         LIMIT $5",
+        scope.predicate("m", 6)
     );
     let thread_rows = scope
         .bind(
@@ -400,7 +426,12 @@ pub async fn recall(
                 .bind(&rooms)
                 .bind(query)
                 .bind(&content_patterns)
-                .bind(origami::boats::MEMORY_KIND),
+                .bind(origami::boats::MEMORY_KIND)
+                .bind(if projection.is_manual() {
+                    manual_limit
+                } else {
+                    8
+                }),
         )
         .fetch_all(pool)
         .await?;
@@ -420,7 +451,7 @@ pub async fn recall(
         if c["temporal_weight"].as_f64().unwrap_or(1.0) < 1.0 {
             reasons.push("durability-shaped temporal decay");
         }
-        fused.insert(key, serde_json::json!({"memory_id":c["memory_id"],"source_path":c["source_path"],"title":c["title"],"heading_path":c["heading_path"],"excerpt":c["body"],"sources":[c["source_path"]],"term_coverage":c["term_coverage"],"matched_terms":c["matched_terms"],"missing_terms":c["missing_terms"],"score":score,"semantic_score":c["sim"],"durability":c["durability"],"temporal_weight":c["temporal_weight"],"reasons":reasons,"source":"semantic","chunk_index":c["chunk_index"]}));
+        fused.insert(key, serde_json::json!({"memory_id":c["memory_id"],"source_path":c["source_path"],"title":c["title"],"heading_path":c["heading_path"],"excerpt":c["body"],"passage":c["passage"],"sources":[c["source_path"]],"term_coverage":c["term_coverage"],"matched_terms":c["matched_terms"],"missing_terms":c["missing_terms"],"score":score,"semantic_score":c["sim"],"durability":c["durability"],"temporal_weight":c["temporal_weight"],"reasons":reasons,"source":"semantic","chunk_index":c["chunk_index"]}));
     }
     for (rank, c) in content_chunks.iter().enumerate() {
         let key = format!(
@@ -454,7 +485,7 @@ pub async fn recall(
             }
             existing["reasons"] = serde_json::json!(reasons);
         } else {
-            fused.insert(key, serde_json::json!({"memory_id":c["memory_id"],"source_path":c["source_path"],"title":c["title"],"heading_path":c["heading_path"],"excerpt":c["body"],"sources":[c["source_path"]],"term_coverage":c["term_coverage"],"matched_terms":c["matched_terms"],"missing_terms":c["missing_terms"],"score":score,"content_score":c["ws"],"durability":c["durability"],"temporal_weight":c["temporal_weight"],"reasons":if decay_reason.is_empty() { serde_json::json!(["lexical word_similarity"]) } else { serde_json::json!(["lexical word_similarity","durability-shaped temporal decay"]) },"source":"content","chunk_index":c["chunk_index"]}));
+            fused.insert(key, serde_json::json!({"memory_id":c["memory_id"],"source_path":c["source_path"],"title":c["title"],"heading_path":c["heading_path"],"excerpt":c["body"],"passage":c["passage"],"sources":[c["source_path"]],"term_coverage":c["term_coverage"],"matched_terms":c["matched_terms"],"missing_terms":c["missing_terms"],"score":score,"content_score":c["ws"],"durability":c["durability"],"temporal_weight":c["temporal_weight"],"reasons":if decay_reason.is_empty() { serde_json::json!(["lexical word_similarity"]) } else { serde_json::json!(["lexical word_similarity","durability-shaped temporal decay"]) },"source":"content","chunk_index":c["chunk_index"]}));
         }
     }
     let max_bm25f_score = bm25f_candidates
@@ -518,6 +549,7 @@ pub async fn recall(
                 "title": candidate["title"],
                 "heading_path": candidate["heading_path"],
                 "excerpt": candidate["body"],
+                "passage": candidate["passage"],
                 "sources": [candidate["source_path"].clone()],
                 "term_coverage": candidate["term_coverage"],
                 "matched_terms": candidate["matched_terms"],
@@ -562,6 +594,7 @@ pub async fn recall(
                 "title": candidate["title"],
                 "heading_path": candidate["heading_path"],
                 "excerpt": candidate["body"],
+                "passage": candidate["passage"],
                 "sources": [candidate["source_path"].clone()],
                 "term_coverage": candidate["term_coverage"],
                 "matched_terms": candidate["matched_terms"],
@@ -604,9 +637,10 @@ pub async fn recall(
         }
         let (matched_terms, missing_terms, coverage) =
             candidate_terms(&query_terms, &[&source_path, &title, &thread_key, &body]);
+        let (excerpt, passage) = source_passage(&body, &query_terms, None);
         fused.insert(
             format!("{memory_id}#thread"),
-            serde_json::json!({"memory_id":memory_id,"source_path":source_path.clone(),"title":title,"heading_path":"","excerpt":bounded_excerpt(&body),"sources":[source_path],"term_coverage":coverage,"matched_terms":matched_terms,"missing_terms":missing_terms,"score":score,"thread_key":thread_key,"reasons":["lexical thread key"],"source":"thread","chunk_index":0}),
+            serde_json::json!({"memory_id":memory_id,"source_path":source_path.clone(),"title":title,"heading_path":"","excerpt":excerpt,"passage":passage,"sources":[source_path],"term_coverage":coverage,"matched_terms":matched_terms,"missing_terms":missing_terms,"score":score,"thread_key":thread_key,"reasons":["lexical thread key"],"source":"thread","chunk_index":0}),
         );
     }
     // An exact reference already owns its memory: a ranked chunk of the same
@@ -641,6 +675,7 @@ pub async fn recall(
                 temporal_decay,
                 decay_now,
                 &settings,
+                (request.rerank_candidate_top_k() as usize).saturating_add(exact_memory_ids.len()),
             )
             .await
             {
@@ -663,11 +698,13 @@ pub async fn recall(
             None
         };
     phase.ok();
-    // A manual projection reads records, not chunks: the selected memories are
-    // capped by count and then carry their complete bodies. The auto
-    // projection keeps the bounded excerpt under the working-set budget.
+    // Manual reads keep complete bodies within the caller's record limit.
     if projection.is_manual() {
-        apply_manual_record_cap(&mut retrieval_candidates, &mut warnings);
+        apply_manual_record_cap(
+            &mut retrieval_candidates,
+            &mut warnings,
+            semantic_top_k.max(content_top_k) as usize,
+        );
         let phase = Phase::start(span, "recall.hydrate");
         hydrate_record_bodies(
             pool,
@@ -722,7 +759,7 @@ pub async fn recall(
            SELECT id,name,kind,summary,aliases,weighty,pointer_files,exactness
            FROM tiered
            ORDER BY exactness, weighty DESC, name
-           LIMIT 12"#,
+           LIMIT $7"#,
     )
     .bind(&rooms)
     .bind(&canon_terms)
@@ -730,6 +767,11 @@ pub async fn recall(
     .bind(&canon_patterns)
     .bind(&query_phrase)
     .bind(&settings.house_language)
+    .bind(if projection.is_manual() {
+        i64::from(semantic_top_k.max(content_top_k))
+    } else {
+        12
+    })
     .fetch_all(pool)
     .await?;
     // The SQL tiers bound the rows; the profile reorders inside one tier, so a
@@ -899,7 +941,7 @@ pub async fn recall(
 mod tests {
     use super::evidence::{
         build_rerank_candidates, candidate_terms, lookup_terms, query_terms,
-        should_build_rerank_candidates, subject_retry_text,
+        should_build_rerank_candidates, source_passage, subject_retry_text,
     };
     use super::memory_reference::{MemoryReferences, memory_references};
     use crate::bm25f;
@@ -907,6 +949,53 @@ mod tests {
     use std::collections::BTreeSet;
 
     const CASUAL_BEND2: &str = "i don't remember exactly lol what we did around bend2 uwu xzclkm";
+
+    #[test]
+    fn source_passage_reaches_beyond_the_old_head_with_scalar_offsets() {
+        let body = format!(
+            "{}İ𝔽 bridge target evidence {}",
+            "🦊".repeat(1500),
+            "z".repeat(600)
+        );
+        let terms = query_terms("bridge target");
+        let (excerpt, passage) = source_passage(&body, &terms, Some(7));
+
+        assert!(passage.char_start > 1200);
+        assert_eq!(passage.chunk_index, Some(7));
+        assert!(excerpt.contains("bridge target"));
+        assert!(excerpt.chars().count() <= 384);
+        assert_eq!(
+            excerpt,
+            body.chars()
+                .skip(passage.char_start as usize)
+                .take((passage.char_end - passage.char_start) as usize)
+                .collect::<String>()
+        );
+        assert_eq!(source_passage(&body, &terms, Some(7)).0, excerpt);
+    }
+
+    #[test]
+    fn source_passage_prefers_distinct_terms_and_keeps_source_punctuation() {
+        let body = format!(
+            "{}{} bridge target… ending",
+            "bridge ".repeat(100),
+            "x".repeat(600)
+        );
+        let (excerpt, passage) = source_passage(&body, &query_terms("bridge target"), None);
+
+        assert!(excerpt.contains("bridge target… ending"));
+        assert_eq!(passage.chunk_index, None);
+        assert_eq!(passage.char_end, body.chars().count() as u64);
+        let (empty, empty_passage) = source_passage("", &[], None);
+        assert!(empty.is_empty());
+        assert_eq!(empty_passage.char_start, 0);
+        assert_eq!(empty_passage.char_end, 0);
+        let (head, head_passage) =
+            source_passage("𝔽".repeat(500).as_str(), &query_terms("absent"), None);
+        assert_eq!(head, "𝔽".repeat(384));
+        assert_eq!(head_passage.char_start, 0);
+        assert_eq!(head_passage.char_end, 384);
+    }
 
     #[test]
     fn contractions_filler_and_laughter_never_become_lexical_terms() {
@@ -1027,6 +1116,7 @@ mod tests {
                 "title": "baseline",
                 "heading_path": "",
                 "excerpt": "bounded baseline",
+                "passage": {"char_start": 1700, "char_end": 1716, "chunk_index": 3},
                 "score": 0.9,
                 "thread_neighbors": [{"id": 8}],
                 "body": "manual body must not cross the sidecar boundary",
@@ -1055,6 +1145,7 @@ mod tests {
         let sidecar = build_rerank_candidates(&baseline, &broad, &BTreeSet::from([9]), 64);
 
         assert_eq!(baseline, before);
+        assert_eq!(sidecar[0]["passage"], baseline[0]["passage"]);
         assert_eq!(
             sidecar
                 .iter()
@@ -1071,7 +1162,7 @@ mod tests {
                 && candidate.get("taxonomy").is_none()
                 && candidate["excerpt"]
                     .as_str()
-                    .is_some_and(|excerpt| excerpt.chars().count() <= 1_201)
+                    .is_some_and(|excerpt| excerpt.chars().count() <= 384)
         }));
     }
 

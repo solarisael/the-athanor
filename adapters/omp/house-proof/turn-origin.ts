@@ -89,6 +89,23 @@ export function currentTurnOrigin(messages: any[], activePrompt?: string | null)
     if (hasActivePrompt && originPromptText(message) !== activePrompt) continue;
     return { message, native };
   }
+  return hasActivePrompt ? batchOrigin(messages, activePrompt as string) : null;
+}
+
+// A dequeued batch prompts with its user messages joined by two newlines
+// (agent-session.ts #prepareQueuedUserMessages); the batch's first message is
+// the turn's origin. Additions anchored after it are skipped, not accumulated.
+function batchOrigin(messages: any[], prompt: string): TurnOrigin | null {
+  if (!prompt.includes("\n\n")) return null;
+  const texts: string[] = [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") continue;
+    texts.unshift(originPromptText(message));
+    const joined = texts.join("\n\n");
+    if (joined === prompt) return { message, native: true };
+    if (joined.length > prompt.length) return null;
+  }
   return null;
 }
 

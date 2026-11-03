@@ -21,7 +21,7 @@ import {
 } from "./house-proof/top-level-session-fence.ts";
 import { responseDigest, settlePresence } from "./house-proof/presence.ts";
 import { logConversationWindow, type ConversationCapture } from "./house-proof/conversation-log.ts";
-import { flushGigaTurns, ingestGigaLoggedTurnsDetached, isSubagentSessionContext, setGigaEnablement } from "./giga.ts";
+import { isSubagentSessionContext, setGigaEnablement, settleGigaCapture } from "./giga.ts";
 import { automaticRecallAllowed, registerSubagentRecallProtocol } from "./house-proof/recall.ts";
 import { installWorkerLifecycle, isWorkerSession, workerTaskOrigins } from "./house-proof/worker-lifecycle.ts";
 import {
@@ -48,6 +48,7 @@ import {
 } from "./house-proof/room.ts";
 import { installPortableSession, onAttachmentChanged } from "./house-proof/session.ts";
 import { installOrihon } from "./house-proof/orihon/index.ts";
+import { installOrihonTurns } from "./house-proof/orihon/turn.ts";
 import { conversationText, messageText } from "./house-proof/text.ts";
 import { anchorTurnAdditions, currentTurnOrigin, turnKeysByMessage } from "./house-proof/turn-origin.ts";
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
@@ -61,7 +62,7 @@ import {
   contextLessonManagerAvailable,
 } from "./house-proof/lesson-ttsr.ts";
 import { boatLineTokens, installBoatDoor } from "./house-proof/boat-door.ts";
-import { classWord, modeDoor, readModeDoorLines, MODE_DOOR_FILE } from "./house-proof/class-word.ts";
+import { MODE_COMMANDS, MODE_DOOR_TYPE, modeDoor } from "./house-proof/mode-door.ts";
 import {
   CONTEXT_BLOCK_TYPES,
   contextBlockKind,
@@ -348,7 +349,7 @@ export default function solarisaelHouseProof(pi, release) {
   // First, so every later session hook resolves the conversation's restored
   // home instead of racing its attachment.
   installPortableSession(pi, release);
-  installOrihon(pi);
+  const orihon = installOrihon(pi);
   registerSubagentRecallProtocol(pi);
   const lessonTtsrInstallWarning = installLessonTtsrBridge(pi);
   const semanticJudgmentShadow = installSemanticJudgmentShadow(pi);
@@ -378,6 +379,20 @@ export default function solarisaelHouseProof(pi, release) {
     description: "Show the Host's Insula Vitals for the last 15m, 1h, or 24h",
     handler: (args, ctx) => showInsulaCockpit(args, ctx),
   });
+  for (const [word, mode] of Object.entries(MODE_COMMANDS)) {
+    pi.registerCommand?.(word, {
+      description: `Set the room's Recall mode to ${mode} for this session`,
+      handler: async (_args, ctx) => {
+        const { binding } = requireRoomBinding(ctx);
+        try {
+          await new RecallPolicyHostClient(binding).setRequestedMode(mode, `${Date.now()}:command:${word}`);
+          ctx.ui.notify(`${word}: Recall mode ${mode}`, "info");
+        } catch (error) {
+          ctx.ui.notify(`${word} not applied: ${error instanceof Error ? error.message : String(error)}`, "warning");
+        }
+      },
+    });
+  }
   // Only the room's top-level session casts a boat before its handoff; workers keep OMP's document.
   installBoatDoor(pi, {
     session: (ctx) => {
@@ -463,11 +478,14 @@ export default function solarisaelHouseProof(pi, release) {
     startChatDoorman(pi, ctx, binding);
     if (topLevelSession(room) === binding.session && !isSubagentSessionContext(ctx) && process.env.ATHANOR_REPLAY_MODE !== "1") {
       try {
-        await setGigaEnablement(binding, {
+        const status = await setGigaEnablement(binding, {
           gigaEnabled: process.env.ATHANOR_GIGA_ENABLED === "1",
           hippocampusEnabled: process.env.ATHANOR_HIPPOCAMPUS_ENABLED === "1",
           replayMode: false,
-        });
+        }, { context: ctx });
+        if (status.classifier_unavailable) {
+          ctx.ui?.notify?.(`Athanor GIGA classification unavailable: ${status.classifier_unavailable}`, "warning");
+        }
       } catch {
         ctx.ui?.notify?.("Athanor GIGA enablement is unavailable.", "warning");
       }
@@ -795,6 +813,7 @@ export default function solarisaelHouseProof(pi, release) {
   });
 
   pi.on("context", async (event, ctx) => {
+    let contextSettlementKey: string | undefined;
     const result = await settleAutomaticContextWithinBudget(async (signal, deadline) => {
       const messages = Array.isArray(event?.messages) ? event.messages : [];
       const resolvedRoom = roomBinding(ctx);
@@ -808,6 +827,7 @@ export default function solarisaelHouseProof(pi, release) {
         automaticRecall: automaticRecallAllowed(ctx) && process.env.ATHANOR_DISABLE_AUTO_RECALL !== "1",
         topLevel: topLevelSession(initial.room) === session && ctx?.agent?.kind !== "sub" && !ctx?.agent?.parentId,
       };
+      if (capabilities.topLevel) contextSettlementKey = `${initial.room}\0${session}`;
       const nativeUser = Boolean(origin?.native) && capabilities.topLevel;
       const prompt = messageText(origin?.message);
       if (!prompt.trim()) return;
@@ -852,15 +872,6 @@ export default function solarisaelHouseProof(pi, release) {
         }
       }
       const activeProject = activeProjectFromEvidence(binding);
-      const word = capabilities.topLevel ? classWord(prompt) : null;
-      if (word) {
-        try {
-          await new RecallPolicyHostClient(binding).setRequestedMode(word.mode, `${turnId}:class-word`);
-          activities.push(`class word ${word.word}: Recall mode ${word.mode}`);
-        } catch (error) {
-          warnings.push(`class word ${word.word} not applied: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
       const plan = await planContextLessons(binding, {
         turnId, activeProject, managerAvailable: contextLessonManagerAvailable(ctx), deadline, nativeUser, capabilities,
       }, signal);
@@ -873,7 +884,8 @@ export default function solarisaelHouseProof(pi, release) {
       try {
         conversation = await logConversationWindow(binding, effectiveRoomDir, ctx, messages, "context",
           houseState?.operator || operator, houseState?.embodiedSpirit || spirit, process.env.ATHANOR_REPLAY_MODE !== "1");
-        ingestGigaLoggedTurnsDetached(ctx, conversation.loggedTurns);
+        const gigaWarning = settleGigaCapture(binding, ctx, conversation.giga);
+        if (gigaWarning) warnings.push(gigaWarning);
       } catch {
         warnings.push("conversation capture degraded");
       }
@@ -920,14 +932,12 @@ export default function solarisaelHouseProof(pi, release) {
         trimOldestSet(adoptedContextSessions, 128);
       }
       const settlementKey = `${room}\0${session}`;
-      if (prepared.presenceSettledContractId
-        && pendingPresenceContracts.get(settlementKey)?.contractId === prepared.presenceSettledContractId) {
-        pendingPresenceContracts.delete(settlementKey);
-      }
       if (prepared.presenceSettlement) {
         pendingPresenceContracts.set(settlementKey, prepared.presenceSettlement);
+      } else {
+        pendingPresenceContracts.delete(settlementKey);
       }
-      const memo = new Map(prepared.turns.map((turn) => [turn.turnId, turn.blocks.map((block) => ({
+      const memo = new Map<string, Array<Record<string, unknown>>>(prepared.turns.map((turn) => [turn.turnId, turn.blocks.map((block) => ({
         role: "custom",
         customType: CONTEXT_BLOCK_TYPES[block.kind],
         content: block.content,
@@ -942,21 +952,17 @@ export default function solarisaelHouseProof(pi, release) {
       if (capabilities.topLevel) {
         try {
           const resolved = (await new RecallPolicyHostClient(binding).inspect()).recallPolicy.resolvedMode;
-          const { lines, problem } = readModeDoorLines(effectiveRoomDir);
-          if (problem) warnings.push(`${MODE_DOOR_FILE}: ${problem} The House lines fill the gap.`);
-          const door = modeDoor(settlementKey, resolved, lines);
-          if (door) {
-            memo.set(turnId, [...(memo.get(turnId) ?? []), {
-              role: "custom",
-              customType: "athanor-mode-door",
-              content: door.text,
-              display: true,
-              details: { from: door.from, to: door.to, word: word?.word ?? null },
-              attribution: "agent",
-              timestamp: Date.now(),
-            }]);
-            activities.push(`mode door: ${door.from ?? "start"} → ${door.to}`);
-          }
+          const door = modeDoor(settlementKey, resolved);
+          memo.set(turnId, [...(memo.get(turnId) ?? []), {
+            role: "custom",
+            customType: MODE_DOOR_TYPE,
+            content: door.text,
+            display: door.rang,
+            details: { from: door.from, to: door.to },
+            attribution: "agent",
+            timestamp: Date.now(),
+          }]);
+          if (door.rang) activities.push(`mode door: ${door.from ?? "start"} → ${door.to}`);
         } catch (error) {
           warnings.push(`mode door unavailable: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -968,9 +974,10 @@ export default function solarisaelHouseProof(pi, release) {
       if (prepared.invalidationReason) warnings.push(`Context rebuilt: ${prepared.invalidationReason}`);
       if (prepared.adoptionRejection) warnings.push(`Legacy context adoption refused: ${prepared.adoptionRejection}; source file retained`);
       showHouseContextFeedback(ctx, { room, spirit, activities: [...activities, ...prepared.activities], warnings: [...warnings, ...prepared.warnings] });
-      const currentMessages = prepared.invalidationReason
-        ? messages.filter((message) => message?.role !== "custom" || !contextBlockKind(message?.customType))
-        : messages;
+      // Host turns are the complete derived snapshot, including removals. The
+      // door rides only the current turn; earlier rings stay in the UI, not here.
+      const currentMessages = messages.filter((message) =>
+        message?.role !== "custom" || (!contextBlockKind(message?.customType) && message?.customType !== MODE_DOOR_TYPE));
       if (!prepared.replayed) {
         const current = prepared.turns.find((turn) => turn.turnId === turnId);
         const contextCharacters = currentMessages.reduce((total, message) => total + messageText(message).length, 0);
@@ -988,6 +995,7 @@ export default function solarisaelHouseProof(pi, release) {
     });
     if (result.status === "settled") return result.value;
     console.warn(`[athanor] Automatic context ${result.status === "timeout" ? "timed out" : "unavailable"}`);
+    if (contextSettlementKey) pendingPresenceContracts.delete(contextSettlementKey);
     const messages = Array.isArray(event?.messages) ? event.messages : [];
     const withoutDerived = messages.filter((message) => message?.role !== "custom" || !contextBlockKind(message?.customType));
     if (withoutDerived.length !== messages.length) return { messages: withoutDerived };
@@ -1021,7 +1029,6 @@ export default function solarisaelHouseProof(pi, release) {
   });
 
   pi.on("shutdown", async () => {
-    await flushGigaTurns();
     // Close every still-open observation before the bounded writer flush, so a
     // request settles with its usage point and an unfinished tool becomes an
     // explicit cancellation instead of a dangling start.
@@ -1064,7 +1071,8 @@ export default function solarisaelHouseProof(pi, release) {
         spirit,
         process.env.ATHANOR_REPLAY_MODE !== "1",
       );
-      ingestGigaLoggedTurnsDetached(ctx, capture.loggedTurns);
+      const gigaWarning = settleGigaCapture(binding, ctx, capture.giga);
+      if (gigaWarning) ctx.ui?.notify?.(`Athanor ${gigaWarning}`, "warning");
     } catch (error) {
       // Capture must never perturb the visible OMP turn, and the reason must
       // never vanish: the toast alone is undiagnosable.
@@ -1079,4 +1087,9 @@ export default function solarisaelHouseProof(pi, release) {
   installWorkerLifecycle(pi);
   installGuDelivery(pi, (ctx) => workerTaskOrigins(hostSessionIdentity(ctx)));
   registerSolarisaelTools(pi, release);
+  // Last: its context handler sees this turn's anchored blocks and replaces only the history before them.
+  installOrihonTurns(pi, orihon, (ctx) => {
+    const resolved = roomBinding(ctx);
+    return resolved ? activeTurnPrompts.get(activeTurnPromptKey(resolved.binding.room, resolved.binding.session)) ?? null : null;
+  });
 }

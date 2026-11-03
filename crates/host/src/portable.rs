@@ -298,6 +298,12 @@ impl Registry {
             .filter(move |(_, instance)| instance.connected(now))
     }
 
+    pub(crate) fn live_conversations(&self) -> Vec<String> {
+        self.live(Utc::now())
+            .map(|(_, instance)| instance.conversation_id.clone())
+            .collect()
+    }
+
     fn chat_owner_live(&self, now: DateTime<Utc>) -> Option<Uuid> {
         self.chat_owner.filter(|owner| {
             self.instances
@@ -336,7 +342,13 @@ impl Registry {
     fn expire(&mut self, now: DateTime<Utc>) {
         for command in self.commands.values_mut() {
             if !command.state.terminal() && command.deadline_at <= now {
-                command.state = CommandState::Expired;
+                if command.kind == "compact" && command.state == CommandState::Delivered {
+                    command.state = CommandState::OutcomeUnknown;
+                    command.detail =
+                        Some("compaction was delivered; completion receipt is overdue".into());
+                } else {
+                    command.state = CommandState::Expired;
+                }
             }
         }
     }
@@ -827,6 +839,179 @@ mod tests {
         assert_eq!(restart::id_text(&json!(null)), None);
     }
 
+    #[tokio::test]
+    async fn slow_compaction_receipts_settle_only_the_original_conversation() {
+        let directory = std::env::temp_dir().join(format!("athanor-compact-{}", Uuid::new_v4()));
+        let config = crate::config::HostConfig {
+            bind: "127.0.0.1:0".parse().unwrap(),
+            bearer_token: "compact-test".into(),
+            room_dir: directory.join("room"),
+            state_dir: directory.join("host"),
+            house_id: "test-house".into(),
+            room: "test-room".into(),
+            spirit: "Test".into(),
+            session: "test-session".into(),
+            database_url: None,
+            nats_url: None,
+            nats_auth: None,
+            knock_autonomy: crate::config::KnockAutonomy::Off,
+            operator: None,
+        };
+        std::fs::create_dir_all(&config.state_dir).unwrap();
+        crate::store::atomic_json_write(
+            &config.room_state_path(),
+            &json!({
+                "room": "test-room", "operator": "Operator", "embodiedSpirit": "Test",
+                "recallPolicy": {
+                    "requestedMode": "auto", "resolvedMode": "conversation",
+                    "workingSetEntries": 0, "recoveryPending": false, "recoveryTerms": [],
+                    "activeProject": null, "resolutionReason": "test",
+                    "lastRefreshReason": null, "lastRefreshAt": null,
+                    "degraded": null, "updatedAt": null
+                }
+            }),
+        )
+        .unwrap();
+        let state = super::super::Host::new(
+            config,
+            None,
+            tokio_util::sync::CancellationToken::new(),
+            tokio_util::task::TaskTracker::new(),
+        )
+        .unwrap()
+        .state;
+        let target = Uuid::new_v4();
+        let now = Utc::now();
+        let late = now + chrono::Duration::seconds(COMMAND_ACK_SECS + 1);
+        let mut offered = instance("c1", COMMAND_ACK_SECS + 300);
+        offered.controls.push("compact".into());
+        state
+            .portable
+            .lock()
+            .await
+            .instances
+            .insert(target, offered);
+
+        for outcome in ["applied", "failed"] {
+            let id = Uuid::new_v4();
+            control::command(
+                &state,
+                now,
+                id,
+                (target, "c1".into()),
+                None,
+                "compact".into(),
+                json!({}),
+                json!({"commandId": id, "kind": "compact"}),
+            )
+            .await
+            .unwrap();
+            control::poll(&state, now, target, "c1".into())
+                .await
+                .unwrap();
+            for seconds in (20..=COMMAND_ACK_SECS).step_by(20) {
+                attach::heartbeat(
+                    &state,
+                    now + chrono::Duration::seconds(seconds),
+                    target,
+                    "c1".into(),
+                )
+                .await
+                .unwrap();
+            }
+            assert_eq!(
+                control::command_status(&state, late, id).await.unwrap()["state"],
+                "outcomeUnknown"
+            );
+            assert!(
+                control::poll(&state, late, target, "c1".into())
+                    .await
+                    .unwrap()["commands"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+
+            state
+                .portable
+                .lock()
+                .await
+                .instances
+                .get_mut(&target)
+                .unwrap()
+                .conversation_id = "c2".into();
+            let foreign =
+                control::acknowledge(&state, late, target, "c2".into(), id, outcome.into(), None)
+                    .await
+                    .unwrap_err();
+            assert_eq!(foreign.code, "conversation_mismatch");
+            state
+                .portable
+                .lock()
+                .await
+                .instances
+                .get_mut(&target)
+                .unwrap()
+                .conversation_id = "c1".into();
+            let answer =
+                control::acknowledge(&state, late, target, "c1".into(), id, outcome.into(), None)
+                    .await
+                    .unwrap();
+            assert_eq!(answer["state"], outcome);
+            let replay =
+                control::acknowledge(&state, late, target, "c1".into(), id, outcome.into(), None)
+                    .await
+                    .unwrap();
+            assert_eq!(replay["state"], outcome);
+            let conflict = if outcome == "applied" {
+                "failed"
+            } else {
+                "applied"
+            };
+            assert_eq!(
+                control::acknowledge(&state, late, target, "c1".into(), id, conflict.into(), None)
+                    .await
+                    .unwrap_err()
+                    .code,
+                "command_conflict"
+            );
+        }
+
+        let queued = Uuid::new_v4();
+        control::command(
+            &state,
+            now,
+            queued,
+            (target, "c1".into()),
+            None,
+            "compact".into(),
+            json!({}),
+            json!({"commandId": queued, "kind": "compact"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            control::command_status(&state, late, queued).await.unwrap()["state"],
+            "expired"
+        );
+        assert_eq!(
+            control::acknowledge(
+                &state,
+                late,
+                target,
+                "c1".into(),
+                queued,
+                "applied".into(),
+                None
+            )
+            .await
+            .unwrap_err()
+            .code,
+            "command_conflict"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     // ---------- restart authority against a real substrate ----------
 
     const RESTART_MIGRATIONS: [&str; 3] = [
@@ -949,8 +1134,18 @@ mod tests {
             };
             for (principal, class, file, secret) in [
                 ("omp-keeper", "restart_claim", CLAIM_FILE, CLAIM_SECRET),
-                ("kodo", "restart_request", "restart-request-capability", "room-request-secret"),
-                ("kodo", "restart_exit", "restart-exit-capability", "room-exit-secret"),
+                (
+                    "kodo",
+                    "restart_request",
+                    "restart-request-capability",
+                    "room-request-secret",
+                ),
+                (
+                    "kodo",
+                    "restart_exit",
+                    "restart-exit-capability",
+                    "room-exit-secret",
+                ),
                 ("kodo", "restart_verify", VERIFY_FILE, VERIFY_SECRET),
             ] {
                 room.provision(principal, class, secret).await;
@@ -1061,17 +1256,28 @@ mod tests {
         let missing = room.ask(ask).await.unwrap_err();
         assert_eq!(
             (missing.status, missing.code),
-            (StatusCode::SERVICE_UNAVAILABLE, "restart_authority_unavailable")
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "restart_authority_unavailable"
+            )
         );
         room.hold(CLAIM_FILE, CLAIM_SECRET);
         room.lose(VERIFY_FILE);
         let unverifiable = room.ask(ask).await.unwrap_err();
         assert_eq!(unverifiable.code, "restart_authority_unavailable");
-        assert!(unverifiable.message.contains(VERIFY_FILE), "{}", unverifiable.message);
+        assert!(
+            unverifiable.message.contains(VERIFY_FILE),
+            "{}",
+            unverifiable.message
+        );
         room.hold(VERIFY_FILE, "not-this-room-verify-secret");
         let stale_verify = room.ask(ask).await.unwrap_err();
         assert_eq!(stale_verify.code, "restart_capability");
-        assert!(stale_verify.message.contains(VERIFY_FILE), "{}", stale_verify.message);
+        assert!(
+            stale_verify.message.contains(VERIFY_FILE),
+            "{}",
+            stale_verify.message
+        );
         assert!(
             room.intents().await.is_empty(),
             "no refused request minted an intent"

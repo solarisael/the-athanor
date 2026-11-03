@@ -31,8 +31,13 @@ a source checkout. The `pulse.exe` window is a separate build
 Delivery API 2 provides authenticated NATS clients.
 The Host API 2 cutover additionally requires matching native and OMP adapter components.
 
-Close the House Host and every OMP session before activating this release.
-The canonical deployment driver refuses an active Host listener or installed substrate child.
+Warning: An older Host still closes the OMP sessions it owns during shutdown.
+Close those sessions before stopping that Host for the first update with cutover support.
+
+Stop the House Host when the deployment driver asks you to.
+OMP sessions can stay open; see [OMP sessions during installation](#omp-sessions-during-installation).
+The driver waits up to ten minutes for the Host to stop.
+It refuses active substrate children and keepers that do not pause.
 It does not terminate user sessions.
 
 Use the two-stage local deployment procedure below.
@@ -43,7 +48,7 @@ The driver supplies the existing OMP configuration, private client path, and ope
 The installer preserves credentials across later updates.
 It writes `secrets/nats-server.conf` and protects the client projections.
 The Host now publishes Hallway pointers, so deployment must restart the broker with the new permission.
-Start the matching Host before reopening OMP.
+Start the matching Host after installation.
 The loader refuses an older running Host when the selected component requires API 2.
 
 Warning: a delivery API 2 installer refuses installation or rollback to an unauthenticated delivery API 1 release.
@@ -73,7 +78,7 @@ Do not change files in the prepared payload.
 Preparation refuses an existing output directory.
 `--skip-tests` records a skipped test gate, not a passed gate.
 
-Close the House Host and every OMP session before installation.
+Stop the House Host when the installation asks you to.
 Run installation from an elevated PowerShell 7 terminal:
 
 ```powershell
@@ -97,13 +102,44 @@ A successful installation removes its receipt and retains its payload for inspec
 The next successful installation can remove that previous payload.
 Other preparations remain intact.
 A failed preparation removes only its own incomplete output directory.
-Restart the Host and OMP after installation.
+A Host that stops while the marker exists releases the keepers it started instead of stopping them.
+Their OMP sessions stay open, and the next Host reports them as held by another owner.
+Start the Host after installation.
 
 With neither `-PrepareOnly` nor `-PreparedRelease`, the PowerShell driver prepares the release and then attempts installation.
-An open Host causes installation to refuse after preparation.
+An open Host makes installation wait up to ten minutes for you to stop it.
 Use the printed receipt for the later installation attempt.
 Do not combine `-PreparedRelease` with preparation or Linux options.
 The Linux deployment path does not use these stages.
+
+### OMP sessions during installation
+
+OMP sessions can stay open during installation.
+The driver writes the cutover marker `<operator state root>/cutover/cutover.json` before it installs.
+It removes the marker after the health proof, also when installation fails.
+
+While the marker exists:
+
+- Each keeper closes its substrate child and starts no new child.
+  Its omp child continues to run.
+- Each keeper writes `keeper-<pid>.json` beside the marker.
+  The driver waits up to 15 seconds for acknowledgements.
+  It refuses keepers that do not acknowledge the current cutover.
+- A keeper that started before this release does not pause.
+  Quit the OMP session that this keeper runs.
+  Run installation again.
+- An open OMP session stays disconnected from the Host.
+  Ordinary chat continues.
+  Orihon refuses fold turns during the cutover.
+  Send the message again after the Host returns.
+
+After installation, start the Host.
+Each open session attaches again on its own when the installed adapter is compatible with the adapter it loaded.
+The loader refreshes the Host credential and address that it originally supplied.
+Explicit operator overrides stay unchanged.
+When the compatibility fields changed, the session refuses to attach and names the OMP restart that it needs.
+A session that attaches again keeps the adapter code it loaded.
+Restart OMP to load new adapter code and tool schemas.
 
 ### Bootstrap an older CLI
 
@@ -379,7 +415,7 @@ refuses any other field (`installer.rs:50-57`; `manage.rs:61`):
 | `roomsRoot` | the folder that holds the rooms |
 | `operatorStateRoot` | the operator state folder |
 | `defaultRoom` | the room key for default routing |
-| `rooms` | a list of `{ "room": <key>, "spirit": <name> }` |
+| `rooms` | A list with `room`, `spirit`, and an optional `operator` key for each room. |
 
 Do not put `hostPort` in the file. The installer refuses it and writes the port
 itself (`installer.rs:1235`).
@@ -396,6 +432,30 @@ itself (`installer.rs:1235`).
   ]
 }
 ```
+Each `operator` value is an explicit lowercase key, such as `sol`.
+The installer and the Host reject invalid keys.
+The room-state display name does not supply this key.
+The Windows `--operator-principal` value controls file permissions and remains a separate value.
+
+Warning: A configured operator changes the default scope of future memory writes to `up`.
+Private memories belong to that human operator, subject to the existing room restrictions.
+An empty operator registry does not disable privacy.
+Historical memories without an operator remain shared.
+A configured writer cannot supersede a memory owned by another key or by no key.
+This configuration does not change historical ownership.
+
+Set `operator` in each intended room entry.
+Apply the complete topology file during a release installation:
+
+```powershell
+athanor deploy install '<printed receipt path>' --house-config-file 'C:\path\house.json'
+```
+
+For the PowerShell driver, use `-HouseConfigFile` with `-PreparedRelease`.
+Preparation does not accept a House configuration change.
+An update without this option preserves the installed room configuration.
+Restart the Host after installation to load the configured keys.
+
 
 ```powershell
 .\The-Athanor-<version>-windows-x64.exe `

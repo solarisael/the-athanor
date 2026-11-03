@@ -30,7 +30,8 @@ sha2 = "0.10"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "io-std", "time", "sync", "fs"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-util", "io-std", "time", "sync", "fs", "process"] }
+tokio-util.workspace = true
 uuid = { version = "1", features = ["v4"] }
 
 [lib]
@@ -42,6 +43,3 @@ path = "src/lib.rs"
 # and the live service all address it. Renaming the exe is a deploy-day migration.
 name = "athanor-substrate"
 path = "src/main.rs"
-
-[dev-dependencies]
-tokio = { version = "1", features = ["process"] }

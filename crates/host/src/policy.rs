@@ -1,5 +1,5 @@
 use protocol::{
-    RecallAction, RecallPolicyDecision, RecallPolicyFacts, RecallPolicyState,
+    RecallAction, RecallPlanAction, RecallPolicyDecision, RecallPolicyFacts, RecallPolicyState,
     RecallRefreshCompletion, RecallRequestedMode, RecallResolvedMode, RecoveryState,
 };
 use serde::{Deserialize, Serialize};
@@ -178,7 +178,24 @@ impl RecallPolicySession {
         if !facts.working_set_present {
             self.working_set = None;
         }
-        let intent = normalized(&facts.query_route.intent).unwrap_or_else(|| "general".to_owned());
+        let routed_intent =
+            normalized(&facts.query_route.intent).unwrap_or_else(|| "general".to_owned());
+        let exact_lookup = is_explicit_lookup(&routed_intent)
+            && (!facts.query_route.required_terms.is_empty()
+                || facts.query_route.terms.windows(2).any(|terms| {
+                    matches!(terms[0].as_str(), "memory" | "memories")
+                        && !terms[1].is_empty()
+                        && terms[1].chars().all(|character| character.is_ascii_digit())
+                }));
+        // Exact references retain precedence; ordinary memory words can also
+        // describe a write request or a question already answered in context.
+        let plan = facts.query_plan.as_ref().filter(|_| !exact_lookup);
+        let intent = if is_explicit_lookup(&routed_intent) {
+            routed_intent
+        } else {
+            plan.and_then(|plan| normalized(&plan.intent))
+                .unwrap_or(routed_intent)
+        };
         let active_project = facts.active_project.and_then(|value| normalized(&value));
         let previous_mode = self.resolved_mode;
         let previous_project = self.active_project.clone();
@@ -217,9 +234,15 @@ impl RecallPolicySession {
         let technical = intent == "technical_project";
         let recovery_due = self.recovery_state.is_pending();
         let recovery_query_terms = self.recovery_state.terms();
+        let planned_action = plan.map(|plan| plan.action);
         let eligible = resolved_mode != RecallResolvedMode::Quiet
-            && (explicit_lookup || technical || recovery_due);
-        let query_terms = unique_terms(
+            && (recovery_due
+                || match planned_action {
+                    Some(RecallPlanAction::Search) => true,
+                    Some(RecallPlanAction::Skip | RecallPlanAction::Reuse) => false,
+                    None => explicit_lookup || technical,
+                });
+        let route_terms = unique_terms(
             facts
                 .query_route
                 .required_terms
@@ -237,6 +260,19 @@ impl RecallPolicySession {
                 .chain(facts.query_route.terms),
             16,
         );
+        let query_terms = if !recovery_due {
+            plan.map(|plan| unique_terms(plan.subject_terms.clone(), 16))
+                .filter(|terms| !terms.is_empty())
+                .unwrap_or(route_terms)
+        } else {
+            route_terms
+        };
+        let query = if !recovery_due {
+            plan.and_then(|plan| bounded(&plan.query, 1024))
+                .unwrap_or_else(|| query_terms.join(" "))
+        } else {
+            query_terms.join(" ")
+        };
         let prior_terms = self
             .working_set
             .as_ref()
@@ -266,6 +302,8 @@ impl RecallPolicySession {
             Some("explicit-lookup")
         } else if eligible && topic_changed {
             Some("topic-change")
+        } else if eligible && planned_action == Some(RecallPlanAction::Search) {
+            Some("query-plan-search")
         } else if eligible && stale {
             Some("stale-working-set")
         } else {
@@ -274,7 +312,13 @@ impl RecallPolicySession {
         .map(str::to_owned);
 
         let refresh = refresh_reason.is_some() && !query_terms.is_empty();
-        let clear = resolved_mode == RecallResolvedMode::Quiet || mode_changed || project_changed;
+        let clear = resolved_mode == RecallResolvedMode::Quiet
+            || mode_changed
+            || project_changed
+            || (topic_changed && planned_action == Some(RecallPlanAction::Skip));
+        if clear || refresh {
+            self.working_set = None;
+        }
         RecallPolicyDecision {
             action: match (clear, refresh) {
                 (false, false) => RecallAction::None,
@@ -282,7 +326,7 @@ impl RecallPolicySession {
                 (false, true) => RecallAction::Refresh,
                 (true, true) => RecallAction::ClearThenRefresh,
             },
-            query: query_terms.join(" "),
+            query,
             query_terms,
             refresh_reason,
             intent,
@@ -306,6 +350,7 @@ impl RecallPolicySession {
     }
 
     pub fn fail_refresh(&mut self, reason: &str, now: String) {
+        self.working_set = None;
         self.last_refresh_reason = Some("failed".to_owned());
         self.last_refresh_at = Some(now);
         self.degraded = bounded(reason, 240).or_else(|| Some("recall unavailable".to_owned()));
@@ -555,6 +600,7 @@ mod tests {
             conversation_tokens: 0,
             working_set_present: false,
             tool_evidence,
+            query_plan: None,
         }
     }
 
@@ -723,5 +769,118 @@ mod tests {
         let read_older: RecallPolicySession =
             serde_json::from_str(&older).expect("older session parses");
         assert_eq!(read_older.judged_mode, None);
+    }
+    fn planned_facts(action: protocol::RecallPlanAction) -> RecallPolicyFacts {
+        let mut input = facts("general", false);
+        input.query_plan = Some(protocol::RecallQueryPlan {
+            action,
+            query: "What about its limits?\nOrchard retrieval policy".into(),
+            intent: "memory_lookup".into(),
+            subject_terms: vec!["orchard".into(), "retrieval".into(), "limits".into()],
+            source_turn_ids: vec!["user-1".into()],
+            reason: "visible user subject".into(),
+        });
+        input
+    }
+
+    #[test]
+    fn contextual_plan_preserves_natural_query_and_enables_conversation_search() {
+        let mut session = session(RecallResolvedMode::Conversation, 0);
+        let input = planned_facts(protocol::RecallPlanAction::Search);
+        let expected = input.query_plan.as_ref().unwrap().query.clone();
+        let decision = session.evaluate(RecallRequestedMode::Conversation, input);
+        assert!(decision.action.refreshes());
+        assert_eq!(decision.query, expected);
+        assert_eq!(decision.intent, "memory_lookup");
+    }
+
+    #[test]
+    fn quiet_and_recovery_outrank_contextual_actions() {
+        let mut quiet = session(RecallResolvedMode::Conversation, 0);
+        quiet.invalidate_after_compaction("Orchard retrieval policy");
+        let decision = quiet.evaluate(
+            RecallRequestedMode::Quiet,
+            planned_facts(protocol::RecallPlanAction::Search),
+        );
+        assert!(matches!(decision.action, protocol::RecallAction::Clear));
+        assert!(quiet.has_pending_recovery());
+
+        let mut recovery = session(RecallResolvedMode::Conversation, 0);
+        recovery.invalidate_after_compaction("Orchard retrieval policy");
+        let decision = recovery.evaluate(
+            RecallRequestedMode::Conversation,
+            planned_facts(protocol::RecallPlanAction::Skip),
+        );
+        assert!(decision.action.refreshes());
+        assert_eq!(
+            decision.refresh_reason.as_deref(),
+            Some("post-compaction-recovery")
+        );
+        assert!(decision.query.contains("orchard"));
+    }
+
+    #[test]
+    fn explicit_id_lookup_cannot_be_replaced_or_skipped_by_a_plan() {
+        for action in [
+            protocol::RecallPlanAction::Skip,
+            protocol::RecallPlanAction::Search,
+        ] {
+            let mut session = session(RecallResolvedMode::Conversation, 0);
+            let mut input = planned_facts(action);
+            input.query_route.intent = "memory_lookup".into();
+            input.query_route.terms = vec!["memory".into(), "42".into()];
+            let decision = session.evaluate(RecallRequestedMode::Conversation, input);
+            assert!(decision.action.refreshes());
+            assert!(decision.query.contains("42"));
+            assert!(!decision.query.contains("Orchard"));
+        }
+    }
+
+    #[test]
+    fn a_skipped_new_subject_retires_old_working_evidence() {
+        let mut session = session(RecallResolvedMode::Conversation, 0);
+        session.requested_mode = RecallRequestedMode::Conversation;
+        session.complete_refresh(
+            protocol::RecallRefreshCompletion {
+                query_terms: vec!["orchard".into(), "retrieval".into(), "policy".into()],
+                refresh_reason: "explicit-lookup".into(),
+                entries: 1,
+                has_working_set: true,
+                warning: None,
+            },
+            "before".into(),
+        );
+        let mut input = planned_facts(protocol::RecallPlanAction::Skip);
+        input.working_set_present = true;
+        let plan = input.query_plan.as_mut().unwrap();
+        plan.intent = "general".into();
+        plan.query = "We adopted a rabbit named Juniper.".into();
+        plan.subject_terms = vec!["adopted".into(), "rabbit".into(), "juniper".into()];
+        let decision = session.evaluate(RecallRequestedMode::Conversation, input);
+
+        assert!(decision.action.clears_working_set());
+        assert!(!decision.action.refreshes());
+        assert_eq!(session.projection("after".into()).working_set_entries, 0);
+    }
+
+    #[test]
+    fn ordinary_memory_words_do_not_override_a_judged_skip() {
+        let mut session = session(RecallResolvedMode::Conversation, 0);
+        let mut input = planned_facts(protocol::RecallPlanAction::Skip);
+        input.query_route.intent = "memory_lookup".into();
+        input.query_route.terms = vec!["remember".into(), "jasmine".into(), "tea".into()];
+        let decision = session.evaluate(RecallRequestedMode::Conversation, input);
+
+        assert!(!decision.action.refreshes());
+    }
+
+    #[test]
+    fn project_boundary_clears_even_when_plan_reuses() {
+        let mut session = session(RecallResolvedMode::Work, 0);
+        session.active_project = Some("orchard".into());
+        let mut input = planned_facts(protocol::RecallPlanAction::Reuse);
+        input.active_project = Some("harbor".into());
+        let decision = session.evaluate(RecallRequestedMode::Work, input);
+        assert!(matches!(decision.action, protocol::RecallAction::Clear));
     }
 }

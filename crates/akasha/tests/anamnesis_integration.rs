@@ -200,7 +200,7 @@ async fn run_contract(pool: &sqlx::PgPool, url: &str) -> TestResult {
             room.clone(),
             AnamnesisReadMode::Consult,
             Some("charcoal".into()),
-            10,
+            51,
         )?,
     )
     .await?;

@@ -118,6 +118,7 @@ pub(super) fn recalled(presentation: &Value) -> Vec<Value> {
             ));
         }
     }
+    // Active spirit identity comes from authenticated room state, not retrieved canon.
     for candidate in array(&presentation["canonMatches"]) {
         let identifier = ["id", "entity_id", "entityId"]
             .iter()
@@ -132,7 +133,7 @@ pub(super) fn recalled(presentation: &Value) -> Vec<Value> {
             materials.push(material(
                 format!("canon:{id}"),
                 json!({"kind":"canon","entity_id":id}),
-                "identity",
+                "continuity",
                 clip(body, 4096),
                 950,
             ));
@@ -324,4 +325,69 @@ pub(super) fn directives(spirit: &str, operator: &str, lessons: &[Value]) -> Vec
         directives.push(json!({"id":format!("presence:{}",text(&lesson["id"])),"kind":"enact","severity":"advisory","instruction":clip(text(&lesson["body"]),1000),"sourceIds":[lesson["id"]],"triggerScope":["text"]}));
     }
     directives
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use summoning::presence::{PresenceAuthority, PresenceMaterial, PresenceMaterialRole};
+
+    #[test]
+    fn retrieved_canon_keeps_authority_without_becoming_spirit_identity() {
+        for kind in ["project", "person", "spirit"] {
+            let presentation = json!({
+                "canonMatches": [{
+                    "id": "entity-42",
+                    "kind": kind,
+                    "name": "Example",
+                    "summary": "An authoritative topical fact."
+                }]
+            });
+            let materials = recalled(&presentation);
+
+            assert_eq!(materials.len(), 1);
+            let material: PresenceMaterial = serde_json::from_value(materials[0].clone()).unwrap();
+
+            assert_eq!(material.id, "canon:entity-42");
+            assert_eq!(
+                material.authority,
+                PresenceAuthority::Canon {
+                    entity_id: "entity-42".into()
+                }
+            );
+            assert_eq!(material.role, PresenceMaterialRole::Continuity);
+            assert_eq!(material.body, "An authoritative topical fact.");
+        }
+    }
+
+    #[test]
+    fn canon_identity_requires_a_record_id_and_preserves_identifier_aliases() {
+        for identifier in [
+            json!({"id": "entity-42"}),
+            json!({"entity_id": "entity-42"}),
+            json!({"entityId": "entity-42"}),
+            json!({"id": 42}),
+        ] {
+            let mut candidate = identifier;
+            candidate["summary"] = json!("An authoritative topical fact.");
+            let materials = recalled(&json!({"canonMatches": [candidate.clone()]}));
+            let expected_id = if candidate["id"] == 42 {
+                "42"
+            } else {
+                "entity-42"
+            };
+
+            assert_eq!(materials.len(), 1);
+            assert_eq!(materials[0]["id"], format!("canon:{expected_id}"));
+            assert_eq!(materials[0]["authority"]["entity_id"], expected_id);
+            assert_eq!(materials[0]["role"], "continuity");
+        }
+
+        assert!(
+            recalled(&json!({
+                "canonMatches": [{"name": "Example", "summary": "No record identity."}]
+            }))
+            .is_empty()
+        );
+    }
 }

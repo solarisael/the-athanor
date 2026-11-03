@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { z } from "zod";
 
 import {
   __workerLifecycleTest,
@@ -20,18 +21,6 @@ import {
 } from "../house-proof/worker-lifecycle.ts";
 import { compactGuMessages } from "../house-proof/swarm-delivery/index.ts";
 
-function makeSchema(kind: string, fields: Record<string, unknown> = {}): any {
-  return { kind, ...fields, describe() { return this; }, optional() { return this; }, regex() { return this; }, strict() { return this; }, default() { return this; } };
-}
-const zodStub = {
-  string: () => makeSchema("string"),
-  boolean: () => makeSchema("boolean"),
-  number: () => makeSchema("number"),
-  enum: (values: readonly string[]) => makeSchema("enum", { values }),
-  object: (shape: Record<string, unknown>) => makeSchema("object", { shape }),
-  array: (element: unknown) => makeSchema("array", { element }),
-  unknown: () => makeSchema("unknown"),
-};
 
 // ---------------------------------------------------------------------------
 // Loopback Host keeping the worker_lifecycle contract
@@ -253,7 +242,7 @@ function ompSession(id: string, agent: Record<string, unknown> | null, entries: 
   const sent: any[] = [];
   const state = { usage: { tokens: 10, contextWindow: 1_000 } as any, aborted: 0 };
   const pi = {
-    zod: zodStub,
+    zod: z,
     events,
     on(name: string, handler: (event: any, ctx: any) => unknown) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);

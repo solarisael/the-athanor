@@ -1,12 +1,12 @@
 use super::classify::classify_event;
 use super::enablement::GigaEnablement;
-use super::identity::{
-    GIGA_MODEL_MANIFEST_DIGEST, GIGA_MODEL_TAG, GIGA_PROMPT_VERSION, sha256_bytes, source_digest,
-};
+use super::failure::WorkerFailure;
+use super::identity::{sha256_bytes, source_digest};
 use super::ledger::resolve_sources_from_ledger;
+use super::typesafe::GigaClassifierConfig;
 use crate::{
     AppError, Config,
-    giga::{database_now, event_from_store, giga_candidate_store_and_finish, giga_event_finish},
+    giga::{database_now, event_from_store, giga_candidates_store_and_finish, giga_event_finish},
 };
 use chrono::{DateTime, Utc};
 use hearth::{
@@ -155,20 +155,28 @@ async fn finish_attempt(
     ))
 }
 
-async fn store_candidate_and_finish(
+async fn store_candidates_and_finish(
     pool: &PgPool,
     event: &GigaEvent,
     worker_id: &str,
     attempt_count: u32,
-    candidate: GigaCandidate,
+    candidates: Vec<GigaCandidate>,
 ) -> Result<GigaProcessResult, AppError> {
-    let request = finish_request(event, worker_id, GigaEventFinishOutcome::Succeeded, 1, None)?;
-    giga_candidate_store_and_finish(pool, candidate, request).await?;
+    let candidate_count = u32::try_from(candidates.len())
+        .map_err(|_| AppError::Invalid("GIGA candidate count is too large".into()))?;
+    let request = finish_request(
+        event,
+        worker_id,
+        GigaEventFinishOutcome::Succeeded,
+        candidate_count,
+        None,
+    )?;
+    giga_candidates_store_and_finish(pool, candidates, request).await?;
     Ok(process_result(
         event,
         attempt_count,
         GigaEventFinishOutcome::Succeeded,
-        1,
+        candidate_count,
         None,
     ))
 }
@@ -178,7 +186,7 @@ pub async fn giga_process(
     config: &Config,
     claim: &GigaEventClaimReceipt,
 ) -> Result<GigaProcessResult, AppError> {
-    giga_process_with_enablement(pool, config, claim, GigaEnablement::from_env()).await
+    giga_process_with_enablement(pool, config, claim, GigaEnablement::from_env(), None).await
 }
 
 pub(super) async fn giga_process_with_enablement(
@@ -186,130 +194,120 @@ pub(super) async fn giga_process_with_enablement(
     config: &Config,
     claim: &GigaEventClaimReceipt,
     enablement: GigaEnablement,
+    classifier: Option<&GigaClassifierConfig>,
 ) -> Result<GigaProcessResult, AppError> {
     let (event, attempt_count) = validate_claim(pool, claim).await?;
-    let source_hash = source_digest(&event);
-    let event_hash = sha256_bytes(event.event_id().as_bytes());
-    let result = resolve_sources_from_ledger(config, &event).await;
-    let classified = match result {
-        Ok(sources) => {
-            let existing_candidates: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*)::bigint FROM giga_candidates WHERE event_id=$1",
-            )
+    let sources = match resolve_sources_from_ledger(config, &event).await {
+        Ok(sources) => sources,
+        Err(failure) => {
+            return failed_classification(pool, &event, claim, attempt_count, failure).await;
+        }
+    };
+    let existing: i64 =
+        sqlx::query_scalar("SELECT COUNT(*)::bigint FROM giga_candidates WHERE event_id=$1")
             .bind(event.event_id())
             .fetch_one(pool)
             .await?;
-            match existing_candidates {
-                0 => classify_event(&event, &sources, enablement).await,
-                1 => {
-                    tracing::info!(
-                        operation = "giga_process",
-                        event_hash = %event_hash,
-                        source_hash = %source_hash,
-                        source_count = event.source_refs().len(),
-                        candidate_count = 1,
-                        outcome = "succeeded",
-                        recovery = "existing_candidate",
-                        model = GIGA_MODEL_TAG,
-                        model_digest = GIGA_MODEL_MANIFEST_DIGEST,
-                        prompt_version = GIGA_PROMPT_VERSION,
-                    );
+
+    if existing > 0 {
+        let count = u32::try_from(existing)
+            .map_err(|_| AppError::Invalid("GIGA candidate count is too large".into()))?;
+        return finish_attempt(
+            pool,
+            &event,
+            claim.worker_id(),
+            attempt_count,
+            GigaEventFinishOutcome::Succeeded,
+            count,
+            None,
+        )
+        .await;
+    }
+    if !enablement.classifier_enabled() {
+        return finish_attempt(
+            pool,
+            &event,
+            claim.worker_id(),
+            attempt_count,
+            GigaEventFinishOutcome::Failed,
+            0,
+            Some("GigaClassifierDisabled"),
+        )
+        .await;
+    }
+    let owned_classifier;
+    let classifier = match classifier {
+        Some(classifier) => classifier,
+        None => {
+            owned_classifier = match GigaClassifierConfig::from_env(config) {
+                Ok(classifier) => classifier,
+                Err(_) => {
                     return finish_attempt(
                         pool,
                         &event,
                         claim.worker_id(),
                         attempt_count,
-                        GigaEventFinishOutcome::Succeeded,
-                        1,
-                        None,
+                        GigaEventFinishOutcome::Failed,
+                        0,
+                        Some("GigaClassifierConfigurationError"),
                     )
                     .await;
                 }
-                _ => {
-                    return Err(AppError::Invalid(
-                        "GIGA event has more than one durable candidate".into(),
-                    ));
-                }
-            }
-        }
-        Err(failure) => Err(failure),
-    };
-    match classified {
-        Ok(None) => {
-            let result = finish_attempt(
-                pool,
-                &event,
-                claim.worker_id(),
-                attempt_count,
-                GigaEventFinishOutcome::Succeeded,
-                0,
-                None,
-            )
-            .await?;
-            tracing::info!(
-                operation = "giga_process",
-                event_hash = %event_hash,
-                source_hash = %source_hash,
-                source_count = event.source_refs().len(),
-                candidate_count = 0,
-                outcome = "succeeded",
-                model = GIGA_MODEL_TAG,
-                model_digest = GIGA_MODEL_MANIFEST_DIGEST,
-                prompt_version = GIGA_PROMPT_VERSION,
-            );
-            Ok(result)
-        }
-        Ok(Some(candidate)) => {
-            let result = store_candidate_and_finish(
-                pool,
-                &event,
-                claim.worker_id(),
-                attempt_count,
-                candidate,
-            )
-            .await?;
-            tracing::info!(
-                operation = "giga_process",
-                event_hash = %event_hash,
-                source_hash = %source_hash,
-                source_count = event.source_refs().len(),
-                candidate_count = 1,
-                outcome = "succeeded",
-                model = GIGA_MODEL_TAG,
-                model_digest = GIGA_MODEL_MANIFEST_DIGEST,
-                prompt_version = GIGA_PROMPT_VERSION,
-            );
-            Ok(result)
-        }
-        Err(failure) => {
-            let retry = failure.retryable() && attempt_count < GIGA_MAX_EVENT_ATTEMPTS;
-            let outcome = if retry {
-                GigaEventFinishOutcome::Retry
-            } else {
-                GigaEventFinishOutcome::Failed
             };
-            tracing::warn!(
-                operation = "giga_process",
-                event_hash = %event_hash,
-                source_hash = %source_hash,
-                source_count = event.source_refs().len(),
-                candidate_count = 0,
-                outcome = outcome.as_str(),
-                error_class = failure.class(),
-                model = GIGA_MODEL_TAG,
-                model_digest = GIGA_MODEL_MANIFEST_DIGEST,
-                prompt_version = GIGA_PROMPT_VERSION,
-            );
-            finish_attempt(
-                pool,
-                &event,
-                claim.worker_id(),
-                attempt_count,
-                outcome,
-                0,
-                Some(failure.class()),
-            )
-            .await
+            &owned_classifier
         }
+    };
+    let candidates = match classify_event(pool, config, &event, &sources, classifier).await {
+        Ok(candidates) => candidates,
+        Err(failure) => {
+            return failed_classification(pool, &event, claim, attempt_count, failure).await;
+        }
+    };
+    let result =
+        store_candidates_and_finish(pool, &event, claim.worker_id(), attempt_count, candidates)
+            .await?;
+
+    // Classification is durable before optional resurfacing starts.
+    if let Err(failure) =
+        super::resonance::resurface_curios(pool, config, &event, &sources, classifier).await
+    {
+        tracing::warn!(
+            operation = "giga_resonance",
+            event_hash = %sha256_bytes(event.event_id().as_bytes()),
+            error_class = failure.class(),
+            "GIGA classification committed; curio resurfacing failed"
+        );
     }
+    Ok(result)
+}
+
+async fn failed_classification(
+    pool: &PgPool,
+    event: &GigaEvent,
+    claim: &GigaEventClaimReceipt,
+    attempt_count: u32,
+    failure: WorkerFailure,
+) -> Result<GigaProcessResult, AppError> {
+    let outcome = if failure.retryable() && attempt_count < GIGA_MAX_EVENT_ATTEMPTS {
+        GigaEventFinishOutcome::Retry
+    } else {
+        GigaEventFinishOutcome::Failed
+    };
+    tracing::warn!(
+        operation = "giga_process",
+        event_hash = %sha256_bytes(event.event_id().as_bytes()),
+        source_hash = %source_digest(event),
+        outcome = outcome.as_str(),
+        error_class = failure.class(),
+    );
+    finish_attempt(
+        pool,
+        event,
+        claim.worker_id(),
+        attempt_count,
+        outcome,
+        0,
+        Some(failure.class()),
+    )
+    .await
 }

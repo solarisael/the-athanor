@@ -16,19 +16,26 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - The runtime starts lazily at the first database method. It builds the `Config`, the pool, the GIGA worker, and the Insula emitter.
 - `substrate_health`, `vault_recall`, and `substrate_migrations` answer before the pool opens.
 - `protocol_error_class`, `app_error_class`, and `backup_error_class` name the failure for the observation. `app_error_outcome` marks refusals as refusals.
-- `cli_subcommand` runs `backup`, `restore`, `health`, `migrations`, `semantic-vocabulary-refresh`, and `orihon-fold`.
+- `cli_subcommand` runs `backup`, `restore`, `health`, `migrations`, and `semantic-vocabulary-refresh`.
 - `spawn_retention_service` checks expired raw observations once each day. The first check waits five minutes.
 - Raw observations expire after seven UTC days. Each sweep checks expiry against the current UTC minute.
 - `WslKeepalive` holds a helper process open on Windows and terminates it on drop.
 
-### orihon_folder/ — selected-page folds
+### orihon_folder/ — the live compactor engine
 
-- `orihon-fold` folds one operator-selected page through a local Ollama model.
-- The command stores immutable source snapshots in PostgreSQL or the selected Vault book.
-- Matching source and recipe digests reuse existing folds.
-- Optional context sheds its oldest lines before it blocks an input that fits alone.
-- Source text never loses bytes to meet the model budget. Oversized input refuses.
-- Generated folds remain derived provenance. No background worker, unfold tool, or wake injection starts.
+- `Engine` builds one live-tree node line per `summarize` call. The Host opens one engine per room prefix and folder model, picks the nodes, writes their prompts, and stores every returned job.
+- A call has the turn's shape: the harness's exact system parts and tool definitions (never executed), one user message with the compactor view's whole 4-line blocks as separate text parts, then one user message with the tail and the task.
+- A line over 512 bytes gets the same-conversation "Too long" correction. After five replies the shortest complete one stands, up to the 16 KiB model-line ceiling. A reply cut by the output budget is never kept.
+- A failed call ends its job. The Host retries failed work after 60 seconds while a registered fold session participates.
+  A message boundary can retry sooner. Loss of consent or room ownership stops automatic retries.
+- Every job receipt lists each attempt: outcome, bytes, input/output/cache-read/cache-write tokens, price, stop reason, and time. An unreported count stays empty, and a missing price names its reason.
+- An engine runs at most eight jobs at once and owns their cancellation. `close` waits for running jobs, then ends the gateway child and its overlay.
+- Local engines call a loopback Ollama endpoint with the same system parts and the tool definitions in Ollama's function shape; a reply that asks for a tool fails the attempt. The prompt, tool bytes included, must fit the configured `num_ctx` (default 32768) at one token per byte, or the attempt refuses before any request. Ollama reports no price.
+- Hosted engines own one `omp auth-gateway stdio` child, started with the operator's binding and an overlay that turns off model fallback. Up to eight requests share it by id. A child that exits is replaced at the next call.
+- Hosted calls use `POST /v1/pi/stream` without streaming. OMP's final message carries the token counts and `usage.cost.total`; the stdio wire forwards no response headers. Requests ask for short cache retention and pin one OMP session per engine.
+- A hosted reply must name the configured provider and model. Tool calls and other non-text replies fail the attempt.
+- For Anthropic, a first attempt waits while another call writes a cache entry its prefix holds. stdio answers each request whole, so the wait lasts until the writer's reply arrives, not until its response starts. A cold prefix costs the waiting calls about one call's latency.
+- Cache scopes cover backend, provider, model, binding, and prefix digest. Nothing claims that two scopes share cache entries.
 
 ### remember/ — the durable write
 
@@ -59,7 +66,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `load_bm25f_candidates` and `load_bm25f_candidates_for_terms` load the field-aware lexical candidates over the memory fields.
 - `load_semantic_vocabulary_concepts` reads concept vectors and turns them into extra lexical terms. This is the bridge from meaning to exact words.
 - `refresh_semantic_vocabulary` is the write path of that vocabulary. It re-embeds the concept rows and reports how many it refreshed.
-- `memory_temporal_factor` applies optional age decay to memories from every origin. The default base half-life is 60 days.
+- `memory_temporal_factor` applies optional age decay to memories from every origin. The default base half-life is 15 days.
 - Memories use their stored `created_at` timestamp unless valid anchor metadata exists. Reviewed metadata in `meta.giga` supplies durability and the original candidate timestamp.
 - Missing or invalid durability uses the base half-life. Invalid anchor metadata uses `created_at`. Future anchors receive no age penalty.
 - The weight is `2^(-age_days * (1 - durability)^2 / half_life_days)`. Durability 1 receives no age penalty.
@@ -70,38 +77,57 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `protocol_pointer_files` normalizes stored pointer files to the wire shape `{file, lines}`. Legacy strings and extra keys stay in the database.
 - `embed_texts`, `embed_text`, and `embed_query` are the embedding client. The `query: ` prefix is load-bearing and pairs with the indexer prefix.
 - `query_terms`, `query_dates`, `term_evidence`, `candidate_terms`, and `bounded_excerpt` build the evidence each candidate carries.
+- `source_passage` selects at most 384 Unicode scalar values from actual source text.
+- Passage offsets address the source chunk, or the complete record when no chunk index exists.
+- Prefix matching uses query-sized state and bounded source-offset queues.
+- BM25F selects passages after ranking, memory deduplication, and the requested result limit.
+- The broad reranking limit includes the requested cards plus exact records that the sidecar excludes.
+- Manual hydration still returns complete selected record bodies.
 - `recall` also returns date matches, the room taxonomy, cluster staleness, and cluster resonance.
+- `ScopeFilter` uses the operator visibility rule when the `operators` table exists, even when it has no rows.
+- Readers see their own rows, company rows, and historical rows with no operator. The registered hierarchy can also grant `up` rows.
+- An unregistered reader gets a warning only when the registry has rows.
+  The filter hides other operators' private and `up` rows even when the registry is empty.
 
 ### giga/ — the Stage 1 candidate plane
 
 - Event ingest. `giga_event_ingest` writes one event and its sources in one transaction. `lifecycle_json` and `lifecycle_from_json` carry the typed lifecycle.
-- Conversation ingest. `giga_conversation_ingest` folds one turn window into an event. It accepts one to eight turns, one session, and stable unique turn ids. The event id is a hash of the room, the session, and the turn hashes.
+- Conversation capture accepts up to 64 turns per transaction. Each new turn receives one job, identified by room, session, and source ID.
+- Repeated identities must retain their role, content hash, and project scope. A conflict refuses the transaction.
+- `giga_turn_release` releases waiting jobs when a conversation reaches its count or oldest-turn deadline. New arrivals never postpone that deadline.
+- Migration 0043 preserves processed identities and archives replaced windows. Failed-only turns remain parked until explicit replay.
 - Candidate store. `giga_candidate_store` verifies the parent event and every source before it writes the candidate.
 - Candidate list. `giga_candidate_list` reads candidates with their sources for review.
 - Room review. `giga_review` applies one review transition. It refuses a changed state, a crossed room boundary, a dropped source, and any durable transition.
 - Tool review. `giga_tool_review` derives the previous state, the sources, and the review time from the store, then calls `giga_review`.
-- Queue maintenance. `giga_queue_maintenance` counts the queue states, the eligible events, and the blocked events. The purge takes an advisory lock and deletes only events with no candidate and no resonance.
-- Health. `giga_health` reports the queue and classifier condition.
-- Lease lifecycle. `giga_event_claim` leases one event to a worker. `giga_event_finish` closes the attempt. `giga_event_replay` re-opens a settled event.
+- Queue maintenance preserves unreleased turns, candidate evidence, archived windows, and turn identity tombstones. A purged job cannot return through repeated capture.
+- Health excludes replaced windows from active counts. `identity_conflict_count` keeps unresolved migration conflicts visible.
+- `giga_event_claim` leases one released event. `giga_event_finish` closes its attempt. `giga_event_replay` rejects archived windows.
+- Claiming quarantines invalid stored events as failed. Later claims can process healthy neighbors.
 - Promotion. `giga_promote` writes the durable memory, coding lesson, or project lesson, and marks the candidate promoted.
 - Promotion is idempotent by request digest. A replay returns the stored receipt and checks that the durable row still exists.
 - `giga_tool_promote` builds the promotion request from the room context and the stored candidate.
 - `verify_resonance`, `fresh_candidate_sources`, and `promotion_digest` keep authority tied to the exact reviewed sources.
 
-### giga_worker/ — the local classifier worker
+### giga_worker/ — the typed turn classifier
 
-- `spawn_giga_worker` starts the loop when the classifier is enabled. `giga_worker_loop` polls, claims, processes, and honors the shutdown signal.
-- `giga_process` runs one event: it validates the claim, resolves the sources, classifies, stores the candidate, and finishes the attempt.
-- `classify_event` runs two model passes: the gate, then the extraction. `GIGA_GATE_PROMPT` and `GIGA_EXTRACTION_PROMPT` hold the prompts.
-- `request_ollama_structured` calls the local Ollama endpoint with a JSON schema. `ollama_config` refuses a non-loopback endpoint.
-- `verify_ollama_model` checks the model tag and the manifest digest before work starts.
-- `gate_schema` and `extraction_schema` bind the model output to the allowed source ids.
-- `validate_gate` and `validate_extraction` refuse an out-of-set source, a bad score, and untrimmed text.
-- `salvage_json_slice` recovers JSON from a prose preamble. `dedupe_preserving_order` tolerates a repeated source id.
-- `resolve_sources_from_ledger` reads the turn bodies from the conversation ledger on disk. `verify_promotion_sources` re-checks them at promotion.
-- `bounded_response`, `bounded_trimmed`, and `truncate_with_marker` bound every model byte the House stores.
-- `candidate_id`, `source_digest`, and `configuration_digest` make the candidate identity reproducible.
-- `WorkerFailure` classes each failure. `giga_classifier_health` reports the last error and the failure streak.
+- The Host supplies a room-approved Jev configuration and transient Typesafe credential.
+- The worker releases batches and processes jobs concurrently. Defaults are eight turns, 120 seconds, and four active jobs.
+- Each job has a 120-second deadline within its 300-second lease. Shutdown cancels and joins owned jobs; unfinished leases remain recoverable.
+- Exact ledger repeats count once. Conflicting rows still refuse source verification.
+- Each target receives at most seven nearby turns and two Recall lookups. Jev can select one follow-up lookup.
+- Recall retains the trusted Host scope. Sending recalled content also requires the current Recall private-packet grant.
+- Explicit historical memory references retain their archived or superseded labels. They do not become current authority.
+- Nearby turns and recalled records supply context only. Candidates cite their target turn.
+- Empty or unavailable memory context cannot support a novelty score. Packet fitting removes context before target evidence.
+- Candidate labels and excerpts derive from exact sources. Candidate insertion and event completion share one transaction.
+- Completed classification remains durable if optional Curio resurfacing fails.
+- The resonance pass compares later evidence with four recent Curios in the same room.
+- Strong resonance returns a Curio to review and records its evidence, score, and actual model identity.
+- Unavailable Curio evidence is skipped with a diagnostic.
+- Classification and resonance never promote a candidate. The existing review tools retain that authority boundary.
+- `verify_promotion_sources` checks exact ledger evidence again before explicit promotion.
+- Health separates classifier availability from capture. Missing model digests are reported as absent.
 
 ### docket/ — the cooperation plane
 
@@ -119,7 +145,8 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 ### lesson/ — the lesson registry and the design catalogue
 
 - Lesson query. `lesson_query` reads one lesson family with filters for scope, project, shape, register, stage, language, and technology. It ranks by always-on, then text rank, then update time.
-- The query expands the result along shared thread keys, up to 50 rows.
+- The query expands results along shared thread keys within the caller's total limit.
+- Exact-ID queries without a limit return all matching requested IDs within scope.
 - Trigger match. `lesson_trigger_match` fires trigger-bearing lessons against at most 16 offered surfaces. `trigger_eligibility` is the one visibility rule every trigger read pushes.
 - Trigger engine. `trigger/engine.rs` owns the compilers: one table of 19 file extensions maps a path to its language slug and its optional ast-grep grammar, so the language fence and the grammar lookup cannot disagree. A row without a grammar fences regex conditions only; an ast condition on it skips with a warning.
 - A lesson fires once for each call, on the first surface and pattern that catches it. A compiled set covers one room, or one room and one project, and the cache replaces it when the fingerprint changes.

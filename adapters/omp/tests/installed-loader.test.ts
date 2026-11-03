@@ -1,9 +1,9 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import installedAthanor, { configureInstalledAthanor } from "../installed-loader.ts";
+import installedAthanor, { configureInstalledAthanor, CUTOVER_MARKER, reconnectGate } from "../installed-loader.ts";
 import * as childProcess from "node:child_process";
 
 type NativePointer = {
@@ -792,4 +792,67 @@ test("does not fall back to product-version adapter paths", async () => {
   await writeFile(path.join(oldAdapter, "hygiene.ts"), oldModule);
 
   await expectRefusal(tree, "component root ancestor omp-adapter could not be inspected");
+});
+
+async function loadedGate(tree: InstalledTree) {
+  const options = { programRoot: tree.program, userProfile: tree.profile, env: tree.env };
+  return reconnectGate(configureInstalledAthanor(options), options);
+}
+
+async function rewriteClient(tree: InstalledTree, change: Record<string, unknown>) {
+  const clientPath = path.join(tree.profile, ".omp", "agent", "athanor", "client.json");
+  const client = JSON.parse(await readFile(clientPath, "utf8"));
+  await writeFile(clientPath, JSON.stringify({ ...client, ...change }));
+}
+
+test("reconnect waits out a cutover, then refreshes the projected Host credential", async () => {
+  const tree = await makeInstalledTree();
+  const gate = await loadedGate(tree);
+  expect(gate()).toBeNull();
+
+  const marker = path.join(tree.root, "state", CUTOVER_MARKER);
+  await mkdir(path.dirname(marker), { recursive: true });
+  await writeFile(marker, JSON.stringify({ format: 1, cutoverId: "c-1" }));
+  await rewriteClient(tree, { hostToken: "rotated-token" });
+  expect(gate()).toMatchObject({ code: "cutover_in_progress" });
+  expect(tree.env.ATHANOR_HOST_TOKEN).toBe("private-token");
+
+  await rm(marker);
+  expect(gate()).toBeNull();
+  expect(tree.env.ATHANOR_HOST_TOKEN).toBe("rotated-token");
+});
+
+test("reconnect never replaces a Host credential the operator configured", async () => {
+  const tree = await makeInstalledTree();
+  tree.env.ATHANOR_HOST_TOKEN = "operator-token";
+  const gate = await loadedGate(tree);
+  await rewriteClient(tree, { hostToken: "rotated-token" });
+
+  expect(gate()).toBeNull();
+  expect(tree.env.ATHANOR_HOST_TOKEN).toBe("operator-token");
+});
+
+test("reconnect refuses an installed release this process cannot speak, and names the restart", async () => {
+  const tree = await makeInstalledTree();
+  const gate = await loadedGate(tree);
+  const loadedRelease = tree.manifest.releaseId;
+  const next = await makeInstalledTree(null, "0.10.2", "0.9.4", 2);
+  await cp(next.program, tree.program, { recursive: true, force: true });
+  await rewriteClient(tree, { hostToken: "rotated-token" });
+
+  const refusal = gate();
+  expect(refusal).toMatchObject({ code: "adapter_restart_required" });
+  expect(refusal?.message).toContain("hostApi 2");
+  expect(refusal?.message).toContain(loadedRelease);
+  expect(refusal?.message).toContain("Restart OMP");
+  expect(tree.env.ATHANOR_HOST_TOKEN).toBe("private-token");
+});
+
+test("reconnect refuses a client projection that names another House", async () => {
+  const tree = await makeInstalledTree();
+  const gate = await loadedGate(tree);
+  await rewriteClient(tree, { houseId: "another-house", hostToken: "rotated-token" });
+
+  expect(gate()).toMatchObject({ code: "adapter_restart_required" });
+  expect(tree.env.ATHANOR_HOST_TOKEN).toBe("private-token");
 });

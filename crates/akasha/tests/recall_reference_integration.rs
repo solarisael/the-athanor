@@ -9,7 +9,7 @@
 //! `cargo test -p akasha --test recall_reference_integration -- --ignored`
 
 use akasha::{Config, EmbeddingMode, RecallResult, recall};
-use hearth::{MANUAL_RECORD_CAP, RecallProjection, RecallRequest, RoomKey};
+use hearth::{RecallProjection, RecallRequest, RoomKey};
 use sqlx::{
     PgPool,
     postgres::{PgConnectOptions, PgPoolOptions},
@@ -432,10 +432,13 @@ async fn manual_projection_reads_whole_records_and_exact_only_queries_skip_ranke
     let excerpt = first["excerpt"].as_str().unwrap_or_default();
     assert_eq!(
         excerpt.chars().count(),
-        1201,
+        384,
         "the excerpt stays bounded beside the body"
     );
-    assert!(excerpt.ends_with('…') && !excerpt.contains(tail));
+    assert_eq!(excerpt, long_body.chars().take(384).collect::<String>());
+    assert_eq!(first["passage"]["char_start"], 0);
+    assert_eq!(first["passage"]["char_end"], 384);
+    assert!(first["passage"]["chunk_index"].is_null());
     assert!(!serde_json::to_string(&result)?.contains("Zanzibar"));
 
     // The same exact-only query under the auto projection: same records and
@@ -452,6 +455,45 @@ async fn manual_projection_reads_whole_records_and_exact_only_queries_skip_ranke
     assert!(
         auto.warnings
             .contains(&format!("memory {missing} not found"))
+    );
+
+    let late = db.recall(ROOM, &format!("memory {long} {tail}")).await?;
+    let selected = &late.retrieval_candidates[0];
+    let excerpt = selected["excerpt"].as_str().unwrap_or_default();
+    let start = selected["passage"]["char_start"].as_u64().unwrap() as usize;
+    let end = selected["passage"]["char_end"].as_u64().unwrap() as usize;
+
+    assert_eq!(selected["memory_id"], long);
+    assert!(excerpt.contains(tail));
+    assert!(start > 1200);
+    assert!(end - start <= 384);
+    assert_eq!(
+        excerpt,
+        long_body
+            .chars()
+            .skip(start)
+            .take(end - start)
+            .collect::<String>()
+    );
+    assert!(selected.get("body").is_none());
+    let wire: protocol::RecallResultInput = serde_json::from_value(serde_json::to_value(&late)?)?;
+    let chunk = wire
+        .content_chunks
+        .iter()
+        .find(|chunk| chunk.memory_id == Some(long))
+        .expect("the ranked lane contains the matching source record");
+    let passage = chunk
+        .passage
+        .as_ref()
+        .expect("raw lane retains source coordinates");
+    assert!(chunk.body.contains(tail));
+    assert_eq!(
+        chunk.body,
+        long_body
+            .chars()
+            .skip(passage.char_start as usize)
+            .take((passage.char_end - passage.char_start) as usize)
+            .collect::<String>()
     );
 
     // A single explicit reference is also exact-only in both projections.
@@ -489,7 +531,7 @@ async fn manual_projection_reads_whole_records_and_exact_only_queries_skip_ranke
         .recall_with(ROOM, "lattice record porch", RecallProjection::Manual)
         .await?;
     assert!(natural.found);
-    assert!(natural.retrieval_candidates.len() <= MANUAL_RECORD_CAP);
+    assert!(natural.retrieval_candidates.len() <= 8);
     assert!(
         natural
             .retrieval_candidates
@@ -535,9 +577,9 @@ async fn manual_projection_reads_whole_records_and_exact_only_queries_skip_ranke
         "the auto excerpt of the long record stops before its tail"
     );
 
-    // Exact references exercise the cap without assuming a ranked lane fills it.
+    let limit = 75;
     let mut many = vec![long, second];
-    for index in 0..MANUAL_RECORD_CAP {
+    for index in 0..limit {
         many.push(
             db.memory(
                 ROOM,
@@ -552,23 +594,35 @@ async fn manual_projection_reads_whole_records_and_exact_only_queries_skip_ranke
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    let capped = db
-        .recall_with(ROOM, &format!("memories {list}"), RecallProjection::Manual)
-        .await?;
+    let capped = recall(
+        &db.pool,
+        &db.cfg,
+        RecallRequest::new(
+            RoomKey::new(ROOM)?,
+            format!("memories {list}"),
+            limit,
+            0.3,
+            limit,
+            0.3,
+        )?
+        .with_projection(RecallProjection::Manual),
+        None,
+    )
+    .await?;
     assert_eq!(
         memory_ids(&capped.retrieval_candidates),
-        many[..MANUAL_RECORD_CAP].to_vec(),
-        "reference order leads; the tail past the cap is dropped"
+        many[..limit as usize].to_vec(),
+        "the caller's limit controls the selected records"
     );
-    let dropped = many[MANUAL_RECORD_CAP..]
+    let dropped = many[limit as usize..]
         .iter()
         .map(|id| id.to_string())
         .collect::<Vec<_>>()
         .join(", ");
     assert!(
         capped.warnings.contains(&format!(
-            "manual record cap {MANUAL_RECORD_CAP}: {} selected records dropped (memories {dropped})",
-            many.len() - MANUAL_RECORD_CAP
+            "manual record limit {limit}: {} selected records dropped (memories {dropped})",
+            many.len() - limit as usize
         )),
         "the cap names every dropped record: {:?}",
         capped.warnings
@@ -579,6 +633,29 @@ async fn manual_projection_reads_whole_records_and_exact_only_queries_skip_ranke
         many,
         "the auto projection keeps every resolved reference; the viewport budgets it"
     );
+
+    let ranked = recall(
+        &db.pool,
+        &db.cfg,
+        RecallRequest::new(
+            RoomKey::new(ROOM)?,
+            "lattice record porch".into(),
+            limit,
+            0.3,
+            limit,
+            0.3,
+        )?
+        .with_projection(RecallProjection::Manual),
+        None,
+    )
+    .await?;
+    assert_eq!(ranked.retrieval_candidates.len(), limit as usize);
+    assert!(ranked.retrieval_candidates.iter().all(|row| {
+        row["memory_id"]
+            .as_i64()
+            .is_some_and(|id| many.contains(&id))
+            && row["body"].is_string()
+    }));
 
     db.close().await
 }

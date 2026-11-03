@@ -1,4 +1,4 @@
-use super::evidence::bounded_excerpt;
+use super::evidence::source_passage;
 use super::scope::ScopeFilter;
 use super::temporal::{compare_weighted_lane, memory_temporal_factor};
 use crate::bm25f::{
@@ -12,11 +12,9 @@ use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, BTreeSet};
 
-const BM25F_TOP_K: usize = 8;
 // enough: 16_384 is the ranked prefilter ceiling; past it the truncation
 // warning below still says the ranker never saw the rest.
 const BM25F_MAX_CANDIDATES: i64 = 16_384;
-const BM25F_BROAD_TOP_K: usize = 16_384;
 const BM25F_BROAD_MAX_CANDIDATES: i64 = 16_384;
 
 #[derive(Clone, Copy)]
@@ -39,6 +37,7 @@ pub(super) async fn load_bm25f_candidates_for_terms(
     decay_now: DateTime<Utc>,
     settings: &RoomSettings,
     warnings: &mut Vec<String>,
+    result_limit: usize,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     load_bm25f_candidates_for_terms_bounded(
         pool,
@@ -49,8 +48,8 @@ pub(super) async fn load_bm25f_candidates_for_terms(
         decay_now,
         settings,
         warnings,
-        BM25F_MAX_CANDIDATES,
-        BM25F_TOP_K,
+        BM25F_MAX_CANDIDATES.max(result_limit as i64),
+        result_limit,
         true,
     )
     .await
@@ -64,6 +63,7 @@ pub(super) async fn load_bm25f_candidates_for_terms_broad(
     temporal_decay: bool,
     decay_now: DateTime<Utc>,
     settings: &RoomSettings,
+    result_limit: usize,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     let mut ignored_warnings = Vec::new();
     load_bm25f_candidates_for_terms_bounded(
@@ -76,7 +76,7 @@ pub(super) async fn load_bm25f_candidates_for_terms_broad(
         settings,
         &mut ignored_warnings,
         BM25F_BROAD_MAX_CANDIDATES,
-        BM25F_BROAD_TOP_K,
+        result_limit.min(BM25F_BROAD_MAX_CANDIDATES as usize),
         false,
     )
     .await
@@ -316,7 +316,7 @@ async fn load_bm25f_candidates_for_terms_bounded(
             "source_path": source_path,
             "title": title,
             "heading_path": heading_path,
-            "body": bounded_excerpt(&body),
+            "body": body,
             "chunk_index": row.try_get::<i32,_>("chunk_index")?,
             "memory_type": memory_type,
             "memory_age_days": age_days,
@@ -337,5 +337,13 @@ async fn load_bm25f_candidates_for_terms_bounded(
             .is_some_and(|memory_id| seen_memories.insert(memory_id))
     });
     candidates.truncate(result_limit);
+    for candidate in &mut candidates {
+        let serde_json::Value::String(body) = candidate["body"].take() else {
+            unreachable!("ranked candidate owns its source body");
+        };
+        let (excerpt, passage) = source_passage(&body, terms, candidate["chunk_index"].as_i64());
+        candidate["body"] = serde_json::json!(excerpt);
+        candidate["passage"] = serde_json::json!(passage);
+    }
     Ok(candidates)
 }

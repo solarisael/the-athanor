@@ -73,10 +73,8 @@ pub async fn design_document_query(
             "docType must be token, component, contract, or guideline".into(),
         ));
     }
-    if !(1..=50).contains(&params.limit) {
-        return Err(AppError::Invalid(
-            "limit must be an integer from 1 through 50".into(),
-        ));
+    if params.limit == 0 {
+        return Err(AppError::Invalid("limit must be a positive integer".into()));
     }
     let settings = RoomSettings::load(pool, "house").await?;
     let mut qb = QueryBuilder::<Postgres>::new(

@@ -4,24 +4,15 @@ use crate::room::RoomKey;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-const MAX_RECALL_TOP_K: u32 = 1_000;
 /// Maximum number of automatic candidates exposed through the optional
 /// reranking sidecar.
 pub const MAX_RERANK_CANDIDATE_TOP_K: u32 = 64;
 
-/// Most records a manual projection hands back whole. A manual read is a
-/// deliberate ask, so it seats more than the automatic working set the Host
-/// viewport keeps per turn; the cap trims by count and says so in `warnings`,
-/// it never clips a selected record's body.
-pub const MANUAL_RECORD_CAP: usize = 12;
-
 /// How a recall's selected records reach the caller.
 ///
-/// `Auto` is the passive working set a turn receives without asking: bounded
-/// excerpts under the context budget. `Manual` is an operator-visible tool
-/// read: every selected record carries its complete authoritative database
-/// body, bounded only by `MANUAL_RECORD_CAP`. The projection is named at the
-/// request boundary; nothing infers it from query syntax.
+/// `Auto` keeps bounded excerpts for the passive working set.
+/// `Manual` returns complete records within the caller's lane count.
+/// The request names the projection explicitly.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecallProjection {
@@ -132,7 +123,7 @@ impl RecallRequest {
             ("semantic_top_k", semantic_top_k),
             ("content_top_k", content_top_k),
         ] {
-            if value == 0 || value > MAX_RECALL_TOP_K {
+            if value == 0 {
                 return Err(DomainError::InvalidTopK {
                     field: field.into(),
                     value,
@@ -239,7 +230,7 @@ impl RecallRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::{MANUAL_RECORD_CAP, MAX_RERANK_CANDIDATE_TOP_K, RecallProjection, RecallRequest};
+    use super::{MAX_RERANK_CANDIDATE_TOP_K, RecallProjection, RecallRequest};
     use crate::room::RoomKey;
 
     #[test]
@@ -260,7 +251,6 @@ mod tests {
             serde_json::from_str::<RecallProjection>(r#""auto""#).unwrap(),
             RecallProjection::Auto
         );
-        assert!(MANUAL_RECORD_CAP >= 1);
     }
 
     #[test]

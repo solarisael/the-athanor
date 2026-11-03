@@ -445,7 +445,7 @@ impl RememberRequest {
         }
         if operator.is_none() && scope.is_some_and(|scope| scope != MemoryScope::Company) {
             return Err(DomainError::InvalidField {
-                field: "memory scope up/private without a Host operator".into(),
+                field: "memory scope up/private requires a Host operator key; set rooms[].operator in the installed House configuration".into(),
                 kind: self.kind.as_str().into(),
             });
         }

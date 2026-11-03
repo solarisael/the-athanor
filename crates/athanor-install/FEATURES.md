@@ -22,6 +22,9 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 - **Native verification.** `verify_native_release` compares the retained manifest with the declared one, then checks the size and the SHA-256 digest of every artifact.
 - **Preflight.** It verifies every staged artifact, requires a valid adapter fallback, requires a room state file outside its own rooms root, and requires absolute operator paths with a present loader.
 - **Configuration.** `write_configuration` writes the runtime file and, on first install, generates a 32-byte host token and a 32-byte database password. It restricts the access list on the secret file and its directory.
+- **Memory ownership.** Each room accepts an optional `operator` key.
+  Installation and startup validate the key through `OperatorKey`.
+  The desktop Host receives that key and does not derive it from the room-state display name.
 - **Operator integration.** `write_operator_integration` writes the client projection, restricts it to the operator, then registers the loader. The projection holds one `hostUrl` for the House and a `rooms` map, not one endpoint per room (`installer.rs:1316-1340`; `omp.rs:14-22`).
 - **Legacy import.** `import_legacy_once` runs one time. A marker file stops every later attempt.
 - **Uninstall and purge.** `uninstall` stops and removes the service, unregisters the loader, removes the client directory, then removes the program tree. `purge` adds the data tree and demands explicit confirmation.
@@ -162,6 +165,8 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 - **`start`.** Starts only what `status` reports missing, in order. The service starts only with `--service`, through `sc start`; a denied start is the typed refusal `needs_elevation` and exit code 3. PostgreSQL and NATS are waited for after the service. The Host starts detached and is waited for on its port. Keepers are never started; the report names the command.
 - **`deploy`.** `prepare` runs the source deployment driver with `-PrepareOnly`.
   `install RECEIPT` runs that driver with `-PreparedRelease`.
+  `--house-config-file FILE` changes the House configuration during installation.
+  The driver receives the absolute path as `-HouseConfigFile`.
   `--source DIR` selects the checkout explicitly. Invalid selections refuse without fallback.
   Otherwise, installation searches the receipt ancestry before the current directory ancestry.
   Preparation searches the current directory ancestry.

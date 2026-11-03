@@ -190,45 +190,36 @@ Not re-verified at a6ab453; `crates/host` (`insula.rs`) would decide:
 
 ### viewport
 
-`src/viewport.rs`. The presentation filter for a recall result. The socket reaches it through `ApplyRecallViewport` and `AnalyzeContext`; it has no HTTP route (`server.rs:746-775,799-801`).
+`src/viewport.rs` owns the final Recall presentation.
 
-- `apply_viewport` turns one result into a bounded presentation plus diagnostics (`viewport.rs:448`).
-- Automatic mode suppresses a candidate as `zero-terms`, `glue-only`, `insufficient-evidence`, or `saturated` (`viewport.rs:484-508`).
-- A candidate needs two independent signals, unless an exact signal matches (`viewport.rs:484-508`).
-- A candidate already exposed in this session is `saturated` (`viewport.rs:484-508`).
-- Automatic mode keeps at most 5 candidates. Manual mode keeps `hearth::MANUAL_RECORD_CAP`. Overflow becomes a `record-cap` suppression (`viewport.rs:115,465-468,520-534`).
-- Manual mode also warns with the dropped ids (`viewport.rs:579-587`).
-- Candidate fields have ceilings: an excerpt of 900 characters, 6 neighbors, and 5 reasons (`viewport.rs:89-110,278-332`).
-- Canon is kept only when exact or file-linked, at most 6 rows. A cut summary carries `full_read` (`viewport.rs:122-128,355-430`).
-- Raw chunks, at most 5, appear only when no candidate is kept (`viewport.rs:432-446`).
-- Manual mode adds the taxonomy, the cluster nudge, the cluster resonance, and the memory handle (`viewport.rs:588-675`).
-- Automatic mode keeps at most 8 warnings of 300 characters each. Manual warnings are unbounded. Manual mode keeps the whole `body`; Automatic mode drops it (`viewport.rs:335-338,550-578`).
-
-Not re-verified at a6ab453; `crates/host` (`viewport.rs`) would decide:
-
-- The value of `hearth::MANUAL_RECORD_CAP`. The comment says 5 (`viewport.rs:111-115`).
-- The list of exact signals, and whether Manual mode ever counts an exposure.
-- The diagnostic counts for each reason.
+- Automatic mode requires candidate-specific exact evidence or meaningful lexical matches.
+- `AutomaticJudged` accepts active Jev relevance selections within the same automatic payload limits.
+- Both automatic modes exclude raw semantic and content fallback.
+- One named canon match does not admit unrelated memory candidates.
+- Candidate and canon identities are unique within each presentation.
+- Earlier exposure does not prevent a record from entering a later current snapshot.
+- Automatic mode keeps at most five candidates and six canon rows.
+- Candidate passages retain their source coordinates.
+- Manual mode retains complete selected record bodies and explicit overflow warnings.
+- `found` describes the evidence actually presented.
 
 ### policy
 
-`src/policy.rs`. The Recall Policy decision engine, held for each sender session. It gates the recall refresh and clear decision, not an HTTP door.
+`src/policy.rs` owns retrieval actions for each sender session.
+`src/recall_plan.rs` forms bounded, source-grounded alternatives.
 
-- A refresh is eligible only in a non-Quiet mode, and only with an explicit lookup, a technical project, or pending recovery (`policy.rs:220-221`).
-- A decision returns one action: none, clear, refresh, or clear then refresh. Clear happens on Quiet, a mode change, or a project change (`policy.rs:274-284`).
-- Auto mode resolves in order: a technical project gives work. A lookup gives mixed with a project, or conversation without one (`policy.rs:364-429`).
-- Tool evidence gives work. A judged mode lives one turn. Conversation needs two turns of hysteresis (`policy.rs:210-212,364-429`).
-- Refresh reasons rank: post-compaction recovery, requested mode change, active project change, resolved mode change, empty working set, explicit lookup, topic change, stale working set (`policy.rs:245-273`).
-- A working set goes stale after 8 turns or 4096 tokens (`policy.rs:245-273`).
-- A topic change needs at least 3 terms on both sides and an overlap below 0.25 (`policy.rs:245-273`).
-- A degradation text holds at most 240 characters (`policy.rs:299,311`).
-- `apply_requested_mode` writes `explicit-override`, or `awaiting-auto-resolution` for Auto (`policy.rs:347-361`).
-
-Not re-verified at a6ab453; `crates/host` (`policy.rs`) would decide:
-
-- Query terms stay unique and hold at most 16 entries.
-- `complete_refresh` clears recovery. `invalidate_after_compaction` seeds recovery terms from the summary.
-- The serialized form keeps the older field names.
+- Plans can request search, reuse, or skip.
+- Contextual plans retain natural query wording and at most 16 subject terms.
+- Query text contains at most 1,024 Unicode scalar values.
+- The session retains an actual user-origin subject across chained follow-ups.
+- A substantive new subject can replace that subject even when retrieval is skipped.
+- Generated turns cannot create user-origin subjects.
+- Quiet, explicit references, recovery, identity, and project boundaries retain precedence.
+- Refreshes retire prior working evidence before retrieval.
+- Failed refreshes record degradation and leave no current working evidence.
+- Existing staleness checks use eight turns or 4,096 additional estimated tokens.
+- Compaction clears the evidence snapshot and records bounded recovery terms.
+- Context format 2 removes obsolete topical frame content while preserving valid room identity.
 
 ### routing and dispatch
 

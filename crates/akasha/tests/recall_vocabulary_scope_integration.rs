@@ -445,7 +445,7 @@ fn assert_expansion(result: &RecallResult, sources: &[&ThreadFixture], context: 
 #[tokio::test]
 #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL pointing to an isolated test database"]
 async fn hardening_thread_vocabulary_uses_operator_visibility() -> TestResult {
-    let (company, private, upward, inactive, lexical_only, author, leader, restricted) =
+    let (company, private, upward, empty_registry, lexical_only, author, leader, restricted) =
         observe(|db| async move {
             let operators: i64 = sqlx::query_scalar("SELECT count(*) FROM operators")
                 .fetch_one(&db.pool)
@@ -453,7 +453,7 @@ async fn hardening_thread_vocabulary_uses_operator_visibility() -> TestResult {
 
             if operators != 0 {
                 return Err(
-                    "the inactive-axis control requires a database with no committed operators"
+                    "the empty-registry control requires a database with no committed operators"
                         .into(),
                 );
             }
@@ -469,7 +469,7 @@ async fn hardening_thread_vocabulary_uses_operator_visibility() -> TestResult {
                     .await?;
             }
 
-            let inactive = db.recall_as(None, QUERY, true).await?;
+            let empty_registry = db.recall_as(None, QUERY, true).await?;
             db.register_operators().await?;
             let lexical_only = db.recall_as(Some(&writer), QUERY, false).await?;
             let author = db.recall_as(Some(&writer), QUERY, true).await?;
@@ -488,7 +488,7 @@ async fn hardening_thread_vocabulary_uses_operator_visibility() -> TestResult {
                 company,
                 private,
                 upward,
-                inactive,
+                empty_registry,
                 lexical_only,
                 author,
                 leader,
@@ -501,7 +501,9 @@ async fn hardening_thread_vocabulary_uses_operator_visibility() -> TestResult {
         memory_ids(&lexical_only).is_empty(),
         "the unrelated query must need vocabulary expansion"
     );
-    assert_expansion(&inactive, &[&company, &private, &upward], "inactive axis");
+    assert_expansion(&empty_registry, &[&company], "empty registry");
+    assert!(!memory_ids(&empty_registry).contains(&private.target_id));
+    assert!(!memory_ids(&empty_registry).contains(&upward.target_id));
     assert_expansion(&author, &[&company, &private, &upward], "writer control");
     assert_expansion(&leader, &[&company, &upward], "ancestor control");
     assert!(

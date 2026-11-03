@@ -4,6 +4,7 @@ mod identity;
 mod lessons;
 mod materials;
 mod observations;
+mod orihon;
 mod recall;
 mod telemetry;
 
@@ -119,17 +120,10 @@ pub(super) fn invalidate(
         Some(saved) => saved,
         None => cache::load(state, session, None, &[])?,
     };
-    remove_recall(&mut saved);
+    cache::retire_recall(&mut saved);
     let result = cache::commit(state, session, &saved);
     context.saved = Some(saved);
     result
-}
-
-fn remove_recall(saved: &mut SavedSession) {
-    for turn in &mut saved.turns {
-        turn.blocks
-            .retain(|block| block.kind != BlockKind::RecallContext);
-    }
 }
 
 pub(super) async fn lesson_plan(state: &AppState, meta: CommandMeta, raw: Value) -> Responses {
@@ -241,7 +235,7 @@ async fn prepare_inner(state: &AppState, meta: &CommandMeta, raw: Value) -> Resu
     };
     let mut saved = saved;
     if compacted_before_adoption {
-        remove_recall(&mut saved);
+        cache::retire_recall(&mut saved);
     }
     saved
         .turns
@@ -252,10 +246,11 @@ async fn prepare_inner(state: &AppState, meta: &CommandMeta, raw: Value) -> Resu
     )
     .await?;
     request.operation_id = format!("{}:{}", saved.generation, request.turn_id);
-    if saved
-        .turns
-        .iter()
-        .any(|turn| turn.turn_id == request.turn_id)
+    if identity.invalidation.is_none()
+        && saved
+            .turns
+            .iter()
+            .any(|turn| turn.turn_id == request.turn_id)
     {
         let report_coverage = coverage(state).await;
         let identity_fence = bounded(plan.deadline, identity::fence(state, &saved)).await?;
@@ -459,6 +454,7 @@ async fn organ(
             target_scope: OrganTargetScope::Room,
         },
         &state.giga,
+        &state.orihon,
     )
     .await
     {
@@ -483,7 +479,14 @@ fn child_meta(meta: &CommandMeta, turn: &str, stage: &str, projection: &str) -> 
 
 async fn command(state: &AppState, command: ClientCommand, hash: Value) -> Result<Value, String> {
     super::validate_command(state, &command)?;
-    let response = super::execute_service_command(state, command, body_hash(&hash)?).await;
+    // The service dispatcher is a large future; do not inline it into every
+    // nested context command's polling frame.
+    let response = Box::pin(super::execute_service_command(
+        state,
+        command,
+        body_hash(&hash)?,
+    ))
+    .await;
     if let Some(delta) = response.delta {
         let _ = state.deltas.send(delta);
     }
@@ -501,6 +504,7 @@ async fn command(state: &AppState, command: ClientCommand, hash: Value) -> Resul
 
 async fn judge(state: &AppState, request: JudgmentRequest) -> Result<Value, String> {
     let grant = match &request {
+        JudgmentRequest::RecallPlan { .. } => Some("recallPlan"),
         JudgmentRequest::RecallRerank {
             grant: RecallGrantKind::Recall,
             ..
@@ -552,6 +556,7 @@ async fn coverage(state: &AppState) -> Value {
     let sessions = state.context_sessions.lock().await;
     json!({
         "recall":sessions.coverage.get("recall").cloned().unwrap_or_else(empty_coverage),
+        "recallPlan":sessions.coverage.get("recallPlan").cloned().unwrap_or_else(empty_coverage),
         "lessons":sessions.coverage.get("lessons").cloned().unwrap_or_else(empty_coverage)
     })
 }

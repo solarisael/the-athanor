@@ -617,6 +617,7 @@ pub async fn execute_service(
                     room_dir: PathBuf::from(request.room_dir),
                     room: request.room,
                     query: request.query,
+                    limit: request.limit,
                 }) {
                     Ok(result) => success_json(id, result)?,
                     Err(error) => protocol_error(

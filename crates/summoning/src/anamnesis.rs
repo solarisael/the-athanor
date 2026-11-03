@@ -41,7 +41,7 @@ impl AnamnesisReadRequest {
         query: Option<String>,
         limit: u32,
     ) -> Result<Self, DomainError> {
-        if !(1..=50).contains(&limit) {
+        if limit == 0 {
             return Err(DomainError::InvalidAnamnesisLimit { value: limit });
         }
         let query = query.map(|q| q.trim().to_owned()).filter(|q| !q.is_empty());

@@ -1,6 +1,6 @@
 use super::Phase;
 use super::embedding::embed_query;
-use super::evidence::{bounded_excerpt, candidate_terms, subject_retry_text};
+use super::evidence::{candidate_terms, source_passage, subject_retry_text};
 use super::memory_reference::MemoryReferences;
 use super::scope::ScopeFilter;
 use super::temporal::memory_temporal_factor;
@@ -164,7 +164,9 @@ impl SemanticLane<'_> {
                     &body,
                 ],
             );
-            semantic_chunks.push(serde_json::json!({"memory_id":row.try_get::<i64,_>("memory_id")?,"source_path":source_path,"title":title,"heading_path":heading_path,"body":bounded_excerpt(&body),"char_start":row.try_get::<i32,_>("char_start")?,"char_end":row.try_get::<i32,_>("char_end")?,"chunk_index":row.try_get::<i32,_>("chunk_index")?,"sim":sim,"durability":durability,"temporal_weight":temporal_weight,"matched_terms":matched_terms,"missing_terms":missing_terms,"term_coverage":coverage,"evidence":evidence}));
+            let chunk_index = i64::from(row.try_get::<i32, _>("chunk_index")?);
+            let (excerpt, passage) = source_passage(&body, self.query_terms, Some(chunk_index));
+            semantic_chunks.push(serde_json::json!({"memory_id":row.try_get::<i64,_>("memory_id")?,"source_path":source_path,"title":title,"heading_path":heading_path,"body":excerpt,"passage":passage,"char_start":row.try_get::<i32,_>("char_start")?,"char_end":row.try_get::<i32,_>("char_end")?,"chunk_index":chunk_index,"sim":sim,"durability":durability,"temporal_weight":temporal_weight,"matched_terms":matched_terms,"missing_terms":missing_terms,"term_coverage":coverage,"evidence":evidence}));
         }
         Ok(semantic_chunks)
     }

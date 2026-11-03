@@ -1,4 +1,3 @@
-use hearth::MANUAL_RECORD_CAP;
 use protocol::{
     RecallCandidate, RecallCanonMatch, RecallPresentation, RecallPresentationCandidate,
     RecallPresentationCanonMatch, RecallPresentationClusterProfile,
@@ -108,10 +107,6 @@ const MAX_TERM_CHARS: usize = 128;
 const MAX_REASONS: usize = 5;
 const MAX_REASON_CHARS: usize = 256;
 const MAX_CANDIDATE_EXCERPT_CHARS: usize = 900;
-// Seats one automatic presentation keeps. A manual record read seats more
-// (`hearth::MANUAL_RECORD_CAP`): it is a deliberate ask and fills each seat
-// with the whole record, while this count rides every turn under the context
-// budget.
 const MAX_KEPT_CANDIDATES: usize = 5;
 // Warnings are one line each. An automatic turn reads a handful under its
 // budget; a manual read keeps every warning whole, because each missing,
@@ -129,7 +124,6 @@ const MAX_CANON_HINT_CHARS: usize = 480;
 
 #[derive(Debug, Default)]
 pub struct ViewportSession {
-    exposures: HashMap<String, u64>,
     last_nudge_band: u64,
 }
 
@@ -171,29 +165,37 @@ fn distinctive_exact_term(value: &str) -> bool {
         && !NON_DISTINCTIVE_EXACT_TERMS.contains(&term.as_str())
 }
 
-fn candidate_identity(candidate: &RecallCandidate, index: usize) -> String {
-    if let Some(explicit) = candidate
-        .id
-        .as_deref()
-        .or(candidate.identity.as_deref())
-        .or(candidate.candidate_id.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return explicit.to_owned();
+fn candidate_identity(candidate: &RecallCandidate) -> Option<String> {
+    if let Some(id) = candidate.memory_id {
+        return Some(format!("memory:{id}"));
     }
+
+    if let Some(explicit) = [
+        candidate.id.as_deref(),
+        candidate.identity.as_deref(),
+        candidate.candidate_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .find(|value| !value.is_empty())
+    {
+        return Some(explicit.to_owned());
+    }
+
     let path = path_key(&candidate.source_path);
-    let title = key(&candidate.title);
-    if path.is_empty() && title.is_empty() {
-        format!("candidate:{index}")
+
+    if path.is_empty() {
+        None
     } else {
-        format!("{path}|{title}")
+        Some(format!("source:{path}"))
     }
 }
 
 fn canon_file_paths(matches: &[RecallCanonMatch]) -> Vec<String> {
     matches
         .iter()
+        .filter(|entry| entry.entry.exact)
         .flat_map(|entry| entry.entry.files.iter())
         .map(|file| path_key(&file.file))
         .filter(|path| !path.is_empty())
@@ -209,70 +211,29 @@ fn date_paths(result: &RecallResultInput) -> Vec<String> {
         .collect()
 }
 
-fn exact_signals(
+fn has_exact_signal(
     candidate: &RecallCandidate,
     query: &str,
     canon_files: &[String],
-    canon_terms: &[String],
     dates: &[String],
-) -> HashSet<&'static str> {
-    let sources = candidate
-        .sources
-        .iter()
-        .map(|value| key(value))
-        .collect::<Vec<_>>();
-    let reasons = candidate
-        .reasons
-        .iter()
-        .map(|value| key(value))
-        .collect::<Vec<_>>();
+) -> bool {
     let path = path_key(&candidate.source_path);
-    let mut signals = HashSet::new();
-    if sources.iter().any(|value| value.contains("canon"))
-        || reasons.iter().any(|value| value.contains("canon"))
-        || canon_files.iter().any(|value| value == &path)
-        || canon_terms.iter().any(|term| contains_term(query, term))
-    {
-        signals.insert("canon");
-    }
-    if sources.iter().any(|value| value.contains("entity"))
-        || reasons.iter().any(|value| value.contains("named entity"))
-    {
-        signals.insert("entity");
-    }
-    if sources.iter().any(|value| value.contains("date"))
-        || dates.iter().any(|value| value == &path)
-    {
-        signals.insert("date");
-    }
-    if sources.iter().any(|value| value == "exact_id")
-        || reasons.iter().any(|value| value == "exact memory id")
-    {
-        signals.insert("id");
-    }
-    if sources.iter().any(|value| value.contains("project"))
-        || reasons.iter().any(|value| value.contains("project"))
-    {
-        signals.insert("project");
-    }
-    if (key(&candidate.title).len() >= DISTINCTIVE_TERM_MIN_CHARS
-        && contains_term(query, &candidate.title))
+    let exact_id = candidate.source.as_deref() == Some("exact_id")
         || candidate
-            .matched_terms
+            .reasons
             .iter()
-            .any(|term| distinctive_exact_term(term) && contains_term(&candidate.title, term))
-    {
-        signals.insert("title");
-    }
-    if candidate
-        .matched_terms
-        .iter()
-        .any(|term| distinctive_exact_term(term) && contains_term(&path, term))
+            .any(|reason| reason == "exact memory id");
+
+    exact_id
+        || canon_files.iter().any(|value| value == &path)
+        || dates.iter().any(|value| value == &path)
+        || (key(&candidate.title).len() >= DISTINCTIVE_TERM_MIN_CHARS
+            && contains_term(query, &candidate.title))
+        || candidate.matched_terms.iter().any(|term| {
+            distinctive_exact_term(term)
+                && (contains_term(&candidate.title, term) || contains_term(&path, term))
+        })
         || (path.len() >= DISTINCTIVE_TERM_MIN_CHARS && contains_term(query, &path))
-    {
-        signals.insert("path");
-    }
-    signals
 }
 
 fn compact_candidate(
@@ -330,11 +291,23 @@ fn compact_candidate(
             .map(|value| bounded(value, MAX_REASON_CHARS))
             .collect(),
         excerpt: bounded(&candidate.excerpt, MAX_CANDIDATE_EXCERPT_CHARS),
+        passage: candidate.passage.as_ref().map(|passage| {
+            let mut passage = passage.clone();
+            passage.char_end = passage.char_end.min(
+                passage.char_start
+                    + candidate
+                        .excerpt
+                        .chars()
+                        .take(MAX_CANDIDATE_EXCERPT_CHARS)
+                        .count() as u64,
+            );
+            passage
+        }),
         // A manual read is the whole selected record; the count cap upstream
         // is the only budget. An automatic working set never carries a body.
         body: match mode {
             RecallViewportMode::Manual => candidate.body.clone(),
-            RecallViewportMode::Automatic => None,
+            RecallViewportMode::Automatic | RecallViewportMode::AutomaticJudged => None,
         },
     }
 }
@@ -378,12 +351,12 @@ fn compact_canon(
     matches: &[RecallCanonMatch],
     query: &str,
     candidate_paths: &HashSet<String>,
-    session: &mut ViewportSession,
-    mode: RecallViewportMode,
     suppressions: &mut Vec<RecallViewportSuppression>,
     reason_counts: &mut HashMap<String, u64>,
+    mode: RecallViewportMode,
 ) -> Vec<RecallPresentationCanonMatch> {
     let mut kept = Vec::new();
+    let mut identities = HashSet::new();
     for entry in matches {
         let exact = entry.entry.exact || direct_canon_match(entry, query);
         let by_file = entry
@@ -394,24 +367,18 @@ fn compact_canon(
         if !(exact || by_file) {
             continue;
         }
-        if kept.len() >= 6 {
+        if mode != RecallViewportMode::Manual && kept.len() >= 6 {
             break;
         }
-        // The same entity version already sits in this session's context;
-        // repeating a whole assertion says nothing new. Compaction clears the
-        // session, so a reorientation after it sees the row again in full.
         let identity = canon_identity(entry);
-        let exposures = session.exposures.get(&identity).copied().unwrap_or(0);
-        if mode == RecallViewportMode::Automatic && exposures >= 1 {
+
+        if !identities.insert(identity.clone()) {
             suppressions.push(RecallViewportSuppression {
                 identity,
-                reason: "saturated".into(),
+                reason: "duplicate".into(),
             });
-            *reason_counts.entry("saturated".into()).or_default() += 1;
+            *reason_counts.entry("duplicate".into()).or_default() += 1;
             continue;
-        }
-        if mode == RecallViewportMode::Automatic {
-            session.exposures.insert(identity, exposures + 1);
         }
         let (summary, truncated, full_read) = canon_summary(entry, exact);
         kept.push(RecallPresentationCanonMatch {
@@ -435,77 +402,72 @@ fn compact_raw_chunks(
 ) -> Vec<RecallPresentationRawChunk> {
     values
         .iter()
-        .take(5)
         .map(|entry| RecallPresentationRawChunk {
             source_path: bounded(&entry.source_path, 2048),
             heading_path: bounded(&entry.heading_path, 1024),
             score: if semantic { entry.sim } else { entry.ws },
             body: bounded(&entry.body, 900),
+            passage: entry.passage.clone(),
         })
         .collect()
 }
 
 pub fn apply_viewport(
     result: RecallResultInput,
-    session: &mut ViewportSession,
+    _session: &mut ViewportSession,
     mode: RecallViewportMode,
 ) -> RecallViewportResult {
-    let glue = DEFAULT_GLUE_TERMS.iter().copied().collect::<HashSet<_>>();
     let canon_files = canon_file_paths(&result.canon_matches);
-    let canon_terms = result
-        .canon_matches
-        .iter()
-        .map(|entry| entry.term_key.clone())
-        .collect::<Vec<_>>();
     let dates = date_paths(&result);
     let mut kept = Vec::new();
     let mut suppressions = Vec::new();
     let mut reason_counts = HashMap::<String, u64>::new();
-    let mut overflow = Vec::<String>::new();
+    let mut identities = HashSet::new();
     let keep_cap = match mode {
-        RecallViewportMode::Manual => MANUAL_RECORD_CAP,
-        RecallViewportMode::Automatic => MAX_KEPT_CANDIDATES,
+        RecallViewportMode::Manual => usize::MAX,
+        RecallViewportMode::Automatic | RecallViewportMode::AutomaticJudged => MAX_KEPT_CANDIDATES,
     };
-    // Only `retrievalCandidates[].body` carries a whole record, and only in a
-    // manual read. Date and canon lanes keep their pre-existing bounds in both
-    // modes so the record cap cannot be bypassed through a second lane.
     let (warning_cap, warning_chars) = match mode {
         RecallViewportMode::Manual => (usize::MAX, usize::MAX),
-        RecallViewportMode::Automatic => (MAX_WARNINGS_AUTOMATIC, MAX_WARNING_CHARS_AUTOMATIC),
+        RecallViewportMode::Automatic | RecallViewportMode::AutomaticJudged => {
+            (MAX_WARNINGS_AUTOMATIC, MAX_WARNING_CHARS_AUTOMATIC)
+        }
     };
 
     for (index, candidate) in result.retrieval_candidates.iter().enumerate() {
-        let identity = candidate_identity(candidate, index);
-        let meaningful = candidate
-            .matched_terms
-            .iter()
-            .filter(|term| !glue.contains(key(term).as_str()))
-            .collect::<Vec<_>>();
-        let mut reason =
-            if mode == RecallViewportMode::Automatic && candidate.matched_terms.is_empty() {
-                Some("zero-terms")
-            } else if mode == RecallViewportMode::Automatic && meaningful.is_empty() {
+        let Some(identity) = candidate_identity(candidate) else {
+            suppressions.push(RecallViewportSuppression {
+                identity: format!("candidate:{index}"),
+                reason: "missing-identity".into(),
+            });
+            *reason_counts.entry("missing-identity".into()).or_default() += 1;
+            continue;
+        };
+        let reason = if identities.contains(&identity) {
+            Some("duplicate")
+        } else if mode != RecallViewportMode::Automatic
+            || has_exact_signal(candidate, &result.query, &canon_files, &dates)
+        {
+            None
+        } else if candidate.matched_terms.is_empty() {
+            Some("zero-terms")
+        } else {
+            let meaningful = candidate
+                .matched_terms
+                .iter()
+                .map(|term| key(term))
+                .filter(|term| !DEFAULT_GLUE_TERMS.contains(&term.as_str()))
+                .collect::<HashSet<_>>();
+
+            if meaningful.is_empty() {
                 Some("glue-only")
+            } else if meaningful.len() < 2 {
+                Some("insufficient-evidence")
             } else {
                 None
-            };
-        let exact = exact_signals(candidate, &result.query, &canon_files, &canon_terms, &dates);
-        let independent = meaningful
-            .iter()
-            .map(|term| key(term))
-            .chain(exact.iter().map(|signal| format!("exact:{signal}")))
-            .collect::<HashSet<_>>();
-        if mode == RecallViewportMode::Automatic
-            && reason.is_none()
-            && exact.is_empty()
-            && independent.len() < 2
-        {
-            reason = Some("insufficient-evidence");
-        }
-        let exposures = session.exposures.get(&identity).copied().unwrap_or(0);
-        if mode == RecallViewportMode::Automatic && reason.is_none() && exposures >= 1 {
-            reason = Some("saturated");
-        }
+            }
+        };
+
         if let Some(reason) = reason {
             suppressions.push(RecallViewportSuppression {
                 identity,
@@ -513,19 +475,9 @@ pub fn apply_viewport(
             });
             *reason_counts.entry(reason.into()).or_default() += 1;
         } else if kept.len() < keep_cap {
-            if mode == RecallViewportMode::Automatic {
-                session.exposures.insert(identity, exposures + 1);
-            }
+            identities.insert(identity);
             kept.push(compact_candidate(candidate, mode));
         } else {
-            // Every seat is taken. The overflow is still accounted: a
-            // suppression per row, never a silent drop.
-            overflow.push(
-                candidate
-                    .memory_id
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| identity.clone()),
-            );
             suppressions.push(RecallViewportSuppression {
                 identity,
                 reason: "record-cap".into(),
@@ -542,12 +494,11 @@ pub fn apply_viewport(
         &result.canon_matches,
         &result.query,
         &candidate_paths,
-        session,
-        mode,
         &mut suppressions,
         &mut reason_counts,
+        mode,
     );
-    let include_raw = kept.is_empty();
+    let include_raw = mode == RecallViewportMode::Manual && kept.is_empty();
     let semantic_chunks = include_raw
         .then(|| compact_raw_chunks(&result.semantic_chunks, true))
         .unwrap_or_default();
@@ -557,7 +508,11 @@ pub fn apply_viewport(
     let date_matches = result
         .date_matches
         .iter()
-        .take(5)
+        .take(if mode == RecallViewportMode::Manual {
+            usize::MAX
+        } else {
+            5
+        })
         .map(|entry| RecallPresentationDateMatch {
             source_path: bounded(&entry.source_path, 2048),
             title: bounded(&entry.title, 512),
@@ -570,21 +525,12 @@ pub fn apply_viewport(
             body_excerpt: bounded(&entry.body_excerpt, MAX_DATE_BODY_EXCERPT_CHARS),
         })
         .collect::<Vec<_>>();
-    let mut warnings = result
+    let warnings = result
         .warnings
         .iter()
         .take(warning_cap)
         .map(|value| bounded(value, warning_chars))
         .collect::<Vec<_>>();
-    if mode == RecallViewportMode::Manual && !overflow.is_empty() {
-        // A manual read names what did not fit; requested IDs beyond the cap
-        // are listed here whole rather than vanishing under the last kept card.
-        warnings.push(format!(
-            "record cap {keep_cap}: {} more selected records not shown ({})",
-            overflow.len(),
-            overflow.join(", ")
-        ));
-    }
     let taxonomy = (mode == RecallViewportMode::Manual).then(|| RecallPresentationTaxonomy {
         rooms: result
             .taxonomy
@@ -676,7 +622,14 @@ pub fn apply_viewport(
     let presentation = RecallPresentation {
         ok: result.ok,
         query: bounded(&result.query, 262_144),
-        found: result.found,
+        found: !kept.is_empty()
+            || !canon_matches.is_empty()
+            || !semantic_chunks.is_empty()
+            || !content_chunks.is_empty()
+            || !date_matches.is_empty()
+            || memory_handle
+                .as_ref()
+                .is_some_and(|handle| handle.memory.is_some()),
         source: bounded(&result.source, 128),
         vault,
         warnings,
@@ -715,7 +668,7 @@ mod tests {
         MAX_CANDIDATE_EXCERPT_CHARS, MAX_CANON_ASSERTION_CHARS, MAX_KEPT_CANDIDATES,
         MAX_WARNINGS_AUTOMATIC, ViewportSession, apply_viewport,
     };
-    use hearth::{MANUAL_RECORD_CAP, RecallProjection};
+    use hearth::RecallProjection;
     use protocol::{RecallResultInput, RecallViewportMode};
 
     fn result(
@@ -757,7 +710,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_canon_is_shown_whole_and_suppressed_only_for_the_same_version() {
+    fn exact_canon_is_shown_whole_on_each_snapshot() {
         let summary =
             "The Athanor is the House platform; silent typing is not a truncation. ".repeat(20);
         assert!(summary.chars().count() > 480);
@@ -787,13 +740,8 @@ mod tests {
             &mut session,
             RecallViewportMode::Automatic,
         );
-        assert!(repeat.presentation.canon_matches.is_empty());
-        assert!(
-            repeat
-                .suppressions
-                .iter()
-                .any(|s| s.identity == "canon:41" && s.reason == "saturated")
-        );
+        assert_eq!(repeat.presentation.canon_matches[0].summary, summary);
+        assert!(repeat.suppressions.is_empty());
 
         let manual = apply_viewport(
             result(
@@ -953,8 +901,9 @@ mod tests {
     }
 
     #[test]
-    fn a_manual_read_keeps_the_record_cap_and_every_id_warning() {
-        let candidates = (1..=(MANUAL_RECORD_CAP as i64 + 3))
+    fn a_manual_read_keeps_requested_records_and_every_id_warning() {
+        let count = 75;
+        let candidates = (1..=count)
             .map(|id| record(id, "short body"))
             .collect::<Vec<_>>();
         let mut input = result(
@@ -974,7 +923,7 @@ mod tests {
         );
         assert_eq!(
             manual.presentation.retrieval_candidates.len(),
-            MANUAL_RECORD_CAP
+            count as usize
         );
         assert_eq!(
             manual
@@ -983,34 +932,11 @@ mod tests {
                 .iter()
                 .map(|card| card.memory_id)
                 .collect::<Vec<_>>(),
-            (1..=(MANUAL_RECORD_CAP as i64))
-                .map(Some)
-                .collect::<Vec<_>>(),
-            "reference order leads and the cap trims the tail"
+            (1..=count).map(Some).collect::<Vec<_>>(),
+            "the viewport preserves every selected record in reference order"
         );
-        let overflow_ids = ((MANUAL_RECORD_CAP as i64 + 1)..=(MANUAL_RECORD_CAP as i64 + 3))
-            .map(|id| id.to_string())
-            .collect::<Vec<_>>();
-        let mut expected_with_overflow = expected_warnings.clone();
-        expected_with_overflow.push(format!(
-            "record cap {MANUAL_RECORD_CAP}: 3 more selected records not shown ({})",
-            overflow_ids.join(", ")
-        ));
-        assert_eq!(
-            manual.presentation.warnings, expected_with_overflow,
-            "a manual read drops no ID warning and names what did not fit"
-        );
-        assert_eq!(manual.diagnostics.reasons.get("record-cap"), Some(&3));
-        assert!(
-            manual
-                .suppressions
-                .iter()
-                .filter(|s| s.reason == "record-cap")
-                .count()
-                == 3,
-            "overflow rows are suppressions, never silent drops: {:?}",
-            manual.suppressions
-        );
+        assert_eq!(manual.presentation.warnings, expected_warnings);
+        assert!(manual.suppressions.is_empty());
 
         let auto = apply_viewport(
             input,
@@ -1030,7 +956,7 @@ mod tests {
         );
         assert_eq!(
             auto.diagnostics.reasons.get("record-cap"),
-            Some(&((MANUAL_RECORD_CAP + 3 - MAX_KEPT_CANDIDATES) as u64)),
+            Some(&((count as usize - MAX_KEPT_CANDIDATES) as u64)),
             "automatic overflow is accounted in diagnostics"
         );
         assert!(
@@ -1041,5 +967,194 @@ mod tests {
                 .any(|w| w.starts_with("record cap")),
             "the automatic working set keeps its warning budget for substrate warnings"
         );
+    }
+
+    #[test]
+    fn named_canon_only_admits_a_candidate_with_linked_provenance() {
+        let mut unrelated = record(71, "An unrelated passage.");
+        unrelated["source"] = serde_json::json!("semantic");
+        unrelated["matched_terms"] = serde_json::json!([]);
+        unrelated["reasons"] = serde_json::json!([]);
+        let mut linked = unrelated.clone();
+        linked["memory_id"] = serde_json::json!(72);
+        linked["source_path"] = serde_json::json!("memory/athanor-policy.md");
+        let mut canon = athanor("The platform's active definition.");
+        canon[0]["entry"]["files"] =
+            serde_json::json!([{"file":"memory/athanor-policy.md","lines":[]}]);
+        let viewport = apply_viewport(
+            result("The Athanor", canon, serde_json::json!([unrelated, linked])),
+            &mut ViewportSession::default(),
+            RecallViewportMode::Automatic,
+        );
+
+        assert_eq!(
+            viewport
+                .presentation
+                .retrieval_candidates
+                .iter()
+                .map(|candidate| candidate.memory_id)
+                .collect::<Vec<_>>(),
+            vec![Some(72)]
+        );
+        assert_eq!(viewport.presentation.canon_matches[0].id, Some(41));
+    }
+
+    #[test]
+    fn judged_relevance_does_not_require_overlap_or_restore_raw_chunks() {
+        let mut candidate = record(71, "A semantic paraphrase without literal query terms.");
+        candidate["matched_terms"] = serde_json::json!([]);
+        candidate["reasons"] = serde_json::json!([]);
+        candidate["source"] = serde_json::json!("semantic");
+        let mut input = result(
+            "unrelated wording",
+            serde_json::json!([]),
+            serde_json::json!([candidate]),
+        );
+        input.semantic_chunks = serde_json::from_value(serde_json::json!([{
+            "source_path": "raw.md", "body": "must not return"
+        }]))
+        .unwrap();
+        input.content_chunks = input.semantic_chunks.clone();
+
+        let conservative = apply_viewport(
+            input.clone(),
+            &mut ViewportSession::default(),
+            RecallViewportMode::Automatic,
+        );
+        assert!(conservative.kept_candidates.is_empty());
+        assert!(!conservative.presentation.found);
+        assert!(conservative.presentation.semantic_chunks.is_empty());
+        assert!(conservative.presentation.content_chunks.is_empty());
+
+        input.found = false;
+        let judged = apply_viewport(
+            input.clone(),
+            &mut ViewportSession::default(),
+            RecallViewportMode::AutomaticJudged,
+        );
+        assert_eq!(judged.kept_candidates.len(), 1);
+        assert!(judged.presentation.found);
+        assert!(judged.kept_candidates[0].body.is_none());
+
+        input.retrieval_candidates.clear();
+        let empty = apply_viewport(
+            input.clone(),
+            &mut ViewportSession::default(),
+            RecallViewportMode::AutomaticJudged,
+        );
+        assert!(!empty.presentation.found);
+        assert!(empty.presentation.semantic_chunks.is_empty());
+        assert!(empty.presentation.content_chunks.is_empty());
+
+        let manual = apply_viewport(
+            input,
+            &mut ViewportSession::default(),
+            RecallViewportMode::Manual,
+        );
+        assert!(manual.presentation.found);
+        assert_eq!(manual.presentation.semantic_chunks.len(), 1);
+    }
+
+    #[test]
+    fn exact_records_with_no_terms_repeat_but_duplicate_records_do_not() {
+        let mut first = record(72, "An exact record.");
+        first["matched_terms"] = serde_json::json!([]);
+        first["id"] = serde_json::json!("first-card");
+        let mut duplicate = first.clone();
+        duplicate["id"] = serde_json::json!("other-card");
+        duplicate["source_path"] = serde_json::json!("another-source.md");
+        let input = result(
+            "72",
+            serde_json::json!([]),
+            serde_json::json!([first, duplicate]),
+        );
+        let mut session = ViewportSession::default();
+
+        for mode in [
+            RecallViewportMode::Automatic,
+            RecallViewportMode::AutomaticJudged,
+            RecallViewportMode::Manual,
+        ] {
+            let viewport = apply_viewport(input.clone(), &mut session, mode);
+            assert_eq!(viewport.kept_candidates.len(), 1);
+            assert_eq!(viewport.diagnostics.reasons.get("duplicate"), Some(&1));
+            assert!(viewport.presentation.found);
+        }
+    }
+
+    #[test]
+    fn judged_selection_still_requires_identity_and_obeys_payload_caps() {
+        let mut input = result(
+            "semantic",
+            serde_json::json!([]),
+            serde_json::json!([{
+                "source_path": "", "title": "A title is not a record identity",
+                "excerpt": "unsupported"
+            }]),
+        );
+        let refused = apply_viewport(
+            input.clone(),
+            &mut ViewportSession::default(),
+            RecallViewportMode::AutomaticJudged,
+        );
+        assert!(!refused.presentation.found);
+        assert_eq!(
+            refused.diagnostics.reasons.get("missing-identity"),
+            Some(&1)
+        );
+
+        input.retrieval_candidates = serde_json::from_value(serde_json::json!(
+            (1..=(MAX_KEPT_CANDIDATES as i64 + 1))
+                .map(|id| record(id, "body"))
+                .collect::<Vec<_>>()
+        ))
+        .unwrap();
+        let capped = apply_viewport(
+            input,
+            &mut ViewportSession::default(),
+            RecallViewportMode::AutomaticJudged,
+        );
+        assert_eq!(capped.kept_candidates.len(), MAX_KEPT_CANDIDATES);
+        assert_eq!(capped.diagnostics.reasons.get("record-cap"), Some(&1));
+    }
+
+    #[test]
+    fn canon_deduplicates_within_each_result_without_historical_suppression() {
+        let mut canon = athanor("Authoritative topical context.");
+        let duplicate = canon[0].clone();
+        canon.as_array_mut().unwrap().push(duplicate);
+        let input = result("The Athanor", canon, serde_json::json!([]));
+        let mut session = ViewportSession::default();
+
+        for _ in 0..2 {
+            let viewport =
+                apply_viewport(input.clone(), &mut session, RecallViewportMode::Automatic);
+            assert_eq!(viewport.presentation.canon_matches.len(), 1);
+            assert!(viewport.presentation.found);
+            assert_eq!(viewport.diagnostics.reasons.get("duplicate"), Some(&1));
+        }
+    }
+
+    #[test]
+    fn excerpt_trimming_preserves_unicode_passage_offsets() {
+        let mut candidate = record(73, &"界".repeat(MAX_CANDIDATE_EXCERPT_CHARS + 20));
+        candidate["passage"] = serde_json::json!({
+            "char_start": 40,
+            "char_end": 40 + MAX_CANDIDATE_EXCERPT_CHARS + 20,
+            "chunk_index": 3
+        });
+        let viewport = apply_viewport(
+            result("73", serde_json::json!([]), serde_json::json!([candidate])),
+            &mut ViewportSession::default(),
+            RecallViewportMode::AutomaticJudged,
+        );
+        let card = &viewport.kept_candidates[0];
+        let passage = card.passage.as_ref().unwrap();
+        assert_eq!(passage.char_start, 40);
+        assert_eq!(
+            passage.char_end - passage.char_start,
+            card.excerpt.chars().count() as u64
+        );
+        assert_eq!(passage.chunk_index, Some(3));
     }
 }

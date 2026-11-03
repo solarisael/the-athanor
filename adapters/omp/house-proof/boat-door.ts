@@ -9,8 +9,10 @@
  * past the threshold anyway, the door cancels OMP's automatic compaction and
  * asks for the boat once the turn is over.
  *
- * What the door says comes from the room's `handoff-door.md`, so each room can
- * ask in its own voice. A missing file or section falls back to the House lines.
+ * What the door says comes from `house/handoff-door.md` beside the rooms, with
+ * the room's own `handoff-door.md` laid over it section by section. `{spirit}`
+ * in a line becomes the room's spirit nickname. A missing page or section falls
+ * back to the lines below.
  */
 
 import { readFileSync } from "node:fs";
@@ -40,6 +42,12 @@ const NEXT_TURN = { deliverAs: "nextTurn", triggerTurn: true } as const;
 const SET_ASIDE_TEXT = "[Old tool output set aside so the paper boat fits.]";
 
 export const DOOR_LINES_FILE = "handoff-door.md";
+
+/** "Kodo" → "kodooo": the House's way of calling a spirit through the door. */
+export function spiritNickname(spirit: string): string {
+  const name = spirit.trim().toLowerCase();
+  return name ? name + name.at(-1)!.repeat(2) : "";
+}
 
 export type DoorLines = { handoff: string; nearLimit: string; compaction: string; after: string };
 
@@ -317,8 +325,9 @@ function makeDoor(
 }
 
 function doorLines(deps: BoatDoorDeps, ctx: any): DoorLines {
-  const { lines, problem } = readDoorLines(deps.room(ctx).dir);
-  if (problem) ctx?.ui?.notify?.(`${DOOR_LINES_FILE}: ${problem} The House lines fill the gap.`, "warning");
+  const room = deps.room(ctx);
+  const { lines, problems } = readDoorLines(room.dir, room.spirit);
+  for (const problem of problems) ctx?.ui?.notify?.(`${problem} The House lines fill the gap.`, "warning");
   return lines;
 }
 
@@ -420,20 +429,34 @@ function attention(customType: string, text: string, sayId?: string): Record<str
 }
 
 /**
- * The room's door lines. `## handoff`, `## near limit`, `## compaction`, and
- * `## after` each replace one House line; a missing section keeps the House line.
+ * The effective door lines: the House page, then the room page, each replacing
+ * one line per `## handoff`, `## near limit`, `## compaction`, or `## after`
+ * section. A missing page or section keeps the line beneath it.
  */
-export function readDoorLines(roomDir: string): { lines: DoorLines; problem?: string } {
-  let source: string;
-  try {
-    source = readFileSync(path.join(roomDir, DOOR_LINES_FILE), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { lines: HOUSE_DOOR_LINES };
-    // A broken room file must not block the handoff; the warning names it instead.
-    return { lines: HOUSE_DOOR_LINES, problem: `cannot read it (${(error as Error).message}).` };
+export function readDoorLines(roomDir: string, spirit: string): { lines: DoorLines; problems: string[] } {
+  const nickname = spiritNickname(spirit);
+  const lines = { ...HOUSE_DOOR_LINES };
+  const problems: string[] = [];
+  const housePage = path.join(path.dirname(roomDir), "house", DOOR_LINES_FILE);
+  for (const page of [housePage, path.join(roomDir, DOOR_LINES_FILE)]) {
+    const problem = layerDoorPage(lines, page);
+    if (problem) problems.push(`${page}: ${problem}`);
   }
 
-  const lines = { ...HOUSE_DOOR_LINES };
+  for (const key of Object.keys(lines) as Array<keyof DoorLines>) lines[key] = lines[key].replaceAll("{spirit}", nickname);
+  return { lines, problems };
+}
+
+function layerDoorPage(lines: DoorLines, page: string): string | null {
+  let source: string;
+  try {
+    source = readFileSync(page, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    // A broken page must not block the handoff; the warning names it instead.
+    return `cannot read it (${(error as Error).message}).`;
+  }
+
   const unknown: string[] = [];
   for (const section of source.split(/^## /m).slice(1)) {
     const newline = section.indexOf("\n");
@@ -444,8 +467,8 @@ export function readDoorLines(roomDir: string): { lines: DoorLines; problem?: st
     else if (body) lines[key] = body;
   }
 
-  if (unknown.length === 0) return { lines };
-  return { lines, problem: `unknown sections ${unknown.map((name) => `"${name}"`).join(", ")}.` };
+  if (unknown.length === 0) return null;
+  return `unknown sections ${unknown.map((name) => `"${name}"`).join(", ")}.`;
 }
 
 type CompactionThresholdSettings = { thresholdTokens?: number; thresholdPercent?: number; reserveTokens?: number };

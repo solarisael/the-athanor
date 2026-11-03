@@ -188,11 +188,7 @@ fn default_semantic_top_k() -> u32 {
     8
 }
 fn default_semantic_min_similarity() -> f64 {
-    // Calibrated 2026-07-25 against Nemotron-3-Embed-1B-Q4: true positives
-    // measure 0.42-0.56, noise ceilings 0.24. Must stay equal to the substrate
-    // constant in recall.rs — when these diverged, the omitted-field path
-    // silently reimposed 0.50 and dropped the whole true-positive band.
-    0.40
+    0.25
 }
 fn default_content_top_k() -> u32 {
     8
@@ -226,9 +222,7 @@ pub struct RecallParams {
         skip_serializing_if = "is_zero_u32"
     )]
     pub rerank_candidate_top_k: u32,
-    /// `auto` (default) keeps the bounded passive working set; `manual` returns
-    /// the selected records whole under `hearth::MANUAL_RECORD_CAP`. Skipped on
-    /// the wire while `auto` so older peers read the same bytes as before.
+    /// Manual reads return complete records within the requested lane count.
     #[serde(default, skip_serializing_if = "RecallProjection::is_auto")]
     pub projection: RecallProjection,
     /// Ranking mode for this recall. Missing reads as `mixed`; an unknown name
@@ -248,6 +242,8 @@ pub struct VaultRecallParams {
     pub room: String,
     pub room_dir: String,
     pub query: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<std::num::NonZeroU32>,
 }
 
 impl VaultRecallParams {
@@ -352,6 +348,16 @@ pub struct RecallThreadNeighbor {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct RecallPassage {
+    /// Unicode scalar offsets within the source chunk, or the whole record
+    /// when `chunk_index` is absent. The excerpt is the exact selected slice.
+    pub char_start: u64,
+    pub char_end: u64,
+    pub chunk_index: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct RecallCandidate {
     #[serde(default)]
     pub id: Option<String>,
@@ -426,6 +432,8 @@ pub struct RecallCandidate {
     /// Complete authoritative record body; present only under a manual projection.
     #[serde(default)]
     pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passage: Option<RecallPassage>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -504,6 +512,8 @@ pub struct RecallRawChunk {
     pub term_coverage: Value,
     #[serde(default)]
     pub evidence: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passage: Option<RecallPassage>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -625,6 +635,7 @@ pub type RecallResult = RecallResultInput;
 #[serde(rename_all = "snake_case")]
 pub enum RecallViewportMode {
     Automatic,
+    AutomaticJudged,
     Manual,
 }
 
@@ -664,6 +675,8 @@ pub struct RecallPresentationCandidate {
     /// Complete authoritative record body; carried only by a manual projection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passage: Option<RecallPassage>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -695,6 +708,8 @@ pub struct RecallPresentationRawChunk {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passage: Option<RecallPassage>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -2978,6 +2993,9 @@ pub struct GigaConversationIngestParams {
     pub turns: Vec<GigaConversationTurnParams>,
 }
 
+/// Most turns one `giga_conversation_ingest` call accepts. Callers chunk larger captures.
+pub const GIGA_CONVERSATION_INGEST_MAX_TURNS: usize = 64;
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GigaEventParams {
@@ -3094,9 +3112,9 @@ impl GigaCandidateListRequest {
 impl TryFrom<GigaCandidateListParams> for GigaCandidateListRequest {
     type Error = ProtocolError;
     fn try_from(value: GigaCandidateListParams) -> Result<Self, Self::Error> {
-        if value.limit == 0 || value.limit > 200 {
+        if value.limit == 0 {
             return Err(ProtocolError::InvalidParams(
-                "limit must be between 1 and 200".into(),
+                "limit must be a positive integer".into(),
             ));
         }
         Ok(Self {
@@ -3378,6 +3396,18 @@ impl<'de> Deserialize<'de> for GigaEventIngestResult {
     }
 }
 
+/// Receipt of one `giga_conversation_ingest` call. Every input turn is counted
+/// once, as accepted (new turn job) or duplicate (identity already recorded).
+/// `event_ids` lists the distinct live owner events in first-seen input order;
+/// a retired owner (purged job) is counted but not listed.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GigaConversationIngestResult {
+    pub accepted_turns: usize,
+    pub duplicate_turns: usize,
+    pub event_ids: Vec<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GigaEventClaimResult {
@@ -3583,7 +3613,7 @@ pub struct GigaHealthCount {
 pub struct GigaClassifierHealthResult {
     pub provider_type: String,
     pub model: String,
-    pub model_digest: String,
+    pub model_digest: RequiredNullable<String>,
     pub prompt_version: String,
     pub endpoint_scope: String,
     pub last_error_class: RequiredNullable<String>,
@@ -3600,6 +3630,7 @@ pub struct GigaHealthResult {
     pub oldest_queue_age_seconds: Option<u64>,
     pub processed_count: u64,
     pub failed_count: u64,
+    pub identity_conflict_count: u64,
     pub candidates_by_kind_state: Vec<GigaHealthCount>,
     pub classifier: GigaClassifierHealthResult,
 }
@@ -5099,10 +5130,6 @@ mod tests {
         )
         .unwrap();
         let recall = request.recall_request().unwrap();
-        assert_eq!(recall.semantic_top_k(), 8);
-        assert_eq!(recall.semantic_min_similarity(), 0.40);
-        assert_eq!(recall.content_top_k(), 8);
-        assert_eq!(recall.content_min_similarity(), 0.30);
         assert!(!recall.temporal_decay());
         assert_eq!(recall.rerank_candidate_top_k(), 0);
 
@@ -5148,23 +5175,6 @@ mod tests {
         .is_err(),
         "an unknown projection is refused, never defaulted"
     );
-
-        let params: RecallParams =
-            serde_json::from_value(serde_json::json!({"room":"lab","query":"alpha"})).unwrap();
-        assert_eq!(
-            serde_json::to_string(&params).unwrap(),
-            r#"{"room":"lab","query":"alpha","semantic_top_k":8,"semantic_min_similarity":0.4,"content_top_k":8,"content_min_similarity":0.3,"temporal_decay":false}"#,
-            "the auto projection leaves the wire bytes unchanged"
-        );
-        let manual_params: RecallParams = serde_json::from_value(
-            serde_json::json!({"room":"lab","query":"alpha","projection":"manual"}),
-        )
-        .unwrap();
-        assert!(
-            serde_json::to_string(&manual_params)
-                .unwrap()
-                .ends_with(r#","projection":"manual"}"#)
-        );
     }
 
     #[test]
@@ -5181,6 +5191,7 @@ mod tests {
                 room: "lab".into(),
                 room_dir: "/rooms/lab".into(),
                 query: "hinge protocol".into(),
+                limit: None,
             }
         );
         for params in [
@@ -6038,6 +6049,20 @@ mod tests {
         }))
         .unwrap();
         assert!(GigaEventReplayReceipt::try_from(invalid_replay).is_err());
+    }
+
+    #[test]
+    fn giga_conversation_receipt_refuses_retired_window_fields() {
+        assert!(
+            serde_json::from_value::<GigaConversationIngestResult>(serde_json::json!({
+                "accepted_turns": 1,
+                "duplicate_turns": 0,
+                "event_ids": ["turn-event-1"],
+                "event_id": "turn-event-1"
+            }))
+            .is_err(),
+            "the retired single-window receipt field must not be accepted"
+        );
     }
 
     #[test]

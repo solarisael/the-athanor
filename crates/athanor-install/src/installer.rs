@@ -11,7 +11,7 @@ use crate::{
     supervisor::{HostRoomConfig, RuntimeConfig},
 };
 use anyhow::{Context, Result, bail};
-use protocol::{DEFAULT_HOST_URL, DEFAULT_HOST_WS_PORT, LOOPBACK_HOST, is_safe_room_key};
+use protocol::{DEFAULT_HOST_URL, DEFAULT_HOST_WS_PORT, LOOPBACK_HOST};
 use serde::{Deserialize, Serialize};
 use std::{
     path::{Path, PathBuf},
@@ -233,6 +233,7 @@ fn decode_existing_runtime(bytes: &[u8]) -> Result<ExistingRuntimeConfig> {
             .map(|room| HostRoomConfig {
                 room: room.room,
                 spirit: room.spirit,
+                operator: None,
             })
             .collect(),
     };
@@ -256,9 +257,7 @@ impl HouseInstallConfig {
         }
         let mut rooms = std::collections::BTreeSet::new();
         for room in &self.rooms {
-            if !is_safe_room_key(&room.room) || room.spirit.trim().is_empty() {
-                bail!("room identity is invalid for {:?}", room.room);
-            }
+            room.validate()?;
             if !rooms.insert(room.room.clone()) {
                 bail!("duplicate room {:?}", room.room);
             }
@@ -1301,6 +1300,7 @@ impl<F: FileSystem, S: ServiceManager, R: RuntimeControl, G: SecretSource>
             rooms: vec![HostRoomConfig {
                 room: "home".into(),
                 spirit: "Athanor".into(),
+                operator: None,
             }],
         })
     }

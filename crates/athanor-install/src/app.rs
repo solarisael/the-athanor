@@ -57,7 +57,7 @@ fn host_configs(
             nats_url: Some(nats_url.clone()),
             nats_auth: secrets.host_nats_auth.clone(),
             knock_autonomy: knock_autonomy.clone(),
-            operator: None,
+            operator: room.operator.clone(),
         })
         .collect())
 }
@@ -99,10 +99,13 @@ pub fn run() -> Result<()> {
     let (config, secrets) = installed_runtime(&layout)?;
     crate::service::ensure_running(&config)?;
     let registry = registry_path(&layout);
-    let owner = Arc::new(HarnessOwner::new(
-        HarnessRegistry::load(&registry)?,
-        control_token(&OsSecrets)?,
-    ));
+    let owner = Arc::new(
+        HarnessOwner::new(
+            HarnessRegistry::load(&registry)?,
+            control_token(&OsSecrets)?,
+        )
+        .with_cutover_state_root(config.operator_state_root.clone()),
+    );
     let _run_owner = RunOwner(Arc::clone(&owner));
     #[cfg(windows)]
     {
@@ -149,6 +152,7 @@ pub fn run() -> Result<()> {
     io::stdout().flush().context("report Athanor readiness")?;
 
     // The House owns the harnesses it starts, not sessions started elsewhere.
-    // RunOwner and the console hook stop only this owner's children.
+    // RunOwner and the console hook stop only this owner's children, and
+    // release its keepers instead while a deployment holds a cutover.
     host.wait().map_err(anyhow::Error::msg)
 }

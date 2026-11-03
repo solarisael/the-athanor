@@ -1,6 +1,6 @@
 # Orihon storage
 
-Status: source changes only. The parent owns integrated verification and deployment.
+The guarded deployment determines installed availability. Source and live state remain separate.
 
 Orihon stores provenance. A record does not establish memory or canon authority.
 
@@ -24,7 +24,11 @@ The source identity is `(room, harness, source_session, source_id)`.
 The content digest does not form part of this identity.
 Replay compares normalized source facts.
 Replay preserves the first writer session and storage timestamp.
-A changed source under the same identity refuses.
+A changed source under the same identity refuses, except for the following reconciliation.
+A replay can add `foldText` or `children` when the stored record has neither field.
+Every original audit fact and digest must remain unchanged.
+The store keeps the stored record unchanged and reports `reconciled`.
+This rule applies to any record that meets these conditions.
 
 Each room starts its sequence and page ordinal at zero.
 A user record starts a page.
@@ -79,3 +83,28 @@ Migration 0037 adds the PostgreSQL book and room cursor.
 A room cursor lock serializes sequence allocation.
 A trigger checks parent linkage.
 Another trigger refuses updates, deletes, and truncation of the book.
+
+## Exact fold snapshots
+
+Migration 0040 extends immutable folds with binary child references.
+Levels zero and one retain their exact message and page source references.
+Higher levels contain two exact child revisions instead of copied descendant lists.
+Both stores validate child geometry, digests, room identity, and replay.
+Old page revisions remain readable after late source records arrive.
+
+`folds::list_pg` and `folds::list_file` return bounded, deterministic fold snapshots.
+The file reader validates source references against one loaded book snapshot.
+No production path composes a view from these folds or generates new ones; the live tree replaced the page-fold worker and its book view.
+Old revisions stay readable through the Host's exact `unfold`.
+
+## Live views
+
+The chat and compactor views keep separate persisted lines and batch states.
+New units append to both views.
+The chat view merges above 128,000 UTF-8 bytes and targets 64,000 bytes.
+The compactor view merges independently above 32,000 bytes and targets 16,000 bytes.
+A chat merge does not replace the compactor view.
+Both views merge only sibling lines whose parent exists.
+
+A view can remain above its target while the required parent nodes are absent.
+Storage preserves originals independently of both views.

@@ -145,7 +145,7 @@ pub const GIGA_MAX_PROCESS_WINDOW_BYTES: usize = 24_000;
 
 pub const GIGA_MAX_LEASE_SECONDS: u32 = 3_600;
 pub const GIGA_MAX_EVENT_ATTEMPTS: u32 = 5;
-pub const GIGA_MAX_CANDIDATES_PER_EVENT: u32 = 1;
+pub const GIGA_MAX_CANDIDATES_PER_EVENT: u32 = GIGA_MAX_PROCESS_SOURCES as u32;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GigaEventClaimRequest {

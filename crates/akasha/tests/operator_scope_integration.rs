@@ -1,7 +1,6 @@
-//! The operator axis on real PostgreSQL. A House with no operators recalls
-//! exactly what it recalled before migration 0035. A House with operators
-//! shows reader R a memory when R wrote it, when it is company-wide, when it
-//! predates the axis, or when it travels up to R's unit at a higher rank.
+//! The operator axis on real PostgreSQL. Historical unowned rows stay shared.
+//! A reader sees its own rows and company-wide rows, even before registration.
+//! Registered readers above the writer's unit and rank also see `up` rows.
 //!
 //! Run with the isolated PostgreSQL pair:
 //! `ATHANOR_SUBSTRATE_TEST_DATABASE_URL=... ATHANOR_SUBSTRATE_TEST_SCHEMA=solarisael_tuner_test_<you>`
@@ -579,56 +578,43 @@ async fn attack_unregistered_writer_rows_reach_only_their_writer_unless_company_
 
 #[tokio::test]
 #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
-async fn attack_empty_operators_short_circuit_reads_writer_rows_for_all_until_one_operator_exists()
--> TestResult {
-    let db = Isolated::migrated("operator_short_circuit").await?;
+async fn empty_registry_keeps_owned_rows_private() -> TestResult {
+    let db = Isolated::migrated("operator_empty_registry").await?;
     let operators: i64 = sqlx::query_scalar("SELECT count(*) FROM operators")
         .fetch_one(&db.pool)
         .await?;
     assert_eq!(operators, 0);
 
-    // The Host stamps `sol` on every write; the House has not named anyone.
-    let written = db
+    let private = db
         .remember(Some("sol"), Some(MemoryScope::Private), "sol-private")
-        .await;
-    let stored: Vec<(i64, Option<String>, String)> =
-        sqlx::query_as("SELECT id, operator, scope FROM memories WHERE title LIKE '%sol-private%'")
-            .fetch_all(&db.pool)
-            .await?;
-    let id = match written {
-        Ok(id) => id,
-        Err(refusal) => panic!(
-            "with zero operators the House must write exactly as before 0035, but a Host-stamped write was refused: {refusal}; rows stored: {stored:?}"
-        ),
-    };
-    for reader in [None, Some("sol"), Some("kodo")] {
-        let visible = db.visible_to(reader).await?;
-        assert!(
-            visible.contains(&id),
-            "inactive axis: {reader:?} cannot read row {id} {stored:?}: {visible:?}"
-        );
+        .await?;
+    let up = db.remember(Some("sol"), None, "sol-up").await?;
+    let shared = db
+        .remember(Some("sol"), Some(MemoryScope::Company), "sol-company")
+        .await?;
+    let historical = db.remember(None, None, "unowned").await?;
+    let public_rows = BTreeSet::from([shared, historical]);
+    let owned_rows = BTreeSet::from([private, up, shared, historical]);
+
+    for reader in [None, Some("peer")] {
+        assert_eq!(db.visible_to(reader).await?, public_rows);
     }
+    assert_eq!(db.visible_to(Some("sol")).await?, owned_rows);
 
     sqlx::query("INSERT INTO units (path, display_name) VALUES ('acme'::ltree, 'Acme')")
         .execute(&db.pool)
         .await?;
     sqlx::query(
         "INSERT INTO operators (key, display_name, unit, rank)
-         VALUES ('kodo', 'Kodo', 'acme'::ltree, 99)",
+         VALUES ('peer', 'Peer', 'acme'::ltree, 99)",
     )
     .execute(&db.pool)
     .await?;
-    for reader in [None, Some("kodo")] {
-        let visible = db.visible_to(reader).await?;
-        assert!(
-            !visible.contains(&id),
-            "active axis: {reader:?} still reads sol's private row {id} {stored:?}"
-        );
+
+    for reader in [None, Some("peer")] {
+        assert_eq!(db.visible_to(reader).await?, public_rows);
     }
-    assert!(
-        db.visible_to(Some("sol")).await?.contains(&id),
-        "active axis: sol lost its own private row {id}"
-    );
+    assert_eq!(db.visible_to(Some("sol")).await?, owned_rows);
     db.close().await
 }
 

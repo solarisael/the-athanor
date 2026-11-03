@@ -248,6 +248,16 @@ static QUESTION_RE: LazyLock<Regex> =
 static PERSONAL_TERM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(?:what|which)\b.*\b(?:canon|entity|plan|intended|decided)\b").unwrap()
 });
+static AUTOBIOGRAPHICAL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)\b(?:what|which|when|where|who|how)\b.*",
+        r"\b(?:i|we|you|my|our|your|i've|we've|you've)\b.*",
+        r"\b(?:said|told|did|met|felt|made|chose|learned|wanted|called|ever|used to)\b|",
+        r"\b(?:what|which|when|where|who|how)\b.*",
+        r"\b(?:was|were|did|have|has)\b.*\b(?:i|we|you|my|our|your)\b",
+    ))
+    .unwrap()
+});
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -625,6 +635,7 @@ pub fn classify_retrieval_query(query: &str, recognized_entities: &[String]) -> 
     let explicit_memory =
         memory_hits > 0 && (QUESTION_RE.is_match(&lower) || EXPLICIT_MEMORY_RE.is_match(&lower));
     let personal_canon = PERSONAL_CANON_RE.is_match(&lower) || PERSONAL_TERM_RE.is_match(&lower);
+    let autobiographical = AUTOBIOGRAPHICAL_RE.is_match(&lower);
     let lookup_language = GENERIC_LOOKUP_RE.is_match(&lower);
     let entity_lookup = route.recognized_entities.len() >= 2
         || (route.recognized_entities.len() == 1 && lookup_language);
@@ -639,11 +650,13 @@ pub fn classify_retrieval_query(query: &str, recognized_entities: &[String]) -> 
     if !route.date_tokens.is_empty() {
         route.intent = "date_lookup".into();
         route.reasons.push("date-token".into());
-    } else if explicit_memory || personal_canon {
+    } else if explicit_memory || personal_canon || autobiographical {
         route.intent = "memory_lookup".into();
         route.reasons.push(
             if personal_canon {
                 "personal-canon-lookup-language"
+            } else if autobiographical {
+                "autobiographical-lookup-language"
             } else {
                 "memory-lookup-language"
             }

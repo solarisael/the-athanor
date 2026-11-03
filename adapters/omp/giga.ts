@@ -7,19 +7,25 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { requestOrgan, OrganError, type OrganOperation } from "./house-proof/organ.ts";
-import { hostSessionIdentity, type HostBinding } from "./house-proof/host.ts";
+import type { HostBinding } from "./house-proof/host.ts";
 type JsonObject = Record<string, unknown>;
-import { roomBinding } from "./house-proof/room.ts";
+import { resolveJudgmentCredential } from "./house-proof/judgment-host.ts";
 
 const GIGA_READ_TIMEOUT_MS = 120_000;
-const GIGA_WINDOW_TURN_LIMIT = 8;
-let gigaClosing = false;
-let gigaShutdown: Promise<void> | undefined;
 
 export type GigaEnablement = { gigaEnabled: boolean; hippocampusEnabled: boolean; replayMode: boolean };
 
-export async function setGigaEnablement(binding: HostBinding, enablement: GigaEnablement, options: { signal?: AbortSignal } = {}): Promise<JsonObject> {
-  return requestOrgan(binding, "giga_set_enablement", enablement, { signal: options.signal, write: true });
+export async function setGigaEnablement(binding: HostBinding, enablement: GigaEnablement, options: { signal?: AbortSignal; context?: any; status?: JsonObject } = {}): Promise<JsonObject> {
+  const request = { signal: options.signal, write: true };
+  const status = options.status ?? await requestOrgan(binding, "giga_set_enablement", enablement, request);
+
+  if (!options.context || (status.credential_required !== true && status.classifier_unavailable !== "classifier_config_invalid")) return status;
+
+  const credential = await resolveJudgmentCredential(options.context, binding, options.signal);
+
+  if (!credential) return { ...status, classifier_unavailable: "credential_unavailable" };
+
+  return requestOrgan(binding, "giga_set_enablement", { ...enablement, credential }, request);
 }
 
 export const GIGA_OMP_ROOM_BINDING = "omp_room_binding" as const;
@@ -68,27 +74,27 @@ export type GigaReviewRequest = {
   authorization_basis: typeof GIGA_OMP_ROOM_BINDING;
 };
 
-type LoggedTurn = {
-  role?: unknown;
-  text?: unknown;
-  sourceID?: unknown;
-  contentHash?: unknown;
-  sessionID?: unknown;
-  sourceTimestamp?: unknown;
-  hasStableID?: unknown;
+export type GigaCaptureRequest = {
+  gigaEnabled: boolean;
+  hippocampusEnabled: boolean;
+  replayMode: boolean;
+  subagent: boolean;
+  projectKeys: string[];
+};
+export type GigaCaptureReceipt = {
+  status: "captured" | "partial" | "failed" | "skipped";
+  reason: "replay" | "subagent" | "disabled" | "not_persisted" | null;
+  submittedTurns: number;
+  acceptedTurns: number;
+  duplicateTurns: number;
+  ledgerFailures: number;
+  eventIds: string[];
+  errors: Array<{ code: string; message: string; retryable: boolean; turns: number }>;
+  classifierStatus: JsonObject | null;
 };
 
-type GigaTurnWindow = { binding: HostBinding; projectKeys: string[]; turns: JsonObject[] };
-type GigaTurnBuffer = {
-  ctx: any;
-  cwd: string;
-  conversation: string;
-  turns: LoggedTurn[];
-  // A lost receipt can follow a commit. Keep this payload unchanged until acknowledged.
-  window?: GigaTurnWindow;
-  flushing?: Promise<void>;
-};
-const gigaTurnBuffers = new Map<string, GigaTurnBuffer>();
+// One credential hand-off at a time: a second one would restart the room worker.
+let credentialBootstrap: Promise<void> | undefined;
 
 
 async function requestObject(binding: HostBinding, method: OrganOperation, params: JsonObject, options: { signal?: AbortSignal; write?: boolean; timeoutMs?: number } = {}): Promise<JsonObject> {
@@ -134,74 +140,6 @@ export async function requestGigaQueueMaintenance(binding: HostBinding, operatio
   return await requestObject(binding, "giga_queue_maintenance", { operation, scope: "room" }, { signal: options.signal, timeoutMs: GIGA_READ_TIMEOUT_MS, write: true });
 }
 
-function prepareGigaWindow(buffered: GigaTurnBuffer): GigaTurnWindow {
-  const resolved = roomBinding(buffered.ctx);
-
-  if (!resolved) throw new OrganError("No home is attached for GIGA ingestion", "giga_room_unavailable", false);
-
-  return {
-    binding: resolved.binding,
-    projectKeys: process.env.ATHANOR_GIGA_PROJECT_KEY ? [process.env.ATHANOR_GIGA_PROJECT_KEY] : [],
-    turns: buffered.turns.slice(0, GIGA_WINDOW_TURN_LIMIT).map((turn) => ({
-      role: turn.role,
-      source_id: turn.sourceID,
-      content_hash: turn.contentHash,
-      session_id: turn.sessionID,
-      timestamp: turn.sourceTimestamp,
-      has_stable_id: turn.hasStableID,
-    })),
-  };
-}
-
-async function ingestGigaWindow(window: GigaTurnWindow): Promise<void> {
-  if (process.env.ATHANOR_REPLAY_MODE === "1") {
-    throw new OrganError("Replay cannot ingest GIGA events", "giga_replay_refused", false);
-  }
-
-  const result = await requestObject(window.binding, "giga_conversation_ingest", {
-    enablement: {
-      gigaEnabled: process.env.ATHANOR_GIGA_ENABLED === "1",
-      hippocampusEnabled: process.env.ATHANOR_HIPPOCAMPUS_ENABLED === "1",
-      replayMode: false,
-    },
-    project_keys: window.projectKeys,
-    turns: window.turns,
-  }, { write: true });
-  const accepted = result.accepted === true && result.duplicate === false;
-  const duplicate = result.accepted === false && result.duplicate === true;
-
-  if (typeof result.event_id !== "string" || !result.event_id || (!accepted && !duplicate)) {
-    throw new OrganError("GIGA did not acknowledge the window", "giga_ingest_unacknowledged", false);
-  }
-}
-
-function flushGigaBuffer(key: string, buffered: GigaTurnBuffer): Promise<void> {
-  if (buffered.flushing) return buffered.flushing;
-
-  buffered.flushing = (async () => {
-    try {
-      while (buffered.turns.length) {
-        const window = buffered.window ??= prepareGigaWindow(buffered);
-        await ingestGigaWindow(window);
-
-        buffered.turns.splice(0, window.turns.length);
-        buffered.window = undefined;
-      }
-
-      gigaTurnBuffers.delete(key);
-    } catch (error) {
-      console.warn("[athanor] giga_conversation_ingest retained pending turns", {
-        code: gigaTransportFailure(error).code,
-        pending: buffered.turns.length,
-      });
-    }
-  })().finally(() => {
-    buffered.flushing = undefined;
-  });
-
-  return buffered.flushing;
-}
-
 export function isSubagentSessionContext(ctx: any): boolean {
   try {
     const sessionFile = ctx?.sessionManager?.getSessionFile?.();
@@ -211,69 +149,45 @@ export function isSubagentSessionContext(ctx: any): boolean {
   }
 }
 
-export function ingestGigaLoggedTurnsDetached(ctx: any, loggedTurns: LoggedTurn[]): void {
-  if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || process.env.ATHANOR_REPLAY_MODE === "1" || !Array.isArray(loggedTurns) || loggedTurns.length === 0 || isSubagentSessionContext(ctx)) return;
-  // Buffers belong to the conversation that logged them. Two conversations in
-  // one workspace never flush each other's turns.
-  const cwd = String(ctx?.cwd || "");
-  let conversation: string;
-  try {
-    conversation = hostSessionIdentity(ctx);
-  } catch {
-    return;
-  }
-  for (const turn of loggedTurns) {
-    const key = `${conversation}\0${String(turn.sessionID ?? "")}`;
-    const buffered = gigaTurnBuffers.get(key) ?? { ctx, cwd, conversation, turns: [] };
-    buffered.ctx = ctx;
-    buffered.turns.push(turn);
-    gigaTurnBuffers.set(key, buffered);
-  }
+// Every capture states its GIGA switches. Replay and subagent sessions opt out
+// explicitly; the Host never infers either one.
+export function gigaCaptureRequest(ctx: any): GigaCaptureRequest {
+  return {
+    gigaEnabled: process.env.ATHANOR_GIGA_ENABLED === "1",
+    hippocampusEnabled: process.env.ATHANOR_HIPPOCAMPUS_ENABLED === "1",
+    replayMode: process.env.ATHANOR_REPLAY_MODE === "1",
+    subagent: isSubagentSessionContext(ctx),
+    projectKeys: process.env.ATHANOR_GIGA_PROJECT_KEY ? [process.env.ATHANOR_GIGA_PROJECT_KEY] : [],
+  };
 }
 
-export function flushGigaTurnsDetached(ctx: any): void {
-  if (gigaClosing) return;
-
-  let conversation: string;
-  try {
-    conversation = hostSessionIdentity(ctx);
-  } catch {
-    return;
+// The Host persisted or refused the window's turn jobs before it replied, so
+// nothing waits here. OMP still owns the classifier credential: only it can
+// read the Typesafe key. Returns the warning for a partial or failed capture.
+export function settleGigaCapture(binding: HostBinding, ctx: any, receipt: GigaCaptureReceipt | null | undefined): string | null {
+  if (!receipt) return null;
+  if (receipt.classifierStatus?.credential_required === true && !credentialBootstrap) {
+    const enablement: GigaEnablement = {
+      gigaEnabled: true,
+      hippocampusEnabled: process.env.ATHANOR_HIPPOCAMPUS_ENABLED === "1",
+      replayMode: false,
+    };
+    credentialBootstrap = setGigaEnablement(binding, enablement, { context: ctx, status: receipt.classifierStatus })
+      .then(() => undefined, (error) => {
+        console.warn("[athanor] GIGA captured turns; classifier credential setup failed.", {
+          code: gigaTransportFailure(error).code,
+        });
+      })
+      .finally(() => {
+        credentialBootstrap = undefined;
+      });
   }
-  for (const [key, buffered] of gigaTurnBuffers) {
-    if (buffered.conversation !== conversation) continue;
+  if (receipt.status !== "partial" && receipt.status !== "failed") return null;
 
-    void flushGigaBuffer(key, buffered);
-  }
+  const causes = receipt.errors.map((error) => `${error.code} x${error.turns}`);
+  if (receipt.ledgerFailures > 0) causes.push(`giga_source_ledger x${receipt.ledgerFailures}`);
+  const missed = receipt.errors.reduce((sum, error) => sum + error.turns, receipt.ledgerFailures);
+  const warning = `GIGA capture ${receipt.status}: ${missed} turn(s) not queued (${causes.join(", ")})`;
+  console.warn(`[athanor] ${warning}`);
+  return warning;
 }
-
-// Counts include in-flight windows until acknowledgment. An exit can still destroy retained turns.
-export function gigaBufferedTurnCensus(): Array<{ session: string; cwd: string; turns: number }> {
-  return [...gigaTurnBuffers]
-    .filter(([, buffered]) => buffered.turns.length)
-    .map(([key, buffered]) => ({
-      session: key.slice(key.indexOf("\0") + 1),
-      cwd: buffered.cwd,
-      turns: buffered.turns.length,
-    }));
-}
-
-export function flushGigaTurns(): Promise<void> {
-  if (gigaShutdown) return gigaShutdown;
-
-  gigaClosing = true;
-  gigaShutdown = Promise.allSettled(
-    [...gigaTurnBuffers].map(([key, buffered]) => flushGigaBuffer(key, buffered)),
-  ).then(() => undefined);
-
-  return gigaShutdown;
-}
-
-export const __gigaTest = Object.freeze({
-  isSubagentSessionContext,
-  resetState() {
-    gigaClosing = false;
-    gigaShutdown = undefined;
-    gigaTurnBuffers.clear();
-  },
-});

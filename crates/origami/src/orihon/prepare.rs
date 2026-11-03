@@ -3,7 +3,8 @@ use super::redaction;
 use crate::sea::idempotency_digest;
 use chrono::{DateTime, Datelike, SecondsFormat, Utc};
 use hearth::orihon::{
-    CaptureBatch, CaptureRecord, ECHO_CHARACTERS, Kind, MAX_BATCH_RECORDS, Record,
+    CaptureBatch, CaptureRecord, ChildRef, ECHO_CHARACTERS, Kind, MAX_BATCH_RECORDS, MAX_CHILDREN,
+    Record,
 };
 use serde::Serialize;
 use std::io::{self, Write};
@@ -24,6 +25,17 @@ pub(super) struct PreparedRecord {
     pub capture: CaptureRecord,
     pub truncated: bool,
     pub content_digest: String,
+    /// The record as it was accepted before captures carried semantic fields. Present only
+    /// when this capture carries `foldText` or `children`.
+    #[serde(skip)]
+    pub original: Option<Original>,
+}
+
+/// Facts of a capture without its semantic fields: its redaction flag from the audit text
+/// alone and the digest an earlier acceptance of the same source computed.
+pub(super) struct Original {
+    redacted: bool,
+    content_digest: String,
 }
 
 pub(super) fn identity(value: &str, field: &str) -> Result<(), Error> {
@@ -80,11 +92,38 @@ fn source_shape(
         (Kind::User, None) => Ok(()),
         (Kind::User, Some(_)) => Err(invalid("a user record cannot name parentUserId")),
         (_, Some(parent)) => identity(parent, "parentUserId"),
-        (_, None) => Err(refusal(
-            "missing_parent",
-            "a non-user record must name parentUserId",
-        )),
+        // A door-opened session prelude; each store admits it only before the session's first user page.
+        (_, None) => Ok(()),
     }
+}
+
+fn semantic_shape(
+    kind: Kind,
+    fold_text: Option<&str>,
+    children: Option<&[ChildRef]>,
+) -> Result<(), Error> {
+    if let Some(text) = fold_text {
+        if kind != Kind::Tool || text.is_empty() || text.contains('\0') {
+            return Err(invalid(
+                "foldText belongs only to tool records and must be nonempty without NUL",
+            ));
+        }
+        if text.len() > MAX_TEXT_BYTES {
+            return Err(invalid("foldText exceeds 1 MiB"));
+        }
+    }
+    if let Some(children) = children {
+        if kind != Kind::Work || children.is_empty() || children.len() > MAX_CHILDREN {
+            return Err(invalid(
+                "children belong only to work records and hold 1 through 16 identities",
+            ));
+        }
+        for child in children {
+            identity(&child.name, "child name")?;
+            identity(&child.session, "child session")?;
+        }
+    }
+    Ok(())
 }
 
 fn truncate_echo(text: String) -> (String, bool) {
@@ -118,6 +157,7 @@ fn source_speaker(kind: Kind, speaker: &str) -> &str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn digest(
     kind: Kind,
     parent: Option<&str>,
@@ -127,8 +167,12 @@ fn digest(
     observed: bool,
     redacted: bool,
     truncated: bool,
+    fold_text: Option<&str>,
+    children: Option<&[ChildRef]>,
 ) -> String {
-    idempotency_digest(&[
+    let children = children
+        .map(|children| serde_json::to_string(children).expect("child identities serialize"));
+    let mut parts = vec![
         kind_name(kind),
         parent.unwrap_or(""),
         source_speaker(kind, speaker),
@@ -137,7 +181,15 @@ fn digest(
         if observed { "observed" } else { "source" },
         if redacted { "redacted" } else { "unredacted" },
         if truncated { "truncated" } else { "complete" },
-    ])
+    ];
+    // Records without semantic fields keep the digest they had before these fields existed.
+    if let Some(fold_text) = fold_text {
+        parts.extend(["foldText", fold_text]);
+    }
+    if let Some(children) = children.as_deref() {
+        parts.extend(["children", children]);
+    }
+    idempotency_digest(&parts)
 }
 
 fn prepare_record(mut capture: CaptureRecord) -> Result<PreparedRecord, Error> {
@@ -146,6 +198,11 @@ fn prepare_record(mut capture: CaptureRecord) -> Result<PreparedRecord, Error> {
         capture.parent_user_id.as_deref(),
         capture.kind,
         &capture.speaker,
+    )?;
+    semantic_shape(
+        capture.kind,
+        capture.fold_text.as_deref(),
+        capture.children.as_deref(),
     )?;
     capture.said_at = timestamp(&capture.said_at)?;
     if capture.text.contains('\0') {
@@ -165,6 +222,15 @@ fn prepare_record(mut capture: CaptureRecord) -> Result<PreparedRecord, Error> {
     if capture.kind != Kind::Echo && capture.text.len() > MAX_TEXT_BYTES {
         return Err(invalid("redacted non-echo text exceeds 1 MiB"));
     }
+    let audit_redacted = capture.redacted;
+    if let Some(fold_text) = capture.fold_text.take() {
+        let (fold_text, redacted) = redaction::redact(fold_text);
+        capture.redacted |= redacted;
+        if fold_text.len() > MAX_TEXT_BYTES {
+            return Err(invalid("redacted foldText exceeds 1 MiB"));
+        }
+        capture.fold_text = Some(fold_text);
+    }
     let content_digest = digest(
         capture.kind,
         capture.parent_user_id.as_deref(),
@@ -174,11 +240,29 @@ fn prepare_record(mut capture: CaptureRecord) -> Result<PreparedRecord, Error> {
         capture.timestamp_observed,
         capture.redacted,
         truncated,
+        capture.fold_text.as_deref(),
+        capture.children.as_deref(),
     );
+    let original = (capture.fold_text.is_some() || capture.children.is_some()).then(|| Original {
+        redacted: audit_redacted,
+        content_digest: digest(
+            capture.kind,
+            capture.parent_user_id.as_deref(),
+            &capture.speaker,
+            &capture.text,
+            &capture.said_at,
+            capture.timestamp_observed,
+            audit_redacted,
+            truncated,
+            None,
+            None,
+        ),
+    });
     Ok(PreparedRecord {
         capture,
         truncated,
         content_digest,
+        original,
     })
 }
 
@@ -213,8 +297,46 @@ pub(super) fn prepare(
     Ok(prepared)
 }
 
+/// How a capture relates to the record already stored under its source identity.
+pub(super) enum Replay {
+    /// The stored record, exactly.
+    Same,
+    /// The stored record was accepted before captures carried semantic fields, and this
+    /// capture differs from it only by adding the named ones. The stored record stands
+    /// unchanged; the added fields are not stored.
+    Original(Vec<&'static str>),
+    /// Different content reusing the identity.
+    Different,
+}
+
 impl PreparedRecord {
-    pub fn matches(&self, stored: &Record) -> bool {
+    pub fn replay(&self, stored: &Record) -> Replay {
+        if self.facts_match(stored, self.capture.redacted, &self.content_digest)
+            && self.capture.fold_text == stored.fold_text
+            && self.capture.children == stored.children
+        {
+            return Replay::Same;
+        }
+        match &self.original {
+            Some(original)
+                if stored.fold_text.is_none()
+                    && stored.children.is_none()
+                    && self.facts_match(stored, original.redacted, &original.content_digest) =>
+            {
+                let mut added = Vec::with_capacity(2);
+                if self.capture.fold_text.is_some() {
+                    added.push("foldText");
+                }
+                if self.capture.children.is_some() {
+                    added.push("children");
+                }
+                Replay::Original(added)
+            }
+            _ => Replay::Different,
+        }
+    }
+
+    fn facts_match(&self, stored: &Record, redacted: bool, content_digest: &str) -> bool {
         let source = &self.capture;
         let source_facts = (
             source.source_id.as_str(),
@@ -224,9 +346,9 @@ impl PreparedRecord {
             source.text.as_str(),
             source.said_at.as_str(),
             source.timestamp_observed,
-            source.redacted,
+            redacted,
             self.truncated,
-            self.content_digest.as_str(),
+            content_digest,
         );
         let stored_facts = (
             stored.source_id.as_str(),
@@ -271,6 +393,8 @@ impl PreparedRecord {
             truncated: self.truncated,
             redacted: self.capture.redacted,
             content_digest: self.content_digest,
+            fold_text: self.capture.fold_text,
+            children: self.capture.children,
         }
     }
 }
@@ -290,6 +414,11 @@ pub(super) fn validate_stored(record: &Record, room: &str) -> Result<(), Error> 
         record.parent_user_id.as_deref(),
         record.kind,
         &record.speaker,
+    )?;
+    semantic_shape(
+        record.kind,
+        record.fold_text.as_deref(),
+        record.children.as_deref(),
     )?;
     if timestamp(&record.said_at)? != record.said_at
         || timestamp(&record.written_at)? != record.written_at
@@ -312,6 +441,8 @@ pub(super) fn validate_stored(record: &Record, room: &str) -> Result<(), Error> 
         record.timestamp_observed,
         record.redacted,
         record.truncated,
+        record.fold_text.as_deref(),
+        record.children.as_deref(),
     );
     if oversized || content_digest != record.content_digest {
         return Err(invalid(

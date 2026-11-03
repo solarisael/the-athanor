@@ -107,7 +107,25 @@ pub(super) fn receipt(source: &Value) -> Value {
             receipt[key] = json!(clip(value, 120));
         }
     }
-    for key in ["latencyMs", "scored", "selected"] {
+    if let Some(
+        value @ ("included"
+        | "not-requested"
+        | "omitted-not-granted"
+        | "omitted-lesson-sieve"
+        | "refused"),
+    ) = source["contextStatus"].as_str()
+    {
+        receipt["contextStatus"] = json!(value);
+    }
+    for key in [
+        "latencyMs",
+        "scored",
+        "selected",
+        "poolSize",
+        "cropped",
+        "packetBytes",
+        "responseBytes",
+    ] {
         if let Some(value) = source[key].as_u64() {
             receipt[key] = json!(value);
         }

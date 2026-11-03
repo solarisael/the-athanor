@@ -14,6 +14,8 @@
   "scripts": {
     "test": "bun test --max-concurrency 1 --isolate",
     "test:omp-compat": "bun compat/omp-compat.ts",
+    "test:omp-cutover": "bun compat/cutover-smoke.ts",
+    "eval:recall": "bun evals/recall-eval.ts",
     "deploy": "pwsh -NoProfile -File deploy-local.ps1"
   },
   "devDependencies": {

@@ -936,6 +936,12 @@ fn watch_child(
         if runtime.control.is_stop_requested() {
             return kill_child(child, runtime).map(|_| None);
         }
+        // The watch holds no substrate child between asks, so a paused keeper
+        // acknowledges within one child poll and skips the ask it cannot make.
+        if let Some(cutover_id) = crate::cutover::active(&config.state_root) {
+            crate::cutover::acknowledge(&config.state_root, &cutover_id);
+            continue;
+        }
         if config.watch_interval_secs == 0
             || last_poll.elapsed() < Duration::from_secs(config.watch_interval_secs)
         {

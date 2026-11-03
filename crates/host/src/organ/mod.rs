@@ -1,7 +1,7 @@
 mod giga;
 pub(crate) mod orihon;
 mod worker_lifecycle;
-pub(crate) use giga::{GigaRoomWorker, serve as serve_giga};
+pub(crate) use giga::{GigaRoomWorker, capture as capture_giga, serve as serve_giga};
 
 use crate::HostConfig;
 use akasha::insula_writer::{end_span, start_span};
@@ -36,6 +36,7 @@ pub(crate) async fn call(
     meta: &CommandMeta,
     mut request: OrganRequest,
     giga_worker: &Mutex<GigaRoomWorker>,
+    live: &orihon::live::Room,
 ) -> ResponsePayload<Value> {
     let method = request.operation.method();
     let bound = match bound_host_config(host, meta) {
@@ -49,9 +50,15 @@ pub(crate) async fn call(
     let host = &bound;
     if matches!(
         request.operation,
-        OrganOperation::Orihon | OrganOperation::OrihonCapture | OrganOperation::OrihonMode
+        OrganOperation::Orihon
+            | OrganOperation::Unfold
+            | OrganOperation::OrihonCapture
+            | OrganOperation::OrihonMode
+            | OrganOperation::OrihonTurn
+            | OrganOperation::OrihonZoom
+            | OrganOperation::OrihonDate
     ) {
-        return orihon::call(host, pool, meta, request).await;
+        return orihon::call(host, pool, meta, request, live).await;
     }
     if request.operation == OrganOperation::GigaSetEnablement {
         if request.target_scope != protocol::organ::OrganTargetScope::Room {
@@ -60,6 +67,15 @@ pub(crate) async fn call(
                     .into(),
             };
         }
+        let credential = match request.params.remove("credential") {
+            Some(Value::String(value)) if !value.is_empty() => Some(value),
+            None | Some(Value::Null) => None,
+            _ => {
+                return ResponsePayload::Error {
+                    error: ProtocolError::InvalidParams("invalid GIGA credential".into()).into(),
+                };
+            }
+        };
         let enablement =
             match serde_json::from_value::<akasha::GigaEnablement>(Value::Object(request.params)) {
                 Ok(enablement) => enablement,
@@ -72,7 +88,7 @@ pub(crate) async fn call(
         return match giga_worker
             .lock()
             .await
-            .set_enablement(host, pool, enablement)
+            .set_enablement(host, pool, enablement, credential)
             .await
         {
             Ok(result) => ResponsePayload::Result { result },
@@ -81,23 +97,6 @@ pub(crate) async fn call(
             },
         };
     }
-    let enablement = if request.operation == OrganOperation::GigaConversationIngest {
-        match request
-            .params
-            .remove("enablement")
-            .map(serde_json::from_value::<akasha::GigaEnablement>)
-            .transpose()
-        {
-            Ok(enablement) => enablement,
-            Err(error) => {
-                return ResponsePayload::Error {
-                    error: ProtocolError::InvalidParams(error.to_string()).into(),
-                };
-            }
-        }
-    } else {
-        None
-    };
     let request = match bound_request(host, meta, request) {
         Ok(request) => request,
         Err(error) => {
@@ -115,7 +114,7 @@ pub(crate) async fn call(
         }
         request => request,
     };
-    execute_native(host, pool, meta, request, enablement, giga_worker).await
+    execute_native(host, pool, meta, request, giga_worker).await
 }
 
 async fn execute_native(
@@ -123,7 +122,6 @@ async fn execute_native(
     pool: Option<&PgPool>,
     meta: &CommandMeta,
     request: ProtocolRequest,
-    enablement: Option<akasha::GigaEnablement>,
     giga_worker: &Mutex<GigaRoomWorker>,
 ) -> ResponsePayload<Value> {
     let method = native::operation_name(&request);
@@ -152,11 +150,6 @@ async fn execute_native(
     }
     if let Some((_, pool)) = runtime {
         failure = Config::validate_pool(pool).await.err();
-    }
-    if failure.is_none() && matches!(&request, ProtocolRequest::GigaConversationIngest(_)) {
-        failure = giga::admit_ingest(host, pool, giga_worker, enablement)
-            .await
-            .err();
     }
     let span = start_span(
         &binding,
@@ -337,6 +330,11 @@ fn bound_request(
                 room: host.room.clone(),
                 room_dir: host.room_dir.to_string_lossy().into_owned(),
                 query: recall.query().to_owned(),
+                limit: if recall.projection().is_manual() {
+                    std::num::NonZeroU32::new(recall.semantic_top_k().max(recall.content_top_k()))
+                } else {
+                    None
+                },
             }))
         }
         request => Ok(request),

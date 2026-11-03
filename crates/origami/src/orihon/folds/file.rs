@@ -20,6 +20,25 @@ fn key(fold: &Fold) -> Key {
     )
 }
 
+fn check_children(fold: &Fold, folds: &HashMap<Key, Fold>) -> Result<(), Error> {
+    for child in &fold.children {
+        let key = (
+            fold.room.clone(),
+            child.level,
+            child.index,
+            child.source_digest.clone(),
+            child.recipe_digest.clone(),
+        );
+        if !folds.contains_key(&key) {
+            return Err(refusal(
+                "invalid_fold_children",
+                "fold references a missing exact child revision",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn lock(directory: &Path, exclusive: bool) -> Result<File, Error> {
     let path = directory.join(".orihon-folds.lock");
     let file = OpenOptions::new()
@@ -40,7 +59,7 @@ fn lock(directory: &Path, exclusive: bool) -> Result<File, Error> {
 }
 
 // enough: file operations scan both books; add an index when measured file I/O dominates a page fold.
-fn load(directory: &Path, room: &str) -> Result<HashMap<Key, Fold>, Error> {
+fn load(directory: &Path, room: &str, ceiling: Option<usize>) -> Result<HashMap<Key, Fold>, Error> {
     let path = directory.join("folds.jsonl");
     let file = match File::open(&path) {
         Ok(file) => file,
@@ -71,8 +90,15 @@ fn load(directory: &Path, room: &str) -> Result<HashMap<Key, Fold>, Error> {
         let fold: Fold = serde_json::from_slice(&bytes).map_err(|_| malformed(&path, line))?;
         validate(&fold).map_err(|_| malformed(&path, line))?;
 
+        check_children(&fold, &folds).map_err(|_| malformed(&path, line))?;
         if fold.room != room || folds.insert(key(&fold), fold).is_some() {
             return Err(malformed(&path, line));
+        }
+        if ceiling.is_some_and(|limit| folds.len() > limit) {
+            return Err(refusal(
+                "fold_snapshot_limit",
+                "fold snapshot exceeds 200000 folds",
+            ));
         }
     }
 
@@ -158,7 +184,7 @@ pub fn read_file(
 ) -> Result<Option<Fold>, Error> {
     identity(room, level, index, source_digest, recipe_digest)?;
     let _lock = lock(directory, false)?;
-    let mut folds = load(directory, room)?;
+    let mut folds = load(directory, room, None)?;
     let found = folds.remove(&(
         room.to_owned(),
         level,
@@ -168,17 +194,69 @@ pub fn read_file(
     ));
 
     if let Some(fold) = &found {
-        check_sources(directory, fold)?;
+        if fold.level < 2 {
+            check_sources(directory, fold)?;
+        }
     }
 
     Ok(found)
 }
 
+pub fn list_file(directory: &Path, room: &str) -> Result<Vec<Fold>, Error> {
+    super::prepare::identity(room, "room")?;
+    let _lock = lock(directory, false)?;
+    let folds = load(directory, room, Some(super::MAX_FOLDS))?;
+    if folds.is_empty() {
+        return Ok(Vec::new());
+    }
+    let book = crate::orihon::file::source_snapshot(directory, room)?;
+    let mut pages: HashMap<i64, Vec<_>> = HashMap::new();
+    for record in book.records.values() {
+        pages.entry(record.turn_no).or_default().push(record);
+    }
+    for fold in folds.values().filter(|fold| fold.level < 2) {
+        let valid = if fold.level == 0 {
+            book.records
+                .get(&fold.index)
+                .is_some_and(|record| record.content_digest == fold.sources[0].content_digest)
+        } else {
+            let through = fold
+                .sources
+                .last()
+                .expect("validated sources are nonempty")
+                .seq;
+            pages.get(&fold.index).is_some_and(|page| {
+                let count = page.partition_point(|record| record.seq <= through);
+                count == fold.sources.len()
+                    && page[..count]
+                        .iter()
+                        .zip(&fold.sources)
+                        .all(|(record, source)| {
+                            record.seq == source.seq
+                                && record.content_digest == source.content_digest
+                        })
+            })
+        };
+        if !valid {
+            return Err(refusal(
+                "invalid_fold_sources",
+                "fold sources differ from the complete source frontier",
+            ));
+        }
+    }
+    let mut folds: Vec<_> = folds.into_values().collect();
+    super::sort_folds(&mut folds);
+    Ok(folds)
+}
+
 pub fn append_file(directory: &Path, fold: &Fold) -> Result<Fold, Error> {
     validate(fold)?;
     let _lock = lock(directory, true)?;
-    let mut folds = load(directory, &fold.room)?;
-    check_sources(directory, fold)?;
+    let mut folds = load(directory, &fold.room, None)?;
+    check_children(fold, &folds)?;
+    if fold.level < 2 {
+        check_sources(directory, fold)?;
+    }
     let path = directory.join("folds.jsonl");
 
     if let Some(stored) = folds.remove(&key(fold)) {

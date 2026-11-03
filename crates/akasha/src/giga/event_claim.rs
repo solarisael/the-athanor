@@ -91,7 +91,7 @@ pub async fn giga_event_claim(
     let selected = sqlx::query(
         "SELECT event_id,queue_state,replay_count,attempt_count FROM giga_events
          WHERE room=$1 AND attempt_count<$3 AND (
-           (queue_state='pending' AND available_at<=$2)
+           (queue_state='pending' AND available_at<=$2 AND waiting_since IS NULL)
            OR (queue_state='running' AND lease_expires_at<=$2)
          )
          ORDER BY
@@ -172,7 +172,43 @@ pub async fn giga_event_claim(
     ))
     .execute(&mut *tx)
     .await?;
-    let event = event_from_store(&mut tx, &event_id).await?;
+    let event = match event_from_store(&mut tx, &event_id).await {
+        Ok(event) => event,
+        Err(AppError::Invalid(_)) => {
+            sqlx::query(
+                "UPDATE giga_event_attempts
+                 SET outcome='failed',error_class='GigaStoredEventInvalid',finished_at=$4
+                 WHERE event_id=$1 AND replay_count=$2 AND attempt_count=$3",
+            )
+            .bind(&event_id)
+            .bind(replay_count)
+            .bind(attempt_count)
+            .bind(claimed_at)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE giga_events SET queue_state='failed',locked_by=NULL,locked_at=NULL,
+                 lease_expires_at=NULL,last_error='GigaStoredEventInvalid',processed_at=$2,
+                 last_finished_at=$2,updated_at=$2 WHERE event_id=$1",
+            )
+            .bind(&event_id)
+            .bind(claimed_at)
+            .execute(&mut *tx)
+            .await?;
+            let receipt = GigaEventClaimReceipt::new(
+                request.room().clone(),
+                request.worker_id().into(),
+                claimed_at.to_rfc3339(),
+                None,
+                None,
+                None,
+            )
+            .map_err(domain_error)?;
+            tx.commit().await?;
+            return Ok(receipt);
+        }
+        Err(error) => return Err(error),
+    };
     let receipt =
         GigaEventClaimReceipt::new(
             request.room().clone(),

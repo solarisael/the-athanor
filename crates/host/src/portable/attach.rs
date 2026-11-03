@@ -198,6 +198,21 @@ pub(super) async fn attach(
     if instance.exited() {
         return Err(Refusal::invalid("processId is not a running process"));
     }
+    crate::organ::orihon::initialize_session(
+        &state.config,
+        state.hallway_pool.as_ref(),
+        &identity.spirit,
+        &conversation_id,
+    )
+    .await
+    .map_err(|error| {
+        Refusal::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "orihon_settings_unavailable",
+            error.message,
+        )
+    })?;
+
     let support = instance.restart_support();
     registry.instances.insert(instance_id, instance);
     if chat_delivery {

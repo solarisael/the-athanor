@@ -1,7 +1,7 @@
-use super::evidence::bounded_excerpt;
+use super::evidence::source_passage;
 use super::scope::ScopeFilter;
 use crate::config::AppError;
-use hearth::{MANUAL_RECORD_CAP, RecallProjection};
+use hearth::RecallProjection;
 use regex::Regex;
 use sqlx::{PgPool, Row};
 use std::collections::BTreeSet;
@@ -149,6 +149,7 @@ pub(super) async fn resolve_memory_references(
     rooms: &[String],
     scope: &ScopeFilter,
     references: &MemoryReferences,
+    terms: &[String],
     projection: RecallProjection,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
@@ -193,12 +194,14 @@ pub(super) async fn resolve_memory_references(
         if archived {
             reasons.push("historical: archived".to_owned());
         }
+        let (excerpt, passage) = source_passage(&body, terms, None);
         let mut candidate = serde_json::json!({
             "memory_id": id,
             "source_path": source_path,
             "title": title,
             "heading_path": "",
-            "excerpt": bounded_excerpt(&body),
+            "excerpt": excerpt,
+            "passage": passage,
             "sources": [source_path],
             "term_coverage": 1.0,
             "matched_terms": [id.to_string()],
@@ -216,26 +219,23 @@ pub(super) async fn resolve_memory_references(
     Ok(candidates)
 }
 
-/// Manual projection count cap. Exact references lead, so a trim always drops
-/// from the ranked tail first; every dropped record is named in `warnings` so
-/// an operator who asked for more than the cap sees exactly what did not fit.
-/// A memory holds one seat: fused lanes can select the same memory through
-/// different chunks, and the first (best-ranked) occurrence keeps the seat so
-/// the cap counts records, never repeats.
+/// Keep one occurrence per memory, then apply the caller's record limit.
+/// Exact references lead. Warnings name each record that does not fit.
 pub(super) fn apply_manual_record_cap(
     candidates: &mut Vec<serde_json::Value>,
     warnings: &mut Vec<String>,
+    limit: usize,
 ) {
     let mut seated = BTreeSet::new();
     candidates.retain(|candidate| match candidate["memory_id"].as_i64() {
         Some(memory_id) => seated.insert(memory_id),
         None => true,
     });
-    if candidates.len() <= MANUAL_RECORD_CAP {
+    if candidates.len() <= limit {
         return;
     }
     let dropped = candidates
-        .drain(MANUAL_RECORD_CAP..)
+        .drain(limit..)
         .map(|candidate| {
             candidate["memory_id"]
                 .as_i64()
@@ -244,7 +244,7 @@ pub(super) fn apply_manual_record_cap(
         })
         .collect::<Vec<_>>();
     warnings.push(format!(
-        "manual record cap {MANUAL_RECORD_CAP}: {} selected records dropped (memories {})",
+        "manual record limit {limit}: {} selected records dropped (memories {})",
         dropped.len(),
         dropped.join(", ")
     ));
@@ -320,7 +320,6 @@ pub(super) async fn hydrate_record_bodies(
 #[cfg(test)]
 mod tests {
     use super::{apply_manual_record_cap, memory_references};
-    use hearth::MANUAL_RECORD_CAP;
 
     #[test]
     fn explicit_forms_resolve_and_strip_their_tokens() {
@@ -404,13 +403,14 @@ mod tests {
     }
 
     #[test]
-    fn the_manual_cap_trims_the_tail_and_names_every_dropped_record() {
-        let mut candidates = (1..=(MANUAL_RECORD_CAP as i64 + 2))
+    fn the_manual_limit_trims_the_tail_and_names_every_dropped_record() {
+        let limit = 75;
+        let mut candidates = (1..=(limit as i64 + 2))
             .map(|id| serde_json::json!({ "memory_id": id }))
             .collect::<Vec<_>>();
         let mut warnings = Vec::new();
-        apply_manual_record_cap(&mut candidates, &mut warnings);
-        assert_eq!(candidates.len(), MANUAL_RECORD_CAP);
+        apply_manual_record_cap(&mut candidates, &mut warnings, limit);
+        assert_eq!(candidates.len(), limit);
         assert_eq!(
             candidates[0]["memory_id"], 1,
             "the head keeps reference order"
@@ -418,15 +418,15 @@ mod tests {
         assert_eq!(
             warnings,
             vec![format!(
-                "manual record cap {MANUAL_RECORD_CAP}: 2 selected records dropped (memories {}, {})",
-                MANUAL_RECORD_CAP + 1,
-                MANUAL_RECORD_CAP + 2
+                "manual record limit {limit}: 2 selected records dropped (memories {}, {})",
+                limit + 1,
+                limit + 2
             )]
         );
 
         let mut within = vec![serde_json::json!({ "memory_id": 1 })];
         let mut quiet = Vec::new();
-        apply_manual_record_cap(&mut within, &mut quiet);
+        apply_manual_record_cap(&mut within, &mut quiet, limit);
         assert_eq!(within.len(), 1);
         assert!(quiet.is_empty(), "no warning while inside the cap");
 
@@ -438,7 +438,7 @@ mod tests {
             serde_json::json!({ "memory_id": 8 }),
         ];
         let mut none = Vec::new();
-        apply_manual_record_cap(&mut repeated, &mut none);
+        apply_manual_record_cap(&mut repeated, &mut none, 2);
         assert_eq!(repeated.len(), 2);
         assert_eq!(
             repeated[0]["heading_path"], "later",

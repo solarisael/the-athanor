@@ -61,6 +61,9 @@ export async function recallWithRouting(
     timeoutMs = RECALL_TIMEOUT_MS,
     rerankCandidateTopK,
     mode,
+    limit,
+    semanticMinSimilarity,
+    contentMinSimilarity,
   }: {
     binding: HostBinding;
     signal?: AbortSignal;
@@ -69,10 +72,16 @@ export async function recallWithRouting(
     timeoutMs?: number;
     rerankCandidateTopK?: number;
     mode?: ResolvedRecallMode;
+    limit?: number;
+    semanticMinSimilarity?: number;
+    contentMinSimilarity?: number;
   },
 ) {
   const params = {
     query,
+    ...(limit !== undefined ? { semantic_top_k: limit, content_top_k: limit } : {}),
+    ...(semanticMinSimilarity !== undefined ? { semantic_min_similarity: semanticMinSimilarity } : {}),
+    ...(contentMinSimilarity !== undefined ? { content_min_similarity: contentMinSimilarity } : {}),
     ...(Number.isSafeInteger(rerankCandidateTopK) && rerankCandidateTopK > 0
       ? { rerank_candidate_top_k: rerankCandidateTopK } : {}),
     ...(mode ? { mode } : {}),

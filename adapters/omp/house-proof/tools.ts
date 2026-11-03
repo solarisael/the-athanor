@@ -19,6 +19,7 @@ import { PAPER_BOAT_GUIDANCE } from "./paper-boat.ts";
 import { boatCast } from "./boat-door.ts";
 import { closePresence, responseDigest } from "./presence.ts";
 import { applyRecallViewport } from "./context.ts";
+import { resolveJudgmentCredential } from "./judgment-host.ts";
 import { kittenLineageDiagnostics } from "../kitten-lineage.ts";
 import { queryAnamnesis, formatAnamnesisContext } from "./anamnesis.ts";
 import {
@@ -39,8 +40,6 @@ import {
 } from "./feedback.ts";
 import {
   GIGA_OMP_ROOM_BINDING,
-  flushGigaTurnsDetached,
-  gigaBufferedTurnCensus,
   gigaTransportFailure,
   requestGigaCandidateList,
   requestGigaHealth,
@@ -60,6 +59,7 @@ import {
   sessionCommandStatus,
 } from "./session.ts";
 import { PortableSessionError } from "./session-transport.ts";
+import { childTranscriptFile, readRecordedImages, readTranscriptPage, sessionFileById } from "./orihon/transcript.ts";
 
 // Host session answers travel verbatim; a refusal keeps the Host's own code
 // (revision_conflict carries currentRevision, path_invalid names traversal).
@@ -90,6 +90,37 @@ const DESIGN_DOCUMENT_TYPES = new Set(["token", "component", "contract", "guidel
 function hostBinding(ctx: any) {
   const { context, binding } = requireRoomBinding(ctx);
   return { binding, effectiveRoomDir: context.effectiveRoomDir };
+}
+
+function toolRefusal(message: string, tool: string) {
+  const refusal = { ok: false, error: { code: "invalid_params", message, tool } };
+  return { isError: true, content: [{ type: "text", text: JSON.stringify(refusal, null, 2) }], details: refusal };
+}
+
+// A child's own log is its OMP transcript under the reporting session's
+// artifacts directory. The Host returns {session, sourceSession} it verified
+// from stored work records; the file is proven by its header before any page
+// is read, and no client-supplied path ever reaches the Host.
+async function childLogPage(ctx: any, zoomed: Record<string, unknown>, offset: number): Promise<Record<string, unknown>> {
+  const children = Array.isArray(zoomed.children) ? zoomed.children as Array<Record<string, unknown>> : [];
+  const name = String(zoomed.name ?? "");
+  if (!children.length) return { ok: false, error: { code: "child_unknown", message: `no stored work record names a child "${name}"` }, name };
+  const currentFile = String(ctx?.sessionManager?.getSessionFile?.() ?? "");
+  const currentSession = hostSessionIdentity(ctx);
+  if (!currentFile) return { ok: false, error: { code: "transcript_unavailable", message: "this session has no transcript file to locate children from" }, name, children };
+  const newest = [...children].sort((a, b) => Number(b.seq ?? 0) - Number(a.seq ?? 0))[0];
+  const session = String(newest.session ?? "");
+  const reporting = sessionFileById(currentFile, currentSession, String(newest.sourceSession ?? ""));
+  const file = reporting && session ? childTranscriptFile(reporting, name, session) : null;
+  if (!file) {
+    return { ok: false, error: { code: "transcript_unavailable", message: `the transcript of child ${session} is not under the reporting session's artifacts` }, name, children };
+  }
+  try {
+    const page = await readTranscriptPage(file, session, offset);
+    return { ok: true, authority: "provenance", name, child: newest, others: children.filter((child) => child !== newest), ...page };
+  } catch (error) {
+    return { ok: false, error: { code: "transcript_unreadable", message: error instanceof Error ? error.message : String(error) }, name, children };
+  }
 }
 
 // Docket writes carry an operation-scoped room capability. It is resolved from
@@ -336,21 +367,142 @@ export function registerHouseTool(pi, definition) {
 
 export function registerSolarisaelTools(pi, release) {
   const z = pi.zod;
+  const foldReference = z.object({
+    level: z.number().int().min(0).max(62),
+    index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    sourceDigest: z.string().regex(/^[0-9a-f]{64}$/),
+    recipeDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  });
 
   registerHouseTool(pi, {
     name: "orihon",
     label: "Athanor Orihon",
-    description: "Read bounded provenance records by page, sequence range, or UTC day. Orihon records do not confer memory or canon authority.",
+    description: "Read exact conversation evidence by page, sequence, or day, or search user pages by query. Orihon is provenance, never memory or canon.",
     parameters: z.object({
+      query: z.string().optional().describe("Search user pages. Use without read bounds."),
       afterSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("Read after this room sequence."),
       untilSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("Stop at this room sequence, inclusive."),
       turnNo: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("Read this room page ordinal."),
       day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("Read this UTC source day, YYYY-MM-DD."),
-      limit: z.number().int().min(1).max(200).optional().describe("Maximum rows; the Host defaults to 50."),
+      limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum rows. Reads default to 50; searches default to 32 candidates within the provider byte budget."),
     }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const result = await requestRustDomain(hostBinding(ctx).binding, "orihon", params, signal, false);
+      const binding = hostBinding(ctx).binding;
+      const request = params.query === undefined ? params : {
+        ...params,
+        credential: await resolveJudgmentCredential(ctx, binding, signal),
+      };
+      const result = await requestRustDomain(binding, "orihon", request, signal, false);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  // The live chat view names lines `id+n`; zoom opens one line, one message, or a child's own log.
+  registerHouseTool(pi, {
+    name: "zoom",
+    label: "Athanor Zoom",
+    description: [
+      "Open a line of the <chat> view. zoom(id, n) with n > 1 gives the two lines it was made from;",
+      "zoom(id, 1) gives message id whole; add rawOffset to page the exact audit text behind a folded tool call.",
+      "zoom(name) gives a task child's own log, the private steps behind its [name] report; offset pages it.",
+      "Every answer names its parent line, so the way back is explicit. Summaries are derived provenance.",
+    ].join("\n"),
+    parameters: z.object({
+      id: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("First message of the line, a multiple of n."),
+      n: z.number().int().min(1).max(2 ** 40).optional().describe("Messages the line covers, a power of two; 1 opens the message whole."),
+      rawOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("With n = 1: byte offset into the raw audit text."),
+      name: z.string().min(1).max(200).optional().describe("A child's report name, as in its [name] work line."),
+      offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().describe("With name: text-fragment offset into the child's log; continue at nextOffset. Long records remain losslessly paged."),
+    }),
+    approval: "read",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const binding = hostBinding(ctx).binding;
+      const byName = params.name !== undefined;
+      if (byName === (params.id !== undefined && params.n !== undefined)
+        || (byName && (params.id !== undefined || params.n !== undefined || params.rawOffset !== undefined))
+        || (!byName && params.offset !== undefined)) {
+        return toolRefusal("zoom takes either id and n, or name", "zoom");
+      }
+      if (byName) {
+        const result = await requestRustDomain(binding, "orihon_zoom", { name: params.name }, signal, false);
+        if (result.ok !== true) return { isError: true, content: [{ type: "text", text: JSON.stringify(result, null, 2) }], details: result };
+        const page = await childLogPage(ctx, result, params.offset ?? 0);
+        return { isError: page.ok !== true, content: [{ type: "text", text: JSON.stringify(page, null, 2) }], details: page };
+      }
+      const request = params.rawOffset === undefined ? { id: params.id, n: params.n } : { id: params.id, n: params.n, rawOffset: params.rawOffset };
+      const result = await requestRustDomain(binding, "orihon_zoom", request, signal, false);
+      const record = result.record as Record<string, unknown> | undefined;
+      if (result.ok === true && params.n === 1 && params.rawOffset === undefined
+        && record?.speaker === "OMP image attachments") {
+        try {
+          const manifest = JSON.parse(String(result.text));
+          if (typeof manifest.sourceEntry !== "string" || !Array.isArray(manifest.images)
+            || !String(record.sourceId).startsWith(`${manifest.sourceEntry}:images:`)) {
+            throw new Error("image manifest does not match its recorded source");
+          }
+          const sourceSession = String(record.sourceSession ?? "");
+          const currentFile = String(ctx?.sessionManager?.getSessionFile?.() ?? "");
+          const file = currentFile && sessionFileById(currentFile, hostSessionIdentity(ctx), sourceSession);
+          if (!file) throw new Error("the original image transcript is unavailable");
+          const images = await readRecordedImages(file, sourceSession, manifest.sourceEntry, manifest.images);
+          return {
+            isError: false,
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }, ...images],
+            details: result,
+          };
+        } catch (error) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: JSON.stringify({
+              ...result, ok: false, imageError: error instanceof Error ? error.message : String(error),
+            }, null, 2) }],
+            details: result,
+          };
+        }
+      }
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "date",
+    label: "Athanor Date",
+    description: "The date and time of message id in the <chat> view.",
+    parameters: z.object({
+      id: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).describe("A message id from a view line."),
+    }),
+    approval: "read",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "orihon_date", { id: params.id }, signal, false);
+      return {
+        isError: result.ok !== true,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "unfold",
+    label: "Athanor Unfold",
+    description: "Open an exact Orihon fold revision into its two children, or read its original page/message records. Summaries are derived provenance.",
+    parameters: z.object({
+      reference: foldReference,
+      afterSeq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+      limit: z.number().int().min(1).max(4294967295).optional(),
+    }),
+    approval: "read",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "unfold", params, signal, false);
       return {
         isError: result.ok !== true,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
@@ -371,6 +523,9 @@ export function registerSolarisaelTools(pi, release) {
     ].join("\n"),
     parameters: z.object({
       query: z.string().describe("Specific natural-language memory/canon query in the room's own vocabulary; name the person, project, event, date, or decision you are trying to recognize."),
+      limit: z.number().int().min(1).max(4294967295).default(12).describe("Maximum memory records and results per retrieval lane. Choose a positive integer; default 12."),
+      semanticMinSimilarity: z.number().min(0).max(1).optional().describe("Minimum semantic similarity, from 0 through 1. Omit for the native default."),
+      contentMinSimilarity: z.number().min(0).max(1).optional().describe("Minimum lexical similarity, from 0 through 1. Omit for the native default."),
     }),
     approval: "read",
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
@@ -385,7 +540,15 @@ export function registerSolarisaelTools(pi, release) {
       const { room, spirit } = requireRoomContext(ctx);
       const session = hostSessionIdentity(ctx);
       try {
-        const recalled = await recallWithRouting(room, params.query, { binding: { room, spirit, session }, signal: _signal, temporalDecay: false, projection: "manual" });
+        const recalled = await recallWithRouting(room, params.query, {
+          binding: { room, spirit, session },
+          signal: _signal,
+          temporalDecay: false,
+          projection: "manual",
+          limit: params.limit,
+          semanticMinSimilarity: params.semanticMinSimilarity,
+          contentMinSimilarity: params.contentMinSimilarity,
+        });
         if (!recalled.ok) {
           return {
             isError: true,
@@ -730,8 +893,8 @@ export function registerSolarisaelTools(pi, release) {
       technologyKeys: z.array(z.string()).optional().describe("Eligibility context. Omitted: every lesson is eligible. Supplied: unkeyed lessons plus lessons matching at least one technology slug, with the same version rule as languageKeys."),
       query: z.string().optional().describe("Full-text lesson query (PostgreSQL text search with stemming, not semantic search)."),
       triggerOnly: z.boolean().optional().describe("Return only lessons with a regex or AST trigger."),
-      limit: z.number().default(12).describe("Maximum rows; integer from 1 through 50."),
-      ids: z.array(z.number()).optional().describe("Exact lesson IDs inside the family, as a lesson map names them. Returns those rows only: no eligibility keys, no thread expansion. Project lessons need no project when ids are given."),
+      limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum rows. Searches default to 12. Exact-ID reads default to the number of requested IDs."),
+      ids: z.array(z.number()).optional().describe("Exact lesson IDs inside the family. Returns those rows only: no eligibility keys or thread expansion. Project lessons need no project when IDs are given."),
     }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -741,8 +904,8 @@ export function registerSolarisaelTools(pi, release) {
       if (params.type === "project" && !project && ids.length === 0) {
         return refuseToolResult("project lessons require project or ids");
       }
-      if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 50) {
-        return refuseToolResult("limit must be an integer from 1 through 50");
+      if (params.limit !== undefined && (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 4294967295)) {
+        return refuseToolResult("limit must be a positive whole number representable as u32");
       }
       const result = await requestRustDomain(hostBinding(ctx).binding, "lesson_query", {
         type: params.type,
@@ -777,7 +940,7 @@ export function registerSolarisaelTools(pi, release) {
       group: z.string().optional().describe("Optional document group."),
       query: z.string().optional().describe("Full-text query over name and contract prose."),
       includeSuperseded: z.boolean().optional().describe("Include superseded historical rows."),
-      limit: z.number().default(12).describe("Maximum rows; integer from 1 through 50."),
+      limit: z.number().int().min(1).max(4294967295).default(12).describe("Maximum rows; positive integer, default 12."),
     }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -787,8 +950,8 @@ export function registerSolarisaelTools(pi, release) {
       if (params.docType !== undefined && !DESIGN_DOCUMENT_TYPES.has(params.docType)) {
         return refuseToolResult("docType must be token, component, contract, or guideline");
       }
-      if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 50) {
-        return refuseToolResult("limit must be an integer from 1 through 50");
+      if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 4294967295) {
+        return refuseToolResult("limit must be a positive whole number representable as u32");
       }
       const result = await requestRustDomain(hostBinding(ctx).binding, "design_document_query", {
         system: params.system.trim(),
@@ -863,7 +1026,7 @@ export function registerSolarisaelTools(pi, release) {
   registerHouseTool(pi, {
     name: "sleep",
     label: "Athanor Sleep",
-    description: ["Close the session by writing one paper boat; backup defaults to true.", ...PAPER_BOAT_GUIDANCE].join("\n"),
+    description: ["Close the session by writing one paper boat; backup defaults to true. Before finalizing, review GIGA unreviewed and in_review suggestions against their exact sources. Use explicit review and promotion tools; sleep does not promote candidates.", ...PAPER_BOAT_GUIDANCE].join("\n"),
     parameters: z.object({
       body: z.string().describe("Standalone Markdown paper boat in the active spirit's ordinary voice and the room's relationship register; concrete continuity for the next waking self, not a report."),
     }),
@@ -871,9 +1034,6 @@ export function registerSolarisaelTools(pi, release) {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { room, spirit } = requireRoomContext(ctx);
       const session = hostSessionIdentity(ctx);
-      // Sleep is the deliberate session boundary: classify whatever the buffer still holds
-      // so the closing batch is not stranded until the next session's shutdown.
-      flushGigaTurnsDetached(ctx);
       const result = await closePresenceAndSleep(
         { room, spirit, session },
         params.body,
@@ -1138,7 +1298,7 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({
       mode: z.enum(["wake", "consult"]),
       query: z.string().optional(),
-      limit: z.number().optional(),
+      limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum cycles; positive integer, default 10."),
     }),
     approval: "read",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1226,7 +1386,7 @@ export function registerSolarisaelTools(pi, release) {
     description: "List Stage 1 GIGA candidates stored for the current room. The room is derived from trusted OMP context and cannot be supplied by the caller.",
     parameters: z.object({
       review_state: z.enum(["unreviewed", "in_review", "dismissed", "unresolved", "curio", "expired"]).optional(),
-      limit: z.number().optional(),
+      limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum candidates; positive integer, default 50."),
     }),
     approval: "read",
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1583,7 +1743,7 @@ export function registerSolarisaelTools(pi, release) {
       hallway: z.string().describe("Hallway key."),
       after: z.number().optional().describe("Non-negative message id; reads after it instead of the presence cursor."),
       thread: z.string().optional().describe("Exact daily thread key. Use an empty string or omit for the whole Hallway."),
-      limit: z.number().optional().describe("Maximum messages to return, 1-200; default 50."),
+      limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum messages; positive integer, default 50."),
       advance_cursor: z.boolean().optional().describe("Acknowledge returned messages. Whole-Hallway reads also advance this presence's cursor; filtered thread reads leave it unchanged."),
     }),
     approval: "read",
@@ -1727,7 +1887,7 @@ export function registerSolarisaelTools(pi, release) {
     parameters: z.object({
       houseId: z.string().optional().describe("House to read. Defaults to this installation's House id."),
       states: z.array(z.string()).optional().describe("Quest states to include, such as offered or claimed. Omit for offered and claimed; pass [\"all\"] for every state."),
-      limit: z.number().optional().describe("Maximum quests to return. Omit for the substrate default."),
+      limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum quests; positive integer. Omit for the substrate default."),
       titlesOnly: z.boolean().optional().describe("When true, every quest comes back with an empty body, so a long board stays small enough to pick from by title."),
     }).strict(),
     approval: "read",
@@ -1849,7 +2009,7 @@ export function registerSolarisaelTools(pi, release) {
     description: "Read one quest's evidence: full receipt bodies, ledger events, and acceptance items with their verdicts. A read with no capability, like the board. An independent reviewer judges primary receipts here, never a claimant's summary of them.",
     parameters: z.object({
       questId: z.string().describe("Quest whose evidence to read."),
-      limit: z.number().optional().describe("Maximum receipts and events to return, 1-200; default 50."),
+      limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum receipts and events, separately; positive integer, default 50."),
     }).strict(),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -1970,7 +2130,6 @@ export function registerSolarisaelTools(pi, release) {
   registerRestartDoor(pi, {
     requestDomain: requestRustDomain,
     registerTool: (definition) => registerHouseTool(pi, definition),
-    gigaBuffers: gigaBufferedTurnCensus,
     release,
   });
 }

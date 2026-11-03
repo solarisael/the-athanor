@@ -1,156 +1,182 @@
-use super::bounds::{
-    GIGA_MAX_STORED_RATIONALE_BYTES, GIGA_RATIONALE_TRUNCATION_MARKER, truncate_with_marker,
-};
-use super::enablement::GigaEnablement;
+use super::bounds::truncate_with_marker;
+use super::context::{MemoryContext, MemoryStatus, TargetJudgment, judge_target};
 use super::failure::{WorkerFailure, domain_failure};
-use super::identity::{
-    GIGA_MODEL_MANIFEST_DIGEST, GIGA_MODEL_TAG, GIGA_PROMPT_VERSION, candidate_id,
-    configuration_digest,
-};
+use super::identity::{GIGA_PROMPT_VERSION, candidate_id, configuration_digest};
 use super::ledger::ResolvedSource;
-use super::ollama::{ollama_config, request_ollama_structured, verify_ollama_model};
-use super::prompts::{GIGA_EXTRACTION_PROMPT, GIGA_GATE_PROMPT};
-use super::schema::{
-    ExtractionOutput, GateKind, GateOutput, extraction_schema, gate_schema, schema_json,
-};
-use super::validation::{dedupe_preserving_order, validate_extraction, validate_gate};
+use super::typesafe::{GigaClassifierConfig, JevJudgment};
+use crate::Config;
 use chrono::Utc;
 use hearth::{
-    GigaAuthority, GigaCandidate, GigaClassifierIdentity, GigaEvent, GigaReviewState, GigaScope,
-    GigaScores, GigaVisibility,
+    GigaAuthority, GigaCandidate, GigaCandidateKind, GigaClassifierIdentity, GigaEvent,
+    GigaReviewState, GigaScope, GigaScores, GigaVisibility,
 };
-use serde::Serialize;
-use serde_json::json;
+use sqlx::PgPool;
 use uuid::Uuid;
 
-#[derive(Serialize)]
-struct ModelSource<'a> {
-    source_id: &'a str,
-    role: &'a str,
-    timestamp: &'a str,
-    text: &'a str,
+fn source_label(source: &ResolvedSource) -> String {
+    format!("{} @ {}", source.source.role(), source.source.timestamp())
 }
 
-pub(super) async fn classify_event(
-    event: &GigaEvent,
-    sources: &[ResolvedSource],
-    enablement: GigaEnablement,
-) -> Result<Option<GigaCandidate>, WorkerFailure> {
-    let config = ollama_config(enablement)?;
-    verify_ollama_model(&config).await?;
-    let model_sources = sources
-        .iter()
-        .map(|resolved| ModelSource {
-            source_id: resolved.source.source_id(),
-            role: resolved.source.role(),
-            timestamp: resolved.source.timestamp(),
-            text: &resolved.text,
-        })
-        .collect::<Vec<_>>();
-    let all_source_ids = model_sources
-        .iter()
-        .map(|source| source.source_id.to_owned())
-        .collect::<Vec<_>>();
-    let mut gate: GateOutput = request_ollama_structured(
-        &config,
-        GIGA_GATE_PROMPT,
-        json!({
-            "project_keys": event.project_keys(),
-            "sources": model_sources
-        }),
-        schema_json(gate_schema(&all_source_ids))?,
-        256,
-    )
-    .await?;
-    dedupe_preserving_order(&mut gate.source_ids);
-    validate_gate(&gate, event)?;
-    if gate.kind == GateKind::None {
-        return Ok(None);
+fn bounded_excerpt(text: &str, maximum: usize) -> String {
+    let trimmed = text.trim();
+    truncate_with_marker(trimmed, maximum, "\n[excerpt truncated]")
+}
+
+fn joined_ids(ids: &[i64]) -> String {
+    if ids.is_empty() {
+        return "none".into();
     }
-    let mut extraction: ExtractionOutput = request_ollama_structured(
-        &config,
-        GIGA_EXTRACTION_PROMPT,
-        json!({
-            "fixed_kind": gate.kind.as_str(),
-            "gate_source_ids": gate.source_ids,
-            "project_keys": event.project_keys(),
-            "sources": model_sources
-        }),
-        extraction_schema(&gate.source_ids, gate.kind.requires_proof())?,
-        768,
-    )
-    .await?;
-    dedupe_preserving_order(&mut extraction.source_ids);
-    dedupe_preserving_order(&mut extraction.proof_source_ids);
-    validate_extraction(&extraction, &gate)?;
-    let rationale = truncate_with_marker(
-        &extraction.rationale,
-        GIGA_MAX_STORED_RATIONALE_BYTES,
-        GIGA_RATIONALE_TRUNCATION_MARKER,
+    ids.iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// How the judgment met memory. Recalled entries are named by ID only:
+/// they are context, never the candidate's source or proof.
+fn novelty_line(novelty: Option<f64>, memory: &MemoryContext) -> String {
+    match novelty {
+        Some(score) => format!(
+            "Novelty {score:.2} was measured against {} Recall lookup(s) in {} scope \
+             (canon: {}; memories: {}). Recalled entries are context, not proof.",
+            memory.lookups(),
+            memory.scope(),
+            joined_ids(&memory.canon_ids()),
+            joined_ids(&memory.memory_ids()),
+        ),
+        None => format!(
+            "Novelty was not measured: memory context was {} ({}). \
+             Missing memory is not evidence of novelty or insignificance.",
+            memory.status().as_str(),
+            memory.reason().unwrap_or("no completed lookup"),
+        ),
+    }
+}
+
+fn deterministic_fields(
+    kind: GigaCandidateKind,
+    source: &ResolvedSource,
+    novelty: Option<f64>,
+    memory: &MemoryContext,
+) -> (String, String, String) {
+    let label = source_label(source);
+    let excerpt = bounded_excerpt(&source.text, 1_200);
+    let title = format!("{} · {}", kind.as_str(), label);
+    let rationale = format!(
+        "{}\nExact source {}: {}",
+        novelty_line(novelty, memory),
+        source.source.source_id(),
+        excerpt
     );
-    let selected = sources
-        .iter()
-        .filter(|resolved| {
-            extraction
-                .source_ids
-                .iter()
-                .any(|source_id| source_id == resolved.source.source_id())
-        })
-        .map(|resolved| resolved.source.clone())
-        .collect::<Vec<_>>();
-    if selected.len() != extraction.source_ids.len() {
-        return Err(domain_failure());
-    }
+    (
+        title.chars().take(160).collect(),
+        excerpt,
+        truncate_with_marker(&rationale, 4 * 1024, "\n[excerpt truncated]"),
+    )
+}
+
+/// A pointer-only candidate whose one source and proof is the judged target.
+pub(super) fn target_candidate(
+    event: &GigaEvent,
+    target: &ResolvedSource,
+    kind: GigaCandidateKind,
+    judgment: JevJudgment,
+    memory: &MemoryContext,
+    configuration_digest: &str,
+) -> Result<GigaCandidate, WorkerFailure> {
+    // Novelty stands only on a completed lookup; otherwise it stays unmeasured.
+    let novelty = judgment
+        .novelty
+        .filter(|_| memory.status() == MemoryStatus::Complete);
+    let source_id = target.source.source_id().to_owned();
+    let proof_source_ids = if kind.requires_proof() {
+        vec![source_id.clone()]
+    } else {
+        Vec::new()
+    };
+    let (title, gist, rationale) = deterministic_fields(kind, target, novelty, memory);
     let completed_at = Utc::now().to_rfc3339();
-    let classifier = GigaClassifierIdentity::new(
-        GIGA_MODEL_TAG.into(),
-        "ollama".into(),
-        GIGA_MODEL_MANIFEST_DIGEST.into(),
+    let classifier_identity = GigaClassifierIdentity::new(
+        judgment.model.clone(),
+        "typesafe".into(),
+        judgment.model,
         GIGA_PROMPT_VERSION.into(),
-        configuration_digest(&config)?,
+        configuration_digest.into(),
         Uuid::new_v4().to_string(),
         completed_at.clone(),
     )
     .map_err(|_| domain_failure())?;
     let scores = GigaScores::new(
-        extraction.priority,
-        extraction.novelty,
-        extraction.durability,
-        extraction.confidence,
+        judgment.priority,
+        novelty.unwrap_or(0.0),
+        judgment.durability,
+        judgment.confidence,
     )
     .map_err(|_| domain_failure())?;
-    let project = event.project_keys().first().cloned();
     let scope = GigaScope::new(
         Some(event.room().to_string()),
-        project,
+        event.project_keys().first().cloned(),
         GigaVisibility::Private,
         true,
     )
     .map_err(|_| domain_failure())?;
     GigaCandidate::new(
-        candidate_id(event, gate.kind, &extraction.source_ids)?,
+        candidate_id(event, kind, std::slice::from_ref(&source_id))?,
         event.event_id().into(),
         event.room().clone(),
         event.session_id().into(),
-        gate.kind.candidate_kind()?,
-        selected,
-        extraction.proof_source_ids,
+        kind,
+        vec![target.source.clone()],
+        proof_source_ids,
         scores,
         event.project_keys().to_vec(),
         Vec::new(),
         Vec::new(),
-        extraction.retrieval_terms,
-        extraction.proposed_title,
-        extraction.gist,
+        Vec::new(),
+        title,
+        gist,
         rationale,
         scope,
         GigaAuthority::PointerOnly,
         GigaReviewState::Unreviewed,
-        classifier,
+        classifier_identity,
         completed_at,
         None,
         Vec::new(),
     )
-    .map(Some)
     .map_err(|_| domain_failure())
+}
+
+/// Judge every event source as its own target. A canonical event has one.
+pub(super) async fn classify_event(
+    pool: &PgPool,
+    config: &Config,
+    event: &GigaEvent,
+    sources: &[ResolvedSource],
+    classifier: &GigaClassifierConfig,
+) -> Result<Vec<GigaCandidate>, WorkerFailure> {
+    let configuration_digest = configuration_digest(classifier)?;
+    let mut candidates = Vec::new();
+    for target in sources {
+        let TargetJudgment { judgment, memory } =
+            judge_target(pool, config, event, target, classifier).await?;
+        if judgment.kind == "none" {
+            continue;
+        }
+        let kind = GigaCandidateKind::parse(&judgment.kind).map_err(|_| domain_failure())?;
+        if kind == GigaCandidateKind::ProjectLesson && event.project_keys().len() != 1
+            || kind == GigaCandidateKind::CodingLesson && !event.project_keys().is_empty()
+        {
+            continue;
+        }
+        candidates.push(target_candidate(
+            event,
+            target,
+            kind,
+            judgment,
+            &memory,
+            &configuration_digest,
+        )?);
+    }
+    Ok(candidates)
 }

@@ -8,6 +8,7 @@ mod organ;
 mod panel;
 mod policy;
 mod presence;
+mod recall_plan;
 mod receipt;
 mod room_state;
 mod routing;

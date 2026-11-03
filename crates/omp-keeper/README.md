@@ -253,6 +253,24 @@ Deadlines and refusals:
 - `resume` appends `--resume <sessionId>` from the intent.
 - `fresh` adds no selector after the adapter confirms a paper boat.
 
+## The cutover pause
+
+A native deployment writes `<stateRoot>/cutover/cutover.json` while it
+replaces the release (`substrate/deploy-local.ps1`). While that marker exists:
+
+- The keeper starts no substrate child. A held child gets EOF and exits.
+  Every ask answers as an absent House, so the keeper waits as it does for any
+  absent House (`src/session.rs`, `HouseLine::call`).
+- The omp child continues to run. The pause never kills it.
+- Within one child poll, the keeper writes `keeper-<pid>.json` beside the
+  marker, once for each cutover id (`src/cutover.rs`). The deployment waits for
+  that file from every running keeper and refuses a keeper without one.
+- A marker that the keeper cannot read pauses the keeper but gets no
+  acknowledgement, so that deployment refuses.
+
+A keeper built before this pause ignores the marker. Quit its OMP session
+before the deployment.
+
 ## The ceilings
 
 - `# enough:` one keeper for each harness kind. One keeper process owns one omp

@@ -16,7 +16,6 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { hostSessionIdentity } from "./host.ts";
 import { homeLaunchRoom, isValidRoomKey } from "./room.ts";
-import { flushGigaTurns } from "../giga.ts";
 import { PortableSessionError, sessionRequest } from "./session-transport.ts";
 import { captureTernTerminal, ternLauncher, type Launcher, type TernTerminal } from "./tern-capture.ts";
 import { confirmPaperBoat, exitGuard } from "./exit-guards.ts";
@@ -139,6 +138,11 @@ const attachments = new Map<string, Attachment>();
 // a launch cwd nor a projected ATHANOR_CLIENT_ROOM_DIR re-attaches a home.
 const homeOff = new Set<string>();
 
+// The installed loader's reconnect gate (installed-loader.ts reconnectGate).
+// Null for an adapter loaded from a checkout, which has no installed release.
+type ReconnectGate = () => { code: string; message: string } | null;
+let reconnectGate: ReconnectGate | null = null;
+
 export function sessionAttachment(ctx: any): Attachment | null {
   const key = conversationKey(ctx);
   return key ? attachments.get(key) ?? null : null;
@@ -228,6 +232,11 @@ async function attachConversation(
   if (!sessionFile || !path.isAbsolute(sessionFile)) {
     throw new PortableSessionError("session_file_missing", "this conversation has no session file, so the Host cannot address or resume it", 0);
   }
+  // A cutover in progress, or an installed release this process's loaded code
+  // cannot speak, refuses every attach; a compatible release refreshes the
+  // projected Host credential before the request below reads it.
+  const refusal = reconnectGate?.();
+  if (refusal) throw new PortableSessionError(refusal.code, refusal.message, 0);
   const instanceId = instanceFor(room);
   const keeperLaunch = keeperInstance !== null && instanceId === keeperInstance;
   const { terminal, reason: terminalReason } = await captureTernTerminal(sessionFile);
@@ -422,11 +431,21 @@ async function recoverLease(runtime: Runtime, attachment: Attachment, error: Por
     runtime.ctx?.ui?.notify?.(`Athanor home ${attachment.room}: ${attachment.error}.`, "error");
     return;
   }
-  if (["lease_expired", "instance_unknown", "conversation_mismatch"].includes(error.code)) {
+  // A 401 means the Host credential changed under this process, as after a
+  // cutover; the attach gate reloads it from the client projection first.
+  if (["lease_expired", "instance_unknown", "conversation_mismatch"].includes(error.code) || error.status === 401) {
     try {
       await attachConversation(runtime.pi, runtime.ctx, attachment.room, attachment.source, { chatDelivery: attachment.chatDelivery });
     } catch (reattach) {
       attachment.connected = false;
+      // No timer may retry what only a new OMP process can fix.
+      if (reattach instanceof PortableSessionError && reattach.code === "adapter_restart_required") {
+        attachment.status = "failed";
+        attachment.error = reattach.message;
+        stopTimers(runtime);
+        runtime.ctx?.ui?.notify?.(`Athanor home ${attachment.room} stays disconnected: ${reattach.message}.`, "error");
+        return;
+      }
       warn(runtime, `re-attach to ${attachment.room} failed: ${message(reattach)}`);
     }
     return;
@@ -575,8 +594,6 @@ async function commitExit(runtime: Runtime, exit: PendingExit): Promise<void> {
   }
   live.exiting = true;
   stopTimers(runtime);
-  // Buffered GIGA turns are pending work an exit would destroy.
-  await flushGigaTurns().catch(() => undefined);
   // The keeper reads exit code 87 as "relaunch me"; Tern and close exit normally.
   if (exit.keeper) setTimeout(() => process.exit(KEEPER_EXIT_CODE), 0);
   else {
@@ -880,8 +897,9 @@ function statusLines(ctx: any, rooms: ReleaseRooms): string[] {
   return lines;
 }
 
-export function installPortableSession(pi: any, release?: { rooms?: ReleaseRooms } | null): void {
+export function installPortableSession(pi: any, release?: { rooms?: ReleaseRooms; reconnectGate?: ReconnectGate } | null): void {
   const rooms = release?.rooms;
+  reconnectGate = release?.reconnectGate ?? null;
   const runtime: Runtime = {
     pi, ctx: null, key: null, pollTimer: null, heartbeatTimer: null, polling: false,
     handled: new Map(), holding: new Map(), pendingApplied: new Map(), lastWarningAt: 0,
@@ -1132,5 +1150,6 @@ export const __sessionTest = Object.freeze({
     roomInstances.clear();
     continuedRestarts.clear();
     keeperInstanceRoom = null;
+    reconnectGate = null;
   },
 });

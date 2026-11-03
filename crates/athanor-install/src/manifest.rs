@@ -213,4 +213,20 @@ mod tests {
             Err(ManifestError::Compatibility(_))
         ));
     }
+
+    /// `installer/build-native-release.ps1` stamps the release manifest from
+    /// `installer/dependencies.json`; the installer inside that same payload
+    /// refuses any manifest whose schema differs from `REQUIRED_SCHEMA`.
+    #[test]
+    fn installer_dependencies_name_the_hearth_schema_head() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../installer/dependencies.json");
+        let dependencies: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).expect("read installer/dependencies.json"))
+                .expect("parse installer/dependencies.json");
+        assert_eq!(
+            dependencies["schemaVersion"].as_u64(),
+            Some(u64::from(REQUIRED_SCHEMA)),
+            "installer/dependencies.json schemaVersion must equal hearth::SUBSTRATE_SCHEMA_VERSION ({REQUIRED_SCHEMA}); a release built from a stale value is refused by its own installer"
+        );
+    }
 }

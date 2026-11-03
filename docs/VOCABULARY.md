@@ -66,7 +66,7 @@ These names have no code. Do not describe them as current. Each one waits in [`R
 | Data root | `%ProgramData%/Solarisael/Athanor` | `layout.rs:4,22-27,39-45` |
 | House id, reference House | `solarisael` | `C:/ProgramData/Solarisael/Athanor/config/runtime.json:1-37` |
 | House id, no config supplied | `local` | `installer.rs:1167-1183` |
-| Room marker | `.athanor-room.json`. Native startup migrates legacy names before reading room state. | `crates/host/src/store.rs` |
+| Room marker | `.athanor-room.json`, laid over `<rooms>/house/.athanor-house.json`. A room key replaces the House value whole. `room` is never inherited. Native startup migrates legacy names before reading room state. | `crates/akasha/src/room_marker.rs`; `crates/host/src/store.rs` |
 | Environment prefix | `ATHANOR_`, including Host, state, and native runtime settings | `crates/host/src/config.rs`; `adapters/omp/house-proof/host.ts` |
 
 Two exceptions to the prefix matter:

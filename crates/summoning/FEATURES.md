@@ -10,7 +10,7 @@ The `presence` crate owns the Presence domain, and Summoning is the boundary con
 ### anamnesis
 
 - Two read modes exist: wake and consult. A consult needs a query. A wake does not.
-- A read limit must be between 1 and 50.
+- A read limit must be a positive unsigned 32-bit integer.
 - Two kinds exist: pillar and cycle.
 - Two fidelity values exist: record and raw material.
 - Two activation points exist: wake and fork.

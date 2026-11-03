@@ -64,6 +64,7 @@ The production builder makes one `HostConfig` per `runtime.json` `rooms[]` entry
 | `bind` | `127.0.0.1` plus `runtime.json` `hostPort` |
 | `bearer_token` | `runtime-secrets.json` `hostToken` |
 | `room`, `spirit` | `rooms[].room`, `rooms[].spirit` |
+| `operator` | Optional `rooms[].operator`; independent of the room-state display name. |
 | `room_dir` | `roomsRoot/<room>` |
 | `state_dir` | `data/state/host/<room>` |
 | `house_id` | `runtime.json` `houseId` |
@@ -148,9 +149,27 @@ Presence advertises capabilities from configuration: `RoomState` always, `Akasha
 
 ### 3.6 Projections
 
-The Recall viewport compacts candidates to fixed ceilings: excerpt 900 characters, 5 kept candidates in automatic mode, 6 canon rows, warnings 8×300 in automatic mode (`crates/host/src/viewport.rs:89-128,278-446`). Automatic mode suppresses `zero-terms`, `glue-only`, `insufficient-evidence`, and `saturated` candidates (`viewport.rs:484-508`).
+The Recall viewport keeps at most five automatic candidates and six canon rows.
+Automatic candidate passages contain at most 384 Unicode scalar values from the source.
+Manual retrieval retains complete selected records.
+Both automatic modes exclude raw fallback chunks.
+An active Jev judgment can establish relevance without literal word overlap.
+Other automatic results require candidate-specific exact evidence or discriminative lexical evidence.
 
-Recall policy is Host-owned. A refresh needs a non-Quiet mode and one of: explicit lookup, technical project, or pending recovery (`crates/host/src/policy.rs:220-221`). Refresh reasons rank from `post-compaction-recovery` down to `stale-working-set` at 8 turns or 4,096 tokens (`policy.rs:245-273`).
+The Host owns retrieval policy and a bounded user-origin subject for each session.
+It forms source-grounded search, reuse, and skip plans from the current turn and bounded preceding context.
+Jev can choose a supplied plan when the required grants permit it.
+Quiet, explicit references, identity boundaries, and recovery retain their deterministic rules.
+Generated turns cannot establish a user-origin subject.
+
+The Host keeps one current Recall block and one current Presence block.
+It retires old topical evidence before a refresh and records that removal before retrieval.
+The Recall block is the single visible owner of topical evidence.
+Stable Presence frames contain no retrieved project material.
+Context format 2 performs the stored-state cutover.
+Physical replacement can invalidate provider prefix caching; cache savings require measurement.
+
+Sources: `crates/host/src/policy.rs`, `recall_plan.rs`, `viewport.rs`, and `server/context_session/`.
 
 Dispatch validates requests and makes packets. The Host never starts a worker.
 Every receipt carries `executed: false`.
@@ -301,7 +320,7 @@ Missing domain operations remain unavailable; they do not become local pretend-w
 | `P/current.json` | `version`, `previousVersion`, `rollbackBackup` |
 | `P/versions/<version>/` | `bin/`, `runtime/postgresql/`, `runtime/nats/`, `components/omp-keeper/`, `components/omp-adapter/`, `compatibility.json`, `release-manifest.json` |
 | `P/components/omp-adapter/current.json`, `versions/<releaseId>/` | the adapter component pointer and payloads |
-| `D/config/runtime.json` | `databaseMode`, `databaseHost`, `databasePort`, `natsHost`, `natsPort`, `hostPort`, `schemaVersion`, `houseId`, `roomsRoot`, `operatorStateRoot`, `defaultRoom`, `rooms[{room, spirit}]`, `ompConfigPath`, `clientConfigPath` |
+| `D/config/runtime.json` | `databaseMode`, `databaseHost`, `databasePort`, `natsHost`, `natsPort`, `hostPort`, `schemaVersion`, `houseId`, `roomsRoot`, `operatorStateRoot`, `defaultRoom`, `rooms[{room, spirit, operator?}]`, `ompConfigPath`, `clientConfigPath` |
 | `D/config/harnesses.json` | `format: 1`, `harnesses[{harnessId, autoStart, label, program, arguments, workspace, console}]` (`crates/athanor-install/src/harness/config.rs:15-59`) |
 | `D/secrets/runtime-secrets.json` | `hostToken`, `postgresPassword`, `externalDatabaseUrl`; restricted ACL |
 | `D/data/postgresql`, `D/data/nats`, `D/state/host/<room>`, `D/backups`, `D/logs` | runtime data and Host state |

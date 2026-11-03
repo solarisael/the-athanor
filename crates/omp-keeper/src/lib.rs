@@ -2,6 +2,7 @@
 pub mod clock;
 pub mod config;
 pub mod control;
+pub mod cutover;
 pub mod decide;
 pub mod keeper;
 // public so the smoke fixtures speak the keeper's own method names and wire

@@ -1,15 +1,13 @@
+use super::context::context_policy;
 use super::failure::{WorkerFailure, WorkerFailureKind};
-use super::ollama::OllamaConfig;
-use super::prompts::{GIGA_EXTRACTION_PROMPT, GIGA_GATE_PROMPT};
-use super::schema::GateKind;
-use hearth::GigaEvent;
+use super::typesafe::GigaClassifierConfig;
+use crate::typesafe::{TYPESAFE_ENDPOINT, TYPESAFE_MODEL};
+use hearth::{GigaCandidateKind, GigaEvent};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-pub const GIGA_PROMPT_VERSION: &str = "agents-a1-akashic-librarian-v3";
-pub const GIGA_MODEL_TAG: &str = "hf.co/InternScience/Agents-A1-4B-Q4_K_M-GGUF:latest";
-pub const GIGA_MODEL_MANIFEST_DIGEST: &str =
-    "96ca1ea02b302bf5cd1118d637f12a5af7c2a5aa465837532448bd6e54db4ceb";
+pub const GIGA_PROMPT_VERSION: &str = "jev-giga-classifier-v2-context";
+pub const GIGA_MODEL_TAG: &str = TYPESAFE_MODEL;
 
 pub(super) fn sha256_bytes(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -21,26 +19,23 @@ fn sha256_json(value: &Value) -> Result<String, WorkerFailure> {
         .map_err(|_| WorkerFailure::new(WorkerFailureKind::ClassifierRequest))
 }
 
-pub(super) fn configuration_digest(config: &OllamaConfig) -> Result<String, WorkerFailure> {
+pub(super) fn configuration_digest(config: &GigaClassifierConfig) -> Result<String, WorkerFailure> {
     sha256_json(&json!({
-        "provider": "ollama",
-        "endpoint_base_url": config.endpoint.as_str(),
-        "model": GIGA_MODEL_TAG,
-        "model_digest": GIGA_MODEL_MANIFEST_DIGEST,
+        "provider": "typesafe",
+        "endpoint": TYPESAFE_ENDPOINT,
+        "model": TYPESAFE_MODEL,
+        "policy_revision": config.policy_revision(),
         "prompt_version": GIGA_PROMPT_VERSION,
-        "gate_prompt_digest": sha256_bytes(GIGA_GATE_PROMPT.as_bytes()),
-        "extraction_prompt_digest": sha256_bytes(GIGA_EXTRACTION_PROMPT.as_bytes()),
-        "temperature": 0,
-        "seed": 42,
-        "num_ctx": config.num_ctx,
-        "gate_num_predict": 256,
-        "extraction_num_predict": 768
+        "temperature": "provider-default",
+        "question_set": ["kind", "priority", "durability", "novelty", "lookup"],
+        "novelty": "measured-against-completed-recall",
+        "context": context_policy(config)
     }))
 }
 
 pub(super) fn candidate_id(
     event: &GigaEvent,
-    kind: GateKind,
+    kind: GigaCandidateKind,
     source_ids: &[String],
 ) -> Result<String, WorkerFailure> {
     let mut sorted = source_ids.to_vec();
@@ -48,7 +43,7 @@ pub(super) fn candidate_id(
     sha256_json(&json!([
         event.event_id(),
         GIGA_PROMPT_VERSION,
-        GIGA_MODEL_MANIFEST_DIGEST,
+        TYPESAFE_MODEL,
         kind.as_str(),
         sorted
     ]))

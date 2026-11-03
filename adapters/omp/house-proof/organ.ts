@@ -9,9 +9,9 @@ export type OrganOperation =
   | "hallway_knock_policy" | "hallway_knock"
   | "quest_post" | "quest_board" | "quest_claim" | "quest_report" | "quest_evidence"
   | "restart_request" | "restart_transition" | "restart_verify" | "restart_status"
-  | "giga_set_enablement" | "giga_conversation_ingest" | "giga_candidate_list" | "giga_tool_review" | "giga_tool_promote"
+  | "giga_set_enablement" | "giga_candidate_list" | "giga_tool_review" | "giga_tool_promote"
   | "giga_health" | "giga_queue_maintenance" | "substrate_health"
-  | "orihon" | "orihon_capture" | "orihon_mode"
+  | "orihon" | "unfold" | "orihon_capture" | "orihon_mode" | "orihon_turn" | "orihon_zoom" | "orihon_date"
   | "worker_lifecycle";
 
 export class OrganError extends Error {

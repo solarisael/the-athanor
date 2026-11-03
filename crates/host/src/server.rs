@@ -152,6 +152,7 @@ struct AppState {
     runtime: Arc<Mutex<RuntimeState>>,
     context_sessions: Arc<Mutex<context_session::ContextSessions>>,
     giga: Arc<Mutex<crate::organ::GigaRoomWorker>>,
+    orihon: crate::organ::orihon::live::Room,
     hallway_pool: Option<PgPool>,
     insula_binding: Arc<TrustedBinding>,
     insula: InsulaHost,
@@ -237,6 +238,7 @@ impl Host {
                 })),
                 context_sessions: Arc::new(Mutex::new(context_session::ContextSessions::default())),
                 giga: Arc::new(Mutex::new(crate::organ::GigaRoomWorker::default())),
+                orihon: crate::organ::orihon::live::Room::default(),
                 hallway_pool: pool,
                 insula,
                 panel,
@@ -261,6 +263,13 @@ impl Host {
             self.state.giga.clone(),
             self.state.cancellation.clone(),
         ));
+        self.state.tasks.spawn(crate::organ::orihon::live::serve(
+            self.state.orihon.clone(),
+            (*self.state.config).clone(),
+            self.state.hallway_pool.clone(),
+            registered_conversations(self.state.portable.clone()),
+            self.state.cancellation.clone(),
+        ));
         if let Some(url) = self.state.config.nats_url.clone() {
             self.state
                 .tasks
@@ -282,6 +291,19 @@ impl Host {
             .merge(surface::router(self.state.clone()))
             .merge(portable::router(self.state.clone()))
     }
+}
+
+/// The conversations this Host still registers, read by the room's Orihon live owner: a fold
+/// session that left them no longer takes part.
+fn registered_conversations(
+    portable: Arc<Mutex<portable::Registry>>,
+) -> crate::organ::orihon::live::Registered {
+    Box::new(
+        move || -> futures_util::future::BoxFuture<'static, Vec<String>> {
+            let portable = portable.clone();
+            Box::pin(async move { portable.lock().await.live_conversations() })
+        },
+    )
 }
 
 async fn health(State(state): State<AppState>) -> Json<Value> {
@@ -1051,7 +1073,7 @@ async fn execute_service_command(
             lineage_response(state, meta, settled, memories).await
         }
         ClientCommand::LogConversation { meta, request } => {
-            let result = log_conversation(&state.config, &meta, request);
+            let result = log_conversation(state, &meta, request).await;
             shell_response(state, meta, result).await
         }
         ClientCommand::PlanTriggerLessons { meta, request } => {
@@ -2298,12 +2320,14 @@ fn append_line(path: &str, content: &str) -> Result<(), String> {
 }
 
 /// Capture the visible conversation: identity, freshness, dedupe marker, and
-/// transcript shape all come from `hearth::conversation`.
-fn log_conversation(
-    config: &HostConfig,
+/// transcript shape all come from `hearth::conversation`. When the request asks
+/// for GIGA, its turn jobs are in PostgreSQL before this reply acknowledges them.
+async fn log_conversation(
+    state: &AppState,
     meta: &CommandMeta,
     mut request: ConversationLogRequest,
 ) -> Value {
+    let config = state.config.as_ref();
     request.room_dir = match resolve_room_dir(Some(&request.room_dir), config) {
         Ok(directory) => directory.into_owned(),
         Err(refusal) => return refusal,
@@ -2322,6 +2346,7 @@ fn log_conversation(
     let mut skipped = 0_u64;
     let mut errors = Vec::new();
     let mut logged = Vec::new();
+    let mut ledger_failures = 0_usize;
 
     if request.persist {
         let transcript_lock = match crate::organ::orihon::transcripts::migrate_and_lock(
@@ -2397,9 +2422,30 @@ fn log_conversation(
             };
             if ledger_ready {
                 logged.push(source);
+            } else {
+                ledger_failures += 1;
             }
         }
+    }
 
+    let giga = match request.giga.as_ref() {
+        Some(capture) => {
+            crate::organ::capture_giga(
+                config,
+                state.hallway_pool.as_ref(),
+                &state.giga,
+                capture,
+                request.persist,
+                &logged,
+                ledger_failures,
+            )
+            .await
+        }
+        None => Value::Null,
+    };
+
+    if request.persist {
+        // Turn identities and job counts only: no text, no event list.
         let debug = json!({
             "timestamp": captured_at,
             "room": &meta.sender_room,
@@ -2409,6 +2455,13 @@ fn log_conversation(
             "skipped": skipped,
             "errors": errors.clone(),
             "sourceLedgerDirectory": &ledger_directory,
+            "giga": giga.as_object().map(|receipt| json!({
+                "status": receipt.get("status"),
+                "reason": receipt.get("reason"),
+                "acceptedTurns": receipt.get("acceptedTurns"),
+                "duplicateTurns": receipt.get("duplicateTurns"),
+                "errors": receipt.get("errors"),
+            })),
         });
         // Debug provenance must never block capture.
         let _ = append_line(
@@ -2423,8 +2476,8 @@ fn log_conversation(
         "appended": appended,
         "skipped": skipped,
         "errors": errors,
-        "loggedTurns": logged,
         "sourceLedgerDirectory": ledger_directory,
+        "giga": giga,
     })
 }
 
@@ -3377,6 +3430,10 @@ fn new_id() -> String {
 #[cfg(test)]
 #[path = "server/recall_atomicity_tests.rs"]
 mod hardening_recall_atomicity;
+
+#[cfg(test)]
+#[path = "server/giga_capture_tests.rs"]
+mod giga_capture_tests;
 
 #[cfg(test)]
 mod tests {

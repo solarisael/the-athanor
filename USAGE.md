@@ -72,6 +72,11 @@ Use `session_control` with both the instance ID and conversation ID.
 Controls include delivery, interruption, compaction, close, and supported restart.
 Capability availability does not replace authorization.
 
+A delivered compaction without a receipt after 120 seconds reports `outcomeUnknown`.
+The original instance and conversation can report completion later.
+The Host does not deliver this command again.
+An undelivered command still expires. Restart and close deadlines remain unchanged.
+
 Use `/spirit chat on` to claim room chat delivery.
 Use `/spirit chat off` to release it.
 Another live recipient is never displaced implicitly.
@@ -332,14 +337,24 @@ Use explicit recall for load-bearing old decisions, names, promises, corrections
 ## Orihon: the room book
 
 Orihon records visible user messages, replies, tool calls, tool results, and attributed reports.
-Recording starts in `log` mode by default. An explicit `off` setting persists.
-Use `/orihon status` to see the mode, generation, baseline, and checkpoint.
-Use `/orihon off` to stop new book records.
-Use `/orihon log` to start a new recording generation after `off`.
+Each spirit has a saved recording default within its room. New spirits start with `log`.
+Each session loads that default when it attaches. Existing sessions keep their effective settings.
+A mode command changes the current session immediately and saves the default for new sessions of that spirit.
+Use `/orihon status` to compare `thisSession` with `defaultForNewSessions`.
+The status also shows the model and the current session's latest folder outcome.
+Use `/orihon off` to stop this session's new records and cancel its folder job.
+Use `/orihon log` to record in this session without automatic folding.
+Use `/orihon fold MODEL:TAG` to enable recording and local folding.
+Use `/orihon fold hosted` to select hosted folding with Sonnet 5.5.
+Use `/orihon fold hosted PROVIDER/MODEL` to select another supported OMP model.
+Each new session receives its own recording generation.
+An off-to-log or off-to-fold transition starts a new generation for the current session.
 
 Each session starts the new generation at its next user page and shows a notice.
 Orihon does not import earlier history or records from an off interval.
 A normal restart keeps the existing generation and resumes from its accepted checkpoint.
+Reattaching the same spirit and session preserves its effective settings, even when the saved default has changed.
+Existing room-wide settings migrate once to the current spirit's default. This migration preserves an explicit `off` setting.
 Capture failures show a warning. Ordinary work continues.
 The adapter retries from the retained harness log.
 A missing source remains an explicit gap.
@@ -348,7 +363,12 @@ Use the read-only `orihon` tool to read a page, sequence range, or UTC source da
 Reads return at most 200 records and a continuation cursor.
 The book is provenance. A row records what was said, not what is true.
 Canon and memory outrank the book.
-The navigator, binary tree, unfold tool, and automatic fold view are not implemented.
+Use `orihon` with `query` to find user pages in your own words.
+Read the selected `turnNo` before you rely on a local search candidate.
+Search uses bounded BM25F ranking. Tool output does not enter the candidate pool.
+The pool holds at most 512 user rows of at most 64 KiB each.
+Results hold at most 32 candidates and 128 KiB of exact source text.
+An incomplete search reports its limits. It does not clip source text.
 
 AKASHA stores accepted rows in PostgreSQL and exports exact rows to `<room>/orihon/YYYY-MM-DD.jsonl`.
 Vault uses those daily files as its durable book.
@@ -365,51 +385,93 @@ The existing Markdown transcript moves to `<room>/orihon/YYYY-MM-DD.md` on its n
 Migration preserves bytes and turn markers. A destination conflict preserves both files and refuses the write.
 Orihon mode does not disable the harness log or the existing Markdown transcript.
 
-### Fold one page
+### Live folding
 
-Generated folds can lose attribution or meaning. Read the exact sources before you rely on a fold.
+Generated summaries can omit conditions or attribution. Read the exact sources before you rely on a summary.
 The folder stores derived provenance. It does not create memory or canon.
-It does not change recording mode, run automatically, or inject summaries at wake.
+Keep recording on `log` until the selected model meets your needs.
 
-Use the substrate command to fold one selected page:
+In `fold` mode, each new idle user turn sends three parts to the model.
+The first part is the stable system prompt and the tool definitions.
+The second part is the persisted chat view, a summary-only user message.
+The third part is the current user message.
+Previous raw turns and earlier compaction summaries do not cross a user-turn boundary.
+The current turn keeps its tool calls, tool results, and steering messages.
+A request waits for the view inside the turn budget.
+When the view is not ready, the adapter refuses the request and shows the reason. It never sends the old conversation instead.
+Send the message again when the compactor is ready, or run `/orihon status`.
 
-```powershell
-athanor-substrate.exe orihon-fold --room ROOM --turn-no N --model TAG --env-file PATH
-```
+The Host builds the view from a message tree.
+Short texts stay verbatim. Longer texts use the model. Each summary targets 512 UTF-8 bytes.
+The chat view appends new summaries between batches.
+Above 128,000 UTF-8 bytes it merges older lines down to 64,000 bytes.
+The compactor reads its own persisted view of 16,000 to 32,000 bytes.
+The Host saves the exact view state. A restart restores the same bytes.
+At most 8 model requests run at the same time. A failed request retries at a later message boundary.
+Each job records its attempts, usage, and price. An unknown price stays unknown.
 
-Use a canonical Ollama model tag, including its version suffix.
-The model must support generation with `think: false`.
-The default endpoint is `http://127.0.0.1:11434`.
-Use `--endpoint URL` to select another local Ollama endpoint.
-Remote endpoints, redirects, and environment proxies are refused.
-Run the normal guarded deployment before you use this command against an installed database.
-The command never applies migrations.
+Use the `zoom` tool with a line id and width to open the two children of a summary, or the exact source record.
+Use the `date` tool with a line id to read the source timestamp.
+Task children receive the bounded view and their task. Their private logs stay private.
+A combined task report keeps the exact identity of each child transcript.
 
-For a Vault book, replace `--env-file PATH` with `--book-dir PATH`.
-The directory must contain the room's existing daily Orihon files.
-The folder writes `folds.jsonl` beside those files.
-AKASHA stores folds in `orihon_folds` through migration 0039.
+OMP compaction in a `fold` session writes a fixed note and summarizes nothing. The view carries the conversation.
+Handoff, advisor, and title requests outside an agent loop are not changed.
 
-Message folds preserve text verbatim when it fits within 512 UTF-8 bytes.
-Longer messages use the model. A page fold summarizes the message folds.
-Each generated fold has at most five attempts. Oversized or incomplete results refuse without clipping.
-The command reports the source frontier, exact source references, model calls, reused folds, and page text.
-Repeating the same source snapshot and recipe reuses the stored result.
-Late source records produce a separate snapshot revision. Earlier revisions remain unchanged.
+`/orihon status` reports the live state: units, built leaves, running and failed jobs, view bytes, and the last error.
+The Host cancels running jobs on shutdown or when the last live session leaves.
+Cancellation does not guarantee that Ollama stops its internal computation.
+Hosted cancellation terminates the owned gateway process before it releases generation ownership.
+Cancellation does not attest that an upstream provider stops its internal computation.
 
-One run accepts at most 4,096 records and 4 MiB of source text.
-Model input is limited to 64 KiB. Reference context is limited to 32 KiB.
-The default context setting is 32,768 tokens.
-Use `--num-ctx N` to select a supported model context between 4,096 and 262,144 tokens.
-Larger contexts require more model memory.
-The command checks serialized prompt bytes plus template and output allowances against this setting before every request.
-Each context record occupies one JSON line, with its kind, speaker, and escaped text.
-The folder removes oldest whole context records when the unchanged source input needs more room.
-It also reserves up to 4 KiB for retry history by removing optional context.
-The recipe digest identifies the exact context used.
-This conservative check can refuse input below the byte ceilings. It is not a tokenizer guarantee for arbitrary models.
-Each request has a 120-second deadline. A refusal can leave completed message folds available for reuse.
-Retry history can exhaust the context allowance before five attempts. That refusal stores no generated summary.
+### Hosted folding
+
+Warning: hosted folding sends conversation text through the selected OMP model route.
+Changing this session's setting does not stop hosted folding in another active session.
+
+Run `/orihon fold hosted` to select `anthropic/claude-sonnet-5-5`.
+Keep the current session open. The Host summarizes this room's live records in the background.
+Run `/orihon status` to inspect the provider, model, and outcome.
+Run `/orihon log` to stop this session's folding while its recording continues.
+
+Supported model selectors use the `anthropic` or `openai-codex` provider.
+The selected model must appear in the bound OMP chat catalog.
+Sonnet, Haiku, and Luna use their exact catalog selectors.
+The hosted context allowance is 131,072. The summary limit remains 512 UTF-8 bytes.
+
+The command binds the current executable, optional Bun entrypoint, operator home, agent directory, working directory, and configuration files.
+The Host must run under the same operating-system account.
+OMP owns credential discovery. Provider credentials do not enter Orihon settings or receipts.
+Use absolute paths for configuration overlays when the original launch directory is unavailable.
+Run the command again after moving the runtime or changing its profile binding.
+
+The Host runs one multiplexed gateway process for the room's live engine.
+Hosted requests use the same system prompt and tool definitions as the turn, so the provider can reuse its cache. The Host never claims that cache reuse happened.
+The scoped configuration preserves the operator's overlay order and disables OMP model fallback and Anthropic server-side fallback.
+The gateway uses the operator's configured logical model route, including configured proxies and wire-model mappings.
+Its returned selector does not attest the model that an upstream service actually executes.
+OMP 18.12.6 passed the hosted runtime proof. Other versions must provide the same gateway and configuration capabilities.
+
+
+### Remote navigation judgment
+
+Remote judgment sends private conversation text to TypeSafe. Enable it only with explicit approval for the room.
+
+Without approval, navigation returns local candidates for the speaking model to inspect.
+The separate `jevOrihon` grant lives in the room's `.athanor-room.json`.
+It requires `mode: "active"`, `provider: "typesafe"`, and the marker's matching `room`.
+Its `grant` requires `purpose: "orihon-navigation"`, `allowPrivateOrihonPackets: true`, and a nonempty `policyRevision`.
+The adapter obtains the TypeSafe credential through OMP's existing credential resolver.
+Recall reranking consent alone does not authorize this packet.
+
+Jev first selects user pages, then exact rows within those pages.
+Close page choices receive independent row judgments.
+The response preserves confidence, the choice distribution, and abstention.
+Privacy, size, credential, and provider failures remain visible.
+No remote packet exceeds the existing 32 KiB judgment limit.
+An oversized row-selection packet returns an exact-page read instruction instead of clipped source.
+Folding consent and the Jev navigation grant are separate settings.
+
 
 
 ## Tools and the Host

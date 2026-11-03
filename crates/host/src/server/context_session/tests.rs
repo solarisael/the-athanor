@@ -116,6 +116,45 @@ impl Fixture {
             "toolEvidenceRevision":0,"toolEvidenceEpoch":"test-epoch","capabilities":capabilities,
             "planToken":token,"credential":null,"legacyMemo":null,"priorPresence":null})
     }
+
+    async fn attach(&self, session: &str) {
+        use tower::ServiceExt;
+
+        std::fs::write(self.root.join("room/AGENTS.md"), "Isolated test home.\n").unwrap();
+        let attachment = json!({
+            "action":"attach","conversationId":session,
+            "instanceId":uuid::Uuid::new_v4(),"workspace":self.root,
+            "harness":"omp","sessionFile":self.root.join("session.jsonl"),
+            "processId":std::process::id(),"controls":[]
+        });
+        let response = crate::server::portable::router(self.state.clone())
+            .oneshot(
+                axum::http::Request::post("/session")
+                    .header("authorization", "Bearer test-token")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(attachment.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+    }
+
+    async fn orihon_mode(&self, session: &str, params: Value) -> Value {
+        let mut meta = self.meta.clone();
+        meta.sender_session = session.to_owned();
+        meta.reply_target = session.to_owned();
+        let request = serde_json::from_value(json!({
+            "operation":"orihon_mode","target_scope":"room","params":params
+        }))
+        .unwrap();
+        let response = crate::server::native_commands::organ(&self.state, meta, request).await;
+        let envelope: Value = serde_json::from_str(&response.direct[0]).unwrap();
+
+        assert_eq!(envelope["result"]["ok"], true, "{envelope}");
+        envelope["result"].clone()
+    }
 }
 
 impl Drop for Fixture {
@@ -202,19 +241,30 @@ async fn worker_context_discards_room_replay_and_legacy_continuity() {
 }
 
 #[tokio::test]
-async fn adoption_replays_exact_bytes_and_never_replaces_newer_native_state() {
+async fn adoption_retires_old_evidence_preserves_static_bytes_and_ignores_later_legacy() {
     let fixture = Fixture::new();
     fixture.prove_frame().await;
     let mut request = fixture.request("first").await;
     request["legacyMemo"] = legacy("first", "original bytes\n");
+    let mut wake = request["legacyMemo"]["turns"][0]["blocks"][0].clone();
+    wake["kind"] = json!("wake-context");
+    wake["content"] = json!("original wake bytes\n");
+    request["legacyMemo"]["turns"][0]["blocks"]
+        .as_array_mut()
+        .unwrap()
+        .push(wake);
     let first = prepare_inner(&fixture.state, &fixture.meta, request.clone())
         .await
         .unwrap();
-    assert_eq!(first["replayed"], true);
-    assert_eq!(
-        first["turns"][0]["blocks"][0]["content"],
-        "original bytes\n"
+    assert_eq!(first["replayed"], false);
+    assert_eq!(first["invalidationReason"], "context-format-changed");
+    let blocks = first["turns"][0]["blocks"].as_array().unwrap();
+    assert!(
+        blocks
+            .iter()
+            .any(|block| block["content"] == "original wake bytes\n")
     );
+    assert!(!blocks.iter().any(|block| block["kind"] == "recall-context"));
     *fixture.state.context_sessions.lock().await = ContextSessions::default();
     request = fixture.request("first").await;
     request["legacyMemo"] = legacy("first", "poisoned replacement");
@@ -313,29 +363,6 @@ async fn expired_assembly_and_cancelled_wait_do_not_publish_a_turn() {
     assert!(task.await.unwrap_err().is_cancelled());
     drop(guard);
     assert!(!cache::file(&fixture.state, &fixture.meta.sender_session).exists());
-}
-
-#[tokio::test]
-async fn visible_turn_pruning_preserves_current_bytes_and_drops_only_absent_turns() {
-    let fixture = Fixture::new();
-    fixture.prove_frame().await;
-    let mut request = fixture.request("second").await;
-    request["visibleTurnIds"] = json!(["first", "second"]);
-    let mut memo = legacy("first", "old");
-    memo["turns"]
-        .as_array_mut()
-        .unwrap()
-        .push(legacy("second", "current")["turns"][0].clone());
-    request["legacyMemo"] = memo;
-    prepare_inner(&fixture.state, &fixture.meta, request)
-        .await
-        .unwrap();
-    let request = fixture.request("second").await;
-    let response = prepare_inner(&fixture.state, &fixture.meta, request)
-        .await
-        .unwrap();
-    assert_eq!(response["turns"].as_array().unwrap().len(), 1);
-    assert_eq!(response["turns"][0]["blocks"][0]["content"], "current");
 }
 
 #[tokio::test]
@@ -1004,4 +1031,402 @@ async fn compaction_before_adoption_preserves_legacy_wake_and_removes_stale_reca
         );
         assert!(!blocks.iter().any(|block| block["kind"] == "recall-context"));
     }
+}
+
+/// The owner answers `subagent` after every earlier command and publishes before each one.
+async fn participants(live: &crate::organ::orihon::live::Room) -> Value {
+    let _ = live.subagent().await;
+    live.status()["participants"].clone()
+}
+
+#[tokio::test]
+async fn fold_consent_is_explicit_and_ends_with_the_last_participant() {
+    let fixture = Fixture::new();
+    let live = fixture.state.orihon.clone();
+    let owner = tokio::spawn(crate::organ::orihon::live::serve(
+        live.clone(),
+        (*fixture.state.config).clone(),
+        None,
+        registered_conversations(fixture.state.portable.clone()),
+        fixture.state.cancellation.clone(),
+    ));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !live.status()["lastError"].is_null() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the live owner starts");
+    fixture.attach("a").await;
+    fixture.attach("b").await;
+
+    let status = fixture.orihon_mode("a", json!({})).await;
+    assert_eq!(
+        status["instructions"],
+        hearth::orihon::live::LIVE_INSTRUCTIONS
+    );
+    assert_eq!(
+        status["instructionsVersion"],
+        hearth::orihon::live::LIVE_VERSION
+    );
+    assert!(status.get("pageRecipe").is_none() && status.get("folderStatus").is_none());
+    assert_eq!(status["liveStatus"]["participants"], 0);
+
+    fixture
+        .orihon_mode("a", json!({"mode":"fold","model":"proof:unused"}))
+        .await;
+    fixture.attach("c").await;
+    // c starts in fold mode from the spirit default; reading its status is not consent.
+    assert_eq!(fixture.orihon_mode("c", json!({})).await["mode"], "fold");
+    assert_eq!(participants(&live).await, 1);
+
+    fixture
+        .orihon_mode("b", json!({"mode":"fold","model":"proof:unused"}))
+        .await;
+    assert_eq!(participants(&live).await, 2);
+    // One fold session leaving keeps the other's compaction.
+    fixture.orihon_mode("a", json!({"mode":"log"})).await;
+    assert_eq!(participants(&live).await, 1);
+    fixture.orihon_mode("b", json!({"mode":"off"})).await;
+    assert_eq!(participants(&live).await, 0);
+
+    let status = live.status();
+    assert_eq!(status["running"], 0, "{status}");
+    assert!(status["cacheGate"].is_null(), "no engine opened: {status}");
+    assert!(
+        fixture.state.tasks.is_empty(),
+        "fold mode spawns no Host worker"
+    );
+
+    fixture.state.cancellation.cancel();
+    owner
+        .await
+        .expect("the live owner releases the room before its directory is removed");
+}
+
+#[tokio::test]
+async fn orihon_defaults_affect_new_sessions_without_changing_existing_sessions() {
+    let fixture = Fixture::new();
+    fixture.attach("a").await;
+    fixture.orihon_mode("a", json!({"mode":"log"})).await;
+    fixture.attach("b").await;
+
+    fixture.orihon_mode("a", json!({"mode":"off"})).await;
+    let b = fixture.orihon_mode("b", json!({})).await;
+
+    assert_eq!(b["mode"], "log");
+    assert_eq!(b["defaults"]["mode"], "off");
+
+    fixture.attach("c").await;
+    let c = fixture.orihon_mode("c", json!({})).await;
+
+    assert_eq!(c["mode"], "off");
+    assert_ne!(b["generation"], c["generation"]);
+
+    fixture.orihon_mode("b", json!({"mode":"log"})).await;
+    let a = fixture.orihon_mode("a", json!({})).await;
+    let c_after = fixture.orihon_mode("c", json!({})).await;
+    let b_after = fixture.orihon_mode("b", json!({})).await;
+
+    assert_eq!(a["mode"], "off");
+    assert_eq!(a["defaults"]["mode"], "log");
+    assert_eq!(c_after["mode"], "off");
+    assert_eq!(c_after["generation"], c["generation"]);
+    assert_eq!(b_after["generation"], b["generation"]);
+
+    fixture.attach("d").await;
+    let d = fixture.orihon_mode("d", json!({})).await;
+
+    assert_eq!(d["mode"], "log");
+}
+
+fn evidence_block(kind: BlockKind, content: &str) -> Block {
+    Block {
+        kind,
+        content: content.into(),
+        details: json!({"presentation":{"found":true,"retrievalCandidates":[
+            {"memory_id":42,"excerpt":content}
+        ]}}),
+        timestamp: 1,
+    }
+}
+
+#[test]
+fn dynamic_snapshot_replaces_each_kind_without_moving_static_or_reused_evidence() {
+    let mut saved = SavedSession::default();
+    cache::merge(
+        &mut saved,
+        "first",
+        vec![
+            evidence_block(BlockKind::RoomContext, "static"),
+            evidence_block(BlockKind::RecallContext, "first subject"),
+            evidence_block(BlockKind::PresenceContext, "first contract"),
+        ],
+    );
+    cache::merge(
+        &mut saved,
+        "second",
+        vec![
+            evidence_block(BlockKind::RoomContext, "replacement refused"),
+            evidence_block(BlockKind::PresenceContext, "second contract"),
+        ],
+    );
+
+    assert_eq!(
+        cache::latest(&saved, BlockKind::RecallContext)
+            .unwrap()
+            .content,
+        "first subject"
+    );
+    assert_eq!(saved.turns[0].blocks[0].content, "static");
+    assert!(
+        !saved.turns[0]
+            .blocks
+            .iter()
+            .any(|block| block.kind == BlockKind::PresenceContext)
+    );
+
+    cache::merge(
+        &mut saved,
+        "second",
+        vec![
+            evidence_block(BlockKind::RecallContext, "new subject"),
+            evidence_block(BlockKind::PresenceContext, "new contract"),
+        ],
+    );
+
+    assert_eq!(saved.turns.len(), 2);
+    assert_eq!(saved.turns[0].blocks.len(), 1);
+    assert_eq!(saved.turns[1].blocks.len(), 2);
+    assert_eq!(
+        cache::latest(&saved, BlockKind::RecallContext)
+            .unwrap()
+            .content,
+        "new subject"
+    );
+    assert!(cache::retire_recall(&mut saved));
+    assert!(!cache::retire_recall(&mut saved));
+    assert_eq!(saved.turns[0].blocks[0].content, "static");
+    assert!(saved.turns[1].blocks.is_empty());
+}
+
+#[tokio::test]
+async fn skipped_retrieval_preserves_one_evidence_snapshot_without_promoting_it_to_identity() {
+    let fixture = Fixture::new();
+    let request = fixture.request("first").await;
+    prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+    let mut context = session(&fixture.state, &fixture.meta.sender_session).await;
+    let saved = context.saved.as_mut().unwrap();
+    cache::merge(
+        saved,
+        "first",
+        vec![evidence_block(
+            BlockKind::RecallContext,
+            "Current topical evidence",
+        )],
+    );
+    cache::commit(&fixture.state, &fixture.meta.sender_session, saved).unwrap();
+    drop(context);
+    *fixture.state.context_sessions.lock().await = ContextSessions::default();
+
+    let mut request = fixture.request("second").await;
+    request["visibleTurnIds"] = json!(["first", "second"]);
+    let result = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+    let blocks = result["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|turn| turn["blocks"].as_array().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        blocks
+            .iter()
+            .filter(|block| block["kind"] == "recall-context")
+            .count(),
+        1
+    );
+    let presence = blocks
+        .iter()
+        .filter(|block| block["kind"] == "presence-context")
+        .collect::<Vec<_>>();
+    assert_eq!(presence.len(), 1);
+    assert_eq!(presence[0]["details"]["turnId"], "second");
+    assert!(!text(&presence[0]["content"]).contains("Current topical evidence"));
+    let recall = blocks
+        .iter()
+        .find(|block| block["kind"] == "recall-context")
+        .unwrap();
+    assert_eq!(recall["content"], "Current topical evidence");
+    assert_eq!(
+        recall["details"]["presentation"]["retrievalCandidates"][0]["memory_id"],
+        42
+    );
+
+    let runtime = fixture.state.runtime.lock().await;
+    let (frame, _) = runtime
+        .presence
+        .session_state(&fixture.meta.sender_session)
+        .unwrap();
+    assert!(!frame.rendered.contains("Current topical evidence"));
+    drop(runtime);
+
+    let mut context = session(&fixture.state, &fixture.meta.sender_session).await;
+    invalidate(&fixture.state, &fixture.meta.sender_session, &mut context).unwrap();
+    drop(context);
+    *fixture.state.context_sessions.lock().await = ContextSessions::default();
+    let persisted = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert!(cache::latest(&persisted, BlockKind::RecallContext).is_none());
+    assert!(cache::latest(&persisted, BlockKind::PresenceContext).is_none());
+    assert!(cache::has_kind(&persisted, BlockKind::RoomContext));
+}
+
+#[tokio::test]
+async fn native_format_cutover_rotates_topical_frames_and_preserves_the_ledger() {
+    let fixture = Fixture::new();
+    let authentication = authenticate_presence(&fixture.state, &fixture.meta).unwrap();
+    let identity = materials::material(
+        "identity:active-spirit".into(),
+        json!({"kind":"identity","source":"active_spirit.md","sha256":"a".repeat(64)}),
+        "identity",
+        "Authenticated identity".into(),
+        1000,
+    );
+    let topical = materials::material(
+        "memory:42".into(),
+        json!({"kind":"memory","memory_id":42}),
+        "continuity",
+        "Obsolete topical frame".into(),
+        650,
+    );
+    let boat = materials::material(
+        "paper-boat:9".into(),
+        json!({"kind":"paper_boat","memory_id":9}),
+        "continuity",
+        "Retained boat continuity".into(),
+        900,
+    );
+    let open = serde_json::from_value(json!({
+        "binding":authentication.binding,"identity":[identity],"continuity":[topical,boat]
+    }))
+    .unwrap();
+    fixture
+        .state
+        .runtime
+        .lock()
+        .await
+        .presence
+        .open_carrying(
+            &authentication,
+            "old-frame",
+            open,
+            Some(PresenceLedger {
+                repair_rule_ids: vec!["rule:preserved".into()],
+                ..PresenceLedger::default()
+            }),
+        )
+        .unwrap();
+    let mut saved = SavedSession {
+        version: 1,
+        ..SavedSession::default()
+    };
+    cache::merge(
+        &mut saved,
+        "first",
+        vec![
+            evidence_block(BlockKind::RoomContext, "Retained static bytes"),
+            evidence_block(BlockKind::RecallContext, "Obsolete topical frame"),
+        ],
+    );
+    cache::commit(&fixture.state, &fixture.meta.sender_session, &saved).unwrap();
+    *fixture.state.context_sessions.lock().await = ContextSessions::default();
+
+    let request = fixture.request("first").await;
+    let result = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+    assert_eq!(result["invalidationReason"], "context-format-changed");
+    assert_eq!(result["replayed"], false);
+    assert!(
+        !result["turns"]
+            .to_string()
+            .contains("Obsolete topical frame")
+    );
+    assert!(
+        result["turns"]
+            .to_string()
+            .contains("Retained static bytes")
+    );
+    let runtime = fixture.state.runtime.lock().await;
+    let (frame, ledger) = runtime
+        .presence
+        .session_state(&fixture.meta.sender_session)
+        .unwrap();
+    assert!(!frame.rendered.contains("Obsolete topical frame"));
+    assert!(frame.rendered.contains("Retained boat continuity"));
+    assert_eq!(ledger.repair_rule_ids, vec!["rule:preserved"]);
+    drop(runtime);
+    let persisted = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert_eq!(persisted.version, cache::CONTEXT_VERSION);
+}
+
+#[tokio::test]
+async fn recall_retirement_survives_an_uncommitted_assembly_timeout_and_restart() {
+    let fixture = Fixture::new();
+    let mut saved = SavedSession::default();
+    cache::merge(
+        &mut saved,
+        "first",
+        vec![
+            evidence_block(BlockKind::RoomContext, "Retained startup"),
+            evidence_block(BlockKind::RecallContext, "Retired subject"),
+            evidence_block(BlockKind::PresenceContext, "Retired turn contract"),
+        ],
+    );
+    cache::commit(&fixture.state, &fixture.meta.sender_session, &saved).unwrap();
+    let mut context = session(&fixture.state, &fixture.meta.sender_session).await;
+    context.saved = Some(saved.clone());
+    let expired = tokio::time::timeout(Duration::from_millis(10), async {
+        assembly::retire_working_set(&fixture.state, &fixture.meta, &mut saved, &mut context)
+            .unwrap();
+        std::future::pending::<()>().await;
+    })
+    .await;
+
+    assert!(expired.is_err());
+    assert!(!cache::has_kind(
+        context.saved.as_ref().unwrap(),
+        BlockKind::RecallContext
+    ));
+    drop(context);
+    *fixture.state.context_sessions.lock().await = ContextSessions::default();
+    let restored = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert!(!cache::has_kind(&restored, BlockKind::RecallContext));
+    assert!(!cache::has_kind(&restored, BlockKind::PresenceContext));
+    assert_eq!(
+        cache::latest(&restored, BlockKind::RoomContext)
+            .unwrap()
+            .content,
+        "Retained startup"
+    );
+
+    cache::merge(
+        &mut saved,
+        "recovery",
+        vec![evidence_block(
+            BlockKind::RecallContext,
+            "Recovered subject",
+        )],
+    );
+    cache::commit(&fixture.state, &fixture.meta.sender_session, &saved).unwrap();
+    let recovered = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert_eq!(
+        cache::latest(&recovered, BlockKind::RecallContext)
+            .unwrap()
+            .content,
+        "Recovered subject"
+    );
 }

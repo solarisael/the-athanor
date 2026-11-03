@@ -38,14 +38,22 @@ pub struct LessonQueryParams {
     pub always_on: bool,
     #[serde(default)]
     pub trigger_only: bool,
-    #[serde(default = "default_twelve")]
-    pub limit: u32,
+    #[serde(default)]
+    pub limit: Option<u32>,
     /// Direct lookup by lesson ID inside the family. A map names lessons by
     /// number, so the number must reach the row without eligibility keys.
     #[serde(default)]
     pub ids: Vec<i64>,
 }
 impl LessonQueryParams {
+    pub fn effective_limit(&self) -> u32 {
+        self.limit.unwrap_or(if self.ids.is_empty() {
+            default_twelve()
+        } else {
+            self.ids.len() as u32
+        })
+    }
+
     pub fn validate(&self) -> Result<(), AppError> {
         if !ROOM_KEY_RE.is_match(&self.room) {
             return Err(AppError::Invalid("room must be a lowercase slug".into()));
@@ -56,10 +64,8 @@ impl LessonQueryParams {
         {
             return Err(AppError::Invalid("project lessons require project".into()));
         }
-        if !(1..=50).contains(&self.limit) {
-            return Err(AppError::Invalid(
-                "limit must be an integer from 1 through 50".into(),
-            ));
+        if self.limit == Some(0) {
+            return Err(AppError::Invalid("limit must be positive".into()));
         }
         Ok(())
     }
@@ -209,6 +215,7 @@ pub async fn lesson_query(
 ) -> Result<LessonQueryResult, AppError> {
     params.validate()?;
     let settings = RoomSettings::load(pool, &params.room).await?;
+    let limit = params.effective_limit();
     let scopes = params.scopes();
     let mut qb = QueryBuilder::<Postgres>::new(LESSON_SELECT);
     qb.push(" WHERE lesson_key = ")
@@ -276,7 +283,7 @@ pub async fn lesson_query(
         .push("::regconfig END, ")
         .push_bind(rank)
         .push(")) ELSE 0 END DESC, updated_at DESC, id LIMIT ")
-        .push_bind(i64::from(params.limit));
+        .push_bind(i64::from(limit));
     let mut lessons = qb
         .build()
         .fetch_all(pool)
@@ -293,7 +300,7 @@ pub async fn lesson_query(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    if !direct && !expansion_keys.is_empty() && lessons.len() < 50 {
+    if !direct && !expansion_keys.is_empty() && lessons.len() < limit as usize {
         let ids = lessons.iter().map(|row| row.id).collect::<Vec<_>>();
         let mut expand = QueryBuilder::<Postgres>::new(LESSON_SELECT);
         expand
@@ -328,7 +335,7 @@ pub async fn lesson_query(
         }
         expand
             .push(" ORDER BY always_on DESC, updated_at DESC, id LIMIT ")
-            .push_bind((50 - lessons.len()) as i64);
+            .push_bind((limit as usize - lessons.len()) as i64);
         let rows = expand.build().fetch_all(pool).await?;
         lessons.extend(
             rows.iter()
@@ -409,7 +416,7 @@ pub async fn lesson_query(
             query: params.query,
             always_on: params.always_on,
             trigger_only: params.trigger_only,
-            limit: params.limit,
+            limit,
             ids: params.ids,
         },
         lessons,

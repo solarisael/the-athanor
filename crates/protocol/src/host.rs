@@ -275,6 +275,33 @@ pub struct RecallQueryRoute {
     pub recognized_entities: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecallPlanAction {
+    Skip,
+    Reuse,
+    Search,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecallContextTurn {
+    pub turn_id: String,
+    pub role: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecallQueryPlan {
+    pub action: RecallPlanAction,
+    pub query: String,
+    pub intent: String,
+    pub subject_terms: Vec<String>,
+    pub source_turn_ids: Vec<String>,
+    pub reason: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecallPolicyFacts {
@@ -287,6 +314,8 @@ pub struct RecallPolicyFacts {
     pub working_set_present: bool,
     #[serde(default)]
     pub tool_evidence: bool,
+    #[serde(default)]
+    pub query_plan: Option<RecallQueryPlan>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -448,22 +477,17 @@ pub struct AkashaLessonQueryPayload {
     pub technology_keys: Vec<String>,
     #[serde(default)]
     pub query: Option<String>,
-    #[serde(default = "default_akasha_lesson_limit")]
-    pub limit: u32,
+    #[serde(default)]
+    pub limit: Option<u32>,
     /// Exact lesson ids inside the family; a direct lookup skips eligibility keys.
     #[serde(default)]
     pub ids: Vec<i64>,
-}
-
-fn default_akasha_lesson_limit() -> u32 {
-    20
 }
 
 const AKASHA_QUERY_MAX_CHARS: usize = 512;
 const AKASHA_FILTER_MAX_CHARS: usize = 128;
 const AKASHA_KEY_MAX_CHARS: usize = 64;
 const AKASHA_KEYS_MAX: usize = 16;
-const AKASHA_IDS_MAX: usize = 50;
 
 /// Trims one bounded free-text query, refusing blank and oversize text.
 fn bounded_akasha_query(field: &str, value: &str) -> Result<String, String> {
@@ -524,9 +548,8 @@ impl AkashaLessonQueryPayload {
         if let Some(query) = &mut self.query {
             *query = bounded_akasha_query("lesson query", query)?;
         }
-        self.limit = self.limit.clamp(1, 50);
-        if self.ids.len() > AKASHA_IDS_MAX {
-            return Err(format!("ids carries more than {AKASHA_IDS_MAX} ids"));
+        if self.limit == Some(0) {
+            return Err("limit must be positive".into());
         }
         if self.ids.iter().any(|id| *id <= 0) {
             return Err("ids must be positive lesson ids".into());
@@ -646,6 +669,23 @@ pub struct ConversationLogRequest {
     pub persist: bool,
     #[serde(default)]
     pub messages: Vec<VisibleMessage>,
+    /// GIGA capture asked of this window. Absent: the caller is no GIGA
+    /// producer, and the Host admits no GIGA turn jobs.
+    #[serde(default)]
+    pub giga: Option<ConversationGigaCapture>,
+}
+
+/// The harness's GIGA switches for one capture. Replay and subagent sessions
+/// state their opt-out; the Host never infers either one.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ConversationGigaCapture {
+    pub giga_enabled: bool,
+    pub hippocampus_enabled: bool,
+    pub replay_mode: bool,
+    pub subagent: bool,
+    #[serde(default)]
+    pub project_keys: Vec<String>,
 }
 
 /// A matched process trigger, optionally carrying the lesson rows the adapter
@@ -2311,44 +2351,47 @@ mod receipt_tests {
     }
 
     #[test]
-    fn akasha_lesson_query_keeps_bounded_filters_and_clamps_the_limit() {
+    fn akasha_lesson_query_preserves_limit_and_refuses_zero() {
         let mut command = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-1");
         command["akasha_lesson_query"] = json!({
             "type": "coding",
             "shape": "  process  ",
             "languageKeys": [" rust "],
             "query": " host command ",
-            "limit": 500
+            "limit": 75
         });
         let Ok(ClientCommand::AkashaLessonQuery { payload, .. }) = parse_client_command(command)
         else {
-            panic!("bounded lesson query parses");
+            panic!("lesson query parses");
         };
         assert_eq!(payload.family, AkashaLessonFamily::Coding);
         assert_eq!(payload.shape.as_deref(), Some("process"));
         assert_eq!(payload.language_keys, vec!["rust".to_owned()]);
         assert_eq!(payload.query.as_deref(), Some("host command"));
-        assert_eq!(payload.limit, 50);
+        assert_eq!(payload.limit, Some(75));
 
         let mut zero = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-zero");
-        zero["akasha_lesson_query"] =
-            json!({ "type": "project", "project": "athanor", "limit": 0 });
-        let Ok(ClientCommand::AkashaLessonQuery { payload, .. }) = parse_client_command(zero)
-        else {
-            panic!("zero limit clamps instead of refusing");
-        };
-        assert_eq!(payload.limit, 1);
+        zero["akasha_lesson_query"] = json!({ "type": "coding", "limit": 0 });
+        assert!(parse_client_command(zero).is_err());
+        for invalid in [
+            json!({"type": "coding", "limit": -1}),
+            json!({"type": "coding", "limit": 1.5}),
+            json!({"type": "coding", "limit": 4294967296_u64}),
+        ] {
+            let mut command = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-invalid-limit");
+            command["akasha_lesson_query"] = invalid;
+            assert!(parse_client_command(command).is_err());
+        }
 
         let mut default = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-default");
         default["akasha_lesson_query"] = json!({ "type": "writing" });
         let Ok(ClientCommand::AkashaLessonQuery { payload, .. }) = parse_client_command(default)
         else {
-            panic!("omitted limit takes the default");
+            panic!("omitted limit parses");
         };
-        assert_eq!(payload.limit, 20);
+        assert_eq!(payload.limit, None);
         assert!(payload.shape.is_none());
     }
-
     #[test]
     fn akasha_lesson_query_refuses_blank_filters_and_a_foreign_payload() {
         let mut blank = akasha_envelope(AKASHA_LESSON_QUERY, "lesson-blank");

@@ -1153,20 +1153,37 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("athanor-fresh-{}", Uuid::new_v4().simple()));
         fs::create_dir_all(&dir).unwrap();
 
-        assert!(fresh_dump_in(dir.clone(), 12).is_none(), "an empty directory is not fresh");
+        assert!(
+            fresh_dump_in(dir.clone(), 12).is_none(),
+            "an empty directory is not fresh"
+        );
 
         write_dump(&dir, "old.dump", std::time::Duration::from_secs(13 * 3600));
-        assert!(fresh_dump_in(dir.clone(), 12).is_none(), "a 13h dump is past a 12h bound");
+        assert!(
+            fresh_dump_in(dir.clone(), 12).is_none(),
+            "a 13h dump is past a 12h bound"
+        );
 
         let young = write_dump(&dir, "young.dump", std::time::Duration::from_secs(2 * 3600));
         let fresh = fresh_dump_in(dir.clone(), 12).expect("a 2h dump is fresh under 12h");
         assert_eq!(fresh.dump_path(), young.to_string_lossy());
         assert_eq!(fresh.bound_hours(), 12);
-        assert!((7_000..=7_400).contains(&fresh.age_seconds()), "{}", fresh.age_seconds());
-        assert!(fresh.detail().starts_with("newest dump is 2.0h old, under the 12h bound"));
+        assert!(
+            (7_000..=7_400).contains(&fresh.age_seconds()),
+            "{}",
+            fresh.age_seconds()
+        );
+        assert!(
+            fresh
+                .detail()
+                .starts_with("newest dump is 2.0h old, under the 12h bound")
+        );
 
         fs::write(&young, b"not a dump").unwrap();
-        assert!(fresh_dump_in(dir.clone(), 12).is_none(), "a bad header is not fresh");
+        assert!(
+            fresh_dump_in(dir.clone(), 12).is_none(),
+            "a bad header is not fresh"
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }

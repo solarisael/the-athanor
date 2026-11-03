@@ -4,6 +4,7 @@ use anyhow::{Context, Result, bail};
 use interactive_process::{InteractiveChild, InteractiveCommand};
 use std::{
     collections::BTreeMap,
+    path::PathBuf,
     sync::Mutex,
     thread,
     time::{Duration, Instant},
@@ -36,6 +37,7 @@ pub struct HarnessOwner {
     registry: HarnessRegistry,
     token: String,
     state: Mutex<OwnedState>,
+    cutover_state_root: Option<PathBuf>,
 }
 
 impl HarnessOwner {
@@ -44,7 +46,16 @@ impl HarnessOwner {
             registry,
             token,
             state: Mutex::new(OwnedState::default()),
+            cutover_state_root: None,
         }
+    }
+
+    /// While a deployment holds a cutover marker under `state_root`
+    /// (omp_keeper::cutover), shutdown releases keeper harnesses instead of
+    /// stopping them: the keeper pauses itself, and its OMP session stays open.
+    pub fn with_cutover_state_root(mut self, state_root: PathBuf) -> Self {
+        self.cutover_state_root = Some(state_root);
+        self
     }
 
     pub fn registry(&self) -> &HarnessRegistry {
@@ -113,10 +124,26 @@ impl HarnessOwner {
     }
 
     pub fn shutdown(&self) {
+        let cutover = self
+            .cutover_state_root
+            .as_deref()
+            .and_then(omp_keeper::cutover::active);
         let mut state = self.state.lock().unwrap();
         state.shutting_down = true;
         let owned: Vec<String> = state.children.keys().cloned().collect();
         for harness_id in owned {
+            let keeper = self
+                .registry
+                .get(&harness_id)
+                .is_some_and(|spec| spec.launch.keeper_config().is_some());
+            if let (Some(cutover_id), true) = (&cutover, keeper) {
+                match release_owned(&mut state, &harness_id, cutover_id) {
+                    Ok(()) => continue,
+                    Err(error) => eprintln!(
+                        "athanor: harness {harness_id:?} could not be released for cutover {cutover_id}, so it stops: {error:#}"
+                    ),
+                }
+            }
             if let Err(error) = stop_owned(&mut state, &harness_id) {
                 eprintln!("athanor: harness {harness_id:?} did not stop cleanly: {error:#}");
             }
@@ -224,6 +251,24 @@ fn stop_owned(state: &mut OwnedState, harness_id: &str) -> Result<()> {
         .get_mut(harness_id)
         .with_context(|| format!("this Athanor owns no running harness for {harness_id:?}"))?;
     stop_process(owned, harness_id)?;
+    state.children.remove(harness_id);
+    state.failures.remove(harness_id);
+    Ok(())
+}
+
+fn release_owned(state: &mut OwnedState, harness_id: &str, cutover_id: &str) -> Result<()> {
+    let owned = state
+        .children
+        .get_mut(harness_id)
+        .with_context(|| format!("this Athanor owns no running harness for {harness_id:?}"))?;
+    owned
+        .child
+        .release_on_drop()
+        .with_context(|| format!("clear the kill-on-close limit of harness {harness_id:?}"))?;
+    println!(
+        "athanor: harness {harness_id:?} (PID {}) keeps running through cutover {cutover_id}",
+        owned.pid
+    );
     state.children.remove(harness_id);
     state.failures.remove(harness_id);
     Ok(())
@@ -354,5 +399,83 @@ mod tests {
         external.terminate().unwrap();
         external.wait().unwrap();
         result.unwrap();
+    }
+
+    #[test]
+    fn cutover_shutdown_preserves_only_keeper_harnesses() {
+        for cutover in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let program = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+                .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+            let config = temp.path().join("keeper.json");
+            let completed = temp.path().join("keeper-completed");
+            let script = format!(
+                "& {{ Start-Sleep -Seconds 2; [IO.File]::WriteAllText('{}', 'finished') }}",
+                completed.display().to_string().replace('\'', "''")
+            );
+            let registry = HarnessRegistry::parse(
+                &serde_json::json!({
+                    "format": 1,
+                    "harnesses": [
+                        {
+                            "harnessId": "keeper", "label": "keeper", "program": program,
+                            "arguments": ["-NoProfile", "-Command", script, "--config", config],
+                            "workspace": temp.path(), "console": "new_window"
+                        },
+                        {
+                            "harnessId": "ordinary", "label": "ordinary", "program": program,
+                            "arguments": ["-NoProfile", "-Command", "Start-Sleep -Seconds 2"],
+                            "workspace": temp.path(), "console": "new_window"
+                        }
+                    ]
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let owner = HarnessOwner::new(registry, "test".into())
+                .with_cutover_state_root(temp.path().to_path_buf());
+            owner.start("keeper").unwrap();
+            owner.start("ordinary").unwrap();
+            let watched = |id: &str| {
+                let pid = owner
+                    .list()
+                    .into_iter()
+                    .find(|status| status.harness_id == id)
+                    .unwrap()
+                    .pid
+                    .unwrap();
+                interactive_process::ProcessWatch::open(pid).unwrap()
+            };
+            let keeper = watched("keeper");
+            let ordinary = watched("ordinary");
+            if cutover {
+                let marker = omp_keeper::cutover::marker_path(temp.path());
+                std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
+                std::fs::write(marker, br#"{"cutoverId":"test-cutover"}"#).unwrap();
+            }
+
+            owner.shutdown();
+            drop(owner);
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !ordinary.has_exited().unwrap() {
+                assert!(
+                    Instant::now() < deadline,
+                    "ordinary harness survived shutdown"
+                );
+                thread::sleep(Duration::from_millis(20));
+            }
+            if cutover {
+                assert!(!keeper.has_exited().unwrap(), "cutover killed its keeper");
+            }
+            while !keeper.has_exited().unwrap() {
+                assert!(Instant::now() < deadline, "keeper fixture did not exit");
+                thread::sleep(Duration::from_millis(20));
+            }
+            assert_eq!(
+                completed.exists(),
+                cutover,
+                "keeper completion disagrees with shutdown mode"
+            );
+        }
     }
 }

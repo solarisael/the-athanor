@@ -1,16 +1,16 @@
 //! The operator axis as one predicate every memories lane shares.
 //!
-//! A House with no `operators` rows renders no SQL and binds nothing, so its
-//! recall is byte-for-byte what it was before the axis existed. Once operators
-//! exist, a row is visible to reader R when R wrote it, when it is company-wide,
-//! when it predates the axis (`operator IS NULL`), or when it travels `up` and R
-//! sits at or above the writer's unit with a higher rank.
+//! A schema without the `operators` table predates this axis and keeps legacy
+//! recall behavior. Once the table exists, row visibility does not depend on
+//! whether any operators are registered. Each reader sees its own rows,
+//! company-wide rows, and historical rows whose operator is null. The existing
+//! registered hierarchy also grants qualifying `up` rows. An unregistered
+//! writer's private and `up` rows remain hidden from other readers.
 //!
-//! enough: `memories.operator` is Host-validated text, not a foreign key, so a
-//! House keeps remembering before anyone is registered. A row whose writer
-//! has no `operators` row misses the writer join below: it reaches its writer
-//! and, when company-wide, every reader, and nobody else. Registering the
-//! writer later gives its `up` rows their reach; no row is ever rewritten.
+//! `memories.operator` is Host-validated text, not a foreign key. A House can
+//! still write before registration, but those rows do not become shared by
+//! default. Registering the writer later gives its `up` rows their reach; no
+//! row is ever rewritten.
 
 use crate::config::AppError;
 use sqlx::PgPool;
@@ -26,10 +26,9 @@ pub(crate) struct ScopeFilter {
 }
 
 impl ScopeFilter {
-    /// Two catalog-sized reads per recall. A reader the House does
-    /// not know still reads company-wide and pre-axis rows, and the recall says
-    /// why it saw no more. A schema older than 0035 has no operators at all, so
-    /// it reads as an inactive axis rather than a failed recall.
+    /// The migrated `operators` table enables the visibility predicate even
+    /// when the registry is empty. A missing table predates this axis and
+    /// keeps legacy recall behavior.
     pub(crate) async fn load(
         pool: &PgPool,
         operator: Option<&str>,
@@ -38,7 +37,8 @@ impl ScopeFilter {
         let axis_exists: bool = sqlx::query_scalar("SELECT to_regclass('operators') IS NOT NULL")
             .fetch_one(pool)
             .await?;
-        let (active, registered) = if axis_exists {
+        let active = axis_exists;
+        let (registry_populated, registered) = if axis_exists {
             sqlx::query_as::<_, (bool, bool)>(
                 "SELECT EXISTS (SELECT 1 FROM operators),
                         EXISTS (SELECT 1 FROM operators WHERE key = $1)",
@@ -49,7 +49,7 @@ impl ScopeFilter {
         } else {
             (false, false)
         };
-        if active && !registered {
+        if registry_populated && !registered {
             warnings.push(UNREGISTERED_OPERATOR_WARNING.to_owned());
         }
         Ok(Self {
@@ -59,7 +59,7 @@ impl ScopeFilter {
     }
 
     /// `AND (...)` over the memories row aliased `alias`, reading the reader
-    /// key from placeholder `$param`. Empty while the axis is inactive.
+    /// key from placeholder `$param`. Empty only before the axis exists.
     pub(crate) fn predicate(&self, alias: &str, param: usize) -> String {
         if !self.active {
             return String::new();
@@ -93,8 +93,8 @@ impl ScopeFilter {
         )
     }
 
-    /// Bind the reader key as the next placeholder, only while the axis is
-    /// active; pairs with [`Self::predicate`].
+    /// Bind the reader key as the next placeholder when the axis exists;
+    /// pairs with [`Self::predicate`].
     pub(crate) fn bind<'q>(
         &'q self,
         query: Query<'q, Postgres, PgArguments>,

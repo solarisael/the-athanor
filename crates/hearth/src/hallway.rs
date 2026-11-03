@@ -670,8 +670,8 @@ impl HallwayReadRequest {
         if self.after.is_some_and(|id| id < 0) {
             return Err("after must be zero or a positive message id".into());
         }
-        if self.limit == 0 || self.limit > HALLWAY_MAX_READ_LIMIT {
-            return Err(format!("limit must be 1-{HALLWAY_MAX_READ_LIMIT}"));
+        if self.limit == 0 {
+            return Err("limit must be a positive integer".into());
         }
         Ok(())
     }
@@ -697,8 +697,7 @@ impl HallwayMessagesRequest {
         Ok(())
     }
 
-    /// A scroller may ask for any page size; the panel still answers under
-    /// the same ceiling `hallway_read` honors.
+    /// The panel page stays within its UI-specific budget.
     pub fn page_limit(&self) -> u32 {
         self.limit.clamp(1, HALLWAY_MAX_READ_LIMIT)
     }

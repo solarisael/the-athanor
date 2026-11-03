@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -562,8 +562,10 @@ function watchScopedHost(endpoint: string, expectedHostApi: number, options: Loa
   options.signal?.addEventListener("abort", () => clearInterval(interval), { once: true });
 }
 
-function setUnlessConfigured(env: NodeJS.ProcessEnv, key: string, value: string) {
-  if (!String(env[key] ?? "").trim()) env[key] = value;
+function setUnlessConfigured(env: NodeJS.ProcessEnv, key: string, value: string): boolean {
+  if (String(env[key] ?? "").trim()) return false;
+  env[key] = value;
+  return true;
 }
 
 export function configureInstalledAthanor(options: LoaderOptions = {}) {
@@ -635,11 +637,17 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
     ),
     "client projection",
   ));
-  setUnlessConfigured(env, "ATHANOR_STATE_DIR", client.stateRoot);
-
-  setUnlessConfigured(env, "ATHANOR_HOST_HOUSE_ID", client.houseId);
-  setUnlessConfigured(env, "ATHANOR_HOST_TOKEN", client.hostToken);
-  setUnlessConfigured(env, "ATHANOR_HOST_URL", client.hostUrl);
+  // The keys this loader projected, as opposed to keys the operator set. Only
+  // these may be refreshed from the client projection on a later reconnect.
+  const projected: string[] = [];
+  for (const [key, value] of [
+    ["ATHANOR_STATE_DIR", client.stateRoot],
+    ["ATHANOR_HOST_HOUSE_ID", client.houseId],
+    ["ATHANOR_HOST_TOKEN", client.hostToken],
+    ["ATHANOR_HOST_URL", client.hostUrl],
+  ] as const) {
+    if (setUnlessConfigured(env, key, value)) projected.push(key);
+  }
 
   return {
     index: pathToFileURL(entrypoints.index).href,
@@ -649,6 +657,77 @@ export function configureInstalledAthanor(options: LoaderOptions = {}) {
     healthEndpoint: scopedHealthEndpoint(client.hostUrl, client.defaultRoom),
     hostApi: native.hostApi,
     rooms: client.rooms,
+    programRoot: programRoot.logical,
+    userProfile: userProfilePath,
+    stateRoot: client.stateRoot,
+    compatibility: manifest.compatibility,
+    projected,
+  };
+}
+
+// substrate/deploy-local.ps1 holds this marker open across a native install;
+// crates/omp-keeper/src/cutover.rs reads the same path.
+export const CUTOVER_MARKER = path.join("cutover", "cutover.json");
+const COMPATIBILITY_FIELDS = ["hostApi", "substrateApi", "deliveryApi", "schemaVersion"] as const;
+// A cutover may change the Host credential and address. A changed House
+// identity or state root names a different House, which needs a fresh process.
+const REFRESHED_KEYS = new Set(["ATHANOR_HOST_TOKEN", "ATHANOR_HOST_URL"]);
+
+export type ReconnectRefusal = {
+  code: "cutover_in_progress" | "adapter_restart_required";
+  message: string;
+};
+
+// Every Host attach after load passes this gate. Code loaded into this OMP
+// process cannot be replaced while it runs, so a cutover that changed the
+// compatibility contract refuses the attach and names the restart. A
+// compatible cutover refreshes the projected Host credential and address.
+export function reconnectGate(
+  loaded: ReturnType<typeof configureInstalledAthanor>,
+  options: LoaderOptions = {},
+): () => ReconnectRefusal | null {
+  const env = options.env ?? process.env;
+  const marker = path.join(loaded.stateRoot, CUTOVER_MARKER);
+  const restart = (reason: string): ReconnectRefusal => ({
+    code: "adapter_restart_required",
+    message: `${reason}; this OMP process loaded adapter release ${loaded.releaseId}. Restart OMP to load the installed adapter, then attach again`,
+  });
+  let staleReleaseTold = false;
+
+  return () => {
+    if (existsSync(marker)) {
+      return {
+        code: "cutover_in_progress",
+        message: `an Athanor cutover is in progress (${marker}); this session stays disconnected until the deployment ends`,
+      };
+    }
+
+    const fresh: NodeJS.ProcessEnv = {};
+    let installed: ReturnType<typeof configureInstalledAthanor>;
+    try {
+      installed = configureInstalledAthanor({ programRoot: loaded.programRoot, userProfile: loaded.userProfile, env: fresh });
+    } catch (error) {
+      return restart(`the installed Athanor release cannot be verified (${error instanceof Error ? error.message : String(error)})`);
+    }
+
+    for (const field of COMPATIBILITY_FIELDS) {
+      if (installed.compatibility[field] !== loaded.compatibility[field]) {
+        return restart(`the installed release requires ${field} ${installed.compatibility[field]}, not ${loaded.compatibility[field]}`);
+      }
+    }
+    for (const key of loaded.projected) {
+      if (REFRESHED_KEYS.has(key)) continue;
+      if (fresh[key] !== env[key]) return restart(`the installed client projection changed ${key}`);
+    }
+
+    for (const key of loaded.projected) {
+      if (REFRESHED_KEYS.has(key)) env[key] = fresh[key];
+    }
+    if (installed.releaseId !== loaded.releaseId && !staleReleaseTold) {
+      staleReleaseTold = true;
+      console.warn(`Athanor adapter release ${installed.releaseId} is installed; this OMP process runs compatible release ${loaded.releaseId} until it restarts.`);
+    }
+    return null;
   };
 }
 
@@ -669,6 +748,7 @@ export default async function installedAthanor(pi: unknown, options: LoaderOptio
     previousReleaseId: modules.previousReleaseId,
     // The configured homes `/spirit` lists; the Host still authorizes each one.
     rooms: modules.rooms,
+    reconnectGate: reconnectGate(modules, options),
   });
   await hygiene.default(pi);
   watchScopedHost(modules.healthEndpoint, modules.hostApi, options, absent);

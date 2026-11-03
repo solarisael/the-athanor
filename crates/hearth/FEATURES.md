@@ -47,7 +47,7 @@ Anamnesis and Paper Boat live in `summoning`.
 
 - A request holds two retrieval lanes: semantic and content.
 - Each lane carries its own count and its own minimum similarity.
-- Each count must be between 1 and 1000.
+- Each count must be a positive unsigned 32-bit integer.
 - Each minimum similarity must be finite and between 0 and 1.
 - A blank query refuses.
 - Temporal decay stays off. `with_temporal_decay` turns it on.

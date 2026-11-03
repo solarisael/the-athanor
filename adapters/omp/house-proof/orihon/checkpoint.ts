@@ -1,14 +1,15 @@
 import { STATE_ENTRY, type Cursor, type Entry } from "./source.ts";
 
 export type Checkpoint = { baselineId: string | null; cursor: Cursor | null };
-export type Scope = { room: string; sourceSession: string; generation: string };
+export type Scope = { room: string; spirit: string; sourceSession: string; generation: string };
 
 export function restoreCheckpoint(entries: Entry[], scope: Scope): Checkpoint | null {
   let state: Checkpoint | null = null;
   for (const entry of entries) {
     if (entry.type !== "custom" || entry.customType !== STATE_ENTRY) continue;
     const data = entry.data;
-    if (data?.room !== scope.room || data?.sourceSession !== scope.sourceSession || data?.generation !== scope.generation) continue;
+    if (data?.room !== scope.room || data?.spirit !== scope.spirit
+      || data?.sourceSession !== scope.sourceSession || data?.generation !== scope.generation) continue;
     if (data.version !== 1) throw new Error("Orihon checkpoint version is unsupported");
     if (data.stage === "baseline") {
       if (state || (data.baselineId !== null && typeof data.baselineId !== "string")) {

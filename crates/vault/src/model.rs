@@ -7,6 +7,7 @@ pub struct VaultRecallRequest {
     pub room_dir: PathBuf,
     pub room: String,
     pub query: String,
+    pub limit: Option<std::num::NonZeroU32>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]

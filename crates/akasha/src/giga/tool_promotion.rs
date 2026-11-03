@@ -44,7 +44,7 @@ pub async fn giga_tool_promote(
     let source_refs = fresh_candidate_sources(&mut tx, &request.candidate_id).await?;
     let event_id: String = candidate.try_get("event_id")?;
     let event = event_from_store(&mut tx, &event_id).await?;
-    verify_promotion_sources(cfg, &event).await?;
+    verify_promotion_sources(cfg, &event, &source_refs).await?;
     let reviewed_at: DateTime<Utc> = database_now(&mut tx).await?;
     let payload = match request.target {
         GigaToolPromotionTargetParams::Memory {

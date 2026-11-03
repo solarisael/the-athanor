@@ -5,33 +5,43 @@ use hearth::{
 use protocol::{GigaQueueMaintenanceResult, GigaQueueStateCount};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
+// Legacy windows replaced by canonical turn jobs (giga_window_replacements) are
+// retained archives: they are neither counted as queue work nor purged.
 const GIGA_ELIGIBLE_ALL_SQL: &str = "SELECT COUNT(*)::bigint FROM giga_events e
      WHERE (e.queue_state IN ('pending','failed')
             OR (e.queue_state='running' AND e.lease_expires_at <= NOW()))
+       AND e.waiting_since IS NULL
        AND NOT EXISTS (SELECT 1 FROM giga_candidates c WHERE c.event_id=e.event_id)
-       AND NOT EXISTS (SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id)";
+       AND NOT EXISTS (SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id)
+       AND NOT EXISTS (SELECT 1 FROM giga_window_replacements w WHERE w.window_event_id=e.event_id)";
 
 const GIGA_ELIGIBLE_ROOM_SQL: &str = "SELECT COUNT(*)::bigint FROM giga_events e
      WHERE e.room=$1
        AND (e.queue_state IN ('pending','failed')
             OR (e.queue_state='running' AND e.lease_expires_at <= NOW()))
+       AND e.waiting_since IS NULL
        AND NOT EXISTS (SELECT 1 FROM giga_candidates c WHERE c.event_id=e.event_id)
-       AND NOT EXISTS (SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id)";
+       AND NOT EXISTS (SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id)
+       AND NOT EXISTS (SELECT 1 FROM giga_window_replacements w WHERE w.window_event_id=e.event_id)";
 
 const GIGA_ATTEMPTS_ALL_SQL: &str = "SELECT COUNT(*)::bigint FROM giga_event_attempts a
      JOIN giga_events e ON e.event_id=a.event_id
      WHERE (e.queue_state IN ('pending','failed')
             OR (e.queue_state='running' AND e.lease_expires_at <= NOW()))
+       AND e.waiting_since IS NULL
        AND NOT EXISTS (SELECT 1 FROM giga_candidates c WHERE c.event_id=e.event_id)
-       AND NOT EXISTS (SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id)";
+       AND NOT EXISTS (SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id)
+       AND NOT EXISTS (SELECT 1 FROM giga_window_replacements w WHERE w.window_event_id=e.event_id)";
 
 const GIGA_ATTEMPTS_ROOM_SQL: &str = "SELECT COUNT(*)::bigint FROM giga_event_attempts a
      JOIN giga_events e ON e.event_id=a.event_id
      WHERE e.room=$1
        AND (e.queue_state IN ('pending','failed')
             OR (e.queue_state='running' AND e.lease_expires_at <= NOW()))
+       AND e.waiting_since IS NULL
        AND NOT EXISTS (SELECT 1 FROM giga_candidates c WHERE c.event_id=e.event_id)
-       AND NOT EXISTS (SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id)";
+       AND NOT EXISTS (SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id)
+       AND NOT EXISTS (SELECT 1 FROM giga_window_replacements w WHERE w.window_event_id=e.event_id)";
 
 async fn giga_queue_state_counts(
     tx: &mut Transaction<'_, Postgres>,
@@ -41,7 +51,10 @@ async fn giga_queue_state_counts(
         Some(room) => {
             sqlx::query(
                 "SELECT queue_state,COUNT(*)::bigint AS count
-                 FROM giga_events WHERE room=$1 GROUP BY queue_state ORDER BY queue_state",
+                 FROM giga_events e WHERE e.room=$1
+                   AND NOT EXISTS (SELECT 1 FROM giga_window_replacements w
+                                   WHERE w.window_event_id=e.event_id)
+                 GROUP BY queue_state ORDER BY queue_state",
             )
             .bind(room)
             .fetch_all(&mut **tx)
@@ -50,7 +63,10 @@ async fn giga_queue_state_counts(
         None => {
             sqlx::query(
                 "SELECT queue_state,COUNT(*)::bigint AS count
-                 FROM giga_events GROUP BY queue_state ORDER BY queue_state",
+                 FROM giga_events e
+                 WHERE NOT EXISTS (SELECT 1 FROM giga_window_replacements w
+                                   WHERE w.window_event_id=e.event_id)
+                 GROUP BY queue_state ORDER BY queue_state",
             )
             .fetch_all(&mut **tx)
             .await?
@@ -121,9 +137,11 @@ pub async fn giga_queue_maintenance(
     let non_succeeded = giga_queue_count(
         &mut tx,
         scoped_room,
-        "SELECT COUNT(*)::bigint FROM giga_events WHERE queue_state <> 'succeeded'",
-        "SELECT COUNT(*)::bigint FROM giga_events
-         WHERE room=$1 AND queue_state <> 'succeeded'",
+        "SELECT COUNT(*)::bigint FROM giga_events e WHERE e.queue_state <> 'succeeded'
+         AND NOT EXISTS (SELECT 1 FROM giga_window_replacements w WHERE w.window_event_id=e.event_id)",
+        "SELECT COUNT(*)::bigint FROM giga_events e
+         WHERE e.room=$1 AND e.queue_state <> 'succeeded'
+           AND NOT EXISTS (SELECT 1 FROM giga_window_replacements w WHERE w.window_event_id=e.event_id)",
     )
     .await?;
     let blocked_events = non_succeeded.saturating_sub(eligible_events);
@@ -152,11 +170,15 @@ pub async fn giga_queue_maintenance(
                      WHERE e.room=$1
                        AND (e.queue_state IN ('pending','failed')
                             OR (e.queue_state='running' AND e.lease_expires_at <= NOW()))
+                       AND e.waiting_since IS NULL
                        AND NOT EXISTS (
                            SELECT 1 FROM giga_candidates c WHERE c.event_id=e.event_id
                        )
                        AND NOT EXISTS (
                            SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id
+                       )
+                       AND NOT EXISTS (
+                           SELECT 1 FROM giga_window_replacements w WHERE w.window_event_id=e.event_id
                        )",
             )
             .bind(room)
@@ -167,11 +189,15 @@ pub async fn giga_queue_maintenance(
                 "DELETE FROM giga_events e
                      WHERE (e.queue_state IN ('pending','failed')
                             OR (e.queue_state='running' AND e.lease_expires_at <= NOW()))
+                       AND e.waiting_since IS NULL
                        AND NOT EXISTS (
                            SELECT 1 FROM giga_candidates c WHERE c.event_id=e.event_id
                        )
                        AND NOT EXISTS (
                            SELECT 1 FROM giga_review_resonances r WHERE r.event_id=e.event_id
+                       )
+                       AND NOT EXISTS (
+                           SELECT 1 FROM giga_window_replacements w WHERE w.window_event_id=e.event_id
                        )",
             )
             .execute(&mut *tx)

@@ -182,6 +182,13 @@ pub(super) async fn select(
 }
 
 async fn requires_credential(state: &AppState, request: &LessonPlanRequest) -> bool {
+    if request.capabilities.automatic_recall
+        && request.capabilities.top_level
+        && crate::judgment::orihon_policy(&state.config.room_dir, &state.config.room).await["approved"]
+            == true
+    {
+        return true;
+    }
     let mut policies = Vec::new();
     if request.capabilities.automatic_recall {
         policies.push(JudgmentRequest::RecallPolicy {
@@ -412,6 +419,7 @@ async fn score_sieve(
         JudgmentRequest::RecallRerank {
             grant: RecallGrantKind::Lessons,
             query: query.into(),
+            context: Vec::new(),
             retrieval_candidates: candidates,
             rerank_candidates: None,
             credential: credential.clone(),

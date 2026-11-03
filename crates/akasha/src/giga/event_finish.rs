@@ -1,13 +1,16 @@
 use super::candidate_store::giga_candidate_store_tx;
-use super::clock::database_now;
+use super::clock::{database_now, timestamp};
 use super::error::domain_error;
 use crate::AppError;
 use chrono::{DateTime, Duration, Utc};
 use hearth::{
-    GIGA_MAX_EVENT_ATTEMPTS, GigaCandidate, GigaEventFinishOutcome, GigaEventFinishReceipt,
-    GigaEventFinishRequest, GigaQueueState,
+    GIGA_MAX_EVENT_ATTEMPTS, GigaCandidate, GigaEventClaimReceipt, GigaEventFinishOutcome,
+    GigaEventFinishReceipt, GigaEventFinishRequest, GigaQueueState,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
+
+const GIGA_DEADLINE_ERROR_CLASS: &str = "GigaWorkerDeadlineExceeded";
+const GIGA_DEADLINE_RETRY_SECONDS: u32 = 30;
 
 async fn giga_event_finish_tx(
     tx: &mut Transaction<'_, Postgres>,
@@ -200,14 +203,71 @@ pub async fn giga_event_finish(
     Ok(receipt)
 }
 
-pub(crate) async fn giga_candidate_store_and_finish(
+pub(crate) async fn giga_candidates_store_and_finish(
     pool: &PgPool,
-    candidate: GigaCandidate,
+    candidates: Vec<GigaCandidate>,
     finish: GigaEventFinishRequest,
 ) -> Result<GigaEventFinishReceipt, AppError> {
     let mut tx = pool.begin().await?;
-    giga_candidate_store_tx(&mut tx, &candidate).await?;
+    for candidate in candidates {
+        if candidate.event_id() != finish.event_id() || candidate.room() != finish.room() {
+            return Err(AppError::Invalid(
+                "GIGA candidate batch crosses its event".into(),
+            ));
+        }
+        giga_candidate_store_tx(&mut tx, &candidate).await?;
+    }
     let receipt = giga_event_finish_tx(&mut tx, &finish).await?;
     tx.commit().await?;
     Ok(receipt)
+}
+
+/// Settles an attempt whose worker deadline passed, only while `claim` still
+/// holds the unexpired running lease it was granted. A result the job already
+/// committed, a lease another claim took over, and an expired lease all stay
+/// untouched and return `None`.
+pub async fn giga_event_deadline_settle(
+    pool: &PgPool,
+    claim: &GigaEventClaimReceipt,
+) -> Result<Option<GigaEventFinishReceipt>, AppError> {
+    let (Some(event), Some(attempt_count)) = (claim.event(), claim.attempt_count()) else {
+        return Err(AppError::Invalid(
+            "GIGA deadline settlement requires a claimed event".into(),
+        ));
+    };
+    let mut tx = pool.begin().await?;
+    let owned = sqlx::query(
+        "SELECT 1 FROM giga_events
+         WHERE event_id=$1 AND room=$2 AND queue_state='running' AND locked_by=$3
+           AND locked_at=$4 AND attempt_count=$5 AND lease_expires_at>clock_timestamp()
+         FOR UPDATE",
+    )
+    .bind(event.event_id())
+    .bind(claim.room().as_str())
+    .bind(claim.worker_id())
+    .bind(timestamp(claim.claimed_at())?)
+    .bind(i32::try_from(attempt_count).unwrap_or(i32::MAX))
+    .fetch_optional(&mut *tx)
+    .await?;
+    if owned.is_none() {
+        return Ok(None);
+    }
+    let outcome = if attempt_count < GIGA_MAX_EVENT_ATTEMPTS {
+        GigaEventFinishOutcome::Retry
+    } else {
+        GigaEventFinishOutcome::Failed
+    };
+    let request = GigaEventFinishRequest::new(
+        claim.room().clone(),
+        event.event_id().into(),
+        claim.worker_id().into(),
+        outcome,
+        0,
+        Some(GIGA_DEADLINE_ERROR_CLASS.into()),
+        (outcome == GigaEventFinishOutcome::Retry).then_some(GIGA_DEADLINE_RETRY_SECONDS),
+    )
+    .map_err(domain_error)?;
+    let receipt = giga_event_finish_tx(&mut tx, &request).await?;
+    tx.commit().await?;
+    Ok(Some(receipt))
 }

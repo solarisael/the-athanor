@@ -3,11 +3,9 @@ const GIGA_MAX_DIAGNOSTIC_CLASS_BYTES: usize = 128;
 #[derive(Clone, Copy, Debug)]
 pub(super) enum WorkerFailureKind {
     ClassifierOutput,
-    Disabled,
-    OllamaConfiguration,
-    OllamaTransport,
-    OllamaResponse,
-    OllamaModelIdentity,
+    TypesafeConfiguration,
+    TypesafeTransport,
+    TypesafeResponse,
     ClassifierRequest,
     SourceVerification,
     LedgerUnavailable,
@@ -15,6 +13,8 @@ pub(super) enum WorkerFailureKind {
     SourceAmbiguous,
     SourceHashMismatch,
     SourceWindowTooLarge,
+    ResonanceStorage,
+    PrivacyRefused,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -30,11 +30,9 @@ impl WorkerFailure {
     pub(super) const fn class(self) -> &'static str {
         match self.kind {
             WorkerFailureKind::ClassifierOutput => "GigaClassifierOutputError",
-            WorkerFailureKind::Disabled => "GigaClassifierDisabled",
-            WorkerFailureKind::OllamaConfiguration => "GigaOllamaConfigurationError",
-            WorkerFailureKind::OllamaTransport => "GigaOllamaTransportError",
-            WorkerFailureKind::OllamaResponse => "GigaOllamaResponseError",
-            WorkerFailureKind::OllamaModelIdentity => "GigaOllamaModelIdentityError",
+            WorkerFailureKind::TypesafeConfiguration => "GigaTypesafeConfigurationError",
+            WorkerFailureKind::TypesafeTransport => "GigaTypesafeTransportError",
+            WorkerFailureKind::TypesafeResponse => "GigaTypesafeResponseError",
             WorkerFailureKind::ClassifierRequest => "GigaClassifierRequestError",
             WorkerFailureKind::SourceVerification => "GigaSourceVerificationError",
             WorkerFailureKind::LedgerUnavailable => "GigaLedgerUnavailableError",
@@ -42,6 +40,8 @@ impl WorkerFailure {
             WorkerFailureKind::SourceAmbiguous => "GigaSourceAmbiguousError",
             WorkerFailureKind::SourceHashMismatch => "GigaSourceHashMismatchError",
             WorkerFailureKind::SourceWindowTooLarge => "GigaSourceWindowTooLargeError",
+            WorkerFailureKind::ResonanceStorage => "GigaResonanceStorageError",
+            WorkerFailureKind::PrivacyRefused => "GigaPrivacyRefused",
         }
     }
 
@@ -49,9 +49,11 @@ impl WorkerFailure {
         matches!(
             self.kind,
             WorkerFailureKind::ClassifierOutput
-                | WorkerFailureKind::OllamaTransport
-                | WorkerFailureKind::OllamaResponse
+                | WorkerFailureKind::TypesafeConfiguration
+                | WorkerFailureKind::TypesafeTransport
+                | WorkerFailureKind::TypesafeResponse
                 | WorkerFailureKind::LedgerUnavailable
+                | WorkerFailureKind::ResonanceStorage,
         )
     }
 }

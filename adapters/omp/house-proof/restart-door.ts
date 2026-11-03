@@ -38,9 +38,6 @@ type LoadedRelease = {
   previousReleaseId?: string | null;
 } | null | undefined;
 
-// One row per session that still holds turns waiting for a GIGA flush.
-type GigaBufferCensus = { session?: unknown; cwd?: unknown; turns?: unknown };
-
 type IssueCommand = (
   ctx: any,
   targetInstanceId: string,
@@ -58,8 +55,6 @@ export type RestartDoorDeps = {
   registerTool: (definition: Record<string, unknown>) => void;
   // Threaded from configureInstalledAthanor through the adapter entry.
   release?: LoadedRelease;
-  // giga.ts's read-only buffered-turn census.
-  gigaBuffers?: () => GigaBufferCensus[] | null;
   // The keeper's successor proof is verified with the room's restart_verify
   // capability; injected in tests so proving the fence needs no real secret.
   verifyCapability?: (effectiveRoomDir: string) => string | null;
@@ -176,34 +171,6 @@ function hubProcessCasualties() {
     enumerable: false,
     reason:
       "hub processes are project-scoped and the plugin surface exposes no process listing, so this door cannot name them or their fate",
-  };
-}
-
-// Turns buffered for a later GIGA flush. session.ts flushes them after the
-// restart is acknowledged and before the exit; the census says what is at stake.
-function gigaBufferCasualties(inspect?: () => GigaBufferCensus[] | null) {
-  let buffers: GigaBufferCensus[] | null = null;
-  try {
-    buffers = inspect ? inspect() : null;
-  } catch {
-    buffers = null;
-  }
-  if (!Array.isArray(buffers)) {
-    return {
-      enumerable: false,
-      reason: "no giga buffered-turn census was threaded into this door, so buffered turns cannot be counted here",
-    };
-  }
-  const bySession = buffers.map((buffer) => ({
-    session: text(buffer?.session),
-    turns: Number(buffer?.turns) || 0,
-  }));
-  return {
-    enumerable: true,
-    sessions: bySession.length,
-    turns: bySession.reduce((total, buffer) => total + buffer.turns, 0),
-    bySession,
-    fate: "flushed after the restart is acknowledged, before the exit",
   };
 }
 
@@ -366,7 +333,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
       "in a new Tern tab beside this pane, or through the integrated keeper. The predecessor pane is never closed or typed into.",
       "The exit never fires inside a turn: the session applies it once idle, and refuses it while async jobs would die.",
       "It refuses when this conversation has no live Host registration or no launcher that can relaunch it.",
-      "On success it reports what the exit costs: async jobs, buffered GIGA turns, and every casualty class it cannot see.",
+      "On success it reports what the exit costs: async jobs and every casualty class it cannot see.",
     ].join("\n"),
     parameters: z.object({
       mode: z.enum(["resume", "fresh"])
@@ -449,7 +416,7 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
         launcher: attachment.restart.launcher,
         mode,
         ...(boat ? { boat } : {}),
-        appliesAt: "the first idle moment after this turn: the session acknowledges, flushes buffered turns, then exits",
+        appliesAt: "the first idle moment after this turn: the session acknowledges, then exits",
         instanceId: attachment.instanceId,
         conversationId: attachment.conversationId,
         room: attachment.room,
@@ -461,7 +428,6 @@ export function registerRestartDoor(pi: any, deps: RestartDoorDeps): void {
         loadedRelease: loadedRelease(deps.release),
         dies: {
           asyncJobs: asyncJobCasualties(ctx),
-          gigaTurnBuffers: gigaBufferCasualties(deps.gigaBuffers),
           transports: { count: 0, open: [], unenumerableFamilies: [], unenumerableReason: null },
           hubProcesses: hubProcessCasualties(),
         },

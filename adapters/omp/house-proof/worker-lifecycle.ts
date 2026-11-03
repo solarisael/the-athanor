@@ -32,12 +32,21 @@ const SETTLEMENT_WAIT_MS = 10_000;
 const EXCERPT_LIMIT = 1_200;
 const MESSAGE_EXCERPT_LIMIT = 2_000;
 const HANDOFF_REQUEST_LIMIT = 2;
-const READ_LIMIT_MAX = 50;
+const DEFAULT_READ_LIMIT = 20;
 const REGISTRY_LIMIT = 1_024;
 // The Host refuses reports above 256 KiB. A larger final report is stored as
 // an explicitly clipped excerpt; the full text stays in the native transcript.
 const REPORT_DATA_LIMIT = 200_000;
 const SECTIONS_LIMIT = 40_000;
+function readLimit(value: unknown): number {
+  if (value === undefined) return DEFAULT_READ_LIMIT;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error("limit must be a positive safe integer");
+  }
+  return value;
+}
+
+
 
 const MARKER_HINT = "athanor-worker-enrollment";
 const MARKER_LINE = /^\[athanor-worker-enrollment:v1:([0-9a-f]{64})\]$/;
@@ -1443,7 +1452,7 @@ export function installWorkerLifecycle(pi: any): void {
       swarmId: z.string().optional().describe("Swarm id (dispose, retained)."),
       after: z.number().optional().describe("read: return entries after this sequence."),
       cursor: z.string().optional().describe("retained: nextCursor from the previous page."),
-      limit: z.number().optional().describe("read/retained: 1-50 entries."),
+      limit: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).optional().describe("read/retained: positive safe integer; defaults to 20 entries."),
       kind: z.enum(NOTEBOOK_KINDS).optional().describe("append: note or message (workers), evidence or briefing (parents)."),
       body: z.unknown().optional().describe("append/accept: JSON body."),
       report: z.unknown().optional().describe("repair: the complete handoff the parent attests to."),
@@ -1471,7 +1480,7 @@ export function installWorkerLifecycle(pi: any): void {
           case "read": {
             const bookId = requested || worker?.bookId || "";
             if (!bookId) return refuse("read requires bookId");
-            const limit = Math.min(READ_LIMIT_MAX, Math.max(1, Math.trunc(Number(params.limit) || 20)));
+            const limit = readLimit(params.limit);
             const after = Number.isFinite(Number(params.after)) ? Math.max(0, Math.trunc(Number(params.after))) : undefined;
             return answer(await lifecycleRequest(binding, "read", { requestId, bookId, limit, ...(after !== undefined ? { after } : {}) }, { write: false }));
           }
@@ -1499,7 +1508,7 @@ export function installWorkerLifecycle(pi: any): void {
             if (worker) return refuse("retained evidence belongs to the owning parent");
             const swarmId = text(params.swarmId);
             if (!swarmId) return refuse("retained requires swarmId");
-            const limit = Math.min(READ_LIMIT_MAX, Math.max(1, Math.trunc(Number(params.limit) || 20)));
+            const limit = readLimit(params.limit);
             const cursor = text(params.cursor);
             return answer(await lifecycleRequest(binding, "retained", { requestId, swarmId, limit, ...(cursor ? { after: cursor } : {}) }, { write: false }));
           }
@@ -1569,7 +1578,7 @@ export function installWorkerLifecycle(pi: any): void {
 }
 
 // A process restart empties these in-process registries; tests use this to
-// prove recovery comes from persisted session entries alone (as __gigaTest).
+// prove recovery comes from persisted session entries alone.
 export const __workerLifecycleTest = Object.freeze({
   restartProcess() {
     sessions.clear();

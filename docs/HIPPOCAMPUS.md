@@ -62,7 +62,7 @@ One or more exact turns and lifecycle events that support a candidate.
 A generated pointer that says a source span may deserve later review.
 
 **Classifier**  
-The local model and prompt that create a candidate.
+The typed Jev questions that classify exact turns for later review.
 
 **Consumer**  
 A House operation that reads candidates. Consumers include recall, remember, task completion, and sleep.
@@ -104,37 +104,39 @@ A harness adapter owns:
 - delivery of advisory candidate context;
 - harness-specific error presentation.
 
-As built at `a6ab453`, the OMP adapter registers 24 `pi.on` handlers and 2 `pi.events` handlers (`adapters/omp/index.ts:1057-2311`). These parts feed GIGA:
-
-- The second `agent_end` handler logs the conversation window, then calls `ingestGigaLoggedTurnsDetached` (`index.ts:2279-2311`). The call does not wait for GIGA (`adapters/omp/giga.ts:194-195`).
-- Ingest stops when `ATHANOR_GIGA_ENABLED` is not `1`, and for a subagent session (`giga.ts:163,185-195`).
-- The `sleep` tool flushes the buffered turns with `flushGigaTurnsDetached` before it closes Presence (`adapters/omp/house-proof/tools.ts:1006-1013`).
-- The `shutdown` handler closes the GIGA transport with the other transports (`index.ts:2264-2277`).
+The OMP adapter captures visible conversation turns through `athanor.shell.conversation_log`.
+The request states its GIGA enablement, replay status, subagent status, and project scope.
+The Host stores eligible turn jobs before it acknowledges capture.
+The adapter reports failed or partial capture. It does not retain a GIGA turn buffer.
 
 The `tool_call` and `tool_result` handlers feed Insula, kitten lineage, tool evidence, and the lesson gate. They do not feed GIGA (`index.ts:1117-1170,1347-1381`). The `task:subagent:progress` and `task:subagent:lifecycle` events feed kitten lineage (`index.ts:1293-1345`). §28.7 defers typed task and subagent events. The first implementation must treat those events as optional structured inputs.
 
 ## 8. Existing source contracts
 
-As built at `a6ab453`:
+Current source contracts:
 
-- The adapter sends each conversation window to the Host over the Host WebSocket as `athanor.shell.conversation_log` (`adapters/omp/house-proof/conversation-log.ts:7`). The repository has no `src/ledger.ts`.
-- The Host writes the ledger and the transcript under `request.room_dir` (`crates/host/src/server.rs:2148-2149,2221`). It labels each turn with the role, operator, and spirit from the request, and keys it by the request session ID (`server.rs:2153,2155`). It does not check `room_dir`. See [LIMITATIONS §8](./LIMITATIONS.md#8-known-defects-in-the-current-code).
-- Not re-verified at a6ab453: the timestamp, message ID, and agent-name fields of a logged turn, the ledger layout under the active spirit, and transcript deduplication. `server.rs` after line 2155 would decide them.
-- GIGA ingest sends the room, the project keys, and each turn's role and source ID (`giga.ts:168-173`). The project keys are `ATHANOR_GIGA_PROJECT_KEY` when it is set, else none (`giga.ts:170`). Hippocampus must use stable turn identifiers instead of copying transcript text into candidate identity.
-- GIGA runs in its own substrate child, one per room. The adapter starts it with the room directory as its working directory and sets `ATHANOR_GIGA_SOURCE_ROOM` and `ATHANOR_GIGA_CLAIM_OWNER=1` (`giga.ts:85-100`). The child starts only when `ATHANOR_GIGA_ENABLED=1` (`giga.ts:86`).
-- Seven tools reach GIGA through that child: `giga_candidate_list`, `giga_health`, `giga_queue_maintenance`, `giga_review`, `giga_promote_memory`, `giga_promote_coding_lesson`, and `giga_promote_project_lesson` (`tools.ts:1377,1409,1425,1450,1538,1554,1575`). Each refuses with `giga_disabled` unless `ATHANOR_GIGA_ENABLED=1` (`giga.ts:107-108`). None needs the Host.
-- `giga_review` and the promotion tools send the spirit name from the room files as `reviewer_id`, and the operator name from the room files as `operator_identity` (`tools.ts:1460-1465,1487,1523`). Both names are self-asserted, not authenticated (`tools.ts:818-847`; `adapters/omp/house-proof/room.ts:112-119`).
-- The core and adapter use explicit API versions. `hostApi` and `substrateApi` remain 1. The authenticated broker cutover uses `deliveryApi` 2 (`installer/dependencies.json`).
+- The Host validates the room directory against its configuration.
+- The private ledger stores each turn's session ID, source ID, role, and full text.
+- One GIGA job represents one target turn. Its identity includes the room, session, and source ID.
+- An exact repeat is idempotent. Changed text, role, or project scope refuses that identity.
+- The Host owns the worker. Read-only tools do not start it.
+- GIGA tools use the authenticated Host organ path. Native review and promotion retain their existing authority checks.
+- Migration 0043 preserves candidates and attempt history. It links replaced windows to the per-turn queue.
+- Already processed turns retain their identity without new classification. Failed-only replacement jobs require explicit replay.
+- Anonymous harness messages retain the position-based fallback identity. Compaction can change that identity.
 
 ## 9. Processing flow
 
 ```mermaid
 flowchart TD
     A[Visible turn or lifecycle event] --> B[Durable exact log]
-    B --> C[Queue annotation work]
-    C --> D[Build bounded source window]
-    D --> E[Run local classifier]
-    E --> F[Validate structured output]
+    B --> C[Persist one job per turn]
+    C --> D[Release by count or oldest age]
+    D --> E[Bounded parallel workers]
+    E --> L[Verify target and nearby turns]
+    L --> M[Recall context and optional follow-up]
+    M --> N[Run typed Jev judgment]
+    N --> F[Validate structured output]
     F --> G[Store non-authoritative candidates]
     G --> H[Recall or consolidation consumer]
     H --> I[Fetch exact source spans]
@@ -144,9 +146,18 @@ flowchart TD
 
 The exact turn log must complete before annotation starts.
 
-The enqueue step must not delay the active response. A queue failure must leave the exact log available for later reprocessing.
+Capture waits for the durable queue receipt. Classification runs in the background.
+A queue failure leaves the exact log available and returns a visible capture error.
 
-The worker must build a bounded window around the new event. The window can include adjacent visible turns and selected lifecycle metadata.
+Defaults are eight waiting turns, 120 seconds from the oldest turn, and four concurrent jobs per room.
+Each job has an independent lease, deadline, attempt history, and completion transaction.
+One failed job does not block healthy jobs.
+
+Each target receives at most seven nearby turns and two Recall lookups.
+Jev can select one follow-up query from actual conversation text.
+Retrieved records supply context only. They never become source or proof references.
+Missing context stays explicit. It does not establish novelty or insignificance.
+Remote recalled content requires the current Recall grant alongside the GIGA grant.
 
 The worker must validate every classifier result against the candidate schema. It must reject invalid output without creating a partial candidate.
 
@@ -570,9 +581,15 @@ A Curio remains pointer-only. It does not enter canon, ordinary memory, or defau
 
 Curios survive the default expiry for unreviewed candidates. The room retention policy still controls their maximum life.
 
-A bounded resonance pass can compare Curios with new candidates or current context. The pass must use room scope and a configured cooldown.
+After classification commits, a bounded Jev pass compares later event evidence with older Curios in the same room.
+It inspects up to sixteen recent Curios to select four with available evidence.
 
 Strong resonance moves the Curio back to `in_review`. The action must record the new event, score, classifier, and source references.
+
+The current admission threshold is 0.85. This conservative threshold is not a calibrated probability of truth.
+Each source excerpt contains at most 512 characters and reports truncation.
+Unavailable Curio sources are skipped with a diagnostic. Resurfacing failure cannot discard the new event's classification.
+This bounded pass does not guarantee coverage of every parked Curio.
 
 Resonance cannot promote a Curio. Promotion still requires a separate authorized review.
 
@@ -665,42 +682,32 @@ The classifier must support a `none` result without error.
 
 The implementation must version the prompt. It must store the prompt version with every candidate.
 
-## 18. Local model boundary
+Each turn receives its own classification. One event can contain up to eight candidates.
+Display fields contain source excerpts and deterministic labels. GIGA does not generate a narrative.
+Novelty remains unmeasured when the request contains no prior memory evidence.
+Simple facts remain suggestions for canon. The governing spirit reviews and finalizes material during the existing sleep workflow.
+Use explicit promotion tools for durable writes. Classification and resonance never promote candidates.
 
-GIGA uses a local classifier by default.
+## 18. Provider boundary
 
-The provider interface must remain replaceable. The specification does not require one model family or inference server.
+GIGA uses Jev at the fixed TypeSafe endpoint. It has no local inference fallback.
+The room's `jevGiga` grant must permit private conversation packets for `giga-classify`.
+The worker rechecks the grant before each remote request.
+The worker stops before claiming more events when the grant changes.
+OMP resolves the Typesafe credential through its existing authentication storage.
+The Host keeps that credential in memory. It does not place credentials in candidate provenance.
 
-A remote classifier requires explicit operator consent. The configuration must show which text leaves the machine.
+Requests contain bounded exact turn text and metadata. Raw strings pass the shared secret detector before transmission.
+The serialized request limit is 32 KiB. Larger windows use separate bounded requests for their turns.
+Responses identify the actual provider model. A missing model digest is reported as absent.
+Historical classifier identities remain unchanged.
 
-The classifier must receive only the minimum source window and metadata. It must not receive the full room history by default.
+### 18.1 Inference context
 
-The first supported local profile must use no more than four billion model parameters. Its resident working set must not exceed 8 GiB.
+Each request receives an explicit source snapshot. No hidden conversation state carries between jobs.
+Classification scores describe the model's decision. They do not establish factual authority.
+Source identity, content hashes, room scope, and review history remain separate from those scores.
 
-The profile must support CPU execution. Release evidence must name the hardware, model digest, quantization, and latency distribution.
-
-On the locked candidate fixture, the profile must reach at least 0.70 precision. It must also reach 0.80 recall for high-priority events.
-
-Exact source-span accuracy must reach 0.95. Failed thresholds block the supported GIGA profile.
-
-### 18.1 Inference context and residency
-
-The runtime must keep three concerns separate:
-
-- exact durable evidence selected for the job;
-- tokens belonging to one classifier invocation;
-- model weights retained in memory for latency.
-
-Each cold classifier job starts with fresh inference state and receives only its
-explicit evidence snapshot. A gate and extraction pass may use separate fresh
-requests. Loaded model residency, including provider `keep_alive` behavior,
-must not carry hidden conversational or KV state into the next job.
-
-Future evidence construction should use completed-interaction anchors and
-deterministic bounded overlapping windows from the trusted ledger. Overlap is
-resolved through source IDs and hashes. The worker records the evidence-builder
-version, exact ordered sources, authority filters, reviewed precedents, and
-prompt/model digest for every run.
 
 ### 18.2 Dynamic invocation routing
 
@@ -843,13 +850,13 @@ These questions were open at draft time. Stage 1 implementation resolved them as
 1. **Canonical source ID.** The OMP-derived stable turn ID `omp-derived:<role>:<index>:<sha256[0..32]>`, produced by the adapter conversation log and dual-verified: the adapter checks stability, uniqueness, and session consistency; the Rust worker re-verifies `source_id`, role, and content hash against the trusted room ledger before classification.
 2. **Candidate store shape.** A normalized event and candidate pair: `giga_events` (queue columns inline), `giga_event_sources`, `giga_candidates`, `giga_candidate_sources`, and `giga_reviews`, plus `giga_event_attempts` and `giga_review_resonances`, with `ON DELETE CASCADE`.
 3. **Dismissed and expired retention.** Retained indefinitely. `expires_at` exists in the schema but nothing sets it; expiry is a manual review transition, not a timer. A TTL sweep is deferred past Stage 1.
-4. **Curio retention and resonance budget.** Curios are retained indefinitely, remain pointer-only, and are invisible to retrieval fusion. Review resonance records provenance only and is review-state-agnostic. A substrate-aware resonance budget for curios is explicitly deferred to the future resonance pass.
-5. **Local model baseline.** Agents-A1-4B (Q4_K_M GGUF) on local Ollama, pinned by manifest digest and verified against `/api/tags` before every run, prompt version `agents-a1-two-pass-v2`. Latency and memory are measured (~41 MB KV per 1k tokens; `num_ctx` 32768 ≈ 4.4 GB). The sanitized quality baseline required by acceptance item 11 is still outstanding.
+4. **Curio retention and resonance budget.** Curios remain pointer-only. The bounded later-event pass described in section 14 can return them to review.
+5. **Classifier.** Typed Jev turn classification replaces the historical Agents-A1 gate and extraction path. Existing receipts retain their historical model identity.
 6. **First review surface.** The OMP tool-organ set: `giga_candidate_list`, `giga_review` (safe non-authority transitions), `giga_promote_memory`, `giga_promote_coding_lesson`, `giga_promote_project_lesson`, `giga_health`, and `giga_queue_maintenance`. No graphical surface ships in Stage 1.
 7. **Adapter task and subagent events.** Stage 1 ingests only the main session. Subagent turns are excluded at the adapter ingestion gate (detected by the child-transcript layout, `<parentStem>/<agentId>.jsonl`); a subagent's durable output re-enters the ledger through the main agent's consuming turn. Typed `task_started` / `subagent_*` events are deferred past Stage 1; the schema's typed event columns stay unused until then.
 8. **Candidate fields in retrieval fusion.** Only promoted candidates enter fusion, via promotion metadata (`origin = giga-promotion`, durability, `candidate_created_at` decay anchor) carried on the resulting memory. Unpromoted candidates are invisible to recall by design: a candidate is a proposal, never memory.
 9. **Backup and restore.** Whole-database `pg_dump -Fc --no-owner --no-acl` with no table filters; all GIGA tables are included in every dump and restored wholesale. No GIGA-specific handling is needed.
-10. **Configuration surface.** Enablement and endpoints are environment variables (`ATHANOR_GIGA_ENABLED`, `ATHANOR_HIPPOCAMPUS_ENABLED`, `ATHANOR_REPLAY_MODE`, `ATHANOR_HIPPOCAMPUS_OLLAMA_ENDPOINT`, adapter-side `ATHANOR_GIGA_PROJECT_KEY`). Resource limits are compiled constants (`num_ctx`, keep-alive, timeouts, lease seconds, byte and source caps). Concurrency is implicitly one worker via the `FOR UPDATE SKIP LOCKED` lease protocol; no dedicated knob.
+10. **Configuration surface.** Capture and classification retain their enablement flags. The room grants remote classification through `jevGiga`; OMP supplies a transient credential.
 11. **Public API version.** No version bump: protocol version stays 1 and the core API version stays 1. GIGA methods are additive under protocol v1, with independent `event_schema_version = 1` and `candidate_schema_version = 1` payload versions.
 
 ## 29. Related documents

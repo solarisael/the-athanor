@@ -63,7 +63,10 @@ mod tests {
         let now = DateTime::parse_from_rfc3339("2026-10-14T00:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        let settings = RoomSettings::default();
+        let settings = RoomSettings {
+            recall_temporal_half_life_days: 20.0,
+            ..RoomSettings::default()
+        };
 
         for meta in [
             json!({}),
@@ -71,7 +74,7 @@ mod tests {
             json!({"origin": "giga-promotion"}),
             json!(null),
         ] {
-            for (days, expected) in [(0, 1.0), (60, 0.5), (120, 0.25), (-60, 1.0)] {
+            for (days, expected) in [(0, 1.0), (20, 0.5), (40, 0.25), (-20, 1.0)] {
                 let (durability, weight) =
                     memory_temporal_factor(&meta, now - Duration::days(days), now, &settings);
                 assert_eq!(durability, None);
@@ -86,7 +89,11 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         let anchor = now - Duration::days(240);
-        let settings = RoomSettings::default();
+        let settings = RoomSettings {
+            recall_temporal_half_life_days: 60.0,
+            recall_temporal_durability_curve_power: 2,
+            ..RoomSettings::default()
+        };
 
         for origin in ["giga-promotion", "direct-write"] {
             for (durability, expected) in [(0.0, 0.0625), (0.5, 0.5), (1.0, 1.0)] {

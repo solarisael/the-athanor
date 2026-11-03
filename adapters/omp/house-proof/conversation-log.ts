@@ -3,6 +3,7 @@
 // window to the Host. Turn identity, freshness, dedupe, transcript shape, and
 // durability all belong to Rust.
 
+import { gigaCaptureRequest, type GigaCaptureReceipt } from "../giga.ts";
 import { CAPTURE_TIMEOUT_MS } from "./constants.ts";
 import { hostCommand, hostSessionIdentity, sendHostCommand, type HostBinding } from "./host.ts";
 import { conversationText } from "./text.ts";
@@ -11,24 +12,15 @@ const CONVERSATION_LOG = "athanor.shell.conversation_log";
 const SHELL_RESULT = "athanor.shell.result";
 const ACCEPTED = new Set([SHELL_RESULT]);
 
-export type LoggedTurn = {
-  role: string;
-  text: string;
-  sourceID: string;
-  contentHash: string;
-  sessionID: string;
-  sourceTimestamp: string;
-  hasStableID: boolean;
-};
-
 export type ConversationCapture = {
   turns: number;
   fresh: boolean;
   appended: number;
   skipped: number;
   errors: Array<Record<string, unknown>>;
-  loggedTurns: LoggedTurn[];
   sourceLedgerDirectory: string;
+  // GIGA turn jobs the Host persisted before this reply; null when not asked.
+  giga: GigaCaptureReceipt | null;
 };
 
 function harnessTimestamp(message: any): string | undefined {
@@ -76,6 +68,7 @@ export async function logConversationWindow(
       source,
       persist,
       messages: visibleMessages(messages),
+      giga: gigaCaptureRequest(ctx),
     },
   });
   const response = await sendHostCommand(command, ACCEPTED, undefined, CAPTURE_TIMEOUT_MS);

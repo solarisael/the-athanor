@@ -62,14 +62,50 @@ pub(super) async fn organ(
     meta: CommandMeta,
     request: protocol::organ::OrganRequest,
 ) -> Responses {
+    // A task child's view needs no registered conversation: its worker lineage is verified.
+    let needs_session = match request.operation {
+        protocol::organ::OrganOperation::OrihonMode
+        | protocol::organ::OrganOperation::OrihonCapture => true,
+        protocol::organ::OrganOperation::OrihonTurn => {
+            request.params.get("purpose").and_then(Value::as_str) != Some("subagent")
+        }
+        _ => false,
+    };
+
+    if needs_session
+        && !state
+            .portable
+            .lock()
+            .await
+            .live_conversations()
+            .contains(&meta.sender_session)
+    {
+        let payload = protocol::ResponsePayload::<Value>::Error {
+            error: protocol::ProtocolError::InvalidParams(
+                "Orihon mode, capture and live turns require an active registered conversation"
+                    .into(),
+            )
+            .into(),
+        };
+        return response(
+            state,
+            &meta,
+            ORGAN_RESULT,
+            serde_json::to_value(payload).expect("native payload serializes"),
+        )
+        .await;
+    }
+
     let payload = crate::organ::call(
         &state.config,
         state.hallway_pool.as_ref(),
         &meta,
         request,
         &state.giga,
+        &state.orihon,
     )
     .await;
+
     response(
         state,
         &meta,

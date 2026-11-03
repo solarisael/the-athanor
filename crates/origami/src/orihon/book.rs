@@ -1,7 +1,7 @@
 use super::error::{Error, refusal};
-use super::prepare::PreparedBatch;
+use super::prepare::{PreparedBatch, Replay};
 use chrono::{SecondsFormat, Utc};
-use hearth::orihon::{CaptureReceipt, Kind, Record};
+use hearth::orihon::{CaptureReceipt, Kind, Reconciled, Record};
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Default)]
@@ -9,6 +9,10 @@ pub(super) struct Book {
     pub records: BTreeMap<i64, Record>,
     sources: HashMap<String, HashMap<String, HashMap<String, i64>>>,
     user_turns: HashMap<i64, i64>,
+    /// First user seq per (harness, source session).
+    session_users: HashMap<(String, String), i64>,
+    /// The single page-less prelude page of a door-opened session.
+    prelude_pages: HashMap<(String, String), i64>,
     next_seq: i64,
     next_turn: i64,
 }
@@ -36,8 +40,14 @@ impl Book {
                 "the book repeats a sequence or source identity",
             ));
         }
+        let session = (record.harness.clone(), record.source_session.clone());
         if record.kind == Kind::User {
-            if self.user_turns.contains_key(&record.turn_no) {
+            if self.user_turns.contains_key(&record.turn_no)
+                || self
+                    .prelude_pages
+                    .values()
+                    .any(|page| *page == record.turn_no)
+            {
                 return Err(refusal(
                     "conflicting_page",
                     "two user records name the same room page",
@@ -45,6 +55,17 @@ impl Book {
             }
             self.next_turn = self.next_turn.max(advance(record.turn_no)?);
             self.user_turns.insert(record.turn_no, record.seq);
+            let first = self.session_users.entry(session).or_insert(record.seq);
+            *first = (*first).min(record.seq);
+        } else if record.parent_user_id.is_none() {
+            let page = *self.prelude_pages.entry(session).or_insert(record.turn_no);
+            if page != record.turn_no || self.user_turns.contains_key(&record.turn_no) {
+                return Err(refusal(
+                    "conflicting_page",
+                    "a session prelude must keep one page without a user record",
+                ));
+            }
+            self.next_turn = self.next_turn.max(advance(record.turn_no)?);
         }
         self.next_seq = self.next_seq.max(advance(record.seq)?);
         self.sources
@@ -61,10 +82,22 @@ impl Book {
         if record.kind == Kind::User {
             return Ok(());
         }
-        let parent = record
-            .parent_user_id
-            .as_deref()
-            .and_then(|id| self.source(&record.harness, &record.source_session, id))
+        let Some(parent_id) = record.parent_user_id.as_deref() else {
+            let session = (record.harness.clone(), record.source_session.clone());
+            let before_users = self
+                .session_users
+                .get(&session)
+                .is_none_or(|first| *first > record.seq);
+            if !before_users || self.prelude_pages.get(&session) != Some(&record.turn_no) {
+                return Err(refusal(
+                    "missing_parent",
+                    "a non-user record must name parentUserId after its session's first user page",
+                ));
+            }
+            return Ok(());
+        };
+        let parent = self
+            .source(&record.harness, &record.source_session, parent_id)
             .ok_or_else(|| {
                 refusal(
                     "missing_parent",
@@ -83,7 +116,8 @@ impl Book {
 
     fn complete(&self) -> Result<(), Error> {
         let dense_sequences = self.records.keys().copied().eq(0..self.next_seq);
-        let dense_pages = self.user_turns.len() as i64 == self.next_turn;
+        let dense_pages =
+            (self.user_turns.len() + self.prelude_pages.len()) as i64 == self.next_turn;
         if !dense_sequences || !dense_pages {
             return Err(refusal(
                 "incomplete_book",
@@ -93,38 +127,62 @@ impl Book {
         Ok(())
     }
 
+    /// Selected seqs, appended seqs, and replays reconciled to their stored originals.
     pub fn plan(
         &mut self,
         room: &str,
         writer_session: &str,
         batch: PreparedBatch,
-    ) -> Result<(Vec<i64>, Vec<i64>), Error> {
+    ) -> Result<(Vec<i64>, Vec<i64>, Vec<Reconciled>), Error> {
         self.complete()?;
         let mut selected = Vec::with_capacity(batch.records.len());
         let mut appended = Vec::new();
+        let mut reconciled = Vec::new();
         for prepared in batch.records {
             if let Some(stored) = self.source(
                 &batch.harness,
                 &batch.source_session,
                 &prepared.capture.source_id,
             ) {
-                if !prepared.matches(stored) {
-                    return Err(refusal(
-                        "idempotency_reuse",
-                        "source identity was reused with different normalized content",
-                    ));
+                match prepared.replay(stored) {
+                    Replay::Same => {}
+                    Replay::Original(added) => reconciled.push(Reconciled {
+                        source_id: stored.source_id.clone(),
+                        seq: stored.seq,
+                        content_digest: stored.content_digest.clone(),
+                        added,
+                    }),
+                    Replay::Different => {
+                        return Err(refusal(
+                            "idempotency_reuse",
+                            "source identity was reused with different normalized content",
+                        ));
+                    }
                 }
                 selected.push(stored.seq);
                 continue;
             }
-            let turn_no = match prepared.capture.kind {
-                Kind::User => self.next_turn,
-                _ => {
-                    let parent = prepared
-                        .capture
-                        .parent_user_id
-                        .as_deref()
-                        .and_then(|id| self.source(&batch.harness, &batch.source_session, id))
+            let session = (batch.harness.clone(), batch.source_session.clone());
+            let turn_no = match (
+                prepared.capture.kind,
+                prepared.capture.parent_user_id.as_deref(),
+            ) {
+                (Kind::User, _) => self.next_turn,
+                (_, None) => {
+                    if self.session_users.contains_key(&session) {
+                        return Err(refusal(
+                            "missing_parent",
+                            "a non-user record must name parentUserId after its session's first user page",
+                        ));
+                    }
+                    self.prelude_pages
+                        .get(&session)
+                        .copied()
+                        .unwrap_or(self.next_turn)
+                }
+                (_, Some(id)) => {
+                    let parent = self
+                        .source(&batch.harness, &batch.source_session, id)
                         .ok_or_else(|| {
                             refusal(
                                 "missing_parent",
@@ -154,10 +212,15 @@ impl Book {
             selected.push(seq);
             appended.push(seq);
         }
-        Ok((selected, appended))
+        Ok((selected, appended, reconciled))
     }
 
-    pub fn receipt(mut self, selected: Vec<i64>, appended: usize) -> Result<CaptureReceipt, Error> {
+    pub fn receipt(
+        mut self,
+        selected: Vec<i64>,
+        appended: usize,
+        reconciled: Vec<Reconciled>,
+    ) -> Result<CaptureReceipt, Error> {
         let replayed = selected.len() - appended;
         let mut accepted_source_ids = Vec::with_capacity(selected.len());
         let mut accepted_records: Vec<Record> = Vec::with_capacity(selected.len());
@@ -178,6 +241,7 @@ impl Book {
             accepted_source_ids,
             appended,
             replayed,
+            reconciled,
             accepted_records,
         })
     }

@@ -525,12 +525,12 @@ fn incomplete_handoff_blocks_successor_until_repaired_and_pending_effects_surviv
     let text = opened["wake"]["text"].as_str().unwrap();
     assert!(text.contains("verify schema first"));
     assert!(text.contains("call-7"));
-    // The successor reads the shared book; the predecessor's entries are there.
+    // Explicit pages above the old cap remain valid.
     let page = fixture
         .call(
             &heir,
             "read",
-            json!({"action": "read", "bookId": book, "limit": 50}),
+            json!({"action": "read", "bookId": book, "limit": 51}),
         )
         .unwrap();
     assert!(

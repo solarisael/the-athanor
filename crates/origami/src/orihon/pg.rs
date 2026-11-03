@@ -1,13 +1,15 @@
 use super::book::advance;
 use super::error::{Error, refusal};
-use super::prepare::{self, PreparedRecord};
+use super::prepare::{self, PreparedRecord, Replay};
 use super::read::read_bounds;
 use chrono::{DateTime, SecondsFormat, Utc};
-use hearth::orihon::{CaptureBatch, CaptureReceipt, Kind, ReadReceipt, ReadRequest, Record};
+use hearth::orihon::{
+    CaptureBatch, CaptureReceipt, Kind, ReadReceipt, ReadRequest, Reconciled, Record,
+};
 use serde_json::json;
 use sqlx::{Acquire, PgPool, Postgres, Row, Transaction, postgres::PgRow};
 
-fn record_from_row(row: PgRow) -> Result<Record, Error> {
+pub(super) fn record_from_row(row: PgRow) -> Result<Record, Error> {
     Ok(Record {
         room: row.try_get("room")?,
         seq: row.try_get("seq")?,
@@ -28,6 +30,12 @@ fn record_from_row(row: PgRow) -> Result<Record, Error> {
         truncated: row.try_get("truncated")?,
         redacted: row.try_get("redacted")?,
         content_digest: row.try_get("content_digest")?,
+        fold_text: row.try_get("fold_text")?,
+        children: row
+            .try_get::<Option<serde_json::Value>, _>("children")?
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|_| refusal("invalid_book", "stored child identities are malformed"))?,
     })
 }
 
@@ -83,6 +91,38 @@ async fn parent_turn(
     Ok(row.try_get("turn_no")?)
 }
 
+/// A door-opened session records one page-less prelude page until its first user page.
+async fn prelude_turn(
+    transaction: &mut Transaction<'_, Postgres>,
+    room: &str,
+    harness: &str,
+    source_session: &str,
+    next_turn: &mut i64,
+) -> Result<i64, Error> {
+    let row = sqlx::query(
+        "SELECT bool_or(kind='user') AS has_user,
+                min(turn_no) FILTER (WHERE kind<>'user' AND parent_user_id IS NULL) AS prelude
+         FROM orihon WHERE room=$1 AND harness=$2 AND source_session=$3",
+    )
+    .bind(room)
+    .bind(harness)
+    .bind(source_session)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if row.try_get::<Option<bool>, _>("has_user")? == Some(true) {
+        return Err(refusal(
+            "missing_parent",
+            "a non-user record must name parentUserId after its session's first user page",
+        ));
+    }
+    if let Some(turn) = row.try_get::<Option<i64>, _>("prelude")? {
+        return Ok(turn);
+    }
+    let turn = *next_turn;
+    *next_turn = advance(*next_turn)?;
+    Ok(turn)
+}
+
 async fn insert(
     transaction: &mut Transaction<'_, Postgres>,
     room: &str,
@@ -97,10 +137,12 @@ async fn insert(
     let row = sqlx::query(
         "INSERT INTO orihon(
             room,seq,turn_no,session_id,harness,source_session,source_id,parent_user_id,
-            kind,speaker,text,source_time,said_at,timestamp_observed,truncated,redacted,content_digest
+            kind,speaker,text,source_time,said_at,timestamp_observed,truncated,redacted,content_digest,
+            fold_text,children
          )
          SELECT room,seq,turn_no,session_id,harness,source_session,source_id,parent_user_id,
-                kind,speaker,text,source_time,said_at,timestamp_observed,truncated,redacted,content_digest
+                kind,speaker,text,source_time,said_at,timestamp_observed,truncated,redacted,content_digest,
+                fold_text,children
          FROM jsonb_populate_record(NULL::orihon,$1)
          RETURNING written_at",
     )
@@ -112,6 +154,7 @@ async fn insert(
         "said_at":source.said_at, "timestamp_observed":source.timestamp_observed,
         "truncated":prepared.truncated, "redacted":source.redacted,
         "content_digest":prepared.content_digest,
+        "fold_text":source.fold_text, "children":source.children,
     }))
     .fetch_one(&mut **transaction).await?;
     let written_at = row
@@ -174,6 +217,7 @@ async fn append_prepared(
     let mut next_turn: i64 = cursor.try_get("next_turn")?;
     let mut accepted_records = Vec::with_capacity(batch.records.len());
     let mut accepted_source_ids = Vec::with_capacity(batch.records.len());
+    let mut reconciled = Vec::new();
     let mut appended = 0;
     for prepared in batch.records {
         let stored = existing(
@@ -185,11 +229,20 @@ async fn append_prepared(
         )
         .await?;
         let record = if let Some(stored) = stored {
-            if !prepared.matches(&stored) {
-                return Err(refusal(
-                    "idempotency_reuse",
-                    "source identity was reused with different normalized content",
-                ));
+            match prepared.replay(&stored) {
+                Replay::Same => {}
+                Replay::Original(added) => reconciled.push(Reconciled {
+                    source_id: stored.source_id.clone(),
+                    seq: stored.seq,
+                    content_digest: stored.content_digest.clone(),
+                    added,
+                }),
+                Replay::Different => {
+                    return Err(refusal(
+                        "idempotency_reuse",
+                        "source identity was reused with different normalized content",
+                    ));
+                }
             }
             stored
         } else {
@@ -197,15 +250,22 @@ async fn append_prepared(
                 let turn = next_turn;
                 next_turn = advance(next_turn)?;
                 turn
-            } else {
+            } else if let Some(parent) = prepared.capture.parent_user_id.as_deref() {
                 parent_turn(
                     transaction,
                     room,
                     &batch.harness,
                     &batch.source_session,
-                    prepared.capture.parent_user_id.as_deref().ok_or_else(|| {
-                        refusal("missing_parent", "a non-user record must name parentUserId")
-                    })?,
+                    parent,
+                )
+                .await?
+            } else {
+                prelude_turn(
+                    transaction,
+                    room,
+                    &batch.harness,
+                    &batch.source_session,
+                    &mut next_turn,
                 )
                 .await?
             };
@@ -239,6 +299,7 @@ async fn append_prepared(
         accepted_source_ids,
         appended,
         replayed,
+        reconciled,
         accepted_records,
     })
 }
@@ -262,7 +323,7 @@ pub async fn read_pg(
     .bind(bounds.request.until_seq)
     .bind(bounds.request.turn_no)
     .bind(bounds.request.day.as_deref())
-    .bind((bounds.request.limit + 1) as i64)
+    .bind(bounds.request.limit as i64 + 1)
     .fetch_all(pool)
     .await?;
     let rows = rows

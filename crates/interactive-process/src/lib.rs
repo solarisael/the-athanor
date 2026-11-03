@@ -129,6 +129,13 @@ impl InteractiveChild {
     pub fn terminate(&mut self) -> io::Result<()> {
         self.inner.terminate()
     }
+
+    /// Clears the kill-on-close limit, so dropping this value afterwards
+    /// leaves the whole process tree running. On failure the limit stands and
+    /// the caller still owns the child.
+    pub fn release_on_drop(&mut self) -> io::Result<()> {
+        self.inner.release_on_drop()
+    }
 }
 
 #[cfg(windows)]
@@ -232,6 +239,22 @@ mod platform {
             let status = ExitStatus::from_raw(code);
             self.status = Some(status);
             Ok(status)
+        }
+
+        pub(super) fn release_on_drop(&mut self) -> io::Result<()> {
+            let limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            let configured = unsafe {
+                SetInformationJobObject(
+                    self._job.as_raw_handle(),
+                    JobObjectExtendedLimitInformation,
+                    (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast::<c_void>(),
+                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+            };
+            if configured == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
         }
     }
 
@@ -488,6 +511,11 @@ mod platform {
 
         pub(super) fn terminate(&mut self) -> io::Result<()> {
             self.child.kill()
+        }
+
+        // A dropped std child keeps running; nothing ties it to this owner.
+        pub(super) fn release_on_drop(&mut self) -> io::Result<()> {
+            Ok(())
         }
     }
 

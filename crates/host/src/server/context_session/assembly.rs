@@ -44,13 +44,9 @@ pub(super) async fn assemble(
     )?;
     let mut lesson_mode = text(&room["recallPolicy"]["resolvedMode"]).to_owned();
     let mut evaluation = None;
-    if request.capabilities.automatic_recall
-        && !request
-            .existing_block_kinds
-            .contains(&BlockKind::RecallContext)
-    {
+    if request.capabilities.automatic_recall {
         if let Ok(analysis) = analysis.clone() {
-            match recall::evaluate(state, meta, request, saved, analysis).await {
+            match recall::evaluate(state, meta, request, saved, analysis, plan.deadline).await {
                 Ok(result) => {
                     lesson_mode = text(&result.decision["resolvedMode"]).into();
                     evaluation = Some(result);
@@ -77,6 +73,12 @@ pub(super) async fn assemble(
         evaluation.decision["shouldRecall"] == true
             && evaluation.decision["refreshReason"].is_string()
     });
+    let clear = evaluation
+        .as_ref()
+        .is_some_and(|evaluation| evaluation.decision["clearWorkingSet"] == true);
+    if clear || refresh.is_some() {
+        retire_working_set(state, meta, saved, context)?;
+    }
     if refresh.is_some() && now_ms() + COMMIT_RESERVE_MS >= plan.deadline {
         return Err("automatic context commit reserve reached".into());
     }
@@ -89,10 +91,13 @@ pub(super) async fn assemble(
                 if let Some(evaluation) = evaluation.as_ref() {
                     telemetry::record(state,meta,request,telemetry::Observation {
                         status:"skipped",route:Some(&evaluation.route),viewport:Value::Null,error:None,query:None,
-                        diagnostics:json!({"policy":{"requestedMode":evaluation.policy["requestedMode"],"resolvedMode":evaluation.policy["resolvedMode"],"reason":evaluation.policy["resolutionReason"]}}),
+                        diagnostics:json!({"planning":evaluation.planning,"policy":{"requestedMode":evaluation.policy["requestedMode"],"resolvedMode":evaluation.policy["resolvedMode"],"reason":evaluation.policy["resolutionReason"]}}),
                     }).await;
                 }
-                Ok((None, Value::Null, Vec::new()))
+                let presentation = cache::latest(saved, BlockKind::RecallContext)
+                    .map(|block| block.details["presentation"].clone())
+                    .unwrap_or(Value::Null);
+                Ok((None, presentation, Vec::new()))
             }
         }
     };
@@ -115,6 +120,25 @@ pub(super) async fn assemble(
             output.warnings.extend(warnings);
         }
         Err(error) => {
+            if let Err(failure) = command(
+                state,
+                ClientCommand::FailRefresh {
+                    meta: child_meta(
+                        meta,
+                        &request.operation_id,
+                        "failed-assembly",
+                        "recall_policy",
+                    ),
+                    reason: error.clone(),
+                },
+                json!(error),
+            )
+            .await
+            {
+                output
+                    .warnings
+                    .push(format!("Recall failure state unavailable: {failure}"));
+            }
             telemetry::record_failure(
                 state,
                 meta,
@@ -128,6 +152,33 @@ pub(super) async fn assemble(
             )
             .await;
             output.warnings.push("Recall Policy Host degraded".into());
+        }
+    }
+    let navigation_query = refresh.map(|evaluation| text(&evaluation.decision["query"]));
+    let (navigation, warnings) = orihon::prepare(
+        state,
+        meta,
+        request,
+        &lesson_mode,
+        navigation_query,
+        plan.deadline,
+    )
+    .await;
+    output.warnings.extend(warnings);
+
+    if let Some(content) = navigation {
+        if let Some(block) = output
+            .blocks
+            .iter_mut()
+            .find(|block| block.kind == BlockKind::RecallContext)
+        {
+            block.content.push_str(&content);
+        } else {
+            output.block(
+                BlockKind::RecallContext,
+                content,
+                json!({"authority":"provenance","source":"orihon"}),
+            );
         }
     }
     if request.capabilities.top_level {
@@ -165,6 +216,24 @@ pub(super) async fn assemble(
         }
     }
     Ok(output)
+}
+
+pub(super) fn retire_working_set(
+    state: &AppState,
+    meta: &CommandMeta,
+    saved: &mut SavedSession,
+    context: &mut ContextSession,
+) -> Result<(), String> {
+    if !cache::retire_recall(saved) {
+        return Ok(());
+    }
+
+    context.saved = Some(saved.clone());
+    // Persist removal before retrieval can fail or exhaust the outer deadline.
+    cache::commit(state, &meta.sender_session, saved)
+        .map_err(|error| format!("Recall retirement journal failed: {error}"))?;
+
+    Ok(())
 }
 
 async fn wake(
@@ -345,15 +414,9 @@ async fn presence(
     let frame = if let Some(prior) = &request.prior_presence {
         json!({"frameId":prior.frame_id,"rendered":prior.frame_rendered,"version":prior.frame_version.unwrap_or(1)})
     } else {
-        let mut identity_materials = vec![material];
-        identity_materials.extend(
-            recalled
-                .iter()
-                .filter(|material| material["role"] == "identity")
-                .cloned(),
-        );
+        let identity_materials = vec![material];
         let relationship = materials::pulse(state)?.into_iter().collect::<Vec<_>>();
-        let input = json!({"binding":{"room":identity.room,"spirit":identity.spirit,"operator":identity.operator,"session":meta.sender_session},"identity":identity_materials,"relationship":relationship,"continuity":recalled.iter().filter(|material| material["role"] != "identity").collect::<Vec<_>>(),"anamnesis":output.counsel,"previousBoat":output.boat,"uncertainties":[]});
+        let input = json!({"binding":{"room":identity.room,"spirit":identity.spirit,"operator":identity.operator,"session":meta.sender_session},"identity":identity_materials,"relationship":relationship,"continuity":[],"anamnesis":output.counsel,"previousBoat":output.boat,"uncertainties":[]});
         let typed = serde_json::from_value(input.clone())
             .map_err(|error| format!("invalid Presence material: {error}"))?;
         let answer = command(

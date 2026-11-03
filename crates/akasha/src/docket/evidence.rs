@@ -24,10 +24,8 @@ impl QuestEvidenceParams {
     pub fn validate(&self) -> Result<(), AppError> {
         validate_identity(&self.room, &self.spirit, &self.session)?;
         validate_uuid(&self.quest_id, "questId")?;
-        if !(1..=200).contains(&self.limit) {
-            return Err(AppError::Invalid(
-                "limit must be an integer from 1 through 200".into(),
-            ));
+        if self.limit == 0 {
+            return Err(AppError::Invalid("limit must be a positive integer".into()));
         }
         Ok(())
     }

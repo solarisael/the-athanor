@@ -60,6 +60,17 @@ pub async fn giga_event_replay(
             "only failed GIGA work can be replayed".into(),
         ));
     }
+    let replaced: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM giga_window_replacements WHERE window_event_id=$1)",
+    )
+    .bind(request.event_id())
+    .fetch_one(&mut *tx)
+    .await?;
+    if replaced {
+        return Err(AppError::Invalid(
+            "GIGA window was replaced; replay its canonical turn jobs. Conflicted identities have no job and require evidence repair before capture.".into(),
+        ));
+    }
     let missing_source_roles: bool = sqlx::query_scalar(
         "SELECT EXISTS(
            SELECT 1 FROM giga_event_sources WHERE event_id=$1 AND source_role IS NULL

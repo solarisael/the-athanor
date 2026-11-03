@@ -16,14 +16,17 @@ mod lesson;
 pub mod migrations;
 pub mod native;
 pub mod orihon_folder;
+pub mod orihon_navigator;
 mod paper_boat;
 mod presence;
 mod recall;
 mod remember;
 mod restart;
+pub mod room_marker;
 pub mod settings;
 pub mod state;
 mod timeline;
+mod typesafe;
 pub mod worker_lifecycle;
 
 pub use anamnesis::{anamnesis, anamnesis_write};
@@ -46,11 +49,13 @@ pub use docket::{
 pub use entity::{EntityMatch, EntityResolveParams, EntityResolveResult, entity_resolve};
 pub use giga::{
     giga_candidate_list, giga_candidate_store, giga_conversation_ingest, giga_event_claim,
-    giga_event_finish, giga_event_ingest, giga_event_replay, giga_health, giga_promote,
-    giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review,
+    giga_event_deadline_settle, giga_event_finish, giga_event_ingest, giga_event_replay,
+    giga_health, giga_promote, giga_queue_maintenance, giga_review, giga_tool_promote,
+    giga_tool_review, giga_turn_release,
 };
 pub use giga_worker::{
-    GigaEnablement, GigaWorkerHandle, giga_process, spawn_giga_worker, spawn_room_giga_worker,
+    GigaClassifierConfig, GigaEnablement, GigaWorkerHandle, giga_process, spawn_giga_worker,
+    spawn_room_giga_worker,
 };
 pub use hallway::{
     hallway_create, hallway_inbox, hallway_join, hallway_knock, hallway_knock_claim,
@@ -103,4 +108,8 @@ pub use timeline::{
     LessonTimelineItem, LessonTimelineParams, LessonTimelineResult, MemoryReadParams,
     MemoryReadResult, MemoryReader, MemoryRecord, MemoryTimelineItem, MemoryTimelineParams,
     MemoryTimelineResult, lesson_timeline, memory_read, memory_timeline,
+};
+pub use typesafe::{
+    TYPESAFE_ENDPOINT, TYPESAFE_MAX_PACKET_BYTES, TYPESAFE_MAX_RESPONSE_BYTES, TYPESAFE_MODEL,
+    is_secret, jev_giga_policy, jev_giga_policy_from_marker, request_provider,
 };

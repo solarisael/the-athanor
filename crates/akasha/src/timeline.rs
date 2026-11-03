@@ -18,8 +18,8 @@ use sqlx::{PgPool, Row};
 
 /// Who reads a Pulse panel: the Host's room and, when the Host names one, its
 /// operator. Both come from the Host's own configuration, never the request.
-/// A bare room reads as no operator: company-wide and pre-axis rows only once
-/// the House has operators, and everything in scope while it has none.
+/// Without an operator, the reader sees company-wide and historical unowned
+/// rows, but no operator-owned rows unless the registered hierarchy grants up.
 #[derive(Clone, Copy, Debug)]
 pub struct MemoryReader<'a> {
     pub room: &'a str,

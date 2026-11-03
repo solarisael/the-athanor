@@ -85,14 +85,14 @@ fn a_trigger_patch_is_judged_before_any_row_is_locked() {
 }
 
 #[test]
-fn lesson_query_preserves_typed_filters_and_bounds() {
+fn lesson_query_preserves_typed_filters_and_accepts_large_positive_limits() {
     let params: LessonQueryParams = serde_json::from_value(serde_json::json!({
         "room": "kintsu",
         "type": "audio",
         "stage": "mix",
         "languageKeys": [],
         "technologyKeys": [],
-        "limit": 12,
+        "limit": 75,
         "triggerOnly": true,
         "tag": "ttsr-approved",
     }))
@@ -102,11 +102,22 @@ fn lesson_query_preserves_typed_filters_and_bounds() {
     assert!(params.trigger_only);
     assert_eq!(params.tag.as_deref(), Some("ttsr-approved"));
     assert!(params.validate().is_ok());
-    let invalid: LessonQueryParams = serde_json::from_value(serde_json::json!({
-        "room": "kintsu", "type": "project", "limit": 12
-    }))
-    .unwrap();
-    assert!(invalid.validate().is_err());
+    assert_eq!(params.effective_limit(), 75);
+
+    for invalid in [
+        serde_json::json!(0),
+        serde_json::json!(-1),
+        serde_json::json!(1.5),
+        serde_json::json!(4294967296_u64),
+    ] {
+        let parsed = serde_json::from_value::<LessonQueryParams>(serde_json::json!({
+            "room": "kintsu", "type": "audio", "limit": invalid
+        }));
+        assert!(
+            parsed.is_err() || parsed.unwrap().validate().is_err(),
+            "invalid limit {invalid} must be refused"
+        );
+    }
 }
 
 #[test]

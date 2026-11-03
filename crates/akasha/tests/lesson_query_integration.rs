@@ -278,3 +278,97 @@ async fn lesson_query_ids_return_exactly_the_named_rows() -> TestResult {
     assert_eq!(result.filters.ids, vec![3]);
     Ok(())
 }
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+async fn lesson_query_limit_controls_primary_rows_and_thread_expansion() -> TestResult {
+    let pool = temp_lesson_pool().await?;
+    for id in 1..=80 {
+        insert_lesson(&pool, id, false).await?;
+    }
+    let wide: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "coding", "limit": 75
+    }))?;
+    let wide = lesson_query(&pool, wide).await?;
+    assert_eq!(wide.lessons.len(), 75);
+    assert_eq!(wide.filters.limit, 75);
+
+    sqlx::query("UPDATE lessons SET thread_keys = ARRAY['shared']")
+        .execute(&pool)
+        .await?;
+    sqlx::query("UPDATE lessons SET lesson_tsv = to_tsvector('portuguese', 'anchor') WHERE id = 1")
+        .execute(&pool)
+        .await?;
+    let bounded: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "coding", "query": "anchor", "limit": 3
+    }))?;
+    let bounded = lesson_query(&pool, bounded).await?;
+    assert_eq!(bounded.lessons.len(), 3);
+    assert_eq!(bounded.lessons[0].id, 1);
+    assert!(
+        bounded.lessons[1..]
+            .iter()
+            .all(|row| row.thread_keys == ["shared"])
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; the lessons table is session-temporary"]
+async fn lesson_query_exact_ids_default_limit_covers_all_requested_ids() -> TestResult {
+    let pool = temp_lesson_pool().await?;
+    for id in 1..=75 {
+        insert_lesson(&pool, id, false).await?;
+    }
+    let ids = (1..=75).collect::<Vec<i64>>();
+    let request: LessonQueryParams = serde_json::from_value(serde_json::json!({
+        "room": "kodo", "type": "coding", "ids": ids
+    }))?;
+    let result = lesson_query(&pool, request).await?;
+    assert_eq!(result.lessons.len(), 75);
+    assert_eq!(result.filters.limit, 75);
+    assert_eq!(ids_of(&result), ids);
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; tables are session-temporary"]
+async fn lesson_query_survives_host_recording_state_without_weakening_settings_validation()
+-> TestResult {
+    let pool = temp_lesson_pool().await?;
+    insert_lesson(&pool, 9, false).await?;
+    let digest = "a".repeat(64);
+    let recording = serde_json::json!({"mode": "fold", "generation": "preserve-me"});
+    for prefix in [
+        "orihon_default_",
+        "orihon_session_",
+        "orihon_folder_status_orihon_session_",
+    ] {
+        sqlx::query("INSERT INTO room_settings(room_key,key,value) VALUES('kintsu',$1,$2)")
+            .bind(format!("{prefix}{digest}"))
+            .bind(&recording)
+            .execute(&pool)
+            .await?;
+    }
+    let params = || {
+        serde_json::from_value::<LessonQueryParams>(serde_json::json!({
+            "room": "kintsu", "type": "coding", "ids": [9]
+        }))
+    };
+    let result = lesson_query(&pool, params()?).await?;
+    assert_eq!(ids_of(&result), vec![9]);
+    assert_eq!(result.lessons[0].lesson, "body 9");
+    let preserved: serde_json::Value =
+        sqlx::query_scalar("SELECT value FROM room_settings WHERE room_key='kintsu' AND key=$1")
+            .bind(format!("orihon_session_{digest}"))
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(preserved, recording);
+
+    sqlx::query(
+        "INSERT INTO room_settings(room_key,key,value) VALUES('kintsu','orihon_unrecognized','null')",
+    )
+    .execute(&pool)
+    .await?;
+    assert!(lesson_query(&pool, params()?).await.is_err());
+    Ok(())
+}

@@ -71,7 +71,7 @@ impl fmt::Display for DomainError {
             Self::DegradedUnavailable => f.write_str("degraded mode cannot durably remember"),
             Self::EmptyQuery => f.write_str("recall query must not be empty"),
             Self::InvalidTopK { field, value } => {
-                write!(f, "{field} must be positive and at most 1000: {value}")
+                write!(f, "invalid {field} count: {value}")
             }
             Self::InvalidThreshold { field, value } => {
                 write!(f, "{field} must be finite and in [0, 1]: {value}")
@@ -83,7 +83,7 @@ impl fmt::Display for DomainError {
                 write!(f, "invalid cluster maintenance {field}: {message}")
             }
             Self::InvalidAnamnesisLimit { value } => {
-                write!(f, "anamnesis limit must be between 1 and 50: {value}")
+                write!(f, "anamnesis limit must be positive: {value}")
             }
             Self::MissingAnamnesisQuery => {
                 f.write_str("anamnesis consult requires a non-empty query")

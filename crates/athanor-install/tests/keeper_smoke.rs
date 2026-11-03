@@ -1052,3 +1052,62 @@ fn one_rooms_restart_leaves_another_rooms_omp_running() {
         }
     }
 }
+
+/// A deployment's cutover marker pauses the keeper: its omp child lives out its
+/// own run, the watch starts no substrate child, and the keeper acknowledges
+/// the cutover under its own pid. The control run, identical except for the
+/// marker, shows the same watch does reach the substrate.
+#[test]
+fn a_cutover_marker_pauses_the_watch_and_leaves_omp_running() {
+    let omp = [
+        ("FAKE_OMP_SLEEP_SECS", "3"),
+        ("FAKE_OMP_QUIT_FROM_RUN", "1"),
+    ];
+
+    let control = tree();
+    write_config(&control, &[control.program.display().to_string()], 1);
+    run_keeper_timed(&control, "no-intent", &omp);
+    let control_asks = methods(&control.transcript)
+        .iter()
+        .filter(|method| *method == "restart_status")
+        .count();
+    assert!(
+        control_asks >= 2,
+        "without a marker the watch and the exit both ask the substrate; saw {control_asks}"
+    );
+
+    let paused = tree();
+    write_config(&paused, &[paused.program.display().to_string()], 1);
+    let marker = omp_keeper::cutover::marker_path(&paused.root.join("state"));
+    fs::create_dir_all(marker.parent().expect("cutover directory")).expect("cutover directory");
+    fs::write(&marker, r#"{"format":1,"cutoverId":"smoke-cutover"}"#).expect("cutover marker");
+    let keeper = keeper_command(&paused, "no-intent", &omp)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("keeper starts");
+    let pid = keeper.id();
+    let output = keeper.wait_with_output().expect("keeper ends");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        lines(&paused.transcript).is_empty(),
+        "no substrate child may start during a cutover; stdout: {stdout}"
+    );
+    assert_eq!(
+        lines(&paused.runs).len(),
+        1,
+        "omp ran once and was never relaunched"
+    );
+    assert_eq!(
+        lines(&paused.survived).len(),
+        1,
+        "omp lived out its own run; the pause never killed it"
+    );
+    let ack_path = omp_keeper::cutover::ack_path(&paused.root.join("state"), pid);
+    let ack: serde_json::Value =
+        serde_json::from_slice(&fs::read(&ack_path).expect("keeper acknowledgement"))
+            .expect("acknowledgement json");
+    assert_eq!(ack["cutoverId"], "smoke-cutover");
+    assert_eq!(ack["pid"], pid);
+}

@@ -20,8 +20,140 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Changed
+
+- GIGA stores individual turn jobs before capture acknowledgement. OMP no longer holds a volatile turn buffer.
+  Conversations release work by count or oldest-turn age. Defaults are eight turns, 120 seconds, and four concurrent jobs.
+  Each judgment receives nearby turns and bounded Recall context. Jev can select one follow-up lookup.
+  Recalled content retains the Host's visibility rules and requires the existing Recall private-packet grant.
+  Schema 43 preserves processed identities, candidates, and attempt history during the queue cutover.
+  Old failed-only turns remain parked for explicit replay. Replaced windows no longer inflate active health counts.
+- Mode commands replace class words. `/magus` sets work, `/bard` or `/warlock` sets conversation,
+  `/rogue` sets quiet, and `/warrior` sets auto. The same word inside a message does nothing.
+  The mode door carries one House register line per resolved mode on every top-level turn.
+  The line is visible when the resolved mode changes and hidden on the turns between.
+  The House lines live in code and are the same for every room. The room `mode-door.md` override is removed.
+- The room marker layers over a House page. The Host reads `<rooms>/house/.athanor-house.json` first,
+  then `<room>/.athanor-room.json`. A room key replaces the House value whole. `room` is never inherited.
+  Every Jev grant reader, the operator name, and recall telemetry use the effective marker.
+  The Orihon settings writer still edits the room page only.
+- The handoff door reads `<rooms>/house/handoff-door.md` first, then the room's `handoff-door.md`,
+  one section over another. `{spirit}` in a line becomes the spirit nickname (Kodo becomes kodooo).
+
 ### Fixed
 
+- GIGA accepts identical ledger rows across daily files while retaining rejection for conflicting evidence.
+  Retries, regrouped capture, and queue purges preserve turn identity.
+  Empty or unavailable Recall context does not produce a novelty score.
+  Queue maintenance preserves unreleased turns. Invalid stored jobs fail without blocking healthy neighbors.
+  Health reports unresolved migration conflicts. Recalled historical records retain their archived and superseded labels.
+- Desktop rooms accept an explicit operator key through the supported installation configuration.
+  Deployment accepts a House configuration file when it installs a prepared release.
+  The Host uses the key for memory ownership and retains the separate display name.
+  Private and `up` memories remain protected when the operator registry is empty.
+  Historical unowned memories remain shared. Existing supersession ownership checks remain unchanged.
+- GIGA uses Jev to classify individual turns instead of running local Agents-A1 inference.
+  Candidate labels and excerpts derive from exact sources. The classifier does not generate narrative text.
+  Schema 42 permits up to eight candidates per event, with atomic storage and completion.
+  A separate room grant controls remote disclosure. Credentials remain transient, and each request rechecks the grant.
+  Later-event resonance can return a Curio to review without promoting it.
+  Stale Curio evidence and resurfacing failures cannot discard new classifications.
+- A delivered compaction with an overdue receipt reports `outcomeUnknown` instead of `expired`.
+  The original instance and conversation can report completion later without repeating compaction.
+  Undelivered commands still expire. Restart and close deadlines remain unchanged.
+  Acknowledgements also reject receipts from a different conversation.
+- The local deploy script shows progress during long steps.
+  Each step banner shows the total elapsed time, and a heartbeat line appears every 10 seconds.
+  Each step reports its duration, and the completion line reports the total deployment time.
+- The deployment test runner clears the inherited client room projection during adapter tests.
+  Direct test runs refuse this live-room binding before fixtures execute.
+- Manual read tools use caller-selected result limits instead of fixed ceilings of 50, 200, or 250.
+  Exact-ID lesson reads without a limit return all matching requested IDs within scope.
+  Explicit lesson limits also bound thread expansion.
+- Manual Recall exposes result counts and AKASHA similarity floors.
+  The semantic floor defaults to 0.25. Manual Recall remains age-neutral.
+  Vault honors the requested result count.
+  Automatic context budgets, provider byte limits, and access checks remain unchanged.
+- Automatic AKASHA Recall uses a default base half-life of 15 days.
+  Reviewed durability and explicit memory references keep their existing rules.
+- Recall keeps a bounded user-origin subject across follow-up turns.
+  A new subject can retire old evidence without starting another search.
+  Generated requests cannot become user-origin subjects.
+- Jev can choose supplied retrieval plans with separately granted conversation context.
+  Active relevance judgments no longer require literal word overlap.
+  Reranking sends the current request as its query; prior conversation requires its own grant.
+- Jev binds each relevance question to its candidate token.
+  Context instructions appear once per packet.
+  Reranking keeps the largest ranked prefix within the existing 32 KiB limit.
+  Receipts report the pool size and omitted count.
+- Follow-ups that name an earlier conversation retain the user subject.
+- Automatic context keeps one current Recall block and one Presence block.
+  Failed or empty refreshes retire old topical evidence.
+  Context format 2 removes retrieved material from stable Presence frames during the stored-state cutover.
+- AKASHA returns query-relevant source passages with Unicode scalar offsets.
+  Passage selection uses bounded auxiliary storage and preserves complete manual record reads.
+  Automatic raw lanes cannot bypass evidence admission.
+- Private Recall evaluation replays preceding user turns through native context preparation.
+  It separates real cases from authored probes and leaves missing gold labels unscored.
+  Failed retrieval is distinct from a successful empty result.
+- The Host bounds nested command futures to prevent a stack overflow during context preparation.
+
+- Orihon retries failed compactions after 60 seconds while a registered fold session remains active.
+  Recovery no longer requires a new user message.
+  Leaving fold mode or losing room ownership stops automatic retries.
+- Orihon keeps the compactor view independent when the chat view merges.
+  Each view retains its own lines and batch state, which avoids unrelated prefix changes.
+- Native installation pauses keeper workers while compatible OMP sessions stay open.
+  Host shutdown releases keeper process jobs during the cutover.
+  Sessions reconnect with refreshed Host credentials after installation.
+  Incompatible releases require an OMP restart.
+  Sessions keep their loaded adapter code until that restart.
+  Older Hosts and keepers still require a shutdown for the first update with cutover support.
+- Orihon exports pre-user shell records without blocking later capture.
+  Accepted PostgreSQL batches no longer fail while their file mirror creates the first prelude page.
+- Orihon gives ready merges priority during a backlog.
+  One leaf can run alongside merges when its context fits the compactor budget.
+  Completed work updates and saves both views before the next jobs read their context.
+- Native releases stamp the manifest `schemaVersion` from `installer/dependencies.json`.
+  That file now names migration head 41; a release built with the stale 40 was refused by
+  its own installer (`schema 40 is incompatible; this installer requires 41`) without
+  touching the database. An `athanor-install` test keeps the file equal to
+  `hearth::SUBSTRATE_SCHEMA_VERSION`.
+- Orihon `fold` is a live conversation contract, not a historical archive.
+  Each new idle user turn sends the stable system prompt and tool definitions, the persisted
+  summary-only chat view, and the current message. Previous raw turns and earlier compaction
+  summaries do not cross a user-turn boundary. The current turn keeps its tool calls and results.
+  The chat view appends between batches and merges above 128,000 UTF-8 bytes down to 64,000.
+  The compactor targets 16,000 to 32,000 bytes.
+  Missing parents and oversized model replies can temporarily keep the view above that range.
+  Native Rust owns storage, the message tree, the queue, and model jobs (migration 41).
+  The adapter owns harness messages and the provider boundary.
+  Exact records stay zoomable with the `zoom` and `date` tools. Task children receive the bounded view plus their task.
+  The old page worker, old view composer, and the `orihon-fold` command are removed. Stored sources and old folds stay readable.
+- Orihon live turns reach the Host with every tool's JSON Schema. OMP hands tools over as ArkType
+  callables; the adapter converts them through the schema's own `toJsonSchema` and refuses a non-object schema.
+  The next turn's prefix uses the tool set and order the model last received when the provider API matches.
+- The Orihon provider gate leaves side requests alone. Handoff, advisor, title, and compaction requests
+  outside an agent loop are not aborted. Inside a loop, a request waits for the current preparation and
+  refuses when the context hook was skipped. One deadline runs from context start through capture and turn;
+  a late preparation authorizes nothing. Identity failures outside live mode are tolerated.
+- OMP compaction in a fold session writes a fixed note and summarizes nothing; the view carries the conversation.
+  The frontier of a combined task report counts every resolved child, and a child transcript resolves by its
+  artifact id when OMP suffixes a colliding job id. A split expanded dispatch folds its task once.
+- The Orihon live file store reopens after a torn tail or a retried write: one durable write per batch,
+  identical duplicate lines skipped, torn trailing bytes truncated on owner open, nodes validated by level
+  independent of day files, persisted views validated on open. PostgreSQL ingest resumes from stored state and a
+  retried node after a lost acknowledgment lands once. View revision starts at 1 in both stores.
+  A replay that adds `foldText` or `children` to a stored record keeps the record unchanged and reports it reconciled.
+- The settings loader accepts the Host's `orihon_default_*`, `orihon_session_*`, and
+  `orihon_folder_status_orihon_session_*` recording keys and still rejects other unknown keys.
+- Orihon supports automatic hosted folding through the operator's OMP model runtime.
+  `/orihon fold hosted` selects Sonnet 5.5. An explicit Anthropic or Codex selector can replace that default.
+  The binding preserves the operator's working directory, profile, and ordered configuration overlays.
+  Scoped settings disable controlled model fallbacks. OMP retains credential ownership.
+  Cancellation waits for the owned gateway before releasing generation ownership.
+  Vault status updates serialize the completed-receipt merge so a competing update cannot discard the retained tree.
+  The command explains the next-session start and reports configuration refusals separately from capture failures.
 - The Windows running-image replacement test waits for child readiness before replacing its executable.
   The test reaps its child when a readiness check or assertion fails.
 - `athanor deploy` shows local preparation and installation commands.
@@ -120,10 +252,13 @@ the exact implementation record.
 
 ### Added
 
-- `orihon-fold` generates source-bound message and page folds through a local Ollama endpoint.
-  PostgreSQL and Vault preserve immutable snapshot revisions and refuse conflicting replays.
-  Model requests preserve complete source input and trim optional context by whole records.
-  This command does not enable per-turn resets, tree navigation, or wake injection.
+- Orihon finds user pages through bounded lexical search and optional, separately authorized Jev judgment.
+- `orihon-fold --through-page` builds immutable binary trees over source-bound page revisions.
+  `unfold` opens exact children or original records. Views retain exact roots and report source drift.
+- `/orihon fold MODEL:TAG` enables a tracked local folder job at the next fresh session.
+  Work-mode wake reads the last completed view beside the paper boat.
+  Failures retain that view. Off mode and Host shutdown cancel the job.
+  Message and page recipes remain unchanged. Binary merges use a separate instruction.
 - The sixteen named kittens and dragonlings receive their role lessons with every wake, resume included.
   The Host reads the coding lessons tagged `familiar-role:shared` and the familiar's role tag.
   Each provider context receives every complete body separately from clipped wake text. The open response lists the lesson IDs.
@@ -347,7 +482,7 @@ the exact implementation record.
 - `remember` skips backups unless the caller requests one; `sleep` keeps backups enabled by default.
   Skipped backups return `Skipped`, not `Ok`.
   PostgreSQL dumps exclude the `insula` schema and still refuse database migrations newer than the binary.
-- Manual OMP Recall returns complete bodies for up to five selected AKASHA memory records.
+- Manual OMP Recall returns complete AKASHA memory bodies within the requested result count.
   Exact-ID-only queries return requested records and explicit missing, refused, or overflow warnings.
   Automatic Recall retains its context budgets.
   The Host reports candidate overflow, and BM25F reports its prefilter ceiling for multi-term queries.

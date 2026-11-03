@@ -1,7 +1,6 @@
 import { requestOrgan, organFailure } from "./organ.ts";
 
 const ANAMNESIS_DEFAULT_LIMIT = 10;
-const ANAMNESIS_MAX_LIMIT = 50;
 const ANAMNESIS_TIMEOUT_MS = 120_000;
 const ANAMNESIS_VALIDATOR_SYMBOL = "validRustAnamnesisResult";
 
@@ -103,8 +102,11 @@ export async function queryAnamnesis(room, options) {
   const query = String(options?.query || "").trim();
   const timeoutMs = options?.timeoutMs === undefined ? ANAMNESIS_TIMEOUT_MS : Number(options.timeoutMs);
   if (mode === "consult" && !query) return { ok: false, mode, ...EMPTY, error: "consult requires a non-empty query" };
-  const requestedLimit = options?.limit === undefined ? ANAMNESIS_DEFAULT_LIMIT : Number(options.limit);
-  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(ANAMNESIS_MAX_LIMIT, Math.trunc(requestedLimit))) : ANAMNESIS_DEFAULT_LIMIT;
+  const requestedLimit = options?.limit === undefined ? ANAMNESIS_DEFAULT_LIMIT : options.limit;
+  if (typeof requestedLimit !== "number" || !Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 4_294_967_295) {
+    return { ok: false, mode, ...EMPTY, error: "limit must be a positive integer no greater than 4294967295" };
+  }
+  const limit = requestedLimit;
   try {
     if (options.binding.room !== room) throw new Error("foreign room binding refused");
     const result = await requestOrgan(options.binding, "anamnesis", {

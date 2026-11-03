@@ -44,6 +44,8 @@ pub(super) async fn synchronize(
     let proven = frame
         .as_ref()
         .is_some_and(|(frame, _)| frame.binding == authentication.binding);
+    let format_changed = saved.version != cache::CONTEXT_VERSION
+        || (saved.identity_epoch.is_none() && frame.is_some());
     let unlabelled = saved.identity_epoch.is_none();
     let changed = saved
         .identity_epoch
@@ -62,6 +64,8 @@ pub(super) async fn synchronize(
         Some("legacy-context-unpaired-surrogate")
     } else if unlabelled && !saved.turns.is_empty() && !proven {
         Some("legacy-context-identity-unverified")
+    } else if format_changed {
+        Some("context-format-changed")
     } else {
         None
     };
@@ -73,7 +77,9 @@ pub(super) async fn synchronize(
         "native"
     };
     let displaced = invalidation.is_some() && !saved.turns.is_empty();
-    if let Some(reason) = invalidation.filter(|_| unlabelled || changed || displaced) {
+    if let Some(reason) =
+        invalidation.filter(|_| unlabelled || changed || displaced || format_changed)
+    {
         saved.last_invalidation = Some(cache::CacheInvalidation {
             reason: reason.into(),
             prior_generation: saved.generation.clone(),
@@ -83,19 +89,24 @@ pub(super) async fn synchronize(
         });
     }
     if invalidation.is_some() {
-        saved.turns.clear();
+        saved.recall_subject = None;
+        if format_changed && !changed && !foreign_frame && proven {
+            cache::retire_recall(saved);
+        } else {
+            saved.turns.clear();
+        }
         context.sieves.clear();
         request.existing_block_kinds.clear();
     }
-    if unlabelled || changed || displaced || saved.generation.is_empty() {
+    if unlabelled || changed || displaced || format_changed || saved.generation.is_empty() {
         saved.identity_epoch = Some(epoch);
         saved.generation = new_id();
         cache::commit(state, &meta.sender_session, saved)
             .map_err(|error| format!("context identity journal failed: {error}"))?;
         context.saved = Some(saved.clone());
     }
-    if foreign_frame && request.capabilities.top_level {
-        let (old_frame, ledger) = frame.as_ref().expect("foreign frame exists");
+    if (foreign_frame || format_changed) && frame.is_some() && request.capabilities.top_level {
+        let (old_frame, ledger) = frame.as_ref().expect("prior frame exists");
         rotate(
             state,
             &mut runtime,
@@ -105,8 +116,15 @@ pub(super) async fn synchronize(
             ledger,
             &saved.generation,
             request,
+            invalidation.unwrap_or("context-format-changed"),
         )
         .await?;
+    }
+    if format_changed {
+        saved.version = cache::CONTEXT_VERSION;
+        cache::commit(state, &meta.sender_session, saved)
+            .map_err(|error| format!("context format journal failed: {error}"))?;
+        context.saved = Some(saved.clone());
     }
     request.prior_presence = runtime
         .presence
@@ -132,6 +150,7 @@ async fn rotate(
     ledger: &PresenceLedger,
     generation: &str,
     request: &ContextPrepareRequest,
+    reason: &str,
 ) -> Result<(), String> {
     let analysis = hearth::context::analyze_context(
         &authentication.binding.room,
@@ -154,16 +173,35 @@ async fn rotate(
         body,
         1000,
     );
+    let same_binding = frame.binding == authentication.binding;
+    let continuity = frame
+        .continuity
+        .iter()
+        .filter(|material| {
+            same_binding
+                && !matches!(
+                    &material.authority,
+                    summoning::presence::PresenceAuthority::Canon { .. }
+                        | summoning::presence::PresenceAuthority::Memory { .. }
+                )
+        })
+        .collect::<Vec<_>>();
+    let relationship = if same_binding {
+        serde_json::to_value(&frame.relationship).map_err(|error| error.to_string())?
+    } else {
+        json!(materials::pulse(state)?.into_iter().collect::<Vec<_>>())
+    };
     let open: PresenceOpenRequest = serde_json::from_value(json!({
-        "binding":authentication.binding,"identity":[identity],"relationship":materials::pulse(state)?.into_iter().collect::<Vec<_>>(),
-        "continuity":[],"anamnesis":[],"previousBoat":null,"uncertainties":[]
-    })).map_err(|error| error.to_string())?;
+        "binding":authentication.binding,"identity":[identity],"relationship":relationship,
+        "continuity":continuity,"anamnesis":[],"previousBoat":null,"uncertainties":[]
+    }))
+    .map_err(|error| error.to_string())?;
     summoning::presence::open_presence(authentication.clone(), open.clone())
         .map_err(|error| error.to_string())?;
     let close = PresenceCloseRequest {
         frame_id: frame.frame_id.clone(),
         frame_version: frame.version,
-        body: "Authenticated room identity changed.".into(),
+        body: format!("Context reopened: {reason}."),
     };
     // The durable close must succeed before the runtime retires its live contract.
     summoning::presence::close_presence(frame, ledger, close.clone())
@@ -272,7 +310,8 @@ pub(super) async fn replay_eligible(
         &state.config.spirit,
         crate::room_state::RoomStateRequest::Read,
     )?;
-    if saved.identity_epoch.as_deref() != Some(fingerprint(&root)?.as_str())
+    if saved.version != cache::CONTEXT_VERSION
+        || saved.identity_epoch.as_deref() != Some(fingerprint(&root)?.as_str())
         || !saved.turns.iter().any(|entry| entry.turn_id == turn)
     {
         return Ok(false);

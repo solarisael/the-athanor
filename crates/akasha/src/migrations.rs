@@ -206,6 +206,26 @@ const MIGRATIONS: &[Migration] = &[
         name: "0039_orihon_folds.sql",
         sql: include_str!("../../../substrate/migrations/0039_orihon_folds.sql"),
     },
+    Migration {
+        version: 40,
+        name: "0040_orihon_tree.sql",
+        sql: include_str!("../../../substrate/migrations/0040_orihon_tree.sql"),
+    },
+    Migration {
+        version: 41,
+        name: "0041_orihon_live.sql",
+        sql: include_str!("../../../substrate/migrations/0041_orihon_live.sql"),
+    },
+    Migration {
+        version: 42,
+        name: "0042_giga_turn_candidates.sql",
+        sql: include_str!("../../../substrate/migrations/0042_giga_turn_candidates.sql"),
+    },
+    Migration {
+        version: 43,
+        name: "0043_giga_turn_queue.sql",
+        sql: include_str!("../../../substrate/migrations/0043_giga_turn_queue.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

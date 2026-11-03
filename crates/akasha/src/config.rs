@@ -25,9 +25,7 @@ use thiserror::Error;
 
 const DEFAULT_EMBED_URL: &str = "http://127.0.0.1:11434/api/embed";
 const DEFAULT_EMBED_MODEL: &str = "hf.co/zenmagnets/Nemotron-3-Embed-1B-Q4_K_M-GGUF:latest";
-const DEFAULT_GIGA_MODEL_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_GIGA_KEEP_ALIVE: &str = "30m";
-const DEFAULT_GIGA_NUM_CTX: u32 = 32_768;
 /// Ingest-side embedding timeout (remember, chunk batches): a batch of
 /// passages may legitimately take this long. Recall does not share it — see
 /// `RECALL_EMBED_TIMEOUT`.
@@ -127,7 +125,7 @@ const EMBEDDING_ENV_KEYS: &[&str] = &[
     "ATHANOR_TEST_DISABLE_EMBEDDING",
     "EMBEDDING_MODEL_TIMEOUT",
 ];
-const GIGA_ENV_KEYS: &[&str] = &["GIGA_MODEL_TIMEOUT", "GIGA_KEEP_ALIVE", "GIGA_NUM_CTX"];
+const GIGA_ENV_KEYS: &[&str] = &["GIGA_KEEP_ALIVE"];
 const HOUSE_ENV_KEYS: &[&str] = &["ATHANOR_HOUSE_TZ"];
 const GIGA_SOURCE_ENV_KEYS: &[&str] =
     &["ATHANOR_GIGA_SOURCE_LEDGER_DIR", "ATHANOR_GIGA_SOURCE_ROOM"];
@@ -214,11 +212,6 @@ fn deployment_positive_u64(key: &str, default: u64) -> Result<u64, AppError> {
         .ok_or_else(|| AppError::Config(format!("{key} must be a positive integer")))
 }
 
-pub(crate) fn giga_model_timeout() -> Result<Duration, AppError> {
-    deployment_positive_u64("GIGA_MODEL_TIMEOUT", DEFAULT_GIGA_MODEL_TIMEOUT_SECS)
-        .map(Duration::from_secs)
-}
-
 pub(crate) fn giga_keep_alive() -> Result<String, AppError> {
     let value = deployment_value("GIGA_KEEP_ALIVE", DEFAULT_GIGA_KEEP_ALIVE);
     if value.trim().is_empty() || value.len() > 64 {
@@ -227,12 +220,6 @@ pub(crate) fn giga_keep_alive() -> Result<String, AppError> {
         ));
     }
     Ok(value)
-}
-
-pub(crate) fn giga_num_ctx() -> Result<u32, AppError> {
-    let value = deployment_positive_u64("GIGA_NUM_CTX", u64::from(DEFAULT_GIGA_NUM_CTX))?;
-    u32::try_from(value)
-        .map_err(|_| AppError::Config("GIGA_NUM_CTX must fit an unsigned 32-bit integer".into()))
 }
 
 pub(crate) fn embedding_model_timeout() -> Result<Duration, AppError> {

@@ -54,12 +54,25 @@ impl<'a> HouseLine<'a> {
     }
 
     /// A substrate that cannot be resolved or spawned is an install fault, not
-    /// a House that blinked, so it stays an error.
+    /// a House that blinked, so it stays an error. A cutover is the House away
+    /// on purpose: the held child is closed and none starts until it ends.
     pub fn call<P, T>(&mut self, method: &str, params: &P) -> Result<Answer<T>>
     where
         P: Serialize,
         T: DeserializeOwned,
     {
+        if let Some(cutover_id) = crate::cutover::active(self.state_root) {
+            if let Some(session) = self.session.take()
+                && let Err(error) = session.close()
+            {
+                eprintln!("omp-keeper: substrate child closed for cutover {cutover_id}: {error:#}");
+            }
+            crate::cutover::acknowledge(self.state_root, &cutover_id);
+            return Ok(Answer::Unreachable(format!(
+                "an Athanor cutover ({cutover_id}) is in progress"
+            )));
+        }
+
         let session = match self.session.as_mut() {
             Some(session) => session,
             None => {

@@ -44,7 +44,6 @@ pub const HANDOFF_REQUEST_LIMIT: i64 = 2;
 /// Upper bound on rendered wake text, in characters.
 pub const WAKE_LIMIT_CHARS: usize = 12_000;
 pub const READ_LIMIT_DEFAULT: i64 = 20;
-pub const READ_LIMIT_MAX: i64 = 50;
 /// Serialized size cap for one appended entry body. The adapter truncates
 /// tool and message content into bounded excerpts before it reaches here.
 pub const BODY_LIMIT_BYTES: usize = 64 * 1024;

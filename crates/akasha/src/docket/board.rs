@@ -43,10 +43,8 @@ impl QuestBoardParams {
     pub fn validate(&self) -> Result<(), AppError> {
         validate_identity(&self.room, &self.spirit, &self.session)?;
         nonempty(&self.house_id, "houseId")?;
-        if !(1..=250).contains(&self.limit) {
-            return Err(AppError::Invalid(
-                "limit must be an integer from 1 through 250".into(),
-            ));
+        if self.limit == 0 {
+            return Err(AppError::Invalid("limit must be a positive integer".into()));
         }
         if self
             .states
@@ -232,10 +230,12 @@ mod tests {
     }
 
     #[test]
-    fn limit_bounds_follow_the_range() {
-        assert!(decode(r#""limit":250"#).validate().is_ok());
+    fn limits_require_only_a_positive_u32() {
+        assert!(decode(r#""limit":4294967295"#).validate().is_ok());
         assert!(decode(r#""limit":0"#).validate().is_err());
-        assert!(decode(r#""limit":251"#).validate().is_err());
+        assert!(serde_json::from_str::<QuestBoardParams>(
+            r#"{"room":"tuner","spirit":"Tuner","session":"service:tuner","houseId":"solarisael","limit":4294967296}"#
+        ).is_err());
         assert!(decode(r#""states":[]"#).validate().is_ok());
     }
 

@@ -350,11 +350,8 @@ impl Call {
                 if read.after.is_some_and(|after| after < 0) {
                     return Err("after must be zero or greater".into());
                 }
-                if read
-                    .limit
-                    .is_some_and(|limit| !(1..=super::READ_LIMIT_MAX).contains(&limit))
-                {
-                    return Err(format!("limit must be 1..{}", super::READ_LIMIT_MAX));
+                if read.limit.is_some_and(|limit| limit <= 0) {
+                    return Err("limit must be positive".into());
                 }
             }
             Action::Append(append) => {
@@ -386,9 +383,11 @@ impl Call {
                 check_optional_text("after", retained.after.as_deref(), 200)?;
                 if retained
                     .limit
-                    .is_some_and(|limit| !(1..=super::READ_LIMIT_MAX).contains(&limit))
+                    .is_some_and(|limit| limit <= 0 || limit == i64::MAX)
                 {
-                    return Err(format!("limit must be 1..{}", super::READ_LIMIT_MAX));
+                    return Err(
+                        "limit must be positive and leave room for one SQL lookahead row".into(),
+                    );
                 }
             }
         }

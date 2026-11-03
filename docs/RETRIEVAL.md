@@ -19,10 +19,16 @@ Sharp queries work best. Use distinctive terms, dates, entities, project names, 
 
 The evidence viewport depends on the active storage profile.
 
-Manual OMP Recall returns up to five selected AKASHA memory records.
-Each selected record carries its complete authoritative text in `retrievalCandidates[].body`.
+Manual OMP Recall accepts a caller-selected `limit`, with a default of 12.
+The limit controls memory records and results from each retrieval lane.
+Vault uses the requested limit instead of its configured result count.
+
+Each selected AKASHA memory carries its complete authoritative text in `retrievalCandidates[].body`.
 The existing `excerpt` remains a preview.
 Automatic Recall retains its character and context budgets.
+The default AKASHA semantic similarity floor is 0.25.
+Use `semanticMinSimilarity` or `contentMinSimilarity` to select an AKASHA similarity floor from 0 through 1.
+Manual Recall remains age-neutral.
 
 An exact-ID-only query returns the requested records in order, without unrelated ranked matches.
 Duplicate IDs use one record slot.
@@ -64,6 +70,23 @@ A retry failure preserves lexical results and adds a warning.
 Treat the cited source as evidence. Relevance selects a viewport; it does not
 change the source's authority.
 
+### Manual read limits
+
+Manual tools accept caller-selected positive result counts instead of fixed ceilings of 50, 200, or 250.
+This applies to `lessons`, `design_doc`, `anamnesis`, `giga_candidate_list`, `hallway_read`, `quest_board`, `quest_evidence`, `orihon`, `unfold`, and notebook reads.
+The public counts use unsigned 32-bit integers.
+Notebook counts use positive JavaScript-safe integers.
+Invalid counts return an error.
+
+An ordinary lesson search defaults to 12 results.
+An exact-ID lesson read without a limit returns all matching requested IDs within the caller's scope.
+An explicit lesson limit includes related lessons from thread expansion.
+
+Orihon search uses its limit for candidates.
+Its provider byte limits still apply.
+Automatic context budgets, panel pagination budgets, access checks, and transport byte limits remain in place.
+
+
 ## Automatic retrieval
 
 The adapter can retrieve room context before the model answers. The core merges bounded streams:
@@ -74,7 +97,14 @@ The adapter can retrieve room context before the model answers. The core merges 
 4. deferred candidates prefetched from the prior turn;
 5. semantic memory chunks.
 
-Candidates are fused, deduplicated, diversified, and trimmed to a context budget. Repeated injection receives a session saturation penalty so one memory does not dominate every turn.
+Candidates are fused, deduplicated, and trimmed to a context budget.
+Automatic AKASHA Recall applies age decay with a default base half-life of 15 days.
+Reviewed durability can slow this decay.
+The age weight affects candidate ranking before Jev's contextual judgment.
+
+Repeated user mentions do not accumulate a retrieval bonus.
+Subject continuity can change the query and the context supplied to Jev.
+Retrieval does not refresh memory timestamps.
 
 Casual acknowledgments, operational commands, and low-information chatter can retrieve nothing. Explicit `recall` remains broader than the automatic viewport.
 

@@ -16,6 +16,8 @@ pub(crate) async fn giga_health_with_enablement(
     enablement: GigaEnablement,
 ) -> Result<GigaHealthResult, AppError> {
     let room = request.room().to_string();
+    // Legacy windows replaced by canonical turn jobs are archives, not backlog:
+    // their rows and attempts stay stored but never count as active queue health.
     let (queue_depth, oldest_age, processed_count, failed_count, last_error, last_error_at, consecutive_failures): (
         i64, Option<i64>, i64, i64, Option<String>, Option<DateTime<Utc>>, i64,
     ) = sqlx::query_as(
@@ -25,9 +27,13 @@ pub(crate) async fn giga_health_with_enablement(
                 COUNT(*) FILTER (WHERE queue_state='failed')::bigint AS failed_count,
                 (SELECT latest.last_error FROM giga_events latest
                  WHERE latest.room=$1 AND latest.last_error IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM giga_window_replacements archive
+                                   WHERE archive.window_event_id=latest.event_id)
                  ORDER BY latest.updated_at DESC,latest.event_id LIMIT 1) AS last_error,
                 (SELECT latest.updated_at FROM giga_events latest
                  WHERE latest.room=$1 AND latest.last_error IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM giga_window_replacements archive
+                                   WHERE archive.window_event_id=latest.event_id)
                  ORDER BY latest.updated_at DESC,latest.event_id LIMIT 1) AS last_error_at,
                 COALESCE((
                     SELECT COUNT(*)::bigint
@@ -36,12 +42,23 @@ pub(crate) async fn giga_health_with_enablement(
                                SUM(CASE WHEN outcome='succeeded' THEN 1 ELSE 0 END)
                                    OVER (ORDER BY finished_at DESC,event_id,replay_count,attempt_count
                                          ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS successes
-                        FROM giga_event_attempts
-                        WHERE room=$1 AND finished_at IS NOT NULL
+                        FROM giga_event_attempts attempt
+                        WHERE attempt.room=$1 AND attempt.finished_at IS NOT NULL
+                          AND NOT EXISTS (SELECT 1 FROM giga_window_replacements archive
+                                          WHERE archive.window_event_id=attempt.event_id)
                     ) recent
                     WHERE recent.successes=0 AND recent.outcome <> 'succeeded'
                 ),0)::bigint AS consecutive_failures
-         FROM giga_events WHERE room=$1",
+         FROM giga_events e
+         WHERE e.room=$1
+           AND NOT EXISTS (SELECT 1 FROM giga_window_replacements archive
+                           WHERE archive.window_event_id=e.event_id)",
+    )
+    .bind(&room)
+    .fetch_one(pool)
+    .await?;
+    let identity_conflict_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)::bigint FROM giga_turn_identities WHERE room=$1 AND state='conflict'",
     )
     .bind(&room)
     .fetch_one(pool)
@@ -68,6 +85,7 @@ pub(crate) async fn giga_health_with_enablement(
         oldest_queue_age_seconds: oldest_age.map(|age| age.max(0) as u64),
         processed_count: processed_count as u64,
         failed_count: failed_count as u64,
+        identity_conflict_count: identity_conflict_count as u64,
         candidates_by_kind_state,
         classifier: giga_classifier_health(
             last_error,

@@ -486,10 +486,11 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                 )
                 .await?;
                 sqlx::query(
-                    "UPDATE memories SET created_at=now()-interval '60 days'
+                    "UPDATE memories SET created_at=now()-($2 * interval '1 day')
                      WHERE room=$1 AND source_path='c-legacy'",
                 )
                 .bind(room)
+                .bind(akasha::RoomSettings::default().recall_temporal_half_life_days)
                 .execute(&pool)
                 .await?;
 
@@ -532,7 +533,7 @@ async fn lexical_recall_applies_durability_decay_only_when_requested() {
                         .as_f64()
                         .is_some_and(|weight| (weight - 0.5).abs() < 0.0001)
                         && legacy["durability"].is_null(),
-                    "an unrated 60-day-old memory must retain half its attention weight",
+                    "an unrated memory one half-life old must retain half its attention weight",
                 )?;
                 let legacy_candidate = decayed
                     .retrieval_candidates

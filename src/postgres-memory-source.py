@@ -126,6 +126,24 @@ def detect_erasure_columns(conn) -> dict[str, bool]:
         "archived_at": "archived_at" in found,
     }
 
+def detect_thread_graph(conn) -> bool:
+    """Return whether the explicit thread graph is available."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT to_regclass('threads'),
+                       to_regclass('thread_events'),
+                       to_regclass('thread_event_links'),
+                       to_regclass('memory_thread_refs')
+                """
+            )
+            return all(value is not None for value in cur.fetchone())
+    except Exception:
+        conn.rollback()
+        return False
+
+
 
 def erasure_select(columns: dict[str, bool], alias: str = "m") -> str:
     archived = f"{alias}.archived_at" if columns.get("archived_at") else "NULL::timestamptz"
@@ -370,6 +388,8 @@ def _candidate(
     title: str,
     excerpt: str,
     terms: list[str],
+    memory_id: int | None = None,
+    thread_key: str = "",
     source_path: str = "",
     heading_path: str = "",
     raw_rank: float = 0.0,
@@ -404,6 +424,9 @@ def _candidate(
         "source": source,
         "source_table": source_table,
         "source_id": source_id,
+        "memory_id": int(memory_id) if memory_id is not None else None,
+        "thread_key": thread_key or "",
+        "thread_neighbors": [],
         "room": room or "",
         "title": title or "",
         "source_path": source_path or "",
@@ -434,6 +457,105 @@ def _candidate(
     }
 
 
+def attach_thread_neighbors(
+    conn,
+    payload: dict,
+    erasure_columns: dict[str, bool],
+    thread_graph: bool,
+) -> None:
+    """Attach explicit graph neighbors to bounded recall rows, never inferred chronology."""
+    rows = [
+        item
+        for key in ("searchCandidates", "semanticChunks", "contentChunks", "dateMatches")
+        for item in payload.get(key, [])
+        if isinstance(item, dict)
+    ]
+    for item in rows:
+        item["thread_neighbors"] = []
+    memory_ids = sorted({
+        int(item["memory_id"])
+        for item in rows
+        if isinstance(item.get("memory_id"), int)
+        and not isinstance(item.get("memory_id"), bool)
+        and item["memory_id"] > 0
+    })
+    if not thread_graph or not memory_ids:
+        return
+
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT requested.memory_id AS anchor_memory_id, expanded.*
+                FROM (
+                  SELECT DISTINCT memory_id
+                  FROM thread_events
+                  WHERE memory_id = ANY(%s)
+                ) requested
+                JOIN LATERAL (
+                  SELECT thread.thread_key AS thread,
+                         CASE WHEN link.next_event_id = anchor.id
+                              THEN 'previous' ELSE 'next' END AS direction,
+                         neighbor.memory_id AS id,
+                         neighbor_memory.room,
+                         neighbor_memory.title,
+                         neighbor_memory.source_path,
+                         LEFT(neighbor_memory.body, 320) AS excerpt,
+                         {erasure_select(erasure_columns, "neighbor_memory")}
+                  FROM thread_events anchor
+                  JOIN threads thread ON thread.id = anchor.thread_id
+                  JOIN thread_event_links link
+                    ON link.thread_id = anchor.thread_id
+                   AND (link.previous_event_id = anchor.id OR link.next_event_id = anchor.id)
+                  JOIN thread_events neighbor
+                    ON neighbor.thread_id = anchor.thread_id
+                   AND neighbor.id = CASE
+                         WHEN link.next_event_id = anchor.id THEN link.previous_event_id
+                         ELSE link.next_event_id
+                       END
+                  JOIN memories neighbor_memory ON neighbor_memory.id = neighbor.memory_id
+                  WHERE anchor.memory_id = requested.memory_id
+                  ORDER BY thread.thread_key,
+                           CASE WHEN link.next_event_id = anchor.id THEN 0 ELSE 1 END,
+                           neighbor.id,
+                           neighbor.memory_id
+                  LIMIT 6
+                ) expanded ON TRUE
+                ORDER BY requested.memory_id,
+                         expanded.thread,
+                         expanded.direction,
+                         expanded.id
+                """,
+                (memory_ids,),
+            )
+            by_memory: dict[int, list[dict]] = {}
+            for row in cur.fetchall():
+                neighbors = by_memory.setdefault(int(row["anchor_memory_id"]), [])
+                if len(neighbors) >= 6:
+                    continue
+                lifecycle = lifecycle_fields(row)
+                neighbors.append({
+                    "thread": row["thread"],
+                    "direction": row["direction"],
+                    "id": int(row["id"]),
+                    "title": row["title"] or "",
+                    "source_path": _candidate_source_path(
+                        row["room"], row["source_path"],
+                    ),
+                    "excerpt": row["excerpt"] or "",
+                    "authority_state": lifecycle["authority_state"],
+                    "superseded_by": lifecycle["superseded_by"],
+                })
+    except Exception:
+        conn.rollback()
+        return
+
+    for item in rows:
+        memory_id = item.get("memory_id")
+        if isinstance(memory_id, int) and not isinstance(memory_id, bool):
+            item["thread_neighbors"] = list(by_memory.get(memory_id, ()))
+
+
 def load_search_candidates(
     conn,
     rooms: tuple,
@@ -441,6 +563,7 @@ def load_search_candidates(
     top_k: int,
     excerpt_chars: int = DEFAULT_CANDIDATE_EXCERPT_CHARS,
     erasure_columns: dict[str, bool] | None = None,
+    thread_graph: bool = False,
     include_archived: bool = False,
     include_historical: bool = False,
 ) -> tuple[list[str], list[dict]]:
@@ -465,6 +588,16 @@ def load_search_candidates(
         include_archived=include_archived,
         include_historical=include_historical,
     )
+    thread_key_sql = "t.thread_key" if thread_graph else "mt.thread_key"
+    thread_source_sql = (
+        "memory_thread_refs mt "
+        "JOIN thread_events te ON te.id = mt.event_id "
+        "JOIN threads t ON t.id = te.thread_id "
+        "JOIN memories m ON m.id = te.memory_id"
+        if thread_graph
+        else "memory_threads mt JOIN memories m ON m.id = mt.memory_id"
+    )
+    thread_source_table = "memory_thread_refs" if thread_graph else "memory_threads"
 
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
@@ -515,22 +648,21 @@ def load_search_candidates(
 
         cur.execute(
             f"""
-            SELECT mt.id, m.id AS memory_id, m.room, mt.thread_key, mt.context,
+            SELECT mt.id, m.id AS memory_id, m.room, {thread_key_sql} AS thread_key, mt.context,
                    m.source_path, m.type,
                    {erasure_select(erasure_columns)},
                    GREATEST(
-                     similarity(mt.thread_key, %s),
+                     similarity({thread_key_sql}, %s),
                      similarity(COALESCE(mt.context, ''), %s)
                    ) AS raw_rank,
-                   mt.thread_key ILIKE ANY(%s::text[]) AS title_hit,
+                   {thread_key_sql} ILIKE ANY(%s::text[]) AS title_hit,
                    m.source_path ILIKE ANY(%s::text[]) AS path_hit
-            FROM memory_threads mt
-            JOIN memories m ON m.id = mt.memory_id
+            FROM {thread_source_sql}
             WHERE m.room = ANY(%s)
               AND {RETRIEVAL_VISIBILITY_SQL}
               AND {memory_filter}
               AND (
-                mt.thread_key ILIKE ANY(%s::text[])
+                {thread_key_sql} ILIKE ANY(%s::text[])
                 OR mt.context ILIKE ANY(%s::text[])
                 OR m.source_path ILIKE ANY(%s::text[])
               )
@@ -545,12 +677,14 @@ def load_search_candidates(
             lifecycle = lifecycle_fields(row)
             item = _candidate(
                 source="thread",
-                source_table="memory_threads",
+                source_table=thread_source_table,
                 source_id=int(row["id"]),
                 room=row["room"],
                 title=row["thread_key"] or "",
                 excerpt=row["context"] or "",
                 terms=terms,
+                memory_id=int(row["memory_id"]),
+                thread_key=row["thread_key"] or "",
                 source_path=_candidate_source_path(row["room"], row["source_path"]),
                 raw_rank=float(row["raw_rank"] or 0.0),
                 title_hit=bool(row["title_hit"]),
@@ -603,6 +737,7 @@ def load_search_candidates(
                 title=row["title"] or row["source_path"] or "",
                 excerpt=row["excerpt"] or "",
                 terms=terms,
+                memory_id=int(row["id"]),
                 source_path=_candidate_source_path(row["room"], row["source_path"]),
                 raw_rank=float(row["raw_rank"] or 0.0),
                 title_hit=bool(row["title_hit"]),
@@ -742,6 +877,7 @@ def load_index(
     conn,
     rooms=("kintsu", "house"),
     erasure_columns: dict[str, bool] | None = None,
+    thread_graph: bool = False,
     include_archived: bool = False,
     include_historical: bool = False,
 ) -> dict:
@@ -752,6 +888,15 @@ def load_index(
         include_historical=include_historical,
     )
     lifecycle_select = erasure_select(erasure_columns)
+    thread_key_sql = "t.thread_key" if thread_graph else "mt.thread_key"
+    thread_source_sql = (
+        "memory_thread_refs mt "
+        "JOIN thread_events te ON te.id = mt.event_id "
+        "JOIN threads t ON t.id = te.thread_id "
+        "JOIN memories m ON m.id = te.memory_id"
+        if thread_graph
+        else "memory_threads mt JOIN memories m ON m.id = mt.memory_id"
+    )
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
             f"""
@@ -777,14 +922,14 @@ def load_index(
 
         cur.execute(
             f"""
-            SELECT m.id AS memory_id, m.room, mt.thread_key, m.source_path AS file,
-                   mt.lines_start, mt.lines_end, mt.context, {lifecycle_select}
-            FROM memory_threads mt
-            JOIN memories m ON m.id = mt.memory_id
+            SELECT m.id AS memory_id, m.room, {thread_key_sql} AS thread_key,
+                   m.source_path AS file, mt.lines_start, mt.lines_end, mt.context,
+                   {lifecycle_select}
+            FROM {thread_source_sql}
             WHERE m.room = ANY(%s)
               AND {RETRIEVAL_VISIBILITY_SQL}
               AND {memory_filter}
-            ORDER BY mt.thread_key
+            ORDER BY {thread_key_sql}
             """,
             (list(rooms),),
         )
@@ -895,6 +1040,7 @@ def fetch_memory(
     source_path=None,
     claimed_room=None,
     erasure_columns: dict[str, bool] | None = None,
+    thread_graph: bool = False,
 ) -> dict:
     """Resolve a deliberate handle, including historical authority metadata.
 
@@ -947,10 +1093,23 @@ def fetch_memory(
         row = cur.fetchone()
         if row is None:
             return {"found": False, "memory": None, "warnings": []}
-        cur.execute(
-            "SELECT thread_key FROM memory_threads WHERE memory_id = %s ORDER BY thread_key",
-            (row["id"],),
-        )
+        if thread_graph:
+            cur.execute(
+                """
+                SELECT thread.thread_key
+                FROM memory_thread_refs ref
+                JOIN thread_events event ON event.id = ref.event_id
+                JOIN threads thread ON thread.id = event.thread_id
+                WHERE event.memory_id = %s
+                ORDER BY thread.thread_key
+                """,
+                (row["id"],),
+            )
+        else:
+            cur.execute(
+                "SELECT thread_key FROM memory_threads WHERE memory_id = %s ORDER BY thread_key",
+                (row["id"],),
+            )
         threads = [r["thread_key"] for r in cur.fetchall()]
 
     warnings = []
@@ -1099,6 +1258,7 @@ def load_taxonomy(
     room="kintsu",
     limit=16,
     erasure_columns: dict[str, bool] | None = None,
+    thread_graph: bool = False,
     include_archived: bool = False,
     include_historical: bool = False,
 ) -> dict:
@@ -1108,6 +1268,15 @@ def load_taxonomy(
         erasure_columns,
         include_archived=include_archived,
         include_historical=include_historical,
+    )
+    thread_key_sql = "thread.thread_key" if thread_graph else "mt.thread_key"
+    thread_source_sql = (
+        "memory_thread_refs mt "
+        "JOIN thread_events event ON event.id = mt.event_id "
+        "JOIN threads thread ON thread.id = event.thread_id "
+        "JOIN memories m ON m.id = event.memory_id"
+        if thread_graph
+        else "memory_threads mt JOIN memories m ON m.id = mt.memory_id"
     )
     with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
         cur.execute(
@@ -1129,14 +1298,13 @@ def load_taxonomy(
 
         cur.execute(
             f"""
-            SELECT mt.thread_key, COUNT(*) AS count
-            FROM memory_threads mt
-            JOIN memories m ON m.id = mt.memory_id
+            SELECT {thread_key_sql} AS thread_key, COUNT(*) AS count
+            FROM {thread_source_sql}
             WHERE m.room = ANY(%s)
               AND (m.source_path NOT LIKE 'db-only/%%' OR m.type = 'paper-boat')
               AND {memory_filter}
-            GROUP BY mt.thread_key
-            ORDER BY count DESC, mt.thread_key
+            GROUP BY {thread_key_sql}
+            ORDER BY count DESC, {thread_key_sql}
             LIMIT %s
             """,
             (list(rooms), limit),
@@ -1818,6 +1986,7 @@ def main() -> int:
     env = substrate_env(room_dir)
     conn = connect(env)
     erasure_columns = detect_erasure_columns(conn)
+    thread_graph = detect_thread_graph(conn)
     include_archived = bool(args.include_archived)
     include_historical = bool(args.include_historical)
     try:
@@ -1845,6 +2014,7 @@ def main() -> int:
                     source_path=args.memory_path,
                     claimed_room=(args.room or "").strip().lower() or None,
                     erasure_columns=erasure_columns,
+                    thread_graph=thread_graph,
                 )
             print(json.dumps(payload, ensure_ascii=False, default=str))
             return 0
@@ -1857,6 +2027,7 @@ def main() -> int:
                 conn,
                 rooms=(room_name, "house"),
                 erasure_columns=erasure_columns,
+                thread_graph=thread_graph,
                 include_archived=include_archived,
                 include_historical=include_historical,
             )
@@ -1868,6 +2039,7 @@ def main() -> int:
                 rooms=(room_name, "house"),
                 room=room_name,
                 erasure_columns=erasure_columns,
+                thread_graph=thread_graph,
                 include_archived=include_archived,
                 include_historical=include_historical,
             )
@@ -1895,6 +2067,7 @@ def main() -> int:
                         top_k=args.candidate_top_k,
                         excerpt_chars=args.candidate_excerpt_chars,
                         erasure_columns=erasure_columns,
+                        thread_graph=thread_graph,
                         include_archived=include_archived,
                         include_historical=include_historical,
                     )
@@ -2034,6 +2207,13 @@ def main() -> int:
 
             payload["dateMatches"] = date_matches
             payload["queryDates"] = [d.isoformat() for d in query_dates]
+
+        attach_thread_neighbors(
+            conn,
+            payload,
+            erasure_columns=erasure_columns,
+            thread_graph=thread_graph,
+        )
     finally:
         conn.close()
 

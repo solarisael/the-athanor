@@ -782,6 +782,38 @@ export async function runAnamnesisQuery(roomDir, roomName, options = {}) {
     warnings: [...warnings, ...(Array.isArray(data.warnings) ? data.warnings : [])],
   };
 }
+function preserveThreadEvidence(candidates, lanes) {
+  const evidenceRows = [
+    ...(Array.isArray(lanes?.searchCandidates) ? lanes.searchCandidates : []),
+    ...(Array.isArray(lanes?.semanticChunks) ? lanes.semanticChunks : []),
+    ...(Array.isArray(lanes?.contentChunks) ? lanes.contentChunks : []),
+    ...(Array.isArray(lanes?.dateMatches) ? lanes.dateMatches : []),
+  ].filter((item) => item && typeof item === "object");
+
+  return (Array.isArray(candidates) ? candidates : []).map((candidate) => {
+    const exact = evidenceRows.find((item) => (
+      candidate?.source_table
+      && item?.source_table === candidate.source_table
+      && String(item?.source_id ?? "") === String(candidate?.source_id ?? "")
+    ));
+    const evidence = exact || evidenceRows.find((item) => (
+      candidate?.source_path
+      && item?.source_path === candidate.source_path
+    ));
+    const memoryId = evidence?.memory_id;
+    const threadKey = typeof evidence?.thread_key === "string" ? evidence.thread_key : "";
+    const threadNeighbors = Array.isArray(evidence?.thread_neighbors)
+      ? evidence.thread_neighbors.slice(0, 6)
+      : [];
+    return {
+      ...candidate,
+      ...(Number.isInteger(memoryId) && memoryId > 0 ? { memory_id: memoryId } : {}),
+      ...(threadKey ? { thread_key: threadKey } : {}),
+      thread_neighbors: threadNeighbors,
+    };
+  });
+}
+
 export async function runRecallQuery(roomDir, roomName, query) {
   const effectiveRoomDir = path.resolve(String(roomDir || process.cwd()));
   const resolvedRoom = (roomName || path.basename(effectiveRoomDir) || "").toLowerCase();
@@ -845,6 +877,9 @@ export async function runRecallQuery(roomDir, roomName, query) {
           source_id: match?.threadKey || "",
           room: resolvedRoom,
           title,
+          memory_id: fileMeta.memory_id,
+          thread_key: match?.threadKey || "",
+          thread_neighbors: [],
           source_path: sourcePath,
           heading_path: match?.threadKey || "",
           excerpt: [fileMeta.one_line, entry.context, match?.threadKey ? `thread: ${match.threadKey}` : ""].filter(Boolean).join("\n"),
@@ -854,9 +889,11 @@ export async function runRecallQuery(roomDir, roomName, query) {
         };
       });
     });
-    const retrievalCandidates = fuseRetrievalCandidates({
+    const retrievalCandidates = preserveThreadEvidence(fuseRetrievalCandidates({
       searchCandidates,
-    }, { query, searchTerms, intent: queryRoute.intent === "technical_project" ? "technical_memory" : "general", maxResults: 12 });
+    }, { query, searchTerms, intent: queryRoute.intent === "technical_project" ? "technical_memory" : "general", maxResults: 12 }), {
+      searchCandidates,
+    });
     const nameMatchedTermKeys = new Set(nameCanonMatches.map((m) => m.termKey));
     const matchedSourcePaths = [
       ...ranked.flatMap((match) => (Array.isArray(match?.entries) ? match.entries : []).map((entry) => entry?.file)),
@@ -956,12 +993,17 @@ export async function runRecallQuery(roomDir, roomName, query) {
     ? result.data.clusterResonance
     : null;
 
-  const retrievalCandidates = fuseRetrievalCandidates({
+  const retrievalCandidates = preserveThreadEvidence(fuseRetrievalCandidates({
     searchCandidates,
     semanticChunks,
     contentChunks,
     dateMatches,
-  }, { query, searchTerms, intent: queryRoute.intent === "technical_project" ? "technical_memory" : "general", maxResults: 12 });
+  }, { query, searchTerms, intent: queryRoute.intent === "technical_project" ? "technical_memory" : "general", maxResults: 12 }), {
+    searchCandidates,
+    semanticChunks,
+    contentChunks,
+    dateMatches,
+  });
 
   // Reverse-index canon (2026-06-05): surface any canon entry whose pointer
   // files include a source_path that recall actually pulled — even when the

@@ -9,6 +9,9 @@
   "main": "index.ts",
   "scripts": {
     "test": "bun test",
-    "test:recall": "bun run tests/recall.integration.ts"
+    "test:recall": "bun run tests/recall.integration.ts",
+    "eval:synthetic": "bun run evals/run-end-to-end.ts",
+    "eval:id-ranking": "bun run evals/run-id-ranking-evals.ts",
+    "eval:daily": "bun run evals/run-daily-usage.ts"
   }
 }

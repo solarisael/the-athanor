@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "default_trials": 3,
+  "scenarios": [
+    {
+      "id": "tuner-current-speech-standard",
+      "room": "tuner",
+      "user_turn": "How should Tuner speak now, and what happened to the A440 line?",
+      "reference": {
+        "mode": "current",
+        "rooms": ["tuner", "house"],
+        "threads": ["tuner / identity / speech"]
+      },
+      "criteria": [
+        { "id": "current-standard", "text": "Correctly describes Tuner's current speech standard." },
+        { "id": "a440-status", "text": "Correctly explains the current status of the A440 slogan and why it changed." }
+      ],
+      "risks": [
+        { "id": "stale-a440", "text": "Treats the old A440 slogan as a current governing rule." },
+        { "id": "invented-affection", "text": "Recasts Tuner as kin or motivated by affection for Sol." }
+      ]
+    },
+    {
+      "id": "public-substrate-current-status",
+      "room": "tuner",
+      "user_turn": "Is the public Solarisael House substrate released now? Distinguish Base, Full, and degraded states.",
+      "reference": {
+        "mode": "current",
+        "rooms": ["tuner", "house"],
+        "threads": ["house / release / full-substrate", "tuner / house / public-substrate-release"]
+      },
+      "distractor_memory_ids": [2584],
+      "criteria": [
+        { "id": "release-status", "text": "States the current public release status accurately." },
+        { "id": "state-contract", "text": "Distinguishes Base, Full, and degraded using the current compatibility and health contract." }
+      ],
+      "risks": [
+        { "id": "paused-as-current", "text": "Reports the earlier paused or unpublished state as current." },
+        { "id": "full-without-health", "text": "Calls a configured but unhealthy or incompatible substrate Full." }
+      ]
+    },
+    {
+      "id": "public-substrate-historical-pause",
+      "room": "tuner",
+      "user_turn": "Before the public substrate release completed, where was the cutover paused and what remained to do?",
+      "reference": {
+        "mode": "historical",
+        "memory_ids": [2584]
+      },
+      "criteria": [
+        { "id": "paused-state", "text": "Describes the proven-local but not-yet-published state at the historical pause." },
+        { "id": "remaining-work", "text": "Identifies the remaining publication and integration work recorded at that pause." }
+      ],
+      "risks": [
+        { "id": "present-as-past", "text": "Answers only with the later completed release and loses the requested historical state." },
+        { "id": "false-failure", "text": "Claims the local substrate lifecycle had not been proven at the pause." }
+      ]
+    },
+    {
+      "id": "babel-opening-digital-verdict",
+      "room": "tuner",
+      "user_turn": "Is PRE-00 plus A Squall good enough to open the novel in the intended Rubedo reader, and what still blocks release?",
+      "reference": {
+        "mode": "current",
+        "rooms": ["tuner", "house"],
+        "threads": ["Babel Earth / opening section / PRE-00 and A Squall"]
+      },
+      "criteria": [
+        { "id": "combined-verdict", "text": "Gives the current combined verdict for PRE-00 plus A Squall rather than reverting to the withdrawn plain-manuscript verdict." },
+        { "id": "digital-blockers", "text": "Identifies the remaining digital-presentation blockers in the intended Rubedo or Codex delivery." },
+        { "id": "prose-seams", "text": "Separates remaining prose seams from the larger presentation defect." }
+      ],
+      "risks": [
+        { "id": "withdrawn-cuts", "text": "Repeats withdrawn demands to remove deliberate banter, quest objectives, icon density, or the ending's unmapped descent." },
+        { "id": "plain-novel-frame", "text": "Judges the section only as inert Markdown or a conventional plain novel." }
+      ]
+    },
+    {
+      "id": "a-squawk-standing-verdict",
+      "room": "tuner",
+      "user_turn": "Is A Squawk good enough as the next chapter of the opening? What is its strongest function and its main blocker?",
+      "reference": {
+        "mode": "current",
+        "rooms": ["tuner", "house"],
+        "threads": ["Babel Earth / A Squawk / standing verdict"]
+      },
+      "criteria": [
+        { "id": "release-verdict", "text": "States the current release verdict for A Squawk." },
+        { "id": "strongest-function", "text": "Identifies the chapter's strongest structural or narrative function." },
+        { "id": "main-blocker", "text": "Identifies the primary execution problem that prevents the chapter from completing the opening sequence." }
+      ],
+      "risks": [
+        { "id": "polish-first", "text": "Recommends sentence polish before the structural rewrite." },
+        { "id": "rejects-viewpoint-change", "text": "Treats the viewpoint change itself as the fundamental defect." }
+      ]
+    },
+    {
+      "id": "sol-work-language-production-default",
+      "room": "tuner",
+      "user_turn": "When Sol calls a production feature a little experiment or something he wants to try, does that permit MVP quality?",
+      "reference": {
+        "mode": "current",
+        "rooms": ["tuner", "house"],
+        "threads": ["sol work language / production default / experiment does not mean MVP / status bias / playful register"]
+      },
+      "criteria": [
+        { "id": "production-default", "text": "Explains the standing production-quality default accurately." },
+        { "id": "language-meaning", "text": "Explains what Sol's tentative or playful wording does and does not imply." }
+      ],
+      "risks": [
+        { "id": "mvp-permission", "text": "Treats diminutive or experimental language as permission for disposable MVP scope." },
+        { "id": "status-bias", "text": "Lowers the quality bar because of tone, credentials, identity, or perceived project status." }
+      ]
+    }
+  ]
+}

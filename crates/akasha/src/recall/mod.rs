@@ -232,7 +232,7 @@ pub async fn recall(
     let semantic_vocabulary_concepts = match vector_text.as_deref() {
         Some(vector) => {
             let phase = Phase::start(span, "recall.vocabulary");
-            match load_semantic_vocabulary_concepts(pool, &rooms, vector, cfg).await {
+            match load_semantic_vocabulary_concepts(pool, &rooms, &scope, vector, cfg).await {
                 Ok(concepts) => {
                     phase.ok();
                     concepts

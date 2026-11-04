@@ -22,6 +22,28 @@ the exact implementation record.
 
 ### Fixed
 
+- GIGA sends source windows with at most eight turns and retains them until acknowledgment.
+  Retries preserve source membership, room binding, and project metadata.
+  Shutdown joins active requests. Failure diagnostics exclude source text and credentials.
+- Pulse ignores superseded responses and focus callbacks.
+  The mechanics shell preserves focused controls and text selection when it replaces their nodes.
+- Recall commits policy, sessions, cursors, and retry receipts through one recoverable record.
+  Startup completes pending checkpoints before loading state. Invalid recovery records cause refusal.
+- Insula reports original observations whose loss has no durable accounting.
+  Successful groups and duplicate receipts settle independently.
+- Vocabulary applies existing operator visibility rules before ranking active-thread terms.
+- Knock uses one default budget for admission, storage, and retry identity.
+  Migration 38 repairs historical omitted-budget digests while preserving explicit budgets and Knock identities.
+- Accepted dispatch packets receive distinct bounded task names.
+  Unknown-familiar errors list the effective spellbook IDs.
+- The OMP adapter guide documents structured organ results and raw JSON agent reads.
+- The adapter combines adjacent successful gu results from one batch into compact model-context links.
+  Eval tasks use the existing parent-scoped enrollment records.
+  Failures and unsupported results keep their native presentation. Full artifacts and native scheduling remain unchanged.
+
+- The lesson manifest includes current craft, verification, delegation, and interface rules.
+  It excludes superseded query, accessibility, and memory-decay instructions.
+
 - Direct marks a lost chat reply as unconfirmed until the Host confirms acceptance.
   Reconciliation retires the send identity and clears only the submitted draft.
   Newer draft edits remain intact. A later identical message gets a new send identity.

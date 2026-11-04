@@ -353,6 +353,23 @@ pub struct ProjectionCursor {
     pub state_hash: String,
 }
 
+impl ProjectionCursor {
+    pub fn advance(&self, state_hash: String) -> Result<Self, String> {
+        Ok(Self {
+            projection_id: protocol::RECALL_POLICY_PROJECTION_ID.into(),
+            version: self
+                .version
+                .checked_add(1)
+                .ok_or("projection version overflow")?,
+            sequence: self
+                .sequence
+                .checked_add(1)
+                .ok_or("projection sequence overflow")?,
+            state_hash,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DurableReceipt {
@@ -364,60 +381,97 @@ pub struct DurableReceipt {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct ReceiptFile {
-    receipts: Vec<DurableReceipt>,
+struct ReceiptFile<T> {
+    receipts: T,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct SessionFile {
-    sessions: HashMap<String, RecallPolicySession>,
+struct SessionFile<T> {
+    sessions: T,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyCheckpoint {
+    pub projection: RecallPolicyState,
+    pub cursor: ProjectionCursor,
+    pub sessions: HashMap<String, RecallPolicySession>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PolicyCommit {
+    format_version: u8,
+    room: String,
+    checkpoint: PolicyCheckpoint,
+    receipts: Vec<DurableReceipt>,
+}
+
+impl PolicyCommit {
+    fn validate(&self, room: &str) -> Result<(), String> {
+        if self.format_version != 1 || self.room != room {
+            return Err("Host policy recovery record has a foreign room or format".into());
+        }
+
+        let cursor = &self.checkpoint.cursor;
+
+        if cursor.projection_id != protocol::RECALL_POLICY_PROJECTION_ID
+            || cursor.version == 0
+            || cursor.sequence == 0
+            || cursor.state_hash != state_hash(&self.checkpoint.projection)?
+            || self.receipts.len() > RECEIPT_LIMIT
+        {
+            return Err("Host policy recovery record is inconsistent".into());
+        }
+
+        Ok(())
+    }
 }
 
 pub struct HostDurableStore {
     cursor_path: PathBuf,
     receipts_path: PathBuf,
     sessions_path: PathBuf,
+    commit_path: PathBuf,
     receipts: Vec<DurableReceipt>,
 }
 
 impl HostDurableStore {
     pub fn open(
         state_dir: &Path,
-        projection: &RecallPolicyState,
-    ) -> Result<(Self, ProjectionCursor, HashMap<String, RecallPolicySession>), String> {
+        room_store: &RoomStateStore,
+    ) -> Result<(Self, PolicyCheckpoint), String> {
         fs::create_dir_all(state_dir).map_err(|error| {
             format!(
                 "cannot create Host state directory {}: {error}",
                 state_dir.display()
             )
         })?;
-        let cursor_path = state_dir.join("recall-policy-cursor.json");
-        let receipts_path = state_dir.join("recall-policy-receipts.json");
-        let sessions_path = state_dir.join("recall-policy-sessions.json");
-        let state_hash = state_hash(projection)?;
-        let cursor = match fs::read(&cursor_path) {
+        let mut store = Self {
+            cursor_path: state_dir.join("recall-policy-cursor.json"),
+            receipts_path: state_dir.join("recall-policy-receipts.json"),
+            sessions_path: state_dir.join("recall-policy-sessions.json"),
+            commit_path: state_dir.join("recall-policy-commit.json"),
+            receipts: Vec::new(),
+        };
+        store.finish_pending(room_store)?;
+
+        let projection = room_store.load()?;
+        let state_hash = state_hash(&projection)?;
+        let cursor = match fs::read(&store.cursor_path) {
             Ok(bytes) => {
                 let previous: ProjectionCursor = serde_json::from_slice(&bytes)
                     .map_err(|error| format!("Host projection cursor is malformed: {error}"))?;
+
                 if previous.projection_id != protocol::RECALL_POLICY_PROJECTION_ID {
                     return Err("Host projection cursor names a foreign projection".into());
                 }
+
                 if previous.state_hash == state_hash {
                     previous
                 } else {
-                    ProjectionCursor {
-                        projection_id: protocol::RECALL_POLICY_PROJECTION_ID.into(),
-                        version: previous
-                            .version
-                            .checked_add(1)
-                            .ok_or("projection version overflow")?,
-                        sequence: previous
-                            .sequence
-                            .checked_add(1)
-                            .ok_or("projection sequence overflow")?,
-                        state_hash,
-                    }
+                    previous.advance(state_hash)?
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => ProjectionCursor {
@@ -428,41 +482,121 @@ impl HostDurableStore {
             },
             Err(error) => return Err(format!("cannot read Host projection cursor: {error}")),
         };
-        atomic_json_write(&cursor_path, &cursor)?;
-        let receipts = match fs::read(&receipts_path) {
+        let receipts = match fs::read(&store.receipts_path) {
             Ok(bytes) => {
-                let file: ReceiptFile = serde_json::from_slice(&bytes)
+                let file: ReceiptFile<Vec<DurableReceipt>> = serde_json::from_slice(&bytes)
                     .map_err(|error| format!("Host receipts are malformed: {error}"))?;
+
                 if file.receipts.len() > RECEIPT_LIMIT {
                     return Err(format!(
                         "Host receipts exceed bounded limit {RECEIPT_LIMIT}"
                     ));
                 }
+
                 file.receipts
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(error) => return Err(format!("cannot read Host receipts: {error}")),
         };
-        let sessions = match fs::read(&sessions_path) {
+        let sessions = match fs::read(&store.sessions_path) {
             Ok(bytes) => {
-                let file: SessionFile = serde_json::from_slice(&bytes).map_err(|error| {
-                    format!("Host Recall Policy sessions are malformed: {error}")
-                })?;
+                let file: SessionFile<HashMap<String, RecallPolicySession>> =
+                    serde_json::from_slice(&bytes).map_err(|error| {
+                        format!("Host Recall Policy sessions are malformed: {error}")
+                    })?;
                 file.sessions
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => HashMap::new(),
             Err(error) => return Err(format!("cannot read Host Recall Policy sessions: {error}")),
         };
+        atomic_json_write(&store.cursor_path, &cursor)?;
+        store.receipts = receipts;
+
         Ok((
-            Self {
-                cursor_path,
-                receipts_path,
-                sessions_path,
-                receipts,
+            store,
+            PolicyCheckpoint {
+                projection,
+                cursor,
+                sessions,
             },
-            cursor,
-            sessions,
         ))
+    }
+
+    pub fn commit_policy(
+        &mut self,
+        room_store: &RoomStateStore,
+        checkpoint: PolicyCheckpoint,
+        receipt: Option<DurableReceipt>,
+    ) -> Result<PolicyCheckpoint, String> {
+        self.finish_pending(room_store)?;
+        room_store.load()?;
+
+        let mut receipts = self.receipts.clone();
+
+        if let Some(receipt) = receipt {
+            receipts.push(receipt);
+            let excess = receipts.len().saturating_sub(RECEIPT_LIMIT);
+            receipts.drain(..excess);
+        }
+
+        let commit = PolicyCommit {
+            format_version: 1,
+            room: room_store.room.clone(),
+            checkpoint,
+            receipts,
+        };
+        commit.validate(&room_store.room)?;
+
+        // This replacement commits the whole change. Mirrors may lag, never authority.
+        atomic_json_write(&self.commit_path, &commit)?;
+
+        if let Err(error) = self.materialize(room_store, &commit) {
+            tracing::warn!(%error, "Recall policy committed; checkpoint recovery is pending");
+        }
+
+        self.receipts = commit.receipts;
+
+        Ok(commit.checkpoint)
+    }
+
+    pub fn finish_pending(&self, room_store: &RoomStateStore) -> Result<(), String> {
+        let bytes = match fs::read(&self.commit_path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(format!("cannot read Host policy recovery record: {error}")),
+        };
+        let commit: PolicyCommit = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("Host policy recovery record is malformed: {error}"))?;
+        commit.validate(&room_store.room)?;
+
+        self.materialize(room_store, &commit)
+    }
+
+    fn materialize(
+        &self,
+        room_store: &RoomStateStore,
+        commit: &PolicyCommit,
+    ) -> Result<(), String> {
+        // Merge policy fields only; later room edits and the manual spirit body are not ours.
+        if room_store.load()? != commit.checkpoint.projection {
+            room_store.write_policy(&commit.checkpoint.projection)?;
+        }
+
+        atomic_json_write(
+            &self.sessions_path,
+            &SessionFile {
+                sessions: &commit.checkpoint.sessions,
+            },
+        )?;
+        atomic_json_write(&self.cursor_path, &commit.checkpoint.cursor)?;
+        atomic_json_write(
+            &self.receipts_path,
+            &ReceiptFile {
+                receipts: &commit.receipts,
+            },
+        )?;
+        fs::remove_file(&self.commit_path)
+            .map_err(|error| format!("cannot retire Host policy recovery record: {error}"))
     }
 
     pub fn receipt(&self, key: &str) -> Option<&DurableReceipt> {
@@ -471,34 +605,40 @@ impl HostDurableStore {
             .find(|receipt| receipt.idempotency_key == key)
     }
 
-    pub fn save_cursor(&self, cursor: &ProjectionCursor) -> Result<(), String> {
-        atomic_json_write(&self.cursor_path, cursor)
+    fn require_no_pending(&self) -> Result<(), String> {
+        match fs::symlink_metadata(&self.commit_path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!(
+                "cannot inspect Host policy recovery record: {error}"
+            )),
+            Ok(_) => Err("Host policy checkpoint recovery must finish before another write".into()),
+        }
     }
 
     pub fn save_receipt(&mut self, receipt: DurableReceipt) -> Result<(), String> {
-        self.receipts.push(receipt);
-        if self.receipts.len() > RECEIPT_LIMIT {
-            let remove = self.receipts.len() - RECEIPT_LIMIT;
-            self.receipts.drain(..remove);
-        }
+        self.require_no_pending()?;
+        let mut receipts = self.receipts.clone();
+        receipts.push(receipt);
+        let excess = receipts.len().saturating_sub(RECEIPT_LIMIT);
+        receipts.drain(..excess);
         atomic_json_write(
             &self.receipts_path,
             &ReceiptFile {
-                receipts: self.receipts.clone(),
+                receipts: &receipts,
             },
-        )
+        )?;
+        self.receipts = receipts;
+
+        Ok(())
     }
 
     pub fn save_sessions(
         &self,
         sessions: &HashMap<String, RecallPolicySession>,
     ) -> Result<(), String> {
-        atomic_json_write(
-            &self.sessions_path,
-            &SessionFile {
-                sessions: sessions.clone(),
-            },
-        )
+        self.require_no_pending()?;
+
+        atomic_json_write(&self.sessions_path, &SessionFile { sessions })
     }
 }
 

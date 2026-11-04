@@ -16,9 +16,8 @@ const MAX_DROP_COUNT: i64 = 1_000_000_000;
 const MAX_DURATION_US: i64 = 86_400_000_000;
 /// Exit flush ceiling. One ingest batch against a multi-GB insula.log costs
 /// 0.8–2 s (measured 2026-09-05, 3 GB log), so the old 750 ms grace lost the
-/// last recall of every short-lived child. Bounded by the real ingest cost;
-/// when the ceiling hits, the dropped count goes to stderr — Insula cannot
-/// record its own loss.
+/// last recall of every short-lived child. Unaccounted loss goes to stderr;
+/// Insula must not observe its own persistence.
 pub const SHUTDOWN_FLUSH_CEILING: Duration = Duration::from_secs(5);
 
 static EMITTER: OnceLock<Emitter> = OnceLock::new();
@@ -31,9 +30,9 @@ struct QueuedObservation {
 struct WriterState {
     writer_id: Uuid,
     sequence: AtomicI64,
-    /// Observations whose ingest attempt the drain has completed. Sequence
-    /// minus settled is the tail still queued or in flight.
-    settled: AtomicI64,
+    /// Originals without a persistence or durable drop receipt.
+    /// Sequence numbers also include synthetic markers and cannot measure this.
+    unaccounted: AtomicI64,
     dropped: AtomicI64,
     accepting: AtomicBool,
     sender: mpsc::Sender<QueuedObservation>,
@@ -56,6 +55,8 @@ impl WriterState {
         if !self.accepting.load(Ordering::Acquire) {
             return;
         }
+
+        self.unaccounted.fetch_add(1, Ordering::AcqRel);
         if self.sender.try_send(observation).is_err() {
             self.note_drop();
         }
@@ -158,7 +159,7 @@ pub fn init_insula_emitter(pool: PgPool) {
         let state = Arc::new(WriterState {
             writer_id: Uuid::new_v4(),
             sequence: AtomicI64::new(0),
-            settled: AtomicI64::new(0),
+            unaccounted: AtomicI64::new(0),
             dropped: AtomicI64::new(0),
             accepting: AtomicBool::new(true),
             sender,
@@ -416,34 +417,29 @@ pub async fn flush_insula_emitter() {
     let Some(drain) = emitter.drain.lock().ok().and_then(|mut task| task.take()) else {
         return;
     };
-    let unflushed = drain_with_ceiling(drain, SHUTDOWN_FLUSH_CEILING, &emitter.state).await;
-    if unflushed > 0 {
+    let unaccounted = drain_with_ceiling(drain, SHUTDOWN_FLUSH_CEILING, &emitter.state).await;
+
+    if unaccounted > 0 {
         eprintln!(
-            "insula_writer: exit flush ceiling {} ms hit; {unflushed} observation(s) dropped (writer {})",
-            SHUTDOWN_FLUSH_CEILING.as_millis(),
+            "insula_writer: shutdown left {unaccounted} observation(s) without a persistence or drop receipt (writer {})",
             emitter.state.writer_id
         );
     }
 }
 
-/// Waits for the drain task to settle, at most `ceiling`. On the ceiling the
-/// task is aborted and the count of observations it never persisted is
-/// returned: everything still queued plus the batch it had in hand.
+/// Wait for the drain until `ceiling`, then abort it if necessary.
+/// Return originals without a persistence or durable drop receipt.
 async fn drain_with_ceiling(
     mut drain: JoinHandle<()>,
     ceiling: Duration,
     state: &WriterState,
 ) -> i64 {
-    if tokio::time::timeout(ceiling, &mut drain).await.is_ok() {
-        return 0;
+    if tokio::time::timeout(ceiling, &mut drain).await.is_err() {
+        drain.abort();
+        let _ = drain.await;
     }
-    drain.abort();
-    let _ = drain.await;
-    // Sequences are handed out at enqueue; the drain counts each batch as it
-    // settles. The gap is the tail that never landed, plus queue-full drops
-    // whose drop row was never written.
-    state.sequence.load(Ordering::Acquire) - state.settled.load(Ordering::Acquire)
-        + state.dropped.load(Ordering::Acquire)
+
+    state.unaccounted.load(Ordering::Acquire)
 }
 
 fn disabled_by_environment() -> bool {
@@ -592,13 +588,11 @@ async fn drain_loop(
                 Err(_) => break,
             }
         }
-        let settled = batch.len() as i64;
-        persist_groups(&pool, batch).await;
-        state.settled.fetch_add(settled, Ordering::AcqRel);
+        persist_groups(&pool, batch, &state).await;
     }
 }
 
-async fn persist_groups(pool: &PgPool, batch: Vec<QueuedObservation>) {
+async fn persist_groups(pool: &PgPool, batch: Vec<QueuedObservation>, state: &WriterState) {
     let mut groups: Vec<(TrustedBinding, Vec<ObservationEvent>)> = Vec::new();
     for observation in batch {
         if let Some((_, events)) = groups
@@ -613,7 +607,32 @@ async fn persist_groups(pool: &PgPool, batch: Vec<QueuedObservation>) {
 
     // The writer's own persistence is behind a recursion fence: Insula database work is never observed.
     for (binding, events) in groups {
-        let _ = ingest_batch(pool, &binding, IngestBatch { events }).await;
+        let drop_marker = events.iter().enumerate().find_map(|(index, event)| {
+            (event.phase == ObservationPhase::Drop).then_some((index as u32, event.drop_count))
+        });
+        let result = ingest_batch(pool, &binding, IngestBatch { events }).await;
+
+        let Ok(receipt) = result else {
+            // Keep failed originals unaccounted; do not retry or observe persistence.
+            continue;
+        };
+
+        let mut accounted = i64::from(receipt.accepted_count) + i64::from(receipt.duplicate_count);
+
+        if let Some((index, drop_count)) = drop_marker {
+            let marker_refused = receipt
+                .conflicts
+                .iter()
+                .any(|item| item.event_index == index);
+
+            if !marker_refused {
+                accounted += drop_count - 1;
+            }
+        }
+
+        if accounted > 0 {
+            state.unaccounted.fetch_sub(accounted, Ordering::AcqRel);
+        }
     }
 }
 
@@ -657,26 +676,29 @@ mod tests {
         Arc::new(WriterState {
             writer_id: Uuid::new_v4(),
             sequence: AtomicI64::new(0),
-            settled: AtomicI64::new(0),
+            unaccounted: AtomicI64::new(0),
             dropped: AtomicI64::new(0),
             accepting: AtomicBool::new(true),
             sender,
         })
     }
 
-    /// A drain stuck in an ingest POST is abandoned at the ceiling, and the
-    /// count reported is exactly the tail it never settled: queued plus
-    /// in-hand observations, plus drops whose row was never written.
+    /// Queue overflow and an in-flight original each count once at the ceiling.
     #[tokio::test]
     async fn flush_ceiling_abandons_stuck_drain_and_counts_the_tail() {
-        let (sender, _receiver) = mpsc::channel(QUEUE_CAPACITY);
+        let (sender, mut receiver) = mpsc::channel(3);
         let state = test_state(sender);
-        for _ in 0..9 {
-            state.next_sequence();
+        let binding = hardening_binding();
+
+        for _ in 0..5 {
+            state.enqueue(hardening_point(&state, &binding, None));
         }
-        state.settled.store(6, Ordering::Release);
-        state.dropped.store(2, Ordering::Release);
-        let stuck = tokio::spawn(std::future::pending::<()>());
+
+        let in_flight = receiver.recv().await.expect("queued original");
+        let stuck = tokio::spawn(async move {
+            std::future::pending::<()>().await;
+            drop(in_flight);
+        });
         let started = Instant::now();
         let unflushed = drain_with_ceiling(stuck, Duration::from_millis(40), &state).await;
         assert!(started.elapsed() >= Duration::from_millis(40));
@@ -684,21 +706,19 @@ mod tests {
             started.elapsed() < Duration::from_secs(2),
             "ceiling is bounded"
         );
-        assert_eq!(unflushed, 9 - 6 + 2);
+        assert_eq!(unflushed, 5);
     }
 
-    /// A drain that settles inside the ceiling reports no loss, however far
-    /// the counters are apart when the wait began.
     #[tokio::test]
-    async fn flush_within_ceiling_reports_no_loss() {
-        let (sender, _receiver) = mpsc::channel(QUEUE_CAPACITY);
+    async fn hardening_completed_drain_keeps_unpersisted_originals() {
+        let (sender, _receiver) = mpsc::channel(1);
         let state = test_state(sender);
-        state.next_sequence();
-        let settling = tokio::spawn(async {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        });
+        state.enqueue(hardening_point(&state, &hardening_binding(), None));
+
+        let settling = tokio::spawn(async {});
         let unflushed = drain_with_ceiling(settling, Duration::from_secs(2), &state).await;
-        assert_eq!(unflushed, 0);
+
+        assert_eq!(unflushed, 1, "task completion is not a persistence receipt");
     }
 
     /// A deferred span is silent until ended, then emits its Start at the
@@ -750,7 +770,7 @@ mod tests {
         let state = WriterState {
             writer_id: Uuid::new_v4(),
             sequence: AtomicI64::new(0),
-            settled: AtomicI64::new(0),
+            unaccounted: AtomicI64::new(0),
             dropped: AtomicI64::new(0),
             accepting: AtomicBool::new(true),
             sender,
@@ -786,7 +806,7 @@ mod tests {
         let state = Arc::new(WriterState {
             writer_id: Uuid::new_v4(),
             sequence: AtomicI64::new(0),
-            settled: AtomicI64::new(0),
+            unaccounted: AtomicI64::new(0),
             dropped: AtomicI64::new(0),
             accepting: AtomicBool::new(true),
             sender,
@@ -914,6 +934,427 @@ mod tests {
             rows[2].get::<Option<String>, _>("receipt_id").as_deref(),
             Some(receipt_id.as_str())
         );
+        Ok(())
+    }
+
+    async fn hardening_pool() -> TestResult<PgPool> {
+        let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
+            .expect("Insula writer proof requires a dedicated PostgreSQL URL");
+        let options: sqlx::postgres::PgConnectOptions = url.parse()?;
+        let database = options.get_database().expect("explicit test database");
+        let database = database.to_ascii_lowercase();
+        let is_test = database.contains("test") || database.starts_with("athanor_hardening_");
+        let lower = url.to_ascii_lowercase();
+
+        assert!(
+            is_test
+                && !database.contains("solarisael")
+                && !database.contains("prod")
+                && !database.contains("live")
+                && !lower.contains("solarisael_memory")
+                && !lower.contains("solarisael-house"),
+            "refusing a non-test or production-looking database"
+        );
+
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .acquire_timeout(Duration::from_secs(2))
+            .connect_with(options)
+            .await?;
+        crate::migrations::run_migrations(&pool).await?;
+
+        Ok(pool)
+    }
+
+    fn hardening_binding() -> TrustedBinding {
+        TrustedBinding {
+            house_id: format!("hardening-{}", Uuid::new_v4().simple()),
+            room: "hardening".into(),
+            spirit: "Hardening".into(),
+            session_id: Uuid::new_v4().to_string(),
+        }
+    }
+
+    fn hardening_point(
+        state: &WriterState,
+        binding: &TrustedBinding,
+        error_class: Option<&str>,
+    ) -> QueuedObservation {
+        QueuedObservation {
+            binding: binding.clone(),
+            event: observation(
+                state,
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                "akasha",
+                "substrate",
+                "hardening_writer",
+                ObservationPhase::Point,
+                None,
+                None,
+                OutcomeClass::Ok,
+                error_class,
+                None,
+                0,
+                0,
+            ),
+        }
+    }
+
+    async fn hardening_flush(
+        pool: &PgPool,
+        receiver: mpsc::Receiver<QueuedObservation>,
+        state: &Arc<WriterState>,
+    ) -> i64 {
+        state.accepting.store(false, Ordering::Release);
+        let (shutdown, shutdown_receiver) = watch::channel(true);
+        let drain = tokio::spawn(drain_loop(
+            pool.clone(),
+            receiver,
+            shutdown_receiver,
+            Arc::clone(state),
+        ));
+        let unflushed = drain_with_ceiling(drain, SHUTDOWN_FLUSH_CEILING, state).await;
+        drop(shutdown);
+
+        unflushed
+    }
+
+    async fn hardening_rows_and_cleanup(
+        pool: &PgPool,
+        state: &WriterState,
+        binding: &TrustedBinding,
+    ) -> TestResult<Vec<(String, String)>> {
+        let rows = sqlx::query_as::<_, (String, String)>(
+            "SELECT event_id::text, session_id FROM insula.log
+             WHERE writer_id = $1::uuid ORDER BY writer_sequence",
+        )
+        .bind(state.writer_id.to_string())
+        .fetch_all(pool)
+        .await;
+        let mut tx = pool.begin().await?;
+        sqlx::query("DELETE FROM insula.log WHERE writer_id = $1::uuid")
+            .bind(state.writer_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM insula.vitals_minute WHERE house_id = $1")
+            .bind(&binding.house_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+
+        Ok(rows?)
+    }
+
+    async fn hardening_success_control(pool: &PgPool) -> TestResult {
+        let binding = hardening_binding();
+        let (sender, receiver) = mpsc::channel(1);
+        let state = test_state(sender);
+        let point = hardening_point(&state, &binding, None);
+        let event_id = point.event.event_id.clone();
+        state.enqueue(point);
+
+        let unflushed = hardening_flush(pool, receiver, &state).await;
+        let rows = hardening_rows_and_cleanup(pool, &state, &binding).await?;
+
+        assert_eq!(rows, vec![(event_id, binding.session_id)]);
+        assert_eq!(unflushed, 0, "a persisted original is not a loss");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a dedicated ATHANOR_SUBSTRATE_TEST_DATABASE_URL"]
+    async fn hardening_graceful_drain_reports_failed_persistence() -> TestResult {
+        let pool = hardening_pool().await?;
+        hardening_success_control(&pool).await?;
+        let unavailable = hardening_pool().await?;
+        unavailable.close().await;
+        let binding = hardening_binding();
+        let (sender, receiver) = mpsc::channel(2);
+        let state = test_state(sender);
+        state.enqueue(hardening_point(&state, &binding, None));
+        state.enqueue(hardening_point(&state, &binding, None));
+
+        let unflushed = hardening_flush(&unavailable, receiver, &state).await;
+        let rows = hardening_rows_and_cleanup(&pool, &state, &binding).await?;
+
+        assert!(
+            rows.is_empty(),
+            "the closed pool cannot persist either original"
+        );
+        assert_eq!(
+            unflushed, 2,
+            "a completed drain must report both failed original observations"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a dedicated ATHANOR_SUBSTRATE_TEST_DATABASE_URL"]
+    async fn hardening_failed_drop_marker_preserves_original_loss_count() -> TestResult {
+        let pool = hardening_pool().await?;
+        hardening_success_control(&pool).await?;
+        let unavailable = hardening_pool().await?;
+        unavailable.close().await;
+        let binding = hardening_binding();
+        let (sender, receiver) = mpsc::channel(1);
+        let state = test_state(sender);
+
+        for _ in 0..3 {
+            state.enqueue(hardening_point(&state, &binding, None));
+        }
+
+        assert_eq!(receiver.len(), 1, "one original reaches the bounded queue");
+        assert_eq!(state.dropped.load(Ordering::Acquire), 2);
+
+        let unflushed = hardening_flush(&unavailable, receiver, &state).await;
+        let rows = hardening_rows_and_cleanup(&pool, &state, &binding).await?;
+
+        assert!(
+            rows.is_empty(),
+            "neither originals nor a drop marker reached PostgreSQL"
+        );
+        assert_eq!(
+            unflushed, 3,
+            "count the queued original and both overflow originals, not the synthetic marker"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a dedicated ATHANOR_SUBSTRATE_TEST_DATABASE_URL"]
+    async fn hardening_mixed_bindings_account_only_the_refused_group() -> TestResult {
+        let pool = hardening_pool().await?;
+        let refused_binding = hardening_binding();
+        let accepted_binding = TrustedBinding {
+            session_id: Uuid::new_v4().to_string(),
+            ..refused_binding.clone()
+        };
+        let (sender, receiver) = mpsc::channel(3);
+        let state = test_state(sender);
+        let invalid = hardening_point(&state, &refused_binding, Some("contradictory_outcome"));
+        let valid_sibling = hardening_point(&state, &refused_binding, None);
+        let accepted = hardening_point(&state, &accepted_binding, None);
+        let accepted_id = accepted.event.event_id.clone();
+        let refusal = ingest_batch(
+            &pool,
+            &refused_binding,
+            IngestBatch {
+                events: vec![invalid.event.clone(), valid_sibling.event.clone()],
+            },
+        )
+        .await;
+        state.enqueue(invalid);
+        state.enqueue(valid_sibling);
+        state.enqueue(accepted);
+
+        let unflushed = hardening_flush(&pool, receiver, &state).await;
+        let rows = hardening_rows_and_cleanup(&pool, &state, &refused_binding).await?;
+
+        assert!(
+            refusal.is_err(),
+            "the real ingest door must refuse the contradictory group"
+        );
+        assert_eq!(
+            rows,
+            vec![(accepted_id, accepted_binding.session_id)],
+            "the later binding must persist while the refused group stays absent"
+        );
+        assert_eq!(
+            unflushed, 2,
+            "both originals in the refused group are lost; the successful group is not"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a dedicated ATHANOR_SUBSTRATE_TEST_DATABASE_URL"]
+    async fn hardening_conflict_receipt_counts_loss_but_duplicate_does_not() -> TestResult {
+        let pool = hardening_pool().await?;
+        let binding = hardening_binding();
+        let (seed_sender, _seed_receiver) = mpsc::channel(1);
+        let seed_state = test_state(seed_sender);
+        let seed = hardening_point(&seed_state, &binding, None).event;
+        let inserted = ingest_batch(
+            &pool,
+            &binding,
+            IngestBatch {
+                events: vec![seed.clone()],
+            },
+        )
+        .await;
+
+        let (duplicate_sender, duplicate_receiver) = mpsc::channel(1);
+        let duplicate_state = test_state(duplicate_sender);
+        let mut duplicate = hardening_point(&duplicate_state, &binding, None);
+        duplicate.event.trace_id = seed.trace_id.clone();
+        duplicate.event.span_id = seed.span_id.clone();
+        duplicate_state.enqueue(duplicate);
+
+        let duplicate_loss = hardening_flush(&pool, duplicate_receiver, &duplicate_state).await;
+        let (conflict_sender, conflict_receiver) = mpsc::channel(2);
+        let conflict_state = test_state(conflict_sender);
+        let mut conflicting = hardening_point(&conflict_state, &binding, None);
+        conflicting.event.trace_id = seed.trace_id.clone();
+        conflicting.event.span_id = seed.span_id.clone();
+        conflicting.event.bytes_in = 1;
+        let conflict_id = conflicting.event.event_id.clone();
+        let receipt = ingest_batch(
+            &pool,
+            &binding,
+            IngestBatch {
+                events: vec![conflicting.event.clone()],
+            },
+        )
+        .await;
+        let accepted = hardening_point(&conflict_state, &binding, None);
+        let accepted_id = accepted.event.event_id.clone();
+        conflict_state.enqueue(conflicting);
+        conflict_state.enqueue(accepted);
+
+        let conflict_loss = hardening_flush(&pool, conflict_receiver, &conflict_state).await;
+        let incumbent = sqlx::query_as::<_, (i64, i64)>(
+            "SELECT bytes_in, duplicate_count FROM insula.log WHERE event_id = $1::uuid",
+        )
+        .bind(&seed.event_id)
+        .fetch_one(&pool)
+        .await;
+        let duplicate_rows = hardening_rows_and_cleanup(&pool, &duplicate_state, &binding).await?;
+        let conflict_rows = hardening_rows_and_cleanup(&pool, &conflict_state, &binding).await?;
+        let seed_rows = hardening_rows_and_cleanup(&pool, &seed_state, &binding).await?;
+        let inserted = inserted?;
+        let receipt = receipt?;
+
+        assert_eq!(inserted.accepted_count, 1);
+        assert!(inserted.conflicts.is_empty());
+        assert_eq!(
+            seed_rows,
+            vec![(seed.event_id.clone(), binding.session_id.clone())]
+        );
+        assert_eq!(
+            incumbent?,
+            (0, 1),
+            "only the matching redelivery increments duplicates"
+        );
+        assert!(
+            duplicate_rows.is_empty(),
+            "the matching original already exists"
+        );
+        assert_eq!(
+            duplicate_loss, 0,
+            "a matching duplicate is not a lost observation"
+        );
+        assert_eq!(receipt.accepted_count, 0);
+        assert_eq!(receipt.duplicate_count, 0);
+        assert_eq!(
+            receipt.conflicts.len(),
+            1,
+            "Ok can still carry a refused original"
+        );
+        assert_eq!(receipt.conflicts[0].event_id, conflict_id);
+        assert_eq!(receipt.conflicts[0].incumbent_event_id, seed.event_id);
+        assert_eq!(
+            conflict_rows,
+            vec![(accepted_id, binding.session_id)],
+            "the nonconflicting original in the same group must still persist"
+        );
+        assert_eq!(conflict_loss, 1, "the conflicting original did not persist");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a dedicated ATHANOR_SUBSTRATE_TEST_DATABASE_URL and --test-threads=1"]
+    async fn hardening_successful_drop_marker_accounts_for_overflow_originals() -> TestResult {
+        let pool = hardening_pool().await?;
+        let system = system_binding();
+        let preexisting: bool = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM insula.vitals_minute
+                WHERE house_id = $1 AND room = $2 AND spirit = $3
+                  AND component = 'akasha' AND layer = 'substrate'
+                  AND operation = 'insula_writer' AND phase = 'drop'
+             )",
+        )
+        .bind(&system.house_id)
+        .bind(&system.room)
+        .bind(&system.spirit)
+        .fetch_one(&pool)
+        .await?;
+
+        assert!(
+            !preexisting,
+            "refusing a pre-existing system drop-marker bucket"
+        );
+
+        let binding = hardening_binding();
+        let (sender, receiver) = mpsc::channel(1);
+        let state = test_state(sender);
+
+        for _ in 0..3 {
+            state.enqueue(hardening_point(&state, &binding, None));
+        }
+
+        let unaccounted = hardening_flush(&pool, receiver, &state).await;
+        let rows = sqlx::query_as::<_, (String, i64)>(
+            "SELECT phase, drop_count FROM insula.log
+             WHERE writer_id = $1::uuid ORDER BY writer_sequence",
+        )
+        .bind(state.writer_id.to_string())
+        .fetch_all(&pool)
+        .await;
+
+        // A system marker shares rollup keys; delete its bucket only when every source row is ours.
+        let deleted = sqlx::query(
+            "WITH marker_bucket AS (
+                SELECT date_trunc('minute', observed_at AT TIME ZONE 'UTC')
+                           AT TIME ZONE 'UTC' AS minute,
+                       house_id, room, spirit, component, layer, operation, phase, outcome_class
+                FROM insula.log WHERE writer_id = $1::uuid AND phase = 'drop'
+             )
+             DELETE FROM insula.vitals_minute v USING marker_bucket b
+             WHERE v.query_name = 'insula.vitals.minute' AND v.query_version = 1
+               AND (v.minute, v.house_id, v.room, v.spirit, v.component,
+                    v.layer, v.operation, v.phase, v.outcome_class)
+                   = (b.minute, b.house_id, b.room, b.spirit, b.component,
+                      b.layer, b.operation, b.phase, b.outcome_class)
+               AND NOT EXISTS(
+                   SELECT 1 FROM insula.log other
+                   WHERE other.writer_id <> $1::uuid
+                     AND (date_trunc('minute', other.observed_at AT TIME ZONE 'UTC')
+                              AT TIME ZONE 'UTC',
+                          other.house_id, other.room, other.spirit, other.component,
+                          other.layer, other.operation, other.phase, other.outcome_class)
+                         = (b.minute, b.house_id, b.room, b.spirit, b.component,
+                            b.layer, b.operation, b.phase, b.outcome_class)
+               )",
+        )
+        .bind(state.writer_id.to_string())
+        .execute(&pool)
+        .await?
+        .rows_affected();
+
+        assert_eq!(
+            deleted, 1,
+            "cleanup requires an exclusively owned marker bucket"
+        );
+
+        hardening_rows_and_cleanup(&pool, &state, &binding).await?;
+
+        assert_eq!(
+            rows?,
+            vec![("point".into(), 0), ("drop".into(), 2)],
+            "one original persists and a durable marker records both lost originals"
+        );
+        assert_eq!(
+            unaccounted, 0,
+            "durably recorded overflow is not an unaccounted shutdown tail"
+        );
+
         Ok(())
     }
 }

@@ -1024,6 +1024,12 @@ function houseRecordLine() {
 }
 
 function renderHouseSurface() {
+  const focused = timeline.contains(document.activeElement) ? document.activeElement : null;
+  const focusedId = focused?.id;
+  const selection = focused && Number.isInteger(focused.selectionStart)
+    ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection]
+    : null;
+
   const views = {
     live: `
       ${renderHouseBoard()}
@@ -1038,6 +1044,11 @@ function renderHouseSurface() {
   };
   timeline.innerHTML = views[state.activeView];
   if (state.activeView === "state") renderMechanicsResults();
+  const restored = focusedId ? timeline.querySelector(`#${CSS.escape(focusedId)}`) : null;
+
+  restored?.focus({ preventScroll: true });
+  if (restored && selection) restored.setSelectionRange(...selection);
+
   if (state.activeView === "durable") ensureSedimentQueried(conversations.house);
   timeline.scrollTop = state.activeView === "state" ? mechanicsScrollTop() : 0;
 }

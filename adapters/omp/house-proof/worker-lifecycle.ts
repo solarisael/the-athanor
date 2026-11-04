@@ -58,6 +58,7 @@ const ROOM_CONTINUITY_TOOLS = new Set([
 const ROOM_DERIVED_MESSAGES = new Set(["athanor-mode-door", "athanor-hallway-knock"]);
 
 export type LifecycleState = "working" | "wrapping" | "handoff_only" | "retired";
+export type WorkerTaskOrigin = { id: string; batch: string; agent: string };
 const LIFECYCLE_STATES = new Set<LifecycleState>(["working", "wrapping", "handoff_only", "retired"]);
 const NOTEBOOK_KINDS = ["note", "message", "evidence", "briefing"] as const;
 
@@ -142,6 +143,19 @@ const slotsByAgent = new Map<string, string>();
 const slotsBySession = new Map<string, string>();
 const slotsByToken = new Map<string, string>();
 const settlements = new Map<string, Promise<void>[]>();
+
+// Eval's nested task results are absent from model history; enrollment still owns their native IDs.
+export function workerTaskOrigins(parentSession: string): WorkerTaskOrigin[] {
+  const origins: WorkerTaskOrigin[] = [];
+
+  for (const slot of slotRegistry.values()) {
+    if (!slot.started || !slot.agentId || slot.reservation.binding.session !== parentSession) continue;
+
+    origins.push({ id: slot.agentId, batch: slot.toolCallId, agent: slot.reservation.agentName });
+  }
+
+  return origins;
+}
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : value == null ? "" : String(value).trim();

@@ -14,9 +14,11 @@ import {
   __workerLifecycleTest,
   installWorkerLifecycle,
   parseEnrollmentMarker,
+  workerTaskOrigins,
   WORKER_NOTICE_MESSAGE,
   WORKER_WAKE_MESSAGE,
 } from "../house-proof/worker-lifecycle.ts";
+import { compactGuMessages } from "../house-proof/swarm-delivery/index.ts";
 
 function makeSchema(kind: string, fields: Record<string, unknown> = {}): any {
   return { kind, ...fields, describe() { return this; }, optional() { return this; }, regex() { return this; }, strict() { return this; }, default() { return this; } };
@@ -909,4 +911,36 @@ describe("named familiar role lessons", () => {
     await parent.notebook("succ-familiar-heir", { action: "successor", bookId: instance.bookId, instanceId: instance.instanceId });
     expect(host.actions("prepare").at(-1)!.params.agentName).toBe("kodo-kitten");
   });
+});
+
+test("Eval worker identities remain parent-scoped and recover for gu projection", async () => {
+  const parent = ompSession("parent-gu-projection", parentAgent);
+  await spawn(parent, "eval-gu-call", {
+    tasks: [
+      { agent: "gu-sonnet", task: "read one bounded grain", solutionSpace: "exact read" },
+      { agent: "scout", task: "read a separate boundary", solutionSpace: "exact read" },
+    ],
+  });
+  const delivery = {
+    role: "custom", customType: "async-result", content: "Native worker report",
+    details: { jobs: [{ jobId: "gu-native-collision", agentId: "gu-native", type: "task", status: "completed" }] },
+  };
+  const messages = [delivery];
+  expect(compactGuMessages(messages, workerTaskOrigins(parent.id))).toBe(messages);
+
+  events.emit("task:subagent:lifecycle", { id: "gu-native", parentToolCallId: "eval-gu-call", index: 0, status: "started" });
+  events.emit("task:subagent:lifecycle", { id: "ordinary-native", parentToolCallId: "eval-gu-call", index: 1, status: "started" });
+  const projected = compactGuMessages(messages, workerTaskOrigins(parent.id));
+  expect(projected[0].content).toContain("agent://gu-native");
+  expect(projected[0].content).not.toContain("agent://gu-native-collision");
+  expect(compactGuMessages(messages, workerTaskOrigins("different-parent"))).toBe(messages);
+  const ordinary = [{ ...delivery, details: { jobs: [{ ...delivery.details.jobs[0], agentId: "ordinary-native" }] } }];
+  expect(compactGuMessages(ordinary, workerTaskOrigins(parent.id))).toBe(ordinary);
+
+  __workerLifecycleTest.restartProcess();
+  bus.clear();
+  const revived = ompSession(parent.id, parentAgent, parent.entries);
+  await revived.emit("session_start", {});
+  expect(compactGuMessages(messages, workerTaskOrigins(parent.id))[0].content).toBe(projected[0].content);
+  expect(delivery.content).toBe("Native worker report");
 });

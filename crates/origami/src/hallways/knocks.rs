@@ -466,7 +466,7 @@ pub async fn knock(
     // effective budget remain equivalent to explicitly naming that budget.
     let max_turns = match (request.max_turns, parent_knock_id.as_deref()) {
         (Some(value), _) => i16::from(value),
-        (None, None) => 4,
+        (None, None) => i16::from(HALLWAY_DEFAULT_KNOCK_TURNS),
         (None, Some(parent)) => sqlx::query_scalar::<_, i16>(
             "SELECT max_turns FROM hallway_knocks
              WHERE knock_id=$1::uuid AND hallway_id=$2 FOR SHARE",

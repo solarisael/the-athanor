@@ -12,7 +12,9 @@ type JsonObject = Record<string, unknown>;
 import { roomBinding } from "./house-proof/room.ts";
 
 const GIGA_READ_TIMEOUT_MS = 120_000;
+const GIGA_WINDOW_TURN_LIMIT = 8;
 let gigaClosing = false;
+let gigaShutdown: Promise<void> | undefined;
 
 export type GigaEnablement = { gigaEnabled: boolean; hippocampusEnabled: boolean; replayMode: boolean };
 
@@ -76,7 +78,16 @@ type LoggedTurn = {
   hasStableID?: unknown;
 };
 
-type GigaTurnBuffer = { ctx: any; cwd: string; conversation: string; turns: LoggedTurn[] };
+type GigaTurnWindow = { binding: HostBinding; projectKeys: string[]; turns: JsonObject[] };
+type GigaTurnBuffer = {
+  ctx: any;
+  cwd: string;
+  conversation: string;
+  turns: LoggedTurn[];
+  // A lost receipt can follow a commit. Keep this payload unchanged until acknowledged.
+  window?: GigaTurnWindow;
+  flushing?: Promise<void>;
+};
 const gigaTurnBuffers = new Map<string, GigaTurnBuffer>();
 
 
@@ -123,32 +134,72 @@ export async function requestGigaQueueMaintenance(binding: HostBinding, operatio
   return await requestObject(binding, "giga_queue_maintenance", { operation, scope: "room" }, { signal: options.signal, timeoutMs: GIGA_READ_TIMEOUT_MS, write: true });
 }
 
-async function ingestLoggedTurns(ctx: any, loggedTurns: LoggedTurn[]): Promise<void> {
-  if (gigaClosing || process.env.ATHANOR_GIGA_ENABLED !== "1" || process.env.ATHANOR_REPLAY_MODE === "1" || loggedTurns.length === 0) return;
-  try {
-    const resolved = roomBinding(ctx);
-    // An ordinary harness session's turns never enter any room's GIGA queue.
-    if (!resolved) return;
-    const binding = resolved.binding;
-    await requestObject(binding, "giga_conversation_ingest", {
-      enablement: {
-        gigaEnabled: process.env.ATHANOR_GIGA_ENABLED === "1",
-        hippocampusEnabled: process.env.ATHANOR_HIPPOCAMPUS_ENABLED === "1",
-        replayMode: process.env.ATHANOR_REPLAY_MODE === "1",
-      },
-      project_keys: process.env.ATHANOR_GIGA_PROJECT_KEY ? [process.env.ATHANOR_GIGA_PROJECT_KEY] : [],
-      turns: loggedTurns.map((turn) => ({
-        role: turn.role,
-        source_id: turn.sourceID,
-        content_hash: turn.contentHash,
-        session_id: turn.sessionID,
-        timestamp: turn.sourceTimestamp,
-        has_stable_id: turn.hasStableID,
-      })),
-    } as JsonObject);
-  } catch {
-    // GIGA ingestion is opt-in background work and cannot block ordinary House behavior.
+function prepareGigaWindow(buffered: GigaTurnBuffer): GigaTurnWindow {
+  const resolved = roomBinding(buffered.ctx);
+
+  if (!resolved) throw new OrganError("No home is attached for GIGA ingestion", "giga_room_unavailable", false);
+
+  return {
+    binding: resolved.binding,
+    projectKeys: process.env.ATHANOR_GIGA_PROJECT_KEY ? [process.env.ATHANOR_GIGA_PROJECT_KEY] : [],
+    turns: buffered.turns.slice(0, GIGA_WINDOW_TURN_LIMIT).map((turn) => ({
+      role: turn.role,
+      source_id: turn.sourceID,
+      content_hash: turn.contentHash,
+      session_id: turn.sessionID,
+      timestamp: turn.sourceTimestamp,
+      has_stable_id: turn.hasStableID,
+    })),
+  };
+}
+
+async function ingestGigaWindow(window: GigaTurnWindow): Promise<void> {
+  if (process.env.ATHANOR_REPLAY_MODE === "1") {
+    throw new OrganError("Replay cannot ingest GIGA events", "giga_replay_refused", false);
   }
+
+  const result = await requestObject(window.binding, "giga_conversation_ingest", {
+    enablement: {
+      gigaEnabled: process.env.ATHANOR_GIGA_ENABLED === "1",
+      hippocampusEnabled: process.env.ATHANOR_HIPPOCAMPUS_ENABLED === "1",
+      replayMode: false,
+    },
+    project_keys: window.projectKeys,
+    turns: window.turns,
+  }, { write: true });
+  const accepted = result.accepted === true && result.duplicate === false;
+  const duplicate = result.accepted === false && result.duplicate === true;
+
+  if (typeof result.event_id !== "string" || !result.event_id || (!accepted && !duplicate)) {
+    throw new OrganError("GIGA did not acknowledge the window", "giga_ingest_unacknowledged", false);
+  }
+}
+
+function flushGigaBuffer(key: string, buffered: GigaTurnBuffer): Promise<void> {
+  if (buffered.flushing) return buffered.flushing;
+
+  buffered.flushing = (async () => {
+    try {
+      while (buffered.turns.length) {
+        const window = buffered.window ??= prepareGigaWindow(buffered);
+        await ingestGigaWindow(window);
+
+        buffered.turns.splice(0, window.turns.length);
+        buffered.window = undefined;
+      }
+
+      gigaTurnBuffers.delete(key);
+    } catch (error) {
+      console.warn("[athanor] giga_conversation_ingest retained pending turns", {
+        code: gigaTransportFailure(error).code,
+        pending: buffered.turns.length,
+      });
+    }
+  })().finally(() => {
+    buffered.flushing = undefined;
+  });
+
+  return buffered.flushing;
 }
 
 export function isSubagentSessionContext(ctx: any): boolean {
@@ -181,24 +232,22 @@ export function ingestGigaLoggedTurnsDetached(ctx: any, loggedTurns: LoggedTurn[
 }
 
 export function flushGigaTurnsDetached(ctx: any): void {
+  if (gigaClosing) return;
+
   let conversation: string;
   try {
     conversation = hostSessionIdentity(ctx);
   } catch {
     return;
   }
-  for (const [key, buffered] of [...gigaTurnBuffers]) {
+  for (const [key, buffered] of gigaTurnBuffers) {
     if (buffered.conversation !== conversation) continue;
-    gigaTurnBuffers.delete(key);
-    if (buffered.turns.length) void ingestLoggedTurns(buffered.ctx, buffered.turns);
+
+    void flushGigaBuffer(key, buffered);
   }
 }
 
-// Read-only census of turns still waiting for a flush, for the callers that
-// must report what an exit destroys. Buffered turns are a real casualty:
-// flushGigaTurns drains them on a graceful shutdown, and a process.exit
-// never reaches that door. Counts only - never turn content - and it mutates
-// nothing, so reporting can never cost a flush.
+// Counts include in-flight windows until acknowledgment. An exit can still destroy retained turns.
 export function gigaBufferedTurnCensus(): Array<{ session: string; cwd: string; turns: number }> {
   return [...gigaTurnBuffers]
     .filter(([, buffered]) => buffered.turns.length)
@@ -209,17 +258,22 @@ export function gigaBufferedTurnCensus(): Array<{ session: string; cwd: string; 
     }));
 }
 
-export async function flushGigaTurns(): Promise<void> {
-  const pending = [...gigaTurnBuffers.values()].filter((buffer) => buffer.turns.length);
-  gigaTurnBuffers.clear();
-  await Promise.allSettled(pending.map((buffer) => ingestLoggedTurns(buffer.ctx, buffer.turns)));
+export function flushGigaTurns(): Promise<void> {
+  if (gigaShutdown) return gigaShutdown;
+
   gigaClosing = true;
+  gigaShutdown = Promise.allSettled(
+    [...gigaTurnBuffers].map(([key, buffered]) => flushGigaBuffer(key, buffered)),
+  ).then(() => undefined);
+
+  return gigaShutdown;
 }
 
 export const __gigaTest = Object.freeze({
   isSubagentSessionContext,
   resetState() {
     gigaClosing = false;
+    gigaShutdown = undefined;
     gigaTurnBuffers.clear();
   },
 });

@@ -109,7 +109,8 @@ fn a_null_room_guide_refuses_instead_of_inheriting() {
 fn a_cleared_chapter_leaves_house_familiars_unknown() {
     let house = house_page();
     let receipt = summon("pipkin", &[(HOUSE, &house), (ROOM, r#"{"familiars":[]}"#)]);
-    assert_eq!(receipt.dispatch.errors, ["Unknown familiar: pipkin"]);
+    assert!(receipt.dispatch.errors[0].contains("Unknown familiar: pipkin"));
+    assert!(receipt.dispatch.errors[0].contains("Valid familiar IDs: <none>"));
     assert!(receipt.familiar.is_none());
 }
 
@@ -191,4 +192,60 @@ fn the_house_page_sits_beside_the_room_never_above_a_bare_room() {
         Some("/srv/rooms/house")
     );
     assert_eq!(house_dir("configured-room"), None);
+}
+
+#[test]
+fn repeated_dispatches_compose_with_valid_distinct_names_and_preserved_routes() {
+    let room = r#"{"version":1,"collective":"familiars","familiars":[{"id":"long-familiar-identity-for-bounded-task-names","name":"Moss","lane":"smol-scout","ompAgent":"scout-kitten","modelRole":"@scout","description":"Finds things."}]}"#;
+    let request = DispatchRequest {
+        familiar: "long-familiar-identity-for-bounded-task-names".into(),
+        task: "Read the exact target.".into(),
+        lesson_bodies: vec!["Read exact sources before acting.".into()],
+        ..Default::default()
+    };
+    let mut tasks = Vec::new();
+
+    for _ in 0..2 {
+        let receipt = house_dispatch(request.clone(), || load(&[(ROOM, room)]));
+        assert!(receipt.dispatch.ok, "{:?}", receipt.dispatch.errors);
+        assert_eq!(receipt.dispatch.omp_agent.as_deref(), Some("scout-kitten"));
+        assert_eq!(receipt.dispatch.model_role.as_deref(), Some("@scout"));
+        tasks.extend(
+            receipt
+                .dispatch
+                .spawn_packet
+                .expect("accepted packet")
+                .args
+                .tasks,
+        );
+    }
+
+    assert_eq!(tasks.len(), 2);
+    assert_ne!(tasks[0].name, tasks[1].name);
+
+    for task in tasks {
+        assert!(task.name.len() <= 32);
+        assert!(task.name.starts_with("Long"));
+        assert!(task.name.as_bytes()[0].is_ascii_uppercase());
+        assert!(task.name.bytes().all(|byte| byte.is_ascii_alphanumeric()));
+        assert_eq!(task.agent.as_deref(), Some("scout-kitten"));
+    }
+}
+
+#[test]
+fn unknown_familiar_lists_effective_ids_without_accepting_agent_selectors() {
+    let house = house_page();
+    let room = r#"{"familiars":[{"id":"scout","name":"Moss","lane":"smol-scout","ompAgent":"scout-kitten","modelRole":"@scout","description":"Room scout."},{"id":"keeper","name":"Wick","aliases":["lantern"],"lane":"smol-scout","description":"Keeps the light."}]}"#;
+
+    for selector in ["missing", "pipkin", "scout-kitten"] {
+        let receipt = summon(selector, &[(HOUSE, &house), (ROOM, room)]);
+        assert!(!receipt.dispatch.ok);
+        assert!(receipt.dispatch.spawn_packet.is_none());
+        assert!(receipt.familiar.is_none());
+        let refusal = &receipt.dispatch.errors[0];
+
+        assert!(refusal.contains(&format!("Unknown familiar: {selector}")));
+        assert!(refusal.contains("Valid familiar IDs: scout, keeper."));
+        assert!(!refusal.contains("Valid familiar IDs: scout-kitten"));
+    }
 }

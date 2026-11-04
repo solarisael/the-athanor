@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Athanor anatomy</title>
+  <link rel="stylesheet" href="anatomy.css">
+  <script type="module" src="anatomy.js"></script>
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">THE HOUSE / SOURCE ATLAS</span><h1>Athanor anatomy</h1></div>
+    <p id="counts">Loading the source map…</p>
+    <span class="snapshot">Source snapshot · no live controls</span>
+  </header>
+  <main>
+    <aside id="catalog" aria-label="Node catalogue">
+      <label for="search">Find a node</label>
+      <input id="search" type="search" placeholder="Recall, session, PostgreSQL…">
+      <label for="kind">Node kind</label>
+      <select id="kind"><option value="">All kinds</option></select>
+      <p id="match-count" class="muted"></p>
+      <div id="nodes"></div>
+    </aside>
+    <section id="stage" aria-label="Connection graph">
+      <nav class="toolbar" aria-label="Graph controls">
+        <button id="all" aria-pressed="true">Whole graph</button>
+        <button id="organs" aria-pressed="false">Organs</button>
+        <button id="neighbors" aria-pressed="false">Neighborhood</button>
+        <button id="fit">Fit</button>
+        <button id="minus" aria-label="Zoom out">−</button>
+        <button id="plus" aria-label="Zoom in">+</button>
+        <button id="layout">Spread out</button>
+      </nav>
+      <div id="graph" tabindex="0" role="region" aria-label="Interactive anatomy canvas. Drag to pan. Scroll to zoom. Use the catalogue to select nodes with the keyboard."></div>
+      <footer><span id="status" role="status">Preparing the canvas…</span><span>Drag space to pan · scroll to zoom · drag a node to move it</span></footer>
+    </section>
+    <aside id="detail" aria-label="Selected node and source evidence">
+      <h2>Follow a connection</h2>
+      <p>Select an organ, tool, or store. Its neighbors light up while the rest of the map stays in place.</p>
+      <p>Click an arrow to inspect its relation and source pointers.</p>
+    </aside>
+  </main>
+</body>
+</html>

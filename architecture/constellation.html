@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Athanor constellation</title>
+  <link rel="stylesheet" href="constellation.css">
+  <script type="module" src="constellation.js"></script>
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">THE HOUSE / SOURCE ATLAS</span><h1>Constellation</h1></div>
+    <div class="search">
+      <input id="search" type="search" placeholder="Find an organ or a part   ( / )" autocomplete="off"
+        role="combobox" aria-label="Find an organ or a part" aria-controls="results" aria-expanded="false">
+      <ul id="results" role="listbox" aria-label="Search results" hidden></ul>
+    </div>
+    <p id="counts">Loading the source map…</p>
+  </header>
+  <nav class="toolbar" aria-label="Map controls">
+    <button id="zoom-out" title="Zoom out ( − )" aria-label="Zoom out">−</button>
+    <button id="zoom-in" title="Zoom in ( + )" aria-label="Zoom in">+</button>
+    <button id="fit" title="Show all organs ( 0 )">Show all</button>
+    <button id="back" title="Go back to the previous view ( Backspace )" disabled>← Back</button>
+    <span class="gap"></span>
+    <label class="filter">Problem type <select id="tag"><option value="">all</option></select></label>
+    <label class="filter">Severity <select id="severity"><option value="">any</option><option value="high">high only</option><option value="med">med or worse</option><option value="low">any problem</option></select></label>
+    <button id="arrange" title="Move linked organs close together so fewer cables cross">Arrange by links</button>
+    <button id="tidy" title="Move overlapping organs apart">Tidy up</button>
+    <button id="split" aria-pressed="false">Second view</button>
+  </nav>
+  <main>
+    <section id="views" aria-label="Constellation views">
+      <canvas id="view-1" tabindex="0" aria-label="Constellation map. Arrow keys move between organs and parts. Enter opens. Escape goes back."></canvas>
+      <canvas id="view-2" tabindex="0" aria-label="Second constellation map with its own camera."></canvas>
+    </section>
+    <aside id="detail" aria-label="Selected organ or part" aria-live="polite">
+      <h2>Pick an organ</h2>
+      <p>Click a bubble, or press an arrow key on the map.</p>
+      <p>Click <strong>Open</strong> on a bubble to zoom into it. Drag the round handle on its edge to make it bigger or smaller.</p>
+      <h3>What the marks mean</h3>
+      <ul class="legend">
+        <li><span class="swatch badge high">5</span> problems found in this organ or part, coloured by the worst one</li>
+        <li><span class="swatch ring"></span> a part that holds a state machine; red arcs are states with no way out</li>
+        <li><span class="swatch dashed"></span> the source changed after the map was made</li>
+      </ul>
+    </aside>
+  </main>
+  <footer>
+    <span id="status" role="status"></span>
+    <span class="keys"><kbd>←↑↓→</kbd> move <kbd>Enter</kbd> open <kbd>Esc</kbd> step out <kbd>+</kbd><kbd>−</kbd> zoom <kbd>0</kbd> show all <kbd>/</kbd> search</span>
+  </footer>
+</body>
+</html>

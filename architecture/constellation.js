@@ -171,6 +171,15 @@ async function start() {
   world.views[0].resize();
   world.views[0].camera = world.views[0].cameraFor(bubbles);
 
+  // A bubble that grew with its parts can cover a neighbour. Push them apart once, with Undo.
+  const beforeGrowth = snapshotLayout(bubbles);
+  const moved = tidy(bubbles);
+  if (moved) {
+    world.rememberLayout(beforeGrowth);
+    world.scheduleSave(`Organs grew with their parts, so ${moved} organs moved apart. Undo puts them back.`);
+    world.views[0].camera = world.views[0].cameraFor(bubbles);
+  }
+
   for (const view of world.views) view.listen();
   new ResizeObserver(() => {
     for (const view of world.views) view.resize();
@@ -328,36 +337,43 @@ function electOwner(counts, unknown, { tierOf, parentOf, shared }) {
   return { bubble, tier, outright, certain };
 }
 
+// A bubble's size follows its part count. The layout file keeps only the operator's resize as a
+// `scale` on that size, so an organ that gains parts grows by itself.
+function partRadius(partCount) {
+  return Math.max(110, 62 * Math.sqrt(partCount));
+}
+
 // The first arrangement fills rows left to right. After that the layout file owns every position.
 // An organ that the saved layout does not know yet starts in a row below it, so it lands in free space.
 // A saved record with a bad shape counts as unknown. When an organ's parts differ from the saved ones,
-// its stars spread again; its position and size stay.
+// its stars spread again; its position and scale stay.
 function placeBubbles(bubbleIds, ownerOf, byId, stored) {
-  const bubbles = [];
-  const saved = new Map(bubbleIds.filter(id => isPlacement(stored[id])).map(id => [id, stored[id]]));
-  const known = [...saved.values()];
+  const bubbles = bubbleIds.map(id => {
+    const memberIds = [...ownerOf].filter(([, bubble]) => bubble === id).map(([member]) => member);
+    memberIds.sort((a, b) => byId.get(a).kind.localeCompare(byId.get(b).kind) || byId.get(a).label.localeCompare(byId.get(b).label));
+
+    const saved = isPlacement(stored[id]) ? stored[id] : null;
+    const savedMembers = saved?.members || {};
+    const sameParts = Object.keys(savedMembers).length === memberIds.length && memberIds.every(member => isPoint(savedMembers[member]));
+    const members = new Map();
+    memberIds.forEach((member, order) => members.set(member, sameParts ? savedMembers[member] : sunflower(order, memberIds.length)));
+
+    const baseR = partRadius(memberIds.length);
+    const scale = Number.isFinite(saved?.scale) && saved.scale > 0 ? saved.scale : 1;
+    const bubble = { id, hue: hueOf(id), label: byId.get(id).label, members, baseR, r: Math.max(MIN_BUBBLE_RADIUS, baseR * scale) };
+    if (saved) Object.assign(bubble, { x: saved.x, y: saved.y });
+    return bubble;
+  });
+
+  const known = bubbles.filter(bubble => bubble.x !== undefined);
   const left = known.length ? Math.min(...known.map(bubble => bubble.x - bubble.r)) : 0;
   let x = left;
   let y = known.length ? Math.max(...known.map(bubble => bubble.y + bubble.r)) + ROW_GAP : 0;
   let rowHeight = 0;
 
-  for (const id of bubbleIds) {
-    const memberIds = [...ownerOf].filter(([, bubble]) => bubble === id).map(([member]) => member);
-    memberIds.sort((a, b) => byId.get(a).kind.localeCompare(byId.get(b).kind) || byId.get(a).label.localeCompare(byId.get(b).label));
+  for (const bubble of bubbles) {
+    if (bubble.x !== undefined) continue;
 
-    const savedMembers = saved.get(id)?.members || {};
-    const sameParts = Object.keys(savedMembers).length === memberIds.length && memberIds.every(member => isPoint(savedMembers[member]));
-    const members = new Map();
-    memberIds.forEach((member, order) => members.set(member, sameParts ? savedMembers[member] : sunflower(order, memberIds.length)));
-    const bubble = { id, hue: hueOf(id), label: byId.get(id).label, members };
-    bubbles.push(bubble);
-
-    if (saved.has(id)) {
-      Object.assign(bubble, { x: saved.get(id).x, y: saved.get(id).y, r: saved.get(id).r });
-      continue;
-    }
-
-    bubble.r = Math.max(110, 62 * Math.sqrt(memberIds.length));
     if (x > left && x + bubble.r * 2 > left + ROW_WIDTH) {
       x = left;
       y += rowHeight + ROW_GAP;
@@ -374,7 +390,7 @@ function placeBubbles(bubbleIds, ownerOf, byId, stored) {
 }
 
 function isPlacement(record) {
-  return Boolean(record) && [record.x, record.y, record.r].every(Number.isFinite) && record.r > 0;
+  return Boolean(record) && [record.x, record.y].every(Number.isFinite);
 }
 
 function isPoint(value) {
@@ -494,11 +510,11 @@ function restoreLayout(bubbles, snapshot) {
 async function saveLayout(bubbles, note) {
   const round = value => Math.round(value * 1000) / 1000;
   const layout = {
-    version: 1,
+    version: 2,
     bubbles: Object.fromEntries(bubbles.map(bubble => [bubble.id, {
       x: Math.round(bubble.x),
       y: Math.round(bubble.y),
-      r: Math.round(bubble.r),
+      scale: round(bubble.r / bubble.baseR),
       members: Object.fromEntries([...bubble.members].map(([id, [u, v]]) => [id, [round(u), round(v)]])),
     }])),
   };
@@ -687,6 +703,8 @@ function updateBack(world) {
 
 // Pushes overlapping bubbles apart along the line between their centres, each by half the overlap.
 // The labels hang below a bubble, so the gap leaves room for them.
+// The layout file keeps whole units, so tidy pushes one unit further and rounds what it moves.
+// Otherwise rounding at save brings back a small overlap, and the next load moves the organs again.
 function tidy(bubbles) {
   const gap = ORGAN_GAP;
   const moved = new Set();
@@ -706,11 +724,11 @@ function tidy(bubbles) {
 
         if (overlap <= 0) continue;
 
-        const push = overlap / 2;
-        a.x -= ux * push;
-        a.y -= uy * push;
-        b.x += ux * push;
-        b.y += uy * push;
+        const push = overlap / 2 + 1;
+        a.x = Math.round(a.x - ux * push);
+        a.y = Math.round(a.y - uy * push);
+        b.x = Math.round(b.x + ux * push);
+        b.y = Math.round(b.y + uy * push);
         moved.add(a).add(b);
         overlaps += 1;
       }

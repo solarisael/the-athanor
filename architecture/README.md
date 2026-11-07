@@ -83,11 +83,14 @@ The view reads four files:
 |---|---|---|
 | `anatomy.jsonl` | the map snapshot | nodes and edges |
 | `anatomy.overlay.jsonl` | the state-machine census and the operator | added organs, ownership rules, state machines, defects, and tags |
-| `anatomy.layout.json` | the operator | bubble positions, sizes, and star positions; the view saves it after each move |
+| `anatomy.layout.json` | the operator | bubble positions, size scales, and star positions; the view saves it after each move |
 | `/anatomy.stale.json` | the server | cited files that changed since the snapshot; computed per request |
 
 Each defect in `anatomy.overlay.jsonl` comes from one file in `docs/state-machines/`.
 When a defect is fixed or a contract file changes, update the overlay in the same commit.
+
+A bubble's size follows its part count. When you drag the rim, the layout file keeps your change as a `scale` on that size.
+When an organ gets more parts, it grows by itself. When a bigger bubble covers a neighbour, the view moves them apart once and saves. **Undo** puts them back.
 
 ### Who owns a part
 

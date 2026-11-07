@@ -1,148 +1,156 @@
 {
-  "version": 1,
+  "version": 2,
   "bubbles": {
     "organ:chat": {
-      "x": 515,
-      "y": 87,
-      "r": 196,
+      "x": 517,
+      "y": -459,
+      "scale": 1,
       "members": {
         "command:athanor-chat": [
-          0.179,
+          0.171,
           0
         ],
         "endpoint:host//athanor/v1/chat/say": [
-          -0.228,
-          0.209
+          -0.218,
+          0.2
         ],
         "endpoint:host//athanor/v1/chat/snapshot": [
-          0.035,
-          -0.398
+          0.033,
+          -0.38
+        ],
+        "endpoint:host//athanor/v1/room/state": [
+          0.275,
+          0.358
         ],
         "file:chat-drafts.json": [
-          0.288,
-          0.376
+          -0.504,
+          -0.089
         ],
         "file:chat.json": [
-          -0.528,
-          -0.093
+          0.477,
+          -0.304
         ],
         "module:crates/host/src/chat.rs": [
-          0.501,
-          -0.318
+          -0.16,
+          0.594
         ],
         "module:adapters/omp/house-proof/chat.ts": [
-          -0.167,
-          0.623
+          -0.304,
+          -0.586
         ],
         "module:gui-prototype/chat.js": [
-          -0.319,
-          -0.615
-        ],
-        "module:crates/host/src/lifecycle.rs": [
-          0.693,
-          0.253
+          0.661,
+          0.241
         ],
         "module:crates/host/src/surface.rs": [
-          -0.721,
-          0.298
+          -0.687,
+          0.284
+        ],
+        "operation:host/ChatCommands": [
+          0.331,
+          -0.708
         ]
       }
     },
     "organ:restart": {
-      "x": 1017,
-      "y": 1746,
-      "r": 301,
+      "x": 1099,
+      "y": 1671,
+      "scale": 1,
       "members": {
-        "file:omp-keeper.json": [
-          0.123,
+        "component:omp-keeper": [
+          0.121,
           0
         ],
+        "file:omp-keeper.json": [
+          -0.154,
+          0.141
+        ],
         "file:omp-keeper.lock": [
-          -0.158,
-          0.144
+          0.024,
+          -0.269
         ],
         "file:restart-secrets": [
-          0.024,
-          -0.275
+          0.194,
+          0.253
         ],
         "module:crates/omp-keeper/src/decide.rs": [
-          0.199,
-          0.259
+          -0.356,
+          -0.063
         ],
         "module:crates/omp-keeper/src/keeper.rs": [
-          -0.365,
-          -0.064
+          0.337,
+          -0.215
         ],
         "module:crates/omp-keeper/src/protocol.rs": [
-          0.345,
-          -0.22
+          -0.113,
+          0.42
         ],
         "module:crates/host/src/portable/restart.rs": [
-          -0.116,
-          0.43
+          -0.215,
+          -0.415
         ],
         "module:crates/protocol/src/restart": [
-          -0.22,
-          -0.424
+          0.467,
+          0.171
         ],
         "module:adapters/omp/house-proof/restart-door.ts": [
-          0.478,
-          0.175
+          -0.486,
+          0.201
         ],
         "module:crates/akasha/src/restart": [
-          -0.497,
-          0.205
+          0.234,
+          -0.501
         ],
         "operation:native/restart_claim": [
-          0.24,
-          -0.512
+          0.173,
+          0.552
         ],
         "operation:native/restart_request": [
-          0.177,
-          0.565
+          -0.522,
+          -0.302
         ],
         "operation:native/restart_status": [
-          -0.534,
-          -0.309
+          0.612,
+          -0.135
         ],
         "operation:native/restart_transition": [
-          0.626,
-          -0.138
+          -0.374,
+          0.531
         ],
         "operation:native/restart_verify": [
-          -0.382,
-          0.544
+          -0.086,
+          -0.666
         ],
         "store:restart.intent_events": [
-          -0.088,
-          -0.682
+          0.53,
+          0.446
         ],
         "store:restart.intent_instances": [
-          0.542,
-          0.457
-        ],
-        "store:restart.intents": [
-          -0.73,
+          -0.713,
           0.03
         ],
+        "store:restart.intents": [
+          0.52,
+          -0.518
+        ],
         "store:restart.principal_capabilities": [
-          0.532,
-          -0.53
+          -0.035,
+          0.752
         ],
         "store:restart.successor_proofs": [
-          -0.036,
-          0.77
+          -0.495,
+          -0.593
         ],
         "tool:request_restart": [
-          -0.506,
-          -0.607
+          0.784,
+          0.105
         ]
       }
     },
     "organ:worker-lifecycle": {
-      "x": 1385,
-      "y": 991,
-      "r": 239,
+      "x": 1273,
+      "y": 852,
+      "scale": 1,
       "members": {
         "file:journal.jsonl": [
           0.141,
@@ -210,655 +218,213 @@
         ]
       }
     },
-    "organ:adapter": {
-      "x": -358,
-      "y": 826,
-      "r": 340,
-      "members": {
-        "component:omp-adapter": [
-          0.103,
-          0
-        ],
-        "module:adapters/omp/house-proof/anamnesis.ts": [
-          -0.132,
-          0.121
-        ],
-        "module:adapters/omp/house-proof/boat-door.ts": [
-          0.02,
-          -0.23
-        ],
-        "module:adapters/omp/house-proof/context.ts": [
-          0.166,
-          0.217
-        ],
-        "module:adapters/omp/house-proof/conversation-log.ts": [
-          -0.305,
-          -0.054
-        ],
-        "module:adapters/omp/house-proof/exit-guards.ts": [
-          0.289,
-          -0.184
-        ],
-        "module:adapters/omp/giga.ts": [
-          -0.097,
-          0.36
-        ],
-        "module:adapters/omp/house-proof/hallway.ts": [
-          -0.184,
-          -0.355
-        ],
-        "module:adapters/omp/house-proof/knock.ts": [
-          0.4,
-          0.146
-        ],
-        "module:adapters/omp/house-proof/host.ts": [
-          -0.416,
-          0.172
-        ],
-        "module:adapters/omp/house-proof/tools.ts": [
-          0.201,
-          -0.429
-        ],
-        "module:adapters/omp/installed-loader.ts": [
-          0.148,
-          0.473
-        ],
-        "module:adapters/omp/house-proof/insula.ts": [
-          -0.447,
-          -0.259
-        ],
-        "module:adapters/omp/house-proof/vitals.ts": [
-          0.524,
-          -0.115
-        ],
-        "module:adapters/omp/house-proof/judgment-host.ts": [
-          -0.32,
-          0.455
-        ],
-        "module:adapters/omp/kitten-lineage.ts": [
-          -0.074,
-          -0.57
-        ],
-        "module:adapters/omp/house-proof/lesson-ttsr.ts": [
-          0.454,
-          0.382
-        ],
-        "module:adapters/omp/house-proof/lifecycle.ts": [
-          -0.61,
-          0.025
-        ],
-        "module:adapters/omp/house-proof/organ.ts": [
-          0.445,
-          -0.443
-        ],
-        "module:adapters/omp/house-proof/session.ts": [
-          -0.03,
-          0.644
-        ],
-        "module:adapters/omp/house-proof/presence.ts": [
-          -0.424,
-          -0.508
-        ],
-        "module:adapters/omp/house-proof/recall.ts": [
-          0.671,
-          0.09
-        ],
-        "module:adapters/omp/house-proof/recall-policy.ts": [
-          -0.569,
-          0.396
-        ],
-        "module:adapters/omp/house-proof/room.ts": [
-          0.155,
-          -0.691
-        ],
-        "module:adapters/omp/house-proof/routing.ts": [
-          0.359,
-          0.627
-        ],
-        "module:adapters/omp/house-proof/semantic-judgment.ts": [
-          -0.703,
-          -0.224
-        ],
-        "module:adapters/omp/house-proof/session-transport.ts": [
-          0.683,
-          -0.315
-        ],
-        "module:adapters/omp/hygiene.ts": [
-          -0.296,
-          0.707
-        ],
-        "module:adapters/omp/house-proof/substrate.ts": [
-          -0.264,
-          -0.734
-        ],
-        "module:adapters/omp/house-proof/top-level-session-fence.ts": [
-          0.702,
-          0.369
-        ]
-      }
-    },
-    "organ:substrate": {
-      "x": 936,
-      "y": 522,
-      "r": 110,
-      "members": {
-        "module:substrate/deploy-local.ps1": [
-          0.4,
-          0
-        ],
-        "module:substrate/migrations": [
-          -0.511,
-          0.468
-        ]
-      }
-    },
-    "organ:anamnesis": {
-      "x": 2197,
-      "y": 189,
-      "r": 124,
-      "members": {
-        "module:crates/akasha/src/anamnesis.rs": [
-          0.283,
-          0
-        ],
-        "module:crates/summoning/src/anamnesis.rs": [
-          -0.361,
-          0.331
-        ],
-        "store:anamnesis": [
-          0.055,
-          -0.63
-        ],
-        "store:anamnesis_reps": [
-          0.455,
-          0.594
-        ]
-      }
-    },
-    "organ:boats": {
-      "x": 3090,
-      "y": 1094,
-      "r": 164,
-      "members": {
-        "module:crates/origami/src/boats/sleep.rs": [
-          0.214,
-          0
-        ],
-        "module:crates/origami/src/boats/wake.rs": [
-          -0.273,
-          0.25
-        ],
-        "module:crates/origami/src/boats": [
-          0.042,
-          -0.476
-        ],
-        "module:crates/origami/src/boats/paper_boat.rs": [
-          0.344,
-          0.449
-        ],
-        "module:crates/akasha/src/paper_boat.rs": [
-          -0.632,
-          -0.112
-        ],
-        "store:crane_outbox": [
-          0.598,
-          -0.381
-        ],
-        "store:memories": [
-          -0.2,
-          0.744
-        ]
-      }
-    },
-    "organ:canon": {
-      "x": 3744,
-      "y": 976,
-      "r": 124,
-      "members": {
-        "module:crates/akasha/src/canon.rs": [
-          0.283,
-          0
-        ],
-        "module:crates/akasha/src/entity.rs": [
-          -0.361,
-          0.331
-        ],
-        "module:crates/hearth/src/canon.rs": [
-          0.055,
-          -0.63
-        ],
-        "store:named_entities": [
-          0.455,
-          0.594
-        ]
-      }
-    },
-    "organ:docket": {
-      "x": -157,
-      "y": 2407,
-      "r": 175,
-      "members": {
-        "module:crates/akasha/src/docket": [
-          0.2,
-          0
-        ],
-        "store:docket.goals": [
-          -0.255,
-          0.234
-        ],
-        "store:docket.quest_acceptance_items": [
-          0.039,
-          -0.446
-        ],
-        "store:docket.quest_attempts": [
-          0.322,
-          0.42
-        ],
-        "store:docket.quest_events": [
-          -0.591,
-          -0.105
-        ],
-        "store:docket.quest_receipts": [
-          0.56,
-          -0.356
-        ],
-        "store:docket.quests": [
-          -0.187,
-          0.696
-        ],
-        "store:docket.room_capabilities": [
-          -0.357,
-          -0.687
-        ]
-      }
-    },
-    "organ:giga": {
-      "x": 3694,
-      "y": 2020,
-      "r": 206,
-      "members": {
-        "module:crates/akasha/src/giga": [
-          0.171,
-          0
-        ],
-        "module:crates/akasha/src/giga_worker": [
-          -0.218,
-          0.2
-        ],
-        "module:crates/hearth/src/giga": [
-          0.033,
-          -0.38
-        ],
-        "store:giga_candidate_sources": [
-          0.275,
-          0.358
-        ],
-        "store:giga_candidates": [
-          -0.504,
-          -0.089
-        ],
-        "store:giga_event_attempts": [
-          0.477,
-          -0.304
-        ],
-        "store:giga_event_replays": [
-          -0.16,
-          0.594
-        ],
-        "store:giga_event_sources": [
-          -0.304,
-          -0.586
-        ],
-        "store:giga_events": [
-          0.661,
-          0.241
-        ],
-        "store:giga_review_resonances": [
-          -0.687,
-          0.284
-        ],
-        "store:giga_reviews": [
-          0.331,
-          -0.708
-        ]
-      }
-    },
-    "organ:hallway": {
-      "x": 903,
-      "y": 2554,
-      "r": 215,
-      "members": {
-        "module:crates/akasha/src/hallway.rs": [
-          0.163,
-          0
-        ],
-        "module:crates/origami/src/hallways/messages.rs": [
-          -0.209,
-          0.191
-        ],
-        "module:crates/hearth/src/hallway.rs": [
-          0.032,
-          -0.364
-        ],
-        "module:crates/origami/src/hallways": [
-          0.263,
-          0.343
-        ],
-        "store:hallway_allowed_rooms": [
-          -0.482,
-          -0.085
-        ],
-        "store:hallway_channels": [
-          0.457,
-          -0.291
-        ],
-        "store:hallway_knocks": [
-          -0.153,
-          0.569
-        ],
-        "store:hallway_messages": [
-          -0.292,
-          -0.561
-        ],
-        "store:hallway_threads": [
-          0.234,
-          0.747
-        ]
-      }
-    },
-    "organ:insula": {
-      "x": 1555,
-      "y": -166,
-      "r": 152,
-      "members": {
-        "module:crates/akasha/src/insula_writer.rs": [
-          0.231,
-          0
-        ],
-        "module:crates/akasha/src/insula": [
-          -0.295,
-          0.27
-        ],
-        "store:insula.log": [
-          0.045,
-          -0.514
-        ],
-        "store:insula.log_tombstones": [
-          0.372,
-          0.485
-        ],
-        "store:insula.retention_receipts": [
-          -0.682,
-          -0.121
-        ],
-        "store:insula.vitals_minute": [
-          0.646,
-          -0.411
-        ]
-      }
-    },
-    "organ:lessons": {
-      "x": 2627,
-      "y": 1622,
-      "r": 175,
-      "members": {
-        "module:crates/hearth/src/lesson_triggers.rs": [
-          0.2,
-          0
-        ],
-        "module:crates/hearth/src/remember.rs": [
-          -0.255,
-          0.234
-        ],
-        "module:crates/hearth/src/triggers.rs": [
-          0.039,
-          -0.446
-        ],
-        "module:crates/akasha/src/lesson": [
-          0.322,
-          0.42
-        ],
-        "module:crates/akasha/src/remember": [
-          -0.591,
-          -0.105
-        ],
-        "store:design_documents": [
-          0.56,
-          -0.356
-        ],
-        "store:lesson_trigger_events": [
-          -0.187,
-          0.696
-        ],
-        "store:lessons": [
-          -0.357,
-          -0.687
-        ]
-      }
-    },
-    "organ:presence": {
-      "x": 3000,
-      "y": 2185,
-      "r": 110,
-      "members": {
-        "module:crates/akasha/src/presence.rs": [
-          0.327,
-          0
-        ],
-        "module:crates/summoning/src/presence": [
-          -0.417,
-          0.382
-        ],
-        "store:presence_sessions": [
-          0.064,
-          -0.728
-        ]
-      }
-    },
-    "organ:recall": {
-      "x": 2848,
-      "y": 393,
-      "r": 186,
-      "members": {
-        "module:crates/hearth/src/recall.rs": [
-          0.189,
-          0
-        ],
-        "module:crates/akasha/src/recall": [
-          -0.241,
-          0.221
-        ],
-        "store:memory_thread_refs": [
-          0.304,
-          0.396
-        ],
-        "store:operators": [
-          -0.557,
-          -0.099
-        ],
-        "store:semantic_vocabulary": [
-          0.528,
-          -0.336
-        ],
-        "store:thread_event_links": [
-          -0.176,
-          0.657
-        ],
-        "store:thread_events": [
-          -0.337,
-          -0.648
-        ],
-        "store:threads": [
-          0.73,
-          0.267
-        ]
-      }
-    },
-    "organ:routing": {
-      "x": 361,
-      "y": 3049,
-      "r": 110,
-      "members": {
-        "module:crates/host/src/routing.rs": [
-          0.566,
-          0
-        ]
-      }
-    },
-    "organ:host": {
-      "x": 143,
-      "y": 1602,
-      "r": 284,
-      "members": {
-        "module:crates/host/src/bin/athanor-host.rs": [
-          0.123,
-          0
-        ],
-        "module:crates/host/src/config.rs": [
-          -0.158,
-          0.144
-        ],
-        "module:crates/host/src/server/context_session": [
-          0.024,
-          -0.275
-        ],
-        "module:crates/host/src/organ/giga.rs": [
-          0.199,
-          0.259
-        ],
-        "module:crates/host/src/house.rs": [
-          -0.365,
-          -0.064
-        ],
-        "module:crates/host/src/insula.rs": [
-          0.345,
-          -0.22
-        ],
-        "module:crates/host/src/judgment.rs": [
-          -0.116,
-          0.43
-        ],
-        "module:crates/host/src/server/native_commands.rs": [
-          -0.22,
-          -0.424
-        ],
-        "module:crates/host/src/organ": [
-          0.478,
-          0.175
-        ],
-        "module:crates/host/src/panel.rs": [
-          -0.497,
-          0.205
-        ],
-        "module:crates/host/src/portable/home.rs": [
-          0.24,
-          -0.512
-        ],
-        "module:crates/host/src/portable/launch.rs": [
-          0.177,
-          0.565
-        ],
-        "module:crates/host/src/portable/ledger.rs": [
-          -0.534,
-          -0.309
-        ],
-        "module:crates/host/src/portable.rs": [
-          0.626,
-          -0.138
-        ],
-        "module:crates/host/src/presence.rs": [
-          -0.382,
-          0.544
-        ],
-        "module:crates/host/src/policy.rs": [
-          -0.088,
-          -0.682
-        ],
-        "module:crates/host/src/viewport.rs": [
-          0.542,
-          0.457
-        ],
-        "module:crates/host/src/receipt.rs": [
-          -0.73,
-          0.03
-        ],
-        "module:crates/host/src/room_state.rs": [
-          0.532,
-          -0.53
-        ],
-        "module:crates/host/src/server.rs": [
-          -0.036,
-          0.77
-        ],
-        "module:crates/host/src/store.rs": [
-          -0.506,
-          -0.607
-        ]
-      }
-    },
     "organ:install": {
-      "x": 2022,
-      "y": 3715,
-      "r": 224,
+      "x": 2017,
+      "y": 3777,
+      "scale": 1,
       "members": {
-        "module:crates/athanor-install/src/cli": [
-          0.157,
+        "file:native-installer": [
+          0.081,
           0
+        ],
+        "component:release-workflow": [
+          -0.103,
+          0.095
+        ],
+        "command:athanor-doctor": [
+          0.016,
+          -0.18
+        ],
+        "command:athanor-install": [
+          0.13,
+          0.17
+        ],
+        "command:athanor-install-omp-adapter": [
+          -0.239,
+          -0.042
+        ],
+        "command:athanor-keeper": [
+          0.226,
+          -0.144
+        ],
+        "command:athanor-launch-session": [
+          -0.076,
+          0.281
+        ],
+        "command:athanor-rollback": [
+          -0.144,
+          -0.278
+        ],
+        "command:athanor-rollback-omp-adapter": [
+          0.313,
+          0.114
+        ],
+        "command:athanor-service": [
+          -0.326,
+          0.134
+        ],
+        "command:athanor-start": [
+          0.157,
+          -0.335
+        ],
+        "command:athanor-status": [
+          0.116,
+          0.37
+        ],
+        "command:athanor-uninstall": [
+          -0.35,
+          -0.203
+        ],
+        "component:athanor-desktop": [
+          0.41,
+          -0.09
+        ],
+        "component:athanor-service": [
+          -0.25,
+          0.356
+        ],
+        "dependency:rust/futures-util": [
+          -0.058,
+          -0.446
+        ],
+        "dependency:rust/getrandom": [
+          0.355,
+          0.299
+        ],
+        "dependency:rust/hex": [
+          -0.478,
+          0.02
+        ],
+        "dependency:rust/thiserror": [
+          0.348,
+          -0.347
+        ],
+        "dependency:rust/tokio-tungstenite": [
+          -0.023,
+          0.504
+        ],
+        "dependency:rust/url": [
+          -0.332,
+          -0.397
+        ],
+        "dependency:rust/winresource": [
+          0.525,
+          0.071
+        ],
+        "external:github-releases": [
+          -0.445,
+          0.31
+        ],
+        "external:nats": [
+          0.122,
+          -0.541
+        ],
+        "external:tern": [
+          0.281,
+          0.491
+        ],
+        "external:windows-scm": [
+          -0.55,
+          -0.175
+        ],
+        "file:harnesses.json": [
+          0.534,
+          -0.247
+        ],
+        "file:runtime.json": [
+          -0.231,
+          0.553
+        ],
+        "file:dependencies.json": [
+          -0.207,
+          -0.574
+        ],
+        "file:current.json": [
+          0.549,
+          0.289
+        ],
+        "file:release-manifest.json": [
+          -0.61,
+          0.161
+        ],
+        "module:crates/athanor-install/src/cli": [
+          0.347,
+          -0.54
+        ],
+        "module:installer/native-build-cache.ps1": [
+          0.11,
+          0.642
         ],
         "module:crates/athanor-install/src/lib.rs": [
-          -0.2,
-          0.184
+          -0.523,
+          -0.405
         ],
         "module:crates/athanor-install/src/harness": [
-          0.031,
-          -0.349
+          0.669,
+          -0.055
         ],
         "module:crates/athanor-install/src/app.rs": [
-          0.253,
-          0.329
+          -0.462,
+          0.5
+        ],
+        "module:installer/athanor.iss": [
+          0.003,
+          -0.69
         ],
         "module:crates/athanor-install/src/layout.rs": [
-          -0.463,
-          -0.082
+          0.47,
+          0.518
         ],
         "module:crates/athanor-install/src/installer.rs": [
-          0.439,
-          -0.279
+          -0.706,
+          -0.065
+        ],
+        "module:installer/build-native-release.ps1": [
+          0.572,
+          -0.434
         ],
         "module:crates/athanor-install/src/native_runtime.rs": [
-          -0.147,
-          0.546
+          -0.13,
+          0.716
+        ],
+        "module:installer/omp-adapter-component.ps1": [
+          -0.392,
+          -0.623
         ],
         "module:crates/athanor-install/src/component.rs": [
-          -0.28,
-          -0.539
+          0.719,
+          0.197
         ],
         "module:crates/athanor-install/src/omp.rs": [
-          0.608,
-          0.222
+          -0.671,
+          0.344
         ],
         "module:crates/athanor-install/src/boundaries.rs": [
-          -0.632,
-          0.261
+          0.265,
+          -0.715
+        ],
+        "module:installer/native-release-contract.ps1": [
+          0.291,
+          0.714
         ],
         "module:crates/athanor-install/src/manifest.rs": [
-          0.305,
-          -0.651
+          -0.704,
+          -0.334
         ],
         "module:crates/athanor-install/src/service.rs": [
-          0.225,
-          0.718
+          0.753,
+          -0.232
         ],
         "module:crates/athanor-install/src/supervisor.rs": [
-          -0.679,
-          -0.393
+          -0.402,
+          0.687
         ]
       }
     },
     "organ:omp-keeper": {
-      "x": 1629,
-      "y": 2782,
-      "r": 124,
+      "x": 1654,
+      "y": 2915,
+      "scale": 1,
       "members": {
         "module:crates/omp-keeper/src/clock.rs": [
           0.283,
@@ -878,88 +444,105 @@
         ]
       }
     },
-    "organ:protocol": {
-      "x": 2047,
-      "y": 2386,
-      "r": 152,
-      "members": {
-        "module:crates/protocol/src/contract.rs": [
-          0.231,
-          0
-        ],
-        "module:crates/protocol/src/harness.rs": [
-          -0.295,
-          0.27
-        ],
-        "module:crates/protocol/src/host.rs": [
-          0.045,
-          -0.514
-        ],
-        "module:crates/protocol/src/launch.rs": [
-          0.372,
-          0.485
-        ],
-        "module:crates/protocol/src/organ.rs": [
-          -0.682,
-          -0.121
-        ],
-        "module:crates/protocol/src/lib.rs": [
-          0.646,
-          -0.411
-        ]
-      }
-    },
     "organ:pulse": {
-      "x": 1063,
-      "y": 3825,
-      "r": 196,
+      "x": 997,
+      "y": 3880,
+      "scale": 1,
       "members": {
         "component:pulse-ui": [
-          0.179,
+          0.121,
           0
         ],
-        "module:gui-prototype/board": [
-          -0.228,
-          0.209
+        "component:pulse-proxy": [
+          -0.154,
+          0.141
         ],
-        "module:gui-prototype/hallways.js": [
-          0.035,
-          -0.398
+        "component:pulse-dev-server": [
+          0.024,
+          -0.269
         ],
-        "module:gui-prototype/health.js": [
-          0.288,
-          0.376
-        ],
-        "module:gui-prototype/mechanics.js": [
-          -0.528,
-          -0.093
-        ],
-        "module:gui-prototype/projects.js": [
-          0.501,
-          -0.318
-        ],
-        "module:gui-prototype/pulse.js": [
-          -0.167,
-          0.623
-        ],
-        "module:gui-desktop/src/proxy.rs": [
-          -0.319,
-          -0.615
-        ],
-        "module:gui-prototype/repair.js": [
-          0.693,
+        "dependency:rust/axum": [
+          0.194,
           0.253
         ],
+        "dependency:rust/mime_guess": [
+          -0.356,
+          -0.063
+        ],
+        "dependency:rust/percent-encoding": [
+          0.337,
+          -0.215
+        ],
+        "dependency:rust/reqwest": [
+          -0.113,
+          0.42
+        ],
+        "dependency:rust/rust-embed": [
+          -0.215,
+          -0.415
+        ],
+        "dependency:rust/tauri": [
+          0.467,
+          0.171
+        ],
+        "dependency:rust/tauri-build": [
+          -0.486,
+          0.201
+        ],
+        "dependency:rust/tempfile": [
+          0.234,
+          -0.501
+        ],
+        "file:live-routes.json": [
+          0.173,
+          0.552
+        ],
+        "file:runtime-secrets.json": [
+          -0.522,
+          -0.302
+        ],
+        "module:gui-prototype/board": [
+          0.612,
+          -0.135
+        ],
+        "module:gui-prototype/hallways.js": [
+          -0.374,
+          0.531
+        ],
+        "module:gui-prototype/health.js": [
+          -0.086,
+          -0.666
+        ],
+        "module:gui-prototype/mechanics.js": [
+          0.53,
+          0.446
+        ],
+        "module:gui-prototype/projects.js": [
+          -0.713,
+          0.03
+        ],
+        "module:gui-prototype/pulse.js": [
+          0.52,
+          -0.518
+        ],
+        "module:gui-desktop/src/proxy.rs": [
+          -0.035,
+          0.752
+        ],
+        "module:gui-prototype/repair.js": [
+          -0.495,
+          -0.593
+        ],
         "module:gui-prototype/sediment": [
-          -0.721,
-          0.298
+          0.784,
+          0.105
         ]
       }
     },
     "organ:interactive-process": {
-      "x": 1177,
-      "y": 3116,
-      "r": 110,
+      "x": 1213,
+      "y": 3215,
+      "scale": 1,
       "members": {
         "module:crates/interactive-process/src/lib.rs": [
           0.566,
@@ -967,233 +550,1654 @@
         ]
       }
     },
-    "organ:akasha": {
-      "x": 1978,
-      "y": 728,
-      "r": 110,
+    "organ:anamnesis": {
+      "x": 2472,
+      "y": -315,
+      "scale": 1,
       "members": {
-        "module:crates/akasha/src/backup.rs": [
-          0.151,
-          0
-        ],
-        "module:crates/akasha/src/cluster.rs": [
-          -0.193,
-          0.177
-        ],
-        "module:crates/akasha/src/config.rs": [
-          0.03,
-          -0.337
-        ],
-        "module:crates/akasha/src/health.rs": [
-          0.243,
-          0.317
-        ],
-        "module:crates/akasha/src/native/retention.rs": [
-          -0.447,
-          -0.079
-        ],
-        "module:crates/akasha/src/migrations.rs": [
-          0.423,
-          -0.269
-        ],
-        "module:crates/akasha/src/native": [
-          0.566,
-          0
-        ],
-        "module:crates/akasha/src/settings": [
-          -0.27,
-          -0.52
-        ],
-        "module:crates/akasha/src/timeline.rs": [
-          0.586,
-          0.214
-        ],
-        "store:memory_chunks": [
-          -0.609,
-          0.251
-        ],
-        "store:memory_cluster_members": [
-          0.294,
-          -0.628
-        ],
-        "store:memory_clusters": [
-          0.217,
-          0.692
-        ],
-        "store:room_settings": [
-          -0.654,
-          -0.379
-        ],
-        "store:schema_migrations": [
-          0.767,
-          -0.169
-        ]
-      }
-    },
-    "organ:hearth": {
-      "x": 2182,
-      "y": 1207,
-      "r": 110,
-      "members": {
-        "module:crates/hearth/src/authority.rs": [
+        "module:adapters/omp/house-proof/anamnesis.ts": [
           0.189,
           0
         ],
-        "module:crates/hearth/src/backup.rs": [
+        "module:crates/akasha/src/anamnesis.rs": [
           -0.241,
           0.221
         ],
-        "module:crates/hearth/src/cluster.rs": [
+        "module:crates/summoning/src/anamnesis.rs": [
           0.037,
           -0.42
         ],
-        "module:crates/hearth/src/context.rs": [
+        "operation:native/anamnesis": [
           0.304,
           0.396
         ],
-        "module:crates/hearth/src/conversation.rs": [
+        "operation:native/anamnesis_write": [
           -0.557,
           -0.099
         ],
-        "module:crates/hearth/src/error.rs": [
+        "store:anamnesis": [
           0.528,
           -0.336
         ],
-        "module:crates/hearth/src/lineage.rs": [
+        "store:anamnesis_reps": [
           -0.176,
           0.657
         ],
-        "module:crates/hearth/src/operator.rs": [
+        "tool:anamnesis": [
           -0.337,
           -0.648
         ],
-        "module:crates/hearth/src/room.rs": [
+        "tool:anamnesis_write": [
           0.73,
           0.267
         ]
       }
     },
-    "organ:origami": {
-      "x": 1915,
-      "y": 1751,
-      "r": 196,
+    "organ:boats": {
+      "x": 3129,
+      "y": 985,
+      "scale": 1,
       "members": {
-        "module:crates/origami/src/cranes/broker.rs": [
+        "module:adapters/omp/house-proof/boat-door.ts": [
           0.179,
           0
         ],
-        "module:crates/origami/src/cranes/delivery.rs": [
+        "module:crates/origami/src/boats/sleep.rs": [
           -0.228,
           0.209
         ],
-        "module:crates/origami/src/cranes/envelope.rs": [
+        "module:crates/origami/src/boats/wake.rs": [
           0.035,
           -0.398
         ],
-        "module:crates/origami/src/cranes/lanes.rs": [
+        "module:crates/origami/src/boats": [
           0.288,
           0.376
         ],
-        "module:crates/origami/src/cranes/outbox.rs": [
+        "module:crates/origami/src/boats/paper_boat.rs": [
           -0.528,
           -0.093
         ],
-        "module:crates/origami/src/hallways/bells.rs": [
-          0.373,
-          -0.237
-        ],
-        "module:crates/origami/src/hallways/channels.rs": [
-          -0.125,
-          0.464
-        ],
-        "module:crates/origami/src/hallways/knocks.rs": [
-          -0.238,
-          -0.458
-        ],
-        "module:crates/origami/src/hallways/rows.rs": [
-          0.516,
-          0.189
-        ],
-        "module:crates/origami/src/hallways/sea.rs": [
-          -0.537,
-          0.222
-        ],
-        "module:crates/origami/src/cranes": [
+        "module:crates/akasha/src/paper_boat.rs": [
           0.501,
           -0.318
         ],
-        "module:crates/origami/src/sea.rs": [
+        "operation:native/paper_boat_sleep": [
           -0.167,
           0.623
         ],
-        "store:crane_dead_letters": [
+        "operation:native/paper_boat_wake": [
           -0.319,
           -0.615
         ],
-        "store:crane_receipts": [
+        "store:crane_outbox": [
           0.693,
           0.253
         ],
-        "store:hallway_knock_policies": [
-          -0.413,
-          0.587
+        "tool:wake": [
+          -0.721,
+          0.298
+        ]
+      }
+    },
+    "organ:canon": {
+      "x": 3810,
+      "y": 969,
+      "scale": 1,
+      "members": {
+        "module:crates/akasha/src/canon.rs": [
+          0.189,
+          0
+        ],
+        "module:crates/akasha/src/entity.rs": [
+          -0.241,
+          0.221
+        ],
+        "module:crates/hearth/src/canon.rs": [
+          0.037,
+          -0.42
+        ],
+        "operation:native/canon_read": [
+          0.304,
+          0.396
+        ],
+        "operation:native/canon_write": [
+          -0.557,
+          -0.099
+        ],
+        "operation:native/entity_resolve": [
+          0.528,
+          -0.336
+        ],
+        "store:named_entities": [
+          -0.176,
+          0.657
+        ],
+        "tool:canon_read": [
+          -0.337,
+          -0.648
+        ],
+        "tool:canon_write": [
+          0.73,
+          0.267
+        ]
+      }
+    },
+    "organ:docket": {
+      "x": -262,
+      "y": 2665,
+      "scale": 1,
+      "members": {
+        "module:crates/akasha/src/docket": [
+          0.126,
+          0
+        ],
+        "operation:native/quest_board": [
+          -0.162,
+          0.148
+        ],
+        "operation:native/quest_chargebook": [
+          0.025,
+          -0.282
+        ],
+        "operation:native/quest_claim": [
+          0.204,
+          0.266
+        ],
+        "operation:native/quest_clock": [
+          -0.374,
+          -0.066
+        ],
+        "operation:native/quest_evidence": [
+          0.354,
+          -0.225
+        ],
+        "operation:native/quest_post": [
+          -0.118,
+          0.44
+        ],
+        "operation:native/quest_report": [
+          -0.226,
+          -0.435
+        ],
+        "store:docket.goals": [
+          0.49,
+          0.179
+        ],
+        "store:docket.quest_acceptance_items": [
+          -0.51,
+          0.21
+        ],
+        "store:docket.quest_attempts": [
+          0.246,
+          -0.525
+        ],
+        "store:docket.quest_events": [
+          0.182,
+          0.579
+        ],
+        "store:docket.quest_receipts": [
+          -0.547,
+          -0.317
+        ],
+        "store:docket.quests": [
+          0.642,
+          -0.141
+        ],
+        "store:docket.room_capabilities": [
+          -0.392,
+          0.557
+        ],
+        "tool:quest_board": [
+          -0.091,
+          -0.698
+        ],
+        "tool:quest_claim": [
+          0.556,
+          0.468
+        ],
+        "tool:quest_evidence": [
+          -0.748,
+          0.031
+        ],
+        "tool:quest_post": [
+          0.545,
+          -0.543
+        ],
+        "tool:quest_report": [
+          -0.036,
+          0.789
+        ]
+      }
+    },
+    "organ:giga": {
+      "x": 3985,
+      "y": 2085,
+      "scale": 1,
+      "members": {
+        "file:giga-source-ledger": [
+          0.1,
+          0
+        ],
+        "module:adapters/omp/giga.ts": [
+          -0.128,
+          0.117
+        ],
+        "module:crates/akasha/src/giga": [
+          0.02,
+          -0.223
+        ],
+        "module:crates/akasha/src/giga_worker": [
+          0.161,
+          0.21
+        ],
+        "module:crates/hearth/src/giga": [
+          -0.295,
+          -0.052
+        ],
+        "operation:native/giga_candidate_list": [
+          0.28,
+          -0.178
+        ],
+        "operation:native/giga_conversation_ingest": [
+          -0.094,
+          0.348
+        ],
+        "operation:native/giga_event_claim": [
+          -0.179,
+          -0.344
+        ],
+        "operation:native/giga_event_finish": [
+          0.387,
+          0.141
+        ],
+        "operation:native/giga_event_ingest": [
+          -0.403,
+          0.166
+        ],
+        "operation:native/giga_event_replay": [
+          0.194,
+          -0.415
+        ],
+        "operation:native/giga_health": [
+          0.144,
+          0.458
+        ],
+        "operation:native/giga_promote": [
+          -0.433,
+          -0.251
+        ],
+        "operation:native/giga_queue_maintenance": [
+          0.507,
+          -0.112
+        ],
+        "operation:native/giga_review": [
+          -0.31,
+          0.441
+        ],
+        "operation:native/giga_tool_promote": [
+          -0.072,
+          -0.552
+        ],
+        "operation:native/giga_tool_review": [
+          0.439,
+          0.37
+        ],
+        "store:giga_candidate_sources": [
+          -0.591,
+          0.024
+        ],
+        "store:giga_candidates": [
+          0.431,
+          -0.429
+        ],
+        "store:giga_event_attempts": [
+          -0.029,
+          0.624
+        ],
+        "store:giga_event_replays": [
+          -0.41,
+          -0.492
+        ],
+        "store:giga_event_sources": [
+          0.65,
+          0.087
+        ],
+        "store:giga_events": [
+          -0.551,
+          0.383
+        ],
+        "store:giga_review_resonances": [
+          0.15,
+          -0.669
+        ],
+        "store:giga_reviews": [
+          0.348,
+          0.607
+        ],
+        "tool:giga_candidate_list": [
+          -0.68,
+          -0.217
+        ],
+        "tool:giga_health": [
+          0.661,
+          -0.305
+        ],
+        "tool:giga_promote_coding_lesson": [
+          -0.286,
+          0.684
+        ],
+        "tool:giga_promote_memory": [
+          -0.256,
+          -0.71
+        ],
+        "tool:giga_promote_project_lesson": [
+          0.68,
+          0.357
+        ],
+        "tool:giga_queue_maintenance": [
+          -0.755,
+          0.199
+        ],
+        "tool:giga_review": [
+          0.429,
+          -0.668
+        ]
+      }
+    },
+    "organ:hallway": {
+      "x": 853,
+      "y": 2571,
+      "scale": 1,
+      "members": {
+        "module:adapters/omp/house-proof/hallway.ts": [
+          0.107,
+          0
+        ],
+        "module:adapters/omp/house-proof/knock.ts": [
+          -0.137,
+          0.125
+        ],
+        "module:crates/akasha/src/hallway.rs": [
+          0.021,
+          -0.238
+        ],
+        "module:crates/origami/src/hallways/messages.rs": [
+          0.172,
+          0.224
+        ],
+        "module:crates/hearth/src/hallway.rs": [
+          -0.316,
+          -0.056
+        ],
+        "module:crates/origami/src/hallways": [
+          0.299,
+          -0.19
+        ],
+        "operation:native/hallway_create": [
+          -0.1,
+          0.372
+        ],
+        "operation:native/hallway_inbox": [
+          -0.191,
+          -0.367
+        ],
+        "operation:native/hallway_join": [
+          0.414,
+          0.151
+        ],
+        "operation:native/hallway_knock": [
+          -0.431,
+          0.178
+        ],
+        "operation:native/hallway_knock_policy": [
+          0.208,
+          -0.444
+        ],
+        "operation:native/hallway_post": [
+          0.153,
+          0.489
+        ],
+        "operation:native/hallway_read": [
+          -0.462,
+          -0.268
+        ],
+        "store:hallway_allowed_rooms": [
+          0.543,
+          -0.119
+        ],
+        "store:hallway_channels": [
+          -0.331,
+          0.471
+        ],
+        "store:hallway_knocks": [
+          -0.077,
+          -0.59
+        ],
+        "store:hallway_messages": [
+          0.47,
+          0.396
         ],
         "store:hallway_notifications": [
-          -0.095,
-          -0.736
+          -0.632,
+          0.026
         ],
         "store:hallway_presences": [
-          0.586,
-          0.494
+          0.461,
+          -0.459
         ],
         "store:hallway_room_state": [
-          -0.788,
-          0.033
+          -0.031,
+          0.667
+        ],
+        "store:hallway_threads": [
+          -0.439,
+          -0.526
+        ],
+        "tool:hallway_create": [
+          0.695,
+          0.093
+        ],
+        "tool:hallway_inbox": [
+          -0.589,
+          0.41
+        ],
+        "tool:hallway_join": [
+          0.161,
+          -0.715
+        ],
+        "tool:hallway_knock": [
+          0.372,
+          0.649
+        ],
+        "tool:hallway_knock_policy": [
+          -0.727,
+          -0.232
+        ],
+        "tool:hallway_post": [
+          0.706,
+          -0.326
+        ],
+        "tool:hallway_read": [
+          -0.306,
+          0.731
+        ]
+      }
+    },
+    "organ:insula": {
+      "x": 1442,
+      "y": -352,
+      "scale": 1,
+      "members": {
+        "endpoint:host//athanor/v1/insula/events": [
+          0.189,
+          0
+        ],
+        "module:crates/akasha/src/insula_writer.rs": [
+          -0.241,
+          0.221
+        ],
+        "module:crates/akasha/src/insula": [
+          0.037,
+          -0.42
+        ],
+        "module:adapters/omp/house-proof/insula.ts": [
+          0.304,
+          0.396
+        ],
+        "module:adapters/omp/house-proof/vitals.ts": [
+          -0.557,
+          -0.099
+        ],
+        "store:insula.log": [
+          0.528,
+          -0.336
+        ],
+        "store:insula.log_tombstones": [
+          -0.176,
+          0.657
+        ],
+        "store:insula.retention_receipts": [
+          -0.337,
+          -0.648
+        ],
+        "store:insula.vitals_minute": [
+          0.73,
+          0.267
+        ]
+      }
+    },
+    "organ:lessons": {
+      "x": 3079,
+      "y": 1781,
+      "scale": 1,
+      "members": {
+        "module:crates/hearth/src/lesson_triggers.rs": [
+          0.115,
+          0
+        ],
+        "module:crates/hearth/src/remember.rs": [
+          -0.147,
+          0.135
+        ],
+        "module:crates/hearth/src/triggers.rs": [
+          0.023,
+          -0.257
+        ],
+        "module:crates/akasha/src/lesson": [
+          0.186,
+          0.242
+        ],
+        "module:adapters/omp/house-proof/lesson-ttsr.ts": [
+          -0.341,
+          -0.06
+        ],
+        "module:crates/akasha/src/remember": [
+          0.323,
+          -0.206
+        ],
+        "operation:host/AkashaLessonQuery": [
+          -0.108,
+          0.402
+        ],
+        "operation:native/design_document_query": [
+          -0.206,
+          -0.397
+        ],
+        "operation:native/design_document_write": [
+          0.447,
+          0.163
+        ],
+        "operation:native/lesson_context": [
+          -0.465,
+          0.192
+        ],
+        "operation:native/lesson_delete": [
+          0.224,
+          -0.479
+        ],
+        "operation:native/lesson_query": [
+          0.166,
+          0.528
+        ],
+        "operation:native/lesson_trigger_match": [
+          -0.5,
+          -0.289
+        ],
+        "operation:native/lesson_trigger_record": [
+          0.586,
+          -0.129
+        ],
+        "operation:native/lesson_update": [
+          -0.358,
+          0.509
+        ],
+        "operation:native/remember": [
+          -0.083,
+          -0.638
+        ],
+        "store:design_documents": [
+          0.507,
+          0.427
+        ],
+        "store:lesson_trigger_events": [
+          -0.683,
+          0.028
+        ],
+        "store:lessons": [
+          0.498,
+          -0.495
+        ],
+        "tool:delete_lesson": [
+          -0.033,
+          0.72
+        ],
+        "tool:design_doc": [
+          -0.474,
+          -0.568
+        ],
+        "tool:design_doc_write": [
+          0.75,
+          0.101
+        ],
+        "tool:lessons": [
+          -0.636,
+          0.442
+        ],
+        "tool:update_lesson": [
+          0.174,
+          -0.772
+        ]
+      }
+    },
+    "organ:presence": {
+      "x": 3044,
+      "y": 2531,
+      "scale": 1.058,
+      "members": {
+        "module:adapters/omp/house-proof/presence.ts": [
+          0.253,
+          0
+        ],
+        "module:crates/akasha/src/presence.rs": [
+          -0.323,
+          0.296
+        ],
+        "module:crates/summoning/src/presence": [
+          0.049,
+          -0.564
+        ],
+        "operation:host/PresenceCommands": [
+          0.407,
+          0.531
+        ],
+        "store:presence_sessions": [
+          -0.747,
+          -0.132
+        ]
+      }
+    },
+    "organ:recall": {
+      "x": 2834,
+      "y": 361,
+      "scale": 1,
+      "members": {
+        "module:crates/hearth/src/recall.rs": [
+          0.179,
+          0
+        ],
+        "module:adapters/omp/house-proof/recall.ts": [
+          -0.228,
+          0.209
+        ],
+        "module:crates/akasha/src/recall": [
+          0.035,
+          -0.398
+        ],
+        "module:adapters/omp/house-proof/recall-policy.ts": [
+          0.288,
+          0.376
+        ],
+        "operation:host/AkashaRecallQuery": [
+          -0.528,
+          -0.093
+        ],
+        "operation:native/recall": [
+          0.501,
+          -0.318
+        ],
+        "store:operators": [
+          -0.167,
+          0.623
+        ],
+        "store:semantic_vocabulary": [
+          -0.319,
+          -0.615
+        ],
+        "tool:recall": [
+          0.693,
+          0.253
+        ],
+        "tool:recall_policy": [
+          -0.721,
+          0.298
+        ]
+      }
+    },
+    "organ:routing": {
+      "x": 306,
+      "y": 3174,
+      "scale": 1,
+      "members": {
+        "module:crates/host/src/routing.rs": [
+          0.189,
+          0
+        ],
+        "module:adapters/omp/house-proof/routing.ts": [
+          -0.241,
+          0.221
+        ],
+        "operation:host/FamiliarStatus": [
+          0.037,
+          -0.42
+        ],
+        "operation:host/RoutingDispatch": [
+          0.304,
+          0.396
+        ],
+        "operation:host/RoutingStatus": [
+          -0.557,
+          -0.099
+        ],
+        "tool:familiar_dispatch": [
+          0.528,
+          -0.336
+        ],
+        "tool:familiar_status": [
+          -0.176,
+          0.657
+        ],
+        "tool:house_dispatch": [
+          -0.337,
+          -0.648
+        ],
+        "tool:house_lane_status": [
+          0.73,
+          0.267
         ]
       }
     },
     "organ:summoning": {
-      "x": 3266,
-      "y": 2993,
-      "r": 110,
+      "x": 3296,
+      "y": 3030,
+      "scale": 1,
       "members": {}
     },
     "organ:vault": {
-      "x": 2549,
-      "y": 3051,
-      "r": 110,
+      "x": 2689,
+      "y": 3122,
+      "scale": 1,
       "members": {
-        "module:crates/vault/src/config.rs": [
-          0.2,
+        "dependency:rust/regex": [
+          0.171,
           0
+        ],
+        "dependency:rust/unicode-normalization": [
+          -0.218,
+          0.2
+        ],
+        "module:crates/vault/src/config.rs": [
+          0.033,
+          -0.38
         ],
         "module:crates/vault/src/documents.rs": [
-          -0.255,
-          0.234
+          0.275,
+          0.358
         ],
         "module:crates/vault/src/ignore.rs": [
-          0.039,
-          -0.446
+          -0.504,
+          -0.089
         ],
         "module:crates/vault/src/index.rs": [
-          0.322,
-          0.42
+          0.477,
+          -0.304
         ],
         "module:crates/vault/src/rank.rs": [
-          -0.591,
-          -0.105
+          -0.16,
+          0.594
         ],
         "module:crates/vault/src/recall.rs": [
-          0.566,
-          0
+          -0.304,
+          -0.586
         ],
         "module:crates/vault/src/text.rs": [
-          -0.187,
-          0.696
+          0.661,
+          0.241
         ],
         "module:crates/vault/src/walk.rs": [
-          -0.357,
-          -0.687
+          -0.687,
+          0.284
+        ],
+        "operation:native/vault_recall": [
+          0.331,
+          -0.708
+        ]
+      }
+    },
+    "organ:host": {
+      "x": 47,
+      "y": 1318,
+      "scale": 1,
+      "members": {
+        "dependency:rust/atomicwrites": [
+          0.04,
+          -0.005
+        ],
+        "dependency:rust/base64": [
+          -0.086,
+          0.079
+        ],
+        "endpoint:host//athanor/v1/docket/board": [
+          0.013,
+          -0.151
+        ],
+        "endpoint:host//athanor/v1/docket/evidence": [
+          0.109,
+          0.142
+        ],
+        "endpoint:host//health": [
+          -0.193,
+          -0.045
+        ],
+        "endpoint:host//athanor/v1/hallway/inbox": [
+          0.189,
+          -0.12
+        ],
+        "endpoint:host//athanor/v1/hallway/messages": [
+          -0.063,
+          0.235
+        ],
+        "endpoint:host//athanor/v1/insula/retention": [
+          -0.121,
+          -0.232
+        ],
+        "endpoint:host//athanor/v1/insula/spans": [
+          0.262,
+          0.096
+        ],
+        "endpoint:host//athanor/v1/insula/trace": [
+          -0.272,
+          0.112
+        ],
+        "endpoint:host//athanor/v1/insula/unverified-exit": [
+          0.131,
+          -0.281
+        ],
+        "endpoint:host//athanor/v1/insula/vitals": [
+          0.097,
+          0.309
+        ],
+        "endpoint:host//athanor/v1/lesson/timeline": [
+          -0.293,
+          -0.169
+        ],
+        "endpoint:host//athanor/v1/memory/read": [
+          0.343,
+          -0.075
+        ],
+        "endpoint:host//athanor/v1/memory/timeline": [
+          -0.209,
+          0.298
+        ],
+        "endpoint:host//session": [
+          -0.048,
+          -0.373
+        ],
+        "endpoint:host/websocket": [
+          0.297,
+          0.25
+        ],
+        "external:laya": [
+          -0.4,
+          0.017
+        ],
+        "external:typesafe": [
+          0.292,
+          -0.29
+        ],
+        "file:active_spirit.md": [
+          -0.019,
+          0.422
+        ],
+        "file:bearer-token": [
+          -0.277,
+          -0.332
+        ],
+        "file:context-turns": [
+          0.439,
+          0.059
+        ],
+        "file:spellbook.json": [
+          -0.372,
+          0.259
+        ],
+        "file:AGENTS.md": [
+          0.102,
+          -0.452
+        ],
+        "file:host-config.json": [
+          0.235,
+          0.411
+        ],
+        "file:launch-manifest": [
+          -0.46,
+          -0.147
+        ],
+        "file:portable-sessions.json": [
+          0.447,
+          -0.206
+        ],
+        "file:presence-pulse.md": [
+          -0.194,
+          0.463
+        ],
+        "file:recall-policy-cursor.json": [
+          -0.173,
+          -0.48
+        ],
+        "file:recall-policy-receipts.json": [
+          0.46,
+          0.242
+        ],
+        "file:recall-policy-sessions.json": [
+          -0.511,
+          0.135
+        ],
+        "file:recall-turns.jsonl": [
+          0.29,
+          -0.451
+        ],
+        "file:.athanor-room.json": [
+          0.092,
+          0.537
+        ],
+        "file:athanor-house-state.json": [
+          -0.438,
+          -0.339
+        ],
+        "file:conversation-ledgers": [
+          0.56,
+          -0.046
+        ],
+        "module:crates/host/src/bin/athanor-host.rs": [
+          -0.387,
+          0.418
+        ],
+        "module:crates/host/src/config.rs": [
+          0.003,
+          -0.578
+        ],
+        "module:crates/host/src/server/context_session": [
+          0.393,
+          0.434
+        ],
+        "module:crates/host/src/organ/giga.rs": [
+          -0.591,
+          -0.055
+        ],
+        "module:crates/host/src/house.rs": [
+          0.479,
+          -0.363
+        ],
+        "module:crates/host/src/insula.rs": [
+          -0.109,
+          0.599
+        ],
+        "module:crates/host/src/judgment.rs": [
+          -0.328,
+          -0.521
+        ],
+        "module:crates/host/src/lifecycle.rs": [
+          0.601,
+          0.165
+        ],
+        "module:crates/host/src/server/native_commands.rs": [
+          -0.561,
+          0.288
+        ],
+        "module:crates/host/src/organ": [
+          0.222,
+          -0.598
+        ],
+        "module:crates/host/src/panel.rs": [
+          0.243,
+          0.597
+        ],
+        "module:crates/host/src/portable/home.rs": [
+          -0.589,
+          -0.279
+        ],
+        "module:crates/host/src/portable/launch.rs": [
+          0.63,
+          -0.194
+        ],
+        "module:crates/host/src/portable/ledger.rs": [
+          -0.337,
+          0.575
+        ],
+        "module:crates/host/src/portable.rs": [
+          -0.116,
+          -0.639
+        ],
+        "module:crates/host/src/presence.rs": [
+          0.554,
+          0.393
+        ],
+        "module:crates/host/src/policy.rs": [
+          -0.681,
+          0.085
+        ],
+        "module:crates/host/src/viewport.rs": [
+          0.449,
+          -0.528
+        ],
+        "module:crates/host/src/receipt.rs": [
+          0.026,
+          0.699
+        ],
+        "module:crates/host/src/room_state.rs": [
+          -0.496,
+          -0.503
+        ],
+        "module:crates/host/src/server.rs": [
+          0.711,
+          0.036
+        ],
+        "module:crates/host/src/store.rs": [
+          -0.554,
+          0.458
+        ],
+        "operation:host/AnalyzeContext": [
+          0.1,
+          -0.718
+        ],
+        "operation:host/ApplyRecallViewport": [
+          0.415,
+          0.602
+        ],
+        "operation:host/ContextLessonPlan": [
+          -0.719,
+          -0.165
+        ],
+        "operation:host/JudgmentRun": [
+          0.647,
+          -0.367
+        ],
+        "operation:host/LifecyclePlan": [
+          -0.231,
+          0.713
+        ],
+        "operation:host/LogConversation": [
+          -0.314,
+          -0.688
+        ],
+        "operation:host/NormalizeLineage": [
+          0.701,
+          0.297
+        ],
+        "operation:host/OrganCall": [
+          -0.724,
+          0.257
+        ],
+        "operation:host/PaperBoatReceiptSubscribe": [
+          0.363,
+          -0.683
+        ],
+        "operation:host/TriggerLessons": [
+          0.195,
+          0.755
+        ],
+        "operation:host/PrepareContext": [
+          -0.659,
+          -0.428
+        ],
+        "operation:host/RecallPolicyCommands": [
+          0.781,
+          -0.13
+        ],
+        "operation:host/RoomState": [
+          -0.491,
+          0.628
+        ]
+      }
+    },
+    "organ:protocol": {
+      "x": 2353,
+      "y": 2542,
+      "scale": 1,
+      "members": {
+        "module:crates/protocol/src/contract.rs": [
+          0.214,
+          0
+        ],
+        "module:crates/protocol/src/harness.rs": [
+          -0.273,
+          0.25
+        ],
+        "module:crates/protocol/src/host.rs": [
+          0.042,
+          -0.476
+        ],
+        "module:crates/protocol/src/launch.rs": [
+          0.344,
+          0.449
+        ],
+        "module:crates/protocol/src/organ.rs": [
+          -0.632,
+          -0.112
+        ],
+        "module:crates/protocol/src/lib.rs": [
+          0.598,
+          -0.381
+        ],
+        "operation:native/giga_set_enablement": [
+          -0.2,
+          0.744
+        ]
+      }
+    },
+    "organ:adapter": {
+      "x": -752,
+      "y": 370,
+      "scale": 1.263,
+      "members": {
+        "component:omp-adapter": [
+          0.105,
+          0
+        ],
+        "file:component-manifest.json": [
+          -0.134,
+          0.123
+        ],
+        "module:adapters/omp/house-proof/context.ts": [
+          0.021,
+          -0.234
+        ],
+        "module:adapters/omp/house-proof/conversation-log.ts": [
+          0.169,
+          0.221
+        ],
+        "module:adapters/omp/house-proof/exit-guards.ts": [
+          -0.31,
+          -0.055
+        ],
+        "module:adapters/omp/house-proof/host.ts": [
+          0.294,
+          -0.187
+        ],
+        "module:adapters/omp/house-proof/tools.ts": [
+          -0.098,
+          0.366
+        ],
+        "module:adapters/omp/installed-loader.ts": [
+          -0.188,
+          -0.361
+        ],
+        "module:adapters/omp/house-proof/judgment-host.ts": [
+          0.407,
+          0.149
+        ],
+        "module:adapters/omp/kitten-lineage.ts": [
+          -0.423,
+          0.175
+        ],
+        "module:adapters/omp/house-proof/lifecycle.ts": [
+          0.204,
+          -0.436
+        ],
+        "module:adapters/omp/house-proof/organ.ts": [
+          0.151,
+          0.481
+        ],
+        "module:adapters/omp/house-proof/session.ts": [
+          -0.454,
+          -0.263
+        ],
+        "module:adapters/omp/house-proof/room.ts": [
+          0.533,
+          -0.117
+        ],
+        "module:adapters/omp/house-proof/semantic-judgment.ts": [
+          -0.325,
+          0.463
+        ],
+        "module:adapters/omp/house-proof/session-transport.ts": [
+          -0.075,
+          -0.58
+        ],
+        "module:adapters/omp/hygiene.ts": [
+          0.461,
+          0.389
+        ],
+        "module:adapters/omp/house-proof/substrate.ts": [
+          -0.621,
+          0.026
+        ],
+        "module:adapters/omp/house-proof/top-level-session-fence.ts": [
+          0.453,
+          -0.451
+        ],
+        "tool:home_resource_write": [
+          -0.03,
+          0.655
+        ],
+        "tool:home_resources": [
+          -0.431,
+          -0.516
+        ],
+        "tool:house_model_default": [
+          0.683,
+          0.092
+        ],
+        "tool:house_routing_mode": [
+          -0.578,
+          0.402
+        ],
+        "tool:house_sessions": [
+          0.158,
+          -0.703
+        ],
+        "tool:kitten_lineage_status": [
+          0.366,
+          0.638
+        ],
+        "tool:remember": [
+          -0.715,
+          -0.228
+        ],
+        "tool:room_state": [
+          0.694,
+          -0.321
+        ],
+        "tool:session_control": [
+          -0.301,
+          0.719
+        ],
+        "tool:set_room_state": [
+          -0.268,
+          -0.746
+        ]
+      }
+    },
+    "organ:substrate": {
+      "x": 812,
+      "y": 383,
+      "scale": 1,
+      "members": {
+        "external:wda-max-linux-deploy": [
+          0.327,
+          0
+        ],
+        "module:substrate/deploy-local.ps1": [
+          -0.417,
+          0.382
+        ],
+        "module:substrate/migrations": [
+          0.064,
+          -0.728
+        ]
+      }
+    },
+    "organ:akasha": {
+      "x": 1936,
+      "y": 289,
+      "scale": 1,
+      "members": {
+        "component:ci": [
+          0.109,
+          0
+        ],
+        "component:pages-workflow": [
+          -0.139,
+          0.127
+        ],
+        "dependency:rust/ast-grep-core": [
+          0.021,
+          -0.243
+        ],
+        "dependency:rust/ast-grep-language": [
+          0.175,
+          0.229
+        ],
+        "dependency:rust/tracing-subscriber": [
+          -0.322,
+          -0.057
+        ],
+        "external:github-pages": [
+          0.305,
+          -0.194
+        ],
+        "external:pg-tools": [
+          -0.102,
+          0.379
+        ],
+        "file:backup-dump": [
+          -0.194,
+          -0.374
+        ],
+        "module:crates/akasha/src/backup.rs": [
+          0.422,
+          0.154
+        ],
+        "module:crates/akasha/src/cluster.rs": [
+          -0.439,
+          0.181
+        ],
+        "module:crates/akasha/src/config.rs": [
+          0.211,
+          -0.452
+        ],
+        "module:crates/akasha/src/health.rs": [
+          0.156,
+          0.498
+        ],
+        "module:crates/akasha/src/native/retention.rs": [
+          -0.471,
+          -0.273
+        ],
+        "module:crates/akasha/src/migrations.rs": [
+          0.552,
+          -0.121
+        ],
+        "module:crates/akasha/src/native": [
+          -0.337,
+          0.48
+        ],
+        "module:scripts/build-pages.mjs": [
+          -0.078,
+          -0.601
+        ],
+        "module:crates/akasha/src/settings": [
+          0.478,
+          0.403
+        ],
+        "module:crates/akasha/src/timeline.rs": [
+          -0.644,
+          0.027
+        ],
+        "operation:native/cluster_maintenance": [
+          0.469,
+          -0.467
+        ],
+        "operation:native/substrate_health": [
+          -0.031,
+          0.679
+        ],
+        "operation:native/substrate_migrations": [
+          -0.447,
+          -0.535
+        ],
+        "file:documentation": [
+          0.708,
+          0.095
+        ],
+        "store:memory_cluster_members": [
+          -0.599,
+          0.417
+        ],
+        "store:memory_clusters": [
+          0.164,
+          -0.728
+        ],
+        "store:room_settings": [
+          0.379,
+          0.661
+        ],
+        "store:schema_migrations": [
+          -0.741,
+          -0.236
+        ],
+        "component:public-pages": [
+          0.719,
+          -0.332
+        ]
+      }
+    },
+    "organ:origami": {
+      "x": 1708,
+      "y": 2245,
+      "scale": 1,
+      "members": {
+        "dependency:rust/bytes": [
+          0.141,
+          0
+        ],
+        "module:crates/origami/src/cranes/broker.rs": [
+          -0.181,
+          0.165
+        ],
+        "module:crates/origami/src/cranes/delivery.rs": [
+          0.028,
+          -0.315
+        ],
+        "module:crates/origami/src/cranes/envelope.rs": [
+          0.228,
+          0.297
+        ],
+        "module:crates/origami/src/cranes/lanes.rs": [
+          -0.418,
+          -0.074
+        ],
+        "module:crates/origami/src/cranes/outbox.rs": [
+          0.396,
+          -0.252
+        ],
+        "module:crates/origami/src/hallways/bells.rs": [
+          -0.132,
+          0.492
+        ],
+        "module:crates/origami/src/hallways/channels.rs": [
+          -0.252,
+          -0.486
+        ],
+        "module:crates/origami/src/hallways/knocks.rs": [
+          0.548,
+          0.2
+        ],
+        "module:crates/origami/src/hallways/rows.rs": [
+          -0.57,
+          0.235
+        ],
+        "module:crates/origami/src/hallways/sea.rs": [
+          0.275,
+          -0.587
+        ],
+        "module:crates/origami/src/cranes": [
+          0.203,
+          0.647
+        ],
+        "module:crates/origami/src/sea.rs": [
+          -0.612,
+          -0.355
+        ],
+        "store:crane_dead_letters": [
+          0.718,
+          -0.158
+        ],
+        "store:crane_receipts": [
+          -0.438,
+          0.623
+        ],
+        "store:hallway_knock_policies": [
+          -0.101,
+          -0.781
+        ]
+      }
+    },
+    "organ:hearth": {
+      "x": 2135,
+      "y": 1341,
+      "scale": 1,
+      "members": {
+        "component:athanor-substrate": [
+          0.08,
+          0
+        ],
+        "component:host": [
+          -0.102,
+          0.094
+        ],
+        "component:workspace-search": [
+          0.016,
+          -0.178
+        ],
+        "component:omp": [
+          0.129,
+          0.168
+        ],
+        "dependency:rust/anyhow": [
+          -0.236,
+          -0.042
+        ],
+        "dependency:rust/async-nats": [
+          0.224,
+          -0.142
+        ],
+        "dependency:rust/chrono": [
+          -0.075,
+          0.279
+        ],
+        "dependency:rust/serde": [
+          -0.143,
+          -0.275
+        ],
+        "dependency:rust/serde_json": [
+          0.31,
+          0.113
+        ],
+        "dependency:rust/sha2": [
+          -0.322,
+          0.133
+        ],
+        "dependency:rust/sqlx": [
+          0.155,
+          -0.332
+        ],
+        "dependency:rust/tokio": [
+          0.115,
+          0.366
+        ],
+        "dependency:rust/tokio-util": [
+          -0.346,
+          -0.201
+        ],
+        "dependency:rust/tracing": [
+          0.406,
+          -0.089
+        ],
+        "dependency:rust/uuid": [
+          -0.248,
+          0.352
+        ],
+        "dependency:rust/windows-sys": [
+          -0.057,
+          -0.442
+        ],
+        "external:mcp-sdk": [
+          0.351,
+          0.296
+        ],
+        "external:zvec-grep": [
+          -0.473,
+          0.02
+        ],
+        "external:ollama": [
+          0.345,
+          -0.343
+        ],
+        "external:postgresql": [
+          -0.023,
+          0.499
+        ],
+        "file:client.json": [
+          -0.328,
+          -0.393
+        ],
+        "module:crates/hearth/src/authority.rs": [
+          0.52,
+          0.07
+        ],
+        "module:crates/hearth/src/backup.rs": [
+          -0.44,
+          0.307
+        ],
+        "module:crates/hearth/src/cluster.rs": [
+          0.12,
+          -0.535
+        ],
+        "module:crates/hearth/src/context.rs": [
+          0.278,
+          0.486
+        ],
+        "module:crates/hearth/src/conversation.rs": [
+          -0.544,
+          -0.174
+        ],
+        "module:crates/hearth/src/error.rs": [
+          0.529,
+          -0.244
+        ],
+        "module:crates/hearth/src/lineage.rs": [
+          -0.229,
+          0.547
+        ],
+        "module:crates/hearth/src/operator.rs": [
+          -0.204,
+          -0.568
+        ],
+        "module:crates/hearth/src/room.rs": [
+          0.544,
+          0.286
+        ],
+        "module:adapters/workspace-search/src/nemotron.ts": [
+          -0.604,
+          0.159
+        ],
+        "module:adapters/workspace-search/src/service.ts": [
+          0.343,
+          -0.534
+        ],
+        "module:adapters/workspace-search/src/worker.ts": [
+          0.109,
+          0.636
+        ],
+        "module:adapters/workspace-search/src/cli.ts": [
+          -0.518,
+          -0.401
+        ],
+        "operation:host/ClaimHallwayKnock": [
+          0.662,
+          -0.055
+        ],
+        "operation:host/ProjectHallwayInbox": [
+          -0.458,
+          0.495
+        ],
+        "operation:host/SettleHallwayKnock": [
+          0.003,
+          -0.684
+        ],
+        "store:docket.quest_dependencies": [
+          0.466,
+          0.513
+        ],
+        "store:memories": [
+          -0.699,
+          -0.065
+        ],
+        "store:memory_chunks": [
+          0.566,
+          -0.43
+        ],
+        "store:memory_thread_refs": [
+          -0.129,
+          0.708
+        ],
+        "store:thread_event_links": [
+          -0.388,
+          -0.617
+        ],
+        "store:thread_events": [
+          0.711,
+          0.195
+        ],
+        "store:threads": [
+          -0.664,
+          0.341
+        ],
+        "store:units": [
+          0.262,
+          -0.708
+        ],
+        "system:athanor": [
+          0.288,
+          0.707
+        ],
+        "tool:sleep": [
+          -0.697,
+          -0.33
+        ],
+        "tool:zvec_grep_index": [
+          0.745,
+          -0.23
+        ],
+        "tool:zvec_grep_search": [
+          -0.398,
+          0.68
+        ],
+        "tool:zvec_grep_status": [
+          -0.167,
+          -0.778
         ]
       }
     }

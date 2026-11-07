@@ -48,18 +48,25 @@ async function saveLayout(request: Request): Promise<Response> {
   return new Response(null, { status: 204 });
 }
 
+// The server answers only requests addressed to itself. A page on another name that resolves
+// to 127.0.0.1 (DNS rebinding) carries its own Host header and gets 403.
+const ALLOWED_HOSTS = new Set(["127.0.0.1:4187", "localhost:4187"]);
+
 Bun.serve({
   hostname: "127.0.0.1",
   port: 4187,
   async fetch(request) {
     const pathname = new URL(request.url).pathname;
 
+    if (!ALLOWED_HOSTS.has(request.headers.get("host") ?? "")) return new Response("Forbidden host", { status: 403 });
+
     if (request.method === "PUT" && pathname === "/anatomy.layout.json") return saveLayout(request);
-    if (pathname === "/anatomy.stale.json") return staleReport();
 
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405 });
     }
+
+    if (pathname === "/anatomy.stale.json") return staleReport();
 
     const script = scripts.get(pathname);
     if (script) {

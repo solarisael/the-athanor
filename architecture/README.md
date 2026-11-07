@@ -82,9 +82,44 @@ The view reads four files:
 | File | Owner | Content |
 |---|---|---|
 | `anatomy.jsonl` | the map snapshot | nodes and edges |
-| `anatomy.overlay.jsonl` | the state-machine census | added organs, state machines, defects, and tags |
-| `anatomy.layout.json` | the operator | bubble positions, sizes, and star positions; the view saves it after each drag |
+| `anatomy.overlay.jsonl` | the state-machine census and the operator | added organs, ownership rules, state machines, defects, and tags |
+| `anatomy.layout.json` | the operator | bubble positions, sizes, and star positions; the view saves it after each move |
 | `/anatomy.stale.json` | the server | cited files that changed since the snapshot; computed per request |
 
 Each defect in `anatomy.overlay.jsonl` comes from one file in `docs/state-machines/`.
 When a defect is fixed or a contract file changes, update the overlay in the same commit.
+
+### Who owns a part
+
+The `ownership` record in the overlay sorts the organs into three tiers:
+
+1. Named organs, such as GIGA, Hallway, or Chat.
+2. Carriers: the processes and crates that carry the named organs, such as Host, AKASHA, and the OMP adapter.
+3. The shared organ, Hearth.
+
+The view finds the owner of each part in this order:
+
+1. The `assign` list in the `ownership` record. An entry there wins over every rule below.
+2. Membership. The organ that reaches the part in the fewest `contains` or `implemented_by` steps owns it. On a tie, a named organ wins.
+3. Connections. The part joins the organs that its other connections reach. A package counts as its crate organ.
+   The best tier present decides. In that tier, an organ with more than half of the connections owns the part.
+   If no organ has more than half, the common parent in `parents` owns the part. With no common parent, the shared organ owns it.
+
+The header shows how many parts the view placed. A part with no connection to any organ stays off the map.
+
+### State machines
+
+Each `machine` record has one or more layers, for example SQL, Host, and Adapter.
+One layer has `authority: true`. Each layer lists its states, its terminal states, and its moves.
+Each move names the code that writes it, with a source range.
+
+The view finds the states with no way out. Such a state is not terminal, and no move leaves it.
+Do not list these states by hand. When the code gets a new exit, add the move, and the red mark goes away.
+
+### Layout safety
+
+- A press that moves less than 5 pixels is a click. A click does not change the layout file.
+- **Undo** (Ctrl+Z) puts back the layout from before the last move, **Tidy up**, or **Arrange by links**.
+- **Arrange by links** changes the layout only when the new layout has fewer crossing cables.
+- When the layout file is not valid JSON, the view ignores it and shows a message. Your next move replaces the file.
+- The server accepts requests only for the host names `127.0.0.1:4187` and `localhost:4187`.

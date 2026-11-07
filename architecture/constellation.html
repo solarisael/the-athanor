@@ -25,8 +25,9 @@
     <span class="gap"></span>
     <label class="filter">Problem type <select id="tag"><option value="">all</option></select></label>
     <label class="filter">Severity <select id="severity"><option value="">any</option><option value="high">high only</option><option value="med">med or worse</option><option value="low">any problem</option></select></label>
-    <button id="arrange" title="Move linked organs close together so fewer cables cross">Arrange by links</button>
+    <button id="arrange" title="Move linked organs close together so fewer cables cross. Nothing moves unless fewer cables cross.">Arrange by links</button>
     <button id="tidy" title="Move overlapping organs apart">Tidy up</button>
+    <button id="undo" title="Put back the layout from before the last move, Tidy up, or Arrange ( Ctrl+Z )" disabled>Undo</button>
     <button id="split" aria-pressed="false">Second view</button>
   </nav>
   <main>

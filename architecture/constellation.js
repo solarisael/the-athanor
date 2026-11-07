@@ -18,7 +18,13 @@ const SEVERITY = {
 // Screen radius thresholds. Below DOTS a bubble shows its part count; from CARDS up its parts carry names.
 const DOTS_RADIUS_PX = 70;
 const CARDS_RADIUS_PX = 200;
+// The rim band that resizes a bubble: at most RIM_GRAB_PX, and never more than RIM_GRAB_SHARE of the
+// screen radius, so a small bubble stays mostly a body to drag and click.
 const RIM_GRAB_PX = 10;
+const RIM_GRAB_SHARE = 0.12;
+// A press that moves less than this is a click, never a drag, so it never rewrites the layout file.
+const DRAG_THRESHOLD_PX = 5;
+const UNDO_LIMIT = 50;
 const GRIP_RADIUS_PX = 11;
 const BADGE_RADIUS_PX = 13;
 const MIN_BUBBLE_RADIUS = 60;
@@ -52,6 +58,7 @@ async function start() {
   const findings = overlay.filter(record => record.type === 'finding');
   const tags = overlay.filter(record => record.type === 'tag');
   const crates = overlay.filter(record => record.type === 'crate');
+  const ownership = { carriers: [], parents: {}, assign: {}, ...overlay.find(record => record.type === 'ownership') };
 
   const byId = new Map(nodes.map(node => [node.id, node]));
   for (const organ of overlayOrgans) {
@@ -66,16 +73,28 @@ async function start() {
     ...crates.filter(crate => byId.has(crate.organ) && byId.has(crate.package))
       .map(crate => ({ from: crate.organ, to: crate.package, relation: 'implemented_by' })),
   ];
-  // Order decides membership ties: domain organs first, crate organs last.
-  const crateOrgans = new Set(crates.map(crate => crate.organ));
+  const carriers = new Set(ownership.carriers);
+  const tierOf = id => (id === ownership.shared ? 2 : carriers.has(id) ? 1 : 0);
+  // Order decides membership ties: named organs first, then carriers, then the shared organ.
   const bubbleIds = [
     ...overlayOrgans.map(organ => organ.id),
     ...nodes.filter(node => node.kind === 'organ').map(node => node.id).sort(),
-  ].sort((a, b) => Number(crateOrgans.has(a)) - Number(crateOrgans.has(b)));
-  const ownerOf = claimMembers([...memberEdges, ...edges], byId, bubbleIds);
+  ].sort((a, b) => tierOf(a) - tierOf(b));
+  const hierarchy = {
+    bubbles: new Set(bubbleIds),
+    shared: ownership.shared,
+    tierOf,
+    parentOf: id => ownership.parents[id] ?? id,
+    crateOrgan: new Map(crates.map(crate => [crate.package, crate.organ])),
+    assigned: new Map(Object.entries(ownership.assign)),
+  };
+
+  const ownerOf = claimMembers([...memberEdges, ...edges], byId, bubbleIds, hierarchy);
   const bubbles = placeBubbles(bubbleIds, ownerOf, byId, saved?.bubbles || {});
+  // A cable end is a part, or the organ itself when the map points straight at the organ.
+  const bubbleOf = id => (hierarchy.bubbles.has(id) ? id : ownerOf.get(id));
   const links = edges.filter(edge =>
-    !MEMBERSHIP.has(edge.relation) && edge.from !== edge.to && ownerOf.has(edge.from) && ownerOf.has(edge.to));
+    !MEMBERSHIP.has(edge.relation) && edge.from !== edge.to && bubbleOf(edge.from) && bubbleOf(edge.to));
 
   const stalePaths = new Set(Object.keys(stale?.files || {}));
   const staleNodes = new Set(nodes.filter(node => node.sources.some(source => stalePaths.has(source.path))).map(node => node.id));
@@ -83,22 +102,34 @@ async function start() {
   const world = {
     byId, bubbles, ownerOf, links,
     bubbleById: new Map(bubbles.map(bubble => [bubble.id, bubble])),
-    crossings: groupCrossings(links, ownerOf),
-    machinesByNode: indexByNode(machines),
+    crossings: groupCrossings(links, bubbleOf),
+    machinesByNode: indexByNode(machines, machineNodes),
     findingsByNode: indexByNode(findings),
     machineById: new Map(machines.map(machine => [machine.id, machine])),
     tagById: new Map(tags.map(tag => [tag.id, tag])),
     staleNodes,
+    meta,
+    organParents: ownership.parents,
     filter: { tag: '', severity: '' },
     highlight: null,
     selected: null,
+    layoutHistory: [],
+    // The first panel holds the help and the legend; it comes back when nothing is selected.
+    welcome: [...$('#detail').children].map(child => child.cloneNode(true)),
   };
 
-  const placedFindings = findings.filter(finding => finding.nodes.some(id => ownerOf.has(id))).length;
-  $('#counts').textContent = [
-    `${bubbles.length} organs`, `${ownerOf.size} parts`,
-    `${placedFindings} of ${findings.length} problems on the map`, `map from ${meta.capturedAt.slice(0, 10)}`,
-  ].join(' · ');
+  const partTotal = nodes.filter(node => node.kind !== 'organ' && node.kind !== 'package').length;
+  world.renderCounts = () => {
+    const placed = findings.filter(finding => finding.nodes.some(bubbleOf));
+    const shown = placed.filter(finding => passesFilter(world.filter, finding));
+    const unverified = shown.filter(finding => finding.status === 'unverified').length;
+    const problems = shown.length === placed.length ? `${placed.length} problems` : `${shown.length} of ${placed.length} problems`;
+    $('#counts').textContent = [
+      `${bubbles.length} organs`, `${ownerOf.size} of ${partTotal} parts placed`,
+      `${problems} (${unverified} unverified)`, `map from ${meta.capturedAt.slice(0, 10)}`,
+    ].join(' · ');
+  };
+  world.renderCounts();
 
   let pending = false;
   world.redraw = () => {
@@ -115,6 +146,22 @@ async function start() {
   world.scheduleSave = (note = '') => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => saveLayout(bubbles, note), SAVE_DELAY_MS);
+  };
+  // A drag, Tidy up, and Arrange each record the layout first, so Undo can put it back.
+  world.rememberLayout = (snapshot = snapshotLayout(bubbles)) => {
+    world.layoutHistory.push(snapshot);
+    if (world.layoutHistory.length > UNDO_LIMIT) world.layoutHistory.shift();
+    $('#undo').disabled = false;
+  };
+  world.undoLayout = () => {
+    const snapshot = world.layoutHistory.pop();
+    $('#undo').disabled = world.layoutHistory.length === 0;
+
+    if (!snapshot) return;
+
+    restoreLayout(bubbles, snapshot);
+    world.scheduleSave('Undid the last layout change.');
+    world.redraw();
   };
   world.select = id => select(world, id);
   world.goTo = id => goTo(world, id);
@@ -142,19 +189,38 @@ async function fetchLines(path, required) {
   if (!response.ok && required) throw new Error(`${path} request failed: ${response.status}`);
   if (!response.ok) return [];
 
-  const text = (await response.text()).trim();
-  return text ? text.split('\n').map(line => JSON.parse(line)) : [];
+  const lines = (await response.text()).split('\n');
+  const records = [];
+  lines.forEach((line, index) => {
+    if (!line.trim()) return;
+
+    try {
+      records.push(JSON.parse(line));
+    } catch (error) {
+      throw new Error(`${path} line ${index + 1} is not valid JSON: ${error.message}`);
+    }
+  });
+  return records;
 }
 
+// A broken file shows a status line and loads as missing, so one bad hand edit cannot blank the map.
 async function fetchJson(path) {
   const response = await fetch(path);
-  return response.ok ? response.json() : null;
+
+  if (!response.ok) return null;
+
+  try {
+    return await response.json();
+  } catch (error) {
+    $('#status').textContent = `${path} is not valid JSON (${error.message}). The view ignores it; your next layout change replaces it.`;
+    return null;
+  }
 }
 
-function indexByNode(records) {
+function indexByNode(records, nodesOf = record => record.nodes) {
   const index = new Map();
   for (const record of records) {
-    for (const id of record.nodes) {
+    for (const id of nodesOf(record)) {
       if (!index.has(id)) index.set(id, []);
       index.get(id).push(record);
     }
@@ -162,10 +228,11 @@ function indexByNode(records) {
   return index;
 }
 
-// Each part joins the bubble that reaches it in the fewest membership steps. On a tie the earlier
-// bubble wins, and the overlay organs come first, so chat.ts sits in Chat and not in its crate.
-// A store with no membership joins the bubble whose parts read or write it most often.
-function claimMembers(edges, byId, bubbleIds) {
+// An owner that the overlay assigns by hand wins over every rule below.
+// Otherwise each part joins the bubble that reaches it in the fewest membership steps. On a tie the earlier
+// bubble wins, and named organs come first, so chat.ts sits in Chat and not in its crate.
+// The parts that no membership reaches join the organs they connect to: see claimByNeighbours.
+function claimMembers(edges, byId, bubbleIds, hierarchy) {
   const children = new Map();
   for (const edge of edges) {
     const ownerKind = byId.get(edge.from)?.kind;
@@ -176,15 +243,18 @@ function claimMembers(edges, byId, bubbleIds) {
     children.get(edge.from).push(edge.to);
   }
 
-  const bubbleSet = new Set(bubbleIds);
   const owner = new Map();
+  for (const [id, bubble] of hierarchy.assigned) {
+    if (byId.has(id) && hierarchy.bubbles.has(bubble)) owner.set(id, { bubble, distance: 0 });
+  }
+
   for (const bubble of bubbleIds) {
     const seen = new Set([bubble]);
     const queue = [[bubble, 0]];
     while (queue.length) {
       const [id, distance] = queue.shift();
       for (const child of children.get(id) || []) {
-        if (seen.has(child) || bubbleSet.has(child)) continue;
+        if (seen.has(child) || hierarchy.bubbles.has(child)) continue;
 
         seen.add(child);
         const claim = owner.get(child);
@@ -196,30 +266,76 @@ function claimMembers(edges, byId, bubbleIds) {
     }
   }
 
-  const touches = new Map();
-  for (const edge of edges) {
-    const target = byId.get(edge.to);
-    const reachesStore = (edge.relation === 'reads' || edge.relation === 'writes') && target?.kind === 'store';
-
-    if (!reachesStore || !owner.has(edge.from) || owner.has(edge.to)) continue;
-    if (!touches.has(edge.to)) touches.set(edge.to, new Map());
-    const counts = touches.get(edge.to);
-    const bubble = owner.get(edge.from).bubble;
-    counts.set(bubble, (counts.get(bubble) || 0) + 1);
-  }
-  for (const [store, counts] of touches) {
-    const [bubble] = [...counts].sort((a, b) => b[1] - a[1])[0];
-    owner.set(store, { bubble, distance: Infinity });
-  }
-
+  claimByNeighbours(edges, byId, owner, hierarchy);
   return new Map([...owner].map(([id, claim]) => [id, claim.bubble]));
+}
+
+// A part with no membership joins the organs that its connections reach; a package counts as its crate organ.
+// A connection to a part with no owner yet is unknown. Each pass claims only the surest parts first:
+// a result that no unknown can change, then an outright named-organ win, then an outright carrier win,
+// and only then any result. Edge order cannot change the result.
+function claimByNeighbours(edges, byId, owner, hierarchy) {
+  const bubbleOf = id => (hierarchy.bubbles.has(id) ? id : hierarchy.crateOrgan.get(id) ?? owner.get(id)?.bubble);
+  const claimable = id => byId.has(id) && !owner.has(id) && !hierarchy.bubbles.has(id) && byId.get(id).kind !== 'package';
+
+  for (;;) {
+    const votes = new Map();
+    const unknown = new Map();
+    for (const edge of edges) {
+      for (const [id, other] of [[edge.from, edge.to], [edge.to, edge.from]]) {
+        if (!claimable(id)) continue;
+
+        const bubble = bubbleOf(other);
+        if (!bubble) {
+          unknown.set(id, (unknown.get(id) || 0) + 1);
+          continue;
+        }
+
+        if (!votes.has(id)) votes.set(id, new Map());
+        const counts = votes.get(id);
+        counts.set(bubble, (counts.get(bubble) || 0) + 1);
+      }
+    }
+
+    if (!votes.size) return;
+
+    const elections = [...votes].map(([id, counts]) => [id, electOwner(counts, unknown.get(id) || 0, hierarchy)]);
+    const outright = tier => elections.filter(([, election]) => election.outright && election.tier <= tier);
+    const certain = elections.filter(([, election]) => election.certain);
+    const batch = [certain, outright(0), outright(1), elections].find(list => list.length);
+    for (const [id, election] of batch) owner.set(id, { bubble: election.bubble, distance: Infinity });
+  }
+}
+
+// The organs fall into three tiers: named organs, carriers, and the shared organ. The best tier present
+// decides. Inside it, an organ that holds more than half the connections wins outright. Otherwise the part
+// goes to the organs' common parent, else to the shared organ. So PostgreSQL, which many named organs use,
+// lands in the shared organ, and a tool that two Summoning organs use lands in Summoning.
+function electOwner(counts, unknown, { tierOf, parentOf, shared }) {
+  const tier = Math.min(...[...counts.keys()].map(tierOf));
+  const candidates = [...counts].filter(([bubble]) => tierOf(bubble) === tier);
+  const total = candidates.reduce((sum, [, count]) => sum + count, 0);
+  const [leader, most] = candidates.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  const outright = most * 2 > total;
+  // An unknown connection can join a better tier or another organ, so only a named majority of every
+  // connection, or a vote with no unknowns left, is final.
+  const certain = unknown === 0 || (tier === 0 && most * 2 > total + unknown);
+
+  if (outright) return { bubble: leader, tier, outright, certain };
+
+  const parents = new Set(candidates.map(([bubble]) => parentOf(bubble)));
+  const bubble = parents.size === 1 ? [...parents][0] : shared ?? leader;
+  return { bubble, tier, outright, certain };
 }
 
 // The first arrangement fills rows left to right. After that the layout file owns every position.
 // An organ that the saved layout does not know yet starts in a row below it, so it lands in free space.
+// A saved record with a bad shape counts as unknown. When an organ's parts differ from the saved ones,
+// its stars spread again; its position and size stay.
 function placeBubbles(bubbleIds, ownerOf, byId, stored) {
   const bubbles = [];
-  const known = Object.values(stored);
+  const saved = new Map(bubbleIds.filter(id => isPlacement(stored[id])).map(id => [id, stored[id]]));
+  const known = [...saved.values()];
   const left = known.length ? Math.min(...known.map(bubble => bubble.x - bubble.r)) : 0;
   let x = left;
   let y = known.length ? Math.max(...known.map(bubble => bubble.y + bubble.r)) + ROW_GAP : 0;
@@ -229,13 +345,15 @@ function placeBubbles(bubbleIds, ownerOf, byId, stored) {
     const memberIds = [...ownerOf].filter(([, bubble]) => bubble === id).map(([member]) => member);
     memberIds.sort((a, b) => byId.get(a).kind.localeCompare(byId.get(b).kind) || byId.get(a).label.localeCompare(byId.get(b).label));
 
+    const savedMembers = saved.get(id)?.members || {};
+    const sameParts = Object.keys(savedMembers).length === memberIds.length && memberIds.every(member => isPoint(savedMembers[member]));
     const members = new Map();
-    memberIds.forEach((member, order) => members.set(member, stored[id]?.members?.[member] ?? sunflower(order, memberIds.length)));
+    memberIds.forEach((member, order) => members.set(member, sameParts ? savedMembers[member] : sunflower(order, memberIds.length)));
     const bubble = { id, hue: hueOf(id), label: byId.get(id).label, members };
     bubbles.push(bubble);
 
-    if (stored[id]) {
-      Object.assign(bubble, { x: stored[id].x, y: stored[id].y, r: stored[id].r });
+    if (saved.has(id)) {
+      Object.assign(bubble, { x: saved.get(id).x, y: saved.get(id).y, r: saved.get(id).r });
       continue;
     }
 
@@ -255,6 +373,14 @@ function placeBubbles(bubbleIds, ownerOf, byId, stored) {
   return bubbles;
 }
 
+function isPlacement(record) {
+  return Boolean(record) && [record.x, record.y, record.r].every(Number.isFinite) && record.r > 0;
+}
+
+function isPoint(value) {
+  return Array.isArray(value) && value.length === 2 && value.every(Number.isFinite);
+}
+
 // The colour follows the organ's id, so adding an organ never repaints the others.
 function hueOf(id) {
   let hash = 0;
@@ -269,11 +395,11 @@ function sunflower(order, count) {
   return [radius * Math.cos(angle), radius * Math.sin(angle)];
 }
 
-function groupCrossings(links, ownerOf) {
+function groupCrossings(links, bubbleOf) {
   const crossings = new Map();
   for (const link of links) {
-    const from = ownerOf.get(link.from);
-    const to = ownerOf.get(link.to);
+    const from = bubbleOf(link.from);
+    const to = bubbleOf(link.to);
 
     if (from === to) continue;
 
@@ -297,16 +423,26 @@ function sortedFindings(findings) {
   return [...findings].sort((a, b) => SEVERITY[b.severity].rank - SEVERITY[a.severity].rank);
 }
 
+function passesFilter(filter, finding) {
+  const tagMatches = !filter.tag || finding.tags.includes(filter.tag);
+  const severityMatches = !filter.severity || SEVERITY[finding.severity].rank >= SEVERITY[filter.severity].rank;
+  return tagMatches && severityMatches;
+}
+
+function isFiltering(world) {
+  return Boolean(world.filter.tag || world.filter.severity);
+}
+
+// The problems on one part that the problem type and severity filters let through.
+function shownFindings(world, id) {
+  return (world.findingsByNode.get(id) || []).filter(finding => passesFilter(world.filter, finding));
+}
+
 // A part stays bright when it passes the problem filter and belongs to the highlighted state machine.
 function isFaded(world, id) {
   if (world.highlight && !world.highlight.nodes.has(id)) return true;
 
-  const { tag, severity } = world.filter;
-
-  if (!tag && !severity) return false;
-
-  return !(world.findingsByNode.get(id) || []).some(finding =>
-    (!tag || finding.tags.includes(tag)) && (!severity || SEVERITY[finding.severity].rank >= SEVERITY[severity].rank));
+  return isFiltering(world) && shownFindings(world, id).length === 0;
 }
 
 function bubbleHealth(world, bubble) {
@@ -315,7 +451,7 @@ function bubbleHealth(world, bubble) {
   let hurt = 0;
 
   for (const id of bubble.members.keys()) {
-    const own = world.findingsByNode.get(id) || [];
+    const own = shownFindings(world, id);
     if (own.length) hurt += 1;
     if (world.staleNodes.has(id)) stale += 1;
     for (const finding of own) findings.add(finding);
@@ -324,7 +460,12 @@ function bubbleHealth(world, bubble) {
   return { findings: sortedFindings(findings), stale, hurt };
 }
 
+// A cable that points straight at an organ ends at the organ's centre.
 function memberPoint(world, id) {
+  const organ = world.bubbleById.get(id);
+
+  if (organ) return { x: organ.x, y: organ.y };
+
   const bubble = world.bubbleById.get(world.ownerOf.get(id));
   const [u, v] = bubble.members.get(id);
   return { x: bubble.x + u * bubble.r, y: bubble.y + v * bubble.r };
@@ -340,6 +481,14 @@ function portPoint(bubble, other) {
   const dy = other.y - bubble.y;
   const length = Math.hypot(dx, dy) || 1;
   return { x: bubble.x + dx / length * bubble.r, y: bubble.y + dy / length * bubble.r };
+}
+
+function snapshotLayout(bubbles) {
+  return bubbles.map(bubble => ({ x: bubble.x, y: bubble.y, r: bubble.r, members: new Map(bubble.members) }));
+}
+
+function restoreLayout(bubbles, snapshot) {
+  snapshot.forEach((saved, index) => Object.assign(bubbles[index], saved));
 }
 
 async function saveLayout(bubbles, note) {
@@ -472,7 +621,8 @@ function handleKey(world, view, event) {
   const arrows = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   const zooms = { '+': ZOOM_STEP, '=': ZOOM_STEP, '-': 1 / ZOOM_STEP, '_': 1 / ZOOM_STEP };
 
-  if (arrows[event.key]) moveSelection(world, view, ...arrows[event.key]);
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') world.undoLayout();
+  else if (arrows[event.key]) moveSelection(world, view, ...arrows[event.key]);
   else if (zooms[event.key]) view.zoomBy(zooms[event.key]);
   else if (event.key === 'Enter' && world.selected) world.goTo(world.selected);
   else if (event.key === 'Escape') stepOut(world, view);
@@ -491,15 +641,29 @@ function setupToolbar(world) {
   $('#zoom-out').onclick = () => world.activeView.zoomBy(1 / ZOOM_STEP);
   $('#fit').onclick = () => world.activeView.flyTo(world.activeView.cameraFor(world.bubbles));
   $('#back').onclick = () => world.activeView.back();
+  $('#undo').onclick = () => world.undoLayout();
   $('#tidy').onclick = () => {
+    const before = snapshotLayout(world.bubbles);
     const moved = tidy(world.bubbles);
     $('#status').textContent = moved ? `Moved ${moved} organs apart.` : 'No organs overlap.';
-    if (moved) world.scheduleSave();
+
+    if (!moved) return;
+
+    world.rememberLayout(before);
+    world.scheduleSave();
     world.redraw();
   };
   $('#arrange').onclick = () => {
-    const { before, after } = arrange(world);
-    const note = `Cables crossing: ${before} before, ${after} now.`;
+    const before = snapshotLayout(world.bubbles);
+    const result = arrange(world);
+
+    if (!result.improved) {
+      $('#status').textContent = `Arrange found no layout with fewer crossing cables than now (${result.before}). Nothing moved.`;
+      return;
+    }
+
+    const note = `Cables crossing: ${result.before} before, ${result.after} now. Undo puts the old layout back.`;
+    world.rememberLayout(before);
     $('#status').textContent = note;
     world.scheduleSave(note);
     world.activeView.flyTo(world.activeView.cameraFor(world.bubbles));
@@ -512,6 +676,7 @@ function setupToolbar(world) {
     for (const view of world.views) view.resize();
     if (split && !second.framed) second.camera = second.cameraFor([ownerBubble(world, world.selected) || world.bubbles[0]]);
     if (!split) world.activeView = world.views[0];
+    updateBack(world);
     world.redraw();
   };
 }
@@ -534,18 +699,18 @@ function tidy(bubbles) {
       for (let j = i + 1; j < bubbles.length; j++) {
         const a = bubbles[i];
         const b = bubbles[j];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const distance = Math.hypot(dx, dy) || 1;
-        const overlap = a.r + b.r + gap - distance;
+        const centreDistance = Math.hypot(b.x - a.x, b.y - a.y);
+        // Two bubbles on the same centre have no line between them, so they part along the x axis.
+        const [ux, uy] = centreDistance ? [(b.x - a.x) / centreDistance, (b.y - a.y) / centreDistance] : [1, 0];
+        const overlap = a.r + b.r + gap - centreDistance;
 
         if (overlap <= 0) continue;
 
-        const push = overlap / 2 / distance;
-        a.x -= dx * push;
-        a.y -= dy * push;
-        b.x += dx * push;
-        b.y += dy * push;
+        const push = overlap / 2;
+        a.x -= ux * push;
+        a.y -= uy * push;
+        b.x += ux * push;
+        b.y += uy * push;
         moved.add(a).add(b);
         overlaps += 1;
       }
@@ -558,7 +723,8 @@ function tidy(bubbles) {
 }
 
 // Places organs so that linked organs sit close and cables cross less. It runs a force layout from
-// the current positions and from a few seeded scatters, then keeps the result with the fewest crossings.
+// the current positions and from a few seeded scatters, tidies each result, and keeps the one with
+// the fewest crossings. When no result beats the current layout, nothing moves.
 function arrange(world) {
   const { bubbles } = world;
   const index = new Map(bubbles.map((bubble, i) => [bubble.id, i]));
@@ -572,15 +738,17 @@ function arrange(world) {
 
   let best = null;
   for (const start of starts) {
-    const points = relax(bubbles, links, start);
-    const crossings = countCrossings(points.map((point, i) => ({ ...point, r: bubbles[i].r })), links);
+    const candidate = relax(bubbles, links, start).map((point, i) => ({ ...point, r: bubbles[i].r }));
+    tidy(candidate);
+    const crossings = countCrossings(candidate, links);
 
-    if (!best || crossings < best.crossings) best = { points, crossings };
+    if (!best || crossings < best.crossings) best = { candidate, crossings };
   }
 
-  best.points.forEach((point, i) => Object.assign(bubbles[i], point));
-  tidy(bubbles);
-  return { before, after: countCrossings(bubbles, links) };
+  if (best.crossings >= before) return { improved: false, before, after: before };
+
+  best.candidate.forEach((point, i) => Object.assign(bubbles[i], { x: point.x, y: point.y }));
+  return { improved: true, before, after: best.crossings };
 }
 
 // enough: O(n²) repulsion for 500 steps; fine for a few dozen organs, needs a quadtree past a few hundred.
@@ -778,6 +946,8 @@ function setupFilters(world, findings) {
 
   const apply = () => {
     world.filter = { tag: $('#tag').value, severity: $('#severity').value };
+    world.renderCounts();
+    renderPanel(world);
     world.redraw();
   };
   $('#tag').onchange = apply;
@@ -791,7 +961,7 @@ function renderPanel(world) {
   panel.scrollTop = 0;
 
   if (!world.selected) {
-    panel.replaceChildren(element('h2', 'Pick an organ'), element('p', 'Click a bubble, or press an arrow key on the map.'));
+    panel.replaceChildren(...world.welcome.map(child => child.cloneNode(true)));
     return;
   }
 
@@ -804,28 +974,58 @@ function renderBubble(world, panel, id) {
   const bubble = world.bubbleById.get(id);
   const health = bubbleHealth(world, bubble);
   const facts = [`${bubble.members.size} parts.`];
-  if (health.hurt) facts.push(`${health.hurt} of them have problems.`);
+  const matching = isFiltering(world) ? ' that match the filter' : '';
+  if (health.hurt) facts.push(`${health.hurt} of them have problems${matching}.`);
   if (health.stale) facts.push(`${health.stale} changed after the map was made.`);
 
   panel.replaceChildren(element('h2', node.label), element('p', node.description), element('p', facts.join(' '), 'lead'));
-  if (node.overlay) panel.append(element('p', 'This organ comes from the state-machine census. The map from 10-15 has no node for it.', 'lead'));
+  if (node.overlay) {
+    panel.append(element('p', `This organ comes from the state-machine census. The map from ${world.meta.capturedAt.slice(0, 10)} has no node for it.`, 'lead'));
+  }
 
   const actions = element('div', undefined, 'actions');
   actions.append(button('Zoom into it', () => world.goTo(id), 'primary'));
+  const parent = world.organParents[id];
+  if (parent) actions.append(button(`↑ Part of ${world.byId.get(parent).label}`, () => world.select(parent)));
   panel.append(actions);
 
-  panel.append(element('h3', health.findings.length ? `Problems (${health.findings.length})` : 'No problems recorded'));
+  const children = Object.keys(world.organParents).filter(child => world.organParents[child] === id);
+  if (children.length) {
+    panel.append(element('h3', `Made of ${children.length} organs`));
+    const list = element('div', undefined, 'link-list');
+    for (const child of children) list.append(button(world.byId.get(child).label, () => world.select(child)));
+    panel.append(list);
+  }
+
+  panel.append(element('h3', health.findings.length ? `Problems${matching} (${health.findings.length})` : `No problems recorded${matching}`));
   for (const finding of health.findings) panel.append(findingRow(world, finding));
 
   const machines = new Set([...bubble.members.keys()].flatMap(member => world.machinesByNode.get(member) || []));
   if (machines.size) panel.append(element('h3', 'State machines'));
   for (const machine of machines) panel.append(machineBlock(world, machine));
+
+  panel.append(...connectionList(world, id, 'Cables to the organ itself'));
+}
+
+// The map's own connections of one part or organ, each a button that flies to the other end.
+function connectionList(world, id, heading) {
+  const own = world.links.filter(link => link.from === id || link.to === id);
+
+  if (!own.length) return [];
+
+  const list = element('div', undefined, 'link-list');
+  for (const link of own) {
+    const outward = link.from === id;
+    const other = world.byId.get(outward ? link.to : link.from);
+    list.append(button(`${outward ? '→' : '←'} ${link.relation} ${other.label}`, () => world.goTo(other.id)));
+  }
+  return [element('h3', `${heading} (${own.length})`), list];
 }
 
 function renderStar(world, panel, id) {
   const node = world.byId.get(id);
   const bubble = ownerBubble(world, id);
-  const findings = sortedFindings(world.findingsByNode.get(id) || []);
+  const findings = sortedFindings(shownFindings(world, id));
   const sentence = [`A ${node.kind} in ${bubble.label}.`];
   if (world.staleNodes.has(id)) sentence.push('Its source changed after the map was made.');
 
@@ -835,22 +1035,13 @@ function renderStar(world, panel, id) {
   actions.append(button(`↑ ${bubble.label}`, () => world.select(bubble.id)));
   panel.append(actions);
 
-  panel.append(element('h3', findings.length ? `Problems (${findings.length})` : 'No problems recorded'));
+  const matching = isFiltering(world) ? ' that match the filter' : '';
+  panel.append(element('h3', findings.length ? `Problems${matching} (${findings.length})` : `No problems recorded${matching}`));
   for (const finding of findings) panel.append(findingRow(world, finding));
 
   for (const machine of world.machinesByNode.get(id) || []) panel.append(machineBlock(world, machine));
 
-  const own = world.links.filter(link => link.from === id || link.to === id);
-  if (own.length) {
-    panel.append(element('h3', `Connected parts (${own.length})`));
-    const list = element('div', undefined, 'link-list');
-    for (const link of own) {
-      const outward = link.from === id;
-      const other = world.byId.get(outward ? link.to : link.from);
-      list.append(button(`${outward ? '→' : '←'} ${link.relation} ${other.label}`, () => world.goTo(other.id)));
-    }
-    panel.append(list);
-  }
+  panel.append(...connectionList(world, id, 'Connected parts'));
 
   const sources = element('details');
   sources.append(element('summary', 'Where the map found it'));
@@ -860,9 +1051,14 @@ function renderStar(world, panel, id) {
 
 function findingRow(world, finding) {
   const row = element('div', undefined, `finding ${finding.severity}`);
-  const target = finding.nodes.find(id => world.ownerOf.has(id));
+  const target = finding.nodes.find(id => world.ownerOf.has(id) || world.bubbleById.has(id));
   const title = element('button', undefined, 'finding-title');
   title.append(element('span', finding.severity, `sev ${finding.severity}`), element('span', finding.title));
+  if (finding.status === 'unverified') {
+    const doubt = element('span', 'unverified', 'chip doubt');
+    doubt.title = 'The census could not confirm this problem. Read the contract file before you act on it.';
+    title.append(doubt);
+  }
 
   if (target && target !== world.selected) {
     title.title = `Show ${world.byId.get(target).label} on the map`;
@@ -882,26 +1078,81 @@ function findingRow(world, finding) {
   return row;
 }
 
+// Every part a machine touches: the parts the census names and the parts that write its moves.
+function machineNodes(machine) {
+  const writers = machine.layers.flatMap(layer => layer.transitions.map(move => move.node).filter(Boolean));
+  return [...new Set([...machine.nodes, ...writers])];
+}
+
+// The layer that the contract file names as the authority; the map's state ring shows this one.
+function authorityLayer(machine) {
+  return machine.layers.find(layer => layer.authority) ?? machine.layers[0];
+}
+
+// A state with no way out is not terminal and has no move that leaves it. The view derives it from
+// the moves, so a new exit in the contract file clears the red mark by itself.
+function statesWithNoExit(layer) {
+  return layer.states.filter(state => !layer.terminal.includes(state) && !layer.transitions.some(move => move.from === state));
+}
+
 function machineBlock(world, machine) {
   const block = element('div', undefined, 'machine');
   const head = element('div', undefined, 'machine-head');
   const showing = world.highlight?.id === machine.id;
   head.append(element('strong', machine.label), button(showing ? 'Stop showing' : 'Show on map', () => {
-    world.highlight = showing ? null : { id: machine.id, nodes: new Set(machine.nodes) };
+    world.highlight = showing ? null : { id: machine.id, nodes: new Set(machineNodes(machine)) };
+    if (!showing) {
+      const view = world.activeView;
+      const touched = [...new Set([...world.highlight.nodes].map(id => ownerBubble(world, id)).filter(Boolean))];
+      if (touched.length) view.flyTo(view.cameraFor(touched));
+    }
     world.redraw();
     renderPanel(world);
   }));
+  block.append(head);
 
-  const states = element('div', undefined, 'states');
-  const all = [...machine.states, ...machine.stuck.filter(state => !machine.states.includes(state))];
-  for (const state of all) {
-    const stuck = machine.stuck.includes(state);
-    const label = element('span', stuck ? `${state} · no way out` : state, 'chip');
-    label.style.color = label.style.borderColor = stuck ? SEVERITY.high.color : '#84b9df';
-    states.append(label);
+  for (const layer of machine.layers) block.append(layerBlock(world, layer));
+
+  if (machine.bridges?.length) {
+    const bridges = element('details');
+    bridges.append(element('summary', `How the layers follow each other (${machine.bridges.length})`));
+    for (const bridge of machine.bridges) {
+      const ends = `${bridge.from.layer} ${bridge.from.state} → ${bridge.to.layer} ${bridge.to.state}`;
+      bridges.append(element('p', `${ends}: ${bridge.text}`, 'bridge'));
+    }
+    block.append(bridges);
   }
 
-  block.append(head, states, element('div', machine.doc, 'source'));
+  block.append(element('div', machine.doc, 'source'));
+  return block;
+}
+
+function layerBlock(world, layer) {
+  const block = element('div', undefined, 'layer');
+  const noExit = statesWithNoExit(layer);
+  block.append(element('div', layer.authority ? `${layer.name} · the authority` : layer.name, 'layer-name'));
+
+  const states = element('div', undefined, 'states');
+  for (const state of layer.states) {
+    const stuck = noExit.includes(state);
+    const terminal = layer.terminal.includes(state);
+    const label = element('span', stuck ? `${state} · no way out` : terminal ? `${state} · end` : state, 'chip');
+    label.style.color = label.style.borderColor = stuck ? SEVERITY.high.color : terminal ? '#a8b8cb' : '#84b9df';
+    states.append(label);
+  }
+  block.append(states);
+
+  const moves = element('details');
+  moves.append(element('summary', `Moves (${layer.transitions.length})`));
+  for (const move of layer.transitions) {
+    const text = `${move.from ?? 'start'} → ${move.to} · ${move.writer}`;
+    const placed = move.node && (world.ownerOf.has(move.node) || world.bubbleById.has(move.node));
+    const row = placed ? button(text, () => world.goTo(move.node), 'move') : element('div', text, 'move');
+    if (placed) row.title = `Show ${world.byId.get(move.node).label} on the map`;
+    moves.append(row);
+    for (const source of move.sources) moves.append(element('div', `${source.path}:${source.line}–${source.endLine}`, 'source'));
+  }
+  block.append(moves);
   return block;
 }
 
@@ -987,6 +1238,11 @@ class Viewport {
   }
 
   flyTo(target, remember = true) {
+    const { x, y, zoom } = this.camera;
+    const alreadyThere = Math.abs(target.x - x) < 1 && Math.abs(target.y - y) < 1 && Math.abs(target.zoom / zoom - 1) < 0.01;
+
+    if (alreadyThere) return;
+
     if (remember) this.history.push({ ...this.camera });
     this.animate(target);
   }
@@ -1156,7 +1412,7 @@ class Viewport {
     if (level === 'count') return;
 
     for (const id of bubble.members.keys()) {
-      const findings = this.world.findingsByNode.get(id) || [];
+      const findings = shownFindings(this.world, id);
       const look = {
         id,
         bubble,
@@ -1224,7 +1480,7 @@ class Viewport {
     ctx.setLineDash([]);
 
     const dot = { x: box.x + 14, y: point.y };
-    if (machine) this.stateRing(dot, 6, machine);
+    if (machine) this.stateRing(dot, 6, machine, id);
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(dot.x, dot.y, 3, 0, Math.PI * 2);
@@ -1260,7 +1516,9 @@ class Viewport {
     const level = this.level(bubble);
     const health = bubbleHealth(this.world, bubble);
     const active = this.hover?.bubble === bubble || this.world.selected === bubble.id;
-    const faded = this.world.highlight && ![...bubble.members.keys()].some(id => this.world.highlight.nodes.has(id));
+    const { highlight } = this.world;
+    const outsideHighlight = highlight && !highlight.nodes.has(bubble.id) && ![...bubble.members.keys()].some(id => highlight.nodes.has(id));
+    const faded = outsideHighlight || (isFiltering(this.world) && health.findings.length === 0);
 
     ctx.globalAlpha = faded ? 0.3 : 1;
 
@@ -1383,17 +1641,23 @@ class Viewport {
     return box;
   }
 
-  // One arc per state in lifecycle order. A stuck state is red: it has no way out or no deadline.
-  stateRing(point, radius, machine) {
+  // One arc per state in lifecycle order; a state with no way out is red. The ring shows the layers
+  // that this part writes moves for, or the authority layer when the part writes none.
+  stateRing(point, radius, machine, id) {
     const ctx = this.context;
-    const states = machine.states.length ? machine.states : ['?'];
-    const step = (Math.PI * 2) / states.length;
+    const written = machine.layers.filter(layer => layer.transitions.some(move => move.node === id));
+    const layers = written.length ? written : [authorityLayer(machine)];
+    const arcs = layers.flatMap(layer => {
+      const noExit = statesWithNoExit(layer);
+      return layer.states.map(state => noExit.includes(state));
+    });
+    const step = (Math.PI * 2) / Math.max(1, arcs.length);
     const gap = Math.min(0.3, step * 0.25);
 
     ctx.lineWidth = 2;
-    states.forEach((state, index) => {
+    arcs.forEach((stuck, index) => {
       const start = -Math.PI / 2 + index * step + gap / 2;
-      ctx.strokeStyle = machine.stuck.includes(state) ? SEVERITY.high.color : '#84b9df';
+      ctx.strokeStyle = stuck ? SEVERITY.high.color : '#84b9df';
       ctx.beginPath();
       ctx.arc(point.x, point.y, radius, start, start + step - gap);
       ctx.stroke();
@@ -1417,7 +1681,7 @@ class Viewport {
 
     if (hover.kind === 'member') {
       const node = world.byId.get(hover.id);
-      const count = (world.findingsByNode.get(hover.id) || []).length;
+      const count = shownFindings(world, hover.id).length;
       lines.push(node.label, `${node.kind}${count ? ` · ${count} problems` : ''} · click for details`);
     } else if (hover.kind === 'open') {
       lines.push(`Zoom into ${hover.bubble.label}`);
@@ -1461,7 +1725,7 @@ class Viewport {
       const distance = Math.hypot(x - center.x, y - center.y);
       const radius = bubble.r * this.camera.zoom;
 
-      if (Math.abs(distance - radius) <= RIM_GRAB_PX) return { kind: 'rim', bubble };
+      if (Math.abs(distance - radius) <= Math.min(RIM_GRAB_PX, radius * RIM_GRAB_SHARE)) return { kind: 'rim', bubble };
       if (distance < radius) return { kind: 'bubble', bubble };
     }
 
@@ -1489,7 +1753,7 @@ class Viewport {
       const point = local(event);
       activate();
       this.stopFlight();
-      drag = { hit: this.hitTest(point.x, point.y), last: point, moved: false };
+      drag = { hit: this.hitTest(point.x, point.y), start: point, last: point, moved: false };
       canvas.setPointerCapture(event.pointerId);
       if (drag.hit.kind === 'space') canvas.style.cursor = 'grabbing';
     });
@@ -1505,12 +1769,18 @@ class Viewport {
         return;
       }
 
+      const { hit } = drag;
+
+      if (!drag.moved && Math.hypot(point.x - drag.start.x, point.y - drag.start.y) < DRAG_THRESHOLD_PX) return;
+
+      if (!drag.moved && hit.kind !== 'space') world.rememberLayout();
+      drag.moved = true;
+
+      // The first step covers the threshold distance too, so the bubble catches up with the pointer.
       const dx = (point.x - drag.last.x) / this.camera.zoom;
       const dy = (point.y - drag.last.y) / this.camera.zoom;
       drag.last = point;
-      drag.moved ||= Math.abs(dx) + Math.abs(dy) > 0;
 
-      const { hit } = drag;
       if (hit.kind === 'space') {
         this.camera.x -= dx;
         this.camera.y -= dy;
@@ -1547,6 +1817,14 @@ class Viewport {
       else if (hit.kind === 'space') world.select(null);
       else world.select(hit.bubble.id);
     });
+
+    // The system took the pointer away mid-gesture. A move that already happened is kept and saved.
+    const cancel = () => {
+      if (drag?.moved && drag.hit.kind !== 'space') world.scheduleSave();
+      drag = null;
+    };
+    canvas.addEventListener('pointercancel', cancel);
+    canvas.addEventListener('lostpointercapture', cancel);
 
     canvas.addEventListener('wheel', event => {
       event.preventDefault();

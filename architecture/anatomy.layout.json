@@ -594,8 +594,8 @@
       }
     },
     "organ:boats": {
-      "x": 3129,
-      "y": 985,
+      "x": 3130,
+      "y": 986,
       "scale": 1,
       "members": {
         "module:adapters/omp/house-proof/boat-door.ts": [
@@ -1069,7 +1069,7 @@
     },
     "organ:lessons": {
       "x": 3079,
-      "y": 1781,
+      "y": 1783,
       "scale": 1,
       "members": {
         "module:crates/hearth/src/lesson_triggers.rs": [
@@ -1198,8 +1198,8 @@
       }
     },
     "organ:recall": {
-      "x": 2834,
-      "y": 361,
+      "x": 2833,
+      "y": 358,
       "scale": 1,
       "members": {
         "module:crates/hearth/src/recall.rs": [

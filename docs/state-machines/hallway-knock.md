@@ -113,7 +113,7 @@ The cross-layer links:
 | L8 | An exchange never exceeds its `max_turns`. | holds | `knocks.rs:405-412`, `0021:67` |
 | L9 | The terminal status does not depend on call order. | **broken** | See defect D3. |
 | L10 | The adapter holds at most one active knock. | holds | `knock.ts:321-338` |
-| L11 | Every adapter state except `Idle` leaves within a bounded time. | **broken** | See defect D4. |
+| L11 | Every adapter state except `Idle` leaves within a bounded time. | holds | D4 fixed in `bfb4364`: a started turn fails at `expiresAt` (`hearth/src/machines/knock_turn.rs`) |
 | L12 | SQL `completed` means that the knock turn ran. | **broken in a race** (`unverified`) | See defect D6. |
 | L13 | The Hearth turn limits agree with the SQL CHECKs. | holds today | 20 and 10 at `hallway.rs:9-10` and `0031:28-37`; no read source checks the agreement |
 
@@ -134,10 +134,10 @@ The cross-layer links:
   `settle` checks the lease and the status only (`knocks.rs:742-777`).
   A `started` row past `expires_at` becomes `completed` when the settle arrives first.
   The same row becomes `failed` when a claim sweep arrives first.
-- **D4. A started turn that never ends has no exit in the adapter.**
-  `KnockPlan` fails a knock only on the three timers at `lifecycle.rs:135-146`.
-  No rule covers `turnStarted && !turnEnded`.
-  The doorman stays active, and the room claims no new knock (D2).
+- **D4. Fixed in `bfb4364`.** A started turn that never ended had no exit in the adapter.
+  The decision moved from `KnockPlan` in `host/src/lifecycle.rs` to `plan_knock_turn` in `crates/hearth/src/machines/knock_turn.rs`.
+  The adapter sends `expiresInMs`, the time left until the pointer's `expiresAt` (`knock.ts:283-296`).
+  A turn that started and did not end fails when that time reaches zero (ruling R2).
 - **D5. A crash loses the active knock.**
   The doorman state lives only in memory (`knockDoormen`, `knock.ts:146`).
   A `claimed` row becomes `Reclaimable` after 30 s, and the next claim injects it again (`knocks.rs:632`).
@@ -170,8 +170,8 @@ The cross-layer links:
    A SQL `BEFORE UPDATE` trigger on `hallway_knocks` refuses every edge outside the same set.
    Add a terminal state for expired `pending` rows (R1). Expire rows in `knock`, `claim`, and `settle` (R4).
    This fixes D1, D2, D3, and D9.
-3. **Host.** Keep `KnockPlan` as the one decision owner. Add a rule for `turnStarted && !turnEnded` (R2).
-   This fixes D4.
+3. **Hearth.** `plan_knock_turn` in `crates/hearth/src/machines/knock_turn.rs` is the one decision owner. The Host only calls it.
+   The started-turn expiry rule is in place (R2). This fixed D4.
 4. **Adapter.** Replace the fields with one tagged state and one pure `step(state, event) → (state, effects)`.
    Bind the turn end to the knock turn that `message_start` observed.
    This fixes D6 and D8.
@@ -182,7 +182,7 @@ The cross-layer links:
 ## Open rulings
 
 - **R1. Terminal state for an expired `pending` row.** Proposal: add the status `expired`. The shape CHECK then permits null claim columns for `expired`. The status `failed` keeps its meaning: a recipient held the turn and did not finish it.
-- **R2. Timeout for a started turn.** Proposal: use the pointer's `expiresAt` as the hard limit, and fail the knock at that instant. The exchange lifetime already scales with the turn budget (`knocks.rs:26-36`).
+- **R2. Timeout for a started turn.** Ruled 2026-11-07 and done in `bfb4364`: the pointer's `expiresAt` is the hard limit, and the knock fails at that instant.
 - **R3. D5: fix or accept.** Proposal: fix, and persist the active knock id in the session file. After a restart, the doorman fails that knock with a restart reason before it claims new work.
 - **R4. Expiry location.** Proposal: run the expiry UPDATE for the hallway inside `knock`, `claim`, and `settle`. `settle` then refuses `completed` past `expires_at`. Expiry then no longer depends on the recipient's claim loop.
 - **R5. D7: name of `started`.** Proposal: keep the SQL value, and define it as "delivered to the recipient harness". The 30-second lease is too short to wait for a busy turn to start. A rename would change the protocol for no new behavior.

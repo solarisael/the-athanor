@@ -722,7 +722,9 @@ function tidy(bubbles) {
         const [ux, uy] = centreDistance ? [(b.x - a.x) / centreDistance, (b.y - a.y) / centreDistance] : [1, 0];
         const overlap = a.r + b.r + gap - centreDistance;
 
-        if (overlap <= 0) continue;
+        // Saved positions are whole units and saved scales keep three decimals, so an overlap up to
+        // 2 units is rounding noise. Each push adds 1 unit per side, which stays clear after rounding.
+        if (overlap <= 2) continue;
 
         const push = overlap / 2 + 1;
         a.x = Math.round(a.x - ux * push);

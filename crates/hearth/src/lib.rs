@@ -14,6 +14,7 @@ pub mod giga;
 pub mod hallway;
 pub mod lesson_triggers;
 pub mod lineage;
+pub mod machines;
 pub mod operator;
 pub mod orihon;
 pub mod recall;

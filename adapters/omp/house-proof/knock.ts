@@ -282,6 +282,7 @@ type KnockPlan = {
 
 function planObservedTurn(state: KnockDoormanState): Promise<KnockPlan> {
   const now = Date.now();
+  const expiresAt = state.active ? Date.parse(state.active.expiresAt) : Number.NaN;
   return lifecyclePlan(state.binding, {
     action: "knockPlan",
     delivered: state.delivered,
@@ -290,6 +291,7 @@ function planObservedTurn(state: KnockDoormanState): Promise<KnockPlan> {
     turnEnded: state.turnEnded,
     deliveredElapsedMs: state.deliveredAt === null ? null : Math.max(0, now - state.deliveredAt),
     endedElapsedMs: state.turnEndedAt === null ? null : Math.max(0, now - state.turnEndedAt),
+    expiresInMs: Number.isFinite(expiresAt) ? expiresAt - now : null,
   });
 }
 

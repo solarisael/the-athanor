@@ -184,3 +184,18 @@ Anamnesis and Paper Boat live in `summoning`.
 - An answered trigger braids each lesson into one hidden reminder.
 - The braid shows the identifier, the title, the lesson, the proof pattern, and the trigger context.
 - A blank field drops out of the braid.
+
+### machines (src/machines/)
+
+- Each module owns one state machine: its states, its legal moves, and the decision for the next move.
+- Time arrives as input. No module reads a clock.
+- The contract for each machine is in `docs/state-machines/`.
+
+#### knock_turn (src/machines/knock_turn.rs)
+
+- The adapter doorman reports its flags, its elapsed times, and the time left until the knock expires.
+- A knock that is not delivered gets the plan "deliver".
+- Three timers fail a stalled step: start settle at 25 s, turn start at 60 s, and completion settle at 25 s.
+- A turn that started and did not end fails when the knock expires.
+- An ended turn that waits for its settle never fails on expiry.
+- Without a failure, the plan names the settlements in order: `started`, then `completed`.

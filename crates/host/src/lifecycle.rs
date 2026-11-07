@@ -1,3 +1,4 @@
+use hearth::machines::knock_turn::{KnockTurnFacts, plan_knock_turn};
 use protocol::{ChatAuthor, ChatMessage};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -31,6 +32,7 @@ pub(crate) enum LifecycleRequest {
         turn_ended: bool,
         delivered_elapsed_ms: Option<u64>,
         ended_elapsed_ms: Option<u64>,
+        expires_in_ms: Option<i64>,
     },
 }
 
@@ -128,34 +130,16 @@ pub(crate) fn execute(
             turn_ended,
             delivered_elapsed_ms,
             ended_elapsed_ms,
-        } => {
-            if !delivered {
-                return Ok(json!({ "deliver": true, "settlements": [], "failure": null }));
-            }
-            let failure = if !start_settled
-                && delivered_elapsed_ms.is_some_and(|elapsed| elapsed >= 25_000)
-            {
-                Some("recipient turn start did not settle within 25000ms")
-            } else if !turn_started && delivered_elapsed_ms.is_some_and(|elapsed| elapsed >= 60_000)
-            {
-                Some("recipient turn did not start within 60000ms")
-            } else if turn_ended && ended_elapsed_ms.is_some_and(|elapsed| elapsed >= 25_000) {
-                Some("recipient turn completion did not settle within 25000ms")
-            } else {
-                None
-            };
-            let settlements: &[&str] = if failure.is_some() {
-                &[]
-            } else {
-                match (start_settled, turn_started && turn_ended) {
-                    (false, true) => &["started", "completed"],
-                    (false, false) => &["started"],
-                    (true, true) => &["completed"],
-                    (true, false) => &[],
-                }
-            };
-            Ok(json!({ "deliver": false, "settlements": settlements, "failure": failure }))
-        }
+            expires_in_ms,
+        } => Ok(json!(plan_knock_turn(&KnockTurnFacts {
+            delivered,
+            start_settled,
+            turn_started,
+            turn_ended,
+            delivered_elapsed_ms,
+            ended_elapsed_ms,
+            expires_in_ms,
+        }))),
     }
 }
 
@@ -200,22 +184,5 @@ mod tests {
             result["answer"],
             json!({"text":"answer", "thinking":["work"], "outcome":"complete"})
         );
-    }
-
-    #[test]
-    fn knock_deadlines_preserve_acknowledgement_precedence() {
-        let result = decide(json!({
-            "action":"knockPlan", "delivered":true, "startSettled":false,
-            "turnStarted":true, "turnEnded":true,
-            "deliveredElapsedMs":25_000, "endedElapsedMs":0
-        }));
-        assert!(result["failure"].is_string());
-        assert_eq!(result["settlements"], json!([]));
-        let result = decide(json!({
-            "action":"knockPlan", "delivered":true, "startSettled":false,
-            "turnStarted":true, "turnEnded":true,
-            "deliveredElapsedMs":24_999, "endedElapsedMs":0
-        }));
-        assert_eq!(result["settlements"], json!(["started", "completed"]));
     }
 }

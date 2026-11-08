@@ -152,7 +152,47 @@ function Wait-CutoverQuiet {
   }
 }
 
-if ($PSBoundParameters.ContainsKey("PreparedRelease")) {
+# A plain run installs the newest unconsumed preparation of HEAD, so activation needs no receipt path.
+# A build from a dirty tree counts only while no tracked change is newer than its receipt.
+function Find-PreparedReleaseForHead {
+  param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+
+  $Commit = (& git -C $RepositoryRoot rev-parse --short HEAD).Trim()
+
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Commit)) { throw "git could not name HEAD" }
+
+  $Changed = @(& git -C $RepositoryRoot status --porcelain --untracked-files=no |
+    Where-Object { $_ } |
+    ForEach-Object { Join-Path $RepositoryRoot ($_.Substring(3) -replace '^.* -> ', '') })
+  $LastChange = $Changed |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    ForEach-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc } |
+    Sort-Object -Descending |
+    Select-Object -First 1
+  $Suffix = if ($Changed.Count -gt 0) { ".$Commit.dirty" } else { ".$Commit" }
+
+  $Receipt = Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot "target/releases") -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name.EndsWith($Suffix, [StringComparison]::Ordinal) } |
+    ForEach-Object { Get-Item -LiteralPath (Join-Path $_.FullName "prepared-release.json") -ErrorAction SilentlyContinue } |
+    Where-Object { $null -eq $LastChange -or $_.LastWriteTimeUtc -gt $LastChange } |
+    Sort-Object LastWriteTimeUtc -Descending |
+    Select-Object -First 1
+
+  if ($null -eq $Receipt) {
+    Write-Host "==> no prepared release matches HEAD $Commit$(if ($Changed.Count -gt 0) { ' and its uncommitted changes' }); preparing a new one"
+    return ""
+  }
+
+  Write-Host "==> using the prepared release for HEAD $Commit`: $($Receipt.Directory.Name)"
+  return $Receipt.FullName
+}
+
+$Preparing = $PrepareOnly -or @("Build", "SkipTests").Where({ $PSBoundParameters.ContainsKey($_) }).Count -gt 0
+if (-not $PSBoundParameters.ContainsKey("PreparedRelease") -and -not $Preparing) {
+  $PreparedRelease = Find-PreparedReleaseForHead -RepositoryRoot $Root
+}
+
+if (-not [string]::IsNullOrWhiteSpace($PreparedRelease)) {
   $Prepared = Read-PreparedRelease -Path $PreparedRelease
   $Receipt = [IO.Path]::GetFullPath($PreparedRelease)
 } else {

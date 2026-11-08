@@ -106,9 +106,11 @@ A Host that stops while the marker exists releases the keepers it started instea
 Their OMP sessions stay open, and the next Host reports them as held by another owner.
 Start the Host after installation.
 
-With neither `-PrepareOnly` nor `-PreparedRelease`, the PowerShell driver prepares the release and then attempts installation.
+With no arguments, the PowerShell driver looks for a prepared release of `HEAD` and installs the newest one.
+A preparation from a dirty tree counts only while no tracked change is newer than its receipt.
+When no preparation matches, the driver prepares a new release and then attempts installation.
 An open Host makes installation wait up to ten minutes for you to stop it.
-Use the printed receipt for the later installation attempt.
+Use `-PreparedRelease` to install a different preparation.
 Do not combine `-PreparedRelease` with preparation or Linux options.
 The Linux deployment path does not use these stages.
 
@@ -150,10 +152,11 @@ Use the PowerShell driver directly until a native update supplies that command.
 pwsh -NoProfile -File .\substrate\deploy-local.ps1 -PrepareOnly
 ```
 
-Close the Host and OMP before the second command:
+Close the Host and OMP before the second command.
+The driver finds the receipt from the first command:
 
 ```powershell
-pwsh -NoProfile -File .\substrate\deploy-local.ps1 -PreparedRelease '<printed receipt path>'
+pwsh -NoProfile -File .\substrate\deploy-local.ps1
 ```
 
 ## Versions

@@ -21,7 +21,13 @@ the exact implementation record.
 ## [Unreleased]
 
 ### Changed
-
+- `substrate/deploy-local.ps1` with no arguments now installs the newest
+  unconsumed preparation of `HEAD`. It prepares a new release only when no
+  preparation matches. A preparation from a dirty tree matches only while no
+  tracked change is newer than its receipt.
+- The hallway knock turn decision moved from the Host into
+  `hearth::machines::knock_turn`. A knock turn that started and did not end
+  now fails when the knock expires (hallway-knock D4).
 - GIGA stores individual turn jobs before capture acknowledgement. OMP no longer holds a volatile turn buffer.
   Conversations release work by count or oldest-turn age. Defaults are eight turns, 120 seconds, and four concurrent jobs.
   Each judgment receives nearby turns and bounded Recall context. Jev can select one follow-up lookup.

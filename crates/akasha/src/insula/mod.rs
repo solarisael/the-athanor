@@ -1,11 +1,12 @@
 //! Insula: the House's interoception. Trusted writers ingest observation
-//! events; the queries read vitals, traces, and unverified exits back;
-//! retention proves what it deleted.
+//! events and state-machine transitions; the queries read vitals, traces, and
+//! unverified exits back; retention proves what it deleted.
 
 mod event;
 mod ingest;
 mod query;
 mod retention;
+mod transitions;
 
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -27,6 +28,9 @@ pub use query::{
 pub use retention::{
     INSULA_MAX_RETENTION_ROWS, RetentionReadResult, RetentionReceipt, RetentionReceiptRow,
     RetentionStatus, query_retention, run_retention,
+};
+pub use transitions::{
+    TRANSITION_RETENTION_DAYS, TransitionRow, ingest_transitions, run_transition_retention,
 };
 
 pub const INSULA_SCHEMA_VERSION: i16 = 1;

@@ -1,8 +1,9 @@
 use crate::insula::{
     INSULA_MAX_BATCH_EVENTS, IdempotencyScope, IngestBatch, ObservationEvent, ObservationPhase,
-    OutcomeClass, TrustedBinding, ingest_batch,
+    OutcomeClass, TransitionRow, TrustedBinding, ingest_batch, ingest_transitions,
 };
 use chrono::{DateTime, Utc};
+use hearth::machines::Transition;
 use sqlx::PgPool;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -27,6 +28,30 @@ struct QueuedObservation {
     event: ObservationEvent,
 }
 
+/// One queue slot: observations and transitions share the capacity, the drop count, and
+/// the drain, and persist to their own tables.
+struct Queued {
+    binding: TrustedBinding,
+    item: QueuedItem,
+}
+
+// Observations fill the queue; boxing them would cost an allocation per event to save
+// bytes on the rare transition slot.
+#[allow(clippy::large_enum_variant)]
+enum QueuedItem {
+    Observation(ObservationEvent),
+    Transition(TransitionRow),
+}
+
+impl From<QueuedObservation> for Queued {
+    fn from(queued: QueuedObservation) -> Self {
+        Self {
+            binding: queued.binding,
+            item: QueuedItem::Observation(queued.event),
+        }
+    }
+}
+
 struct WriterState {
     writer_id: Uuid,
     sequence: AtomicI64,
@@ -35,7 +60,7 @@ struct WriterState {
     unaccounted: AtomicI64,
     dropped: AtomicI64,
     accepting: AtomicBool,
-    sender: mpsc::Sender<QueuedObservation>,
+    sender: mpsc::Sender<Queued>,
 }
 
 impl WriterState {
@@ -51,13 +76,13 @@ impl WriterState {
             });
     }
 
-    fn enqueue(&self, observation: QueuedObservation) {
+    fn enqueue(&self, queued: impl Into<Queued>) {
         if !self.accepting.load(Ordering::Acquire) {
             return;
         }
 
         self.unaccounted.fetch_add(1, Ordering::AcqRel);
-        if self.sender.try_send(observation).is_err() {
+        if self.sender.try_send(queued.into()).is_err() {
             self.note_drop();
         }
     }
@@ -408,6 +433,32 @@ pub fn record_timed_point(
     });
 }
 
+/// Queues the moves a Hearth machine committed. Each becomes one `insula.transitions` row.
+// enough: a full queue drops a transition like any observation, and the drop marker counts
+// it; the SQL tables of each machine stay the authority for state.
+pub fn record_transitions(binding: &TrustedBinding, transitions: Vec<Transition>) {
+    let Some(emitter) = EMITTER.get() else {
+        return;
+    };
+    if !emitter.state.accepting.load(Ordering::Acquire) {
+        return;
+    }
+
+    for transition in transitions {
+        let row = TransitionRow {
+            event_id: Uuid::new_v4(),
+            writer_id: emitter.state.writer_id,
+            writer_sequence: emitter.state.next_sequence(),
+            observed_at: Utc::now(),
+            transition,
+        };
+        emitter.state.enqueue(Queued {
+            binding: binding.clone(),
+            item: QueuedItem::Transition(row),
+        });
+    }
+}
+
 pub async fn flush_insula_emitter() {
     let Some(emitter) = EMITTER.get() else {
         return;
@@ -549,7 +600,7 @@ fn drop_observation(state: &WriterState, drop_count: i64) -> QueuedObservation {
 
 async fn drain_loop(
     pool: PgPool,
-    mut receiver: mpsc::Receiver<QueuedObservation>,
+    mut receiver: mpsc::Receiver<Queued>,
     mut shutdown: watch::Receiver<bool>,
     state: Arc<WriterState>,
 ) {
@@ -577,7 +628,7 @@ async fn drain_loop(
 
         let mut batch = Vec::with_capacity(INSULA_MAX_BATCH_EVENTS);
         if dropped > 0 {
-            batch.push(drop_observation(&state, dropped));
+            batch.push(drop_observation(&state, dropped).into());
         }
         if let Some(first) = first {
             batch.push(first);
@@ -592,21 +643,37 @@ async fn drain_loop(
     }
 }
 
-async fn persist_groups(pool: &PgPool, batch: Vec<QueuedObservation>, state: &WriterState) {
-    let mut groups: Vec<(TrustedBinding, Vec<ObservationEvent>)> = Vec::new();
-    for observation in batch {
-        if let Some((_, events)) = groups
-            .iter_mut()
-            .find(|(binding, _)| *binding == observation.binding)
-        {
-            events.push(observation.event);
-        } else {
-            groups.push((observation.binding, vec![observation.event]));
+async fn persist_groups(pool: &PgPool, batch: Vec<Queued>, state: &WriterState) {
+    let mut groups: Vec<(TrustedBinding, Vec<ObservationEvent>, Vec<TransitionRow>)> = Vec::new();
+    for Queued { binding, item } in batch {
+        let index = match groups.iter().position(|(known, ..)| *known == binding) {
+            Some(index) => index,
+            None => {
+                groups.push((binding, Vec::new(), Vec::new()));
+                groups.len() - 1
+            }
+        };
+        match item {
+            QueuedItem::Observation(event) => groups[index].1.push(event),
+            QueuedItem::Transition(row) => groups[index].2.push(row),
         }
     }
 
     // The writer's own persistence is behind a recursion fence: Insula database work is never observed.
-    for (binding, events) in groups {
+    for (binding, events, transitions) in groups {
+        // A replayed row is a duplicate, never a second count, so success accounts every row.
+        if !transitions.is_empty()
+            && ingest_transitions(pool, &binding, &transitions)
+                .await
+                .is_ok()
+        {
+            let accounted = i64::try_from(transitions.len()).unwrap_or(i64::MAX);
+            state.unaccounted.fetch_sub(accounted, Ordering::AcqRel);
+        }
+        if events.is_empty() {
+            continue;
+        }
+
         let drop_marker = events.iter().enumerate().find_map(|(index, event)| {
             (event.phase == ObservationPhase::Drop).then_some((index as u32, event.drop_count))
         });
@@ -672,7 +739,7 @@ mod tests {
         assert!(status.success());
     }
 
-    fn test_state(sender: mpsc::Sender<QueuedObservation>) -> Arc<WriterState> {
+    fn test_state(sender: mpsc::Sender<Queued>) -> Arc<WriterState> {
         Arc::new(WriterState {
             writer_id: Uuid::new_v4(),
             sequence: AtomicI64::new(0),
@@ -751,8 +818,12 @@ mod tests {
         let span = deferred("knock_poll_claimed");
         let span_id = span.span_id.to_string();
         end_span(Some(span), OutcomeClass::Ok, None);
-        let start = receiver.try_recv().expect("start row").event;
-        let end = receiver.try_recv().expect("end row").event;
+        let observed = |queued: Queued| match queued.item {
+            QueuedItem::Observation(event) => event,
+            QueuedItem::Transition(_) => panic!("a span queues observations only"),
+        };
+        let start = observed(receiver.try_recv().expect("start row"));
+        let end = observed(receiver.try_recv().expect("end row"));
         assert!(receiver.try_recv().is_err());
         assert_eq!(start.phase, ObservationPhase::Start);
         assert_eq!(start.observed_at, began_at);
@@ -1003,7 +1074,7 @@ mod tests {
 
     async fn hardening_flush(
         pool: &PgPool,
-        receiver: mpsc::Receiver<QueuedObservation>,
+        receiver: mpsc::Receiver<Queued>,
         state: &Arc<WriterState>,
     ) -> i64 {
         state.accepting.store(false, Ordering::Release);

@@ -96,7 +96,9 @@ async fn hallway_temp_session_exchanges_messages_without_persistent_state() -> T
     sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
     sqlx::raw_sql(KNOCK_MIGRATION).execute(&pool).await?;
     sqlx::raw_sql(KNOCK_TURNS_MIGRATION).execute(&pool).await?;
-    sqlx::raw_sql(KNOCK_EXPIRED_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(KNOCK_EXPIRED_MIGRATION)
+        .execute(&pool)
+        .await?;
     let result = async {
         run_contract(&pool).await?;
         run_knock_contract(&pool).await

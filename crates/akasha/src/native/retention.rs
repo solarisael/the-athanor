@@ -92,5 +92,13 @@ pub async fn run(shared_pool: Option<sqlx::PgPool>, house_id: &str) {
                 tracing::warn!(error_class = class, "retention_sweep_failed");
             }
         }
+
+        // Independent of the raw-log sweep: the daily counts need no coverage proof.
+        if let Err(error) = akasha::run_transition_retention(&pool, house_id, Utc::now()).await {
+            tracing::warn!(
+                error_class = retention_error_class(&error),
+                "transition_retention_failed"
+            );
+        }
     }
 }

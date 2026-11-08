@@ -1,8 +1,11 @@
 //! The SQL status of one Hallway Knock and every legal move between statuses.
 //! Contract: `docs/state-machines/hallway-knock.md`. The store asks `knock_step` before each UPDATE.
 
+use super::Transition;
 use crate::hallway::HallwayKnockOutcome;
 use serde::{Deserialize, Serialize};
+
+pub const MACHINE: &str = "hallway_knock";
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -55,6 +58,18 @@ pub enum KnockEvent {
     Expire,
 }
 
+impl KnockEvent {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Claim => "claim",
+            Self::Settle(HallwayKnockOutcome::Started) => "settle_started",
+            Self::Settle(HallwayKnockOutcome::Completed) => "settle_completed",
+            Self::Settle(HallwayKnockOutcome::Failed) => "settle_failed",
+            Self::Expire => "expire",
+        }
+    }
+}
+
 /// The status `event` moves a Knock to, or `None` when the move is illegal.
 pub const fn knock_step(
     status: HallwayKnockStatus,
@@ -71,6 +86,22 @@ pub const fn knock_step(
         (S::Claimed | S::Started, Settle(Failed) | Expire) => Some(S::Failed),
         (S::Pending, Expire) => Some(S::Expired),
         _ => None,
+    }
+}
+
+/// The Insula record of one move `knock_step` allowed.
+pub fn knock_transition(
+    knock_id: &str,
+    from: HallwayKnockStatus,
+    event: KnockEvent,
+    to: HallwayKnockStatus,
+) -> Transition {
+    Transition {
+        machine: MACHINE,
+        subject_id: knock_id.to_owned(),
+        from: from.as_str(),
+        event: event.as_str(),
+        to: to.as_str(),
     }
 }
 

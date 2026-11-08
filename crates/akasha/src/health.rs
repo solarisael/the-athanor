@@ -30,6 +30,8 @@ const REQUIRED_TABLES: &[&str] = &[
     "insula.vitals_minute",
     "insula.retention_receipts",
     "insula.log_tombstones",
+    "insula.transitions",
+    "insula.transitions_daily",
 ];
 const REQUIRED_EXTENSIONS: &[&str] = &["pg_trgm", "pgcrypto", "vector"];
 

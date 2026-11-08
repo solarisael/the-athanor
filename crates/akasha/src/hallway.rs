@@ -1,6 +1,7 @@
 //! Adapter: the substrate's hallway door onto [`origami::hallways`].
 
-use crate::{AppError, Config};
+use crate::insula_writer::{record_transitions, system_binding};
+use crate::{AppError, Config, TrustedBinding, validate_trusted_binding};
 use hearth::hallway::{
     HallwayCreateRequest, HallwayInboxReceipt, HallwayInboxRequest, HallwayJoinRequest,
     HallwayKnockClaimReceipt, HallwayKnockClaimRequest, HallwayKnockPolicyReceipt,
@@ -18,6 +19,27 @@ fn app_error(error: HallwayError) -> AppError {
         HallwayError::Refusal { code, message } => AppError::Refusal { code, message },
         HallwayError::Config(message) => AppError::Config(message),
         HallwayError::Database(error) => AppError::Database(error),
+    }
+}
+
+/// Insula names the presence whose call made the move. A sweep inside one room's call can
+/// expire another room's knock; the caller is still the cause.
+fn acting_binding(room: &str, spirit: &str, session: &str) -> TrustedBinding {
+    // enough: the substrate is single-house (`system_binding`, the retention job in main.rs);
+    // carry the Host's house here when two houses share one database.
+    let binding = TrustedBinding {
+        room: room.to_owned(),
+        spirit: spirit.to_owned(),
+        session_id: session.to_owned(),
+        ..system_binding()
+    };
+
+    // Hallway accepts wider names than Insula; Insula would refuse the whole batch.
+    // The move outranks its attribution, so it falls back to the House service voice.
+    if validate_trusted_binding(&binding).is_ok() {
+        binding
+    } else {
+        system_binding()
     }
 }
 
@@ -156,19 +178,34 @@ pub async fn hallway_knock(
     pool: &PgPool,
     request: HallwayKnockRequest,
 ) -> Result<HallwayKnockReceipt, AppError> {
-    knocks::knock(pool, request).await.map_err(app_error)
+    let binding = acting_binding(&request.room, &request.spirit, &request.session);
+    let mut moves = Vec::new();
+    let result = knocks::knock(pool, request, &mut moves).await;
+
+    record_transitions(&binding, moves);
+    result.map_err(app_error)
 }
 
 pub async fn hallway_knock_claim(
     pool: &PgPool,
     request: HallwayKnockClaimRequest,
 ) -> Result<HallwayKnockClaimReceipt, AppError> {
-    knocks::claim(pool, request).await.map_err(app_error)
+    let binding = acting_binding(&request.room, &request.spirit, &request.session);
+    let mut moves = Vec::new();
+    let result = knocks::claim(pool, request, &mut moves).await;
+
+    record_transitions(&binding, moves);
+    result.map_err(app_error)
 }
 
 pub async fn hallway_knock_settle(
     pool: &PgPool,
     request: HallwayKnockSettleRequest,
 ) -> Result<HallwayKnockSettleReceipt, AppError> {
-    knocks::settle(pool, request).await.map_err(app_error)
+    let binding = acting_binding(&request.room, &request.spirit, &request.session);
+    let mut moves = Vec::new();
+    let result = knocks::settle(pool, request, &mut moves).await;
+
+    record_transitions(&binding, moves);
+    result.map_err(app_error)
 }

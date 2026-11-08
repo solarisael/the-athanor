@@ -168,6 +168,8 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `query_trace` reads one trace inside the caller's scope, up to 1000 rows.
 - `query_vitals` reads the minute rollups, up to 5000 rows.
 - `run_retention` deletes expired raw observations only after it verifies complete Vitals coverage. It preserves summaries, tombstones, and deletion receipts.
+- `ingest_transitions` writes state-machine moves to `insula.transitions` and adds each new row to its `insula.transitions_daily` edge count in one statement. A replayed row counts once.
+- `run_transition_retention` deletes raw transitions older than `TRANSITION_RETENTION_DAYS` (30). The daily counts stay. The native retention job runs it after the raw-log sweep.
 - `query_retention` reads the sweep receipts with their tombstone summary, up to 100 rows.
 - `query_unverified_exit` reads, for one room, the sessions whose restart intent reached `exiting` and never reached `verified` inside the stage window, up to 100 rows. It observes the restart plane and commands nothing.
 - `lock` takes an advisory lock so two writers cannot race on one logical key.
@@ -178,8 +180,9 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `init_insula_emitter` installs the process emitter once and starts the drain task.
 - `start_span` and `end_span` record the start and the end of one operation, with the duration.
 - `record_point` records a single event with no span, such as a backup receipt.
-- The queue holds 512 pending observations. An overflow increments a drop count that the next observation carries.
-- `drain_loop` batches the queue and calls `ingest_batch`. `persist_groups` groups the batch by binding.
+- `record_transitions` queues the moves a Hearth machine committed. The Hallway knock wrappers in `hallway.rs` call it with the presence that made the call.
+- The queue holds 512 pending observations and transitions together. An overflow increments a drop count that the next observation carries.
+- `drain_loop` batches the queue. `persist_groups` groups the batch by binding, then calls `ingest_transitions` and `ingest_batch`.
 - `flush_insula_emitter` drains on shutdown within 750 milliseconds.
 - `system_binding` is the House service voice for work with no caller.
 - `mechanical_name` and `opaque_identifier` refuse any caller text inside an observation.

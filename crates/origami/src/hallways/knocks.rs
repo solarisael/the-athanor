@@ -1,5 +1,8 @@
 //! The Knock ledger: a room sets its policy, a presence asks a peer room for
 //! one bounded turn, the recipient claims that turn and settles it.
+//!
+//! `knock`, `claim`, and `settle` push every committed status move into `moves`, also when
+//! the call refuses after its expiry sweep committed. The caller hands them to Insula.
 
 use super::channels::{ensure_presence, lookup_id};
 use super::errors::{HallwayError, invalid, refusal};
@@ -12,7 +15,10 @@ use hearth::hallway::{
     HallwayKnockPolicyRequest, HallwayKnockReceipt, HallwayKnockRequest, HallwayKnockSettleReceipt,
     HallwayKnockSettleRequest,
 };
-use hearth::machines::hallway_knock::{HallwayKnockStatus, KnockEvent, knock_step};
+use hearth::machines::Transition;
+use hearth::machines::hallway_knock::{
+    HallwayKnockStatus, KnockEvent, knock_step, knock_transition,
+};
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -154,7 +160,7 @@ async fn write_settlement(
 /// Settles every live Knock whose exchange clock has run out (ruling R4). It commits on its own,
 /// so a refusal later in the caller cannot roll the expiry back. A row another transaction holds
 /// is skipped; every holder checks `expires_at` itself.
-async fn expire_overdue(pool: &PgPool) -> Result<(), HallwayError> {
+async fn expire_overdue(pool: &PgPool, moves: &mut Vec<Transition>) -> Result<(), HallwayError> {
     let mut tx = pool.begin().await?;
     let overdue: Vec<(String, String)> = sqlx::query_as(
         "SELECT knock_id::text,status FROM hallway_knocks
@@ -164,16 +170,21 @@ async fn expire_overdue(pool: &PgPool) -> Result<(), HallwayError> {
     .fetch_all(&mut *tx)
     .await?;
 
+    let mut expired = Vec::with_capacity(overdue.len());
     for (knock_id, status) in overdue {
-        let next = step(stored_status(&status)?, KnockEvent::Expire)?;
+        let from = stored_status(&status)?;
+        let next = step(from, KnockEvent::Expire)?;
         let reason = if next == HallwayKnockStatus::Expired {
             "nobody claimed the turn before it expired"
         } else {
             "recipient turn expired before completion"
         };
         write_settlement(&mut tx, &knock_id, next, Some(reason)).await?;
+        expired.push(knock_transition(&knock_id, from, KnockEvent::Expire, next));
     }
     tx.commit().await?;
+
+    moves.extend(expired);
     Ok(())
 }
 
@@ -523,6 +534,7 @@ async fn chain_position(
 pub async fn knock(
     pool: &PgPool,
     request: HallwayKnockRequest,
+    moves: &mut Vec<Transition>,
 ) -> Result<HallwayKnockReceipt, HallwayError> {
     request.validate().map_err(invalid)?;
     let parent_knock_id = request
@@ -534,7 +546,7 @@ pub async fn knock(
                 .map_err(|_| refusal("malformed_uuid", "parentKnockId must be a UUID"))
         })
         .transpose()?;
-    expire_overdue(pool).await?;
+    expire_overdue(pool, moves).await?;
     let mut tx = pool.begin().await?;
     let id = lookup_id(&mut tx, &request.hallway).await?;
     // Preserve omission until the stored parent can supply its authority.
@@ -676,9 +688,10 @@ pub async fn knock(
 pub async fn claim(
     pool: &PgPool,
     request: HallwayKnockClaimRequest,
+    moves: &mut Vec<Transition>,
 ) -> Result<HallwayKnockClaimReceipt, HallwayError> {
     request.validate().map_err(invalid)?;
-    expire_overdue(pool).await?;
+    expire_overdue(pool, moves).await?;
     let mut tx = pool.begin().await?;
     let candidate = sqlx::query(
         "SELECT k.knock_id::text,k.status,k.hallway_id,h.hallway_key AS hallway
@@ -711,10 +724,8 @@ pub async fn claim(
         });
     };
     let knock_id: String = candidate.try_get("knock_id")?;
-    let next = step(
-        stored_status(candidate.try_get("status")?)?,
-        KnockEvent::Claim,
-    )?;
+    let from = stored_status(candidate.try_get("status")?)?;
+    let next = step(from, KnockEvent::Claim)?;
     let hallway: String = candidate.try_get("hallway")?;
     let hallway_id: i64 = candidate.try_get("hallway_id")?;
     ensure_presence(
@@ -749,6 +760,8 @@ pub async fn claim(
     .await?;
     let knock = knock_pointer(&mut tx, &knock_id, "claimed Knock could not be read back").await?;
     tx.commit().await?;
+
+    moves.push(knock_transition(&knock_id, from, KnockEvent::Claim, next));
     Ok(HallwayKnockClaimReceipt {
         ok: true,
         knock: Some(knock),
@@ -758,12 +771,13 @@ pub async fn claim(
 pub async fn settle(
     pool: &PgPool,
     request: HallwayKnockSettleRequest,
+    moves: &mut Vec<Transition>,
 ) -> Result<HallwayKnockSettleReceipt, HallwayError> {
     request.validate().map_err(invalid)?;
     let knock_id = Uuid::parse_str(&request.knock_id)
         .map(|uuid| uuid.to_string())
         .map_err(|_| refusal("malformed_uuid", "knockId must be a UUID"))?;
-    expire_overdue(pool).await?;
+    expire_overdue(pool, moves).await?;
     let mut tx = pool.begin().await?;
     let row = sqlx::query(
         "SELECT status,claimed_by_room,claimed_by_spirit,claimed_by_session,
@@ -825,9 +839,12 @@ pub async fn settle(
         ));
     }
 
-    let next = step(status, KnockEvent::Settle(request.outcome))?;
+    let event = KnockEvent::Settle(request.outcome);
+    let next = step(status, event)?;
     write_settlement(&mut tx, &knock_id, next, request.reason.as_deref()).await?;
     tx.commit().await?;
+
+    moves.push(knock_transition(&knock_id, status, event, next));
     Ok(HallwayKnockSettleReceipt {
         ok: true,
         duplicate: false,

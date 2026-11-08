@@ -1,9 +1,11 @@
 use akasha::{
-    INSULA_MAX_TRACE_ROWS, IngestBatch, ObservationEvent, TraceScope, TrustedBinding, VitalsQuery,
-    derive_idempotency_key_v1, derive_semantic_hash_v1, ingest_batch, query_trace, query_vitals,
-    run_retention,
+    INSULA_MAX_TRACE_ROWS, IngestBatch, ObservationEvent, TRANSITION_RETENTION_DAYS, TraceScope,
+    TransitionRow, TrustedBinding, VitalsQuery, derive_idempotency_key_v1, derive_semantic_hash_v1,
+    ingest_batch, ingest_transitions, query_trace, query_vitals, run_retention,
+    run_transition_retention,
 };
 use chrono::{Duration, Utc};
+use hearth::machines::Transition;
 use serde_json::json;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -14,6 +16,8 @@ type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 const INSULA_MIGRATION: &str = include_str!("../../../substrate/migrations/0022_insula.sql");
 const SEVEN_DAY_MIGRATION: &str =
     include_str!("../../../substrate/migrations/0032_insula_seven_day_retention.sql");
+const TRANSITIONS_MIGRATION: &str =
+    include_str!("../../../substrate/migrations/0045_insula_transitions.sql");
 
 fn isolated_database_url() -> String {
     let url = std::env::var("ATHANOR_SUBSTRATE_TEST_DATABASE_URL")
@@ -45,6 +49,7 @@ async fn fresh_insula() -> TestResult<PgPool> {
         .await?;
     sqlx::raw_sql(INSULA_MIGRATION).execute(&pool).await?;
     sqlx::raw_sql(SEVEN_DAY_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(TRANSITIONS_MIGRATION).execute(&pool).await?;
     Ok(pool)
 }
 
@@ -301,6 +306,77 @@ async fn ingest_collapses_only_identical_cross_session_redelivery_and_reports_co
     assert_eq!(
         final_rows, 1,
         "every conflict must leave the original observation intact"
+    );
+
+    sqlx::query("DROP SCHEMA insula CASCADE")
+        .execute(&pool)
+        .await?;
+    Ok(())
+}
+
+fn transition_row(
+    writer_id: Uuid,
+    writer_sequence: i64,
+    age: Duration,
+    to: &'static str,
+) -> TransitionRow {
+    TransitionRow {
+        event_id: Uuid::new_v4(),
+        writer_id,
+        writer_sequence,
+        observed_at: Utc::now() - age,
+        transition: Transition {
+            machine: "hallway_knock",
+            subject_id: Uuid::new_v4().to_string(),
+            from: "pending",
+            event: "expire",
+            to,
+        },
+    }
+}
+
+async fn daily_counts(pool: &PgPool) -> TestResult<Vec<(String, i64)>> {
+    Ok(sqlx::query_as(
+        "SELECT to_state,transition_count FROM insula.transitions_daily ORDER BY day,to_state",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL; resets only its dedicated Insula schema"]
+async fn transitions_count_each_move_once_and_counts_outlive_raw_retention() -> TestResult {
+    let pool = fresh_insula().await?;
+    let binding = binding("transition-session");
+    let writer = Uuid::new_v4();
+    let old = Duration::days(TRANSITION_RETENTION_DAYS + 1);
+    let rows = [
+        transition_row(writer, 1, old, "expired"),
+        transition_row(writer, 2, Duration::zero(), "expired"),
+        transition_row(writer, 3, Duration::zero(), "expired"),
+        transition_row(writer, 4, Duration::zero(), "failed"),
+    ];
+    ingest_transitions(&pool, &binding, &rows).await?;
+
+    // A redelivered batch is the drain retrying the same rows; it must not count twice.
+    ingest_transitions(&pool, &binding, &rows).await?;
+    let counted = vec![
+        ("expired".to_owned(), 1),
+        ("expired".to_owned(), 2),
+        ("failed".to_owned(), 1),
+    ];
+    assert_eq!(daily_counts(&pool).await?, counted);
+
+    run_transition_retention(&pool, &binding.house_id, Utc::now()).await?;
+    let raw: Vec<i64> =
+        sqlx::query_scalar("SELECT writer_sequence FROM insula.transitions ORDER BY 1")
+            .fetch_all(&pool)
+            .await?;
+    assert_eq!(raw, [2, 3, 4], "retention deletes only rows past the month");
+    assert_eq!(
+        daily_counts(&pool).await?,
+        counted,
+        "daily counts outlive the raw rows"
     );
 
     sqlx::query("DROP SCHEMA insula CASCADE")
@@ -618,6 +694,7 @@ async fn automatic_retention_fires_after_real_startup_delay_and_preserves_recent
         .await?;
     sqlx::raw_sql(INSULA_MIGRATION).execute(&pool).await?;
     sqlx::raw_sql(SEVEN_DAY_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(TRANSITIONS_MIGRATION).execute(&pool).await?;
     akasha::RoomSettings::load(&pool, "house").await?;
     let trusted = binding("automatic-retention-proof");
     let mut expired = event(Uuid::new_v4(), 1);
@@ -631,6 +708,17 @@ async fn automatic_retention_fires_after_real_startup_delay_and_preserves_recent
         IngestBatch {
             events: vec![expired, recent],
         },
+    )
+    .await?;
+    let writer = Uuid::new_v4();
+    let old = Duration::days(TRANSITION_RETENTION_DAYS + 1);
+    ingest_transitions(
+        &pool,
+        &trusted,
+        &[
+            transition_row(writer, 1, old, "expired"),
+            transition_row(writer, 2, Duration::zero(), "expired"),
+        ],
     )
     .await?;
     let summaries_before: serde_json::Value = sqlx::query_scalar(
@@ -711,6 +799,23 @@ async fn automatic_retention_fires_after_real_startup_delay_and_preserves_recent
                 .fetch_one(&pool)
                 .await?;
         assert_eq!(tombstone_count, 1);
+
+        // The transition sweep runs right after the raw-log sweep in the same tick.
+        let swept = Instant::now();
+        loop {
+            let transitions: Vec<i64> =
+                sqlx::query_scalar("SELECT writer_sequence FROM insula.transitions ORDER BY 1")
+                    .fetch_all(&pool)
+                    .await?;
+            if transitions == [2] {
+                break;
+            }
+            assert!(
+                swept.elapsed() < WallDuration::from_secs(30),
+                "the scheduled job did not delete the month-old transition: {transitions:?}"
+            );
+            tokio::time::sleep(WallDuration::from_secs(1)).await;
+        }
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
     })
     .await;

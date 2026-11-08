@@ -70,14 +70,16 @@ pub use insula::{
     INSULA_QUERY_VERSION, INSULA_SCHEMA_VERSION, IdempotencyScope, IngestBatch, IngestConflict,
     IngestConflictKind, IngestReceipt, InsulaError, ObservationEvent, ObservationPhase,
     OutcomeClass, RetentionReadResult, RetentionReceipt, RetentionReceiptRow, RetentionStatus,
-    SpanRow, SpanWindow, SpansQuery, SpansResult, TraceResult, TraceRow, TraceScope,
-    TrustedBinding, UnverifiedExitResult, UnverifiedExitRow, VitalsQuery, VitalsResult, VitalsRow,
-    derive_idempotency_key_v1, derive_semantic_hash_v1, ingest_batch, query_retention, query_spans,
-    query_trace, query_unverified_exit, query_vitals, run_retention, validate_trusted_binding,
+    SpanRow, SpanWindow, SpansQuery, SpansResult, TRANSITION_RETENTION_DAYS, TraceResult, TraceRow,
+    TraceScope, TransitionRow, TrustedBinding, UnverifiedExitResult, UnverifiedExitRow,
+    VitalsQuery, VitalsResult, VitalsRow, derive_idempotency_key_v1, derive_semantic_hash_v1,
+    ingest_batch, ingest_transitions, query_retention, query_spans, query_trace,
+    query_unverified_exit, query_vitals, run_retention, run_transition_retention,
+    validate_trusted_binding,
 };
 pub use insula_writer::{
-    EmitterSpan, end_span, flush_insula_emitter, init_insula_emitter, record_point, start_span,
-    system_binding,
+    EmitterSpan, end_span, flush_insula_emitter, init_insula_emitter, record_point,
+    record_transitions, start_span, system_binding,
 };
 pub use lesson::{
     DesignDocument, DesignDocumentFilters, DesignDocumentQueryParams, DesignDocumentQueryResult,

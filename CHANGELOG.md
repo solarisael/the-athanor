@@ -28,6 +28,17 @@ the exact implementation record.
 - The hallway knock turn decision moved from the Host into
   `hearth::machines::knock_turn`. A knock turn that started and did not end
   now fails when the knock expires (hallway-knock D4).
+- `hearth::machines::hallway_knock` owns the knock status moves. Schema 44 adds
+  the final status `expired` for a pending knock that nobody claimed in time.
+  `knock`, `claim`, and `settle` expire overdue knocks first, and `settle`
+  refuses an overdue knock (hallway-knock R1, R4; D1, D2, D3, D9).
+
+### Added
+- Insula records state-machine transitions. Schema 45 adds `insula.transitions`:
+  one row for each committed move, with the machine, the subject id, from, event,
+  to, and the presence that made the call. `insula.transitions_daily` counts each
+  edge for each UTC day. Raw rows keep 30 days; the daily counts stay.
+  The Hallway knock is the first machine that records its moves.
 - GIGA stores individual turn jobs before capture acknowledgement. OMP no longer holds a volatile turn buffer.
   Conversations release work by count or oldest-turn age. Defaults are eight turns, 120 seconds, and four concurrent jobs.
   Each judgment receives nearby turns and bounded Recall context. Jev can select one follow-up lookup.

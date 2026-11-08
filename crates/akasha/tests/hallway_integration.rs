@@ -8,6 +8,7 @@ use hearth::hallway::{
     HallwayKnockPolicyRequest, HallwayKnockRequest, HallwayKnockSettleRequest,
     HallwayPostDisposition, HallwayPostRequest, HallwayReadRequest,
 };
+use hearth::machines::hallway_knock::HallwayKnockStatus;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::str::FromStr;
 use uuid::Uuid;
@@ -31,6 +32,10 @@ const KNOCK_TURNS_MIGRATION: &str = include_str!(concat!(
 const KNOCK_DEFAULT_DIGEST_MIGRATION: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../substrate/migrations/0038_hallway_knock_default_digest.sql"
+));
+const KNOCK_EXPIRED_MIGRATION: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../substrate/migrations/0044_hallway_knock_expired.sql"
 ));
 
 fn bell_config() -> Config {
@@ -91,6 +96,7 @@ async fn hallway_temp_session_exchanges_messages_without_persistent_state() -> T
     sqlx::raw_sql(BELL_MIGRATION).execute(&pool).await?;
     sqlx::raw_sql(KNOCK_MIGRATION).execute(&pool).await?;
     sqlx::raw_sql(KNOCK_TURNS_MIGRATION).execute(&pool).await?;
+    sqlx::raw_sql(KNOCK_EXPIRED_MIGRATION).execute(&pool).await?;
     let result = async {
         run_contract(&pool).await?;
         run_knock_contract(&pool).await
@@ -1322,7 +1328,7 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
     let expiring_knock = hallway_knock(
         pool,
         HallwayKnockRequest {
-            hallway,
+            hallway: hallway.clone(),
             room: "kodo".into(),
             spirit: "Kodo".into(),
             session: "kodo-knock".into(),
@@ -1364,16 +1370,27 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
     .bind(&expiring_knock.knock.knock_id)
     .execute(pool)
     .await?;
-    let sweep = hallway_knock_claim(
+
+    // R4: settle runs the expiry itself, so a turn past its clock cannot complete (D3).
+    let late_completion = hallway_knock_settle(
         pool,
-        HallwayKnockClaimRequest {
+        HallwayKnockSettleRequest {
             room: "kintsu".into(),
             spirit: "Kintsu".into(),
-            session: "kintsu-expiry-sweep".into(),
+            session: "kintsu-expiring".into(),
+            knock_id: expiring_claim.knock_id.clone(),
+            outcome: HallwayKnockOutcome::Completed,
+            reason: None,
         },
     )
-    .await?;
-    assert!(sweep.knock.is_none());
+    .await;
+    assert!(matches!(
+        late_completion,
+        Err(AppError::Refusal {
+            code: "knock_state_conflict",
+            ..
+        })
+    ));
     let expired_status = sqlx::query_as::<_, (String, Option<String>)>(
         "SELECT status,settled_reason FROM hallway_knocks WHERE knock_id=$1::uuid",
     )
@@ -1385,5 +1402,44 @@ async fn run_knock_contract(pool: &sqlx::PgPool) -> TestResult {
         expired_status.1.as_deref(),
         Some("recipient turn expired before completion")
     );
+
+    // R1 and D1: nobody claims this Knock; the sender's own replay expires it.
+    let unclaimed_message = hallway_post(
+        pool,
+        &config,
+        HallwayPostRequest {
+            hallway: hallway.clone(),
+            room: "kodo".into(),
+            spirit: "Kodo".into(),
+            session: "kodo-knock".into(),
+            idempotency_key: "post-unclaimed".into(),
+            body: "nobody answers before the clock runs out".into(),
+            reply_to: None,
+            to_rooms: vec!["kintsu".into()],
+        },
+    )
+    .await?;
+    let unclaimed_request = HallwayKnockRequest {
+        hallway,
+        room: "kodo".into(),
+        spirit: "Kodo".into(),
+        session: "kodo-knock".into(),
+        idempotency_key: "knock-unclaimed".into(),
+        message_id: unclaimed_message.message.id,
+        recipient_room: "kintsu".into(),
+        parent_knock_id: None,
+        max_turns: Some(1),
+    };
+    let unclaimed = hallway_knock(pool, unclaimed_request.clone()).await?;
+    sqlx::query(
+        "UPDATE hallway_knocks SET expires_at=NOW()-INTERVAL '1 second'
+         WHERE knock_id=$1::uuid",
+    )
+    .bind(&unclaimed.knock.knock_id)
+    .execute(pool)
+    .await?;
+    let replay = hallway_knock(pool, unclaimed_request).await?;
+    assert!(replay.duplicate);
+    assert_eq!(replay.knock.status, HallwayKnockStatus::Expired);
     Ok(())
 }

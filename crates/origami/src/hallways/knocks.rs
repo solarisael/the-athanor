@@ -12,6 +12,7 @@ use hearth::hallway::{
     HallwayKnockPolicyRequest, HallwayKnockReceipt, HallwayKnockRequest, HallwayKnockSettleReceipt,
     HallwayKnockSettleRequest,
 };
+use hearth::machines::hallway_knock::{HallwayKnockStatus, KnockEvent, knock_step};
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -102,6 +103,80 @@ fn policy_receipt_from_row(
     })
 }
 
+fn stored_status(value: &str) -> Result<HallwayKnockStatus, HallwayError> {
+    HallwayKnockStatus::parse(value).ok_or_else(|| {
+        refusal(
+            "knock_state_conflict",
+            "stored Hallway Knock has an invalid status",
+        )
+    })
+}
+
+/// Asks the Hearth machine for the next status, and refuses an illegal move.
+fn step(status: HallwayKnockStatus, event: KnockEvent) -> Result<HallwayKnockStatus, HallwayError> {
+    let refused = match event {
+        KnockEvent::Claim => "Knock is not open for a claim",
+        KnockEvent::Settle(HallwayKnockOutcome::Started) => "Knock can start only from its claim",
+        KnockEvent::Settle(HallwayKnockOutcome::Completed) => {
+            "Knock can complete only after its turn has started"
+        }
+        KnockEvent::Settle(HallwayKnockOutcome::Failed) => {
+            "Knock can fail only during its claim or started turn"
+        }
+        KnockEvent::Expire => "Knock has already settled",
+    };
+    knock_step(status, event).ok_or_else(|| refusal("knock_state_conflict", refused))
+}
+
+/// Writes a settle-side move. `started` stamps the start; every other status closes the Knock.
+async fn write_settlement(
+    tx: &mut Transaction<'_, Postgres>,
+    knock_id: &str,
+    next: HallwayKnockStatus,
+    reason: Option<&str>,
+) -> Result<(), HallwayError> {
+    let statement = if next == HallwayKnockStatus::Started {
+        "UPDATE hallway_knocks SET status=$2,started_at=NOW(),started_reason=$3
+         WHERE knock_id=$1::uuid"
+    } else {
+        "UPDATE hallway_knocks SET status=$2,settled_at=NOW(),settled_reason=$3
+         WHERE knock_id=$1::uuid"
+    };
+    sqlx::query(statement)
+        .bind(knock_id)
+        .bind(next.as_str())
+        .bind(reason)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// Settles every live Knock whose exchange clock has run out (ruling R4). It commits on its own,
+/// so a refusal later in the caller cannot roll the expiry back. A row another transaction holds
+/// is skipped; every holder checks `expires_at` itself.
+async fn expire_overdue(pool: &PgPool) -> Result<(), HallwayError> {
+    let mut tx = pool.begin().await?;
+    let overdue: Vec<(String, String)> = sqlx::query_as(
+        "SELECT knock_id::text,status FROM hallway_knocks
+         WHERE status IN ('pending','claimed','started') AND expires_at<=NOW()
+         FOR UPDATE SKIP LOCKED",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    for (knock_id, status) in overdue {
+        let next = step(stored_status(&status)?, KnockEvent::Expire)?;
+        let reason = if next == HallwayKnockStatus::Expired {
+            "nobody claimed the turn before it expired"
+        } else {
+            "recipient turn expired before completion"
+        };
+        write_settlement(&mut tx, &knock_id, next, Some(reason)).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 fn knock_pointer_from_row(row: &PgRow) -> Result<HallwayKnockPointer, HallwayError> {
     let turn_index: i16 = row.try_get("turn_index")?;
     let max_turns: i16 = row.try_get("max_turns")?;
@@ -118,7 +193,7 @@ fn knock_pointer_from_row(row: &PgRow) -> Result<HallwayKnockPointer, HallwayErr
         root_knock_id: row.try_get("root_knock_id")?,
         turn_index: turn_index as u8,
         max_turns: max_turns as u8,
-        status: row.try_get("status")?,
+        status: stored_status(row.try_get("status")?)?,
         expires_at: row.try_get("expires_at_text")?,
     })
 }
@@ -459,6 +534,7 @@ pub async fn knock(
                 .map_err(|_| refusal("malformed_uuid", "parentKnockId must be a UUID"))
         })
         .transpose()?;
+    expire_overdue(pool).await?;
     let mut tx = pool.begin().await?;
     let id = lookup_id(&mut tx, &request.hallway).await?;
     // Preserve omission until the stored parent can supply its authority.
@@ -602,21 +678,10 @@ pub async fn claim(
     request: HallwayKnockClaimRequest,
 ) -> Result<HallwayKnockClaimReceipt, HallwayError> {
     request.validate().map_err(invalid)?;
+    expire_overdue(pool).await?;
     let mut tx = pool.begin().await?;
-    sqlx::query(
-        "UPDATE hallway_knocks
-         SET status='failed',
-             settled_reason='recipient turn expired before completion',
-             settled_at=NOW()
-         WHERE recipient_room=$1
-           AND status IN ('claimed','started')
-           AND expires_at<=NOW()",
-    )
-    .bind(&request.room)
-    .execute(&mut *tx)
-    .await?;
     let candidate = sqlx::query(
-        "SELECT k.knock_id::text,k.hallway_id,h.hallway_key AS hallway
+        "SELECT k.knock_id::text,k.status,k.hallway_id,h.hallway_key AS hallway
          FROM hallway_knocks k
          JOIN hallway_channels h ON h.id=k.hallway_id
          JOIN hallway_knock_policies p
@@ -646,6 +711,10 @@ pub async fn claim(
         });
     };
     let knock_id: String = candidate.try_get("knock_id")?;
+    let next = step(
+        stored_status(candidate.try_get("status")?)?,
+        KnockEvent::Claim,
+    )?;
     let hallway: String = candidate.try_get("hallway")?;
     let hallway_id: i64 = candidate.try_get("hallway_id")?;
     ensure_presence(
@@ -664,7 +733,7 @@ pub async fn claim(
         // into the driver where nothing here can prove it.
         concat!(
             "UPDATE hallway_knocks
-         SET status='claimed',claimed_by_room=$2,claimed_by_spirit=$3,
+         SET status=$5,claimed_by_room=$2,claimed_by_spirit=$3,
              claimed_by_session=$4,lease_expires_at=NOW()+INTERVAL '",
             knock_claim_lease_seconds!(),
             " seconds'
@@ -675,6 +744,7 @@ pub async fn claim(
     .bind(&request.room)
     .bind(&request.spirit)
     .bind(&request.session)
+    .bind(next.as_str())
     .execute(&mut *tx)
     .await?;
     let knock = knock_pointer(&mut tx, &knock_id, "claimed Knock could not be read back").await?;
@@ -693,10 +763,12 @@ pub async fn settle(
     let knock_id = Uuid::parse_str(&request.knock_id)
         .map(|uuid| uuid.to_string())
         .map_err(|_| refusal("malformed_uuid", "knockId must be a UUID"))?;
+    expire_overdue(pool).await?;
     let mut tx = pool.begin().await?;
     let row = sqlx::query(
         "SELECT status,claimed_by_room,claimed_by_spirit,claimed_by_session,
-                lease_expires_at,started_reason,settled_reason
+                lease_expires_at<=NOW() AS lease_lapsed,expires_at<=NOW() AS overdue,
+                started_reason,settled_reason
          FROM hallway_knocks WHERE knock_id=$1::uuid FOR UPDATE",
     )
     .bind(&knock_id)
@@ -721,15 +793,15 @@ pub async fn settle(
             "Knock is not leased to this room, spirit, and session",
         ));
     }
-    let status: String = row.try_get("status")?;
-    let requested_status = request.outcome.as_str();
+    let status = stored_status(row.try_get("status")?)?;
+    let requested = request.outcome.status();
     let stored_reason = match request.outcome {
         HallwayKnockOutcome::Started => row.try_get::<Option<String>, _>("started_reason")?,
         HallwayKnockOutcome::Completed | HallwayKnockOutcome::Failed => {
             row.try_get::<Option<String>, _>("settled_reason")?
         }
     };
-    if status == requested_status && stored_reason == request.reason {
+    if status == requested && stored_reason == request.reason {
         tx.commit().await?;
         return Ok(HallwayKnockSettleReceipt {
             ok: true,
@@ -739,53 +811,27 @@ pub async fn settle(
         });
     }
 
-    let lease_expires_at: DateTime<Utc> = row.try_get("lease_expires_at")?;
-    let lease_active = status == "claimed" && lease_expires_at > Utc::now();
-    let statement = match request.outcome {
-        HallwayKnockOutcome::Started => {
-            if !lease_active {
-                return Err(refusal(
-                    "knock_state_conflict",
-                    "Knock cannot start outside its active claim lease",
-                ));
-            }
-            "UPDATE hallway_knocks
-             SET status='started',started_at=NOW(),started_reason=$2
-             WHERE knock_id=$1::uuid"
-        }
-        HallwayKnockOutcome::Completed => {
-            if status != "started" {
-                return Err(refusal(
-                    "knock_state_conflict",
-                    "Knock can complete only after its turn has started",
-                ));
-            }
-            "UPDATE hallway_knocks
-             SET status='completed',settled_at=NOW(),settled_reason=$2
-             WHERE knock_id=$1::uuid"
-        }
-        HallwayKnockOutcome::Failed => {
-            if status != "started" && !lease_active {
-                return Err(refusal(
-                    "knock_state_conflict",
-                    "Knock cannot fail outside its active claim or started turn",
-                ));
-            }
-            "UPDATE hallway_knocks
-             SET status='failed',settled_at=NOW(),settled_reason=$2
-             WHERE knock_id=$1::uuid"
-        }
-    };
-    sqlx::query(statement)
-        .bind(&knock_id)
-        .bind(&request.reason)
-        .execute(&mut *tx)
-        .await?;
+    // The sweep above skips a row another transaction held, and the clock moves after it.
+    if row.try_get("overdue")? {
+        return Err(refusal(
+            "knock_state_conflict",
+            "Knock exchange has expired",
+        ));
+    }
+    if status == HallwayKnockStatus::Claimed && row.try_get("lease_lapsed")? {
+        return Err(refusal(
+            "knock_state_conflict",
+            "Knock claim lease has lapsed",
+        ));
+    }
+
+    let next = step(status, KnockEvent::Settle(request.outcome))?;
+    write_settlement(&mut tx, &knock_id, next, request.reason.as_deref()).await?;
     tx.commit().await?;
     Ok(HallwayKnockSettleReceipt {
         ok: true,
         duplicate: false,
         knock_id,
-        status: requested_status.into(),
+        status: next,
     })
 }

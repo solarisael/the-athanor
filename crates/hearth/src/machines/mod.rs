@@ -2,4 +2,5 @@
 //! and the decision that picks the next move. Time arrives as input; nothing here reads a clock.
 //! The contract for each machine lives in `docs/state-machines/`.
 
+pub mod hallway_knock;
 pub mod knock_turn;

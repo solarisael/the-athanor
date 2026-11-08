@@ -1,3 +1,4 @@
+use crate::machines::hallway_knock::HallwayKnockStatus;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer, de::Error as DeError, ser::SerializeStruct,
 };
@@ -446,7 +447,7 @@ pub struct HallwayKnockRequest {
     /// Omit for a root exchange. A continuation supplies its prior Knock UUID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_knock_id: Option<String>,
-    /// Omitted roots use four turns; omitted children inherit the stored parent ceiling.
+    /// Omitted roots use `HALLWAY_DEFAULT_KNOCK_TURNS`; omitted children inherit the stored parent ceiling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u8>,
 }
@@ -466,7 +467,7 @@ pub struct HallwayKnockPointer {
     pub root_knock_id: String,
     pub turn_index: u8,
     pub max_turns: u8,
-    pub status: String,
+    pub status: HallwayKnockStatus,
     pub expires_at: String,
 }
 
@@ -502,11 +503,12 @@ pub enum HallwayKnockOutcome {
 }
 
 impl HallwayKnockOutcome {
-    pub const fn as_str(self) -> &'static str {
+    /// The status a settle with this outcome writes.
+    pub const fn status(self) -> HallwayKnockStatus {
         match self {
-            Self::Started => "started",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
+            Self::Started => HallwayKnockStatus::Started,
+            Self::Completed => HallwayKnockStatus::Completed,
+            Self::Failed => HallwayKnockStatus::Failed,
         }
     }
 }
@@ -529,7 +531,7 @@ pub struct HallwayKnockSettleReceipt {
     pub ok: bool,
     pub duplicate: bool,
     pub knock_id: String,
-    pub status: String,
+    pub status: HallwayKnockStatus,
 }
 
 fn valid_slug(value: &str) -> bool {

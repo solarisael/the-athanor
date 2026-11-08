@@ -14,34 +14,36 @@ A separate policy row decides which rooms can knock on a room.
 
 ## States
 
-### SQL (`substrate/migrations/0021_hallway_knock.sql`)
+### SQL (`substrate/migrations/0021_hallway_knock.sql`, `0044_hallway_knock_expired.sql`)
 
-`hallway_knocks.status` holds five values (`0021:51-52`):
+`hallway_knocks.status` holds six values (`0044:22-24`):
 
-- `pending`: no claim. All claim columns are null (`0021:81-82`).
+- `pending`: no claim. All claim columns are null (`0044:35-36`).
 - `claimed`: a presence holds a 30-second lease (`knocks.rs:41-45`, `knocks.rs:56`).
-- `started`: the recipient turn is open. `started_at` is set (`0021:76`).
-- `completed`: terminal. `started_at` and `settled_at` are set (`0021:77`).
-- `failed`: terminal. `settled_at` is set (`0021:78`).
+- `started`: the recipient turn is open. `started_at` is set (`0044:28`).
+- `completed`: terminal. `started_at` and `settled_at` are set (`0044:29`).
+- `failed`: terminal. A recipient held the turn and did not finish it. `settled_at` is set (`0044:30`).
+- `expired`: terminal. Nobody claimed the turn before `expires_at`. Claim columns stay null, and `settled_at` is set (`0044:31`, ruling R1).
 
-Shape CHECKs bind each status to its columns: `0021:74-86`.
+Shape CHECKs bind each status to its columns: `0044:25-41`.
 Migration 0031 moves the turn ceiling to 20 and the default to 10 (`0031_hallway_knock_turns.sql:25-37`).
 Two more states are derived and have no value:
 
-- `Reclaimable`: `claimed` with `lease_expires_at <= NOW()` (`knocks.rs:632`).
-- `Expired`: any non-terminal row with `expires_at <= NOW()`.
+- `Reclaimable`: `claimed` with `lease_expires_at <= NOW()` (`knocks.rs:698`).
+- `Overdue`: any `pending`, `claimed`, or `started` row with `expires_at <= NOW()`. The next sweep closes it.
   The lifetime is 3 minutes for each turn, with a minimum of 15 minutes (`knocks.rs:26-36`).
 
 `hallway_knock_policies` has two states: current (`superseded_at` null) and superseded (`0021:22`).
 A partial unique index permits one current row for each hallway and room (`0021:30-32`).
-No current row means "deny" (`knocks.rs:336-341`).
+No current row means "deny" (`knocks.rs:412-417`).
 
 ### Store and Host (`crates/origami/src/hallways/knocks.rs`, `crates/host/src/lifecycle.rs`)
 
 The store writes the row and keeps no state.
-`HallwayKnockOutcome` names three of the five statuses: `Started`, `Completed`, `Failed` (`hallway.rs:498-502`).
-The pointer carries `status` as a free string (`hallway.rs:469`).
-`pending` and `claimed` exist only as SQL literals in `knocks.rs`.
+`HallwayKnockStatus` and `knock_step(status, event)` in `crates/hearth/src/machines/hallway_knock.rs` own every status move.
+The store calls `knock_step` before each UPDATE (`knocks.rs:115-129`). The pointer and the settle receipt carry `HallwayKnockStatus`.
+`HallwayKnockOutcome` is the settle request: `Started`, `Completed`, `Failed` (`hallway.rs:498-502`).
+`expire_overdue` (`knocks.rs:154-178`) closes every overdue row. `knock`, `claim`, and `settle` call it first, in its own transaction (ruling R4).
 
 The Host stores no knock state.
 `KnockPlan` (`lifecycle.rs:27-34`) is a pure decision on the adapter's flags: `lifecycle.rs:124-158`.
@@ -67,15 +69,16 @@ No field names these states.
 
 | Layer | Move | Writer |
 |---|---|---|
-| SQL | policy → current, old current → superseded | `knocks::policy`, `knocks.rs:247-271`; serialized by the room-state upsert, `knocks.rs:239-246` |
-| SQL | → `pending` | `knocks::knock`, `knocks.rs:544-575`; admission `knocks.rs:533`, chain `knocks.rs:535-543` |
-| SQL | `pending` → `claimed` | `knocks::claim`, `knocks.rs:618-679` |
-| SQL | `Reclaimable` → `claimed` (new holder) | same query, `knocks.rs:632` |
-| SQL | `claimed`/`started` past `expires_at` → `failed` | sweep inside `claim`, `knocks.rs:606-617` |
-| SQL | `claimed` (lease active) → `started` | `knocks::settle`, `knocks.rs:745-755` |
-| SQL | `started` → `completed` | `knocks.rs:756-766` |
-| SQL | `claimed` (lease active)/`started` → `failed` | `knocks.rs:767-777` |
-| SQL | same outcome and reason again → no move | `knocks.rs:732-740` |
+| SQL | policy → current, old current → superseded | `knocks::policy`, `knocks.rs:323-347`; serialized by the room-state upsert, `knocks.rs:315-322` |
+| SQL | → `pending` | `knocks::knock`, `knocks.rs:621-652`; admission `knocks.rs:610`, chain `knocks.rs:612-620` |
+| SQL | `pending` → `claimed` | `knocks::claim`, `knocks.rs:684-750`; `knock_step(_, Claim)` |
+| SQL | `Reclaimable` → `claimed` (new holder) | same query, `knocks.rs:698` |
+| SQL | `pending` past `expires_at` → `expired` | `expire_overdue`, `knocks.rs:157-178`; `knock_step(_, Expire)` |
+| SQL | `claimed`/`started` past `expires_at` → `failed` | same sweep |
+| SQL | `claimed` (lease active) → `started` | `knocks::settle`, `knocks.rs:829-830`; `knock_step(_, Settle(Started))` |
+| SQL | `started` → `completed` | same lines; `knock_step(_, Settle(Completed))` |
+| SQL | `claimed` (lease active)/`started` → `failed` | same lines; `knock_step(_, Settle(Failed))` |
+| SQL | same outcome and reason again → no move | `knocks.rs:805-813` |
 | Host | not delivered → `deliver` | `lifecycle.rs:132-134` |
 | Host | timer exceeded → `failure` | `lifecycle.rs:135-146` |
 | Host | flags → settlements | `lifecycle.rs:147-156` |
@@ -103,15 +106,15 @@ The cross-layer links:
 
 | # | Rule | Status | Evidence |
 |---|---|---|---|
-| L1 | Every non-terminal SQL status leaves within a bounded time. | **broken** | See defects D1 and D2. |
-| L2 | One current policy exists for each hallway and room. | holds | `0021:30-32`, `knocks.rs:239-253` |
-| L3 | Each status has exactly its own column shape. | holds | `0021:74-86` |
-| L4 | A status moves only forward: `pending` → `claimed` → `started` → `completed` or `failed`. | holds in the only writer | guards `knocks.rs:743-777`, `knocks.rs:606-613`; no SQL trigger enforces it |
-| L5 | Only the lease holder settles a knock. | holds | `knocks.rs:706-723` |
-| L6 | A claim never takes a `started` knock from its holder. | holds | `knocks.rs:630-633` |
-| L7 | One message asks one recipient once. | holds | `0021:64`, `knocks.rs:565-575` |
-| L8 | An exchange never exceeds its `max_turns`. | holds | `knocks.rs:405-412`, `0021:67` |
-| L9 | The terminal status does not depend on call order. | **broken** | See defect D3. |
+| L1 | Every non-terminal SQL status leaves within a bounded time. | holds when any room calls `knock`, `claim`, or `settle` | D1 and D2 fixed: `expire_overdue` (`knocks.rs:157-178`). No timer runs the sweep in an idle House. |
+| L2 | One current policy exists for each hallway and room. | holds | `0021:30-32`, `knocks.rs:315-329` |
+| L3 | Each status has exactly its own column shape. | holds | `0021:74-86` as replaced by `0044:25-41` |
+| L4 | A status moves only forward: `pending` → `claimed` → `started` → `completed` or `failed`; `pending` → `expired`. | holds in the only writer | `knock_step` (`hallway_knock.rs`); no SQL trigger enforces it |
+| L5 | Only the lease holder settles a knock. | holds | `knocks.rs:779-796` |
+| L6 | A claim never takes a `started` knock from its holder. | holds | `knocks.rs:696-699` |
+| L7 | One message asks one recipient once. | holds | `0021:64`, `knocks.rs:642-652` |
+| L8 | An exchange never exceeds its `max_turns`. | holds | `knocks.rs:481-488`, `0021:67` |
+| L9 | The terminal status does not depend on call order. | holds | D3 fixed: `settle` sweeps first and refuses an overdue row (`knocks.rs:767`, `knocks.rs:815-821`). |
 | L10 | The adapter holds at most one active knock. | holds | `knock.ts:321-338` |
 | L11 | Every adapter state except `Idle` leaves within a bounded time. | holds | D4 fixed in `bfb4364`: a started turn fails at `expiresAt` (`hearth/src/machines/knock_turn.rs`) |
 | L12 | SQL `completed` means that the knock turn ran. | **broken in a race** (`unverified`) | See defect D6. |
@@ -119,21 +122,14 @@ The cross-layer links:
 
 ## Defects
 
-- **D1. An expired `pending` knock stays `pending` forever.**
-  The sweep at `knocks.rs:606-617` moves only `claimed` and `started`.
-  The claim query skips expired rows (`knocks.rs:629`).
-  The shape CHECK forbids `failed` with null claim columns (`0021:80-86`), so no writer can fail a `pending` row today.
-  The unique key at `0021:64` then refuses a new knock on the same message (`knocks.rs:565-575`).
-  A revoked policy also holds its `pending` rows, because the claim joins the current policy (`knocks.rs:622-628`).
-- **D2. Expiry runs only inside the recipient's claim.**
-  The sweep is in `claim` only (`knocks.rs:606`).
-  The doorman does not claim while it holds an active knock (`knock.ts:321-338`).
-  A room with `KnockAutonomy` off never claims (`server.rs:1839`, `knock.ts:385`).
-  In both cases, an expired `claimed` or `started` row stays non-terminal.
-- **D3. Settle ignores `expires_at`.**
-  `settle` checks the lease and the status only (`knocks.rs:742-777`).
-  A `started` row past `expires_at` becomes `completed` when the settle arrives first.
-  The same row becomes `failed` when a claim sweep arrives first.
+- **D1. Fixed.** An expired `pending` knock stayed `pending` forever.
+  Migration 0044 adds `expired` (ruling R1). The sweep moves an overdue `pending` row to `expired` (`knocks.rs:157-178`).
+  The unique key at `0021:64` still refuses a new knock on the same message (`knocks.rs:642-652`).
+- **D2. Fixed.** Expiry ran only inside the recipient's claim.
+  `knock`, `claim`, and `settle` now run the sweep for every hallway (ruling R4). A sender's next knock closes rows that a silent recipient left open.
+- **D3. Fixed.** Settle ignored `expires_at`.
+  `settle` runs the sweep, then refuses an overdue row that another transaction held during the sweep (`knocks.rs:815-821`).
+  A `started` row past `expires_at` now always becomes `failed`.
 - **D4. Fixed in `bfb4364`.** A started turn that never ended had no exit in the adapter.
   The decision moved from `KnockPlan` in `host/src/lifecycle.rs` to `plan_knock_turn` in `crates/hearth/src/machines/knock_turn.rs`.
   The adapter sends `expiresInMs`, the time left until the pointer's `expiresAt` (`knock.ts:283-296`).
@@ -157,19 +153,18 @@ The cross-layer links:
 - **D8. The adapter types permit contradictory combinations.**
   `startSettled` with `delivered === false`, and `turnEnded` with `active === null`, are representable (`knock.ts:119-140`).
   `clearActiveKnock` (`knock.ts:160-171`) keeps the phase latches consistent. It does not reset `settling`.
-- **D9. The status vocabulary has no single type.**
-  `HallwayKnockOutcome` names three statuses (`hallway.rs:498-502`). The pointer uses a string (`hallway.rs:469`, `knock.ts:28`).
-  The doc comment at `hallway.rs:449` says that omitted roots use four turns. The default is 10 (`hallway.rs:10`, `knocks.rs:469`).
+- **D9. Fixed in Rust.** The status vocabulary had no single type.
+  `HallwayKnockStatus` names all six values. The pointer and the settle receipt use it (`hallway.rs:469`, `hallway.rs:533`).
+  The adapter keeps `status: string` (`knock.ts:28`). It never branches on the value.
 
 ## Target shape
 
 1. **Bend2 model.** Model the SQL machine, the `KnockPlan` decision, and the adapter machine, then prove L1 to L13.
    The proof must fail on L1, L9, L11, and L12 against today's transitions; this shows that it catches real defects.
-2. **SQL and store (both owners).** Add one Rust step function `knock_step(status, event) → status` in Hearth, with one `HallwayKnockStatus` enum for all five values.
+2. **SQL and store (both owners).** Done for the store: `knock_step(status, event)` and `HallwayKnockStatus` are in `crates/hearth/src/machines/hallway_knock.rs`.
    `knocks.rs` calls `knock_step` before each UPDATE.
-   A SQL `BEFORE UPDATE` trigger on `hallway_knocks` refuses every edge outside the same set.
-   Add a terminal state for expired `pending` rows (R1). Expire rows in `knock`, `claim`, and `settle` (R4).
-   This fixes D1, D2, D3, and D9.
+   Open: a SQL `BEFORE UPDATE` trigger on `hallway_knocks` that refuses every edge outside the same set.
+   R1 and R4 are in place. This fixed D1, D2, D3, and D9.
 3. **Hearth.** `plan_knock_turn` in `crates/hearth/src/machines/knock_turn.rs` is the one decision owner. The Host only calls it.
    The started-turn expiry rule is in place (R2). This fixed D4.
 4. **Adapter.** Replace the fields with one tagged state and one pure `step(state, event) → (state, effects)`.
@@ -181,8 +176,8 @@ The cross-layer links:
 
 ## Open rulings
 
-- **R1. Terminal state for an expired `pending` row.** Proposal: add the status `expired`. The shape CHECK then permits null claim columns for `expired`. The status `failed` keeps its meaning: a recipient held the turn and did not finish it.
+- **R1. Terminal state for an expired `pending` row.** Ruled 2026-11-08 and done in migration 0044: the status `expired`. Its claim columns stay null. The status `failed` keeps its meaning: a recipient held the turn and did not finish it.
 - **R2. Timeout for a started turn.** Ruled 2026-11-07 and done in `bfb4364`: the pointer's `expiresAt` is the hard limit, and the knock fails at that instant.
 - **R3. D5: fix or accept.** Proposal: fix, and persist the active knock id in the session file. After a restart, the doorman fails that knock with a restart reason before it claims new work.
-- **R4. Expiry location.** Proposal: run the expiry UPDATE for the hallway inside `knock`, `claim`, and `settle`. `settle` then refuses `completed` past `expires_at`. Expiry then no longer depends on the recipient's claim loop.
+- **R4. Expiry location.** Ruled 2026-11-08 and done: `knock`, `claim`, and `settle` run `expire_overdue` first, for every hallway. `settle` refuses `completed` past `expires_at`. Expiry no longer depends on the recipient's claim loop.
 - **R5. D7: name of `started`.** Proposal: keep the SQL value, and define it as "delivered to the recipient harness". The 30-second lease is too short to wait for a busy turn to start. A rename would change the protocol for no new behavior.

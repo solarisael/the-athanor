@@ -59,6 +59,8 @@ const AUTHENTICATED_URL = /([a-z][a-z0-9+.-]*:\/\/)([^\s/@]+)@/gi;
 const WRITE_OPERATIONS = new Set([
   "remember",
   "thread_memories",
+  "unthread_memories",
+  "amend_memories",
   "delete_lesson",
   "update_lesson",
   "set_room_state",

@@ -64,6 +64,7 @@ const MIGRATIONS: &[&str] = &[
     migration!("0027_restart_successor_proof.sql"),
     migration!("0028_room_settings.sql"),
     migration!("0032_insula_seven_day_retention.sql"),
+    migration!("0047_memory_amendments.sql"),
 ];
 
 type TestResult<T = ()> = Result<T, Box<dyn std::error::Error + Send + Sync>>;

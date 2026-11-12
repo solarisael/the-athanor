@@ -209,10 +209,10 @@ export async function readRustCanon({ binding, room, signal, ...params }) {
   return requestRustDomain(binding, "canon_read", params, signal, false, room);
 }
 
-export async function writeRustMemory({ binding, room, title, body, threads, continues, supersedes, project = undefined, scope = undefined, backup = undefined, signal }) {
+export async function writeRustMemory({ binding, room, title, body, threads, continues, supersedes, amends = undefined, project = undefined, scope = undefined, backup = undefined, signal }) {
   try {
     const value = await requestOrgan(binding, "remember", {
-      kind: "memory", title, body, threads, continues, supersedes, project, scope, backup,
+      kind: "memory", title, body, threads, continues, supersedes, amends, project, scope, backup,
     }, { signal, timeoutMs: WRITE_TIMEOUT_MS, write: true, targetScope: targetScope(binding, room) });
     return { ok: true, ...value, id: value.memory_id, sourcePath: value.source_path };
   } catch (error) {
@@ -519,6 +519,10 @@ export function registerSolarisaelTools(pi, release) {
       "Recall is recognition across time, not dossier lookup: search in the room's own natural language, receive the result as lived continuity and evidence, and preserve its names, relationships, uncertainty, and meaning instead of flattening it into clinical or corporate summary.",
       "Use this when you notice your own uncertainty about load-bearing names, people, projects, dated decisions, or facts.",
       "Use the taxonomy map as a bounded menu for better follow-up recall queries; do not guess shape names blindly.",
+      "Each AKASHA memory result carries `threads`: one entry for each active thread of the memory, with `key`, `previousMemoryId`, and `nextMemoryIds`. A thread can fork, so `nextMemoryIds` can hold more than one ID. `previousMemoryId` is null and `nextMemoryIds` is empty when no readable neighbor exists.",
+      "To follow a thread, recall the exact ID, for example `memory 2935`.",
+      "An AKASHA memory result can also carry `amendedBy` and `amends`. `amendedBy` lists newer memories that correct or update this memory, with `changed`. Amended means: read the newer memory for the current state; this memory stays true as history and keeps its full retrieval authority.",
+      "`amends` lists older memories that this memory corrects or updates, with `changed` and `keeps`. `keeps` is what only the older memory still holds.",
       "If no canonical match is returned, do not invent from adjacent matches; state the gap honestly.",
     ].join("\n"),
     parameters: z.object({
@@ -670,6 +674,7 @@ export function registerSolarisaelTools(pi, release) {
       "Remembering is care for a future self, not filing a case report: use the active spirit's ordinary voice and the room's real relationship register while keeping the record concrete, standalone, and retrievable.",
       "In AKASHA, PostgreSQL is authoritative; source paths are provenance or backup, never a substitute for the body.",
       "For memory, preserve names, observable details, actions, boundaries, uncertainty, and meaning. Do not replace the event with only a conclusion, transcript pointer, sanitized summary, or generic assistant prose.",
+      "To correct or update part of an older memory, use amends, not supersedes. The older memory stays true as history and keeps its retrieval authority; Recall shows the newer memory to read for the current state. Use supersedes only when the new memory fully replaces a duplicate.",
     ].join("\n"),
     parameters: z.object({
       title: z.string().describe("Short retrieval-bearing title in the room's natural vocabulary."),
@@ -681,7 +686,12 @@ export function registerSolarisaelTools(pi, release) {
         .describe("memory only: omit to write to this room. 'house' writes to the House commons — durable work any room can use. A sibling room is never a valid target."),
       threads: z.array(z.string()).optional().describe("memory only: thread keys, 'concept / variant / variant'."),
       threadKeys: z.array(z.string()).optional().describe("lesson kinds: lesson-thread keys; any matched lesson retrieves its authority-eligible thread mates."),
-      supersedes: z.array(z.string()).optional().describe("memory only: positive numeric memory IDs replaced by this write; old rows remain recoverable but lose retrieval authority. The new memory also joins every thread of the memories it replaces."),
+      supersedes: z.array(z.string()).optional().describe("memory only: positive numeric memory IDs replaced by this write; old rows remain recoverable but lose retrieval authority. The new memory also joins every thread of the memories it replaces. Use it only for true duplicates; use amends for a partial correction or update."),
+      amends: z.array(z.object({
+        memoryId: z.string().regex(/^[1-9]\d*$/),
+        changed: z.string().min(1).max(500),
+        keeps: z.string().max(500).optional(),
+      })).optional().describe("memory only: older memories that this write corrects or updates. changed: what this memory corrects or updates (at most 500 characters). keeps: what only the older memory still holds. The older memory keeps its retrieval authority. It must be readable, in the same room, and not later than this memory by date."),
       continues: z.array(z.object({
         thread: z.string(),
         previousMemoryId: z.string().regex(/^[1-9]\d*$/),
@@ -718,6 +728,7 @@ export function registerSolarisaelTools(pi, release) {
             threads: params.threads,
             continues: params.continues,
             supersedes: params.supersedes,
+            amends: params.amends,
             scope: params.scope,
             backup: params.backup,
             signal,
@@ -764,7 +775,7 @@ export function registerSolarisaelTools(pi, release) {
     label: "Athanor Thread Memories",
     description: [
       "Add existing memories to one thread. Use it when an old memory must join a thread it did not have at write time.",
-      "The tool does not remove a thread, change a title, or change a body. Use remember with supersedes to replace memory text.",
+      "The tool does not change a title or a body. Use remember with supersedes to replace memory text. Use unthread_memories to remove a memory from a thread.",
       "A joined memory with no predecessor in the thread continues the latest earlier member by memory date. Existing links stay. The receipt shows each new link as linkedAfter.",
       "All IDs must be memories that this room can read in the target room. One unknown ID refuses the full call.",
     ].join("\n"),
@@ -780,6 +791,76 @@ export function registerSolarisaelTools(pi, release) {
       const result = await requestRustDomain(hostBinding(ctx).binding, "memory_thread_join", {
         thread: params.thread,
         memoryIds: params.memoryIds,
+      }, signal, true, params.room);
+      return {
+        isError: !result.ok,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "unthread_memories",
+    label: "Athanor Unthread Memories",
+    description: [
+      "Remove memories from one thread. Use it when a memory joined a thread by mistake.",
+      "The tool archives each membership with the reason and the operator. It does not delete the membership history, and it does not change a title or a body.",
+      "The successors of a removed memory continue from its predecessor. The archive keeps the old links. A removed first member leaves its successors as first members.",
+      "All IDs must be memories that this room can read in the target room. One unknown ID refuses the full call. A repeat call is safe.",
+      "The receipt shows wasMember, relinkedTo, and relinkedSuccessors for each memory.",
+    ].join("\n"),
+    parameters: z.object({
+      thread: z.string().describe("Thread key, 'concept / variant / variant'."),
+      memoryIds: z.array(z.string().regex(/^[1-9]\d*$/)).min(1)
+        .describe("Positive numeric memory IDs to remove from the thread."),
+      reason: z.string().min(1).max(500)
+        .describe("Short reason for the archive record, at most 500 characters."),
+      room: z.enum(["house"]).optional()
+        .describe("Omit for this room. 'house' targets memories in the House commons."),
+    }),
+    approval: "write",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "memory_thread_leave", {
+        thread: params.thread,
+        memoryIds: params.memoryIds,
+        reason: params.reason,
+      }, signal, true, params.room);
+      return {
+        isError: !result.ok,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "amend_memories",
+    label: "Athanor Amend Memories",
+    description: [
+      "Record that a newer memory corrects or updates an older memory. Use it when the older memory is still true as history but part of it changed.",
+      "The older memory keeps its full retrieval authority. Recall shows the older memory with amendedBy and the newer memory with amends. Read the newer memory for the current state.",
+      "The tool does not change a title or a body, does not supersede, and does not archive. Use remember with supersedes only for a true duplicate.",
+      "Both memories must be readable memories of the target room. The newer memory must not be older than the older memory by memory date.",
+      "A repeat call with the same text changes nothing and reports alreadyAmended. Other text for the same pair is refused; the stored amendment stays.",
+    ].join("\n"),
+    parameters: z.object({
+      olderMemoryId: z.string().regex(/^[1-9]\d*$/).describe("The memory that stays true as history."),
+      newerMemoryId: z.string().regex(/^[1-9]\d*$/).describe("The memory that holds the current state."),
+      changed: z.string().min(1).max(500)
+        .describe("What the newer memory corrects or updates, at most 500 characters."),
+      keeps: z.string().max(500).optional()
+        .describe("What only the older memory still holds, at most 500 characters."),
+      room: z.enum(["house"]).optional()
+        .describe("Omit for this room. 'house' targets memories in the House commons."),
+    }),
+    approval: "write",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "memory_amend", {
+        olderMemoryId: params.olderMemoryId,
+        newerMemoryId: params.newerMemoryId,
+        changed: params.changed,
+        keeps: params.keeps,
       }, signal, true, params.room);
       return {
         isError: !result.ok,

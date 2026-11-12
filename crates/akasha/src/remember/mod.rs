@@ -1,3 +1,4 @@
+mod amend;
 mod chunking;
 mod dates;
 mod embedding;
@@ -5,6 +6,7 @@ mod lessons;
 mod memory_write;
 mod normalize;
 mod thread_join;
+mod thread_leave;
 mod tokens;
 
 pub(crate) use chunking::chunk_body;
@@ -13,17 +15,20 @@ pub(crate) use embedding::embed;
 pub(crate) use lessons::{write_coding_lesson_tx, write_project_lesson_tx};
 // On the door because `prepare_memory_write` hands this type back: a caller outside
 // this folder that names the returned value needs the path, though none does today.
+pub use amend::{MemoryAmendParams, MemoryAmendReceipt, memory_amend};
 #[allow(unused_imports)]
 pub(crate) use memory_write::PreparedMemoryWrite;
 pub(crate) use memory_write::{prepare_memory_write, write_memory_tx};
 pub(crate) use normalize::normalize_strings;
 pub use thread_join::{MemoryThreadJoinParams, MemoryThreadJoinReceipt, memory_thread_join};
+pub use thread_leave::{MemoryThreadLeaveParams, MemoryThreadLeaveReceipt, memory_thread_leave};
 pub(crate) use tokens::token_estimate;
 
 use crate::backup;
 use crate::config::{AppError, Config};
 use crate::recall::scope::ScopeFilter;
 use crate::settings::RoomSettings;
+use amend::amend_tx;
 use chrono::Local;
 use hearth::{BackupOutcome, RememberReceipt, RememberRequest};
 use lessons::remember_lesson;
@@ -146,6 +151,17 @@ pub async fn remember(
     )
     .await?;
     continue_by_date_tx(&mut tx, &[memory_id], None, &writer_scope).await?;
+    for amendment in req.amends() {
+        amend_tx(
+            &mut tx,
+            req.room().as_str(),
+            memory_id,
+            amendment,
+            req.operator().map(|operator| operator.as_str()),
+            &writer_scope,
+        )
+        .await?;
+    }
     tx.commit().await?;
     let backup = post_write_backup(pool, cfg, &settings, req.backup(), &mut warnings).await;
     let receipt = RememberReceipt::committed(

@@ -254,7 +254,10 @@ async fn seed_memories(db: &Isolated) -> TestResult<Seeded> {
 #[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
 async fn empty_operators_recall_exactly_what_the_pre_axis_house_recalled() -> TestResult {
     let db = Isolated::bare("operator_baseline").await?;
-    db.apply_files(|version| version < 35).await?;
+    // Recall reads the amendment table of schema 47, so the baseline carries it
+    // and only the operator axis differs between the two reads.
+    db.apply_files(|version| version < 35 || version == 47)
+        .await?;
     for marker in ["first-entry", "second-entry", "third-entry"] {
         db.pre_axis_memory(marker).await?;
     }

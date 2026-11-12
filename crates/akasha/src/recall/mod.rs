@@ -40,7 +40,7 @@ use serde::Serialize;
 use sqlx::{PgPool, Row};
 use std::collections::{BTreeMap, BTreeSet};
 use temporal::{compare_weighted_lane, memory_temporal_factor, weighted_lane_score};
-use thread_neighbors::attach_thread_neighbors;
+use thread_neighbors::attach_memory_links;
 
 #[derive(Debug, Serialize)]
 pub struct RecallResult {
@@ -174,7 +174,7 @@ pub async fn recall(
             );
         }
         let mut retrieval_candidates = exact_candidates;
-        attach_thread_neighbors(pool, span, &scope, &mut retrieval_candidates).await?;
+        attach_memory_links(pool, span, &scope, &mut retrieval_candidates).await?;
         return Ok(RecallResult {
             ok: true,
             query: query.to_owned(),
@@ -716,7 +716,7 @@ pub async fn recall(
         .await?;
         phase.ok();
     }
-    attach_thread_neighbors(pool, span, &scope, &mut retrieval_candidates).await?;
+    attach_memory_links(pool, span, &scope, &mut retrieval_candidates).await?;
     // Canon lookup matches three ways, ranked. Tokens alone can never match a
     // multi-word name or a hyphenated alias, which is how 42 of 109 rows went
     // dark; widening to ILIKE/tsvector then lets fuzzy hits evict the row the

@@ -48,6 +48,10 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `write_continuations_tx` records which memory a thread continues from.
 - `continue_by_date_tx` links a thread member with no predecessor to the latest earlier member by memory date, then by ID. It keeps links that exist.
 - `memory_thread_join` adds existing readable memories to one thread in one transaction. It preserves memory text and applies the date default to the joined memories.
+- `memory_thread_leave` removes readable memories from one thread in one transaction. It moves each membership into `thread_event_archive` with the reason and the operator. The successors continue from the predecessor. It removes the key from `memories.threads` and keeps the memory text.
+- `memory_ids` and `lock_room_memories` are the shared refusal rule of the join and the leave. One ID that is not a readable, unarchived memory of the room refuses the whole call.
+- `memory_amend` records that a newer memory corrects or updates an older memory, in table `memory_amendments`. It locks both readable, unarchived memories of the room and refuses a newer memory with an earlier memory date. The same pair with the same text changes nothing; other text for the pair refuses. It never changes a title, a body, `superseded_by`, or `archived_at`.
+- `amend_tx` is the shared amendment writer. `remember` calls it in the write transaction for each entry of `amends`, so one refused amendment refuses the whole write.
 - `remember_lesson` writes five lesson kinds: coding, project, writing, design, and audio. It refuses a trigger pattern that does not compile before the transaction opens.
 - Five named lesson writers exist, one per kind: `write_coding_lesson_tx`, `write_project_lesson_tx`, `write_writing_lesson_tx`, `write_design_lesson_tx`, and `write_audio_lesson_tx`. Each sends one jsonb row to `jsonb_populate_record`; `remember_lesson` only dispatches.
 - `prepare_memory_write` is the shared preparation step. It normalizes threads, derives dates, chunks the body, and asks for vectors.
@@ -76,6 +80,9 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - Semantic, content, and BM25F lanes apply the weight before their final limits. Decay changes ranking, never similarity floors or stored authority.
 - Automatic context requests decay. Explicit recall and write reconciliation leave decay off. Retrieval never updates a memory timestamp.
 - `load_thread_neighbors` attaches the neighbors of each returned memory on its threads.
+- `load_thread_memberships` attaches `threads` to each memory candidate in one query: every active thread key with the readable `previousMemoryId` and `nextMemoryIds`.
+- `load_amendments` attaches `amendedBy` and `amends` to each memory candidate in one query. It omits each amendment whose other memory the reader cannot read. An amendment never changes the ranking.
+- `attach_memory_links` runs the three loaders once for the final candidate set.
 - The canon lane matches named entities three ways: whole phrase, exact token, then fuzzy similarity.
 - `protocol_pointer_files` normalizes stored pointer files to the wire shape `{file, lines}`. Legacy strings and extra keys stay in the database.
 - `embed_texts`, `embed_text`, and `embed_query` are the embedding client. The `query: ` prefix is load-bearing and pairs with the indexer prefix.

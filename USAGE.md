@@ -482,7 +482,7 @@ The adapter does not start substrate children or provide a fallback when the Hos
 
 | Family | Tools | Runtime |
 |---|---|---|
-| Continuity | `wake`, `sleep`, `remember`, `thread_memories`, `recall`, `canon_read`, `canon_write` | Host and native storage |
+| Continuity | `wake`, `sleep`, `remember`, `thread_memories`, `unthread_memories`, `amend_memories`, `recall`, `canon_read`, `canon_write` | Host and native storage |
 | Lessons and design | `lessons`, `update_lesson`, `delete_lesson`, `design_doc`, `design_doc_write` | Host and native storage |
 | Anamnesis | `anamnesis`, `anamnesis_write` | Host and native storage |
 | Room | `room_state`, `set_room_state`, `house_routing_mode`, `house_model_default` | Native state; OMP performs model selection |

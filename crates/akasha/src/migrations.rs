@@ -236,6 +236,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "0045_insula_transitions.sql",
         sql: include_str!("../../../substrate/migrations/0045_insula_transitions.sql"),
     },
+    Migration {
+        version: 46,
+        name: "0046_thread_membership_archive.sql",
+        sql: include_str!("../../../substrate/migrations/0046_thread_membership_archive.sql"),
+    },
+    Migration {
+        version: 47,
+        name: "0047_memory_amendments.sql",
+        sql: include_str!("../../../substrate/migrations/0047_memory_amendments.sql"),
+    },
 ];
 
 /// The consolidated lineage as recorded in `schema_migrations`: every version

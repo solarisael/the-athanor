@@ -181,6 +181,24 @@ The superseded memories keep their membership and their links as history.
 
 After ranking, `recall` expands only the bounded final candidates with their directly linked `previous` and `next` memories. Historical neighbors can remain visible as labeled history. Supersession still decides current authority; continuation only records chronology.
 
+Each AKASHA candidate with a memory ID also carries `threads`.
+`threads` has one entry for each active thread of the memory:
+
+```json
+{
+  "key": "Solarisael website / Work page",
+  "previousMemoryId": 2935,
+  "nextMemoryIds": [2940]
+}
+```
+
+`previousMemoryId` is the predecessor in that thread, or `null` for a first member.
+`nextMemoryIds` lists the successors. A thread can fork, so the list can hold more than one ID.
+The list is empty when the memory has no successor.
+Recall omits each predecessor and successor that the reader cannot read.
+To follow a thread, recall the exact ID, for example `memory 2940`.
+The Host keeps at most 8 threads for each candidate and at most 8 successors for each thread.
+
 ### Join existing memories to a thread
 
 Use `thread_memories` to add existing memories to one thread.
@@ -204,6 +222,40 @@ The receipt shows each link that the call makes as `linkedAfter`.
 The tool does not change titles, bodies, or links that exist.
 Use `remember` with `supersedes` to replace memory text.
 Superseded memories can still join a thread.
+
+### Remove memories from a thread
+
+Use `unthread_memories` to remove memories from one thread.
+Give a short reason of 500 characters or less.
+Omit `room` for this room, or set `room` to `"house"` for the House commons.
+
+```json
+{
+  "thread": "Solarisael website / Work page",
+  "memoryIds": ["2936"],
+  "reason": "Joined this thread by mistake."
+}
+```
+
+The tool does not delete a membership. It moves the membership into the table `thread_event_archive`.
+The archive row keeps the archive time, the reason, and the operator.
+It also keeps the predecessor, the successors, and the thread references from before the change.
+
+An archived membership is not active.
+Thread reads, the `threads` field of `recall`, the thread lane, and `memories.threads` show only active memberships.
+
+The active chain stays whole.
+The successors of a removed memory continue from its predecessor.
+When the removed memory has no predecessor, its successors become first members.
+
+All IDs must identify readable, unarchived memories in the target room.
+One unknown ID refuses the full call and changes nothing.
+A repeat call succeeds and changes nothing.
+The receipt shows `wasMember` for each memory.
+`relinkedSuccessors` lists the successors that the call moved, and `relinkedTo` names their new predecessor.
+The receipt names only memories that the caller can read.
+The tool does not change titles or bodies.
+Use `thread_memories` to add a memory to the thread again. The archive row stays.
 
 
 ## Authority
@@ -230,6 +282,57 @@ Use correction language plainly:
 > This preference changed. Keep the history, but make the new preference current.
 
 Narrative and session memories are not flattened merely because later events occurred. Dense narrative history can be proposed for arc compression through the substrate digest pass. The pass is manual and review-first; no sleep or wake action invokes it automatically.
+
+### Amend a memory
+
+Supersession removes the retrieval authority of the old memory.
+Use an amendment when the old memory stays true as history and only part of it changed.
+An amendment is an edge from the older memory to the newer memory.
+The older memory keeps its full retrieval authority, and Recall does not rank it lower.
+
+Use `amend_memories` to record one amendment:
+
+```json
+{
+  "olderMemoryId": "2935",
+  "newerMemoryId": "2940",
+  "changed": "The launch moved from February to March.",
+  "keeps": "The original budget and the team list."
+}
+```
+
+`changed` is required. It tells what the newer memory corrects or updates.
+`keeps` is optional. It tells what only the older memory still holds.
+Each note holds at most 500 characters.
+Omit `room` for this room, or set `room` to `"house"` for the House commons.
+
+Both memories must be readable, unarchived memories of the target room.
+The newer memory must not be older than the older memory by memory date.
+A memory cannot amend itself, and two memories cannot amend each other.
+A repeat call with the same text changes nothing and returns `alreadyAmended: true`.
+A call with other text for the same pair is refused. The stored amendment stays.
+The tool does not change titles or bodies, does not set `superseded_by`, and does not archive.
+
+To amend in the same write, give `remember` the `amends` list:
+
+```json
+{
+  "amends": [{
+    "memoryId": "2935",
+    "changed": "The launch moved from February to March."
+  }]
+}
+```
+
+The same rules apply. One refused amendment refuses the whole write.
+Keep `supersedes` for a new memory that fully replaces a duplicate.
+
+Each AKASHA candidate with a memory ID carries `amendedBy` and `amends`.
+`amendedBy` lists the newer memories with `memoryId` and `changed`.
+`amends` lists the older memories with `memoryId`, `changed`, and `keeps`.
+An amended memory means: read the newer memory for the current state, and keep this memory as true history.
+Recall omits each amendment whose other memory the reader cannot read.
+The Host keeps at most 8 amendments in each direction for each candidate.
 
 ## Archival
 

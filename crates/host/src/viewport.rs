@@ -93,6 +93,13 @@ const MAX_THREAD_KEY_CHARS: usize = 512;
 // sits in its thread without redrawing the thread inside a card.
 const MAX_THREAD_NEIGHBORS: usize = 6;
 const MAX_THREAD_NAME_CHARS: usize = 512;
+// A memory's threads are a map of where to read next, not the threads
+// themselves: a card names a few threads and a few next members in each.
+const MAX_CANDIDATE_THREADS: usize = 8;
+const MAX_THREAD_NEXT_MEMORIES: usize = 8;
+// Amendments point to other records. A card names a few in each direction;
+// each note keeps the length that the store allows.
+const MAX_AMENDMENTS: usize = 8;
 // Direction and authority state are closed vocabularies, never prose.
 const MAX_DIRECTION_CHARS: usize = 32;
 const MAX_AUTHORITY_STATE_CHARS: usize = 64;
@@ -262,6 +269,43 @@ fn compact_candidate(
                 excerpt: bounded(&neighbor.excerpt, MAX_NEIGHBOR_EXCERPT_CHARS),
                 authority_state: bounded(&neighbor.authority_state, MAX_AUTHORITY_STATE_CHARS),
                 superseded_by: neighbor.superseded_by,
+            })
+            .collect(),
+        threads: candidate
+            .threads
+            .iter()
+            .take(MAX_CANDIDATE_THREADS)
+            .map(|thread| protocol::RecallThreadMembership {
+                key: bounded(&thread.key, MAX_THREAD_KEY_CHARS),
+                previous_memory_id: thread.previous_memory_id,
+                next_memory_ids: thread
+                    .next_memory_ids
+                    .iter()
+                    .take(MAX_THREAD_NEXT_MEMORIES)
+                    .copied()
+                    .collect(),
+            })
+            .collect(),
+        amended_by: candidate
+            .amended_by
+            .iter()
+            .take(MAX_AMENDMENTS)
+            .map(|entry| protocol::RecallAmendedBy {
+                memory_id: entry.memory_id,
+                changed: bounded(&entry.changed, hearth::MAX_AMENDMENT_CHARS),
+            })
+            .collect(),
+        amends: candidate
+            .amends
+            .iter()
+            .take(MAX_AMENDMENTS)
+            .map(|entry| protocol::RecallAmends {
+                memory_id: entry.memory_id,
+                changed: bounded(&entry.changed, hearth::MAX_AMENDMENT_CHARS),
+                keeps: entry
+                    .keeps
+                    .as_deref()
+                    .map(|keeps| bounded(keeps, hearth::MAX_AMENDMENT_CHARS)),
             })
             .collect(),
         sources: candidate
@@ -665,8 +709,9 @@ pub fn apply_viewport(
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_CANDIDATE_EXCERPT_CHARS, MAX_CANON_ASSERTION_CHARS, MAX_KEPT_CANDIDATES,
-        MAX_WARNINGS_AUTOMATIC, ViewportSession, apply_viewport,
+        MAX_AMENDMENTS, MAX_CANDIDATE_EXCERPT_CHARS, MAX_CANDIDATE_THREADS,
+        MAX_CANON_ASSERTION_CHARS, MAX_KEPT_CANDIDATES, MAX_THREAD_KEY_CHARS,
+        MAX_THREAD_NEXT_MEMORIES, MAX_WARNINGS_AUTOMATIC, ViewportSession, apply_viewport,
     };
     use hearth::RecallProjection;
     use protocol::{RecallResultInput, RecallViewportMode};
@@ -822,6 +867,97 @@ mod tests {
         assert_eq!(viewport.kept_candidates.len(), 1);
         assert_eq!(viewport.kept_candidates[0].memory_id, Some(4197));
         assert!(viewport.suppressions.is_empty());
+    }
+
+    #[test]
+    fn a_card_keeps_bounded_threads_with_exact_neighbor_ids() {
+        let mut candidate = record(4520, "body");
+        candidate["threads"] = serde_json::json!(
+            (0..12)
+                .map(|index| serde_json::json!({
+                    "key": format!("{}{index}", "k".repeat(600)),
+                    "previousMemoryId": 4519,
+                    "nextMemoryIds": (4521..4541).collect::<Vec<i64>>(),
+                }))
+                .collect::<Vec<_>>()
+        );
+        let viewport = apply_viewport(
+            result(
+                "memory 4520",
+                serde_json::json!([]),
+                serde_json::json!([candidate]),
+            ),
+            &mut ViewportSession::default(),
+            RecallViewportMode::Automatic,
+        );
+        let threads = &viewport.presentation.retrieval_candidates[0].threads;
+
+        assert_eq!(threads.len(), MAX_CANDIDATE_THREADS);
+        assert!(
+            threads
+                .iter()
+                .all(|thread| thread.key.chars().count() == MAX_THREAD_KEY_CHARS)
+        );
+        assert!(
+            threads
+                .iter()
+                .all(|thread| thread.previous_memory_id == Some(4519))
+        );
+        assert_eq!(
+            threads[0].next_memory_ids,
+            (4521..4521 + MAX_THREAD_NEXT_MEMORIES as i64).collect::<Vec<_>>()
+        );
+
+        let wire = serde_json::to_value(&viewport.presentation).unwrap();
+        let first = &wire["retrievalCandidates"][0]["threads"][0];
+
+        assert_eq!(first["previousMemoryId"], 4519);
+        assert_eq!(first["nextMemoryIds"][0], 4521);
+    }
+
+    #[test]
+    fn a_card_keeps_bounded_amendments_in_both_directions() {
+        let mut candidate = record(4520, "body");
+        let note = "n".repeat(hearth::MAX_AMENDMENT_CHARS + 40);
+        candidate["amendedBy"] = serde_json::json!(
+            (4600..4612)
+                .map(|id| serde_json::json!({"memoryId": id, "changed": note}))
+                .collect::<Vec<_>>()
+        );
+        candidate["amends"] = serde_json::json!([
+            {"memoryId": 4400, "changed": "The date moved.", "keeps": "The budget."},
+            {"memoryId": 4401, "changed": "The owner changed.", "keeps": null}
+        ]);
+        let viewport = apply_viewport(
+            result(
+                "memory 4520",
+                serde_json::json!([]),
+                serde_json::json!([candidate]),
+            ),
+            &mut ViewportSession::default(),
+            RecallViewportMode::Automatic,
+        );
+        let card = &viewport.presentation.retrieval_candidates[0];
+
+        assert_eq!(card.amended_by.len(), MAX_AMENDMENTS);
+        assert_eq!(card.amended_by[0].memory_id, 4600);
+        assert!(
+            card.amended_by
+                .iter()
+                .all(|entry| entry.changed.chars().count() == hearth::MAX_AMENDMENT_CHARS)
+        );
+
+        let wire = serde_json::to_value(&viewport.presentation).unwrap();
+        let card = &wire["retrievalCandidates"][0];
+
+        assert_eq!(card["amendedBy"][0]["memoryId"], 4600);
+        assert_eq!(
+            card["amends"],
+            serde_json::json!([
+                {"memoryId": 4400, "changed": "The date moved.", "keeps": "The budget."},
+                {"memoryId": 4401, "changed": "The owner changed.", "keeps": null}
+            ])
+        );
     }
 
     fn record(id: i64, body: &str) -> serde_json::Value {

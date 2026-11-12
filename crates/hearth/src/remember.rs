@@ -77,6 +77,48 @@ pub struct ThreadContinuation {
     pub previous_memory_id: u64,
 }
 
+/// The most characters that `changed` or `keeps` of one amendment can hold.
+pub const MAX_AMENDMENT_CHARS: usize = 500;
+
+/// One amendment: a newer memory corrects or updates the older memory
+/// `memory_id`. The older memory keeps its retrieval authority as history.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoryAmendment {
+    pub memory_id: u64,
+    /// What the newer memory corrects or updates.
+    pub changed: String,
+    /// What only the older memory still holds.
+    pub keeps: Option<String>,
+}
+
+impl MemoryAmendment {
+    /// Trims both notes. `changed` holds 1 to 500 characters. A blank `keeps`
+    /// means that the older memory holds nothing of its own.
+    pub fn new(memory_id: u64, changed: &str, keeps: Option<&str>) -> Result<Self, DomainError> {
+        let changed = changed.trim();
+        let keeps = keeps.map(str::trim).filter(|keeps| !keeps.is_empty());
+        let invalid = |field: &str| DomainError::InvalidField {
+            field: field.into(),
+            kind: "memory".into(),
+        };
+
+        if memory_id == 0 || i64::try_from(memory_id).is_err() {
+            return Err(invalid("amended memory ID"));
+        }
+        if changed.is_empty() || changed.chars().count() > MAX_AMENDMENT_CHARS {
+            return Err(invalid("amendment changed (1 to 500 characters)"));
+        }
+        if keeps.is_some_and(|keeps| keeps.chars().count() > MAX_AMENDMENT_CHARS) {
+            return Err(invalid("amendment keeps (at most 500 characters)"));
+        }
+        Ok(Self {
+            memory_id,
+            changed: changed.to_owned(),
+            keeps: keeps.map(str::to_owned),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RememberMemoryDetails {
     pub source_path: Option<String>,
@@ -123,6 +165,7 @@ pub struct RememberRequest {
     threads: Vec<String>,
     continues: Vec<ThreadContinuation>,
     supersedes: Vec<u64>,
+    amends: Vec<MemoryAmendment>,
     backup: bool,
     shape: Option<String>,
     voice: Option<String>,
@@ -407,6 +450,7 @@ impl RememberRequest {
             threads,
             continues: normalized_continues,
             supersedes: unique_supersedes,
+            amends: Vec::new(),
             backup,
             shape,
             voice,
@@ -454,6 +498,39 @@ impl RememberRequest {
         Ok(self)
     }
 
+    /// Record that this memory corrects or updates older memories, which keep
+    /// their retrieval authority. Memory kind only. Each older memory appears
+    /// once.
+    pub fn with_amends(mut self, amends: Vec<MemoryAmendment>) -> Result<Self, DomainError> {
+        if self.kind.is_lesson() && !amends.is_empty() {
+            return Err(DomainError::InvalidField {
+                field: "amends".into(),
+                kind: self.kind.as_str().into(),
+            });
+        }
+        let mut normalized: Vec<MemoryAmendment> = Vec::with_capacity(amends.len());
+        for amendment in amends {
+            let amendment = MemoryAmendment::new(
+                amendment.memory_id,
+                &amendment.changed,
+                amendment.keeps.as_deref(),
+            )?;
+
+            if normalized
+                .iter()
+                .any(|seen| seen.memory_id == amendment.memory_id)
+            {
+                return Err(DomainError::InvalidField {
+                    field: format!("amends naming memory {} twice", amendment.memory_id),
+                    kind: self.kind.as_str().into(),
+                });
+            }
+            normalized.push(amendment);
+        }
+        self.amends = normalized;
+        Ok(self)
+    }
+
     pub fn authored_by_operator(mut self, author: String) -> Result<Self, DomainError> {
         if self.kind.is_lesson() || author.trim().is_empty() {
             return Err(DomainError::InvalidField {
@@ -495,6 +572,9 @@ impl RememberRequest {
     }
     pub fn supersedes(&self) -> &[u64] {
         &self.supersedes
+    }
+    pub fn amends(&self) -> &[MemoryAmendment] {
+        &self.amends
     }
     pub const fn backup(&self) -> bool {
         self.backup

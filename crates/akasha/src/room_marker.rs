@@ -32,7 +32,11 @@ pub async fn read_room_marker_async(room_dir: &Path) -> Value {
         Some(path) => parse(tokio::fs::read(path).await.ok()),
         None => None,
     };
-    let room = parse(tokio::fs::read(room_dir.join(ROOM_MARKER_FILENAME)).await.ok());
+    let room = parse(
+        tokio::fs::read(room_dir.join(ROOM_MARKER_FILENAME))
+            .await
+            .ok(),
+    );
 
     layer_marker(house, room)
 }
@@ -101,7 +105,8 @@ mod tests {
 
     #[test]
     fn the_effective_marker_reads_both_pages_from_disk() {
-        let root = std::env::temp_dir().join(format!("athanor-marker-{}", uuid::Uuid::new_v4().simple()));
+        let root =
+            std::env::temp_dir().join(format!("athanor-marker-{}", uuid::Uuid::new_v4().simple()));
         let room_dir = root.join("kodo");
         std::fs::create_dir_all(root.join("house")).unwrap();
         std::fs::create_dir_all(&room_dir).unwrap();

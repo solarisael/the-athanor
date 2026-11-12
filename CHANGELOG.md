@@ -38,6 +38,16 @@ the exact implementation record.
 - `thread_memories` adds existing readable memories to one thread without changing their text.
 - A thread member with no named predecessor now continues the latest earlier member by memory date. This applies to `remember` and `thread_memories`.
 - A memory that supersedes other memories now joins every thread of those memories.
+- Each `recall` candidate with a memory ID now carries `threads`. Each entry has the thread `key`, `previousMemoryId`, and `nextMemoryIds`.
+  Recall omits a neighbor that the reader cannot read. The Host keeps at most 8 threads and 8 successors for each thread.
+- `unthread_memories` removes memories from one thread and requires a reason. Schema 46 adds `thread_event_archive`.
+  The archive row keeps the membership, its old links, the reason, and the operator. The successors continue from the predecessor.
+  Thread reads, Recall, and `memories.threads` show only active memberships. One unknown ID refuses the full call.
+- `amend_memories` records that a newer memory corrects or updates an older memory. Schema 47 adds `memory_amendments`.
+  `changed` tells what changed. `keeps` tells what only the older memory still holds. The older memory keeps its full retrieval authority.
+  `remember` accepts `amends` to amend in the same write. Keep `supersedes` for true duplicates.
+  Each `recall` candidate with a memory ID now carries `amendedBy` and `amends`. Recall omits an amendment that the reader cannot read.
+  A repeat with the same text changes nothing. Other text for the same pair, a newer memory with an earlier date, and an unreadable memory are refused.
 - Insula records state-machine transitions. Schema 45 adds `insula.transitions`:
   one row for each committed move, with the machine, the subject id, from, event,
   to, and the presence that made the call. `insula.transitions_daily` counts each

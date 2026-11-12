@@ -24,10 +24,10 @@ use hearth::{
     GigaPromotionReceipt, GigaPromotionRequest, GigaPublicationConsent,
     GigaQueueMaintenanceOperation, GigaQueueMaintenanceRequest, GigaQueueMaintenanceScope,
     GigaQueueState, GigaResonance, GigaReviewAction, GigaReviewState, GigaRisk, GigaScope,
-    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, MemoryScope,
-    OperatorKey, RecallMode, RecallProjection, RecallRequest, RememberKind, RememberLessonDetails,
-    RememberMemoryDetails, RememberReceipt, RememberRequest, RoomKey, ThreadContinuation,
-    lesson_triggers::LessonTriggerSpec,
+    GigaScores, GigaSourceRange, GigaSourceRef, GigaSourceType, GigaVisibility, MemoryAmendment,
+    MemoryScope, OperatorKey, RecallMode, RecallProjection, RecallRequest, RememberKind,
+    RememberLessonDetails, RememberMemoryDetails, RememberReceipt, RememberRequest, RoomKey,
+    ThreadContinuation, lesson_triggers::LessonTriggerSpec,
 };
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -113,6 +113,17 @@ pub struct ThreadContinuationParams {
     pub previous_memory_id: String,
 }
 
+/// One amendment that a memory write makes: the new memory corrects or
+/// updates `memoryId`, which keeps its retrieval authority.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct MemoryAmendmentParams {
+    pub memory_id: String,
+    pub changed: String,
+    #[serde(default)]
+    pub keeps: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RememberParams {
@@ -130,6 +141,8 @@ pub struct RememberParams {
     pub continues: Vec<ThreadContinuationParams>,
     #[serde(default)]
     pub supersedes: Vec<String>,
+    #[serde(default)]
+    pub amends: Vec<MemoryAmendmentParams>,
     #[serde(default)]
     pub shape: Option<String>,
     #[serde(default)]
@@ -346,6 +359,38 @@ pub struct RecallThreadNeighbor {
     pub superseded_by: Option<i64>,
 }
 
+/// One active thread of a recalled memory. The previous and next members are
+/// directly linked memories that the reader can read; others are omitted.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecallThreadMembership {
+    pub key: String,
+    #[serde(default)]
+    pub previous_memory_id: Option<i64>,
+    #[serde(default)]
+    pub next_memory_ids: Vec<i64>,
+}
+
+/// A newer memory that corrects or updates the recalled memory. The recalled
+/// memory stays true as history; the newer memory holds the current state.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecallAmendedBy {
+    pub memory_id: i64,
+    pub changed: String,
+}
+
+/// An older memory that the recalled memory corrects or updates. `keeps` is
+/// what only the older memory still holds.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct RecallAmends {
+    pub memory_id: i64,
+    pub changed: String,
+    #[serde(default)]
+    pub keeps: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecallPassage {
@@ -389,6 +434,12 @@ pub struct RecallCandidate {
     pub thread_key: Option<String>,
     #[serde(default)]
     pub thread_neighbors: Vec<RecallThreadNeighbor>,
+    #[serde(default)]
+    pub threads: Vec<RecallThreadMembership>,
+    #[serde(default, rename = "amendedBy")]
+    pub amended_by: Vec<RecallAmendedBy>,
+    #[serde(default)]
+    pub amends: Vec<RecallAmends>,
     #[serde(default)]
     pub source: Option<String>,
     #[serde(default)]
@@ -664,6 +715,12 @@ pub struct RecallPresentationCandidate {
     pub thread_key: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub thread_neighbors: Vec<RecallPresentationThreadNeighbor>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threads: Vec<RecallThreadMembership>,
+    #[serde(default, rename = "amendedBy", skip_serializing_if = "Vec::is_empty")]
+    pub amended_by: Vec<RecallAmendedBy>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub amends: Vec<RecallAmends>,
     pub sources: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub score: Option<f64>,
@@ -1692,6 +1749,24 @@ impl From<ProtocolError> for ProtocolErrorBody {
     }
 }
 
+/// A memory ID parameter: a positive PostgreSQL BIGINT in decimal text.
+fn positive_memory_id(raw: &str, field: &str) -> Result<u64, ProtocolError> {
+    let invalid = || {
+        ProtocolError::InvalidParams(format!(
+            "{field} must be a positive PostgreSQL BIGINT decimal: {raw}"
+        ))
+    };
+
+    if raw.starts_with('0') || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid());
+    }
+    raw.parse::<i64>()
+        .ok()
+        .filter(|&id| id > 0)
+        .map(|id| id as u64)
+        .ok_or_else(invalid)
+}
+
 impl TryFrom<RememberParams> for RememberRequest {
     type Error = ProtocolError;
     fn try_from(params: RememberParams) -> Result<Self, Self::Error> {
@@ -1708,6 +1783,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                 || !params.threads.is_empty()
                 || !params.continues.is_empty()
                 || !params.supersedes.is_empty()
+                || !params.amends.is_empty()
                 || params.operator.is_some())
         {
             return Err(ProtocolError::InvalidParams(
@@ -1739,45 +1815,31 @@ impl TryFrom<RememberParams> for RememberRequest {
         }
         let mut supersedes = Vec::with_capacity(params.supersedes.len());
         for raw in params.supersedes {
-            if raw.starts_with('0') || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Err(ProtocolError::InvalidParams(format!(
-                    "supersedes ID must be a positive PostgreSQL BIGINT decimal: {raw}"
-                )));
-            }
-            let id = raw
-                .parse::<i64>()
-                .ok()
-                .filter(|&id| id > 0)
-                .ok_or_else(|| {
-                    ProtocolError::InvalidParams(format!(
-                        "supersedes ID must be a positive PostgreSQL BIGINT decimal: {raw}"
-                    ))
-                })? as u64;
+            let id = positive_memory_id(&raw, "supersedes ID")?;
             if !supersedes.contains(&id) {
                 supersedes.push(id);
             }
         }
         let mut continues = Vec::with_capacity(params.continues.len());
         for continuation in params.continues {
-            let raw = continuation.previous_memory_id;
-            if raw.starts_with('0') || !raw.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Err(ProtocolError::InvalidParams(format!(
-                    "previousMemoryId must be a positive PostgreSQL BIGINT decimal: {raw}"
-                )));
-            }
-            let previous_memory_id =
-                raw.parse::<i64>()
-                    .ok()
-                    .filter(|&id| id > 0)
-                    .ok_or_else(|| {
-                        ProtocolError::InvalidParams(format!(
-                            "previousMemoryId must be a positive PostgreSQL BIGINT decimal: {raw}"
-                        ))
-                    })? as u64;
             continues.push(ThreadContinuation {
                 thread: continuation.thread,
-                previous_memory_id,
+                previous_memory_id: positive_memory_id(
+                    &continuation.previous_memory_id,
+                    "previousMemoryId",
+                )?,
             });
+        }
+        let mut amends = Vec::with_capacity(params.amends.len());
+        for amendment in params.amends {
+            amends.push(
+                MemoryAmendment::new(
+                    positive_memory_id(&amendment.memory_id, "amends memoryId")?,
+                    &amendment.changed,
+                    amendment.keeps.as_deref(),
+                )
+                .map_err(|e| ProtocolError::InvalidParams(e.to_string()))?,
+            );
         }
         let result = if kind.is_lesson() {
             RememberRequest::new_lesson(
@@ -1835,6 +1897,7 @@ impl TryFrom<RememberParams> for RememberRequest {
                 },
             )
             .and_then(|request| request.with_operator(operator, scope))
+            .and_then(|request| request.with_amends(amends))
         };
         result.map_err(|e| ProtocolError::InvalidParams(e.to_string()))
     }
@@ -4972,6 +5035,7 @@ mod tests {
             threads: vec![],
             continues: vec![],
             supersedes: vec!["41".into(), "42".into(), "41".into()],
+            amends: vec![],
             shape: None,
             voice: None,
             scope: None,
@@ -5007,6 +5071,7 @@ mod tests {
             source_memory_path: None,
             threads: vec![],
             continues: vec![],
+            amends: vec![],
             shape: None,
             voice: None,
             scope: None,
@@ -5042,6 +5107,7 @@ mod tests {
                 source_memory_path: None,
                 threads: vec![],
                 continues: vec![],
+                amends: vec![],
                 shape: None,
                 voice: None,
                 scope: None,

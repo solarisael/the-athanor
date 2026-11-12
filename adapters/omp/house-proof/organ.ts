@@ -2,7 +2,7 @@ import { hostCommand, HostRefused, HostUnavailable, sendHostCommand, type HostBi
 
 export type OrganOperation =
   | "canon_write" | "canon_read" | "remember" | "paper_boat_sleep" | "paper_boat_wake"
-  | "memory_thread_join"
+  | "memory_thread_join" | "memory_thread_leave" | "memory_amend"
   | "recall" | "vault_recall" | "anamnesis" | "anamnesis_write"
   | "lesson_query" | "lesson_update" | "lesson_delete" | "lesson_trigger_match" | "lesson_trigger_record"
   | "design_document_query" | "design_document_write" | "entity_resolve"

@@ -34,7 +34,7 @@ The native CLI remains available for administration and keeper operations.
 
 The Host derives room paths and sender identity from its configuration and current room state.
 Organ parameters cannot replace those fields.
-Explicit House targets remain available for `canon_read`, `canon_write`, `remember`, and `thread_memories`.
+Explicit House targets remain available for `canon_read`, `canon_write`, `remember`, `thread_memories`, `unthread_memories`, and `amend_memories`.
 Docket and restart operations retain their native capability checks.
 
 ## Programmatic tool results

@@ -14,6 +14,8 @@ const REQUIRED_TABLES: &[&str] = &[
     "thread_events",
     "memory_thread_refs",
     "thread_event_links",
+    "thread_event_archive",
+    "memory_amendments",
     "memory_chunks",
     "named_entities",
     "lessons",

@@ -286,8 +286,12 @@ fn bound_request(
     if request.target_scope == protocol::organ::OrganTargetScope::House
         && !matches!(
             request.operation,
-            OrganOperation::CanonRead | OrganOperation::CanonWrite | OrganOperation::Remember
+            OrganOperation::CanonRead
+                | OrganOperation::CanonWrite
+                | OrganOperation::Remember
                 | OrganOperation::MemoryThreadJoin
+                | OrganOperation::MemoryThreadLeave
+                | OrganOperation::MemoryAmend
         )
     {
         return Err(ProtocolError::InvalidParams(
@@ -378,9 +382,14 @@ fn bind_identity(
         _ => {}
     }
     // The operator axis: the Host names the reader and the writer. Lessons stay
-    // off the axis, so only a memory write carries one.
-    let memory_write = operation == MemoryThreadJoin
-        || (operation == Remember && params.get("kind").and_then(Value::as_str) == Some("memory"));
+    // off the axis, so only a memory write carries one. Thread membership and
+    // amendments belong to memories, so a join, a leave, or an amendment is a
+    // memory write.
+    let memory_write = matches!(
+        operation,
+        MemoryThreadJoin | MemoryThreadLeave | MemoryAmend
+    ) || (operation == Remember
+        && params.get("kind").and_then(Value::as_str) == Some("memory"));
     if let Some(operator) = &host.operator
         && (operation == Recall || memory_write)
     {

@@ -273,6 +273,7 @@ fn is_write_operation(operation: &str) -> bool {
         operation,
         "canon_write"
             | "remember"
+            | "memory_thread_join"
             | "paper_boat_sleep"
             | "anamnesis_write"
             | "cluster_maintenance"
@@ -297,6 +298,7 @@ fn validation_owner(operation: &str) -> (&'static str, &'static str) {
         "canon_write" => ("src/canon.rs", "canon_write"),
         "canon_read" => ("src/canon.rs", "canon_read"),
         "remember" => ("src/remember/mod.rs", "remember"),
+        "memory_thread_join" => ("src/remember/thread_join.rs", "memory_thread_join"),
         "paper_boat_sleep" => ("src/paper_boat.rs", "PaperBoatSleepRequest::new"),
         "paper_boat_wake" => ("src/paper_boat.rs", "PaperBoatWakeRequest::new"),
         "recall" => ("src/recall/mod.rs", "recall"),
@@ -352,6 +354,7 @@ fn validation_target(message: &str) -> &'static str {
 fn database_owner(operation: &str) -> (&'static str, &'static str) {
     match operation {
         "remember" => ("src/remember.rs", "remember"),
+        "memory_thread_join" => ("src/remember/thread_join.rs", "memory_thread_join"),
         "paper_boat_sleep" => ("src/paper_boat.rs", "paper_boat_sleep"),
         "paper_boat_wake" => ("src/paper_boat.rs", "paper_boat_wake"),
         "recall" => ("src/recall.rs", "recall"),

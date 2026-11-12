@@ -58,6 +58,7 @@ const AUTH_HEADER = /\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]+/gi;
 const AUTHENTICATED_URL = /([a-z][a-z0-9+.-]*:\/\/)([^\s/@]+)@/gi;
 const WRITE_OPERATIONS = new Set([
   "remember",
+  "thread_memories",
   "delete_lesson",
   "update_lesson",
   "set_room_state",

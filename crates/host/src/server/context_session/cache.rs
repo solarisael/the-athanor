@@ -24,7 +24,7 @@ impl BlockKind {
         )
     }
 
-    fn dynamic(self) -> bool {
+    pub(super) fn dynamic(self) -> bool {
         matches!(self, Self::RecallContext | Self::PresenceContext)
     }
 }
@@ -92,11 +92,21 @@ pub(super) struct RecallSubject {
     pub project: Option<String>,
 }
 
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub(super) struct DynamicRetirement {
+    recall: usize,
+    presence: usize,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(super) struct SavedSession {
     pub version: u8,
     pub turns: Vec<TurnBlocks>,
+    // Per-kind frontiers retire active material without changing sent blocks or retiring reused Recall.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub retired_dynamic_through: BTreeMap<String, DynamicRetirement>,
     #[serde(default)]
     pub woken: bool,
     #[serde(default)]
@@ -116,6 +126,7 @@ impl Default for SavedSession {
         Self {
             version: CONTEXT_VERSION,
             turns: Vec::new(),
+            retired_dynamic_through: BTreeMap::new(),
             woken: false,
             work: WorkEvidence::default(),
             identity_epoch: None,
@@ -199,8 +210,6 @@ pub(super) fn load(
             if !matches!(saved.version, 1 | CONTEXT_VERSION) {
                 return Err("unsupported native turn cache".into());
             }
-            let mut saved = saved;
-            retain_current_dynamic(&mut saved);
             Ok(saved)
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => adopt(legacy, visible),
@@ -228,7 +237,6 @@ fn adopt(legacy: Option<LegacyMemo>, visible: &[String]) -> Result<SavedSession,
             saved.turns.push(turn);
         }
     }
-    retain_current_dynamic(&mut saved);
     Ok(saved)
 }
 
@@ -236,13 +244,43 @@ pub(super) fn commit(state: &AppState, session: &str, saved: &SavedSession) -> R
     crate::store::atomic_json_write(&file(state, session), saved)
 }
 
+fn latest_entry(saved: &SavedSession, kind: BlockKind) -> Option<(&TurnBlocks, &Block)> {
+    saved.turns.iter().rev().find_map(|turn| {
+        let frontier = if kind.dynamic() {
+            saved
+                .retired_dynamic_through
+                .get(&turn.turn_id)
+                .map_or(0, |frontier| match kind {
+                    BlockKind::RecallContext => frontier.recall,
+                    BlockKind::PresenceContext => frontier.presence,
+                    _ => 0,
+                })
+        } else {
+            0
+        };
+
+        turn.blocks
+            .iter()
+            .skip(frontier)
+            .rev()
+            .find(|block| block.kind == kind)
+            .map(|block| (turn, block))
+    })
+}
+
 pub(super) fn latest(saved: &SavedSession, kind: BlockKind) -> Option<&Block> {
-    saved
-        .turns
-        .iter()
-        .rev()
-        .flat_map(|turn| turn.blocks.iter().rev())
-        .find(|block| block.kind == kind)
+    latest_entry(saved, kind).map(|(_, block)| block)
+}
+
+// Only the latest active block of each kind can supply current authority.
+pub(super) fn latest_for_turn<'a>(
+    saved: &'a SavedSession,
+    turn_id: &str,
+    kind: BlockKind,
+) -> Option<&'a Block> {
+    latest_entry(saved, kind)
+        .filter(|(turn, _)| turn.turn_id == turn_id)
+        .map(|(_, block)| block)
 }
 
 pub(super) fn has_kind(saved: &SavedSession, kind: BlockKind) -> bool {
@@ -250,47 +288,81 @@ pub(super) fn has_kind(saved: &SavedSession, kind: BlockKind) -> bool {
 }
 
 pub(super) fn retire_recall(saved: &mut SavedSession) -> bool {
+    retire_dynamic(saved, true, true)
+}
+
+fn retire_dynamic(saved: &mut SavedSession, recall: bool, presence: bool) -> bool {
+    if !recall && !presence {
+        return false;
+    }
+
     let mut changed = false;
-    for turn in &mut saved.turns {
-        turn.blocks.retain(|block| {
-            let retain = !block.kind.dynamic();
-            changed |= !retain;
-            retain
-        });
+    for turn in &saved.turns {
+        let mut frontier = saved
+            .retired_dynamic_through
+            .get(&turn.turn_id)
+            .copied()
+            .unwrap_or_default();
+        let recall_active = recall
+            && turn
+                .blocks
+                .iter()
+                .skip(frontier.recall)
+                .any(|block| block.kind == BlockKind::RecallContext);
+        let presence_active = presence
+            && turn
+                .blocks
+                .iter()
+                .skip(frontier.presence)
+                .any(|block| block.kind == BlockKind::PresenceContext);
+
+        if !recall_active && !presence_active {
+            continue;
+        }
+
+        if recall_active {
+            frontier.recall = turn.blocks.len();
+        }
+        if presence_active {
+            frontier.presence = turn.blocks.len();
+        }
+        if let Some(current) = saved.retired_dynamic_through.get_mut(&turn.turn_id) {
+            *current = frontier;
+        } else {
+            saved
+                .retired_dynamic_through
+                .insert(turn.turn_id.clone(), frontier);
+        }
+        changed = true;
     }
 
     changed
 }
 
-fn retain_current_dynamic(saved: &mut SavedSession) {
-    let mut recall = false;
-    let mut presence = false;
-    for turn in saved.turns.iter_mut().rev() {
-        turn.blocks.reverse();
-        turn.blocks.retain(|block| {
-            let seen = match block.kind {
-                BlockKind::RecallContext => Some(&mut recall),
-                BlockKind::PresenceContext => Some(&mut presence),
-                _ => None,
-            };
+pub(super) fn prune(saved: &mut SavedSession, visible: &[String]) -> bool {
+    let turns = saved.turns.len();
+    let frontiers = saved.retired_dynamic_through.len();
+    saved.turns.retain(|turn| visible.contains(&turn.turn_id));
+    saved
+        .retired_dynamic_through
+        .retain(|turn_id, _| saved.turns.iter().any(|turn| &turn.turn_id == turn_id));
 
-            if let Some(seen) = seen {
-                if *seen {
-                    return false;
-                }
-                *seen = true;
-            }
-            true
-        });
-        turn.blocks.reverse();
-    }
+    saved.turns.len() != turns || saved.retired_dynamic_through.len() != frontiers
 }
 
 pub(super) fn merge(saved: &mut SavedSession, turn_id: &str, blocks: Vec<Block>) {
-    let blocks = blocks
+    let blocks: Vec<_> = blocks
         .into_iter()
         .filter(|block| !block.kind.singleton() || !has_kind(saved, block.kind))
         .collect();
+    let recall = blocks
+        .iter()
+        .any(|block| block.kind == BlockKind::RecallContext);
+    let presence = blocks
+        .iter()
+        .any(|block| block.kind == BlockKind::PresenceContext);
+    retire_dynamic(saved, recall, presence);
+
     if let Some(turn) = saved.turns.iter_mut().find(|turn| turn.turn_id == turn_id) {
         turn.blocks.extend(blocks);
     } else {
@@ -299,5 +371,4 @@ pub(super) fn merge(saved: &mut SavedSession, turn_id: &str, blocks: Vec<Block>)
             blocks,
         });
     }
-    retain_current_dynamic(saved);
 }

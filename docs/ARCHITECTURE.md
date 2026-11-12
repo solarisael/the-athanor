@@ -220,6 +220,12 @@ Sources: `adapters/omp/index.ts`, `house-proof/tools.ts`, `house-proof/organ.ts`
 That ordering also applies to replay and timeout paths.
 Native context preparation returns harness-neutral blocks.
 The adapter anchors those blocks beside the correct OMP turn.
+The Host keeps previously sent blocks byte-identical during ordinary preparation.
+Separate retirement metadata prevents old Recall evidence and Presence contracts from becoming active again.
+New blocks supersede earlier working sets and turn contracts without removing their historical text.
+OMP stores each turn's mode notice in its native session history and restores the notice at its original turn.
+Identity and format changes remain explicit rebuild boundaries.
+
 
 Replay requires the current identity, native frame, and active contract.
 Pending settlement information survives adapter reconstruction.

@@ -2,6 +2,7 @@
 // Native and queued prompts use before_agent_start; idle generated prompts do not.
 // Only the three named House doors carry generated-turn identity.
 
+import { MODE_DOOR_TYPE } from "./mode-door.ts";
 import { messageText } from "./text.ts";
 
 export const GENERATED_TURN_ORIGINS: ReadonlyMap<string, string> = new Map([
@@ -107,6 +108,24 @@ function batchOrigin(messages: any[], prompt: string): TurnOrigin | null {
     if (joined.length > prompt.length) return null;
   }
   return null;
+}
+
+export function modeDoorsByTurn(
+  messages: any[],
+  turnKeys: Map<any, string>,
+): Map<string, Record<string, any>> {
+  const doors = new Map<string, Record<string, any>>();
+  let turnId: string | undefined;
+
+  for (const message of messages) {
+    turnId = turnKeys.get(message) ?? turnId;
+
+    if (turnId && message?.role === "custom" && message.customType === MODE_DOOR_TYPE) {
+      doors.set(turnId, message);
+    }
+  }
+
+  return doors;
 }
 
 export function anchorTurnAdditions(

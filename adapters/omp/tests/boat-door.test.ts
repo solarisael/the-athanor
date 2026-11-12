@@ -5,6 +5,7 @@ import path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai";
 import { untilAborted } from "@oh-my-pi/pi-utils";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
 
 import {
   boatCast,
@@ -241,6 +242,95 @@ test("overflow, manual /compact, workers, and the handoff itself compact without
   expect(await compactionAt(emit, "threshold")).toBeUndefined();
   await settle();
   expect(sent).toHaveLength(2);
+});
+
+test("a successful boat before the gate satisfies threshold checks until compaction commits", async () => {
+  const { session, calls } = fakeSession();
+  const { ctx, emit, sent } = fakePi(session);
+  boatCast(ctx);
+
+  expect(await compactionAt(emit, "threshold")).toBeUndefined();
+  expect(await compactionAt(emit, "threshold")).toBeUndefined();
+  await settle();
+  expect(sent).toEqual([]);
+  expect(calls.aborts).toEqual([]);
+  expect(calls.handoff).toEqual([]);
+
+  await emit("session_compact", { type: "session_compact" });
+  expect(await compactionAt(emit, "threshold")).toEqual({ cancel: true });
+  await settle();
+  expect(sent.map((entry) => entry.message.customType)).toEqual(["athanor-boat-before-handoff"]);
+});
+
+test("a boat arriving while the threshold gate waits proceeds directly to handoff", async () => {
+  let idle!: () => void;
+  const idleWait = new Promise<void>((resolve) => { idle = resolve; });
+  const { session, calls } = fakeSession({ waitForIdle: () => idleWait });
+  const { ctx, emit, sent } = fakePi(session);
+
+  expect(await compactionAt(emit, "threshold")).toEqual({ cancel: true });
+  boatCast(ctx);
+  idle();
+  await settle();
+
+  expect(calls.aborts).toEqual([]);
+  expect(calls.handoff).toEqual([undefined]);
+  expect(sent.map((entry) => entry.message.customType)).toEqual(["athanor-after-handoff"]);
+});
+
+test("a manual handoff reuses a boat already cast for the same work", async () => {
+  const { session, calls } = fakeSession();
+  const { ctx, emit, sent } = fakePi(session);
+  boatCast(ctx);
+
+  expect(await emit("input", input("/handoff preserve the open task"))).toEqual({ handled: true });
+  await settle();
+
+  expect(calls.handoff).toEqual(["preserve the open task"]);
+  expect(sent.map((entry) => entry.message.customType)).toEqual(["athanor-after-handoff"]);
+});
+
+test("new operator input cannot reuse a prior boat", async () => {
+  const { session } = fakeSession();
+  const { ctx, emit, sent } = fakePi(session);
+  boatCast(ctx);
+
+  expect(await emit("input", input("one more task"))).toBeUndefined();
+  expect(await compactionAt(emit, "threshold")).toEqual({ cancel: true });
+  await settle();
+
+  expect(sent.map((entry) => entry.message.customType)).toEqual(["athanor-boat-before-handoff"]);
+});
+
+test("another conversation's boat cannot satisfy this conversation's gate", async () => {
+  const { session } = fakeSession();
+  const { emit, sent } = fakePi(session);
+  boatCast({ sessionManager: { getSessionId: () => "another-session" } });
+
+  expect(await compactionAt(emit, "threshold")).toEqual({ cancel: true });
+  await settle();
+
+  expect(sent.map((entry) => entry.message.customType)).toEqual(["athanor-boat-before-handoff"]);
+});
+
+test("a queued user turn in the native branch invalidates a previous boat", async () => {
+  const manager = SessionManager.inMemory(tmpdir());
+  try {
+    manager.appendMessage({ role: "user", content: [{ type: "text", text: "finish the work" }], timestamp: 1 });
+    const { session } = fakeSession();
+    const { ctx, emit, sent } = fakePi(session);
+    Object.assign(ctx, { sessionManager: manager });
+    boatCast(ctx);
+
+    expect(await compactionAt(emit, "threshold")).toBeUndefined();
+    manager.appendMessage({ role: "user", content: [{ type: "text", text: "queued new work" }], timestamp: 2 });
+    expect(await compactionAt(emit, "threshold")).toEqual({ cancel: true });
+    await settle();
+
+    expect(sent.map((entry) => entry.message.customType)).toEqual(["athanor-boat-before-handoff"]);
+  } finally {
+    await manager.close();
+  }
 });
 
 test("the room's handoff-door.md speaks for the door; missing sections keep the House lines", async () => {

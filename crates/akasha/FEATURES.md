@@ -44,7 +44,10 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - Memory identifiers cross from `u64` to PostgreSQL BIGINT at the bind. An identifier outside that range refuses there.
 - `write_memory_tx` upserts the memory on (room, source_path). It refuses a conflicting paper boat and returns the id plus an inserted flag.
 - `write_memory_tx` also links threads, prunes dropped thread events, marks superseded memories, and rewrites every chunk row.
+- `threads_with_inherited` adds the threads of each superseded memory to the new memory before the write.
 - `write_continuations_tx` records which memory a thread continues from.
+- `continue_by_date_tx` links a thread member with no predecessor to the latest earlier member by memory date, then by ID. It keeps links that exist.
+- `memory_thread_join` adds existing readable memories to one thread in one transaction. It preserves memory text and applies the date default to the joined memories.
 - `remember_lesson` writes five lesson kinds: coding, project, writing, design, and audio. It refuses a trigger pattern that does not compile before the transaction opens.
 - Five named lesson writers exist, one per kind: `write_coding_lesson_tx`, `write_project_lesson_tx`, `write_writing_lesson_tx`, `write_design_lesson_tx`, and `write_audio_lesson_tx`. Each sends one jsonb row to `jsonb_populate_record`; `remember_lesson` only dispatches.
 - `prepare_memory_write` is the shared preparation step. It normalizes threads, derives dates, chunks the body, and asks for vectors.
@@ -52,7 +55,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `derive_dates` reads dates out of the source path. A stitched path date moves to the next day.
 - `embed` posts the chunks to the embedding endpoint with the `passage: ` prefix. It checks the vector count and the dimension.
 - `normalize_strings` and `token_estimate` clean the inputs the writers store.
-- Every write calls `backup::post_write_outcome` after its commit. The receipt carries a `backup` field: `skipped` when the request did not ask, `ok` with the dump path, sha256, bytes, elapsed time, and the `pg_dump` route that ran, or `failed` with a mechanical code and one line of detail. A failed backup adds one warning line and is never a failed write.
+- `remember` calls `backup::post_write_outcome` after its commit. The receipt reports `skipped`, `ok`, or `failed`. A successful backup includes the dump path, sha256, bytes, elapsed time, and `pg_dump` route. A failed backup adds one warning with a code and reason. The committed write stays successful.
 
 ### recall/ — the retrieval door
 

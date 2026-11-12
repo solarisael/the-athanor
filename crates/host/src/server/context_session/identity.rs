@@ -91,10 +91,14 @@ pub(super) async fn synchronize(
     if invalidation.is_some() {
         saved.recall_subject = None;
         if format_changed && !changed && !foreign_frame && proven {
-            cache::retire_recall(saved);
+            // Format cutovers discard incompatible blocks; ordinary refreshes only retire them.
+            for turn in &mut saved.turns {
+                turn.blocks.retain(|block| !block.kind.dynamic());
+            }
         } else {
             saved.turns.clear();
         }
+        saved.retired_dynamic_through.clear();
         context.sieves.clear();
         request.existing_block_kinds.clear();
     }
@@ -274,13 +278,7 @@ fn cached_presence_failure(
     turn: &str,
     binding: &PresenceBinding,
 ) -> Option<&'static str> {
-    let cached = saved
-        .turns
-        .iter()
-        .find(|entry| entry.turn_id == turn)?
-        .blocks
-        .iter()
-        .find(|block| block.kind == BlockKind::PresenceContext)?;
+    let cached = cache::latest_for_turn(saved, turn, BlockKind::PresenceContext)?;
     let Some((frame, _)) = runtime.presence.session_state(&binding.session) else {
         return Some("presence-frame-unavailable");
     };

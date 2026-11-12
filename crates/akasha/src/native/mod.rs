@@ -4,8 +4,8 @@ use crate::migrations::{migration_pool, run_migrations};
 use crate::{
     AppError, Config, DesignDocumentQueryParams, DesignDocumentWriteParams, EntityResolveParams,
     LessonContextParams, LessonDeleteParams, LessonQueryParams, LessonTriggerMatchParams,
-    LessonTriggerRecordParams, LessonUpdateParams, OutcomeClass, QuestBoardParams,
-    QuestChargebookParams, QuestClaimParams, QuestClockParams, QuestEvidenceParams,
+    LessonTriggerRecordParams, LessonUpdateParams, MemoryThreadJoinParams, OutcomeClass,
+    QuestBoardParams, QuestChargebookParams, QuestClaimParams, QuestClockParams, QuestEvidenceParams,
     QuestPostParams, QuestReportParams, SubstrateHealthOptions, TrustedBinding, anamnesis,
     anamnesis_write, canon_read, canon_write, cluster_maintenance, design_document_query,
     design_document_write, entity_resolve, giga_candidate_list, giga_conversation_ingest,
@@ -13,9 +13,9 @@ use crate::{
     giga_queue_maintenance, giga_review, giga_tool_promote, giga_tool_review, hallway_create,
     hallway_inbox, hallway_join, hallway_knock, hallway_knock_policy, hallway_read, lesson_context,
     lesson_delete, lesson_query, lesson_trigger_match, lesson_trigger_record, lesson_update,
-    paper_boat_sleep, paper_boat_wake, quest_board, quest_chargebook, quest_claim, quest_clock,
-    quest_evidence, quest_post, quest_report, recall, remember, restart_claim, restart_request,
-    restart_status, restart_transition, restart_verify, validate_trusted_binding,
+    memory_thread_join, paper_boat_sleep, paper_boat_wake, quest_board, quest_chargebook, quest_claim,
+    quest_clock, quest_evidence, quest_post, quest_report, recall, remember, restart_claim,
+    restart_request, restart_status, restart_transition, restart_verify, validate_trusted_binding,
 };
 use hearth::{
     CanonReadRequest, CanonWriteRequest,
@@ -52,6 +52,7 @@ pub enum ProtocolRequest {
     CanonWrite(CanonWriteRequest),
     CanonRead(CanonReadRequest),
     Remember(RememberRequest),
+    MemoryThreadJoin(MemoryThreadJoinParams),
     PaperBoatSleep(PaperBoatSleepRequest),
     PaperBoatWake(PaperBoatWakeRequest),
     HallwayCreate(HallwayCreateRequest),
@@ -137,6 +138,9 @@ pub fn decode_envelope(
             .canon_read_request()
             .map(ProtocolRequest::CanonRead),
         "remember" => envelope.remember_request().map(ProtocolRequest::Remember),
+        "memory_thread_join" => serde_json::from_value(envelope.params.clone())
+            .map(ProtocolRequest::MemoryThreadJoin)
+            .map_err(|error| invalid_params(error.to_string())),
         "paper_boat_sleep" => envelope
             .paper_boat_sleep_request()
             .map(ProtocolRequest::PaperBoatSleep),
@@ -339,6 +343,7 @@ pub fn operation_name(request: &ProtocolRequest) -> &'static str {
         ProtocolRequest::CanonWrite(_) => "canon_write",
         ProtocolRequest::CanonRead(_) => "canon_read",
         ProtocolRequest::Remember(_) => "remember",
+        ProtocolRequest::MemoryThreadJoin(_) => "memory_thread_join",
         ProtocolRequest::PaperBoatSleep(_) => "paper_boat_sleep",
         ProtocolRequest::PaperBoatWake(_) => "paper_boat_wake",
         ProtocolRequest::HallwayCreate(_) => "hallway_create",
@@ -552,7 +557,7 @@ pub async fn execute_service(
     let operation = operation_name(&request);
     let validation = match &request {
         ProtocolRequest::CanonWrite(_) | ProtocolRequest::CanonRead(_) => Ok(()),
-        ProtocolRequest::Remember(_) => Ok(()),
+        ProtocolRequest::Remember(_) | ProtocolRequest::MemoryThreadJoin(_) => Ok(()),
         ProtocolRequest::PaperBoatSleep(_) | ProtocolRequest::PaperBoatWake(_) => Ok(()),
         ProtocolRequest::HallwayCreate(request) => request.validate().map_err(AppError::Invalid),
         ProtocolRequest::HallwayJoin(request) => request.validate().map_err(AppError::Invalid),
@@ -850,6 +855,12 @@ pub async fn execute_service(
                         }
                         ProtocolRequest::LessonDelete(request) => {
                             match lesson_delete(pool, request).await {
+                                Ok(result) => success_json(id, result)?,
+                                Err(error) => app_error(id, operation, error),
+                            }
+                        }
+                        ProtocolRequest::MemoryThreadJoin(request) => {
+                            match memory_thread_join(pool, request).await {
                                 Ok(result) => success_json(id, result)?,
                                 Err(error) => app_error(id, operation, error),
                             }

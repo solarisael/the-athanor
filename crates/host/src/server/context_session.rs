@@ -237,9 +237,7 @@ async fn prepare_inner(state: &AppState, meta: &CommandMeta, raw: Value) -> Resu
     if compacted_before_adoption {
         cache::retire_recall(&mut saved);
     }
-    saved
-        .turns
-        .retain(|turn| request.visible_turn_ids.contains(&turn.turn_id));
+    let pruned = cache::prune(&mut saved, &request.visible_turn_ids);
     let identity = bounded(
         plan.deadline,
         identity::synchronize(state, meta, &mut context, &mut saved, &mut request),
@@ -256,6 +254,11 @@ async fn prepare_inner(state: &AppState, meta: &CommandMeta, raw: Value) -> Resu
         let identity_fence = bounded(plan.deadline, identity::fence(state, &saved)).await?;
         let (pending, settled) =
             settlement_fields(&identity_fence, meta, &saved, &request.turn_id)?;
+        if pruned {
+            cache::commit(state, &meta.sender_session, &saved)
+                .map_err(|error| format!("context pruning journal failed: {error}"))?;
+        }
+
         let result = json!({"turns":saved.turns,"replayed":true,"activities":[],"warnings":[],"nativeOwned":cache::file(state,&meta.sender_session).exists(),"adoption":identity.adoption,"adoptionRejection":request.legacy_rejection,"invalidationReason":identity.invalidation,"coverage":report_coverage,"presenceSettlement":pending,"presenceSettledContractId":settled});
         context.saved = Some(saved);
         return Ok(result);
@@ -345,16 +348,7 @@ fn settlement_fields(
     saved: &SavedSession,
     turn_id: &str,
 ) -> Result<(Option<Value>, Option<String>), String> {
-    let Some(block) = saved
-        .turns
-        .iter()
-        .find(|turn| turn.turn_id == turn_id)
-        .and_then(|turn| {
-            turn.blocks
-                .iter()
-                .find(|block| block.kind == BlockKind::PresenceContext)
-        })
-    else {
+    let Some(block) = cache::latest_for_turn(saved, turn_id, BlockKind::PresenceContext) else {
         return Ok((None, None));
     };
     let contract_id = text(&block.details["contractId"]);

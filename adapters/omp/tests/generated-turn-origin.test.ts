@@ -17,11 +17,16 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { SessionManager } from "@oh-my-pi/pi-coding-agent/session/session-manager";
+import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 
 import solarisaelHouseProof from "../index.ts";
 import { registerTopLevelSession, retireTopLevelSession } from "../house-proof/top-level-session-fence.ts";
 import { generatedTurnKey, turnKeysByMessage } from "../house-proof/turn-origin.ts";
 import { startChatDoorman, stopChatDoorman } from "../house-proof/chat.ts";
+import { MODE_DOOR_LINES, MODE_DOOR_TYPE, resetModeDoors } from "../house-proof/mode-door.ts";
+import type { ResolvedRecallMode } from "../house-proof/recall-policy.ts";
+import { AUTOMATIC_CONTEXT_IO_TIMEOUT_MS } from "../house-proof/constants.ts";
 
 const ROOM_KEY = "origin-room";
 const ROOM = path.join(tmpdir(), "athanor-generated-turn-origin", ROOM_KEY);
@@ -37,6 +42,9 @@ function registerAdapter(): Map<string, Handler[]> {
     on(name: string, handler: Handler) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
     },
+    appendEntry(customType: string, data: unknown) {
+      sessionManager.appendCustomEntry(customType, data);
+    },
     events: { on: () => () => {} },
     registerMessageRenderer() {},
     registerCommand() {},
@@ -46,13 +54,14 @@ function registerAdapter(): Map<string, Handler[]> {
   return handlers;
 }
 
-// A loopback Host that answers Presence open/compile and refuses everything
-// else by name, so conversation capture, context analysis, and the Bell all
-// take their documented fail-open paths and only Presence is observed.
+// A loopback Host supplies prepared Presence blocks and optional mode snapshots.
+// Other commands take their named fail-open paths.
 function fakeHost() {
   const commands: Array<Record<string, any>> = [];
   let contracts = 0;
   const preparedTurns = new Map<string, Record<string, unknown>>();
+  let resolvedMode: ResolvedRecallMode | null = null;
+  let contextFailure: "refuse" | "timeout" | null = null;
   const chatLines: Array<Record<string, unknown>> = [];
   let nextSay: Record<string, unknown> | null = null;
   const nativeAnswers: Array<{ text: string; thinking: string[]; outcome: string } | null> = [];
@@ -71,6 +80,14 @@ function fakeHost() {
         const type = String(command.command_or_event_type ?? "");
         const reply = (kind: string, extra: Record<string, unknown>) =>
           socket.send(JSON.stringify({ correlation_id: command.message_id, command_or_event_type: kind, ...extra }));
+        if (type === "athanor.organ.call" && command.organ_request.operation === "orihon_mode") {
+          reply("athanor.organ.result", { result: {
+            ok: true, mode: "off", generation: "fixture-off",
+            spirit: "Origin", sourceSession: command.sender_session,
+            defaults: { mode: "off" }, supportedModes: ["off", "log", "fold"],
+          } });
+          return;
+        }
         if (type === "athanor.lifecycle.plan") {
           if (command.lifecycle_request.action === "chatNext") {
             reply("athanor.lifecycle.result", { result: { next: nextSay } });
@@ -115,7 +132,19 @@ function fakeHost() {
           });
           return;
         }
+        if (type === "athanor.recall_policy.subscribe" && resolvedMode) {
+          reply("athanor.recall_policy.snapshot", {
+            state: { resolvedMode }, version: 1, sequence: 1, state_hash: "fixture-mode",
+          });
+          return;
+        }
         if (type === "athanor.context.prepare") {
+          if (contextFailure === "timeout") return;
+          if (contextFailure === "refuse") {
+            reply(`${type}.command_refused`, { reason: "fixture preparation unavailable" });
+            return;
+          }
+
           const request = command.context_prepare;
           if (!preparedTurns.has(request.turnId)) {
             contracts += 1;
@@ -141,6 +170,8 @@ function fakeHost() {
   process.env.ATHANOR_HOST_URL = `ws://127.0.0.1:${server.port}`;
   return {
     server,
+    setMode: (mode: ResolvedRecallMode) => { resolvedMode = mode; },
+    failContextWith: (failure: typeof contextFailure) => { contextFailure = failure; },
     offerSay: (line: Record<string, unknown>) => {
       chatLines.push(line);
       nextSay = line;
@@ -168,7 +199,7 @@ function fakeHost() {
   };
 }
 
-let sessionCounter = 0;
+let sessionManager: SessionManager;
 let session = "";
 let host: ReturnType<typeof fakeHost>;
 let handlers = new Map<string, Handler[]>();
@@ -191,18 +222,21 @@ beforeEach(() => {
   rmSync(path.dirname(ROOM), { recursive: true, force: true });
   mkdirSync(ROOM, { recursive: true });
   writeFileSync(path.join(ROOM, "active_spirit.md"), "# Active Spirit: Origin\n", "utf8");
-  sessionCounter += 1;
-  session = `0199a000-0000-7000-8000-${String(sessionCounter).padStart(12, "0")}`;
+  resetModeDoors();
+  sessionManager = SessionManager.inMemory(ROOM);
+  session = sessionManager.getSessionId();
   registerTopLevelSession(ROOM_KEY, session);
   host = fakeHost();
   handlers = registerAdapter();
 });
 
-afterEach(() => {
+afterEach(async () => {
   setSystemTime();
   stopChatDoorman({ room: ROOM_KEY, spirit: "Origin", session });
   host.server.stop(true);
   retireTopLevelSession(ROOM_KEY, session);
+  await sessionManager.close();
+  resetModeDoors();
   for (const [key, value] of Object.entries(savedEnv)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
@@ -215,7 +249,7 @@ function ctx() {
     cwd: ROOM,
     mode: "tui",
     agent: { kind: "main", name: "Origin" },
-    sessionManager: { getSessionId: () => session },
+    sessionManager,
     ui: { notify() {} },
   };
 }
@@ -312,6 +346,169 @@ function presenceAfter(messages: any[] | undefined, anchor: unknown) {
 
 function presenceBlocks(messages: any[] | undefined) {
   return (messages ?? []).filter((message) => message?.customType === PRESENCE);
+}
+
+function modeBlocks(messages: any[] | undefined) {
+  return (messages ?? []).filter((message) => message?.customType === MODE_DOOR_TYPE);
+}
+
+function modeAfter(messages: any[] | undefined, anchor: unknown) {
+  presenceAfter(messages, anchor);
+
+  const door = messages![messages!.indexOf(anchor) + 2];
+
+  expect(door?.customType).toBe(MODE_DOOR_TYPE);
+
+  return door;
+}
+
+function providerMessages(messages: any[] | undefined) {
+  expect(messages).toBeDefined();
+
+  return convertToLlm(messages as any).map((message) => ({ role: message.role, content: message.content }));
+}
+
+test("mode history preserves the provider prefix across native and generated turns", async () => {
+  const first = user("mode-native-1", "the same words");
+  host.setMode("work");
+  await beforeAgentStart("the same words");
+  const firstOut = await runContext([first]);
+  const firstProvider = providerMessages(firstOut);
+
+  expect(modeAfter(firstOut, first)).toMatchObject({ content: MODE_DOOR_LINES.work, display: true });
+
+  const firstAnswer = assistant("first answer");
+  await agentEnd([first, firstAnswer]);
+
+  const say = chatSay("mode-generated", "a different register");
+  host.setMode("conversation");
+  const secondRaw = [first, firstAnswer, say];
+  const secondOut = await runContext(secondRaw);
+  const secondProvider = providerMessages(secondOut);
+
+  expect(secondProvider.slice(0, firstProvider.length)).toEqual(firstProvider);
+  expect(modeAfter(secondOut, first)).toEqual(modeAfter(firstOut, first));
+  expect(modeAfter(secondOut, say)).toMatchObject({ content: MODE_DOOR_LINES.conversation, display: true });
+
+  const secondAnswer = assistant("second answer");
+  await agentEnd([...secondRaw, secondAnswer]);
+
+  const third = user("mode-native-2", "the same words");
+  await beforeAgentStart("the same words");
+  const thirdOut = await runContext([...secondRaw, secondAnswer, third]);
+
+  expect(providerMessages(thirdOut).slice(0, secondProvider.length)).toEqual(secondProvider);
+  expect(modeAfter(thirdOut, third)).toMatchObject({ content: MODE_DOOR_LINES.conversation, display: false });
+  expect(modeBlocks(thirdOut).map((message) => message.content))
+    .toEqual([MODE_DOOR_LINES.work, MODE_DOOR_LINES.conversation, MODE_DOOR_LINES.conversation]);
+});
+
+for (const kind of ["native", "generated"] as const) {
+  test(`${kind} same-turn retry keeps the first mode message after a policy change`, async () => {
+    const origin = kind === "native" ? user("mode-retry", "retry this turn") : chatSay("mode-retry", "retry this turn");
+    host.setMode("work");
+
+    if (kind === "native") await beforeAgentStart("retry this turn");
+
+    const firstOut = await runContext([origin]);
+    const firstProvider = providerMessages(firstOut);
+    const originalDoor = modeAfter(firstOut, origin);
+
+    host.setMode("quiet");
+
+    const continuation = [assistantToolCall(), toolResult()];
+    const retryOut = await runContext([origin, ...continuation]);
+    expect(providerMessages(retryOut).slice(0, firstProvider.length)).toEqual(firstProvider);
+    expect(modeBlocks(retryOut)).toEqual([originalDoor]);
+
+    const expandedRetry = await runContext([...firstOut!, ...continuation]);
+    expect(providerMessages(expandedRetry)).toEqual(providerMessages(retryOut));
+    expect(modeBlocks(expandedRetry)).toEqual([originalDoor]);
+
+    const entries = sessionManager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === MODE_DOOR_TYPE);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ data: {
+      room: ROOM_KEY, session,
+      turnId: kind === "native" ? "id:mode-retry" : "athanor-chat-say:mode-retry",
+      message: originalDoor,
+    } });
+  });
+}
+
+test("mode history survives native session reopen and adapter reconstruction", async () => {
+  retireTopLevelSession(ROOM_KEY, session);
+  await sessionManager.close();
+  sessionManager = SessionManager.create(ROOM, path.join(ROOM, "sessions"));
+  session = sessionManager.getSessionId();
+  registerTopLevelSession(ROOM_KEY, session);
+  handlers = registerAdapter();
+
+  const first = user("mode-persisted", "keep this register");
+  sessionManager.appendMessage(first as any);
+  host.setMode("work");
+  await beforeAgentStart("keep this register");
+  const firstOut = await runContext([first]);
+  const firstProvider = providerMessages(firstOut);
+  const originalDoor = modeAfter(firstOut, first);
+  await sessionManager.ensureOnDisk();
+  const file = sessionManager.getSessionFile()!;
+
+  await sessionManager.close();
+
+  resetModeDoors();
+  sessionManager = await SessionManager.open(file, undefined, undefined, { suppressBreadcrumb: true, throwIfMissing: true });
+  expect(sessionManager.getSessionId()).toBe(session);
+  handlers = registerAdapter();
+  const restored = sessionManager.buildSessionContext().messages;
+
+  expect(modeBlocks(restored)).toEqual([]);
+  host.setMode("conversation");
+  const retryOut = await runContext(restored);
+  expect(providerMessages(retryOut)).toEqual(firstProvider);
+  expect(modeBlocks(retryOut)).toEqual([originalDoor]);
+
+  const answer = assistant("answered after reopen");
+  await agentEnd([...restored, answer]);
+
+  const generated = restartContinuation("mode-after-reopen");
+  host.setMode("quiet");
+  const nextOut = await runContext([...restored, answer, generated]);
+  expect(providerMessages(nextOut).slice(0, firstProvider.length)).toEqual(firstProvider);
+
+  expect(modeBlocks(nextOut)[0]).toEqual(originalDoor);
+  expect(modeAfter(nextOut, generated)).toMatchObject({ content: MODE_DOOR_LINES.quiet });
+});
+
+for (const failure of ["refuse", "timeout"] as const) {
+  test(`automatic context ${failure} preserves known modes without a new Presence block`, async () => {
+    const first = user("mode-before-failure", "keep the sent mode");
+    host.setMode("work");
+    await beforeAgentStart("keep the sent mode");
+    const firstOut = await runContext([first]);
+    const firstProvider = providerMessages(firstOut);
+    const originalDoor = modeAfter(firstOut, first);
+    const answer = assistant("first answer");
+    await agentEnd([first, answer]);
+
+    const generated = chatSay("mode-during-failure", "new turn");
+    host.setMode("conversation");
+    host.failContextWith(failure);
+    const raw = [first, answer, generated];
+    const failedOut = await runContext(raw);
+
+    expect(providerMessages(failedOut)).toEqual(providerMessages([first, originalDoor, answer, generated]));
+    expect(modeBlocks(failedOut)).toEqual([originalDoor]);
+    expect(presenceBlocks(failedOut)).toEqual([]);
+    expect(sessionManager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === MODE_DOOR_TYPE)).toHaveLength(1);
+
+    host.failContextWith(null);
+    const recoveredOut = await runContext(raw);
+
+    expect(providerMessages(recoveredOut).slice(0, firstProvider.length)).toEqual(firstProvider);
+    expect(modeBlocks(recoveredOut)[0]).toEqual(originalDoor);
+    expect(modeAfter(recoveredOut, generated)).toMatchObject({ content: MODE_DOOR_LINES.conversation });
+  }, AUTOMATIC_CONTEXT_IO_TIMEOUT_MS + 5_000);
 }
 
 test("fresh idle restart: no user turn, no before_agent_start, the continuation owns the turn", async () => {

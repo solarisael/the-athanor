@@ -179,7 +179,7 @@ async fn worker_context_discards_room_replay_and_legacy_continuity() {
         BlockKind::RecallContext,
         BlockKind::PresenceContext,
     ];
-    let saved = SavedSession {
+    let mut saved = SavedSession {
         turns: vec![cache::TurnBlocks {
             turn_id: "worker".into(),
             blocks: kinds
@@ -195,6 +195,7 @@ async fn worker_context_discards_room_replay_and_legacy_continuity() {
         woken: true,
         ..SavedSession::default()
     };
+    assert!(cache::retire_recall(&mut saved));
     cache::commit(&fixture.state, &fixture.meta.sender_session, &saved).unwrap();
     let mut request = fixture
         .request_for(
@@ -221,6 +222,7 @@ async fn worker_context_discards_room_replay_and_legacy_continuity() {
     let persisted = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
     assert!(persisted.turns.is_empty());
     assert!(!persisted.woken);
+    assert!(persisted.retired_dynamic_through.is_empty());
 
     // A cold resume must not restore the previous room wake from disk.
     *fixture.state.context_sessions.lock().await = ContextSessions::default();
@@ -303,7 +305,7 @@ async fn adoption_refuses_unknown_blocks_invisible_turns_and_foreign_plan_tokens
 }
 
 #[tokio::test]
-async fn replay_requires_a_fresh_lesson_plan_and_compaction_removes_only_recall() {
+async fn replay_requires_a_fresh_lesson_plan_and_compaction_retires_only_dynamic_authority() {
     let fixture = Fixture::new();
     fixture.prove_frame().await;
     let mut request = fixture.request("first").await;
@@ -315,7 +317,7 @@ async fn replay_requires_a_fresh_lesson_plan_and_compaction_removes_only_recall(
         .as_array_mut()
         .unwrap()
         .push(room_block);
-    prepare_inner(&fixture.state, &fixture.meta, request)
+    let first = prepare_inner(&fixture.state, &fixture.meta, request)
         .await
         .unwrap();
     let request = fixture.request("first").await;
@@ -332,8 +334,14 @@ async fn replay_requires_a_fresh_lesson_plan_and_compaction_removes_only_recall(
     let response = prepare_inner(&fixture.state, &fixture.meta, request)
         .await
         .unwrap();
-    assert_eq!(response["turns"][0]["blocks"].as_array().unwrap().len(), 1);
-    assert_eq!(response["turns"][0]["blocks"][0]["kind"], "room-context");
+    assert_eq!(response["replayed"], true);
+    assert_eq!(response["turns"], first["turns"]);
+    assert!(response["presenceSettlement"].is_null());
+    assert!(response["presenceSettledContractId"].is_null());
+    let saved = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert!(!cache::has_kind(&saved, BlockKind::RecallContext));
+    assert!(!cache::has_kind(&saved, BlockKind::PresenceContext));
+    assert!(cache::has_kind(&saved, BlockKind::RoomContext));
 }
 
 #[tokio::test]
@@ -1152,7 +1160,7 @@ fn evidence_block(kind: BlockKind, content: &str) -> Block {
 }
 
 #[test]
-fn dynamic_snapshot_replaces_each_kind_without_moving_static_or_reused_evidence() {
+fn dynamic_snapshots_preserve_sent_blocks_and_use_only_current_evidence() {
     let mut saved = SavedSession::default();
     cache::merge(
         &mut saved,
@@ -1163,6 +1171,7 @@ fn dynamic_snapshot_replaces_each_kind_without_moving_static_or_reused_evidence(
             evidence_block(BlockKind::PresenceContext, "first contract"),
         ],
     );
+    let first_bytes = serde_json::to_vec(&saved.turns[0]).unwrap();
     cache::merge(
         &mut saved,
         "second",
@@ -1178,13 +1187,14 @@ fn dynamic_snapshot_replaces_each_kind_without_moving_static_or_reused_evidence(
             .content,
         "first subject"
     );
-    assert_eq!(saved.turns[0].blocks[0].content, "static");
-    assert!(
-        !saved.turns[0]
-            .blocks
-            .iter()
-            .any(|block| block.kind == BlockKind::PresenceContext)
+    assert_eq!(serde_json::to_vec(&saved.turns[0]).unwrap(), first_bytes);
+    assert_eq!(
+        cache::latest(&saved, BlockKind::PresenceContext)
+            .unwrap()
+            .content,
+        "second contract"
     );
+    assert!(cache::latest_for_turn(&saved, "first", BlockKind::PresenceContext).is_none());
 
     cache::merge(
         &mut saved,
@@ -1196,18 +1206,54 @@ fn dynamic_snapshot_replaces_each_kind_without_moving_static_or_reused_evidence(
     );
 
     assert_eq!(saved.turns.len(), 2);
-    assert_eq!(saved.turns[0].blocks.len(), 1);
-    assert_eq!(saved.turns[1].blocks.len(), 2);
+    assert_eq!(serde_json::to_vec(&saved.turns[0]).unwrap(), first_bytes);
+    assert_eq!(saved.turns[1].blocks.len(), 3);
     assert_eq!(
         cache::latest(&saved, BlockKind::RecallContext)
             .unwrap()
             .content,
         "new subject"
     );
+    let sent_bytes = serde_json::to_vec(&saved.turns).unwrap();
+    let second_bytes = serde_json::to_vec(&saved.turns[1].blocks).unwrap();
     assert!(cache::retire_recall(&mut saved));
     assert!(!cache::retire_recall(&mut saved));
-    assert_eq!(saved.turns[0].blocks[0].content, "static");
-    assert!(saved.turns[1].blocks.is_empty());
+    assert_eq!(serde_json::to_vec(&saved.turns).unwrap(), sent_bytes);
+    assert!(!cache::has_kind(&saved, BlockKind::RecallContext));
+    assert!(!cache::has_kind(&saved, BlockKind::PresenceContext));
+    assert_eq!(
+        cache::latest(&saved, BlockKind::RoomContext)
+            .unwrap()
+            .content,
+        "static"
+    );
+
+    cache::merge(
+        &mut saved,
+        "second",
+        vec![
+            evidence_block(BlockKind::RecallContext, "recompiled subject"),
+            evidence_block(BlockKind::PresenceContext, "recompiled contract"),
+        ],
+    );
+
+    assert_eq!(serde_json::to_vec(&saved.turns[0]).unwrap(), first_bytes);
+    assert_eq!(
+        serde_json::to_vec(&saved.turns[1].blocks[..3]).unwrap(),
+        second_bytes
+    );
+    assert_eq!(
+        cache::latest(&saved, BlockKind::RecallContext)
+            .unwrap()
+            .content,
+        "recompiled subject"
+    );
+    assert_eq!(
+        cache::latest_for_turn(&saved, "second", BlockKind::PresenceContext)
+            .unwrap()
+            .content,
+        "recompiled contract"
+    );
 }
 
 #[tokio::test]
@@ -1227,6 +1273,7 @@ async fn skipped_retrieval_preserves_one_evidence_snapshot_without_promoting_it_
             "Current topical evidence",
         )],
     );
+    let first_bytes = serde_json::to_vec(&serde_json::to_value(&saved.turns[0]).unwrap()).unwrap();
     cache::commit(&fixture.state, &fixture.meta.sender_session, saved).unwrap();
     drop(context);
     *fixture.state.context_sessions.lock().await = ContextSessions::default();
@@ -1236,6 +1283,10 @@ async fn skipped_retrieval_preserves_one_evidence_snapshot_without_promoting_it_
     let result = prepare_inner(&fixture.state, &fixture.meta, request)
         .await
         .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&result["turns"][0]).unwrap(),
+        first_bytes
+    );
     let blocks = result["turns"]
         .as_array()
         .unwrap()
@@ -1253,9 +1304,9 @@ async fn skipped_retrieval_preserves_one_evidence_snapshot_without_promoting_it_
         .iter()
         .filter(|block| block["kind"] == "presence-context")
         .collect::<Vec<_>>();
-    assert_eq!(presence.len(), 1);
-    assert_eq!(presence[0]["details"]["turnId"], "second");
-    assert!(!text(&presence[0]["content"]).contains("Current topical evidence"));
+    assert_eq!(presence.len(), 2);
+    assert_eq!(presence[1]["details"]["turnId"], "second");
+    assert!(!text(&presence[1]["content"]).contains("Current topical evidence"));
     let recall = blocks
         .iter()
         .find(|block| block["kind"] == "recall-context")
@@ -1279,6 +1330,10 @@ async fn skipped_retrieval_preserves_one_evidence_snapshot_without_promoting_it_
     drop(context);
     *fixture.state.context_sessions.lock().await = ContextSessions::default();
     let persisted = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert_eq!(
+        serde_json::to_vec(&serde_json::to_value(&persisted.turns).unwrap()).unwrap(),
+        serde_json::to_vec(&result["turns"]).unwrap()
+    );
     assert!(cache::latest(&persisted, BlockKind::RecallContext).is_none());
     assert!(cache::latest(&persisted, BlockKind::PresenceContext).is_none());
     assert!(cache::has_kind(&persisted, BlockKind::RoomContext));
@@ -1386,6 +1441,7 @@ async fn recall_retirement_survives_an_uncommitted_assembly_timeout_and_restart(
             evidence_block(BlockKind::PresenceContext, "Retired turn contract"),
         ],
     );
+    let sent_bytes = serde_json::to_vec(&saved.turns).unwrap();
     cache::commit(&fixture.state, &fixture.meta.sender_session, &saved).unwrap();
     let mut context = session(&fixture.state, &fixture.meta.sender_session).await;
     context.saved = Some(saved.clone());
@@ -1397,6 +1453,10 @@ async fn recall_retirement_survives_an_uncommitted_assembly_timeout_and_restart(
     .await;
 
     assert!(expired.is_err());
+    assert_eq!(
+        serde_json::to_vec(&context.saved.as_ref().unwrap().turns).unwrap(),
+        sent_bytes
+    );
     assert!(!cache::has_kind(
         context.saved.as_ref().unwrap(),
         BlockKind::RecallContext
@@ -1404,6 +1464,7 @@ async fn recall_retirement_survives_an_uncommitted_assembly_timeout_and_restart(
     drop(context);
     *fixture.state.context_sessions.lock().await = ContextSessions::default();
     let restored = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert_eq!(serde_json::to_vec(&restored.turns).unwrap(), sent_bytes);
     assert!(!cache::has_kind(&restored, BlockKind::RecallContext));
     assert!(!cache::has_kind(&restored, BlockKind::PresenceContext));
     assert_eq!(
@@ -1429,4 +1490,301 @@ async fn recall_retirement_survives_an_uncommitted_assembly_timeout_and_restart(
             .content,
         "Recovered subject"
     );
+    assert_eq!(
+        serde_json::to_vec(&recovered.turns[..1]).unwrap(),
+        sent_bytes
+    );
+}
+
+#[tokio::test]
+async fn existing_memo_without_retirement_metadata_replays_without_a_format_cutover() {
+    let fixture = Fixture::new();
+    let request = fixture.request("first").await;
+    let first = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+    let saved = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    let generation = saved.generation.clone();
+    let mut memo = serde_json::to_value(saved).unwrap();
+    memo["version"] = json!(2);
+    memo.as_object_mut()
+        .unwrap()
+        .remove("retiredDynamicThrough");
+    crate::store::atomic_json_write(
+        &cache::file(&fixture.state, &fixture.meta.sender_session),
+        &memo,
+    )
+    .unwrap();
+    *fixture.state.context_sessions.lock().await = ContextSessions::default();
+
+    let request = fixture.request("first").await;
+    let replay = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+
+    assert_eq!(replay["replayed"], true);
+    assert!(replay["invalidationReason"].is_null());
+    assert_eq!(
+        serde_json::to_vec(&replay["turns"]).unwrap(),
+        serde_json::to_vec(&first["turns"]).unwrap()
+    );
+    assert_eq!(replay["presenceSettlement"], first["presenceSettlement"]);
+    let restored = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert_eq!(restored.generation, generation);
+    assert!(restored.retired_dynamic_through.is_empty());
+}
+
+#[tokio::test]
+async fn quiet_prepare_preserves_sent_turns_and_supersedes_retired_recall() {
+    let fixture = Fixture::new();
+    let request = fixture.request("first").await;
+    prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+    let mut context = session(&fixture.state, &fixture.meta.sender_session).await;
+    let saved = context.saved.as_mut().unwrap();
+    cache::merge(
+        saved,
+        "first",
+        vec![evidence_block(
+            BlockKind::RecallContext,
+            "Retired topical evidence",
+        )],
+    );
+    let first_bytes = serde_json::to_vec(&serde_json::to_value(&saved.turns[0]).unwrap()).unwrap();
+    cache::commit(&fixture.state, &fixture.meta.sender_session, saved).unwrap();
+    drop(context);
+
+    let base_version = fixture.state.runtime.lock().await.cursor.version;
+    command(
+        &fixture.state,
+        ClientCommand::SetRequestedMode {
+            meta: child_meta(&fixture.meta, "quiet", "set-mode", "recall_policy"),
+            base_version,
+            requested_mode: protocol::RecallRequestedMode::Quiet,
+        },
+        json!("quiet"),
+    )
+    .await
+    .unwrap();
+    let mut request = fixture
+        .request_for(
+            "second",
+            Capabilities {
+                automatic_recall: true,
+                top_level: true,
+            },
+            false,
+        )
+        .await;
+    request["visibleTurnIds"] = json!(["first", "second"]);
+    let result = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::to_vec(&result["turns"][0]).unwrap(),
+        first_bytes
+    );
+    let saved = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    let recall = cache::latest_for_turn(&saved, "second", BlockKind::RecallContext).unwrap();
+    assert_eq!(recall.details["presentation"]["found"], false);
+    assert!(
+        recall
+            .content
+            .contains("supersedes every earlier Athanor Recall working set")
+    );
+    assert!(!recall.content.contains("Retired topical evidence"));
+    let presentation = materials::recalled(&recall.details["presentation"]);
+    assert!(presentation.is_empty());
+    let presence = cache::latest_for_turn(&saved, "second", BlockKind::PresenceContext).unwrap();
+    assert!(!presence.content.contains("Retired topical evidence"));
+    assert!(cache::latest_for_turn(&saved, "first", BlockKind::RecallContext).is_none());
+    assert!(cache::latest_for_turn(&saved, "first", BlockKind::PresenceContext).is_none());
+
+    let mut request = fixture.request("first").await;
+    request["visibleTurnIds"] = json!(["first", "second"]);
+    let historical = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+
+    assert_eq!(historical["replayed"], true);
+    assert!(historical["invalidationReason"].is_null());
+    assert!(historical["presenceSettlement"].is_null());
+    assert!(historical["presenceSettledContractId"].is_null());
+    assert_eq!(
+        serde_json::to_vec(&historical["turns"]).unwrap(),
+        serde_json::to_vec(&result["turns"]).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn retired_history_survives_host_restart_and_replay_prunes_only_invisible_turns() {
+    let mut fixture = Fixture::new();
+    let request = fixture.request("first").await;
+    let first = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+    let mut request = fixture.request("second").await;
+    request["visibleTurnIds"] = json!(["first", "second"]);
+    let second = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::to_vec(&second["turns"][0]).unwrap(),
+        serde_json::to_vec(&first["turns"][0]).unwrap()
+    );
+    let mut request = fixture.request("first").await;
+    request["visibleTurnIds"] = json!(["first", "second"]);
+    let historical = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+
+    assert_eq!(historical["replayed"], true);
+    assert!(historical["invalidationReason"].is_null());
+    assert!(historical["presenceSettlement"].is_null());
+    assert!(historical["presenceSettledContractId"].is_null());
+    assert_eq!(
+        serde_json::to_vec(&historical["turns"]).unwrap(),
+        serde_json::to_vec(&second["turns"]).unwrap()
+    );
+
+    let mut context = session(&fixture.state, &fixture.meta.sender_session).await;
+    invalidate(&fixture.state, &fixture.meta.sender_session, &mut context).unwrap();
+    drop(context);
+    fixture.state.cancellation.cancel();
+    fixture.state = Host::new(
+        fixture.state.config.as_ref().clone(),
+        None,
+        CancellationToken::new(),
+        TaskTracker::new(),
+    )
+    .unwrap()
+    .state;
+
+    let mut request = fixture.request("second").await;
+    request["visibleTurnIds"] = json!(["first", "second"]);
+    let restarted = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+
+    assert_eq!(restarted["replayed"], true);
+    assert!(restarted["invalidationReason"].is_null());
+    assert!(restarted["presenceSettlement"].is_null());
+    assert!(restarted["presenceSettledContractId"].is_null());
+    assert_eq!(
+        serde_json::to_vec(&restarted["turns"]).unwrap(),
+        serde_json::to_vec(&second["turns"]).unwrap()
+    );
+    let saved = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert!(!cache::has_kind(&saved, BlockKind::PresenceContext));
+    assert_eq!(saved.retired_dynamic_through.len(), 2);
+
+    let request = fixture.request("second").await;
+    let pruned = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+
+    assert_eq!(pruned["replayed"], true);
+    assert_eq!(pruned["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        serde_json::to_vec(&pruned["turns"][0]).unwrap(),
+        serde_json::to_vec(&second["turns"][1]).unwrap()
+    );
+    let persisted = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert_eq!(persisted.turns.len(), 1);
+    assert_eq!(persisted.turns[0].turn_id, "second");
+    assert!(!persisted.retired_dynamic_through.contains_key("first"));
+    assert!(persisted.retired_dynamic_through.contains_key("second"));
+
+    let mut request = fixture.request("first").await;
+    request["visibleTurnIds"] = json!(["second", "first"]);
+    let reused = prepare_inner(&fixture.state, &fixture.meta, request)
+        .await
+        .unwrap();
+
+    assert_eq!(reused["replayed"], false);
+    assert_eq!(
+        serde_json::to_vec(&reused["turns"][0]).unwrap(),
+        serde_json::to_vec(&pruned["turns"][0]).unwrap()
+    );
+    let saved = cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+    assert!(cache::latest_for_turn(&saved, "first", BlockKind::PresenceContext).is_some());
+}
+
+#[tokio::test]
+async fn pruning_newest_dynamic_turns_does_not_reactivate_superseded_evidence() {
+    let fixture = Fixture::new();
+    let mut saved = SavedSession::default();
+    cache::merge(
+        &mut saved,
+        "first",
+        vec![
+            evidence_block(BlockKind::RoomContext, "Retained identity"),
+            evidence_block(BlockKind::RecallContext, "Original evidence"),
+            evidence_block(BlockKind::PresenceContext, "Original contract"),
+        ],
+    );
+    let first_bytes = serde_json::to_vec(&saved.turns[0]).unwrap();
+    cache::merge(
+        &mut saved,
+        "second",
+        vec![evidence_block(
+            BlockKind::PresenceContext,
+            "Second contract",
+        )],
+    );
+    cache::commit(&fixture.state, &fixture.meta.sender_session, &saved).unwrap();
+    let mut restored =
+        cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+
+    assert_eq!(
+        cache::latest(&restored, BlockKind::RecallContext)
+            .unwrap()
+            .content,
+        "Original evidence"
+    );
+    assert_eq!(
+        cache::latest_for_turn(&restored, "second", BlockKind::PresenceContext)
+            .unwrap()
+            .content,
+        "Second contract"
+    );
+    assert!(cache::prune(&mut restored, &["first".into()]));
+    assert_eq!(serde_json::to_vec(&restored.turns[0]).unwrap(), first_bytes);
+    assert!(cache::has_kind(&restored, BlockKind::RecallContext));
+    assert!(!cache::has_kind(&restored, BlockKind::PresenceContext));
+
+    cache::merge(
+        &mut restored,
+        "replacement",
+        vec![
+            evidence_block(BlockKind::RecallContext, "Replacement evidence"),
+            evidence_block(BlockKind::PresenceContext, "Replacement contract"),
+        ],
+    );
+    cache::commit(&fixture.state, &fixture.meta.sender_session, &restored).unwrap();
+    let mut restored =
+        cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+
+    assert_eq!(
+        cache::latest(&restored, BlockKind::RecallContext)
+            .unwrap()
+            .content,
+        "Replacement evidence"
+    );
+    assert!(cache::prune(&mut restored, &["first".into()]));
+    cache::commit(&fixture.state, &fixture.meta.sender_session, &restored).unwrap();
+    let mut restored =
+        cache::load(&fixture.state, &fixture.meta.sender_session, None, &[]).unwrap();
+
+    assert_eq!(serde_json::to_vec(&restored.turns[0]).unwrap(), first_bytes);
+    assert!(cache::has_kind(&restored, BlockKind::RoomContext));
+    assert!(!cache::has_kind(&restored, BlockKind::RecallContext));
+    assert!(!cache::has_kind(&restored, BlockKind::PresenceContext));
+    assert!(cache::latest_for_turn(&restored, "first", BlockKind::PresenceContext).is_none());
+    assert_eq!(restored.retired_dynamic_through.len(), 1);
+    assert!(restored.retired_dynamic_through.contains_key("first"));
+    assert!(!cache::prune(&mut restored, &["first".into()]));
 }

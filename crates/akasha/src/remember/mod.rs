@@ -4,6 +4,7 @@ mod embedding;
 mod lessons;
 mod memory_write;
 mod normalize;
+mod thread_join;
 mod tokens;
 
 pub(crate) use chunking::chunk_body;
@@ -16,6 +17,7 @@ pub(crate) use lessons::{write_coding_lesson_tx, write_project_lesson_tx};
 pub(crate) use memory_write::PreparedMemoryWrite;
 pub(crate) use memory_write::{prepare_memory_write, write_memory_tx};
 pub(crate) use normalize::normalize_strings;
+pub use thread_join::{MemoryThreadJoinParams, MemoryThreadJoinReceipt, memory_thread_join};
 pub(crate) use tokens::token_estimate;
 
 use crate::backup;
@@ -25,7 +27,7 @@ use crate::settings::RoomSettings;
 use chrono::Local;
 use hearth::{BackupOutcome, RememberReceipt, RememberRequest};
 use lessons::remember_lesson;
-use memory_write::write_continuations_tx;
+use memory_write::{continue_by_date_tx, write_continuations_tx};
 use protocol::RememberResult;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -143,6 +145,7 @@ pub async fn remember(
         &writer_scope,
     )
     .await?;
+    continue_by_date_tx(&mut tx, &[memory_id], None, &writer_scope).await?;
     tx.commit().await?;
     let backup = post_write_backup(pool, cfg, &settings, req.backup(), &mut warnings).await;
     let receipt = RememberReceipt::committed(

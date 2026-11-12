@@ -167,9 +167,43 @@ When one memory explicitly continues another, `remember` accepts both the thread
 }
 ```
 
-A memory may continue a different predecessor in each of its threads. Each event has at most one predecessor per thread. Branching is valid; a memory can converge histories only by carrying one predecessor in each distinct thread. House never infers these links from creation order, import order, matching labels, or supersession.
+A memory may continue a different predecessor in each of its threads. Each event has at most one predecessor per thread. Branching is valid; a memory can converge histories only by carrying one predecessor in each distinct thread.
+
+A thread member with no named predecessor continues the latest earlier member of that thread.
+The order is the memory date, then the memory ID.
+This default applies to `remember` and to `thread_memories`.
+It never replaces a link that exists, and it uses only predecessors that the writer can read.
+A member that joins between two linked members branches from the earlier one.
+House does not infer links from import order or matching labels.
+
+A memory that supersedes other memories also joins every thread of those memories.
+The superseded memories keep their membership and their links as history.
 
 After ranking, `recall` expands only the bounded final candidates with their directly linked `previous` and `next` memories. Historical neighbors can remain visible as labeled history. Supersession still decides current authority; continuation only records chronology.
+
+### Join existing memories to a thread
+
+Use `thread_memories` to add existing memories to one thread.
+Omit `room` for this room, or set `room` to `"house"` for the House commons.
+
+```json
+{
+  "thread": "Solarisael website / Work page",
+  "memoryIds": ["2935", "2936"]
+}
+```
+
+All IDs must identify readable, unarchived memories in the target room.
+One unknown ID refuses the full call and changes nothing.
+The tool ignores duplicate IDs.
+It returns each memory's title and `alreadyMember` status.
+A repeat call succeeds without duplicate events.
+
+A joined memory with no predecessor continues the latest earlier member by date.
+The receipt shows each link that the call makes as `linkedAfter`.
+The tool does not change titles, bodies, or links that exist.
+Use `remember` with `supersedes` to replace memory text.
+Superseded memories can still join a thread.
 
 
 ## Authority

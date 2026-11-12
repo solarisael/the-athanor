@@ -154,6 +154,19 @@ pub(super) async fn assemble(
             output.warnings.push("Recall Policy Host degraded".into());
         }
     }
+    if (clear || refresh.is_some())
+        && !output
+            .blocks
+            .iter()
+            .any(|block| block.kind == BlockKind::RecallContext)
+    {
+        output.block(
+            BlockKind::RecallContext,
+            "<athanor-memories>\nThe active Athanor Recall working set is empty. This notice supersedes every earlier Athanor Recall working set in this conversation. Earlier working sets remain historical evidence only.\n</athanor-memories>".into(),
+            json!({"presentation":{"found":false}}),
+        );
+    }
+
     let navigation_query = refresh.map(|evaluation| text(&evaluation.decision["query"]));
     let (navigation, warnings) = orihon::prepare(
         state,
@@ -459,7 +472,11 @@ async fn presence(
     if !receipt.is_null() {
         details["lessonSieve"] = receipt;
     }
-    let content = [text(&frame["rendered"]), text(&contract["rendered"])]
+    let content = [
+        "This Presence contract applies only to the turn that follows it. All earlier Presence turn contracts have expired.",
+        text(&frame["rendered"]),
+        text(&contract["rendered"]),
+    ]
         .into_iter()
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()

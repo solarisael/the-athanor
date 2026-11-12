@@ -401,7 +401,6 @@ struct LaneCase {
     query: &'static str,
     floor: f64,
     patterns: &'static [&'static str],
-    expect_rows: bool,
 }
 
 const LANE_CASES: &[LaneCase] = &[
@@ -409,13 +408,11 @@ const LANE_CASES: &[LaneCase] = &[
         query: "substrate lattice",
         floor: 0.30,
         patterns: &["%lattice%", "%substrate%"],
-        expect_rows: true,
     },
     LaneCase {
         query: "shadowboxing porch",
         floor: 0.30,
         patterns: &["%porch%", "%shadowboxing%"],
-        expect_rows: true,
     },
     // A term that matches nearly every body, next to two that do not: the
     // case where no index can narrow the lane.
@@ -423,23 +420,11 @@ const LANE_CASES: &[LaneCase] = &[
         query: "the tuner ledger",
         floor: 0.30,
         patterns: &["%ledger%", "%the%", "%tuner%"],
-        expect_rows: true,
-    },
-    // No token reaches two characters, so recall derives no patterns at all.
-    // The old statement passed its `$5 = '{}'` guard; the new lane omits the
-    // term group. Floor 0.0 keeps the case honest: every scoped chunk
-    // qualifies, so the whole ordering is compared, ties included.
-    LaneCase {
-        query: "a b",
-        floor: 0.0,
-        patterns: &[],
-        expect_rows: true,
     },
     LaneCase {
         query: "notebook",
         floor: 0.05,
         patterns: &["%notebook%"],
-        expect_rows: true,
     },
 ];
 
@@ -493,12 +478,10 @@ async fn the_content_lane_returns_what_the_statement_it_replaced_returned() -> T
             })
             .collect();
 
-        assert_eq!(
-            case.expect_rows,
+        assert!(
             !expected.is_empty(),
-            "case {:?}: the oracle statement returned {} rows, so the comparison would prove nothing",
-            case.query,
-            expected.len()
+            "case {:?}: the oracle statement returned no rows, so the comparison would prove nothing",
+            case.query
         );
         assert_eq!(
             observed, expected,

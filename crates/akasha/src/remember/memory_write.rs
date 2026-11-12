@@ -89,6 +89,9 @@ pub(crate) async fn write_memory_tx(
     prepared: &PreparedMemoryWrite,
     axis: Option<(&OperatorKey, MemoryScope)>,
 ) -> Result<(i64, bool), AppError> {
+    let operator = axis.map(|(operator, _)| operator.as_str());
+    let threads = threads_with_inherited(tx, room, operator, &prepared.threads, supersedes).await?;
+
     // One jsonb row serves both branches: keys are `memories` column names
     // (0001_initial.sql:19), matched by NAME. The column lists stay written out
     // because `body_tsv` (0001_initial.sql:28) and `bm25f_meta_tsv`
@@ -101,12 +104,11 @@ pub(crate) async fn write_memory_tx(
         "title": title,
         "source_path": source_path,
         "body": body,
-        "threads": prepared.threads,
+        "threads": threads,
         "meta": meta,
-        "operator": axis.map(|(operator, _)| operator.as_str()),
+        "operator": operator,
         "scope": axis.map_or(MemoryScope::Company, |(_, scope)| scope).as_str(),
     });
-    let operator = axis.map(|(operator, _)| operator.as_str());
 
     let (memory_id, inserted) = if memory_type == origami::boats::MEMORY_KIND {
         let inserted_id: Option<i64> = sqlx::query_scalar(
@@ -164,7 +166,7 @@ pub(crate) async fn write_memory_tx(
         .fetch_one(&mut **tx)
         .await?
     };
-    for thread_key in &prepared.threads {
+    for thread_key in &threads {
         let thread_id: i64 = sqlx::query_scalar(
             "INSERT INTO threads (room,thread_key) VALUES ($1,$2)
              ON CONFLICT (room,thread_key) DO UPDATE SET thread_key=EXCLUDED.thread_key
@@ -200,7 +202,7 @@ pub(crate) async fn write_memory_tx(
     )
     .bind(memory_id)
     .bind(room)
-    .bind(&prepared.threads)
+    .bind(&threads)
     .execute(&mut **tx)
     .await?;
     // A writer retires only its own memories in this room. A missing ID, a
@@ -278,6 +280,46 @@ pub(crate) async fn write_memory_tx(
     Ok((memory_id, inserted))
 }
 
+/// A successor stays in every thread of the memories it replaces, so a
+/// correction never leaves a history because its writer omitted a key. Only
+/// rows that this write may retire lend their threads.
+async fn threads_with_inherited(
+    tx: &mut Transaction<'_, Postgres>,
+    room: &str,
+    operator: Option<&str>,
+    named: &[String],
+    supersedes: &[u64],
+) -> Result<Vec<String>, AppError> {
+    let mut threads = named.to_vec();
+
+    if supersedes.is_empty() {
+        return Ok(threads);
+    }
+
+    let superseded_ids = supersedes
+        .iter()
+        .map(|id| bigint(*id, "supersedes ID"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let inherited: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT thread_key FROM memories, unnest(threads) AS thread_key
+         WHERE id=ANY($1) AND room=$2 AND operator IS NOT DISTINCT FROM $3
+         ORDER BY thread_key",
+    )
+    .bind(&superseded_ids)
+    .bind(room)
+    .bind(operator)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    for thread_key in inherited {
+        if !threads.contains(&thread_key) {
+            threads.push(thread_key);
+        }
+    }
+
+    Ok(threads)
+}
+
 pub(super) async fn write_continuations_tx(
     tx: &mut Transaction<'_, Postgres>,
     room: &str,
@@ -342,4 +384,69 @@ pub(super) async fn write_continuations_tx(
         .await?;
     }
     Ok(())
+}
+
+/// A thread member with no predecessor continues the latest earlier member,
+/// by memory date and then by ID. Links that already exist stay as written.
+/// Only a predecessor the writer can read is eligible. Returns each new link
+/// as (memory ID, predecessor memory ID).
+// enough: a member that joins between two linked members branches from the
+// earlier one. Move the later link when a thread must stay one strict line.
+pub(super) async fn continue_by_date_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    memory_ids: &[i64],
+    thread_id: Option<i64>,
+    writer_scope: &ScopeFilter,
+) -> Result<Vec<(i64, i64)>, AppError> {
+    let sql = format!(
+        "WITH linked AS (
+             INSERT INTO thread_event_links (thread_id,previous_event_id,next_event_id)
+             SELECT current_event.thread_id,previous.event_id,current_event.id
+             FROM thread_events current_event
+             JOIN memories current_memory ON current_memory.id=current_event.memory_id
+             CROSS JOIN LATERAL (
+                 SELECT previous_event.id AS event_id
+                 FROM thread_events previous_event
+                 JOIN memories previous_memory
+                   ON previous_memory.id=previous_event.memory_id
+                 WHERE previous_event.thread_id=current_event.thread_id
+                   AND previous_memory.archived_at IS NULL
+                   AND (COALESCE(previous_memory.date,previous_memory.created_at::date),
+                        previous_memory.id)
+                     < (COALESCE(current_memory.date,current_memory.created_at::date),
+                        current_memory.id){}
+                 ORDER BY COALESCE(previous_memory.date,previous_memory.created_at::date) DESC,
+                          previous_memory.id DESC
+                 LIMIT 1
+             ) previous
+             WHERE current_event.memory_id=ANY($1)
+               AND ($2::bigint IS NULL OR current_event.thread_id=$2)
+               AND NOT EXISTS (
+                   SELECT 1 FROM thread_event_links link
+                   WHERE link.thread_id=current_event.thread_id
+                     AND link.next_event_id=current_event.id
+               )
+             ON CONFLICT (thread_id,next_event_id) DO NOTHING
+             RETURNING previous_event_id,next_event_id
+         )
+         SELECT next_event.memory_id,previous_event.memory_id AS previous_memory_id
+         FROM linked
+         JOIN thread_events next_event ON next_event.id=linked.next_event_id
+         JOIN thread_events previous_event ON previous_event.id=linked.previous_event_id",
+        writer_scope.predicate("previous_memory", 3)
+    );
+    let rows = writer_scope
+        .bind(sqlx::query(&sql).bind(memory_ids).bind(thread_id))
+        .fetch_all(&mut **tx)
+        .await?;
+
+    rows.iter()
+        .map(|row| {
+            Ok((
+                sqlx::Row::try_get(row, "memory_id")?,
+                sqlx::Row::try_get(row, "previous_memory_id")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(AppError::from)
 }

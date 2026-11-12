@@ -50,7 +50,12 @@ import { installPortableSession, onAttachmentChanged } from "./house-proof/sessi
 import { installOrihon } from "./house-proof/orihon/index.ts";
 import { installOrihonTurns } from "./house-proof/orihon/turn.ts";
 import { conversationText, messageText } from "./house-proof/text.ts";
-import { anchorTurnAdditions, currentTurnOrigin, turnKeysByMessage } from "./house-proof/turn-origin.ts";
+import {
+  anchorTurnAdditions,
+  currentTurnOrigin,
+  modeDoorsByTurn,
+  turnKeysByMessage,
+} from "./house-proof/turn-origin.ts";
 import { registerSolarisaelTools } from "./house-proof/tools.ts";
 import {
   blockLessonRefusal,
@@ -814,6 +819,9 @@ export default function solarisaelHouseProof(pi, release) {
 
   pi.on("context", async (event, ctx) => {
     let contextSettlementKey: string | undefined;
+    let knownModeDoors: Map<string, Record<string, any>> | undefined;
+    let modeTurnKeys: Map<any, string> | undefined;
+    const modeEntries: Array<{ room: string; session: string; turnId: string; message: Record<string, any> }> = [];
     const result = await settleAutomaticContextWithinBudget(async (signal, deadline) => {
       const messages = Array.isArray(event?.messages) ? event.messages : [];
       const resolvedRoom = roomBinding(ctx);
@@ -834,6 +842,9 @@ export default function solarisaelHouseProof(pi, release) {
       const turnKeys = turnKeysByMessage(messages);
       const turnId = turnKeys.get(origin?.message);
       if (!turnId) return;
+
+      const visibleTurnIds = [...turnKeys.values()];
+      const visibleTurns = new Set(visibleTurnIds);
       // A worker keeps only its task-relevant lessons from this hook. Room
       // state, doormen, model defaults, the room conversation log, and room
       // context are the room spirit's; the worker lifecycle hook owns the
@@ -841,6 +852,26 @@ export default function solarisaelHouseProof(pi, release) {
       const worker = isWorkerSession(ctx);
       const warnings: string[] = [];
       const activities: string[] = [];
+      const persistedDoors = new Set<string>();
+
+      if (capabilities.topLevel) {
+        modeTurnKeys = turnKeys;
+        knownModeDoors = modeDoorsByTurn(messages, turnKeys);
+        try {
+          for (const entry of ctx.sessionManager?.getBranch?.() ?? []) {
+            const data = entry?.data;
+
+            if (entry?.type !== "custom" || entry.customType !== MODE_DOOR_TYPE
+              || data?.room !== initial.room || data?.session !== session || !visibleTurns.has(data.turnId)) continue;
+
+            knownModeDoors.set(data.turnId, data.message);
+            persistedDoors.add(data.turnId);
+          }
+        } catch (error) {
+          warnings.push(`mode history unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
       let houseState = null;
       if (!worker) {
         try {
@@ -889,10 +920,9 @@ export default function solarisaelHouseProof(pi, release) {
       } catch {
         warnings.push("conversation capture degraded");
       }
-      const visibleTurnIds = [...turnKeys.values()];
       const memoSessionKey = `${room}:${session}`;
       const legacy = adoptedContextSessions.has(memoSessionKey)
-        ? { status: "absent" as const } : readLegacyContextProposal(effectiveRoomDir, memoSessionKey, new Set(visibleTurnIds));
+        ? { status: "absent" as const } : readLegacyContextProposal(effectiveRoomDir, memoSessionKey, visibleTurns);
       const priorPresence = [...messages].reverse().find((message) =>
         message?.customType === "athanor-presence-context" && typeof message?.details?.frameId === "string");
       const existingBlockKinds = messages.map((message) => contextBlockKind(message?.customType))
@@ -946,25 +976,36 @@ export default function solarisaelHouseProof(pi, release) {
         display: false,
         attribution: "agent",
       }))]));
-      // enough: the prepared context does not carry the resolved mode, so the door
-      // costs one more local Host read per top-level turn. The way up is a mode
-      // field on PreparedContext.
-      if (capabilities.topLevel) {
+      // OMP does not persist context-hook output. Native branch entries keep the
+      // original mode messages; the Host remains the owner of Recall and Presence.
+      if (knownModeDoors) {
+        const doors = new Map(knownModeDoors);
         try {
-          const resolved = (await new RecallPolicyHostClient(binding).inspect()).recallPolicy.resolvedMode;
-          const door = modeDoor(settlementKey, resolved);
-          memo.set(turnId, [...(memo.get(turnId) ?? []), {
-            role: "custom",
-            customType: MODE_DOOR_TYPE,
-            content: door.text,
-            display: door.rang,
-            details: { from: door.from, to: door.to },
-            attribution: "agent",
-            timestamp: Date.now(),
-          }]);
-          if (door.rang) activities.push(`mode door: ${door.from ?? "start"} → ${door.to}`);
+          // The prepared context has no resolved mode. Read it only for a new door.
+          if (!doors.has(turnId)) {
+            const resolved = (await new RecallPolicyHostClient(binding).inspect()).recallPolicy.resolvedMode;
+
+            if (signal.aborted) return;
+
+            const door = modeDoor(settlementKey, resolved);
+            doors.set(turnId, {
+              role: "custom",
+              customType: MODE_DOOR_TYPE,
+              content: door.text,
+              display: door.rang,
+              details: { from: door.from, to: door.to },
+              attribution: "agent",
+              timestamp: Date.now(),
+            });
+            if (door.rang) activities.push(`mode door: ${door.from ?? "start"} → ${door.to}`);
+          }
         } catch (error) {
           warnings.push(`mode door unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        }
+
+        for (const [originId, message] of doors) {
+          memo.set(originId, [...(memo.get(originId) ?? []), message]);
+          if (!persistedDoors.has(originId)) modeEntries.push({ room, session, turnId: originId, message });
         }
       }
       for (const [grant, coverage] of Object.entries(prepared.coverage ?? {})) {
@@ -974,8 +1015,8 @@ export default function solarisaelHouseProof(pi, release) {
       if (prepared.invalidationReason) warnings.push(`Context rebuilt: ${prepared.invalidationReason}`);
       if (prepared.adoptionRejection) warnings.push(`Legacy context adoption refused: ${prepared.adoptionRejection}; source file retained`);
       showHouseContextFeedback(ctx, { room, spirit, activities: [...activities, ...prepared.activities], warnings: [...warnings, ...prepared.warnings] });
-      // Host turns are the complete derived snapshot, including removals. The
-      // door rides only the current turn; earlier rings stay in the UI, not here.
+      // Host turns are the complete derived snapshot, including removals.
+      // Mode messages retain their original turn beside that turn's Host blocks.
       const currentMessages = messages.filter((message) =>
         message?.role !== "custom" || (!contextBlockKind(message?.customType) && message?.customType !== MODE_DOOR_TYPE));
       if (!prepared.replayed) {
@@ -993,11 +1034,30 @@ export default function solarisaelHouseProof(pi, release) {
       }
       return anchorTurnAdditions(currentMessages, turnKeys, memo) ?? (currentMessages !== messages ? { messages: currentMessages } : undefined);
     });
-    if (result.status === "settled") return result.value;
+    if (result.status === "settled") {
+      try {
+        for (const entry of modeEntries) pi.appendEntry(MODE_DOOR_TYPE, entry);
+      } catch (error) {
+        console.warn(`[athanor] Mode history unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      return result.value;
+    }
     console.warn(`[athanor] Automatic context ${result.status === "timeout" ? "timed out" : "unavailable"}`);
     if (contextSettlementKey) pendingPresenceContracts.delete(contextSettlementKey);
     const messages = Array.isArray(event?.messages) ? event.messages : [];
-    const withoutDerived = messages.filter((message) => message?.role !== "custom" || !contextBlockKind(message?.customType));
+    // Failed preparation cannot validate Host blocks. Restore only known mode messages.
+    const withoutDerived = messages.filter((message) => message?.role !== "custom"
+      || (!contextBlockKind(message?.customType) && (!knownModeDoors || message.customType !== MODE_DOOR_TYPE)));
+
+    if (knownModeDoors && modeTurnKeys) {
+      const memo = new Map<string, Array<Record<string, any>>>();
+      for (const [turnId, message] of knownModeDoors) memo.set(turnId, [message]);
+
+      const anchored = anchorTurnAdditions(withoutDerived, modeTurnKeys, memo);
+
+      if (anchored) return anchored;
+    }
     if (withoutDerived.length !== messages.length) return { messages: withoutDerived };
   });
 

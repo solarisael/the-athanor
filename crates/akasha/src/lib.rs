@@ -98,7 +98,7 @@ pub use presence::{
     presence_session_write_ledger,
 };
 pub use recall::{RecallResult, recall, refresh_semantic_vocabulary};
-pub use remember::remember;
+pub use remember::{MemoryThreadJoinParams, MemoryThreadJoinReceipt, memory_thread_join, remember};
 pub use restart::{
     CLAIMANT_LOST_REASON, EXIT_UNCLAIMED_REASON, EXITING_DEADLINE_SECS, RELAUNCH_ATTEMPT_LIMIT,
     RELAUNCHING_DEADLINE_SECS, REQUESTED_TTL_SECS, RestartPreflightDoor,

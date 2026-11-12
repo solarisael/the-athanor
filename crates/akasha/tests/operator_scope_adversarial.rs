@@ -498,7 +498,7 @@ async fn attack_supersession_by_another_operator_of_a_private_row_is_refused() -
 }
 
 // ---------------------------------------------------------------------------
-// Attack 3: thread neighbours, thread keys, taxonomy, and `continues`.
+// Attack 3: thread neighbours, thread keys, taxonomy, `continues`, and date order.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -632,6 +632,74 @@ async fn attack_continues_onto_another_operators_private_row_is_indistinguishabl
             .as_ref()
             .map_err(|refusal| refusal.replace(&missing_id.to_string(), "<id>")),
         "continuing staff's private row must read exactly like continuing a missing one"
+    );
+    db.close().await
+}
+
+#[tokio::test]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL schema"]
+async fn attack_date_order_never_continues_another_operators_private_row() -> TestResult {
+    let db = Isolated::company("attack_date_order").await?;
+    let private_id = db
+        .staff_private(
+            "dawn",
+            RememberMemoryDetails {
+                threads: vec!["harbor-log".into()],
+                ..no_details()
+            },
+        )
+        .await?;
+    let mut peer_ids = Vec::new();
+    for label in ["dusk", "night"] {
+        let peer_id = db
+            .write(
+                "peer",
+                Some(MemoryScope::Company),
+                &format!("{TERM} peer {label}"),
+                &format!("Peer adds the {label} entry to the harbor log."),
+                RememberMemoryDetails {
+                    threads: vec!["harbor-log".into()],
+                    ..no_details()
+                },
+            )
+            .await?
+            .map_err(|refusal| format!("peer could not write into the harbor log: {refusal}"))?;
+        peer_ids.push(peer_id);
+    }
+    let links: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT previous_event.memory_id, next_event.memory_id
+         FROM thread_event_links link
+         JOIN thread_events previous_event ON previous_event.id = link.previous_event_id
+         JOIN thread_events next_event ON next_event.id = link.next_event_id
+         ORDER BY next_event.memory_id",
+    )
+    .fetch_all(&db.pool)
+    .await?;
+    let seen = db.recall_as("peer", TERM, RecallProjection::Auto).await?;
+
+    // Teeth: peer's second entry continues its first by date, so no link to
+    // the private row means the reader filter, not an absent date rule.
+    assert!(
+        links.contains(&(peer_ids[0], peer_ids[1])),
+        "control: peer's second entry must continue its first by date: links (previous, next) = {links:?}"
+    );
+    let grafted = links
+        .iter()
+        .filter(|(previous, next)| *previous == private_id || *next == private_id)
+        .collect::<Vec<_>>();
+    assert!(
+        grafted.is_empty(),
+        "peer's entries {peer_ids:?} continue staff's private row {private_id} by date: links (previous, next) = {grafted:?}"
+    );
+    assert!(
+        selected_ids(&seen).contains(&peer_ids[0]),
+        "control: peer must reach its own entry {}",
+        peer_ids[0]
+    );
+    let found = leaks(&seen, private_id);
+    assert!(
+        found.is_empty(),
+        "peer sees staff's private row {private_id} in: {found:#?}"
     );
     db.close().await
 }

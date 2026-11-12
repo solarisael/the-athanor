@@ -32,8 +32,12 @@ the exact implementation record.
   the final status `expired` for a pending knock that nobody claimed in time.
   `knock`, `claim`, and `settle` expire overdue knocks first, and `settle`
   refuses an overdue knock (hallway-knock R1, R4; D1, D2, D3, D9).
+- Migration 0022 applies again in a second schema on PostgreSQL 18. Its Insula guard now ignores the NOT NULL constraints that PostgreSQL 18 catalogues.
 
 ### Added
+- `thread_memories` adds existing readable memories to one thread without changing their text.
+- A thread member with no named predecessor now continues the latest earlier member by memory date. This applies to `remember` and `thread_memories`.
+- A memory that supersedes other memories now joins every thread of those memories.
 - Insula records state-machine transitions. Schema 45 adds `insula.transitions`:
   one row for each committed move, with the machine, the subject id, from, event,
   to, and the presence that made the call. `insula.transitions_daily` counts each
@@ -58,6 +62,15 @@ the exact implementation record.
   one section over another. `{spirit}` in a line becomes the spirit nickname (Kodo becomes kodooo).
 
 ### Fixed
+- Automatic compaction recognizes a paper boat written before its handoff gate opens.
+  The same conversation reuses that receipt until new operator work or a committed compaction.
+  A boat that finishes while the gate waits does not trigger another boat request.
+- Ordinary context preparation keeps previously sent Recall and Presence blocks unchanged.
+  Separate retirement metadata prevents old evidence and contracts from becoming active again.
+  Empty refreshes explicitly supersede the previous working set.
+  OMP restores mode notices at their original turns across retries and session reopen.
+  Identity changes, format changes, and failed preparation remain cache-rebuild boundaries.
+
 
 - GIGA accepts identical ledger rows across daily files while retaining rejection for conflicting evidence.
   Retries, regrouped capture, and queue purges preserve turn identity.

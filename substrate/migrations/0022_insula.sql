@@ -201,10 +201,13 @@ BEGIN
                 relation_name;
         END IF;
 
+        -- PostgreSQL 18 also records each NOT NULL as a constraint of type 'n'.
+        -- The column contract above already checks nullability.
         SELECT array_agg(c.conname ORDER BY c.conname)
           INTO actual_constraints
           FROM pg_constraint c
-         WHERE c.conrelid = format('insula.%I', relation_name)::regclass;
+         WHERE c.conrelid = format('insula.%I', relation_name)::regclass
+           AND c.contype <> 'n';
 
         IF actual_constraints IS DISTINCT FROM expected_constraints THEN
             RAISE EXCEPTION

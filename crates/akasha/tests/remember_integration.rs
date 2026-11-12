@@ -1,3 +1,5 @@
+mod support;
+
 use akasha::{Config, EmbeddingMode, backup::source_migrations, recall, remember};
 use hearth::{
     RecallRequest, RememberKind, RememberLessonDetails, RememberMemoryDetails, RememberRequest,
@@ -97,31 +99,9 @@ fn migration_database_scope() -> (String, Option<String>) {
 }
 
 #[tokio::test]
-#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and an isolated PostgreSQL database"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and ATHANOR_SUBSTRATE_TEST_SCHEMA"]
 async fn isolated_database_guard() {
-    let url = isolated_database_url();
-    let options = PgConnectOptions::from_str(&url).expect("dedicated test URL must be valid");
-    let pool = PgPoolOptions::new()
-        .max_connections(2)
-        .connect_with(options)
-        .await
-        .expect("isolated database must be reachable");
-    sqlx::query("SELECT 1")
-        .execute(&pool)
-        .await
-        .expect("isolated database health check");
-
-    let cfg = Config {
-        database_url: url,
-        embed_url: None,
-        embed_model: "disabled".into(),
-        embed_dimension: 2048,
-        embedding_mode: EmbeddingMode::DisabledForTest,
-        giga_source_ledger_dir: None,
-        giga_source_room: None,
-        house_tz: "America/Sao_Paulo".into(),
-        nats_url: None,
-    };
+    let (pool, cfg, schema) = support::isolated_database("guard").await;
     let source_path = format!("isolated-test/{}", Uuid::new_v4());
     let body = "This mutation proves the dedicated PostgreSQL authority path.";
     let receipt = remember(
@@ -186,36 +166,13 @@ async fn isolated_database_guard() {
         }),
         "lexical recall must return the exact written body for the written source path"
     );
-    sqlx::query("DELETE FROM memories WHERE room=$1 AND source_path=$2")
-        .bind("isolated-test")
-        .bind(source_path)
-        .execute(&pool)
-        .await
-        .unwrap();
-    pool.close().await;
+    support::drop_isolated_schema(pool, &schema).await;
 }
 
 #[tokio::test]
-#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and migrations through 0006"]
+#[ignore = "requires ATHANOR_SUBSTRATE_TEST_DATABASE_URL and ATHANOR_SUBSTRATE_TEST_SCHEMA"]
 async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
-    let url = isolated_database_url();
-    let options = PgConnectOptions::from_str(&url).expect("dedicated test URL must be valid");
-    let pool = PgPoolOptions::new()
-        .max_connections(2)
-        .connect_with(options)
-        .await
-        .expect("isolated database must be reachable");
-    let cfg = Config {
-        database_url: url,
-        embed_url: None,
-        embed_model: "disabled".into(),
-        embed_dimension: 2048,
-        embedding_mode: EmbeddingMode::DisabledForTest,
-        giga_source_ledger_dir: None,
-        giga_source_room: None,
-        house_tz: "America/Sao_Paulo".into(),
-        nats_url: None,
-    };
+    let (pool, cfg, schema) = support::isolated_database("ordered").await;
     let suffix = Uuid::new_v4();
     let root_source = format!("thread-integration/{suffix}/root");
     let next_source = format!("thread-integration/{suffix}/next");
@@ -294,13 +251,7 @@ async fn ordered_thread_write_surfaces_explicit_recall_neighbors() {
             && neighbor["authority_state"].as_str() == Some("active")
     }));
 
-    sqlx::query("DELETE FROM memories WHERE room=$1 AND source_path = ANY($2::text[])")
-        .bind("thread-continuity-integration")
-        .bind(vec![root_source, next_source])
-        .execute(&pool)
-        .await
-        .expect("thread integration memories must clean up");
-    pool.close().await;
+    support::drop_isolated_schema(pool, &schema).await;
 }
 
 #[tokio::test]
@@ -661,6 +612,10 @@ async fn migrations_reapply_without_clearing_current_embeddings() {
         .await
         .expect("test database must be reachable");
     if let Some(schema) = &schema {
+        sqlx::query(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            .execute(&pool)
+            .await
+            .expect("a schema left by a failed run must drop");
         sqlx::query(&format!("CREATE SCHEMA {schema}"))
             .execute(&pool)
             .await
@@ -751,6 +706,10 @@ async fn source_migrations_accepts_text_version_columns() {
         .connect_with(options)
         .await
         .expect("test database must be reachable");
+    sqlx::query(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .execute(&pool)
+        .await
+        .expect("a schema left by a failed run must drop");
     sqlx::query(&format!("CREATE SCHEMA {schema}"))
         .execute(&pool)
         .await
@@ -804,6 +763,10 @@ async fn remember_with_backup_returns_a_verifiable_dump_receipt() {
         .connect_with(options)
         .await
         .expect("isolated database must be reachable");
+    sqlx::query(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .execute(&pool)
+        .await
+        .expect("a schema left by a failed run must drop");
     sqlx::query(&format!("CREATE SCHEMA {schema}"))
         .execute(&pool)
         .await

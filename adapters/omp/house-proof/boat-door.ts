@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { lifecyclePlan } from "./lifecycle.ts";
 import type { HostBinding } from "./host.ts";
+import { GENERATED_TURN_ORIGINS } from "./turn-origin.ts";
 
 // OMP's agent loop stops before the next model call on this abort reason; its
 // own `yield` tool ends turns the same way (pi-agent-core agent-loop.ts).
@@ -123,23 +124,44 @@ let installed: BoatDoorDeps | null = null;
 let installedPi: any = null;
 // Set by auto_compaction_start; session_before_compact itself does not say why it runs.
 let autoCompactionReason: string | undefined;
+let castBoat: { sessionId: string; originId: string | undefined } | undefined;
 
 export function resetBoatDoor(): void {
   door = null;
   installed = null;
   installedPi = null;
   autoCompactionReason = undefined;
+  castBoat = undefined;
 }
 
 function sessionIdOf(ctx: any): string {
   return String(ctx?.sessionManager?.getSessionId?.() ?? "").trim();
 }
 
-/** Called by the `sleep` tool after the boat reached the House. Inside the door it ends the turn. */
+function workOriginId(ctx: any): string | undefined {
+  const entries = ctx?.sessionManager?.getBranch?.() ?? [];
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if ((entry.type === "message" && entry.message?.role === "user")
+      || (entry.type === "custom_message" && GENERATED_TURN_ORIGINS.has(entry.customType))) return entry.id;
+  }
+  return undefined;
+}
+
+function hasCastBoat(ctx: any): boolean {
+  return castBoat?.sessionId === sessionIdOf(ctx) && castBoat.originId === workOriginId(ctx);
+}
+
+/** A successful sleep receipt also satisfies a compaction that starts after this turn. */
 export function boatCast(ctx: any): void {
-  if (door?.stage !== "boat" || door.sessionId !== sessionIdOf(ctx)) return;
+  const sessionId = sessionIdOf(ctx);
+  if (!sessionId) return;
+
+  castBoat = { sessionId, originId: workOriginId(ctx) };
+  if (door?.sessionId !== sessionId) return;
+
   door.boatCast = true;
-  installed?.session(ctx)?.agent?.abort?.(END_TURN_AFTER_TOOL);
+  if (door.stage === "boat") installed?.session(ctx)?.agent?.abort?.(END_TURN_AFTER_TOOL);
 }
 
 export function boatDoorOpen(): boolean {
@@ -159,9 +181,11 @@ export function openSurfaceDoor(ctx: any, say: SurfaceSay): boolean {
   const session = deps.session(ctx);
   if (!session || session.isStreaming || session.isCompacting) return false;
 
+  if (say.nearLimit) castBoat = undefined;
+
   const lines = doorLines(deps, ctx);
   door = makeDoor(deps, ctx, lines, { focus: say.focus, held: [], stage: "boat", surface: say });
-  askForBoat(installedPi, say.nearLimit ? lines.nearLimit : lines.handoff, say.sayId);
+  startDoor(installedPi, deps, ctx, door, say.nearLimit ? lines.nearLimit : lines.handoff, say.sayId);
   return true;
 }
 
@@ -183,6 +207,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
 
     const command = handoffCommand(text);
     const normalMessage = !command && text !== "" && !text.startsWith("/");
+    if (normalMessage) castBoat = undefined;
     const over = normalMessage ? await deps.tokensOverBoatLine(ctx) : undefined;
     const nearLine = over !== undefined && over >= 0;
     if (!command && !nearLine) return undefined;
@@ -199,7 +224,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
       held: nearLine ? [{ text, images: event.images }] : [],
       stage: "boat",
     });
-    askForBoat(pi, nearLine ? lines.nearLimit : lines.handoff);
+    startDoor(pi, deps, ctx, door, nearLine ? lines.nearLimit : lines.handoff);
     return { handled: true };
   });
 
@@ -218,6 +243,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
     if (door?.stage === "handoff") return undefined;
     if (door) return door.sessionId === sessionIdOf(ctx) ? { cancel: true } : undefined;
     if (!deps.isTopLevel(ctx) || !deps.session(ctx)) return undefined;
+    if (hasCastBoat(ctx)) return undefined;
 
     const lines = doorLines(deps, ctx);
     const current = makeDoor(deps, ctx, lines, { focus: undefined, held: [], stage: "waiting" });
@@ -267,6 +293,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
   });
 
   pi.on("session_compact", (_event: any, ctx: any) => {
+    if (castBoat?.sessionId === sessionIdOf(ctx)) castBoat = undefined;
     if (door && door.sessionId === sessionIdOf(ctx)) door.compacted = true;
   });
 
@@ -283,8 +310,7 @@ export function installBoatDoor(pi: any, deps: BoatDoorDeps): void {
 
     // The handoff cannot start inside agent_end: the session is still settling
     // this turn, and OMP's own compaction check may run right after it.
-    current.stage = "handoff";
-    setTimeout(() => void handOff(pi, deps, ctx, current), 0);
+    startDoor(pi, deps, ctx, current, "");
   });
 }
 
@@ -301,7 +327,17 @@ async function askWhenIdle(pi: any, deps: BoatDoorDeps, ctx: any, current: Door,
   if (door !== current) return;
 
   current.stage = "boat";
-  askForBoat(pi, line);
+  startDoor(pi, deps, ctx, current, line);
+}
+
+function startDoor(pi: any, deps: BoatDoorDeps, ctx: any, current: Door, line: string, sayId?: string): void {
+  if (current.boatCast) {
+    current.stage = "handoff";
+    setTimeout(() => void handOff(pi, deps, ctx, current), 0);
+    return;
+  }
+
+  askForBoat(pi, line, sayId);
 }
 
 function askForBoat(pi: any, line: string, sayId?: string): void {
@@ -317,7 +353,7 @@ function makeDoor(
   return {
     ...opening,
     sessionId: sessionIdOf(ctx),
-    boatCast: false,
+    boatCast: hasCastBoat(ctx),
     compacted: false,
     spirit: deps.room(ctx).spirit,
     after: lines.after,

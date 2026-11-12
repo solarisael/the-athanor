@@ -41,6 +41,12 @@ Query the registry for additional task-specific lessons when needed.
 Use shape and technology filters when a lexical query misses relevant guidance.
 Preserve the lesson family with each ID.
 
+## State machine contracts
+
+`docs/state-machines/` holds one contract file for each state machine.
+A change to a machine's states, transition writers, or rules updates its file in the same commit.
+Read the machine's file before you change its transitions.
+
 ## Main surface (standing, 2026-08-28 — project lesson 462)
 
 The web client at `gui-prototype/` is the House's main operator surface.

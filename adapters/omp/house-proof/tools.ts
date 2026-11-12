@@ -681,11 +681,11 @@ export function registerSolarisaelTools(pi, release) {
         .describe("memory only: omit to write to this room. 'house' writes to the House commons — durable work any room can use. A sibling room is never a valid target."),
       threads: z.array(z.string()).optional().describe("memory only: thread keys, 'concept / variant / variant'."),
       threadKeys: z.array(z.string()).optional().describe("lesson kinds: lesson-thread keys; any matched lesson retrieves its authority-eligible thread mates."),
-      supersedes: z.array(z.string()).optional().describe("memory only: positive numeric memory IDs replaced by this write; old rows remain recoverable but lose retrieval authority."),
+      supersedes: z.array(z.string()).optional().describe("memory only: positive numeric memory IDs replaced by this write; old rows remain recoverable but lose retrieval authority. The new memory also joins every thread of the memories it replaces."),
       continues: z.array(z.object({
         thread: z.string(),
         previousMemoryId: z.string().regex(/^[1-9]\d*$/),
-      })).optional().describe("memory only: predecessor edges, one per thread. The predecessor must belong to the target memory's room and the exact thread key must appear in both memories; cross-room conceptual provenance belongs in the body instead. Each thread must also appear in threads."),
+      })).optional().describe("memory only: predecessor edges, one per thread. Omit an edge and the memory continues the latest earlier member of that thread by date. The predecessor must belong to the target memory's room and the exact thread key must appear in both memories; cross-room conceptual provenance belongs in the body instead. Each thread must also appear in threads."),
       shape: z.string().optional().describe("lesson kinds: shape taxonomy value (e.g. process, naming, refusal)."),
       voice: z.string().optional().describe("coding, writing, or design lessons: voice (e.g. craft, room-style)."),
       register: z.array(z.string()).optional().describe("writing/design lessons: contexts where the rule applies (e.g. fiction, product-work)."),
@@ -751,6 +751,36 @@ export function registerSolarisaelTools(pi, release) {
             backup: params.backup,
             signal,
           });
+      return {
+        isError: !result.ok,
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
+    },
+  });
+
+  registerHouseTool(pi, {
+    name: "thread_memories",
+    label: "Athanor Thread Memories",
+    description: [
+      "Add existing memories to one thread. Use it when an old memory must join a thread it did not have at write time.",
+      "The tool does not remove a thread, change a title, or change a body. Use remember with supersedes to replace memory text.",
+      "A joined memory with no predecessor in the thread continues the latest earlier member by memory date. Existing links stay. The receipt shows each new link as linkedAfter.",
+      "All IDs must be memories that this room can read in the target room. One unknown ID refuses the full call.",
+    ].join("\n"),
+    parameters: z.object({
+      thread: z.string().describe("Thread key, 'concept / variant / variant'."),
+      memoryIds: z.array(z.string().regex(/^[1-9]\d*$/)).min(1)
+        .describe("Positive numeric memory IDs to add to the thread."),
+      room: z.enum(["house"]).optional()
+        .describe("Omit for this room. 'house' targets memories in the House commons."),
+    }),
+    approval: "write",
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const result = await requestRustDomain(hostBinding(ctx).binding, "memory_thread_join", {
+        thread: params.thread,
+        memoryIds: params.memoryIds,
+      }, signal, true, params.room);
       return {
         isError: !result.ok,
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }],

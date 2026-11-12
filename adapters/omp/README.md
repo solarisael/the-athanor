@@ -34,7 +34,7 @@ The native CLI remains available for administration and keeper operations.
 
 The Host derives room paths and sender identity from its configuration and current room state.
 Organ parameters cannot replace those fields.
-Explicit House targets remain available for `canon_read`, `canon_write`, and `remember`.
+Explicit House targets remain available for `canon_read`, `canon_write`, `remember`, and `thread_memories`.
 Docket and restart operations retain their native capability checks.
 
 ## Programmatic tool results
@@ -139,11 +139,16 @@ OMP installs the returned rules into its TTSR manager.
 The Host stores prepared turns under `<Host state directory>/context-turns/<digest>.json`.
 It keeps at most 128 resident sessions.
 Visible-turn pruning removes only turns that leave the supplied context window.
-The Host retains one current Recall block and one current Presence block.
-The adapter removes obsolete derived messages before it anchors the complete Host projection.
-An empty or failed refresh cannot restore an older topical snapshot.
+The Host keeps sent blocks byte-identical and tracks active Recall and Presence separately.
+Retirement changes metadata, so old blocks remain historical text without becoming active again.
+The adapter anchors the complete Host projection at the original turns.
+An empty or failed refresh emits an empty working-set notice when preparation completes.
 Context format 2 rebuilds obsolete stored context.
 Only the Recall block displays retrieved topical evidence.
+OMP stores mode notices in native session entries and restores their original bytes on retries and session reopen.
+These entries contain no Recall or Presence cache.
+If preparation fails or times out, the adapter retains known mode notices and removes unvalidated Host blocks.
+That failure path can still interrupt the provider cache prefix.
 
 
 Repeated requests reuse stable context bytes while the identity and native Presence contract remain valid.
@@ -163,6 +168,14 @@ The adapter reads legacy turn files only for native adoption.
 It never writes another legacy turn cache.
 Unverified identity material and invalid Unicode produce an explicit rebuild.
 The legacy file remains unchanged.
+
+## Handoffs and paper boats
+
+A successful `sleep` receipt satisfies the next compaction or handoff for the same conversation and work.
+The adapter keeps this receipt even when no handoff gate is open.
+New operator work invalidates the receipt, and a committed compaction consumes it.
+A boat that finishes while the gate waits proceeds directly to handoff without another boat request.
+
 
 ## Judgments and credentials
 

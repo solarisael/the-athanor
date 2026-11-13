@@ -1,0 +1,160 @@
+:root {
+  --ink: #1a1a1a;
+  --muted: #4a4a4a;
+  --line: #767676;
+  --surface: #ffffff;
+  --page: #f2f2f2;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1rem;
+
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+
+  color: var(--ink);
+  background: var(--page);
+}
+
+h1,
+h2 {
+  margin: 0 0 0.5rem;
+
+  line-height: 1.2;
+}
+
+h1 {
+  font-size: 1.5rem;
+}
+
+h2 {
+  font-size: 1.2rem;
+}
+
+.notice {
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.75rem;
+
+  font-weight: 600;
+
+  border: 2px dashed var(--ink);
+  background: var(--surface);
+}
+
+.views {
+  display: flex;
+  flex-wrap: wrap;
+
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+button {
+  min-height: 2.5rem;
+  padding: 0.4rem 1rem;
+
+  font: inherit;
+
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  background: var(--surface);
+
+  cursor: pointer;
+}
+
+button[aria-pressed="true"] {
+  font-weight: 700;
+
+  color: var(--surface);
+  background: var(--ink);
+}
+
+button[aria-disabled="true"] {
+  border-style: dashed;
+  color: var(--muted);
+
+  cursor: progress;
+}
+
+:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.panel {
+  padding: 1rem;
+
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+label {
+  display: block;
+
+  margin-bottom: 0.25rem;
+
+  font-weight: 600;
+}
+
+textarea {
+  display: block;
+
+  width: 100%;
+  max-width: 100%;
+  padding: 0.5rem;
+
+  font: inherit;
+
+  color: var(--ink);
+  border: 2px solid var(--line);
+  background: var(--surface);
+
+  resize: vertical;
+}
+
+.meta {
+  margin: 0.25rem 0 0;
+
+  color: var(--muted);
+}
+
+.result {
+  margin-top: 1rem;
+}
+
+.outcome {
+  margin: 0 0 0.5rem;
+
+  font-weight: 600;
+}
+
+.error {
+  padding-left: 0.75rem;
+
+  font-weight: 700;
+
+  border-left: 4px solid var(--ink);
+}
+
+.body {
+  max-width: 100%;
+  margin: 0;
+  padding: 0.75rem;
+
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+
+  border: 1px solid var(--line);
+  background: var(--page);
+}

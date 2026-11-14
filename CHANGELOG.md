@@ -20,6 +20,8 @@ the exact implementation record.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-14
+
 ### Changed
 - `substrate/deploy-local.ps1` with no arguments now installs the newest
   unconsumed preparation of `HEAD`. It prepares a new release only when no

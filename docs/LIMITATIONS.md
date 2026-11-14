@@ -34,7 +34,6 @@ Pulse's separate proxy installation was verified on 2026-10-04.
 - Fixed Windows paths remain in the Pulse launchers. The adapter no longer discovers substrate or broker processes.
 - The service, the installer, ACL hardening, and the release are Windows only. Off Windows, ACL hardening reports success and does nothing (`crates/athanor-install/src/boundaries.rs:377-380,431-435`).
 - The keeper lock does not exclude a second keeper off Windows, and a kill reaches only the direct child (`crates/omp-keeper/src/keeper.rs:82-87,128-136`).
-- The automatic Recall timeout is 2,000 ms off Windows and 8,000 ms on Windows (`adapters/omp/house-proof/constants.ts:16`).
 
 The substrate has run on Linux before: the organ matrix of 2026-08-30 ran on a NixOS laptop. That run used hand-written units, not this code path.
 

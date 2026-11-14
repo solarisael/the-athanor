@@ -7,12 +7,12 @@ export const DIAGNOSTIC_TIMEOUT_MS = 8000;
 // spends up to 3 s on an embed stall by design, then 0.8-4.1 s on the lexical
 // lane, so a 4.5 s share cut 41 of 259 recalls (16%); completed recalls ran
 // p50 1.1 s, p95 3.4 s. 8 s covers the substrate's designed ceiling.
-export const AUTOMATIC_CONTEXT_IO_TIMEOUT_MS = process.platform === "win32" ? 8_000 : 2_000;
-export const WRITE_TIMEOUT_MS = process.platform === "win32" ? 300_000 : 90_000;
+export const AUTOMATIC_CONTEXT_IO_TIMEOUT_MS = 8_000;
+export const WRITE_TIMEOUT_MS = 300_000;
 // Turn-end conversation capture. It shares PostgreSQL with every other room's
 // writes; a post-write pg_dump (first boat of the day) pins the database for
 // ~25 s on this machine. 30 s is the shell-command ceiling in sendHostCommand.
-export const CAPTURE_TIMEOUT_MS = process.platform === "win32" ? 30_000 : 8_000;
+export const CAPTURE_TIMEOUT_MS = 30_000;
 export const TRANSCRIPT_DEBUG_LOG = "athanor-transcript-debug.jsonl";
 export const HOUSE_STATE_FILENAME = "athanor-house-state.json";
 // Room-local, operation-scoped Docket write capability. Never a schema field.

@@ -185,20 +185,21 @@ The native installer and the managed runtime for Windows. It builds the one exe,
 - **Start order.** `run` takes these steps in order (`app.rs:85-134`):
   1. It builds the install layout from the environment.
   2. It reads and validates `runtime.json` and the secrets.
-  3. It calls `service::ensure_running`, which waits until the service runs and the PostgreSQL and NATS ports accept.
+  3. It calls `service::ensure_running`. On Windows, this waits until the service runs and the PostgreSQL and NATS ports accept. On other platforms, it waits only for the two ports.
   4. It loads `harnesses.json` one time.
   5. It draws a random control token.
   6. On Windows, it installs a console control handler.
   7. It binds the control server on `127.0.0.1:0`.
   8. It calls `host::start` with one `HostConfig` for each room.
   9. It starts each `autoStart` harness in file order. It collects each failure and continues.
-  10. It prints the readiness JSON to stdout, then waits on the Host.
-- **`ensure_running`.** It starts the service one time when the service is stopped. It fails when the service is still stopped after the request. Readiness means the service runs and both ports connect within 90 seconds (`service.rs:40-111`).
-- **Database probe.** `ensure_running` always probes the configured database port, also when the database mode is external (`service.rs:40-111`).
+  10. It prints the readiness JSON to stdout, then waits on the Host. On Unix, it also waits for SIGINT or SIGTERM.
+- **`ensure_running` on Windows.** It starts the service one time when the service is stopped. It fails when the service is still stopped after the request. Readiness means the service runs and both ports connect within 90 seconds (`service.rs:40-111`).
+- **`ensure_running` on other platforms.** The operating system's service manager starts PostgreSQL and NATS, for example systemd. `ensure_running` waits until both ports connect within 90 seconds. It writes a progress line every 5 seconds (`service.rs:365-418`).
+- **Database probe.** `ensure_running` always probes the configured database port, also when the database mode is external (`service.rs:40-111,365-418`).
 - **Rooms.** One Host process serves every room on `127.0.0.1:hostPort` with one bearer token. [`ARCHITECTURE.md`](../../docs/ARCHITECTURE.md#31-one-process-many-rooms) lists the source of every `HostConfig` field (`app.rs:30-58`).
 - **Waits.** The Host waits for the service. Harnesses start only after `host::start` returns. A harness start does not wait for that harness to be ready (`app.rs:88,104-113`).
-- **Shutdown.** When `RunOwner` drops, it shuts the harnesses down. On Windows, a Ctrl, close, logoff, or shutdown event shuts the owner down, and the process exits with 0 (`app.rs:60-75,95-102`).
-- **Other platforms.** Outside Windows `ensure_running` always fails, so the Host cannot start (`service.rs:319-322`). See [`LIMITATIONS.md`](../../docs/LIMITATIONS.md#3-linux-today).
+- **Shutdown.** When `RunOwner` drops, it shuts the harnesses down. On Windows, a Ctrl, close, logoff, or shutdown event shuts the owner down, and the process exits with 0 (`app.rs:60-75,95-102`). On Unix, SIGINT or SIGTERM shuts the Host down. The process exits after the Host stops (`app.rs:163-193`).
+- **Other platforms.** The service mode is Windows only (`service.rs:360-363`). See [`LIMITATIONS.md`](../../docs/LIMITATIONS.md#3-linux-today).
 
 ### endpoints
 

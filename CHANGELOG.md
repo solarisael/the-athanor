@@ -35,6 +35,10 @@ the exact implementation record.
 - Migration 0022 applies again in a second schema on PostgreSQL 18. Its Insula guard now ignores the NOT NULL constraints that PostgreSQL 18 catalogues.
 
 ### Added
+- A release tag also builds the Linux x64 Host archive `The-Athanor-<version>-linux-x64.tar.gz` and its SHA-256 file.
+  The archive holds `athanor-host`, `athanor-substrate`, and `release-manifest.json`. `installer/build-linux-host-release.sh` builds it.
+  The Linux job runs on Ubuntu 22.04 and does not wait for the Windows job. It runs the `host`, `akasha`, and `hearth` tests before it builds.
+  The glibc version of the target VPS is not verified.
 - `thread_memories` adds existing readable memories to one thread without changing their text.
 - A thread member with no named predecessor now continues the latest earlier member by memory date. This applies to `remember` and `thread_memories`.
 - A memory that supersedes other memories now joins every thread of those memories.

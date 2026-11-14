@@ -362,10 +362,57 @@ pub fn dispatch() -> anyhow::Result<()> {
     anyhow::bail!("the managed service is supported only on Windows")
 }
 
+/// Off Windows the operating system's service manager (systemd on Linux) starts
+/// PostgreSQL and NATS. This only waits until both ports accept, with the same
+/// timeout and progress lines as the Windows path.
 #[cfg(not(windows))]
-pub fn ensure_running(_: &crate::supervisor::RuntimeConfig) -> anyhow::Result<()> {
-    anyhow::bail!(
-        "service {} startup is supported only on Windows",
-        crate::layout::SERVICE_NAME
-    )
+pub fn ensure_running(config: &crate::supervisor::RuntimeConfig) -> anyhow::Result<()> {
+    use crate::supervisor::{START_PROGRESS_INTERVAL, START_TIMEOUT, loopback_address};
+    use std::{
+        net::TcpStream,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    let ports = [
+        (
+            "PostgreSQL",
+            loopback_address(&config.database_host, config.database_port)?,
+        ),
+        (
+            "NATS",
+            loopback_address(&config.nats_host, config.nats_port)?,
+        ),
+    ];
+    let started = Instant::now();
+    let mut next_progress = START_PROGRESS_INTERVAL;
+    loop {
+        let unavailable: Vec<String> = ports
+            .iter()
+            .filter(|(_, address)| {
+                TcpStream::connect_timeout(address, Duration::from_millis(250)).is_err()
+            })
+            .map(|(name, address)| format!("{name} port {address}"))
+            .collect();
+
+        if unavailable.is_empty() {
+            return Ok(());
+        }
+
+        let elapsed = started.elapsed();
+        let waiting = unavailable.join(", ");
+        if elapsed >= START_TIMEOUT {
+            anyhow::bail!("{waiting} not ready after {} seconds", elapsed.as_secs());
+        }
+        if elapsed >= next_progress {
+            eprintln!(
+                "athanor: waiting for {waiting}; {} of {} seconds",
+                elapsed.as_secs(),
+                START_TIMEOUT.as_secs()
+            );
+            next_progress += START_PROGRESS_INTERVAL;
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    }
 }

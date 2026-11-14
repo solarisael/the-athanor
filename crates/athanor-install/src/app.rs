@@ -154,5 +154,40 @@ pub fn run() -> Result<()> {
     // The House owns the harnesses it starts, not sessions started elsewhere.
     // RunOwner and the console hook stop only this owner's children, and
     // release its keepers instead while a deployment holds a cutover.
+    #[cfg(unix)]
+    return wait_for_stop_signal(host);
+    #[cfg(not(unix))]
     host.wait().map_err(anyhow::Error::msg)
+}
+
+/// systemd stops the House with SIGTERM and a terminal with SIGINT. Either one
+/// shuts the Host down cleanly; `RunOwner` then stops this owner's harnesses.
+#[cfg(unix)]
+fn wait_for_stop_signal(host: host::HostRuntime) -> Result<()> {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build the stop-signal runtime")?;
+    let stop_requested = runtime.block_on(async {
+        let mut interrupt = signal(SignalKind::interrupt()).context("register SIGINT")?;
+        let mut terminate = signal(SignalKind::terminate()).context("register SIGTERM")?;
+        loop {
+            if host.is_finished() {
+                return Ok::<bool, anyhow::Error>(false);
+            }
+            tokio::select! {
+                _ = interrupt.recv() => return Ok(true),
+                _ = terminate.recv() => return Ok(true),
+                _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {}
+            }
+        }
+    })?;
+
+    if stop_requested {
+        host.shutdown().map_err(anyhow::Error::msg)
+    } else {
+        host.wait().map_err(anyhow::Error::msg)
+    }
 }

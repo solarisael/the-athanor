@@ -161,7 +161,7 @@ pwsh -NoProfile -File .\substrate\deploy-local.ps1
 
 ## Versions
 
-The product source version is `0.5.4`, and the OMP component version is `0.10.0`.
+The product source version is `0.7.0`, and the OMP component version is `0.10.0`.
 Local native builds add a timestamp and source revision to the product version.
 Read `current.json` and the component pointer for the selected installed versions.
 Do not infer installed state from source versions or older documentation.

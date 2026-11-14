@@ -1,4 +1,4 @@
-name: Release native Windows runtime
+name: Release native runtime (Windows installer and Linux Host)
 
 on:
   push:
@@ -71,6 +71,7 @@ jobs:
           name: The Athanor v${{ env.VERSION }} — Native runtime prerelease
           body: |
             Native Windows x64 runtime installer. This package does not include the Hearth GUI.
+            The Linux x64 Host archive The-Athanor-${{ env.VERSION }}-linux-x64.tar.gz and its SHA-256 file come from a separate job.
 
             The attached SHA-256 file identifies the installer bytes.
             This prerelease does not claim clean-machine installation, upgrade, rollback, or code-signing verification.
@@ -79,3 +80,55 @@ jobs:
           files: |
             dist/The-Athanor-${{ env.VERSION }}-windows-x64.exe
             dist/The-Athanor-${{ env.VERSION }}-windows-x64.exe.sha256
+
+  linux-x64:
+    # No `needs:`: a Windows failure must not block the Linux Host archive.
+    # enough: ubuntu-22.04 sets the glibc floor (2.35) of the Linux binaries,
+    # and the glibc of the VPS distribution is not verified yet. Change the
+    # runner when the VPS glibc is known to be older or a static build is needed.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Resolve release version
+        shell: pwsh
+        env:
+          REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          . ./installer/native-release-contract.ps1
+          # The same version authority and grammar as the Windows job.
+          $version = Get-NativeReleaseVersion -RepositoryRoot $env:GITHUB_WORKSPACE -Requested ($env:REQUESTED -replace '^v', '')
+          "VERSION=$version" | Out-File $env:GITHUB_ENV -Append
+      - name: Test the Host, substrate, and hearth crates
+        # The PostgreSQL proofs are #[ignore] and need no service here.
+        # The explicit target directory keeps .cargo/config.toml's Windows path
+        # from creating a directory named 'C:' in the checkout.
+        run: cargo test --locked -p host -p akasha -p hearth --lib --tests --target-dir target/linux-x64
+      - name: Build the Linux Host archive
+        run: bash installer/build-linux-host-release.sh "$VERSION" dist
+      - name: Retain release proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: the-athanor-${{ env.VERSION }}-linux-x64
+          path: |
+            dist/The-Athanor-${{ env.VERSION }}-linux-x64.tar.gz
+            dist/The-Athanor-${{ env.VERSION }}-linux-x64.tar.gz.sha256
+          if-no-files-found: error
+      - name: Publish archive and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v${{ env.VERSION }}
+        run: |
+          archive="dist/The-Athanor-$VERSION-linux-x64.tar.gz"
+          # Both jobs publish to one release, and either job can arrive first.
+          # The Windows job owns the title and body and replaces these when it
+          # publishes. If the other job creates the release between the view
+          # and the create, the create fails and the second view must succeed.
+          if ! gh release view "$TAG" > /dev/null; then
+            gh release create "$TAG" --prerelease --target "$GITHUB_SHA" \
+              --title "The Athanor $TAG" \
+              --notes "Linux x64 Host archive. The attached SHA-256 file identifies the archive bytes." \
+              || gh release view "$TAG" > /dev/null
+          fi
+          gh release upload "$TAG" "$archive" "$archive.sha256" --clobber

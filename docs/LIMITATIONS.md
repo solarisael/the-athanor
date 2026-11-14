@@ -8,7 +8,7 @@ Pulse's separate proxy installation was verified on 2026-10-04.
 
 ## 1. Supported install
 
-- The only supported target is Windows 11 x64 with OMP as the harness. The release manifest requires platform `windows-x64` (`crates/athanor-install/src/manifest.rs:104-106`). The release workflow has one job, `windows-x64` (`.github/workflows/release.yml:17-18`).
+- The only supported target is Windows 11 x64 with OMP as the harness. The release manifest requires platform `windows-x64` (`crates/athanor-install/src/manifest.rs:104-106`). The release workflow has two jobs. The `windows-x64` job builds the installer. The `linux-x64` job builds only a Linux Host archive, without an installer (`.github/workflows/release.yml`).
 - Installation requires Administrator (`installer/athanor.iss:17`).
 - The installer bundles PostgreSQL 18.4-2, pgvector 0.8.6, and NATS 2.14.4 (`installer/dependencies.json`). It needs no WSL, Python, Bun, Cargo, or Rust at run time.
 - The installer does not carry the Pulse window. `scripts/install-pulse.ps1` builds and places `pulse.exe` separately (`scripts/install-pulse.ps1:18-61`).

@@ -20,6 +20,11 @@ the exact implementation record.
 
 ## [Unreleased]
 
+### Fixed
+- The automatic context budget is 12 s on every platform. Before this change,
+  the Host kept 2 s off Windows and the adapter kept 8 s. The Host used the
+  earlier deadline, so automatic Recall rarely completed on Linux.
+
 ## [0.7.0] - 2026-11-14
 
 ### Changed

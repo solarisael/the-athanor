@@ -21,6 +21,8 @@ the exact implementation record.
 ## [Unreleased]
 
 ### Changed
+- `substrate/deploy-local.sh` no longer asks you to close the OMP sessions first. At the end, it lists the open sessions and tells you to restart them.
+- `substrate/deploy-local.sh` refuses to run inside a shell that is not its own process, because such a shell skips the recovery step.
 - Orihon Fold keeps the current prefix when one background merge makes a small change.
 - A new message can publish a partial merge batch. Background jobs publish only a substantial reduction.
 - Orihon Fold sends only the latest size correction when it retries a compactor request.

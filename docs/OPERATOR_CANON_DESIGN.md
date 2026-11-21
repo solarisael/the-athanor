@@ -460,13 +460,14 @@ The script uses the existing user unit and its database environment.
 It requires GNU Coreutils with `mv --exchange` and a filesystem that supports directory exchange.
 Keep the live checkout and the Athanor state on the same filesystem.
 
-Warning: close the House OMP sessions before deployment.
+OMP sessions can stay open during deployment.
+Warning: run the script as its own process, with the system bash. A shell that runs it in-process skips the recovery step.
 Warning: after migration starts, a failure leaves the Host stopped and the cutover marker in place.
 
 1. Build the release binaries from the source checkout.
 2. Run the deploy script from that checkout.
 3. Keep the release receipt path and the database manifest path.
-4. Start new OMP sessions to load the new adapter.
+4. Restart each OMP session that the script lists. A session loads the new adapter only at its start.
 
 ```sh
 cargo build --locked --release \

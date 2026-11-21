@@ -9,7 +9,9 @@ Usage: bash substrate/deploy-local.sh LIVE_CHECKOUT DATA_ROOT RELEASE_BIN_DIR
 
 Update a provisioned systemd user unit from this source checkout.
 Build the release binaries from this checkout before you run this script.
-Close the House OMP sessions before you deploy. Start new sessions after deployment.
+OMP sessions can stay open during the deployment.
+Restart each open OMP session after the deployment. A session loads the adapter only at its start.
+Run this script as its own process. A shell that runs it in-process skips the recovery step.
 Set ATHANOR_DEPLOY_UNIT to select a unit other than athanor.service.
 EOF
 }
@@ -46,6 +48,27 @@ maintenance() {
         --setenv="ATHANOR_BACKUP_DIR=$receipt/database" -- "$@"
 }
 
+restart_notice() {
+    local processes sessions status=0
+
+    processes=$(pgrep -u "$UID" -a -x omp) || status=$?
+
+    if ((status > 1)); then
+        printf 'Could not list the OMP sessions. Restart each open OMP session.\n'
+        return
+    fi
+
+    # OMP worker processes share the process name and are not sessions.
+    sessions=$(awk '!/__omp_worker/' <<<"$processes")
+
+    if [[ -z $sessions ]]; then
+        printf 'No OMP session is open.\n'
+        return
+    fi
+
+    printf 'Restart these OMP sessions to load the new adapter:\n%s\n' "$sessions"
+}
+
 finish() {
     local status=$?
     trap - EXIT
@@ -66,7 +89,8 @@ finish() {
     if [[ $marker -ef $receipt/cutover.json ]]; then
         rm -- "$marker"
         if [[ $phase == complete ]]; then
-            printf 'Deployment complete. Start new OMP sessions to load the adapter.\n'
+            printf 'Deployment complete.\n'
+            restart_notice
         fi
     else
         fail "the cutover marker changed during deployment: $marker"
@@ -82,6 +106,11 @@ if (($# != 3 && $# != 8)) || [[ $# == 8 && $4 != --register-operator ]]; then
     usage >&2
     exit 2
 fi
+
+# `finish` must run on every exit. A shell that runs this script in-process
+# does not run the EXIT trap. A failed step then leaves the Host down with the
+# cutover marker in place and no recovery message.
+[[ -e /proc/$$/exe ]] || fail 'this shell is not its own process; run the script with the system bash'
 
 source_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 live=$(realpath -e -- "$1")

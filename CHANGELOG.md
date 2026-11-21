@@ -21,6 +21,9 @@ the exact implementation record.
 ## [Unreleased]
 
 ### Changed
+- Each Recall card that Jev scores now has a label: the title of the memory and the heading of the section. Before this change, Jev got the excerpt only.
+- Jev now scores each of the 64 candidates of the Recall pool. The Recall packet has its own limit of 65,536 bytes. Before this change, a limit of 32,768 bytes removed 16 to 18 candidates from each packet.
+- In conversation mode, a message that names a canon entity now gets a Recall search when the plan judge selects Skip. Other Skip plans stay a skip.
 - Orihon Fold keeps the current prefix when one background merge makes a small change.
 - A new message can publish a partial merge batch. Background jobs publish only a substantial reduction.
 - Orihon Fold sends only the latest size correction when it retries a compactor request.

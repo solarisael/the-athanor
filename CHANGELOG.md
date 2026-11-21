@@ -49,6 +49,7 @@ the exact implementation record.
   would break a room page is refused, and the refusal names the room.
 - `substrate/deploy-local.sh` updates a provisioned Linux House.
   It keeps a database backup and the previous release. It checks health after the update.
+- Schema 50 adds table `spirit_texts`. It holds the identity contract, the presence text, and the spirit text of each spirit, with every revision. The Host does not read this table yet. `substrate/import-spirit-texts.sh` copies text files into the table and proves each copy by SHA-256.
 
 ### Fixed
 - The automatic context budget is 12 s on every platform. Before this change,

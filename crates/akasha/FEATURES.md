@@ -247,6 +247,7 @@ The crate is the Athanor substrate: one stdio server over PostgreSQL. `lib.rs` d
 - `migration_state` and `state_from` report the applied, missing, and unknown versions.
 - `consolidated_version_labels` derives the backup allowlist from the registry, so the two cannot drift.
 - `migration_pool` opens a pool for schema work with its own timeout.
+- Schema 50 keeps every revision of each spirit's identity, presence, and spirit texts in `spirit_texts`. The Host does not read this table yet. `substrate/import-spirit-texts.sh` copies text files into the table and checks each copy by SHA-256.
 
 ### backup.rs — dumps, rotation, and restore
 

@@ -339,6 +339,18 @@ function gigaToolFailure(error) {
 }
 
 
+// OMP removes an unknown key from a strict schema before `execute` and
+// reports success. A plain object schema passes the key through, so the
+// refusal lives here and the tool schemas stay non-strict.
+// enough: root keys only; check nested objects when a nested key is dropped.
+export function unknownArgumentKeys(parameters, params) {
+  const known = parameters?.shape;
+
+  if (!known || params === null || typeof params !== "object") return [];
+
+  return Object.keys(params).filter(key => !Object.hasOwn(known, key));
+}
+
 export function registerHouseTool(pi, definition) {
   const execute = definition.execute;
   const renderers = createToolRenderers(definition.label, definition.name);
@@ -348,6 +360,17 @@ export function registerHouseTool(pi, definition) {
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       emitToolUpdate(onUpdate, definition.name);
       beginHouseToolFeedback(ctx, definition.label);
+      const unknown = unknownArgumentKeys(definition.parameters, params);
+
+      if (unknown.length > 0) {
+        const known = Object.keys(definition.parameters.shape).join(", ");
+        const result = refuseToolResult(
+          `${definition.name} does not accept: ${unknown.join(", ")}. It accepts: ${known}.`,
+        );
+        completeHouseToolFeedback(ctx, definition.label, result);
+        return result;
+      }
+
       try {
         const result = normalizeToolResponse(
           await execute(toolCallId, params, signal, onUpdate, ctx),
@@ -1967,7 +1990,7 @@ export function registerSolarisaelTools(pi, release) {
       reviewClass: z.enum(["R0", "R1", "R2", "R3"]).optional().describe("Review class frozen at activation. Required by activate."),
       acceptanceCriteria: z.array(z.string()).optional().describe("Named criteria, at least one, frozen at activation and settled one by one. Required by activate."),
       idempotencyKey: z.string().optional().describe("Stable retry key. Defaults to this tool-call id."),
-    }).strict(),
+    }),
     approval: "write",
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       const { binding, capability } = docketWriteBinding(ctx);
@@ -2052,7 +2075,7 @@ export function registerSolarisaelTools(pi, release) {
       states: z.array(z.string()).optional().describe("Quest states to include, such as offered or claimed. Omit for offered and claimed; pass [\"all\"] for every state."),
       limit: z.number().int().min(1).max(4294967295).optional().describe("Maximum quests; positive integer. Omit for the substrate default."),
       titlesOnly: z.boolean().optional().describe("When true, every quest comes back with an empty body, so a long board stays small enough to pick from by title."),
-    }).strict(),
+    }),
     approval: "read",
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const { binding } = hostBinding(ctx);

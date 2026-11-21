@@ -120,5 +120,5 @@ pub use timeline::{
 };
 pub use typesafe::{
     TYPESAFE_ENDPOINT, TYPESAFE_MAX_PACKET_BYTES, TYPESAFE_MAX_RESPONSE_BYTES, TYPESAFE_MODEL,
-    is_secret, jev_giga_policy, jev_giga_policy_from_marker, request_provider,
+    jev_giga_policy, jev_giga_policy_from_marker, request_provider,
 };

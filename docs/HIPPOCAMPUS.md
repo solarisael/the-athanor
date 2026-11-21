@@ -1,7 +1,7 @@
 # GIGA and Hippocampus Specification
 
 Status: contract with as-built notes. §7 (last part), §8, and the header were re-verified against the adapter at commit `a6ab453` on 2026-10-04. The 2026-10-04 census did not walk `crates/akasha/src/giga`, `crates/akasha/src/giga_worker`, or the migrations. The other sections keep their earlier date.
-Release: `0.5.4` (`package.json:3`).
+Release: `0.7.0` (`package.json:3`).
 Not re-verified at a6ab453: "Stage 1 operational in the reference House" and contract version 0.1. The installed environment and `crates/akasha/src/giga` would decide them.
 Known conflicts, open (line numbers at `a6ab453`): §16.3 (lines 644-650) gives Recall a candidate lane, but §28.8 (line 1090) says unpromoted candidates are invisible to recall. §14.3 and §19 (lines 597 and 789) keep a retention policy and expiry, but §28.3 (line 1085) says nothing sets `expires_at`.
 Moved: §3 Problem, §4 Goals, and §24-27 (evaluation, security review, delivery stages, release acceptance) are in [`history/2026-10-04-hippocampus-discussion.md`](./history/2026-10-04-hippocampus-discussion.md).

@@ -15,7 +15,9 @@ pub(super) use cache::{ContextSession, ContextSessions};
 use protocol::organ::{OrganOperation, OrganRequest, OrganTargetScope};
 use serde::{Deserialize, Serialize};
 
-const CONTEXT_BUDGET_MS: u64 = if cfg!(windows) { 8_000 } else { 2_000 };
+// The adapter holds the same value in `AUTOMATIC_CONTEXT_IO_TIMEOUT_MS`
+// (adapters/omp/house-proof/constants.ts). Change both together.
+const CONTEXT_BUDGET_MS: u64 = 12_000;
 const COMMIT_RESERVE_MS: u64 = 500;
 
 struct AssemblyLifetime {

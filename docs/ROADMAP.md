@@ -11,7 +11,7 @@ Read [Architecture](./ARCHITECTURE.md) for runtime ownership.
 Read [Limitations](./LIMITATIONS.md) for current constraints.
 Read [Vocabulary](./VOCABULARY.md) for names and [Evidence](./EVIDENCE.md) for measured results.
 
-The product version is `0.5.4` (`package.json:3`). The labels `0.9.6`, `0.11.0`, and `1.0.0-rc.3` are history. They are numerically above the current version, so do not read them as progress.
+The product version is `0.7.0` (`package.json:3`). The labels `0.9.6`, `0.11.0`, and `1.0.0-rc.3` are history. They are numerically above the current version, so do not read them as progress.
 
 ## Status guide
 

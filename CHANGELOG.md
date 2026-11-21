@@ -42,6 +42,22 @@ the exact implementation record.
   adds `warnings`, `contested`, and `pages`.
 - `RoutingDispatch` and `FamiliarStatus` lost their `room_dir` field. The Host
   uses its configured room.
+
+### Added
+- `spellbook_write` (Host command `athanor.spellbook.write`) replaces this
+  room's page or the House page whole after validation. A House page that
+  would break a room page is refused, and the refusal names the room.
+- `substrate/deploy-local.sh` updates a provisioned Linux House.
+  It keeps a database backup and the previous release. It checks health after the update.
+
+### Fixed
+- The automatic context budget is 12 s on every platform. Before this change,
+  the Host kept 2 s off Windows and the adapter kept 8 s. The Host used the
+  earlier deadline, so automatic Recall rarely completed on Linux.
+
+## [0.7.0] - 2026-11-14
+
+### Changed
 - `substrate/deploy-local.ps1` with no arguments now installs the newest
   unconsumed preparation of `HEAD`. It prepares a new release only when no
   preparation matches. A preparation from a dirty tree matches only while no
@@ -56,11 +72,10 @@ the exact implementation record.
 - Migration 0022 applies again in a second schema on PostgreSQL 18. Its Insula guard now ignores the NOT NULL constraints that PostgreSQL 18 catalogues.
 
 ### Added
-- `spellbook_write` (Host command `athanor.spellbook.write`) replaces this
-  room's page or the House page whole after validation. A House page that
-  would break a room page is refused, and the refusal names the room.
-- `substrate/deploy-local.sh` updates a provisioned Linux House.
-  It keeps a database backup and the previous release. It checks health after the update.
+- A release tag also builds the Linux x64 Host archive `The-Athanor-<version>-linux-x64.tar.gz` and its SHA-256 file.
+  The archive holds `athanor-host`, `athanor-substrate`, and `release-manifest.json`. `installer/build-linux-host-release.sh` builds it.
+  The Linux job runs on Ubuntu 22.04 and does not wait for the Windows job. It runs the `host`, `akasha`, and `hearth` tests before it builds.
+  The glibc version of the target VPS is not verified.
 - `thread_memories` adds existing readable memories to one thread without changing their text.
 - A thread member with no named predecessor now continues the latest earlier member by memory date. This applies to `remember` and `thread_memories`.
 - A memory that supersedes other memories now joins every thread of those memories.

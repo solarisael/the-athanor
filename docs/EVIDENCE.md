@@ -219,7 +219,7 @@ The legacy rescue patch is outside this repository's release payload.
 
 ## Next public evidence
 
-The public proof program for the current release, `0.5.4` (`package.json:3`), expands the evidence surface in this order.
+The public proof program for the current release, `0.7.0` (`package.json:3`), expands the evidence surface in this order.
 
 ### Restart continuity
 

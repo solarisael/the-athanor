@@ -12,7 +12,7 @@ making the project start from zero again.
 
 - The only supported target is native Windows x64 (`.github/workflows/release.yml:17-18`; `installer/athanor.iss:22`).
 - OMP is the only supported harness. The runtime refuses the retired `driver` field (`crates/athanor-install/src/harness/config.rs:44-45,132-141`).
-- The product version is `0.5.4` ([`package.json`](./package.json):3).
+- The product version is `0.7.0` ([`package.json`](./package.json):3).
 - The reference House runs `0.5.4+dev.202609282201.0e4ea3c` (`%ProgramFiles%/Solarisael/Athanor/current.json:2`).
 - One Rust workspace holds the Host, the substrate, Vault, AKASHA, delivery, and the installer ([`Cargo.toml`](./Cargo.toml):3-15).
 

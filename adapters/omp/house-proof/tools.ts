@@ -342,30 +342,49 @@ function gigaToolFailure(error) {
 // OMP removes an unknown key from a strict schema before `execute` and
 // reports success. A plain object schema passes the key through, so the
 // refusal lives here and the tool schemas stay non-strict.
+//
+// `pi.zod` in OMP is not Zod: an object schema has no `shape`, and its keys
+// are in `ir.props`. The tests use real Zod, so both layouts are read.
+export function schemaArgumentKeys(parameters) {
+  if (parameters?.shape) return Object.keys(parameters.shape);
+
+  const props = parameters?.ir?.props;
+
+  if (Array.isArray(props)) return props.map(prop => prop.key);
+
+  return undefined;
+}
+
 // enough: root keys only; check nested objects when a nested key is dropped.
-export function unknownArgumentKeys(parameters, params) {
-  const known = parameters?.shape;
+export function unknownArgumentKeys(known, params) {
+  if (params === null || typeof params !== "object") return [];
 
-  if (!known || params === null || typeof params !== "object") return [];
-
-  return Object.keys(params).filter(key => !Object.hasOwn(known, key));
+  return Object.keys(params).filter(key => !known.includes(key));
 }
 
 export function registerHouseTool(pi, definition) {
   const execute = definition.execute;
   const renderers = createToolRenderers(definition.label, definition.name);
+  const known = schemaArgumentKeys(definition.parameters);
+
+  if (!known) {
+    throw new Error(
+      `${definition.name}: cannot read the argument keys of the schema, so unknown keys cannot be refused`,
+    );
+  }
+
   pi.registerTool({
     ...definition,
     ...renderers,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       emitToolUpdate(onUpdate, definition.name);
       beginHouseToolFeedback(ctx, definition.label);
-      const unknown = unknownArgumentKeys(definition.parameters, params);
+      const unknown = unknownArgumentKeys(known, params);
 
       if (unknown.length > 0) {
-        const known = Object.keys(definition.parameters.shape).join(", ");
+        const accepted = known.length > 0 ? `It accepts: ${known.join(", ")}.` : "It accepts no arguments.";
         const result = refuseToolResult(
-          `${definition.name} does not accept: ${unknown.join(", ")}. It accepts: ${known}.`,
+          `${definition.name} does not accept: ${unknown.join(", ")}. ${accepted}`,
         );
         completeHouseToolFeedback(ctx, definition.label, result);
         return result;
